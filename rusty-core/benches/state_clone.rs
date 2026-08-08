@@ -11,7 +11,12 @@
 //!   `serde_json::Map<String, Value>`;
 //! - `state_serde_roundtrip`: `serde_json::to_string` + `from_str` — the
 //!   full serialize/parse cycle a durable checkpoint pays in both
-//!   directions.
+//!   directions;
+//! - `superstep_snapshot_clones` (R0.7 wave 4): the executor's per-step
+//!   fan-out — one pre-step snapshot, one immutable clone per concurrent
+//!   node (4), one clone for the checkpoint mint. Channel-granularity
+//!   copy-on-write turns each clone into an Arc bump, so this group shows
+//!   the win `state_clone` (a single isolated clone) cannot.
 //!
 //! Note: a 10 MB payload means a single ~10 MB JSON string; string clones
 //! are memcpy-fast, so this is a *lower bound* — a structurally deep 10 MB
@@ -64,5 +69,35 @@ fn bench_state_serde_roundtrip(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_state_clone, bench_state_serde_roundtrip);
+fn bench_superstep_snapshot_clones(c: &mut Criterion) {
+    let mut group = c.benchmark_group("superstep_snapshot_clones");
+    for bytes in [1_048_576usize, 10_485_760] {
+        group.throughput(Throughput::Bytes(bytes as u64));
+        group.bench_with_input(
+            BenchmarkId::new("payload_bytes", bytes),
+            &bytes,
+            |b, &bytes| {
+                let state = state_sized(bytes);
+                b.iter(|| {
+                    // Executor super-step fan-out: the pre-step snapshot plus
+                    // one immutable clone per concurrent node and one for the
+                    // checkpoint mint. W4 makes each clone an Arc bump;
+                    // pre-W4 each was a full deep copy of the payload.
+                    let snapshot = state.clone();
+                    let node_clones: Vec<State> = (0..4).map(|_| snapshot.clone()).collect();
+                    let checkpoint_copy = snapshot.clone();
+                    criterion::black_box((node_clones, checkpoint_copy))
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_state_clone,
+    bench_state_serde_roundtrip,
+    bench_superstep_snapshot_clones
+);
 criterion_main!(benches);

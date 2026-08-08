@@ -446,6 +446,10 @@ pub(crate) struct JsonFileStore {
     agents: Mutex<HashMap<String, AgentRecord>>,
     coordinations: Mutex<HashMap<String, CoordinationRecord>>,
     agent_leases: Mutex<HashMap<String, ActivationLease>>,
+    // One long-lived checkpointer for the checkpoint write path (W4): the
+    // delta-head cache lives on the instance, so a fresh checkpointer per
+    // write would re-walk the on-disk chain on every put.
+    checkpointer: JsonFileCheckpointer,
 }
 
 impl JsonFileStore {
@@ -462,6 +466,7 @@ impl JsonFileStore {
             agents: Mutex::new(agents::load(root)),
             coordinations: Mutex::new(coordination::load(root)),
             agent_leases: Mutex::new(agents::load_leases(root)),
+            checkpointer: JsonFileCheckpointer::new(root),
         }
     }
 }
@@ -686,9 +691,10 @@ impl ServerStore for JsonFileStore {
                 map.insert(row.outbox_id.clone(), row);
             }
         }
-        // The checkpoint write goes through the same JSON-file checkpointer
-        // the run routes use, rooted at the same store path.
-        JsonFileCheckpointer::new(self.root.clone())
+        // The checkpoint write goes through the store's long-lived
+        // JSON-file checkpointer (delta-head cache warm across writes),
+        // rooted at the same store path as the run routes'.
+        self.checkpointer
             .put(checkpoint.clone())
             .await
             .map_err(|e| format!("put checkpoint: {e}"))
@@ -1375,7 +1381,7 @@ impl JsonFileStore {
 #[cfg(feature = "postgres")]
 mod postgres {
     use chrono::{DateTime, Utc};
-    use rusty_agent_runtime::checkpoint::Checkpoint;
+    use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
     use rusty_agent_runtime::journal::JournalSnapshot;
     use serde_json::Value;
     use sqlx::{PgPool, Row};
@@ -2027,11 +2033,13 @@ mod postgres {
     /// duplicate id must abort the transaction — that abort is precisely
     /// what keeps the checkpoint and the outbox rows atomic together); it
     /// lives here because a transaction cannot span the two stores'
-    /// connection pools.
+    /// connection pools. The W4 `base` column carries the delta-chain link
+    /// the same way core's insert does (see `checkpoint_and_enqueue` for
+    /// the encoding decision).
     pub(crate) const INSERT_CHECKPOINT_SQL: &str = "
         INSERT INTO rusty_checkpoints
-            (thread_id, checkpoint_id, step, state, next_nodes, created_at, header, journal_ref)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
+            (thread_id, checkpoint_id, step, state, next_nodes, created_at, header, journal_ref, base)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)";
 
     // -- Agent fabric statements (R0.7, wave 1) -------------------------- //
 
@@ -3235,6 +3243,22 @@ mod postgres {
                     .map_err(|e| format!("migrate checkpoints table: {e}"))
                 })
                 .await?;
+            // Delta encoding (R0.7 wave 4): the same decision core's
+            // `PostgresCheckpointer::put` makes, through the same public
+            // helpers — this path writes through its own transaction, so it
+            // cannot delegate the put. The head is read outside the
+            // transaction (thread writes are single-writer by contract); a
+            // foreign writer would only soften the chain bound, never
+            // corrupt — a delta always names a real ancestor as its base.
+            let head = rusty_agent_runtime::checkpoint_postgres::PostgresCheckpointer::from_pool(
+                pool.clone(),
+            )
+            .delta_head(&checkpoint.thread_id)
+            .await
+            .map_err(|e| format!("read checkpoint delta head: {e}"))?;
+            let encoding = encode_delta(checkpoint, head.as_ref(), &DeltaPolicy::default());
+            let encoded_state = serde_json::to_value(&encoding.checkpoint.state)
+                .map_err(|e| format!("serialize checkpoint state: {e}"))?;
             // The one transaction this wave exists for: the checkpoint and
             // every outbox row commit together or not at all. A duplicate
             // checkpoint id aborts the whole unit (no silent half-write);
@@ -3248,11 +3272,12 @@ mod postgres {
                 .bind(&checkpoint.thread_id)
                 .bind(&checkpoint.id)
                 .bind(step)
-                .bind(checkpoint.state.to_value())
+                .bind(encoded_state)
                 .bind(next_nodes)
                 .bind(checkpoint.created_at)
                 .bind(header)
                 .bind(journal_ref)
+                .bind(&encoding.checkpoint.base)
                 .execute(&mut *tx)
                 .await
                 .map_err(db_err("checkpoint and enqueue"))?;

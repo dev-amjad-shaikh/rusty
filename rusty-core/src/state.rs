@@ -18,23 +18,77 @@
 //! [`StateSpec`] is the graph's state schema: channel name → reducer. It also
 //! performs super-step write validation in [`StateSpec::apply_super_step`].
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::error::{Result, RustyError};
 
-/// The shared graph state: a thin wrapper over a JSON object (`Map<String, Value>`).
+/// The channel map's concrete type. `BTreeMap`, not `serde_json::Map`:
+/// serde_json's `Map` is only fully implemented for `Map<String, Value>`,
+/// and without the `preserve_order` feature it is B-tree-backed — sorted
+/// iteration order identical to this one's, which is what keeps the custom
+/// serde impls below byte-identical to the pre-W4 transparent-Map shape.
+type ChannelMap = BTreeMap<String, Arc<Value>>;
+
+/// The shared graph state: channel name → value, with copy-on-write sharing
+/// at channel granularity (R0.7 wave 4).
 ///
 /// This is the "untyped typed-dict" of the engine: nodes read the full state
 /// snapshot and return partial updates keyed by channel name. Type safety for
 /// concrete applications is layered on top via serde (de)serialization of
 /// individual channel values.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
+///
+/// # Copy-on-write representation
+///
+/// Every channel value sits behind an [`Arc`], and the channel map itself
+/// behind another. Cloning a `State` — the executor's per-super-step
+/// snapshot, each node's private copy, the checkpoint's copy — is two
+/// refcount bumps, O(1) in the state's size, where it used to be a deep
+/// clone of every channel. A write (a reducer merge at the barrier, an
+/// engine [`State::insert`]) touches only what it must: the map is cloned
+/// shallowly when shared (one refcount bump per channel), and a channel's
+/// value is cloned only when some other `State` still shares it —
+/// `Arc::make_mut` semantics per channel. Unchanged channels stay shared
+/// between the pre- and post-step states and every node's snapshot, which is
+/// also what delta checkpoints diff against (see
+/// [`crate::checkpoint::encode_delta`]): sharing and deltas are the same
+/// structural observation.
+///
+/// The public contract is unchanged and pinned: [`State::get`] still returns
+/// `Option<&Value>`, serde still sees the same JSON object (the custom
+/// impls below serialize exactly like the previous transparent `Map`, so
+/// checkpoints, the wire, the SDKs, and golden files stay byte-identical),
+/// and reducer semantics are untouched. What changed is representation only.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
-    inner: Map<String, Value>,
+    inner: Arc<ChannelMap>,
+}
+
+/// Serializes exactly like the `Map<String, Value>` this type used to wrap
+/// transparently: a JSON object of channel name → value. Byte-identity with
+/// the pre-W4 wire shape is the contract — checkpoints, goldens, and SDK
+/// payloads must not drift because the interior changed.
+impl Serialize for State {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(self.inner.len()))?;
+        for (channel, value) in self.inner.iter() {
+            map.serialize_entry(channel, value.as_ref())?;
+        }
+        map.end()
+    }
+}
+
+/// Parses any JSON object, as the previous transparent `Map` did.
+impl<'de> Deserialize<'de> for State {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        Ok(Self::from_map(Map::<String, Value>::deserialize(
+            deserializer,
+        )?))
+    }
 }
 
 impl State {
@@ -45,13 +99,15 @@ impl State {
 
     /// Wrap an existing JSON object.
     pub fn from_map(inner: Map<String, Value>) -> Self {
-        Self { inner }
+        Self {
+            inner: Arc::new(inner.into_iter().map(|(k, v)| (k, Arc::new(v))).collect()),
+        }
     }
 
     /// Build a state from any serializable value that is a JSON object.
     pub fn from_value(value: Value) -> Result<Self> {
         match value {
-            Value::Object(inner) => Ok(Self { inner }),
+            Value::Object(inner) => Ok(Self::from_map(inner)),
             // Report only the type: the value itself may be a multi-MB blob.
             other => Err(RustyError::InvalidUpdate(format!(
                 "state must be a JSON object, got {}",
@@ -62,22 +118,38 @@ impl State {
 
     /// Serialize the whole state back into a [`Value::Object`].
     pub fn to_value(&self) -> Value {
-        Value::Object(self.inner.clone())
+        Value::Object(
+            self.inner
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_ref().clone()))
+                .collect(),
+        )
     }
 
-    /// Consume the state, returning the underlying map.
+    /// Consume the state, returning the underlying map. Channel values that
+    /// no other state shares are unwrapped without copying; shared ones are
+    /// cloned (copy-on-write).
     pub fn into_map(self) -> Map<String, Value> {
-        self.inner
+        match Arc::try_unwrap(self.inner) {
+            Ok(map) => map
+                .into_iter()
+                .map(|(k, v)| (k, Arc::unwrap_or_clone(v)))
+                .collect(),
+            Err(shared) => shared
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_ref().clone()))
+                .collect(),
+        }
     }
 
-    /// Borrow the underlying map.
-    pub fn as_map(&self) -> &Map<String, Value> {
-        &self.inner
+    /// Iterate over `(channel, value)` pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.inner.iter().map(|(k, v)| (k.as_str(), v.as_ref()))
     }
 
     /// Get a channel's current value.
     pub fn get(&self, channel: &str) -> Option<&Value> {
-        self.inner.get(channel)
+        self.inner.get(channel).map(Arc::as_ref)
     }
 
     /// `true` if the channel exists in the state (regardless of value).
@@ -90,12 +162,12 @@ impl State {
     /// Intended for engine internals (initial state seeding, checkpoint
     /// restore). Nodes should always go through reducers.
     pub fn insert(&mut self, channel: impl Into<String>, value: Value) {
-        self.inner.insert(channel.into(), value);
+        self.insert_shared(channel, Arc::new(value));
     }
 
     /// Deserialize a channel into a concrete type.
     pub fn get_as<T: serde::de::DeserializeOwned>(&self, channel: &str) -> Result<Option<T>> {
-        match self.inner.get(channel) {
+        match self.get(channel) {
             None => Ok(None),
             // `&Value` implements `Deserializer`; no need to clone first.
             Some(v) => Ok(Some(T::deserialize(v)?)),
@@ -110,6 +182,54 @@ impl State {
     /// `true` if no channels are present.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
+    }
+
+    /// A shared handle to one channel's value. Test-only: production code
+    /// reaches channels through `get` / `shared_channels`; the copy-on-write
+    /// tests use this to assert pointer-level sharing.
+    #[cfg(test)]
+    pub(crate) fn shared_channel(&self, channel: &str) -> Option<Arc<Value>> {
+        self.inner.get(channel).cloned()
+    }
+
+    /// All channels as shared values.
+    pub(crate) fn shared_channels(&self) -> impl Iterator<Item = (&str, &Arc<Value>)> {
+        self.inner.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Insert a channel value that is already shared, preserving sharing.
+    /// Clones the channel map shallowly when other states share it.
+    pub(crate) fn insert_shared(&mut self, channel: impl Into<String>, value: Arc<Value>) {
+        Arc::make_mut(&mut self.inner).insert(channel.into(), value);
+    }
+
+    /// Build a state from shared channel values (delta encoding/decoding in
+    /// `checkpoint.rs`), preserving sharing with the states they came from.
+    pub(crate) fn from_shared_channels<I, S>(channels: I) -> Self
+    where
+        I: IntoIterator<Item = (S, Arc<Value>)>,
+        S: Into<String>,
+    {
+        Self {
+            inner: Arc::new(channels.into_iter().map(|(k, v)| (k.into(), v)).collect()),
+        }
+    }
+
+    /// The channels whose values differ from `base`'s, as shared values —
+    /// the channel-level delta a W4 delta checkpoint persists. Pointer
+    /// equality short-circuits: a channel still shared with the base is
+    /// unchanged without a value walk. Value equality still dedupes channels
+    /// that were rebuilt with identical content (e.g. after a deserialize),
+    /// so equal bytes are never written twice.
+    pub(crate) fn channels_changed_since(&self, base: &State) -> Vec<(String, Arc<Value>)> {
+        self.shared_channels()
+            .filter(|(channel, value)| match base.inner.get(*channel) {
+                Some(base_value) if Arc::ptr_eq(value, base_value) => false,
+                Some(base_value) => value.as_ref() != base_value.as_ref(),
+                None => true,
+            })
+            .map(|(channel, value)| (channel.to_owned(), value.clone()))
+            .collect()
     }
 }
 
@@ -191,10 +311,7 @@ impl Reducer {
             Reducer::Append => match current {
                 Some(Value::Array(existing)) => {
                     let mut out = existing.clone();
-                    match update {
-                        Value::Array(items) => out.extend(items),
-                        single => out.push(single),
-                    }
+                    append_in_place(&mut out, update);
                     Value::Array(out)
                 }
                 _ => match update {
@@ -207,6 +324,77 @@ impl Reducer {
                 None => update,
             },
             Reducer::AddMessages => add_messages(current, update),
+        }
+    }
+
+    /// The copy-on-write twin of [`Reducer::apply`]: identical semantics,
+    /// but operating on the channel's shared value so uniquely owned values
+    /// mutate in place.
+    ///
+    /// When no snapshot, checkpoint, or sibling state shares the current
+    /// value, an aggregating reducer (Append / DeepMerge / AddMessages)
+    /// merges into it directly — an Append push onto a uniquely owned array
+    /// is amortized O(1) instead of the O(N) clone [`Reducer::apply`] always
+    /// pays. When the value is shared, only this channel is cloned: the
+    /// merge never pays for channels it did not write, which is the whole
+    /// point of the W4 representation. The result is wrapped in a fresh
+    /// [`Arc`] only when a new value was produced; an in-place merge returns
+    /// the same allocation it was given.
+    pub(crate) fn apply_shared(&self, current: Option<Arc<Value>>, update: Value) -> Arc<Value> {
+        match self {
+            Reducer::Overwrite => Arc::new(update),
+            Reducer::Append => match current {
+                Some(mut shared) if shared.is_array() => match Arc::get_mut(&mut shared) {
+                    Some(Value::Array(existing)) => {
+                        append_in_place(existing, update);
+                        shared
+                    }
+                    // Shared with a live snapshot or checkpoint: copy this
+                    // channel only, then merge into the copy.
+                    _ => {
+                        let Value::Array(existing) = shared.as_ref() else {
+                            unreachable!("guarded by is_array above")
+                        };
+                        let mut out = existing.clone();
+                        append_in_place(&mut out, update);
+                        Arc::new(Value::Array(out))
+                    }
+                },
+                // Missing or non-array current (the latter is rejected by
+                // `apply_super_step` validation; direct callers get the same
+                // coercion `apply` documents): the update starts a fresh array.
+                _ => Arc::new(match update {
+                    Value::Array(items) => Value::Array(items),
+                    single => Value::Array(vec![single]),
+                }),
+            },
+            Reducer::DeepMerge => match current {
+                Some(mut shared) => match Arc::get_mut(&mut shared) {
+                    Some(current) => {
+                        deep_merge_in_place(current, &update);
+                        shared
+                    }
+                    None => Arc::new(deep_merge(shared.as_ref(), &update)),
+                },
+                None => Arc::new(update),
+            },
+            Reducer::AddMessages => match current {
+                Some(mut shared) if shared.is_array() => match Arc::get_mut(&mut shared) {
+                    Some(Value::Array(messages)) => {
+                        upsert_messages_in_place(messages, update);
+                        shared
+                    }
+                    _ => {
+                        let Value::Array(existing) = shared.as_ref() else {
+                            unreachable!("guarded by is_array above")
+                        };
+                        let mut messages = existing.clone();
+                        upsert_messages_in_place(&mut messages, update);
+                        Arc::new(Value::Array(messages))
+                    }
+                },
+                _ => Arc::new(add_messages(None, update)),
+            },
         }
     }
 }
@@ -237,19 +425,37 @@ fn json_type_name(v: &Value) -> &'static str {
 
 /// Recursive JSON object merge. Non-object pairs resolve to `b`.
 fn deep_merge(a: &Value, b: &Value) -> Value {
-    match (a, b) {
+    let mut merged = a.clone();
+    deep_merge_in_place(&mut merged, b);
+    merged
+}
+
+/// The in-place core of [`deep_merge`]: merge `b` into `a` without cloning
+/// `a` first. Shared by the copy-on-write merge path, which calls this
+/// directly when the channel value is uniquely owned.
+fn deep_merge_in_place(a: &mut Value, b: &Value) {
+    match (&mut *a, b) {
         (Value::Object(x), Value::Object(y)) => {
-            let mut merged = x.clone();
             for (k, v) in y {
-                let next = match merged.get(k) {
-                    Some(cur) => deep_merge(cur, v),
-                    None => v.clone(),
-                };
-                merged.insert(k.clone(), next);
+                match x.get_mut(k) {
+                    Some(cur) => deep_merge_in_place(cur, v),
+                    None => {
+                        x.insert(k.clone(), v.clone());
+                    }
+                }
             }
-            Value::Object(merged)
         }
-        _ => b.clone(),
+        _ => *a = b.clone(),
+    }
+}
+
+/// The in-place core of [`Reducer::Append`]'s merge: extend an existing
+/// array with the update (array updates concatenate; anything else pushes
+/// as a single element).
+fn append_in_place(existing: &mut Vec<Value>, update: Value) {
+    match update {
+        Value::Array(items) => existing.extend(items),
+        single => existing.push(single),
     }
 }
 
@@ -262,6 +468,13 @@ fn add_messages(current: Option<&Value>, update: Value) -> Value {
         Some(Value::Array(existing)) => existing.clone(),
         _ => Vec::new(),
     };
+    upsert_messages_in_place(&mut messages, update);
+    Value::Array(messages)
+}
+
+/// The in-place core of [`add_messages`]: upsert the update's messages into
+/// an existing array by `"id"`, appending id-less and unknown-id messages.
+fn upsert_messages_in_place(messages: &mut Vec<Value>, update: Value) {
     let incoming: Vec<Value> = match update {
         Value::Array(items) => items,
         single => vec![single],
@@ -286,7 +499,6 @@ fn add_messages(current: Option<&Value>, update: Value) -> Value {
             }
         }
     }
-    Value::Array(messages)
 }
 
 /// The graph's state schema: channel name → [`Reducer`].
@@ -444,8 +656,14 @@ impl StateSpec {
         for (_node, updates) in collected {
             for (channel, update) in updates {
                 let reducer = self.reducer_for(&channel);
-                let merged = reducer.apply(state.get(&channel), update);
-                state.insert(channel, merged);
+                // Copy-on-write merge: the channel is taken OUT of the map
+                // first, so a value no snapshot or checkpoint shares has
+                // refcount 1 here and the reducer merges into it in place;
+                // a shared value is cloned by the reducer — that channel
+                // alone, never the whole state.
+                let current = Arc::make_mut(&mut state.inner).remove(&channel);
+                let merged = reducer.apply_shared(current, update);
+                state.insert_shared(channel, merged);
             }
         }
         Ok(())
@@ -623,5 +841,154 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, RustyError::InvalidUpdate(_)));
         assert_eq!(state.get("messages"), Some(&json!(42)));
+    }
+
+    // ---- Copy-on-write representation (R0.7 wave 4) ----
+
+    #[test]
+    fn clone_shares_channels_until_write() {
+        let mut state = State::from_value(json!({"a": [1, 2, 3], "b": {"x": 1}})).unwrap();
+        let snapshot = state.clone();
+
+        // Cloning shares every channel (pointer-identical, no copies).
+        for channel in ["a", "b"] {
+            assert!(Arc::ptr_eq(
+                &state.shared_channel(channel).unwrap(),
+                &snapshot.shared_channel(channel).unwrap()
+            ));
+        }
+
+        // A write to one channel copies only that channel; the other stays
+        // shared with the snapshot.
+        state.insert("a", json!([9]));
+        assert!(!Arc::ptr_eq(
+            &state.shared_channel("a").unwrap(),
+            &snapshot.shared_channel("a").unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &state.shared_channel("b").unwrap(),
+            &snapshot.shared_channel("b").unwrap()
+        ));
+        // Isolation: the snapshot is untouched.
+        assert_eq!(snapshot.get("a"), Some(&json!([1, 2, 3])));
+        assert_eq!(state.get("a"), Some(&json!([9])));
+    }
+
+    #[test]
+    fn reducer_merge_is_copy_on_write_at_channel_granularity() {
+        let spec = StateSpec::new()
+            .channel("xs", Reducer::Append)
+            .channel("ys", Reducer::Append);
+        let mut state = State::from_value(json!({"xs": [1], "ys": ["keep"]})).unwrap();
+        let snapshot = state.clone();
+
+        // Merge into `xs` while `snapshot` is alive: `xs` is copied
+        // (snapshot keeps the old array), `ys` is never touched.
+        spec.apply_single(&mut state, "n", updates(&[("xs", json!(2))]))
+            .unwrap();
+        assert_eq!(state.get("xs"), Some(&json!([1, 2])));
+        assert_eq!(snapshot.get("xs"), Some(&json!([1])));
+        assert!(Arc::ptr_eq(
+            &state.shared_channel("ys").unwrap(),
+            &snapshot.shared_channel("ys").unwrap()
+        ));
+    }
+
+    #[test]
+    fn append_mutates_in_place_when_uniquely_owned() {
+        let spec = StateSpec::new().channel("xs", Reducer::Append);
+        let mut state = State::from_value(json!({"xs": [1]})).unwrap();
+        let before = Arc::as_ptr(&state.shared_channel("xs").unwrap());
+        spec.apply_single(&mut state, "n", updates(&[("xs", json!(2))]))
+            .unwrap();
+        // Unique ownership: the merge reused the same allocation instead of
+        // cloning the array.
+        assert_eq!(state.get("xs"), Some(&json!([1, 2])));
+        assert_eq!(before, Arc::as_ptr(&state.shared_channel("xs").unwrap()));
+    }
+
+    #[test]
+    fn deep_merge_mutates_in_place_when_uniquely_owned() {
+        let spec = StateSpec::new().channel("cfg", Reducer::DeepMerge);
+        let mut state = State::from_value(json!({"cfg": {"a": 1, "nested": {"x": 1}}})).unwrap();
+        let before = Arc::as_ptr(&state.shared_channel("cfg").unwrap());
+        spec.apply_single(
+            &mut state,
+            "n",
+            updates(&[("cfg", json!({"nested": {"y": 2}}))]),
+        )
+        .unwrap();
+        assert_eq!(
+            state.get("cfg"),
+            Some(&json!({"a": 1, "nested": {"x": 1, "y": 2}}))
+        );
+        assert_eq!(before, Arc::as_ptr(&state.shared_channel("cfg").unwrap()));
+    }
+
+    #[test]
+    fn serde_is_byte_identical_to_plain_map() {
+        let state = State::from_value(json!({
+            "blob": "payload",
+            "meta": {"kind": "test", "n": 42},
+            "list": [1, 2.5, null, true]
+        }))
+        .unwrap();
+        let plain = state.to_value();
+
+        // Compact and pretty forms both match the plain-Value serialization
+        // of the same object — the pre-W4 transparent-Map wire shape.
+        assert_eq!(
+            serde_json::to_string(&state).unwrap(),
+            serde_json::to_string(&plain).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string_pretty(&state).unwrap(),
+            serde_json::to_string_pretty(&plain).unwrap()
+        );
+
+        // Deserialize round-trips through both representations.
+        let from_state_json: State =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        let from_value_json: State = serde_json::from_value(plain).unwrap();
+        assert_eq!(state, from_state_json);
+        assert_eq!(state, from_value_json);
+    }
+
+    #[test]
+    fn into_map_and_iter_round_trip() {
+        let state = State::from_value(json!({"a": 1, "b": [2]})).unwrap();
+        let iterated: HashMap<String, Value> = state
+            .iter()
+            .map(|(k, v)| (k.to_owned(), v.clone()))
+            .collect();
+        assert_eq!(iterated["a"], json!(1));
+        assert_eq!(iterated["b"], json!([2]));
+
+        // Shared with a clone: into_map still yields owned values.
+        let snapshot = state.clone();
+        let map = state.into_map();
+        assert_eq!(map["a"], json!(1));
+        assert_eq!(snapshot.get("b"), Some(&json!([2])));
+    }
+
+    #[test]
+    fn channels_changed_since_diffs_by_pointer_then_value() {
+        let base =
+            State::from_value(json!({"same": 1, "changed": [1], "gone_from_delta": true})).unwrap();
+        let mut next = base.clone();
+        next.insert("changed", json!([1, 2]));
+        next.insert("new", json!("hello"));
+        // Rebuilt with identical content: value-equal but not pointer-equal.
+        next.insert("same", json!(1));
+
+        let delta = next.channels_changed_since(&base);
+        let names: Vec<&str> = delta.iter().map(|(k, _)| k.as_str()).collect();
+        // `changed` (new value) and `new` (absent from base) are in; the
+        // value-equal rebuild of `same` is deduped; `gone_from_delta` is
+        // unchanged and channels are never deleted.
+        assert_eq!(names, ["changed", "new"]);
+
+        // Against an empty base every channel is a change.
+        assert_eq!(next.channels_changed_since(&State::new()).len(), 4);
     }
 }

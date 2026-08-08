@@ -242,6 +242,9 @@ mod tests {
             thread_id: format!("thread:{run_id}"),
             events,
             artifacts: BTreeMap::new(),
+            // W4 additive field: this helper assembles in-memory snapshots,
+            // which never reference an external artifact store.
+            artifact_refs: BTreeMap::new(),
             head_hash: String::new(),
         }
     }

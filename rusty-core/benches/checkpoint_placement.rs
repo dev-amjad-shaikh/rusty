@@ -46,6 +46,7 @@ use async_trait::async_trait;
 use common::{state_sized, temp_checkpoint_root, tokio_runtime};
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkGroup, Criterion};
+use rusty_agent_runtime::checkpoint::DeltaPolicy;
 use rusty_agent_runtime::prelude::*;
 use serde_json::{json, Value};
 
@@ -224,7 +225,12 @@ struct PlacementCheckpointer {
 impl PlacementCheckpointer {
     fn new(dir: &std::path::Path, chain_len: usize, density: f64, policy: Placement) -> Self {
         Self {
-            inner: JsonFileCheckpointer::new(dir),
+            // W4: pin the pre-wave-4 full-write path. This bench re-puts
+            // identical states per step, which the default delta policy
+            // would encode as empty deltas — that would measure the delta
+            // fast path, not the R0.5 placement experiment this file
+            // publishes numbers for.
+            inner: JsonFileCheckpointer::with_delta_policy(dir, DeltaPolicy::full_only()),
             policy,
             chain_len,
             density,
@@ -350,7 +356,12 @@ fn bench_checkpoint_stream(c: &mut Criterion) {
                             },
                             |_| {
                                 rt.block_on(async {
-                                    let store = JsonFileCheckpointer::new(root.clone());
+                                    // W4: full-only policy — see
+                                    // `PlacementCheckpointer::new` above.
+                                    let store = JsonFileCheckpointer::with_delta_policy(
+                                        root.clone(),
+                                        DeltaPolicy::full_only(),
+                                    );
                                     for step in kept_steps(chain_len, density, policy) {
                                         store
                                             .put(Checkpoint::new(
@@ -399,7 +410,12 @@ fn accounting(_c: &mut Criterion) {
                     let _ = std::fs::remove_dir_all(&dir);
                     let expected = kept_steps(chain_len, density, policy);
                     rt.block_on(async {
-                        let store = JsonFileCheckpointer::new(stream_root.clone());
+                        // W4: full-only policy — see
+                        // `PlacementCheckpointer::new` above.
+                        let store = JsonFileCheckpointer::with_delta_policy(
+                            stream_root.clone(),
+                            DeltaPolicy::full_only(),
+                        );
                         for &step in &expected {
                             store
                                 .put(Checkpoint::new(

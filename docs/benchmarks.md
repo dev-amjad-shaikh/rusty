@@ -425,3 +425,160 @@ engine-bound, large-state, and high-step-rate runs (up to ~71 % of wall here)
 and does not exist in LLM-bound runs (<1 %), so checkpoint placement should
 rank behind retry/timeout learning and be evaluated against durable-work
 workloads, not model-call loops.
+
+## State scaling — the R0.7 wave 4 before/after (2026-08-08)
+
+Wave 4 shipped channel-granularity copy-on-write state (`Arc<Value>` per
+channel), delta checkpoints in both durable checkpointers, and a
+content-addressed artifact store (see `docs/agent-fabric-design.md`, "State
+scaling"). This section publishes the exit numbers against the baseline
+above, per the wave's evidence-over-claims gate.
+
+**Method.** *Before* is not the 2026-08-06 baseline re-quoted: it is the
+wave's base commit (`583fe9a`, R0.7 W3) re-measured on 2026-08-08 with the
+identical Criterion targets, so both columns are same-day, same-machine,
+same-harness. Where the base re-measurement drifts from the published
+baseline (run-to-run variance on memcpy-bound payloads), both values are
+noted. *After* is the wave-4 branch, same day. The `checkpoint_json_file_*`
+groups are pinned to `DeltaPolicy::full_only()` so they stay like-for-like
+regression guards; new `*_delta` groups measure the new path, and a
+`DELTA-ACCOUNT` accounting pass (untimed, asserted) measures on-disk bytes.
+
+| | |
+|---|---|
+| CPU | Apple M2 Max (12 cores: 8 performance + 4 efficiency) |
+| RAM | 96 GB |
+| OS | macOS 26.5.1 (Build 25F80), arm64 |
+| Rust | rustc 1.97.1 (8bab26f4f 2026-07-14) |
+| Criterion | 0.5.1 (default features off: no plotters/rayon) |
+| Date of run | 2026-08-08 |
+| Crate version | R0.7 wave 4, unreleased, on top of `rusty-agent-runtime` 0.6.0 (before: base commit `583fe9a`) |
+| Load | single-user machine, no other heavy processes |
+
+### Exit metric 1 — snapshot cost per super-step
+
+`State::clone()` is now one refcount bump per channel — O(channels), flat in
+payload size. The `superstep_snapshot_clones` group measures the executor's
+actual per-step fan-out (pre-step snapshot + 4 node clones + checkpoint
+copy = 6 clones); pre-wave 4 that cost 6 × the full-clone column.
+
+| Payload | Before: `State::clone()` | After: `State::clone()` | After: 6-clone super-step fan-out |
+|---|---|---|---|
+| 1 KB | 227.53 ns [224.87, 231.91] | 3.93 ns [3.89, 3.99] | — |
+| 100 KB | 1.89 µs [1.87, 1.91] | 3.94 ns [3.91, 3.97] | — |
+| 1 MB | 17.16 µs [16.96, 17.37] | 3.88 ns [3.85, 3.91] | 26.17 ns [25.95, 26.38] |
+| 10 MB | 312.78 µs [308.70, 317.01] | 3.95 ns [3.92, 4.00] | 26.07 ns [25.85, 26.29] |
+
+The full super-step snapshot fan-out at 1 MB / 10 MB — the wave's first
+exit number, ~105 µs / ~1.9 ms per step before (6 × the clone column) —
+is now **~26 ns, flat in payload size**. (The base re-measurement of the
+10 MB clone, 312.78 µs, sits above the published baseline's 248.65 µs; the
+payload is one memcpy-bound string and run-to-run variance there is large.
+The 1 MB re-measurement, 17.16 µs vs the published 17.50 µs, matches.)
+
+The serde contract is unchanged and priced: the checkpoint serialize/parse
+round-trip pays the same after as before (1 MB: 471.65 µs vs 479.62 µs;
+10 MB: 4.43 ms vs 4.60 ms — within noise, no regression), because
+serialization walks the whole `Value` regardless of sharing. CoW removes
+clone cost; it does not touch serde cost — that is what deltas are for.
+
+### Exit metric 2 — reducer merge cost
+
+The barrier merge now mutates a channel **in place** when the state's
+`Arc<Value>` is uniquely owned (Append / DeepMerge / AddMessages), and
+copies only that channel when a snapshot still shares it.
+
+**Append** (push one element onto an existing array):
+
+| Existing length | Before | After: unique ownership | After: shared with live snapshot |
+|---|---|---|---|
+| 10 | 934.31 ns [916.33, 964.51] | 257.12 ns [256.24, 258.06] | 874.72 ns [839.87, 909.98] |
+| 100 | 7.77 µs [7.52, 8.03] | 454.93 ns [446.06, 462.22] | 5.93 µs [5.60, 6.28] |
+| 1,000 | 68.03 µs [66.61, 69.49] | 1.30 µs [1.28, 1.32] | 58.88 µs [55.56, 61.80] |
+| 10,000 | 696.79 µs [693.91, 699.82] | **7.57 µs [7.47, 7.67]** | 496.67 µs [482.89, 511.69] |
+
+**DeepMerge** (10 %-overlap object into existing object):
+
+| Existing keys | Before | After: unique ownership |
+|---|---|---|
+| 100 | 26.78 µs [26.20, 27.40] | 2.44 µs [2.34, 2.55] |
+| 1,000 | 292.41 µs [286.05, 299.58] | 26.21 µs [25.42, 27.05] |
+| 10,000 | 3.08 ms [3.03, 3.14] | **270.38 µs [264.48, 276.73]** |
+
+The wave's second exit number — Append at 10,000 elements, 1.18 ms on the
+published baseline and 696.79 µs re-measured at the base commit — is
+**7.57 µs** when the merge owns the channel (~92× against the base
+re-measurement) and **496.67 µs** when a live snapshot forces the
+copy-on-write clone (~1.4× — one channel clone instead of the old two).
+
+**The honest gate for `im` (persistent within-channel structures):** the
+executor's pre-step checkpoint holds the pre-merge state, so a *durable*
+run's barrier merges take the shared column — still O(channel). The
+unique-ownership column is what non-durable runs get (the executor drops
+its snapshot before the barrier when no checkpointer is attached, so the
+merge reaches refcount 1 and mutates in place — verified by pointer
+equality in `state.rs` tests). The design's `im` gate — adopt if reducer
+merges exceed an agreed share of turn latency — therefore stays **open on
+evidence**: a durable run appending into a 10 k-element channel still pays
+~0.5 ms per merge. Overwrite is untouched and flat (257.62 ns at 1 MB vs
+227.63 ns before; ~13 % overhead from the Arc indirection, absolute cost
+still sub-µs).
+
+### Exit metric 3 — checkpoint bytes for the 1000-step / 1 MB run
+
+Delta checkpoints: `Checkpoint` gains an additive `base: Option<String>`;
+opting-in checkpointers (`JsonFileCheckpointer`, `PostgresCheckpointer`,
+the server store) persist only the channels that changed since the chain
+head, bounded by chain length *K* = 32 and a byte ratio (delta ≥ 80 % of
+full ⇒ write full), with `fork_thread` compacting eagerly to full
+snapshots. All reads fold the chain internally — the trait and the
+materialized-`Checkpoint` contract are unchanged.
+
+`DELTA-ACCOUNT` (1000 checkpoints × 1 MB state, `blob` channel constant,
+small `meta` channel rewritten per step; asserted, untimed):
+
+| Policy | On-disk bytes | Wall time |
+|---|---|---|
+| full-only (pre-W4 path) | 1,049,035,813 (1.05 GB) | 884 ms |
+| delta (default, K = 32) | **32,994,615 (33.0 MB)** | 996 ms |
+
+The wave's third exit number: **31.8× fewer bytes** for the motivating
+uniform-1000-step case (1.05 GB → 33.0 MB; the full-only arm reproduces
+the placement experiment's 1.05 GB exactly, on-tree). Wall time is flat
+(+13 %): the write path is dominated by per-file atomic-write overhead,
+not payload bytes, and the delta arm additionally re-anchors a full write
+every 32 steps and reads the chain head per put. Deltas are a *bytes*
+optimization — disk, replication, and backup cost — not a latency one.
+
+**Per-operation timing** (mean [95 % CI]):
+
+| Group | 1 KB | 100 KB | 1 MB |
+|---|---|---|---|
+| `json_file_put`, full-only (regression guard) | 445.55 µs [407.12, 490.47] (before: 443.49 µs) | 518.24 µs [499.40, 536.84] (before: 609.50 µs) | 1.02 ms [0.96, 1.10] (before: 1.09 ms) |
+| `json_file_put_delta` (steady chain) | 640.63 µs [525.84, 794.17] | 452.83 µs [418.66, 506.35] | 921.63 µs [853.51, 1046.20] |
+| `json_file_get_latest`, full-only | 45.69 µs [45.28, 46.18] (before: 46.33 µs) | 64.91 µs [64.49, 65.37] (before: 65.39 µs) | 236.05 µs [233.31, 239.32] (before: 234.66 µs) |
+| `json_file_get_latest_delta` (worst case: head K−1 = 31 deltas above its base) | 480.23 µs [412.94, 543.57] | 502.43 µs [435.87, 565.87] | 692.11 µs [622.04, 757.80] |
+
+Reads: the full-only guard confirms no regression on the pre-W4 load path
+(236.05 µs vs 234.66 µs at 1 MB — unchanged). The delta resume path at its
+bounded worst (31 delta files + 1 full base read + fold) costs ~2.9× the
+single-file load at 1 MB — the design's predicted "sub-millisecond at
+CoW-sharing sizes" holds (692 µs), and *K* = 32 caps it there by
+construction. `checkpoint_serialize` (357.06 µs → 353.86 µs at 1 MB) and
+`checkpoint_in_memory_put` (871.17 ns → 729.48 ns — InMemory opts out of
+deltas; the small gain is the CoW checkpoint move) are likewise unchanged
+in shape.
+
+### Artifact store (adoption note, not a benchmark)
+
+The content-addressed store shipped with both backends
+(`FileArtifactStore`: `{dir}/{sha256}` under the same atomic
+temp-write-then-rename discipline as checkpoints; `PostgresArtifactStore`:
+`rusty_artifacts` table, `ON CONFLICT DO NOTHING` dedupe), integrity
+verification on every read (re-hash against the address; corruption fails
+the read rather than returning bad bytes), and the journal persistence
+seam (`snapshot_externalized` / `from_snapshot_with_store`) — snapshots
+still embed bytes by default, keeping replay fixtures self-contained per
+the design. Mailbox/checkpoint-channel spill adoption is deferred (see the
+wave-4 annotation in `docs/agent-fabric-design.md`), so no benchmark here
+claims end-to-end artifact savings yet.

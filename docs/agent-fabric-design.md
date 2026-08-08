@@ -616,6 +616,31 @@ merge at 10,000 elements (before: ~1.18 ms), checkpoint bytes for the 1000-step 
 (before: 1.05 GB uniform) — same Criterion harness and environment table, per
 evidence-over-claims.
 
+> **Wave 4 status: implemented.** CoW state shipped as designed (`State` is one
+> `Arc<BTreeMap<String, Arc<Value>>>`; serde byte-identical, pinned by round-trip tests;
+> `Reducer::apply_shared` mutates in place under unique ownership, and the barrier merge
+> removes the channel from the map first so a uniquely-owned channel actually reaches
+> refcount 1). Delta checkpoints shipped with *K* = 32 + 80 % byte ratio in both durable
+> checkpointers and both server-store checkpoint paths; fork compacts eagerly (open
+> question 3, resolved below); `InMemoryCheckpointer` opts out. The artifact store shipped
+> as `FileArtifactStore` + `PostgresArtifactStore` (table named `rusty_artifacts`, not
+> `server_artifacts` as drafted above — one store for the runtime, not server-scoped) with
+> read-time integrity verification and the journal seam (`snapshot_externalized` /
+> `from_snapshot_with_store`); snapshots embed by default, per the fixture contract. The
+> exit numbers are published in `docs/benchmarks.md` (2026-08-08 section): super-step
+> snapshot fan-out at 1 MB / 10 MB → ~26 ns flat; Append at 10 k → 7.57 µs unique /
+> 496.67 µs shared; the 1000-step / 1 MB run → 33.0 MB vs 1.05 GB (31.8×), wall time flat.
+> Deviations from the text above, all scope-forced: (1) the delta policy lives on the
+> checkpointers (`with_delta_policy`), not `ServerConfig` — server config is out of this
+> wave's file scope; (2) artifact adoption shipped as the journal seam plus both store
+> backends only — mailbox-payload spill and the checkpoint `artifact_manifest` need
+> `tasks.rs` / `Checkpoint` wire changes owned by other workstreams and stay deferred;
+> (3) `State::as_map` was removed (it returned the interior map by reference, impossible
+> under the new representation) — it had zero callers repo-wide; `State::iter` replaces
+> it; (4) the `im` gate stays open on evidence — durable runs merge through the shared
+> (copy-on-write) column, so the within-channel persistent-structure question is answered
+> by the published shared-column numbers, not by assertion.
+
 **Release proof (the whole release).** An automated integration test in the crash-recovery
 family (`rusty-server/tests/`, real processes, real SIGKILLs — the precedent
 `crash_recovery.rs` set): a three-agent team — supervisor, two workers — executes a fan-out
@@ -679,6 +704,10 @@ Flagged for the owner before wave 1 lands:
    latency spike on a user-facing time-travel call. Acceptable, or compact asynchronously and
    serve reads from the chain until done? Leaning: eager — forks are rare and the fold is
    bounded by *K* = 32 by construction.
+   **Resolved for wave 4 as leaned:** forks write full snapshots only (`put_internal(..,
+   force_full)` on both durable backends), so a forked timeline never references the source
+   timeline's chain. The measured fold at the bounded worst (31 deltas + base at 1 MB) is
+   692 µs — a rare, sub-millisecond spike; asynchronous compaction stays unbuilt.
 4. **Per-agent quotas.** Tenant quotas (tasks queued / in flight / DLQ depth) exist; a
    runaway agent can still monopolize its tenant's budget. Per-agent queue-depth quotas in
    R0.7, or is supervision-with-intensity enough backpressure? Leaning: defer unless the

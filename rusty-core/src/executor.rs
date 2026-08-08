@@ -1039,6 +1039,13 @@ impl Executor {
         // -- merge: reducers + LastValue single-write validation. On
         //    error the mutated state is dropped with the run
         //    (transactional super-step).
+        //
+        // The start-of-step snapshot's job ends at the barrier — every node
+        // has reported (or the step has failed). Dropping it before the
+        // merge releases its per-channel shared references, so channels no
+        // checkpoint still shares reach the reducer with refcount 1 and
+        // merge in place (W4 copy-on-write) instead of cloning.
+        drop(snapshot);
         let written_channels: HashSet<String> = writes
             .iter()
             .flat_map(|(_, updates)| updates.keys().cloned())
@@ -1267,6 +1274,9 @@ impl Recorder {
                 manifest: self.manifest.clone(),
             },
             journal_ref: Some(self.journal.head_ref()),
+            // The executor always mints full snapshots; delta encoding is
+            // decided inside the checkpointer (`checkpoint::encode_delta`).
+            base: None,
         }
     }
 }

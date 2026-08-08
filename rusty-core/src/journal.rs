@@ -31,10 +31,26 @@
 //! The in-memory journal is the v1 store; [`JournalSnapshot`] is its
 //! serde-complete export form (events plus the artifact payloads they
 //! reference), the unit portable replay fixtures are built from.
+//!
+//! # Artifact persistence seam (R0.7 wave 4)
+//!
+//! Payloads over [`INLINE_PAYLOAD_MAX_BYTES`] have always been
+//! content-addressed ([`ArtifactRef`]) with their bytes embedded in the
+//! snapshot's artifact map — a self-contained fixture contract that
+//! [`Journal::snapshot`] keeps. W4 adds the *other* half of the contract:
+//! an external, content-addressed [`ArtifactStore`] the snapshot can
+//! reference instead ([`JournalSnapshot::artifact_refs`]), so a server
+//! persisting journals stops rewriting the same large payload bytes at
+//! every checkpoint boundary. Writes dedupe by construction (the hash is
+//! the identity); reads verify integrity on every fetch. The seam is
+//! additive: snapshots with embedded bytes — everything written before W4,
+//! and replay fixtures by design — deserialize and load exactly as before.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -332,6 +348,18 @@ impl Journal {
     /// [`crate::error::RustyError::Serialization`] when an event fails to
     /// serialize (not realistically possible for well-formed snapshots).
     pub fn from_snapshot(snapshot: JournalSnapshot, clock: Clock) -> crate::error::Result<Self> {
+        // An externalized snapshot cannot resolve payloads without its
+        // store; refusing here beats a journal that silently answers `None`
+        // for artifact resolutions deep inside a replay.
+        if !snapshot.artifact_refs.is_empty() {
+            return Err(crate::error::RustyError::Serialization(
+                serde_json::Error::io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "journal snapshot references an external artifact store; \
+                     load it with Journal::from_snapshot_with_store",
+                )),
+            ));
+        }
         let mut head_hash = sha256_hex(b"");
         for event in &snapshot.events {
             head_hash = chained_hash(&head_hash, event)?;
@@ -471,6 +499,10 @@ impl Journal {
     /// A serde-complete export of the journal: every event plus the artifact
     /// payloads they reference. The unit a portable replay fixture is built
     /// from.
+    ///
+    /// Bytes stay embedded by design: the fixture contract (self-contained,
+    /// loadable anywhere) outranks the size optimization. Persistence paths
+    /// that want the optimization use [`Journal::snapshot_externalized`].
     pub fn snapshot(&self) -> JournalSnapshot {
         let inner = self.lock();
         JournalSnapshot {
@@ -478,8 +510,62 @@ impl Journal {
             thread_id: self.thread_id.clone(),
             events: inner.events.clone(),
             artifacts: inner.artifacts.clone(),
+            artifact_refs: BTreeMap::new(),
             head_hash: inner.head_hash.clone(),
         }
+    }
+
+    /// Export the journal with its artifact payloads spilled to an external
+    /// [`ArtifactStore`]: the snapshot records content addresses
+    /// ([`JournalSnapshot::artifact_refs`]) instead of embedding bytes.
+    ///
+    /// This is the persistence-path export (R0.7 wave 4): a server
+    /// rewriting journal snapshots at every checkpoint boundary stores each
+    /// oversized payload once per content, not once per snapshot — re-puts
+    /// dedupe on the content address, so artifact-addressed retry traffic is
+    /// cheap. Load with [`Journal::from_snapshot_with_store`].
+    pub async fn snapshot_externalized(
+        &self,
+        store: &dyn ArtifactStore,
+    ) -> crate::error::Result<JournalSnapshot> {
+        let mut snapshot = self.snapshot();
+        let artifacts = std::mem::take(&mut snapshot.artifacts);
+        for (sha256, value) in artifacts {
+            // The canonical serialization the artifact map was keyed on
+            // (`store_payload`); infallible for a Value in practice.
+            let bytes = serde_json::to_vec(&value).expect("a serde_json::Value always serializes");
+            let reference = store.put(&bytes).await?;
+            debug_assert_eq!(
+                reference.sha256, sha256,
+                "artifact map keys are content addresses by construction"
+            );
+            snapshot.artifact_refs.insert(sha256, reference);
+        }
+        Ok(snapshot)
+    }
+
+    /// Rebuild a journal from an externalized snapshot
+    /// ([`Journal::snapshot_externalized`]): every referenced artifact is
+    /// fetched through `store` — integrity-verified on read by the store's
+    /// contract — and re-embedded, after which the load is the ordinary
+    /// hash-verified [`Journal::from_snapshot`].
+    pub async fn from_snapshot_with_store(
+        mut snapshot: JournalSnapshot,
+        store: &dyn ArtifactStore,
+        clock: Clock,
+    ) -> crate::error::Result<Self> {
+        let refs = std::mem::take(&mut snapshot.artifact_refs);
+        for (sha256, reference) in refs {
+            let bytes = store.get(&reference.sha256).await?;
+            let value: Value = serde_json::from_slice(&bytes).map_err(|e| {
+                crate::error::RustyError::Serialization(serde_json::Error::io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("artifact `{sha256}` is not valid JSON: {e}"),
+                )))
+            })?;
+            snapshot.artifacts.insert(sha256, value);
+        }
+        Self::from_snapshot(snapshot, clock)
     }
 
     /// Resolve a [`PayloadRef`] to its value, looking through the artifact
@@ -548,6 +634,125 @@ fn chained_hash(prev: &str, event: &RunEvent) -> crate::error::Result<String> {
     Ok(sha256_hex(&[prev.as_bytes(), &bytes].concat()))
 }
 
+/// A content-addressed blob store for journal artifacts (R0.7 wave 4).
+///
+/// The addressing contract predates the store: [`ArtifactRef`] has always
+/// content-addressed oversized payloads by SHA-256 — W4 adds where the
+/// bytes *live* when they leave the journal snapshot. The hash is the
+/// identity, so writes dedupe by construction (re-sent large inputs
+/// reference the same object) and readers can prove they got the bytes they
+/// asked for.
+///
+/// Error mapping: IO failures use the implementation's module convention
+/// ([`RustyError::Serialization`](crate::error::RustyError::Serialization)
+/// here in the journal, `Checkpoint` in the Postgres backend); an
+/// **integrity failure** — bytes that do not re-hash to their address — is
+/// always a `Serialization` error with `InvalidData`, the same shape
+/// [`Journal::from_snapshot`] uses for a tampered snapshot.
+#[async_trait]
+pub trait ArtifactStore: Send + Sync {
+    /// Store `bytes`, returning their content address. Idempotent: storing
+    /// identical bytes twice yields the same address and (at most) one
+    /// stored object.
+    async fn put(&self, bytes: &[u8]) -> crate::error::Result<ArtifactRef>;
+
+    /// Fetch the bytes for a content address. Integrity is verified on
+    /// every read: the returned bytes re-hash to the requested address, or
+    /// this errors — a store that cannot prove its bytes are the addressed
+    /// bytes is corruption, not data.
+    async fn get(&self, sha256: &str) -> crate::error::Result<Vec<u8>>;
+
+    /// Whether the store holds an address (existence only, no integrity
+    /// check — use [`ArtifactStore::get`] when the bytes matter).
+    async fn contains(&self, sha256: &str) -> crate::error::Result<bool>;
+}
+
+/// Map an IO error into the journal module's error convention.
+fn artifact_io_error(context: String, e: std::io::Error) -> crate::error::RustyError {
+    crate::error::RustyError::Serialization(serde_json::Error::io(std::io::Error::new(
+        e.kind(),
+        format!("{context}: {e}"),
+    )))
+}
+
+/// Filesystem [`ArtifactStore`]: one file per artifact at
+/// `{dir}/{sha256}`, written with the same atomic temp-write-then-rename
+/// discipline the JSON-file checkpointer uses — a crash mid-write can never
+/// leave a truncated blob behind (and a truncated blob would be caught by
+/// the read-side integrity check anyway).
+#[derive(Debug, Clone)]
+pub struct FileArtifactStore {
+    dir: PathBuf,
+}
+
+impl FileArtifactStore {
+    /// A store rooted at `dir` (created lazily on first `put`).
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self { dir: dir.into() }
+    }
+
+    /// The root directory artifacts are stored under.
+    pub fn dir(&self) -> &std::path::Path {
+        &self.dir
+    }
+
+    fn artifact_path(&self, sha256: &str) -> PathBuf {
+        self.dir.join(sha256)
+    }
+}
+
+#[async_trait]
+impl ArtifactStore for FileArtifactStore {
+    async fn put(&self, bytes: &[u8]) -> crate::error::Result<ArtifactRef> {
+        let reference = ArtifactRef {
+            sha256: sha256_hex(bytes),
+            bytes: bytes.len() as u64,
+        };
+        let path = self.artifact_path(&reference.sha256);
+        // Dedupe by construction: an existing file under the address IS
+        // these bytes (or corruption the read side will catch) — re-puts of
+        // the same content are a no-op, which is what makes
+        // artifact-addressed retry traffic cheap.
+        if tokio::fs::try_exists(&path)
+            .await
+            .map_err(|e| artifact_io_error(format!("stat artifact `{}`", path.display()), e))?
+        {
+            return Ok(reference);
+        }
+        tokio::fs::create_dir_all(&self.dir).await.map_err(|e| {
+            artifact_io_error(format!("create artifact dir `{}`", self.dir.display()), e)
+        })?;
+        crate::checkpoint::JsonFileCheckpointer::atomic_write(&path, bytes).await?;
+        Ok(reference)
+    }
+
+    async fn get(&self, sha256: &str) -> crate::error::Result<Vec<u8>> {
+        let path = self.artifact_path(sha256);
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| artifact_io_error(format!("read artifact `{sha256}`"), e))?;
+        let actual = sha256_hex(&bytes);
+        if actual != sha256 {
+            return Err(crate::error::RustyError::Serialization(
+                serde_json::Error::io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "artifact integrity failure: `{sha256}` re-hashes to `{actual}`; \
+                         the stored bytes are corrupt"
+                    ),
+                )),
+            ));
+        }
+        Ok(bytes)
+    }
+
+    async fn contains(&self, sha256: &str) -> crate::error::Result<bool> {
+        tokio::fs::try_exists(self.artifact_path(sha256))
+            .await
+            .map_err(|e| artifact_io_error(format!("stat artifact `{sha256}`"), e))
+    }
+}
+
 /// The serde-complete export form of a [`Journal`]: run identity, the full
 /// event sequence, the artifact payloads referenced by events, and the head
 /// hash binding them. Round-trips through JSON unchanged; load with
@@ -565,6 +770,15 @@ pub struct JournalSnapshot {
 
     /// Content-addressed payloads referenced by events (SHA-256 hex → value).
     pub artifacts: BTreeMap<String, Value>,
+
+    /// Payloads whose bytes live in an external [`ArtifactStore`] instead
+    /// of embedded in `artifacts` (R0.7 wave 4; see
+    /// [`Journal::snapshot_externalized`]). Additive: absent from the wire
+    /// when empty, so pre-W4 snapshots — and replay fixtures, which embed
+    /// by design — keep their exact shape. Load with
+    /// [`Journal::from_snapshot_with_store`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub artifact_refs: BTreeMap<String, ArtifactRef>,
 
     /// The chained head hash over `events`.
     pub head_hash: String,
@@ -832,5 +1046,137 @@ mod tests {
         assert!(snapshot
             .find_effect_receipt_by_effect_id(&derive_effect_id("run-1", "legacy", "x", None))
             .is_none());
+    }
+
+    // ---- Artifact store + persistence seam (R0.7 wave 4) ----
+
+    /// Unique temp root under the OS temp dir, removed on drop.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("rusty-artifact-test-{}", uuid::Uuid::new_v4())))
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn big_payload() -> Value {
+        json!({"blob": "x".repeat(INLINE_PAYLOAD_MAX_BYTES)})
+    }
+
+    #[tokio::test]
+    async fn file_artifact_store_roundtrip_and_dedupe() {
+        let tmp = TestDir::new();
+        let store = FileArtifactStore::new(tmp.0.clone());
+
+        let bytes = serde_json::to_vec(&big_payload()).unwrap();
+        let reference = store.put(&bytes).await.unwrap();
+        assert_eq!(reference.sha256, sha256_hex(&bytes));
+        assert_eq!(reference.bytes as usize, bytes.len());
+        assert!(store.contains(&reference.sha256).await.unwrap());
+        assert!(!store.contains(&sha256_hex(b"never stored")).await.unwrap());
+
+        // Dedupe by construction: re-putting the same content is a no-op
+        // returning the same address, and the file count stays one.
+        let again = store.put(&bytes).await.unwrap();
+        assert_eq!(again, reference);
+        assert_eq!(std::fs::read_dir(&tmp.0).unwrap().count(), 1);
+
+        // Read verifies integrity and returns the addressed bytes.
+        assert_eq!(store.get(&reference.sha256).await.unwrap(), bytes);
+    }
+
+    #[tokio::test]
+    async fn file_artifact_store_detects_corruption_on_read() {
+        let tmp = TestDir::new();
+        let store = FileArtifactStore::new(tmp.0.clone());
+
+        let bytes = b"genuine payload".repeat(1024);
+        let reference = store.put(&bytes).await.unwrap();
+        // Tamper with the stored bytes: the next read must fail integrity,
+        // not return corrupt data.
+        std::fs::write(tmp.0.join(&reference.sha256), b"tampered").unwrap();
+        let err = store.get(&reference.sha256).await.unwrap_err();
+        assert!(err.to_string().contains("integrity failure"), "got: {err}");
+
+        // A missing artifact is an error, never an empty read.
+        assert!(store.get(&sha256_hex(b"missing")).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn externalized_snapshot_spills_and_resolves_artifacts() {
+        let tmp = TestDir::new();
+        let store = FileArtifactStore::new(tmp.0.clone());
+
+        let j = journal();
+        let big = big_payload();
+        j.record(EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure));
+        j.record(
+            EventDraft::new(RunEventKind::ModelCall, Effect::NonIdempotent).output(big.clone()),
+        );
+
+        let externalized = j.snapshot_externalized(&store).await.unwrap();
+        // Bytes left the snapshot: the artifact map is empty, the reference
+        // ledger points at the store, and the wire shows it.
+        assert!(externalized.artifacts.is_empty());
+        assert_eq!(externalized.artifact_refs.len(), 1);
+        let wire = serde_json::to_string(&externalized).unwrap();
+        assert!(wire.contains("\"artifact_refs\""));
+
+        // The event still references the same content address, and the
+        // store holds the bytes under it.
+        let event = &externalized.events[1];
+        let Some(PayloadRef::Artifact(reference)) = event.output.as_ref() else {
+            panic!("large payload must be artifact-referenced");
+        };
+        assert!(store.contains(&reference.sha256).await.unwrap());
+
+        // Loading an externalized snapshot WITHOUT the store is a hard
+        // error — never a silently unresolvable journal.
+        let parsed: JournalSnapshot = serde_json::from_str(&wire).unwrap();
+        assert!(Journal::from_snapshot(parsed, Clock::System).is_err());
+
+        // With the store, the load resolves artifacts and re-verifies the
+        // head hash over events.
+        let parsed: JournalSnapshot = serde_json::from_str(&wire).unwrap();
+        let rebuilt = Journal::from_snapshot_with_store(parsed, &store, Clock::System)
+            .await
+            .unwrap();
+        assert_eq!(rebuilt.head_hash(), j.head_hash());
+        assert_eq!(
+            rebuilt.resolve(rebuilt.events()[1].output.as_ref().unwrap()),
+            Some(big)
+        );
+
+        // Re-externalizing the rebuilt journal re-puts nothing new (dedupe).
+        let re = rebuilt.snapshot_externalized(&store).await.unwrap();
+        assert_eq!(re.artifact_refs, externalized.artifact_refs);
+    }
+
+    #[test]
+    fn embedded_byte_snapshots_keep_deserializing() {
+        // The pre-W4 wire shape: no `artifact_refs` key at all.
+        let j = journal();
+        j.record(
+            EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure).input(json!({"s": 0})),
+        );
+        let snapshot = j.snapshot();
+        let mut wire: serde_json::Map<String, Value> =
+            serde_json::from_str(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+        assert!(
+            wire.remove("artifact_refs").is_none(),
+            "embedded snapshots must not emit artifact_refs"
+        );
+        let text = serde_json::to_string(&Value::Object(wire)).unwrap();
+        let parsed: JournalSnapshot = serde_json::from_str(&text).unwrap();
+        assert!(parsed.artifact_refs.is_empty());
+        // And the snapshot loads through the ordinary integrity-verified path.
+        let rebuilt = Journal::from_snapshot(parsed, Clock::System).unwrap();
+        assert_eq!(rebuilt.head_hash(), j.head_hash());
     }
 }
