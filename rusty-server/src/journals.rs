@@ -25,7 +25,12 @@ pub(crate) async fn persist(root: &Path, snapshot: &JournalSnapshot) -> io::Resu
     let bytes = serde_json::to_vec_pretty(snapshot)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let path = dir.join(format!("{}.json", snapshot.run_id));
-    let tmp = dir.join(format!("{}.tmp", snapshot.run_id));
+    // Unique temp name per write: two concurrent persists of the same
+    // journal (a settlement hook racing a reconcile-on-read, say) must
+    // not share a temp file — the loser's rename would find its temp
+    // gone and surface ENOENT as a 500. The rename onto `path` stays
+    // atomic, so crash-safety is unchanged; last writer wins.
+    let tmp = dir.join(format!(".{}.{}.tmp", snapshot.run_id, uuid::Uuid::new_v4()));
     tokio::fs::write(&tmp, bytes).await?;
     tokio::fs::rename(&tmp, path).await
 }
@@ -79,6 +84,41 @@ mod tests {
         assert_eq!(loaded.events.len(), 3);
 
         assert!(get(&root, "never-written").await.unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn concurrent_persists_of_one_journal_never_race_on_the_temp_file() {
+        let root =
+            std::env::temp_dir().join(format!("rusty-journals-test-{}", uuid::Uuid::new_v4()));
+        let journal = Journal::new("run-1", "thread-1", Clock::System);
+        journal.record(EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure));
+        let snapshot = journal.snapshot();
+
+        // A settlement hook and a reconcile-on-read can persist the same
+        // journal in the same instant; a shared temp path made the loser
+        // fail with ENOENT. Every writer must succeed; last writer wins.
+        let mut writers = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let root = root.clone();
+            let snapshot = snapshot.clone();
+            writers.spawn(async move { persist(&root, &snapshot).await });
+        }
+        while let Some(outcome) = writers.join_next().await {
+            outcome.expect("writer joined").expect("persist succeeds");
+        }
+        let loaded = get(&root, "run-1")
+            .await
+            .unwrap()
+            .expect("snapshot persisted");
+        assert_eq!(loaded.head_hash, snapshot.head_hash);
+        // No temp files survive a completed write.
+        let leftovers = std::fs::read_dir(dir(&root))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
         let _ = std::fs::remove_dir_all(root);
     }
 }
