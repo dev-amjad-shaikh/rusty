@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 
 use crate::error::{Result, RustyError};
 use crate::llm::{ChatMessage, ToolCall};
+use crate::middleware::{MiddlewareChain, ToolInvocation};
 
 /// An invocable tool.
 ///
@@ -133,20 +134,57 @@ impl ToolRegistry {
 /// Typical use in a ReAct `tools` node: take the assistant message's
 /// `tool_calls`, `execute_batch` them, and append the resulting tool
 /// messages to the `messages` channel via the `AddMessages` reducer.
+///
+/// Attach a [`MiddlewareChain`] via [`ToolExecutor::with_middleware`] to run
+/// every dispatched call through the chain's tool hooks (Middleware /
+/// Interceptor SDK): a layer may mutate the call, reject it (surfacing as an
+/// `ERROR:` tool message under the same failure-isolation contract below),
+/// or short-circuit it with a substitute result.
 #[derive(Debug, Clone, Default)]
 pub struct ToolExecutor {
     registry: ToolRegistry,
+    middleware: MiddlewareChain,
+    thread_id: String,
+    node: String,
 }
 
 impl ToolExecutor {
     /// An executor over `registry`.
     pub fn new(registry: ToolRegistry) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            ..Self::default()
+        }
     }
 
     /// The underlying registry.
     pub fn registry(&self) -> &ToolRegistry {
         &self.registry
+    }
+
+    /// Builder-style: run every dispatched call through `chain`'s tool
+    /// hooks. Typically handed the chain from
+    /// [`crate::node::NodeContext::middleware`].
+    pub fn with_middleware(mut self, chain: MiddlewareChain) -> Self {
+        self.middleware = chain;
+        self
+    }
+
+    /// Builder-style: label dispatched calls with the thread and node they
+    /// originate from (flowing into the [`ToolInvocation`] context).
+    pub fn with_call_context(
+        mut self,
+        thread_id: impl Into<String>,
+        node: impl Into<String>,
+    ) -> Self {
+        self.thread_id = thread_id.into();
+        self.node = node.into();
+        self
+    }
+
+    /// The attached middleware chain (empty when none was added).
+    pub fn middleware(&self) -> &MiddlewareChain {
+        &self.middleware
     }
 
     /// Execute a batch of tool calls concurrently.
@@ -163,12 +201,34 @@ impl ToolExecutor {
     pub async fn execute_batch(&self, calls: &[ToolCall]) -> Vec<ChatMessage> {
         let futures = calls.iter().map(|call| {
             let registry = self.registry.clone();
+            let chain = self.middleware.clone();
+            let thread_id = self.thread_id.clone();
+            let node = self.node.clone();
             async move {
                 let result = std::panic::AssertUnwindSafe(async {
-                    let tool = registry
-                        .get(&call.name)
-                        .ok_or_else(|| RustyError::Tool(format!("unknown tool `{}`", call.name)))?;
-                    let value = tool.call(call.arguments.clone()).await?;
+                    let value = if chain.is_empty() {
+                        let tool = registry.get(&call.name).ok_or_else(|| {
+                            RustyError::Tool(format!("unknown tool `{}`", call.name))
+                        })?;
+                        tool.call(call.arguments.clone()).await?
+                    } else {
+                        let mut invocation = ToolInvocation::new(thread_id, node, call.clone());
+                        chain
+                            .run_tool(&mut invocation, |invocation| {
+                                let registry = registry.clone();
+                                let call = invocation.call().clone();
+                                async move {
+                                    // The lookup happens after before-hooks,
+                                    // so a layer may rewrite the arguments —
+                                    // or the target tool name itself.
+                                    let tool = registry.get(&call.name).ok_or_else(|| {
+                                        RustyError::Tool(format!("unknown tool `{}`", call.name))
+                                    })?;
+                                    tool.call(call.arguments).await
+                                }
+                            })
+                            .await?
+                    };
                     Ok::<String, RustyError>(match value {
                         Value::String(s) => s,
                         other => other.to_string(),

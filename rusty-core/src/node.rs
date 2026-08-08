@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Result, RustyError};
+use crate::middleware::MiddlewareChain;
 use crate::state::State;
 
 /// Per-run, per-node configuration handed to every node invocation.
@@ -67,13 +68,19 @@ pub struct NodeConfig {
 pub struct NodeContext {
     state: State,
     config: NodeConfig,
+    middleware: MiddlewareChain,
 }
 
 impl NodeContext {
     /// Build a context from a state snapshot and config. Primarily used by
-    /// the executor; tests may construct it directly.
+    /// the executor; tests may construct it directly. Carries no middleware
+    /// chain — see [`NodeContext::with_middleware`].
     pub fn new(state: State, config: NodeConfig) -> Self {
-        Self { state, config }
+        Self {
+            state,
+            config,
+            middleware: MiddlewareChain::new(),
+        }
     }
 
     /// The immutable state snapshot as of the start of this super-step.
@@ -84,6 +91,23 @@ impl NodeContext {
     /// The run configuration for this invocation.
     pub fn config(&self) -> &NodeConfig {
         &self.config
+    }
+
+    /// Builder-style: attach the run's middleware chain. The executor sets
+    /// this when layers are registered; empty otherwise.
+    pub fn with_middleware(mut self, chain: MiddlewareChain) -> Self {
+        self.middleware = chain;
+        self
+    }
+
+    /// The middleware chain attached to the run's executor (Middleware /
+    /// Interceptor SDK). Node code uses it to propagate interception into
+    /// the boundaries it controls: hand it to
+    /// [`crate::tool::ToolExecutor::with_middleware`] or wrap models in
+    /// [`crate::middleware::MiddlewareChatModel`]. Empty when the executor
+    /// has no layers.
+    pub fn middleware(&self) -> &MiddlewareChain {
+        &self.middleware
     }
 
     /// The current thread id (shortcut for `config().thread_id`).

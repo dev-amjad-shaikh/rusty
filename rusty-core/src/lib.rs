@@ -32,6 +32,10 @@
 //! - **MCP** ([`mcp`]): call any MCP server's tools from [`tool::Tool`]
 //!   impls over stdio transport; MCP tool servers register into the
 //!   registry/executor exactly like native tools.
+//! - **Middleware** ([`middleware`]): ordered interception layers around
+//!   node runs, model calls, and tool calls — observe, mutate, reject, or
+//!   short-circuit with tower-style onion semantics. Layers attach to the
+//!   executor via [`executor::Executor::layer`].
 //! - **Remote nodes** ([`remote`]): a [`remote::RemoteNode`] executes node
 //!   work on a remote worker over HTTP behind the same [`node::Node`] trait;
 //!   HITL interrupts cross the wire.
@@ -104,6 +108,7 @@ pub mod graph;
 pub mod journal;
 pub mod llm;
 pub mod mcp;
+pub mod middleware;
 pub mod node;
 pub mod react;
 pub mod record;
@@ -149,6 +154,10 @@ pub mod prelude {
     };
     pub use crate::llm::{
         ChatMessage, ChatModel, ChatResponse, OpenAiCompatibleClient, Role, ToolCall, Usage,
+    };
+    pub use crate::middleware::{
+        Decision, InterceptPoint, Middleware, MiddlewareChain, MiddlewareChatModel, ModelCall,
+        NodeCall, Rejection, RequestLogger, ToolCallBlocklist, ToolInvocation,
     };
     pub use crate::node::{Command, Node, NodeConfig, NodeContext, NodeOutput};
     pub use crate::react::{

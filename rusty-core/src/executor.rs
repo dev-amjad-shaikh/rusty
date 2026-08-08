@@ -56,6 +56,7 @@ use crate::checkpoint::{Checkpoint, Checkpointer};
 use crate::error::{Result, RustyError};
 use crate::graph::{Edge, Graph, Route};
 use crate::journal::{Clock, EventDraft, Journal, RngSource};
+use crate::middleware::{Middleware, MiddlewareChain, NodeCall};
 use crate::node::{Command, NodeConfig, NodeContext, NodeOutput};
 use crate::record::{
     CheckpointHeader, Effect, EventStatus, PolicyVersion, RunEventKind, RunManifest,
@@ -427,9 +428,10 @@ pub enum GraphEvent {
     },
 }
 
-/// The graph executor. Holds an optional checkpointer; stateless with
-/// respect to individual runs, so one `Executor` can drive many concurrent
-/// runs (each with its own `thread_id`).
+/// The graph executor. Holds an optional checkpointer and an optional
+/// middleware chain; stateless with respect to individual runs, so one
+/// `Executor` can drive many concurrent runs (each with its own
+/// `thread_id`).
 #[derive(Default)]
 pub struct Executor {
     checkpointer: Option<Arc<dyn Checkpointer>>,
@@ -437,6 +439,10 @@ pub struct Executor {
     // The most recent run's Flight Recorder journal. Interior mutability
     // keeps `run` taking `&self`; overwritten at the start of every run.
     journal: Mutex<Option<Journal>>,
+    // Middleware/Interceptor SDK: ordered layers wrapping every node
+    // invocation (and, via `NodeContext::middleware`, the tool/model calls
+    // node code makes). An empty chain takes the original dispatch path.
+    middleware: MiddlewareChain,
 }
 
 impl Executor {
@@ -451,9 +457,28 @@ impl Executor {
     pub fn with_checkpointer(checkpointer: Arc<dyn Checkpointer>) -> Self {
         Self {
             checkpointer: Some(checkpointer),
-            token_tx: None,
-            journal: Mutex::new(None),
+            ..Self::default()
         }
+    }
+
+    /// Builder-style: attach a middleware layer (Middleware/Interceptor
+    /// SDK). Layers compose in registration order — before-hooks run in
+    /// `.layer()` order on the way into a node/model/tool call, after-hooks
+    /// in reverse order on the way out. See [`crate::middleware`].
+    pub fn layer<M: Middleware + 'static>(mut self, middleware: M) -> Self {
+        self.middleware.push(Arc::new(middleware));
+        self
+    }
+
+    /// Builder-style: attach a pre-shared middleware layer.
+    pub fn layer_shared(mut self, middleware: Arc<dyn Middleware>) -> Self {
+        self.middleware.push(middleware);
+        self
+    }
+
+    /// The attached middleware chain (empty when no layers were added).
+    pub fn middleware(&self) -> &MiddlewareChain {
+        &self.middleware
     }
 
     /// Builder-style: hold a token broadcast sender that nodes can clone to
@@ -845,21 +870,18 @@ impl Executor {
             );
             invocation_effects.push(node.effect());
 
-            let ctx = NodeContext::new(
-                node_state,
-                NodeConfig {
-                    thread_id: config.thread_id.clone(),
-                    step,
-                    resume: pending_resume.clone(),
-                    // Hand the invocation its own journal event id so node
-                    // code can parent the effects it records (model/tool
-                    // calls) to this invocation.
-                    extra: HashMap::from([(
-                        crate::journal::PARENT_EVENT_KEY.to_owned(),
-                        Value::String(input_event.clone()),
-                    )]),
-                },
-            );
+            let node_config = NodeConfig {
+                thread_id: config.thread_id.clone(),
+                step,
+                resume: pending_resume.clone(),
+                // Hand the invocation its own journal event id so node
+                // code can parent the effects it records (model/tool
+                // calls) to this invocation.
+                extra: HashMap::from([(
+                    crate::journal::PARENT_EVENT_KEY.to_owned(),
+                    Value::String(input_event.clone()),
+                )]),
+            };
             input_events.push(input_event);
             let name = task.name.clone();
             Self::emit(
@@ -877,10 +899,33 @@ impl Executor {
             // clock the value is reproducible; under the system clock it is
             // the real elapsed time.
             let clock = recorder.clock.clone();
+            let chain = self.middleware.clone();
             join_set.spawn(
                 async move {
                     let node_started = clock.now();
-                    let result = node.run(ctx).await;
+                    // Middleware chain: with layers attached, the invocation
+                    // runs inside the onion — before-hooks may mutate the
+                    // snapshot, reject the run, or short-circuit with a
+                    // substitute output; after-hooks unwind over the result.
+                    // No layers: the original dispatch, byte-identical.
+                    let result = if chain.is_empty() {
+                        node.run(NodeContext::new(node_state, node_config)).await
+                    } else {
+                        let mut call = NodeCall::new(
+                            node_config.thread_id.clone(),
+                            name.clone(),
+                            step,
+                            node_state,
+                        );
+                        chain
+                            .run_node(&mut call, |call| {
+                                let ctx = NodeContext::new(call.state().clone(), node_config)
+                                    .with_middleware(chain.clone());
+                                let node = Arc::clone(&node);
+                                async move { node.run(ctx).await }
+                            })
+                            .await
+                    };
                     let latency_ms = (clock.now() - node_started).num_milliseconds().max(0) as u64;
                     (index, name, result, latency_ms)
                 }
