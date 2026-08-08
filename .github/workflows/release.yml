@@ -45,6 +45,7 @@ jobs:
           echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
           echo "Run mode: dry_run=$dry_run"
 
+          missing=()
           for pair in cargo:CARGO_TOKEN pypi:PYPI_TOKEN npm:NPM_TOKEN; do
             name="${pair%%:*}"
             var="${pair##*:}"
@@ -52,9 +53,18 @@ jobs:
               echo "has_${name}_token=true" >> "$GITHUB_OUTPUT"
             else
               echo "has_${name}_token=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::secret for ${name} is not set; the ${name} publish step will be skipped"
+              missing+=("$name")
             fi
           done
+
+          if [ "$dry_run" = "false" ] && [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::real release requires registry secrets for: ${missing[*]}"
+            exit 1
+          fi
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::notice::dry run will use local package preflights without registry secrets for: ${missing[*]}"
+          fi
 
   # crates.io in dependency order: rusty-agent-runtime first, then the three
   # crates that path-depend on it. Preflight (`cargo publish --dry-run`) runs
@@ -194,8 +204,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
 
-  # Always runs so a skipped stage (missing secret) is visible in the run
-  # summary instead of silently producing a green check.
+  # Always runs and requires every release stage to complete. A skipped stage
+  # is a release failure: dry runs do not require registry credentials, while
+  # real releases are rejected by `config` when any credential is missing.
   release-summary:
     name: release-summary
     needs: [config, publish-crates, publish-pypi, publish-npm]
@@ -219,8 +230,13 @@ jobs:
             echo "| publish-pypi | $PYPI |"
             echo "| publish-npm | $NPM |"
           } >> "$GITHUB_STEP_SUMMARY"
+          failed=false
           for stage in "$CRATES" "$PYPI" "$NPM"; do
-            if [ "$stage" = "failure" ] || [ "$stage" = "cancelled" ]; then
-              exit 1
+            if [ "$stage" != "success" ]; then
+              echo "::error::release stage did not complete successfully: $stage"
+              failed=true
             fi
           done
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi
