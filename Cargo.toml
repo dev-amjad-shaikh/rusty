@@ -8,6 +8,7 @@ members = [
     "rusty-server",
     "rusty-worker",
     "rusty-otel",
+    "rusty-eval",
 ]
 # Local e2e scratch crates (gitignored) must never join the workspace.
 exclude = [".tmp-e2e"]

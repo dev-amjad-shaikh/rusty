@@ -1,0 +1,3 @@
+{"kind":"header","format_version":1,"name":"math-tools","version":"1.0.0"}
+{"kind":"case","id":"add-two-numbers","input":{"messages":[{"content":"what is 2 + 3?","role":"user"}]},"expect":{"tool_trajectory":[{"name":"calculator","args":{"/op":"add"}}],"state":[{"pointer":"/messages/3/content","expected":"the answer is 5"}]},"tags":["math","smoke"]}
+{"kind":"case","id":"mul-then-add","input":{"messages":[{"content":"what is 2 * 3 + 4?","role":"user"}]},"expect":{"tool_trajectory":[{"name":"calculator","args":{"/op":"mul"}},{"name":"calculator","args":{"/op":"add"}}],"state":[{"pointer":"/messages/5/content","expected":"the answer is 10"}],"forbid_tools":["shell"],"max_latency_ms":60000},"tags":["math"]}

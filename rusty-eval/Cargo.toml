@@ -1,0 +1,25 @@
+[package]
+name = "rusty-eval"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/rusty-eval"
+readme = "README.md"
+description = "Agent TestOps for Rusty — versioned evaluation datasets, deterministic assertions over recorded runs, experiment reports, and baseline-vs-candidate comparison."
+keywords = ["agent", "evaluation", "testing", "llm"]
+categories = ["asynchronous"]
+
+[dependencies]
+rusty-agent-runtime = { path = "../rusty-core", version = "0.6" }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
