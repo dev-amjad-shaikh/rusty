@@ -39,7 +39,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
-use rusty_agent_runtime::agents::CapabilityManifest;
+use rusty_agent_runtime::agents::{CapabilityManifest, SupervisionAttempt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -55,9 +55,86 @@ pub(crate) struct AgentRecord {
     /// The pinned capability manifest (core's wire contract, stored
     /// verbatim).
     pub manifest: CapabilityManifest,
+    /// The team this agent belongs to (R0.7 wave 2): a declared label, not
+    /// a registry — `POST /teams/{team_id}/cancel` addresses every member
+    /// by it. Teams are a coordination grouping (wave 3 grows the typed
+    /// patterns over them); the wave-2 cancellation tree needs only the
+    /// membership fact, so the label rides the registration additively.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
     #[serde(default)]
     pub metadata: Value,
     pub created_at: DateTime<Utc>,
+    /// Server-side supervision state (R0.7 wave 2): the attempt history,
+    /// the escalation latch, and the deadline-breach latch. Persisted with
+    /// the record (additive — records written before wave 2 deserialize
+    /// empty) but never served on the registry endpoints; the deliberate
+    /// read surface is `GET /agents/{id}/supervision` — see
+    /// [`AgentRecord::wire`].
+    #[serde(default, skip_serializing_if = "AgentSupervision::is_empty")]
+    pub supervision: AgentSupervision,
+}
+
+impl AgentRecord {
+    /// The registry-endpoint representation: the full record minus the
+    /// supervision state, which has its own dedicated endpoint. Bulk reads
+    /// (`GET /agents`) must not drag growing evidence arrays through a
+    /// listing shape clients poll.
+    pub(crate) fn wire(&self) -> Value {
+        let mut value =
+            serde_json::to_value(self).expect("AgentRecord serialization is infallible");
+        if let Value::Object(ref mut map) = value {
+            map.remove("supervision");
+        }
+        value
+    }
+}
+
+/// Server-side supervision state of one agent (R0.7 wave 2): the durable
+/// half of "no restart happens without a journaled decision". The attempt
+/// history is the evidence an escalation carries; the latches make
+/// escalation and deadline-breach handling exactly-once per supervision
+/// episode (an operator's manual restart is the reset, OTP's "I've fixed
+/// the child" path).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AgentSupervision {
+    /// The full attempt history (core's [`SupervisionAttempt`] wire
+    /// shape), oldest first — failures, deadline breaches, and manual
+    /// restarts in one append-only evidence log.
+    #[serde(default)]
+    pub attempts: Vec<SupervisionAttempt>,
+    /// Latched when the restart budget exhausted and the escalation went
+    /// out: further failures are counted (`suppressed_failures`) but
+    /// produce no new restarts and no escalation flood. Cleared by
+    /// `POST /agents/{id}/restart`.
+    #[serde(default)]
+    pub escalated: bool,
+    /// Latched when the agent-level deadline breach was first handled
+    /// (outstanding mailbox traffic cancelled, the decision journaled), so
+    /// every later mailbox claim does not re-run the breach path. Cleared
+    /// by the manual restart, like `escalated`.
+    #[serde(default)]
+    pub deadline_breached: bool,
+    /// Failures observed while `escalated` is latched — counted, not
+    /// appended, so a permanently broken agent cannot grow `attempts`
+    /// without bound after the evidence that matters (the escalation
+    /// history) is already preserved.
+    #[serde(default)]
+    pub suppressed_failures: u64,
+}
+
+impl AgentSupervision {
+    /// `true` for the pristine state — drives the sparse-storage
+    /// `skip_serializing_if` on [`AgentRecord::supervision`], so
+    /// unsupervised agents' records stay byte-identical to wave 1.
+    pub(crate) fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    /// The next attempt ordinal (1-based position in the history).
+    pub(crate) fn next_ordinal(&self) -> u32 {
+        self.attempts.len() as u32 + 1
+    }
 }
 
 /// One agent's activation lease: the host currently allowed to run the
@@ -321,8 +398,10 @@ mod tests {
         AgentRecord {
             agent_id: "acme/researcher-7".to_string(),
             manifest,
+            team_id: None,
             metadata: json!({"team": "qa"}),
             created_at: Utc::now(),
+            supervision: AgentSupervision::default(),
         }
     }
 
@@ -385,5 +464,44 @@ mod tests {
         // Releasing twice is not an error.
         remove_lease(&root, "acme/researcher-7").await.unwrap();
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn agent_record_wave2_fields_are_additive_and_wire_strips_supervision() {
+        // A wave-1 record — no `team_id`, no `supervision` keys — loads
+        // with honest defaults, and a pristine record stays minimal.
+        let wave1_shape = json!({
+            "agent_id": "acme/researcher-7",
+            "manifest": {"agent_kind": "researcher", "manifest_version": "researcher/1.4.0"},
+            "metadata": null,
+            "created_at": Utc::now(),
+        });
+        let pristine: AgentRecord = serde_json::from_value(wave1_shape).unwrap();
+        assert_eq!(pristine.team_id, None);
+        assert!(pristine.supervision.is_empty());
+        let stored = serde_json::to_value(&pristine).unwrap();
+        assert!(stored.get("team_id").is_none());
+        assert!(stored.get("supervision").is_none());
+
+        // Once supervision state exists it persists with the record, but
+        // the registry wire projection strips it — the dedicated
+        // supervision endpoint is the evidence read surface.
+        let mut supervised = record();
+        supervised.team_id = Some("squad-1".into());
+        supervised.supervision.escalated = true;
+        supervised.supervision.suppressed_failures = 2;
+        let stored = serde_json::to_value(&supervised).unwrap();
+        assert_eq!(stored["team_id"], json!("squad-1"));
+        assert_eq!(stored["supervision"]["escalated"], json!(true));
+        let wire = supervised.wire();
+        assert!(wire.get("supervision").is_none());
+        assert_eq!(wire["team_id"], json!("squad-1"));
+        assert_eq!(wire["manifest"]["agent_kind"], json!("researcher"));
+
+        // Round-trip preserves the supervision evidence.
+        let back: AgentRecord = serde_json::from_value(stored).unwrap();
+        assert!(back.supervision.escalated);
+        assert_eq!(back.supervision.suppressed_failures, 2);
+        assert_eq!(back.supervision.next_ordinal(), 1);
     }
 }

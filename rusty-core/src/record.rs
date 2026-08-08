@@ -355,7 +355,10 @@ pub enum RunEventKind {
 
     /// An agent terminated (R0.7): output carries the terminal disposition
     /// (completed, failed, cancelled) and the final checkpoint reference.
-    /// Inert in wave 1 — emitted by the agent host.
+    /// Wired in wave 2 for the cancellation tree: the server journals it
+    /// into the agent's supervision journal when an agent/team cancel
+    /// actually touches work. Host-emitted terminal exits land with the
+    /// agent host.
     AgentExit,
 
     /// A mailbox message was submitted to an agent's mailbox (R0.7): output
@@ -374,7 +377,9 @@ pub enum RunEventKind {
     /// policy (`permanent` / `transient` / `temporary`), the triggering
     /// failure's [`EventStatus`] / error class, and the restart ordinal —
     /// the journaled decision record that makes "no restart without a
-    /// journaled decision" auditable. Contract only in wave 1.
+    /// journaled decision" auditable. Wired in wave 2: the server journals
+    /// it into the agent's supervision journal on restart / escalate /
+    /// manual-restart decisions.
     SupervisionEvent,
 
     /// A coordination pattern (delegate / fan-out / race / quorum) began

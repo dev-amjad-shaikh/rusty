@@ -531,6 +531,41 @@ intensity/period, escalation-as-message, agent/team cancel endpoints composing
 escalates to its supervisor's mailbox with its attempt history intact; cancelling a team
 leaves zero orphan tasks (asserted by queue inspection).
 
+> **Wave 2 status: implemented.** The supervision contracts landed as written
+> (`SupervisionPolicy { restart, intensity, period_ms, supervisor }` — an additive optional
+> manifest field, golden-tested; OTP `permanent` / `transient` / `temporary`, where
+> `transient` restarts after failure classes but never after cancellations, the clock, or the
+> operator; `EscalationNotice` under the `escalated` message kind). The server decides at
+> three trigger points, all on durable records: turn-failure settlement (non-`cancelled`
+> classes), the mailbox claim past the agent-level deadline (latched, fires once), and
+> `POST /agents/{id}/restart` — the operator's reset, which clears the escalation and
+> deadline latches and works with or without a declared policy. Escalation is a message to
+> the supervisor's mailbox (idempotency key `escalation:{agent}:{ordinal}`, submitted
+> quota-free like the outbox relay — evidence is never dropped under pressure); when no
+> supervisor exists or accepts the kind, the notice dead-letters with the full evidence
+> chain — open question 2's leaned default (DLQ + operator, no runtime-level root policy).
+> The cancellation tree: `POST /agents/{id}/cancel` and `POST /teams/{team_id}/cancel` —
+> team addressing is the declared `team_id` registration label, the one degree of freedom
+> the design left open — compose a recipient-scoped `cancel_run_tasks` twin with per-run
+> `RunConfig::cancellation` tokens, children before parent, journaled as `AgentExit` only
+> when the cancel actually touched something. Agent deadlines stamp the earlier of
+> message/budget deadline onto mailbox traffic and breach into supervision on the claim
+> path. Every decision lands in the agent's supervision journal
+> (`agent-supervision:{tenant}:{agent}`, integrity re-verified on read) behind
+> `GET /agents/{id}/supervision`; the registry wire projection strips supervision state, so
+> that endpoint is the only evidence surface. Both exit criteria are automated in
+> `rusty-server/tests/supervision.rs` — crash-loop → supervisor mailbox with the
+> three-attempt history, the journaled restart / restart / escalate trail, and latch
+> suppression proven by a fourth failure; team cancel → zero orphan tasks by queue
+> inspection with a per-member `AgentExit` — and again over live Postgres in
+> `rusty-server/tests/postgres_supervision.rs` (plus the supervision-state persistence
+> roundtrip through a fresh store instance). The crash-loop test drives the fail path
+> in-process rather than SIGKILLing hosts: supervision triggers on the durable failure
+> record, not the crash — the record is what survives one. The honesty boundary: the server
+> half is decision + journal + escalation message + latch state; the restart itself (a new
+> run re-driven from the latest checkpoint) remains the agent host's integration point via
+> the unmodified wave-1 machinery.
+
 **Wave 3 — coordination patterns.** The four typed patterns on the wave-1 substrate,
 outbox-submitted, with `TeamTrace` cross-journal assembly. Exit: per-pattern integration
 tests covering member crash mid-pattern.
@@ -600,6 +635,9 @@ Flagged for the owner before wave 1 lands:
    DLQ for an operator. Should there be a runtime-level root policy instead (bounded root
    restart with operator notification) — server config or a reserved system agent? Leaning:
    DLQ + metrics endpoint, consistent with "signals, not mechanisms".
+   **Resolved for wave 2 as leaned:** an escalation no supervisor can accept (root agent,
+   unknown supervisor, undeclared kind) dead-letters with the full evidence chain attached;
+   `GET /tasks?status=dead` is the operator surface. No runtime-level root policy.
 3. **Eager compaction on `fork_thread`.** Materializing a delta chain during a fork is a
    latency spike on a user-facing time-travel call. Acceptable, or compact asynchronously and
    serve reads from the chain until done? Leaning: eager — forks are rare and the fold is

@@ -56,7 +56,7 @@
 //! | `GET /tasks/metrics` | R0.6 wave 3: the autoscaling signals, tenant-scoped — per-pool queue depth, live leases, lease saturation against the configured limit, and oldest-visible-task age. Metrics, not a mechanism: the autoscaler is the operator's |
 //! | `POST /tasks/{id}/heartbeat` | R0.6: extend the held lease `{worker_id, lease_ms}` → `{lease_expires_at}`; `409` when the lease is lost |
 //! | `POST /tasks/{id}/complete` | R0.6: settle the held lease `{worker_id, result, receipt?}` → updated task record; `409` when the lease is lost. The optional `receipt` (wave 2b: `{provider, provider_id, idempotency_key, task_id?}`) is the worker's report of an idempotent effect's provider confirmation; the server journals it into the task's run as an `effect_receipt` event |
-//! | `POST /tasks/{id}/fail` | R0.6: record a failed attempt `{worker_id, error_class, message, retryable}` → `{requeued, next_attempt_at, dead}` (backoff + jitter requeue, or dead-letter); `409` when the lease is lost |
+//! | `POST /tasks/{id}/fail` | R0.6: record a failed attempt `{worker_id, error_class, message, retryable}` → `{requeued, next_attempt_at, dead, escalation}` (backoff + jitter requeue, or dead-letter); `409` when the lease is lost. R0.7 wave 2: a failed agent turn (non-`cancelled`) also feeds the agent's supervision policy — `escalation` reports where the escalation notice landed when the restart intensity was exceeded |
 //! | `GET /tasks/{id}` | R0.6: the task record (404 unknown/cross-tenant) |
 //! | `GET /tasks?status=…` | R0.6: the tenant's tasks, oldest first; `status=dead` is the DLQ listing |
 //! | `POST /agents` | R0.7 Agent Fabric (wave 1): register an agent `{agent_id, manifest, metadata?}` — the manifest is a core `CapabilityManifest` (`agent_kind`, `manifest_version`, `accepts`, …) → `201`; `409` when the id is taken |
@@ -67,6 +67,10 @@
 //! | `POST /agents/{id}/activate/heartbeat` | R0.7: renew the held activation `{worker_id, fencing, lease_ms}`; `409` on fencing loss |
 //! | `POST /agents/{id}/activate/release` | R0.7: drop the held activation `{worker_id, fencing}` so a draining host's replacement activates promptly; `409` on fencing loss |
 //! | `POST /agents/{id}/mailbox/next` | R0.7: claim the oldest queued mailbox message as one turn `{worker_id, fencing, lease_ms}` → `200 {task}` leased to the worker, `204` when empty or a turn is already in flight (one message at a time per agent is server-enforced), `409` when the activation lease is not held. The turn settles through the ordinary `/tasks/{id}/heartbeat|complete|fail` protocol |
+//! | `GET /agents/{id}/supervision` | R0.7 wave 2: the agent's supervision evidence — declared policy, latches, full attempt history, and the journaled `SupervisionEvent` / `AgentExit` events of its supervision journal (integrity re-verified on read) |
+//! | `POST /agents/{id}/cancel` | R0.7 wave 2: cancel the agent's outstanding mailbox traffic — queued/retry-scheduled messages go terminal-`cancelled`, the leased turn keeps its lease with `cancel_requested` set — and journal an `AgentExit`; idempotent (`200` with empty lists when nothing is outstanding) |
+//! | `POST /agents/{id}/restart` | R0.7 wave 2: the operator's manual restart — records a `manual_restart` supervision attempt, clears the escalation/deadline latches, and journals the event so the agent's next turn runs fresh |
+//! | `POST /teams/{team_id}/cancel` | R0.7 wave 2: cancel every agent registered with the `team_id` label, member by member with the agent-cancel semantics; `404` when no tenant agent declares the team |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -87,6 +91,7 @@ mod runs;
 mod server_store;
 mod sse;
 mod store;
+mod supervision;
 mod tasks;
 mod threads;
 

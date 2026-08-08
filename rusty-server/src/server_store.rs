@@ -207,6 +207,33 @@ pub(crate) trait ServerStore: Send + Sync {
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<RunCancellation>;
 
+    /// Cancel every non-terminal task addressed to one agent's mailbox
+    /// (`recipient` = `agent:{agent_id}`, R0.7 wave 2) — the agent-scoped
+    /// form of [`ServerStore::cancel_run_tasks`], and the cancellation
+    /// tree's "children before parent" step: cancelling an agent cancels
+    /// its outstanding mailbox traffic first, so a cancelled agent (or
+    /// team) never leaves an orphan task that would re-activate it.
+    /// Applies the same two transitions as [`ServerStore::cancel_task`]:
+    /// queued and retry-scheduled messages go terminal-`cancelled`
+    /// immediately; a leased turn keeps its lease with `cancel_requested`
+    /// set for the holder to learn on its next heartbeat.
+    async fn cancel_agent_tasks(
+        &self,
+        tenant: &str,
+        recipient: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<RunCancellation>;
+
+    /// Insert a task directly into the terminal `dead` state (R0.7 wave 2)
+    /// — the runtime's own dead-letter write path, used by supervision's
+    /// root escalation: the notice must land in the DLQ with its evidence
+    /// attached even though no attempt ever ran (today only
+    /// `classify_retry`'s `RetryDecision::Dead` writes `dead`, and only
+    /// after a failed attempt). Dedupes on the record's idempotency key
+    /// exactly like [`ServerStore::enqueue_task`], so a retried escalation
+    /// cannot double the DLQ entry.
+    async fn dead_letter_task(&self, record: &TaskRecord) -> StoreResult<(TaskRecord, bool)>;
+
     /// The tenant's queue pressure (R0.6 wave 3) — the three gauges the
     /// submission quota gate enforces. Read-only; the gauge definitions
     /// (including why pending outbox rows count as queued) live on
@@ -268,6 +295,13 @@ pub(crate) trait ServerStore: Send + Sync {
     /// assistants/crons convention), so there is no separate tenant
     /// argument.
     async fn create_agent(&self, record: &AgentRecord) -> StoreResult<bool>;
+    /// Overwrite an existing agent registration (R0.7 wave 2 — the
+    /// supervision state mutates in place); `false` (no write) when the id
+    /// does not exist. Last-writer-wins: safe because supervision triggers
+    /// for one agent are serialized by the turn protocol (only the turn's
+    /// lease holder can settle it, and the latches make escalation and
+    /// breach handling exactly-once — see `crate::supervision`).
+    async fn update_agent(&self, record: &AgentRecord) -> StoreResult<bool>;
     /// Fetch one agent by its tenant-scoped id.
     async fn get_agent(&self, agent_id: &str) -> StoreResult<Option<AgentRecord>>;
     /// All registered agents (order unspecified; routes sort and filter by
@@ -825,6 +859,49 @@ impl ServerStore for JsonFileStore {
         Ok(outcome)
     }
 
+    async fn cancel_agent_tasks(
+        &self,
+        tenant: &str,
+        recipient: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<RunCancellation> {
+        // The agent-scoped twin of `cancel_run_tasks`: same two
+        // transitions, same persist-before-swap discipline, the recipient
+        // filter in place of the run-id one.
+        let mut map = self.tasks.lock().await;
+        let targets: Vec<String> = map
+            .values()
+            .filter(|t| t.tenant == tenant && t.recipient.as_deref() == Some(recipient))
+            .map(|t| t.task_id.clone())
+            .collect();
+        let mut outcome = RunCancellation::default();
+        for task_id in targets {
+            let mut task = map
+                .get(&task_id)
+                .cloned()
+                .expect("cancel target came from the task index");
+            let Some(transition) = task.cancel(now) else {
+                continue; // already terminal: nothing to propagate
+            };
+            tasks::persist(&self.root, &task)
+                .await
+                .map_err(io_err("persist task"))?;
+            map.insert(task_id, task.clone());
+            match transition {
+                tasks::CancelTransition::Cancelled => outcome.cancelled.push(task),
+                tasks::CancelTransition::Signalled => outcome.signalled.push(task),
+            }
+        }
+        Ok(outcome)
+    }
+
+    async fn dead_letter_task(&self, record: &TaskRecord) -> StoreResult<(TaskRecord, bool)> {
+        // The file backend persists records verbatim, so the shared
+        // dedupe-and-insert path carries the dead status as-is.
+        let mut map = self.tasks.lock().await;
+        self.enqueue_locked(&mut map, record).await
+    }
+
     async fn task_usage(&self, tenant: &str) -> StoreResult<tasks::TaskUsage> {
         // Both locks held for the whole count, in the publish path's order
         // (outbox before tasks — see `outbox_publish_pending`). Two separate
@@ -909,6 +986,20 @@ impl ServerStore for JsonFileStore {
         }
         // Hold the lock across the file write so a concurrent create of the
         // same id can't interleave (the assistants convention).
+        agents::persist(&self.root, record)
+            .await
+            .map_err(io_err("persist agent"))?;
+        map.insert(record.agent_id.clone(), record.clone());
+        Ok(true)
+    }
+
+    async fn update_agent(&self, record: &AgentRecord) -> StoreResult<bool> {
+        let mut map = self.agents.lock().await;
+        if !map.contains_key(&record.agent_id) {
+            return Ok(false);
+        }
+        // Same lock discipline as create: persist before the index swap, so
+        // a failed write cannot leave state a restart would silently rewind.
         agents::persist(&self.root, record)
             .await
             .map_err(io_err("persist agent"))?;
@@ -1803,6 +1894,57 @@ mod postgres {
     pub(crate) const SELECT_AGENT_SQL: &str =
         "SELECT payload FROM server_agents WHERE agent_id = $1";
 
+    /// Whole-payload overwrite for the supervision state (R0.7 wave 2):
+    /// the record travels as one JSONB payload, so the update does too —
+    /// no column surgery, and the additive wave-2 fields need no
+    /// migration. Last-writer-wins under the turn protocol's serialization
+    /// (see the trait contract).
+    pub(crate) const UPDATE_AGENT_SQL: &str = "
+        UPDATE server_agents SET payload = $2
+        WHERE agent_id = $1
+        RETURNING agent_id";
+
+    /// Agent cancel (R0.7 wave 2), part 1: the mailbox's queued and
+    /// retry-scheduled messages go terminal-`cancelled` immediately. The
+    /// recipient-scoped twin of [`CANCEL_RUN_FINALIZE_SQL`].
+    pub(crate) const CANCEL_AGENT_FINALIZE_SQL: &str = "
+        UPDATE server_tasks
+        SET status = 'cancelled', error_class = 'cancelled', lease_owner = NULL,
+            lease_expires_at = NULL, next_attempt_at = NULL, updated_at = $3
+        WHERE tenant = $1 AND recipient = $2
+          AND (status = 'queued' OR (status = 'failed' AND next_attempt_at IS NOT NULL))
+        RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
+            attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+
+    /// Agent cancel, part 2: the mailbox's leased turn keeps its lease and
+    /// gets `cancel_requested` set — its holder learns on the next
+    /// heartbeat and reports the attempt as cancelled. The recipient-scoped
+    /// twin of [`CANCEL_RUN_SIGNAL_SQL`].
+    pub(crate) const CANCEL_AGENT_SIGNAL_SQL: &str = "
+        UPDATE server_tasks
+        SET cancel_requested = TRUE, updated_at = $3
+        WHERE tenant = $1 AND recipient = $2 AND status = 'leased'
+        RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
+            attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+
+    /// The runtime's direct DLQ write (R0.7 wave 2): a task inserted
+    /// terminal-`dead` with its evidence (`last_error`, payload) and no
+    /// attempt history — supervision's root escalation is the producer.
+    /// The idempotency unique index makes a retried escalation a no-op,
+    /// read back by key like [`INSERT_TASK_SQL`]'s dedup.
+    pub(crate) const INSERT_DEAD_LETTER_SQL: &str = "
+        INSERT INTO server_tasks (
+            task_id, tenant, kind, payload, pool, status,
+            attempt, max_attempts, error_class, effect, idempotency_key, last_error,
+            run_id, thread_id, deadline, worker_version, recipient, next_attempt_at, created_at, updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, 'dead', 0, $6, NULL, NULL, $7, $8, NULL, NULL, NULL, NULL, NULL, NULL, $9, $9
+        )
+        ON CONFLICT DO NOTHING
+        RETURNING task_id";
+
     pub(crate) const LIST_AGENTS_SQL: &str = "SELECT payload FROM server_agents";
 
     /// The activation lease row, locked `FOR UPDATE`: the claim's
@@ -2626,6 +2768,85 @@ mod postgres {
             })
         }
 
+        async fn cancel_agent_tasks(
+            &self,
+            tenant: &str,
+            recipient: &str,
+            now: DateTime<Utc>,
+        ) -> StoreResult<RunCancellation> {
+            let pool = self.pool().await?;
+            // One transaction, the run-scoped twin's discipline: the
+            // mailbox's outstanding messages cancel as a unit, never
+            // half-propagated.
+            let mut tx = pool.begin().await.map_err(db_err("cancel agent tasks"))?;
+            let finalized = sqlx::query(CANCEL_AGENT_FINALIZE_SQL)
+                .bind(tenant)
+                .bind(recipient)
+                .bind(now)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(db_err("cancel agent tasks"))?;
+            let signalled = sqlx::query(CANCEL_AGENT_SIGNAL_SQL)
+                .bind(tenant)
+                .bind(recipient)
+                .bind(now)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(db_err("cancel agent tasks"))?;
+            tx.commit().await.map_err(db_err("cancel agent tasks"))?;
+            Ok(RunCancellation {
+                cancelled: finalized
+                    .iter()
+                    .map(task_from_row)
+                    .collect::<StoreResult<Vec<_>>>()?,
+                signalled: signalled
+                    .iter()
+                    .map(task_from_row)
+                    .collect::<StoreResult<Vec<_>>>()?,
+            })
+        }
+
+        async fn dead_letter_task(&self, record: &TaskRecord) -> StoreResult<(TaskRecord, bool)> {
+            let row = sqlx::query(INSERT_DEAD_LETTER_SQL)
+                .bind(&record.task_id)
+                .bind(&record.tenant)
+                .bind(&record.kind)
+                .bind(&record.payload)
+                .bind(&record.pool)
+                .bind(record.max_attempts as i32)
+                .bind(&record.idempotency_key)
+                .bind(&record.last_error)
+                .bind(record.created_at)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("dead-letter task"))?;
+            if row.is_some() {
+                return Ok((record.clone(), false));
+            }
+            // The insert was absorbed by a conflict. With an idempotency
+            // key — escalation always carries one — that is the dedup
+            // path: the dead-letter carrying the key wins, read back the
+            // way `enqueue_task` resolves its dedup.
+            let Some(key) = &record.idempotency_key else {
+                return Err(format!(
+                    "dead-letter id `{}` collided with an existing task",
+                    record.task_id
+                ));
+            };
+            let existing = sqlx::query(SELECT_TASK_BY_IDEMPOTENCY_SQL)
+                .bind(&record.tenant)
+                .bind(key)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("dead-letter task dedup lookup"))?;
+            match existing {
+                Some(row) => Ok((task_from_row(&row)?, true)),
+                None => Err(format!(
+                    "dead-letter insert for idempotency key `{key}` conflicted but no task carries it"
+                )),
+            }
+        }
+
         async fn task_usage(&self, tenant: &str) -> StoreResult<tasks::TaskUsage> {
             let pool = self.pool().await?;
             let row = sqlx::query(TASK_USAGE_SQL)
@@ -2867,6 +3088,17 @@ mod postgres {
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("insert agent"))?;
+            Ok(row.is_some())
+        }
+
+        async fn update_agent(&self, record: &AgentRecord) -> StoreResult<bool> {
+            let payload = record_to_payload(record)?;
+            let row = sqlx::query(UPDATE_AGENT_SQL)
+                .bind(&record.agent_id)
+                .bind(payload)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("update agent"))?;
             Ok(row.is_some())
         }
 
@@ -3435,6 +3667,32 @@ mod postgres {
             assert!(AGENT_CLAIM_SELECT_SQL.contains("recipient = $2"));
             assert!(AGENT_CLAIM_SELECT_SQL.contains("FOR UPDATE SKIP LOCKED"));
             assert!(!AGENT_CLAIM_SELECT_SQL.contains("pool"));
+        }
+
+        #[test]
+        fn supervision_sql_mirrors_the_cancel_twin_and_dead_letters_atomically() {
+            // Agent cancel is the recipient-scoped twin of run cancel:
+            // same two transitions, the recipient filter in place of the
+            // run-id one.
+            assert!(CANCEL_AGENT_FINALIZE_SQL.contains("status = 'cancelled'"));
+            assert!(CANCEL_AGENT_FINALIZE_SQL.contains("recipient = $2"));
+            assert!(CANCEL_AGENT_FINALIZE_SQL.contains(
+                "status = 'queued' OR (status = 'failed' AND next_attempt_at IS NOT NULL)"
+            ));
+            assert!(CANCEL_AGENT_SIGNAL_SQL.contains("cancel_requested = TRUE"));
+            assert!(CANCEL_AGENT_SIGNAL_SQL.contains("recipient = $2"));
+            assert!(CANCEL_AGENT_SIGNAL_SQL.contains("status = 'leased'"));
+            // The supervision record update is a whole-payload overwrite —
+            // no column surgery, no migration for the additive fields.
+            assert!(UPDATE_AGENT_SQL.contains("UPDATE server_agents SET payload = $2"));
+            assert!(UPDATE_AGENT_SQL.contains("WHERE agent_id = $1"));
+            // The dead-letter lands terminal-'dead' in one insert; the
+            // idempotency index makes a retried escalation a no-op, read
+            // back by key like the enqueue dedup.
+            assert!(INSERT_DEAD_LETTER_SQL.contains("'dead'"));
+            assert!(INSERT_DEAD_LETTER_SQL.contains("ON CONFLICT DO NOTHING"));
+            assert!(INSERT_DEAD_LETTER_SQL.contains("RETURNING task_id"));
+            assert!(SELECT_TASK_BY_IDEMPOTENCY_SQL.contains("idempotency_key = $2"));
         }
 
         #[test]

@@ -1,0 +1,6 @@
+{
+  "restart": "permanent",
+  "intensity": 3,
+  "period_ms": 60000,
+  "supervisor": "boss"
+}

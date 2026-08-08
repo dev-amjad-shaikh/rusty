@@ -1,5 +1,6 @@
-//! Agent Fabric contracts (R0.7, wave 1): durable agent identity, the
-//! versioned capability manifest, and the state-scope taxonomy.
+//! Agent Fabric contracts (R0.7): durable agent identity, the
+//! versioned capability manifest, the state-scope taxonomy, and the
+//! supervision vocabulary (wave 2).
 //!
 //! This module freezes the wire shapes the agent fabric builds on — the
 //! server's agent registry and activation leases, the agent hosts (a later
@@ -24,6 +25,12 @@
 //! - [`StateScope`] — the closed taxonomy of state an agent may read and
 //!   write, mapped onto stores that already exist (the agent's checkpoint
 //!   log, a shared team thread, the server KV namespaces).
+//! - [`SupervisionPolicy`] — the declared restart semantics
+//!   ([`RestartPolicy`], OTP's vocabulary) plus the intensity/period
+//!   budget and supervisor address; [`EscalationNotice`] is the message
+//!   shape an exhausted budget submits to the supervisor's mailbox.
+//!   Escalation is a message, not an exit, because Rusty agents are data
+//!   and runs, not processes.
 //!
 //! Golden-file tests under `tests/golden/` pin the serialized shapes; any
 //! accidental contract drift fails CI. To bless an intentional change,
@@ -34,7 +41,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::ArtifactContract;
+use crate::durable::{ArtifactContract, ErrorClass};
 
 /// The address prefix distinguishing mailbox recipients from worker pools
 /// on the task queue: a `recipient` of `agent:{agent_id}` is mailbox
@@ -161,10 +168,180 @@ pub struct AgentBudget {
 
     /// Wall-clock deadline for the whole agent activity, across turns.
     /// Expiry is cancellation by clock one level up from
-    /// [`crate::durable::TaskEnvelope::deadline`] — enforced with the
-    /// supervision wave (R0.7 wave 2); wave 1 declares the shape.
+    /// [`crate::durable::TaskEnvelope::deadline`]: the server stamps it
+    /// onto the agent's mailbox messages (the earlier bound wins), and its
+    /// breach is a supervision signal — the turn's outstanding work is
+    /// cancelled, journaled, and the declared [`SupervisionPolicy`]
+    /// decides restart vs escalate (R0.7 wave 2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline: Option<DateTime<Utc>>,
+}
+
+/// The message kind carrying a supervision escalation (R0.7 wave 2).
+///
+/// Escalation is a *message*, not an exit: when a supervised agent exhausts
+/// its restart budget, the runtime submits an [`EscalationNotice`] under
+/// this kind to the supervisor's mailbox — durable, journaled,
+/// retry-policy-bearing like any other mailbox traffic. A supervisor's
+/// manifest must declare this kind in [`CapabilityManifest::accepts`] for
+/// the escalation to be delivered; when it cannot be delivered (no
+/// supervisor declared, unknown supervisor, or the kind not accepted) the
+/// notice dead-letters with the full evidence attached — the design's
+/// "root escalations dead-letter" rule, honoring the chosen default of
+/// open question 2 (DLQ + operator, no runtime-level root policy).
+pub const ESCALATION_MESSAGE_KIND: &str = "escalated";
+
+/// A restart policy (R0.7 wave 2): how a supervised agent is restarted
+/// after a failed turn, in Erlang/OTP's vocabulary because that vocabulary
+/// is the reference implementation of operational restart semantics.
+///
+/// "Restart" here means what the design doc defines it to mean: a new run
+/// on the agent's thread, restoring the latest checkpoint — the mailbox is
+/// untouched, so the crashed turn's message returns to visibility at its
+/// own lease expiry and is re-delivered under its idempotency key. State
+/// loss is bounded and explicit (the in-flight turn re-executes from its
+/// start; everything checkpointed survives), unlike OTP's process restart,
+/// because the state is the checkpoint log, not the process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartPolicy {
+    /// Always restarted after a failed turn (within the declared
+    /// intensity/period budget).
+    Permanent,
+    /// Restarted only after an *abnormal* termination. A turn cancelled by
+    /// clock (deadline) or by the cancellation tree is control flow, not a
+    /// crash — OTP's transient rule applied to the R0.6
+    /// [`ErrorClass::Cancelled`] semantics.
+    Transient,
+    /// Never restarted after a failure: the first failed turn escalates.
+    Temporary,
+}
+
+/// What triggered a supervision decision (R0.7 wave 2), recorded on every
+/// [`SupervisionAttempt`] so the escalation's attempt history reads as
+/// evidence, not just as a counter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupervisionTrigger {
+    /// A mailbox turn settled as failed (the worker running the turn
+    /// classified the error into the shared [`ErrorClass`] taxonomy).
+    TurnFailed,
+    /// The agent's whole-activity deadline
+    /// ([`AgentBudget::deadline`]) passed: cancellation by clock one level
+    /// up from the task deadline.
+    DeadlineBreached,
+    /// An operator restarted the agent deliberately
+    /// (`POST /agents/{id}/restart`). Manual restarts carry no failure
+    /// class and do not consume the restart budget.
+    ManualRestart,
+}
+
+/// One entry in a supervised agent's attempt history (R0.7 wave 2): the
+/// failure (or operator action) a supervision decision was made about.
+///
+/// The history is the evidence an escalation carries — the design's
+/// "escalation with its attempt history intact" — so every entry records
+/// the trigger, the classification, and the turn task it came from, not
+/// merely a count.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SupervisionAttempt {
+    /// 1-based position in the agent's full supervision history. When the
+    /// decision was a restart, this is the restart ordinal the journaled
+    /// `SupervisionEvent` names.
+    pub ordinal: u32,
+    /// What the runtime observed.
+    pub trigger: SupervisionTrigger,
+    /// The failed turn's classification (core's closed [`ErrorClass`]
+    /// taxonomy). `None` for [`SupervisionTrigger::ManualRestart`] — an
+    /// operator action has no failure class.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<ErrorClass>,
+    /// The human-readable failure message (or the operator's reason).
+    pub message: String,
+    /// The mailbox turn task this attempt came from, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// When the attempt was recorded.
+    pub at: DateTime<Utc>,
+}
+
+/// The supervision policy declared per agent in its
+/// [`CapabilityManifest`] (R0.7 wave 2): the restart vocabulary plus the
+/// intensity/period budget bounding how much failure the runtime tolerates
+/// before escalating to the supervisor.
+///
+/// Policy is static and declared — no learned supervision in R0.7; the
+/// journaled decisions are the R0.10 policy plane's training data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SupervisionPolicy {
+    /// When the agent is restarted after a failed turn.
+    pub restart: RestartPolicy,
+    /// The maximum restarts tolerated within `period_ms` before the
+    /// runtime stops restarting and escalates (OTP's restart intensity).
+    pub intensity: u32,
+    /// The sliding window `intensity` is counted over, in milliseconds
+    /// (OTP's restart period). A quiet gap longer than this resets the
+    /// count.
+    pub period_ms: u64,
+    /// The supervisor's agent id (external, same tenant) whose mailbox
+    /// receives the [`EscalationNotice`] when the budget is exhausted.
+    /// `None` — a root agent — dead-letters its escalations for an
+    /// operator, per open question 2's chosen default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supervisor: Option<String>,
+}
+
+impl SupervisionPolicy {
+    /// A policy with no supervisor (a root agent): set the optional field
+    /// directly; it is public.
+    pub fn new(restart: RestartPolicy, intensity: u32, period_ms: u64) -> Self {
+        Self {
+            restart,
+            intensity,
+            period_ms,
+            supervisor: None,
+        }
+    }
+
+    /// Whether a turn ending with `error_class` (`None` = the agent's
+    /// deadline breached, cancellation by clock) may be restarted under
+    /// this policy — OTP's restart semantics mapped onto the shared
+    /// [`ErrorClass`] taxonomy: `permanent` restarts on any termination,
+    /// `transient` only on abnormal ones (a cancellation — operator or
+    /// clock — is control flow, not a crash), `temporary` never.
+    pub fn allows_restart_after(&self, error_class: Option<ErrorClass>) -> bool {
+        match self.restart {
+            RestartPolicy::Permanent => true,
+            RestartPolicy::Transient => {
+                matches!(error_class, Some(class) if class != ErrorClass::Cancelled)
+            }
+            RestartPolicy::Temporary => false,
+        }
+    }
+}
+
+/// The escalation message submitted to a supervisor's mailbox (or the
+/// dead-letter queue) when an agent exhausts its restart budget (R0.7 wave
+/// 2). This is the payload of every mailbox message of kind
+/// [`ESCALATION_MESSAGE_KIND`].
+///
+/// Escalation-as-message is the structural change from OTP: Rusty agents
+/// are data and runs, not processes, so there is no exit signal to trap —
+/// the exhausted supervision budget submits this notice instead, durable
+/// and journaled like any other mailbox traffic, naming the failed agent,
+/// the policy that gave out, and the full attempt history as evidence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EscalationNotice {
+    /// The failed agent (external id within the tenant).
+    pub agent_id: String,
+    /// The policy that exhausted, verbatim — the supervisor (or the
+    /// operator reading the DLQ) sees exactly what was declared, not a
+    /// paraphrase.
+    pub policy: SupervisionPolicy,
+    /// The full attempt history at escalation time, oldest first.
+    pub attempts: Vec<SupervisionAttempt>,
+    /// When the runtime escalated.
+    pub escalated_at: DateTime<Utc>,
 }
 
 /// The versioned capability manifest of an agent (R0.7 wave 1): what the
@@ -182,8 +359,8 @@ pub struct AgentBudget {
 /// Every field past `agent_kind` / `manifest_version` is additive and
 /// omitted from the wire when empty, so manifests written against later
 /// waves keep deserializing here and a minimal manifest stays minimal on
-/// the wire. The supervision policy fields (restart / intensity / period,
-/// R0.7 wave 2) land the same additive way.
+/// the wire. The supervision policy (R0.7 wave 2) landed the same additive
+/// way.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityManifest {
     /// What the agent runs: a graph/assistant identity (a graph plus
@@ -212,6 +389,14 @@ pub struct CapabilityManifest {
     /// agent-level bound; tenant quotas still apply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<AgentBudget>,
+
+    /// The declared supervision policy (R0.7 wave 2): restart semantics,
+    /// the intensity/period budget, and the supervisor escalation is
+    /// addressed to. `None` (the default) means unmanaged — failures stand
+    /// on their own, no restarts and no escalations; the runtime only
+    /// supervises agents that declare a policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supervision: Option<SupervisionPolicy>,
 }
 
 impl CapabilityManifest {
@@ -225,6 +410,7 @@ impl CapabilityManifest {
             accepts: BTreeMap::new(),
             scopes: Vec::new(),
             budget: None,
+            supervision: None,
         }
     }
 
@@ -393,5 +579,136 @@ mod tests {
             RunEventKind::ModelCall
         );
         assert!(serde_json::from_value::<RunEventKind>(json!("agent_magic")).is_err());
+    }
+
+    #[test]
+    fn restart_policy_and_trigger_serde_names_are_snake_case() {
+        for (policy, name) in [
+            (RestartPolicy::Permanent, "permanent"),
+            (RestartPolicy::Transient, "transient"),
+            (RestartPolicy::Temporary, "temporary"),
+        ] {
+            assert_eq!(serde_json::to_value(policy).unwrap(), json!(name));
+            assert_eq!(
+                serde_json::from_value::<RestartPolicy>(json!(name)).unwrap(),
+                policy
+            );
+        }
+        for (trigger, name) in [
+            (SupervisionTrigger::TurnFailed, "turn_failed"),
+            (SupervisionTrigger::DeadlineBreached, "deadline_breached"),
+            (SupervisionTrigger::ManualRestart, "manual_restart"),
+        ] {
+            assert_eq!(serde_json::to_value(trigger).unwrap(), json!(name));
+            assert_eq!(
+                serde_json::from_value::<SupervisionTrigger>(json!(name)).unwrap(),
+                trigger
+            );
+        }
+        assert!(serde_json::from_value::<RestartPolicy>(json!("always")).is_err());
+    }
+
+    #[test]
+    fn allows_restart_after_maps_the_otp_vocabulary_onto_error_class() {
+        let permanent = SupervisionPolicy::new(RestartPolicy::Permanent, 3, 60_000);
+        let transient = SupervisionPolicy::new(RestartPolicy::Transient, 3, 60_000);
+        let temporary = SupervisionPolicy::new(RestartPolicy::Temporary, 3, 60_000);
+
+        // Permanent restarts on any termination, including cancellation.
+        assert!(permanent.allows_restart_after(Some(ErrorClass::Transient)));
+        assert!(permanent.allows_restart_after(Some(ErrorClass::Cancelled)));
+        assert!(permanent.allows_restart_after(None));
+        // Transient restarts only on abnormal termination: cancellation
+        // (operator or deadline clock) is control flow, not a crash.
+        assert!(transient.allows_restart_after(Some(ErrorClass::Timeout)));
+        assert!(!transient.allows_restart_after(Some(ErrorClass::Cancelled)));
+        assert!(!transient.allows_restart_after(None));
+        // Temporary never restarts after a failure.
+        assert!(!temporary.allows_restart_after(Some(ErrorClass::Unknown)));
+        assert!(!temporary.allows_restart_after(None));
+    }
+
+    #[test]
+    fn supervision_policy_wire_shape_is_sparse_and_additive() {
+        // Root policy: no supervisor key on the wire at all.
+        let root = SupervisionPolicy::new(RestartPolicy::Permanent, 3, 60_000);
+        assert_eq!(
+            serde_json::to_value(&root).unwrap(),
+            json!({"restart": "permanent", "intensity": 3, "period_ms": 60000})
+        );
+        let back: SupervisionPolicy =
+            serde_json::from_str(&serde_json::to_string(&root).unwrap()).unwrap();
+        assert_eq!(root, back);
+
+        let with_supervisor = SupervisionPolicy {
+            supervisor: Some("boss".into()),
+            ..root.clone()
+        };
+        assert_eq!(
+            serde_json::to_value(&with_supervisor).unwrap(),
+            json!({
+                "restart": "permanent",
+                "intensity": 3,
+                "period_ms": 60000,
+                "supervisor": "boss",
+            })
+        );
+
+        // A minimal manifest — the pre-wave-2 shape — keeps deserializing
+        // with the policy unset, and stays minimal on the wire.
+        let minimal = CapabilityManifest::new("researcher", "researcher/1.4.0");
+        assert_eq!(minimal.supervision, None);
+        assert_eq!(
+            serde_json::to_value(&minimal).unwrap(),
+            json!({"agent_kind": "researcher", "manifest_version": "researcher/1.4.0"})
+        );
+    }
+
+    #[test]
+    fn attempt_history_and_escalation_notice_round_trip() {
+        let t0 = DateTime::<Utc>::from_timestamp_millis(1_800_000_000_000).unwrap();
+        let attempts = vec![
+            SupervisionAttempt {
+                ordinal: 1,
+                trigger: SupervisionTrigger::TurnFailed,
+                error_class: Some(ErrorClass::Transient),
+                message: "model timed out".into(),
+                task_id: Some("task-1".into()),
+                at: t0,
+            },
+            // A manual restart carries no failure class and no task —
+            // both keys vanish from the wire.
+            SupervisionAttempt {
+                ordinal: 2,
+                trigger: SupervisionTrigger::ManualRestart,
+                error_class: None,
+                message: "operator reset".into(),
+                task_id: None,
+                at: t0 + chrono::Duration::seconds(5),
+            },
+        ];
+        let manual = serde_json::to_value(&attempts[1]).unwrap();
+        // Sparse wire: unset fields are absent, not null.
+        assert!(manual.get("error_class").is_none());
+        assert!(manual.get("task_id").is_none());
+
+        let notice = EscalationNotice {
+            agent_id: "looper".into(),
+            policy: SupervisionPolicy {
+                supervisor: Some("boss".into()),
+                ..SupervisionPolicy::new(RestartPolicy::Permanent, 2, 60_000)
+            },
+            attempts,
+            escalated_at: t0 + chrono::Duration::seconds(9),
+        };
+        let back: EscalationNotice =
+            serde_json::from_str(&serde_json::to_string(&notice).unwrap()).unwrap();
+        assert_eq!(notice, back);
+        // The attempt history survives the round-trip intact — ordinals,
+        // classes, task ids: the escalation's evidence is the point.
+        assert_eq!(back.attempts.len(), 2);
+        assert_eq!(back.attempts[0].ordinal, 1);
+        assert_eq!(back.attempts[0].error_class, Some(ErrorClass::Transient));
+        assert_eq!(back.attempts[0].task_id.as_deref(), Some("task-1"));
     }
 }

@@ -289,6 +289,13 @@ pub(crate) struct RunSnapshot {
     pub payload: RunPayload,
     pub sink: FrameSink,
     pub checkpoint_ids: Arc<StdMutex<Vec<String>>>,
+    /// This run's own cancellation token (R0.7 wave 2): a child of the
+    /// server's drain token, so a run-level cancel ([`RunManager::cancel_run`]
+    /// — the cancellation tree's run half) stops this run at its next
+    /// super-step boundary without touching any other run, while a server
+    /// drain still stops them all. Observed by the executor exactly where
+    /// the drain token always was.
+    pub cancel: tokio_util::sync::CancellationToken,
 }
 
 /// Read-only view of a run (used by the rollback and status endpoints).
@@ -326,6 +333,11 @@ pub struct RunHandle {
     sink: FrameSink,
     terminal: watch::Sender<Option<Value>>,
     checkpoint_ids: Arc<StdMutex<Vec<String>>>,
+    /// This run's own cancellation token (see [`RunSnapshot::cancel`]).
+    /// Firing it is the run-level half of the R0.7 cancellation tree; the
+    /// executor observes it at super-step boundaries, after the boundary
+    /// checkpoint has landed.
+    cancel: tokio_util::sync::CancellationToken,
 }
 
 impl RunHandle {
@@ -346,6 +358,43 @@ pub(crate) enum ScheduleDecision {
     Started,
     /// The run was queued behind the active run.
     Queued,
+}
+
+/// What [`RunManager::cancel_run`] did (R0.7 wave 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunCancel {
+    /// The run was executing; its cancellation token fired. The terminal
+    /// transition lands when the executor observes it at the next
+    /// super-step boundary.
+    Signalled,
+    /// The run was queued behind another; it was dequeued and finished
+    /// terminal-`cancelled` without ever starting.
+    CancelledQueued,
+    /// The run was already terminal; nothing changed.
+    Terminal,
+    /// No such run.
+    Unknown,
+}
+
+/// What [`RunManager::cancel_thread_runs`] did to one thread's runs
+/// (R0.7 wave 2), split by how each run's cancellation lands — mirroring
+/// the task queue's [`crate::tasks::RunCancellation`] shape.
+#[derive(Debug, Default)]
+pub(crate) struct ThreadCancellation {
+    /// Running runs whose cancellation tokens fired (terminal at their
+    /// next boundary).
+    pub signalled: Vec<String>,
+    /// Queued runs dequeued into terminal-`cancelled` immediately.
+    pub cancelled: Vec<String>,
+}
+
+impl ThreadCancellation {
+    /// `true` when no run was touched (the thread had no active or queued
+    /// runs) — the cancel route journals an `AgentExit` only when the
+    /// cancellation actually landed somewhere.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.signalled.is_empty() && self.cancelled.is_empty()
+    }
 }
 
 #[derive(Default)]
@@ -434,6 +483,7 @@ impl RunManager {
             payload: h.payload.clone(),
             sink: h.sink.clone(),
             checkpoint_ids: Arc::clone(&h.checkpoint_ids),
+            cancel: h.cancel.clone(),
         })
     }
 
@@ -473,6 +523,81 @@ impl RunManager {
                 .queues
                 .get(thread_id)
                 .is_some_and(|queue| !queue.is_empty())
+    }
+
+    /// Cancel one run (R0.7 wave 2 — the run-level half of the
+    /// cancellation tree). A running run is *signalled*: its own
+    /// cancellation token fires and the executor stops it at the next
+    /// super-step boundary — after the boundary checkpoint has landed —
+    /// ending terminal-`cancelled` and resumable by re-running the thread,
+    /// exactly like the server drain. A queued (pending) run never started,
+    /// so it is dequeued and finished terminal-`cancelled` immediately —
+    /// leaving it queued would let a dead run promote and execute.
+    pub(crate) async fn cancel_run(&self, run_id: &str) -> RunCancel {
+        let mut inner = self.inner.lock().await;
+        let Some(handle) = inner.runs.get_mut(run_id) else {
+            return RunCancel::Unknown;
+        };
+        match handle.status {
+            RunStatus::Running => {
+                handle.cancel.cancel();
+                RunCancel::Signalled
+            }
+            RunStatus::Pending => {
+                let thread_id = handle.thread_id.clone();
+                let wire_thread_id = handle.wire_thread_id.clone();
+                if let Some(queue) = inner.queues.get_mut(&thread_id) {
+                    queue.retain(|queued| queued != run_id);
+                }
+                let handle = inner
+                    .runs
+                    .get_mut(run_id)
+                    .expect("the handle was resolved above");
+                handle.status = RunStatus::Cancelled;
+                let terminal = json!({
+                    "run_id": run_id,
+                    "thread_id": wire_thread_id,
+                    "status": "cancelled",
+                    "message": "cancelled while queued, before its first step",
+                });
+                handle.terminal.send_replace(Some(terminal));
+                RunCancel::CancelledQueued
+            }
+            // Terminal runs (including an already-cancelled one) are
+            // untouched — cancellation is control flow, idempotent by
+            // no-op, never a second terminal transition.
+            _ => RunCancel::Terminal,
+        }
+    }
+
+    /// Cancel every run of one thread (R0.7 wave 2): the active run is
+    /// signalled, every queued run is dequeued-cancelled — the whole
+    /// per-thread run state, so cancelling an agent's thread leaves no
+    /// pending run that would re-drive it.
+    pub(crate) async fn cancel_thread_runs(&self, thread_id: &str) -> ThreadCancellation {
+        let (active, queued) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.active_by_thread.get(thread_id).cloned(),
+                inner
+                    .queues
+                    .get(thread_id)
+                    .map(|q| q.iter().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            )
+        };
+        let mut outcome = ThreadCancellation::default();
+        if let Some(run_id) = active {
+            if matches!(self.cancel_run(&run_id).await, RunCancel::Signalled) {
+                outcome.signalled.push(run_id);
+            }
+        }
+        for run_id in queued {
+            if matches!(self.cancel_run(&run_id).await, RunCancel::CancelledQueued) {
+                outcome.cancelled.push(run_id);
+            }
+        }
+        outcome
     }
 
     /// Record the terminal status + JSON, wake waiters, release the thread
@@ -610,6 +735,9 @@ pub(crate) async fn schedule(
         sink: FrameSink::new(deps.log_capacity, bcast_tx),
         terminal: terminal_tx,
         checkpoint_ids: Arc::new(StdMutex::new(Vec::new())),
+        // A child of the server drain token: the drain still stops every
+        // run, and a run-level cancel (R0.7 wave 2) stops only this one.
+        cancel: deps.shutdown.child_token(),
     };
     // Subscribe/snapshot before any execution can emit frames.
     let replay = handle.log_snapshot();
@@ -703,10 +831,11 @@ async fn execute(deps: RunDeps, run_id: String) {
     let mut config = RunConfig::new(snap.thread_id.clone())
         .with_event_tx(evt_tx)
         .with_journal(journal.clone())
-        // Drain hook: when the server shuts down, this run stops at its
-        // next super-step boundary — a point where a checkpoint was just
+        // Cancellation hook: this run's own token (a child of the server
+        // drain token). When either fires, the run stops at its next
+        // super-step boundary — a point where a checkpoint was just
         // persisted — instead of being torn down mid-step.
-        .with_cancellation(deps.shutdown.clone());
+        .with_cancellation(snap.cancel.clone());
     if let Some(command) = &snap.payload.command {
         if let Some(resume) = &command.resume {
             config = config.with_resume(resume.clone());

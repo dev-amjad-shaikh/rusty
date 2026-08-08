@@ -37,6 +37,7 @@ use crate::runs::{
 };
 use crate::server_store::{JsonFileStore, ServerStore};
 use crate::sse;
+use crate::supervision;
 use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
 use crate::threads::ThreadRecord;
 use crate::{store, GraphRegistry, ServerConfig, RESERVED_NAMES};
@@ -175,6 +176,10 @@ pub(crate) fn router_with_shutdown(
         .route("/agents/{agent_id}/mailbox", post(send_agent_message))
         .route("/agents/{agent_id}/mailbox/next", post(claim_agent_message))
         .route("/agents/{agent_id}/status", get(get_agent_status))
+        .route("/agents/{agent_id}/cancel", post(cancel_agent))
+        .route("/agents/{agent_id}/restart", post(restart_agent))
+        .route("/agents/{agent_id}/supervision", get(get_agent_supervision))
+        .route("/teams/{team_id}/cancel", post(cancel_team))
         .route("/agents/{agent_id}/activate", post(activate_agent))
         .route(
             "/agents/{agent_id}/activate/heartbeat",
@@ -2297,12 +2302,71 @@ async fn fail_task(
         .await
         .map_err(internal_err)?;
     let task = lease_outcome(outcome, &task_id, &payload.worker_id)?;
+    // Supervision trigger (R0.7 wave 2): a failed mailbox turn is a
+    // supervision signal — the declared policy decides restart vs
+    // escalate, journaled. Cancellation-class failures are control flow
+    // (the cancellation tree's business, not a crash), and failures on
+    // ordinary pool tasks or unregistered recipients take no supervision
+    // path. The settlement is already durable at this point; supervision
+    // composes after it, never inside the lease guard.
+    let mut escalation = None;
+    if error_class != rusty_agent_runtime::durable::ErrorClass::Cancelled {
+        if let Some(agent_external) = task
+            .recipient
+            .as_deref()
+            .and_then(rusty_agent_runtime::agents::agent_id_from_recipient)
+        {
+            if let Some(agent) = state
+                .server_store
+                .get_agent(&tenant.scope(agent_external))
+                .await
+                .map_err(internal_err)?
+            {
+                let outcome = supervision::supervise(
+                    &state.server_store,
+                    &tenant,
+                    agent_external,
+                    agent,
+                    supervision::Trigger::TurnFailed {
+                        error_class,
+                        message: task
+                            .last_error
+                            .clone()
+                            .unwrap_or_else(|| "turn failed".to_string()),
+                        task_id: task.task_id.clone(),
+                    },
+                    Utc::now(),
+                )
+                .await
+                .map_err(internal_err)?;
+                // The failure report's caller is the turn's holder; when
+                // that report tipped the agent over its restart intensity,
+                // the response carries where the escalation landed — the
+                // same evidence the supervision journal holds.
+                escalation = outcome.delivery.map(|delivery| match delivery {
+                    supervision::EscalationDelivery::Mailbox {
+                        task_id,
+                        deduplicated,
+                    } => json!({
+                        "kind": "mailbox",
+                        "task_id": task_id,
+                        "deduplicated": deduplicated,
+                    }),
+                    supervision::EscalationDelivery::DeadLetter { task_id } => json!({
+                        "kind": "dead_letter",
+                        "task_id": task_id,
+                    }),
+                });
+            }
+        }
+    }
     Ok(Json(json!({
         // A retry is outstanding exactly when a next attempt is scheduled;
         // a `failed` task with a null schedule failed outright.
         "requeued": task.status == TaskStatus::Failed && task.next_attempt_at.is_some(),
         "next_attempt_at": task.next_attempt_at,
         "dead": task.status == TaskStatus::Dead,
+        "escalation": escalation,
     })))
 }
 
@@ -2481,6 +2545,11 @@ struct CreateAgentPayload {
     /// `budget`). Unknown fields are tolerated (the manifest is
     /// forward-compatible across waves); missing required fields are a 400.
     manifest: Value,
+    /// The team this agent belongs to (R0.7 wave 2): a declared label
+    /// `POST /teams/{team_id}/cancel` addresses — see
+    /// [`agents::AgentRecord::team_id`].
+    #[serde(default)]
+    team_id: Option<String>,
     #[serde(default)]
     metadata: Option<Value>,
 }
@@ -2506,7 +2575,7 @@ async fn create_agent(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<CreateAgentPayload>,
-) -> Result<(StatusCode, Json<AgentRecord>), ApiError> {
+) -> Result<(StatusCode, Json<Value>), ApiError> {
     let manifest: CapabilityManifest = serde_json::from_value(payload.manifest)
         .map_err(|e| ApiError::bad_request(format!("invalid `manifest`: {e}")))?;
     tasks::validate_label("agent_kind", &manifest.agent_kind, 256)
@@ -2518,13 +2587,19 @@ async fn create_agent(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     validate_client_id("agent_id", &agent_id)?;
+    if let Some(team_id) = &payload.team_id {
+        tasks::validate_pool(team_id)
+            .map_err(|e| ApiError::bad_request(e.replace("`pool`", "`team_id`")))?;
+    }
 
     // Persist under the tenant's internal id; the wire shows the external id.
     let record = AgentRecord {
         agent_id: tenant.scope(&agent_id),
         manifest,
+        team_id: payload.team_id,
         metadata: payload.metadata.unwrap_or(Value::Null),
         created_at: Utc::now(),
+        supervision: agents::AgentSupervision::default(),
     };
     let created = state
         .server_store
@@ -2538,7 +2613,7 @@ async fn create_agent(
     }
     let mut wire = record;
     wire.agent_id = agent_id;
-    Ok((StatusCode::CREATED, Json(wire)))
+    Ok((StatusCode::CREATED, Json(wire.wire())))
 }
 
 /// `GET /agents` — the tenant's registered agents, oldest first.
@@ -2565,7 +2640,8 @@ async fn list_agents(
             .cmp(&b.created_at)
             .then_with(|| a.agent_id.cmp(&b.agent_id))
     });
-    Ok(Json(json!(records)))
+    let wire: Vec<Value> = records.iter().map(AgentRecord::wire).collect();
+    Ok(Json(json!(wire)))
 }
 
 /// `GET /agents/{id}` — one registration (404 unknown/cross-tenant).
@@ -2573,7 +2649,7 @@ async fn get_agent(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Path(agent_id): Path<String>,
-) -> Result<Json<AgentRecord>, ApiError> {
+) -> Result<Json<Value>, ApiError> {
     state
         .server_store
         .get_agent(&tenant.scope(&agent_id))
@@ -2581,7 +2657,7 @@ async fn get_agent(
         .map_err(internal_err)?
         .map(|mut record| {
             record.agent_id = agent_id.clone();
-            Json(record)
+            Json(record.wire())
         })
         .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))
 }
@@ -2640,7 +2716,7 @@ async fn send_agent_message(
     // The shared validation surface (`build_task_record`) keeps the mailbox
     // path from drifting from direct enqueue; pool and worker-version pins
     // are forced to their defaults — they do not apply to agent claims.
-    let record = build_task_record(
+    let mut record = build_task_record(
         EnqueueTaskPayload {
             kind: payload.kind,
             payload: payload.payload,
@@ -2656,6 +2732,17 @@ async fn send_agent_message(
         },
         &tenant,
     )?;
+    // The agent-level whole-activity deadline (R0.7 wave 2) composes into
+    // R0.6's task deadline — the earlier bound wins. Expiry is then
+    // cancellation by clock through the ordinary claim-path finalization,
+    // and the breach is a supervision signal (see `claim_agent_message`).
+    if let Some(agent_deadline) = agent.manifest.budget.as_ref().and_then(|b| b.deadline) {
+        record.deadline = Some(
+            record
+                .deadline
+                .map_or(agent_deadline, |d| d.min(agent_deadline)),
+        );
+    }
     // Same quota gate as every other submission surface.
     enforce_task_quota(&state, &tenant, 1).await?;
     let (task, deduplicated) = state
@@ -2904,12 +2991,31 @@ async fn claim_agent_message(
     tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
     tasks::validate_lease_ms(payload.lease_ms).map_err(ApiError::bad_request)?;
     let scoped = tenant.scope(&agent_id);
-    state
+    let agent = state
         .server_store
         .get_agent(&scoped)
         .await
         .map_err(internal_err)?
         .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let now = Utc::now();
+    // Agent-level deadline (R0.7 wave 2): past the whole-activity bound,
+    // the claim triggers the breach path once (latched) — outstanding
+    // mailbox traffic is cancelled (children before parent), and the
+    // declared policy decides restart vs escalate, journaled. The claim
+    // itself then proceeds normally: the cancellation finalization makes
+    // it answer empty.
+    if !agent.supervision.deadline_breached
+        && agent
+            .manifest
+            .budget
+            .as_ref()
+            .and_then(|b| b.deadline)
+            .is_some_and(|deadline| deadline <= now)
+    {
+        supervision::on_deadline_breach(&state.server_store, &tenant, &agent_id, agent, now)
+            .await
+            .map_err(internal_err)?;
+    }
     let recipient = AgentId::new(agent_id.as_str()).mailbox_recipient();
     let claimed = state
         .server_store
@@ -2922,7 +3028,7 @@ async fn claim_agent_message(
                 fencing: payload.fencing,
             },
             payload.lease_ms,
-            Utc::now(),
+            now,
         )
         .await
         .map_err(internal_err)?;
@@ -2934,4 +3040,222 @@ async fn claim_agent_message(
         ))
         .into_response(),
     })
+}
+
+// --------------------------------------------------------------------- //
+// Supervision and the cancellation tree (R0.7 Agent Fabric, wave 2)
+// --------------------------------------------------------------------- //
+
+/// Cancel one agent: its outstanding mailbox traffic first, then its live
+/// runs — the cancellation tree's per-member rule (children before
+/// parent), shared by `POST /agents/{id}/cancel` and
+/// `POST /teams/{team_id}/cancel` so a member's cancellation is
+/// self-contained and the two endpoints can never drift apart.
+///
+/// Mailbox traffic goes through the R0.6 semantics, agent-id scoped:
+/// queued and retry-scheduled messages go terminal-`cancelled`
+/// immediately; a leased turn keeps its lease with `cancel_requested` set
+/// (a hint for promptness — lease expiry stays the correctness mechanism).
+/// Runs go through `RunConfig::cancellation`: the executor observes the
+/// token at a super-step boundary, after the boundary checkpoint has
+/// landed, ending terminal-`cancelled` and resumable by re-running the
+/// thread. The exit is journaled as an `AgentExit` in the agent's
+/// supervision journal — only when the cancellation actually touched
+/// something.
+async fn cancel_one_agent(
+    state: &AppState,
+    tenant: &TenantContext,
+    agent_external: &str,
+) -> Result<Value, ApiError> {
+    let now = Utc::now();
+    let recipient = AgentId::new(agent_external).mailbox_recipient();
+    let outcome = state
+        .server_store
+        .cancel_agent_tasks(tenant.tenant(), &recipient, now)
+        .await
+        .map_err(internal_err)?;
+    // The agent's thread convention, internally scoped — the manager keys
+    // runs by internal thread id.
+    let thread = tenant.scope(&AgentId::new(agent_external).thread_id());
+    let runs = state.run_deps.manager.cancel_thread_runs(&thread).await;
+    let ids =
+        |tasks: Vec<TaskRecord>| -> Vec<String> { tasks.into_iter().map(|t| t.task_id).collect() };
+    let cancelled = ids(outcome.cancelled);
+    let signalled = ids(outcome.signalled);
+    let mut exit_event = Value::Null;
+    if !cancelled.is_empty() || !signalled.is_empty() || !runs.is_empty() {
+        exit_event = json!(supervision::journal_agent_exit(
+            &state.server_store,
+            tenant,
+            agent_external,
+            "cancelled",
+            json!({
+                "cancelled_messages": cancelled,
+                "signalled_messages": signalled,
+                "signalled_runs": runs.signalled,
+                "cancelled_runs": runs.cancelled,
+            }),
+        )
+        .await
+        .map_err(internal_err)?);
+    }
+    Ok(json!({
+        "agent_id": agent_external,
+        "cancelled": cancelled,
+        "signalled": signalled,
+        "runs": {
+            "signalled": runs.signalled,
+            "cancelled": runs.cancelled,
+        },
+        "exit_event": exit_event,
+    }))
+}
+
+/// `POST /agents/{id}/cancel` — cancel one agent (R0.7 wave 2): its
+/// outstanding mailbox traffic (agent-id-scoped `cancel_run_tasks`
+/// composition) and its live runs (`RunConfig::cancellation`), journaled
+/// as an `AgentExit`. Idempotent: a repeated cancel of a quiescent agent
+/// answers `200` with empty lists and journals nothing. `404` for unknown
+/// or cross-tenant ids.
+async fn cancel_agent(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    Ok(Json(cancel_one_agent(&state, &tenant, &agent_id).await?))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RestartAgentPayload {
+    /// The operator's reason, recorded as the attempt's message.
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// `POST /agents/{id}/restart` — the manual supervision action (R0.7 wave
+/// 2): the operator's "I've fixed the child" reset. Records the restart
+/// (journaled `SupervisionEvent`, ordinal from the attempt history), and
+/// clears the escalation and deadline-breach latches so supervision
+/// resumes. Works with or without a declared policy — the operator
+/// outranks the declaration.
+///
+/// The restart itself — a new run on the agent's thread restoring the
+/// latest checkpoint — is the agent host's integration point: the mailbox
+/// is untouched, so the next claimed turn re-drives the thread from its
+/// latest checkpoint (the W1b machinery, unmodified). This endpoint is
+/// the server-side half: the journaled decision and the latch reset.
+async fn restart_agent(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+    body: Option<Json<RestartAgentPayload>>,
+) -> Result<Json<Value>, ApiError> {
+    let agent = state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let reason = body
+        .and_then(|Json(payload)| payload.reason)
+        .unwrap_or_else(|| "manual restart".to_string());
+    let outcome = supervision::supervise(
+        &state.server_store,
+        &tenant,
+        &agent_id,
+        agent,
+        supervision::Trigger::ManualRestart { reason },
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
+    let ordinal = match outcome.decision {
+        supervision::Decision::Restart { ordinal } => ordinal,
+        // `supervise` maps the manual trigger to a restart by construction.
+        _ => unreachable!("a manual restart trigger always decides restart"),
+    };
+    Ok(Json(json!({
+        "agent_id": agent_id,
+        "restarted": true,
+        "restart_ordinal": ordinal,
+        "event": outcome.event_id,
+    })))
+}
+
+/// `GET /agents/{id}/supervision` — the agent's supervision evidence
+/// (R0.7 wave 2): the declared policy, the latches, the full attempt
+/// history, and the journaled `SupervisionEvent` / `AgentExit` events of
+/// the agent's supervision journal — integrity re-verified on read,
+/// exactly like the Flight Recorder endpoints. `404` for unknown or
+/// cross-tenant ids.
+async fn get_agent_supervision(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let agent = state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let events = supervision::supervision_events(&state.server_store, &tenant, &agent_id)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({
+        "agent_id": agent_id,
+        "policy": agent.manifest.supervision,
+        "escalated": agent.supervision.escalated,
+        "deadline_breached": agent.supervision.deadline_breached,
+        "suppressed_failures": agent.supervision.suppressed_failures,
+        "attempts": agent.supervision.attempts,
+        "journal_run_id": supervision::supervision_journal_run_id(tenant.tenant(), &agent_id),
+        "events": events,
+    })))
+}
+
+/// `POST /teams/{team_id}/cancel` — cancel a whole team (R0.7 wave 2):
+/// every registered agent carrying the `team_id` label is cancelled by
+/// the per-member rule ([`cancel_one_agent`]) — each member's
+/// cancellation is self-contained, so the order across members does not
+/// matter. `404` when no agent in this tenant declares the team (an empty
+/// team is indistinguishable from an unknown one, the cross-tenant rule
+/// applied to the label).
+async fn cancel_team(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(team_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    tasks::validate_pool(&team_id)
+        .map_err(|e| ApiError::bad_request(e.replace("`pool`", "`team_id`")))?;
+    let members: Vec<String> = state
+        .server_store
+        .list_agents()
+        .await
+        .map_err(internal_err)?
+        .into_iter()
+        .filter(|record| record.team_id.as_deref() == Some(team_id.as_str()))
+        // Tenant isolation rides the id prefix, as on every agent read:
+        // another tenant's same-labelled team resolves to nothing here.
+        .filter_map(|record| tenant.unscope(&record.agent_id).map(str::to_owned))
+        .collect();
+    if members.is_empty() {
+        return Err(ApiError::not_found(format!(
+            "no agents registered for team `{team_id}`"
+        )));
+    }
+    let mut cancelled = Vec::with_capacity(members.len());
+    for agent_external in members {
+        cancelled.push(cancel_one_agent(&state, &tenant, &agent_external).await?);
+    }
+    Ok(Json(json!({
+        "team_id": team_id,
+        "members": cancelled,
+    })))
 }

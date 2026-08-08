@@ -13,8 +13,11 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
 
-use rusty_agent_runtime::agents::{AgentBudget, CapabilityManifest, StateScope};
-use rusty_agent_runtime::durable::ArtifactContract;
+use rusty_agent_runtime::agents::{
+    AgentBudget, CapabilityManifest, EscalationNotice, RestartPolicy, StateScope,
+    SupervisionAttempt, SupervisionPolicy, SupervisionTrigger,
+};
+use rusty_agent_runtime::durable::{ArtifactContract, ErrorClass};
 use rusty_agent_runtime::record::RunEventKind;
 
 fn golden_path(name: &str) -> PathBuf {
@@ -78,6 +81,10 @@ fn sample_manifest() -> CapabilityManifest {
             max_cost_usd: Some(1.50),
             deadline: DateTime::<Utc>::from_timestamp_millis(1_800_000_000_000),
         }),
+        // Wave-2 field deliberately unset here: the pinned golden must
+        // stay byte-identical across the additive change — the proof that
+        // pre-wave-2 readers see no shape drift.
+        supervision: None,
     }
 }
 
@@ -163,6 +170,60 @@ fn minimal_manifest_json_still_loads() {
     assert!(manifest.accepts.is_empty());
     assert!(manifest.scopes.is_empty());
     assert!(manifest.budget.is_none());
+    assert!(manifest.supervision.is_none());
+}
+
+#[test]
+fn golden_supervision_policy_shape() {
+    // The wave-2 contract: OTP restart vocabulary + intensity/period +
+    // the supervisor address.
+    assert_golden(
+        "supervision_policy.json",
+        &SupervisionPolicy {
+            restart: RestartPolicy::Permanent,
+            intensity: 3,
+            period_ms: 60_000,
+            supervisor: Some("boss".into()),
+        },
+    );
+}
+
+#[test]
+fn golden_escalation_notice_shape() {
+    // The escalation message payload: failed agent, the exhausted policy
+    // verbatim, and the full attempt history as evidence.
+    let t0 = DateTime::<Utc>::from_timestamp_millis(1_800_000_000_000).unwrap();
+    assert_golden(
+        "escalation_notice.json",
+        &EscalationNotice {
+            agent_id: "looper".into(),
+            policy: SupervisionPolicy {
+                restart: RestartPolicy::Permanent,
+                intensity: 2,
+                period_ms: 60_000,
+                supervisor: Some("boss".into()),
+            },
+            attempts: vec![
+                SupervisionAttempt {
+                    ordinal: 1,
+                    trigger: SupervisionTrigger::TurnFailed,
+                    error_class: Some(ErrorClass::Transient),
+                    message: "model timed out".into(),
+                    task_id: Some("task-1".into()),
+                    at: t0,
+                },
+                SupervisionAttempt {
+                    ordinal: 2,
+                    trigger: SupervisionTrigger::TurnFailed,
+                    error_class: Some(ErrorClass::Timeout),
+                    message: "turn lease lapsed mid-effect".into(),
+                    task_id: Some("task-1".into()),
+                    at: t0 + chrono::Duration::seconds(4),
+                },
+            ],
+            escalated_at: t0 + chrono::Duration::seconds(9),
+        },
+    );
 }
 
 /// A pre-R0.7 artifact contract (no `schema` key — the exact R0.6 golden

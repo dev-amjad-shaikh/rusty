@@ -111,8 +111,9 @@ pub mod wasm_node;
 /// Convenience re-exports of the main public API.
 pub mod prelude {
     pub use crate::agents::{
-        agent_id_from_recipient, AgentBudget, AgentId, CapabilityManifest, StateScope,
-        AGENT_RECIPIENT_PREFIX,
+        agent_id_from_recipient, AgentBudget, AgentId, CapabilityManifest, EscalationNotice,
+        RestartPolicy, StateScope, SupervisionAttempt, SupervisionPolicy, SupervisionTrigger,
+        AGENT_RECIPIENT_PREFIX, ESCALATION_MESSAGE_KIND,
     };
     pub use crate::checkpoint::{
         Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,

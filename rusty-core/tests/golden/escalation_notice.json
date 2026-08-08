@@ -1,0 +1,28 @@
+{
+  "agent_id": "looper",
+  "policy": {
+    "restart": "permanent",
+    "intensity": 2,
+    "period_ms": 60000,
+    "supervisor": "boss"
+  },
+  "attempts": [
+    {
+      "ordinal": 1,
+      "trigger": "turn_failed",
+      "error_class": "transient",
+      "message": "model timed out",
+      "task_id": "task-1",
+      "at": "2027-01-15T08:00:00Z"
+    },
+    {
+      "ordinal": 2,
+      "trigger": "turn_failed",
+      "error_class": "timeout",
+      "message": "turn lease lapsed mid-effect",
+      "task_id": "task-1",
+      "at": "2027-01-15T08:00:04Z"
+    }
+  ],
+  "escalated_at": "2027-01-15T08:00:09Z"
+}
