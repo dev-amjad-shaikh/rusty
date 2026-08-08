@@ -62,6 +62,52 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps -p ${{ matrix.pkg }}
 
+  # Live database gate. The default crate legs compile the optional Postgres
+  # paths under clippy, but the integration suites are deliberately ignored
+  # unless DATABASE_URL points at a scratch database. Run those suites here
+  # against an ephemeral service so migrations, transactions, leases, outbox
+  # delivery, and crash-recovery persistence are exercised on every change.
+  postgres:
+    name: postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: rusty
+          POSTGRES_PASSWORD: rusty
+          POSTGRES_DB: rusty_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusty -d rusty_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://rusty:rusty@localhost:5432/rusty_test
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rusty-workspace-postgres
+          key: postgres
+
+      - name: Core Postgres tests
+        run: >-
+          cargo test -p rusty-agent-runtime --features postgres --lib
+          -- --ignored --test-threads=1
+
+      - name: Server Postgres tests
+        run: >-
+          cargo test -p rusty-server --features postgres --lib --tests
+          -- --ignored --test-threads=1
+
   # MSRV: resolve each crate's effective `rust-version` at runtime via
   # cargo metadata (this follows `rust-version.workspace = true` inheritance
   # from the root [workspace.package] table), then check the crate with
