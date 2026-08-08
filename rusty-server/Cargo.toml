@@ -34,6 +34,10 @@ futures = "0.3"
 async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Trigger webhooks: HMAC-SHA256 signature verification (`X-Rusty-Signature`)
+# and SHA-256 payload hashes for the event log.
+hmac = "0.12"
+sha2 = "0.10"
 # Permissive CORS in `router()` so browser clients (e.g. the Studio) can call
 # the API cross-origin. Production deployments should restrict this — see README.
 tower-http = { version = "0.6", features = ["cors"] }
@@ -49,3 +53,6 @@ tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 # Graceful-shutdown tests drive `serve_with_shutdown` over real sockets.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Trigger tests sign webhook bodies the way an external sender would.
+hmac = "0.12"
+sha2 = "0.10"

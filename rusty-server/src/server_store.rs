@@ -14,9 +14,10 @@
 //! - [`PostgresStore`] (feature `postgres`) — tables `server_assistants`,
 //!   `server_crons`, `server_threads`, `server_kv`, `server_journals`,
 //!   `server_tasks` (the R0.6 durable task queue, column-mapped for
-//!   `FOR UPDATE SKIP LOCKED` claiming), and `server_outbox` (the R0.6
-//!   wave-2b transactional outbox), auto-migrated on (lazy) connect.
-//!   Selected via `ServerConfig::with_postgres(url)`.
+//!   `FOR UPDATE SKIP LOCKED` claiming), `server_outbox` (the R0.6
+//!   wave-2b transactional outbox), and `server_triggers` /
+//!   `server_trigger_events` (event-driven triggers), auto-migrated on
+//!   (lazy) connect. Selected via `ServerConfig::with_postgres(url)`.
 //!
 //! All trait errors are plain `String`s; routes map them to 500s — no store
 //! error is ever a client error (validation happens before the store call).
@@ -41,6 +42,7 @@ use crate::outbox::{self, OutboxRecord};
 use crate::store::{self, StoreItem};
 use crate::tasks::{self, CancelOutcome, MutationOutcome, RunCancellation, TaskRecord, TaskStatus};
 use crate::threads::{self, ThreadRecord};
+use crate::triggers::{self, TriggerEventRecord, TriggerRecord};
 
 /// Store operation result. The `String` payload is a 500-class internal
 /// failure (IO error, DB error, serialization bug).
@@ -72,6 +74,33 @@ pub(crate) trait ServerStore: Send + Sync {
     async fn list_crons(&self) -> StoreResult<Vec<CronRecord>>;
     /// Delete a cron; `true` when it existed.
     async fn delete_cron(&self, cron_id: &str) -> StoreResult<bool>;
+
+    // -- Triggers (event-driven webhook bindings) ----------------------- //
+
+    /// Insert a new trigger; `false` (no write) when the id exists.
+    async fn create_trigger(&self, record: &TriggerRecord) -> StoreResult<bool>;
+    /// Overwrite a trigger (updates, bookkeeping counters).
+    async fn upsert_trigger(&self, record: &TriggerRecord) -> StoreResult<()>;
+    /// Fetch one trigger by (internal, tenant-scoped) id.
+    async fn get_trigger(&self, trigger_id: &str) -> StoreResult<Option<TriggerRecord>>;
+    /// All triggers across all tenants (routes filter; the webhook resolver
+    /// scans for the external id and lets the HMAC signature decide).
+    async fn list_triggers(&self) -> StoreResult<Vec<TriggerRecord>>;
+    /// Delete a trigger and its whole event log; `true` when it existed.
+    async fn delete_trigger(&self, trigger_id: &str) -> StoreResult<bool>;
+    /// Append an event to a trigger's log, or overwrite it on a status
+    /// transition (`pending` → `coalesced`/`failed`). Upserts on event id
+    /// and prunes the oldest entries past
+    /// [`crate::triggers::MAX_EVENTS_PER_TRIGGER`].
+    async fn append_trigger_event(&self, record: &TriggerEventRecord) -> StoreResult<()>;
+    /// Fetch one event of one trigger.
+    async fn get_trigger_event(
+        &self,
+        trigger_id: &str,
+        event_id: &str,
+    ) -> StoreResult<Option<TriggerEventRecord>>;
+    /// A trigger's event log, oldest first.
+    async fn list_trigger_events(&self, trigger_id: &str) -> StoreResult<Vec<TriggerEventRecord>>;
 
     /// Insert a new thread under its internal (tenant-scoped) id; `false`
     /// (no write) when the id exists. Thread records are durable so
@@ -450,6 +479,11 @@ pub(crate) struct JsonFileStore {
     // delta-head cache lives on the instance, so a fresh checkpointer per
     // write would re-walk the on-disk chain on every put.
     checkpointer: JsonFileCheckpointer,
+    triggers: Mutex<HashMap<String, TriggerRecord>>,
+    /// Per-trigger event logs keyed by internal trigger id, each oldest
+    /// first (appends are chronological; status-transition upserts keep
+    /// position), so pruning drops from the front.
+    trigger_events: Mutex<HashMap<String, Vec<TriggerEventRecord>>>,
 }
 
 impl JsonFileStore {
@@ -467,6 +501,8 @@ impl JsonFileStore {
             coordinations: Mutex::new(coordination::load(root)),
             agent_leases: Mutex::new(agents::load_leases(root)),
             checkpointer: JsonFileCheckpointer::new(root),
+            triggers: Mutex::new(triggers::load(root)),
+            trigger_events: Mutex::new(triggers::load_events(root)),
         }
     }
 }
@@ -546,6 +582,118 @@ impl ServerStore for JsonFileStore {
                 Err(format!("remove cron file: {e}"))
             }
         }
+    }
+
+    async fn create_trigger(&self, record: &TriggerRecord) -> StoreResult<bool> {
+        let mut map = self.triggers.lock().await;
+        if map.contains_key(&record.trigger_id) {
+            return Ok(false);
+        }
+        // Hold the lock across the file write so a concurrent create of the
+        // same id can't interleave.
+        triggers::persist(&self.root, record)
+            .await
+            .map_err(io_err("persist trigger"))?;
+        map.insert(record.trigger_id.clone(), record.clone());
+        Ok(true)
+    }
+
+    async fn upsert_trigger(&self, record: &TriggerRecord) -> StoreResult<()> {
+        let mut map = self.triggers.lock().await;
+        triggers::persist(&self.root, record)
+            .await
+            .map_err(io_err("persist trigger"))?;
+        map.insert(record.trigger_id.clone(), record.clone());
+        Ok(())
+    }
+
+    async fn get_trigger(&self, trigger_id: &str) -> StoreResult<Option<TriggerRecord>> {
+        Ok(self.triggers.lock().await.get(trigger_id).cloned())
+    }
+
+    async fn list_triggers(&self) -> StoreResult<Vec<TriggerRecord>> {
+        Ok(self.triggers.lock().await.values().cloned().collect())
+    }
+
+    async fn delete_trigger(&self, trigger_id: &str) -> StoreResult<bool> {
+        let mut map = self.triggers.lock().await;
+        let Some(record) = map.remove(trigger_id) else {
+            return Ok(false);
+        };
+        let path = triggers::dir(&self.root).join(format!("{trigger_id}.json"));
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => {}
+            // The file is already gone; the in-memory index was authoritative.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            // Same resurrection discipline as cron delete.
+            Err(e) => {
+                map.insert(trigger_id.to_string(), record);
+                return Err(format!("remove trigger file: {e}"));
+            }
+        }
+        // The trigger is gone; its event log goes with it (memory + files).
+        // An event-dir removal failure only orphans files for a trigger that
+        // no longer resolves — logged, not fatal.
+        let mut events = self.trigger_events.lock().await;
+        events.remove(trigger_id);
+        let events_path = triggers::events_dir(&self.root).join(trigger_id);
+        if let Err(e) = tokio::fs::remove_dir_all(&events_path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(path = %events_path.display(), %e, "remove trigger events dir failed")
+            }
+        }
+        Ok(true)
+    }
+
+    async fn append_trigger_event(&self, record: &TriggerEventRecord) -> StoreResult<()> {
+        let mut map = self.trigger_events.lock().await;
+        let events = map.entry(record.trigger_id.clone()).or_default();
+        // Upsert on event id (status transitions rewrite the entry in
+        // place); new events append, keeping the list chronological.
+        if let Some(existing) = events.iter_mut().find(|e| e.event_id == record.event_id) {
+            *existing = record.clone();
+        } else {
+            events.push(record.clone());
+        }
+        triggers::persist_event(&self.root, record)
+            .await
+            .map_err(io_err("persist trigger event"))?;
+        // Retention: prune the oldest entries past the cap (and their
+        // files) — the log is an inspection surface, not an unbounded
+        // journal.
+        while events.len() > triggers::MAX_EVENTS_PER_TRIGGER {
+            let dropped = events.remove(0);
+            let path = triggers::event_path(&self.root, &dropped);
+            if let Err(e) = tokio::fs::remove_file(&path).await {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(path = %path.display(), %e, "prune trigger event file failed")
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn get_trigger_event(
+        &self,
+        trigger_id: &str,
+        event_id: &str,
+    ) -> StoreResult<Option<TriggerEventRecord>> {
+        Ok(self
+            .trigger_events
+            .lock()
+            .await
+            .get(trigger_id)
+            .and_then(|events| events.iter().find(|e| e.event_id == event_id).cloned()))
+    }
+
+    async fn list_trigger_events(&self, trigger_id: &str) -> StoreResult<Vec<TriggerEventRecord>> {
+        Ok(self
+            .trigger_events
+            .lock()
+            .await
+            .get(trigger_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn create_thread(&self, internal_id: &str, record: &ThreadRecord) -> StoreResult<bool> {
@@ -1401,6 +1549,7 @@ mod postgres {
         self, CancelOutcome, MutationOutcome, RunCancellation, TaskLease, TaskRecord, TaskStatus,
     };
     use crate::threads::ThreadRecord;
+    use crate::triggers::{TriggerEventRecord, TriggerRecord};
 
     // -- Schema (auto-migrated on connect) ------------------------------ //
 
@@ -1419,6 +1568,31 @@ mod postgres {
             payload    JSONB NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )";
+
+    /// `server_triggers`: one row per trigger, whole record as JSONB (the
+    /// assistants/crons pattern — nothing filters on trigger fields).
+    pub(crate) const CREATE_TRIGGERS_SQL: &str = "
+        CREATE TABLE IF NOT EXISTS server_triggers (
+            trigger_id TEXT PRIMARY KEY,
+            payload    JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )";
+
+    /// `server_trigger_events`: one row per received event, whole record as
+    /// JSONB; `trigger_id` is a real column because the log is listed and
+    /// pruned per trigger.
+    pub(crate) const CREATE_TRIGGER_EVENTS_SQL: &str = "
+        CREATE TABLE IF NOT EXISTS server_trigger_events (
+            event_id   TEXT PRIMARY KEY,
+            trigger_id TEXT NOT NULL,
+            payload    JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )";
+
+    /// The per-trigger listing (and retention prune) scans exactly this.
+    pub(crate) const CREATE_TRIGGER_EVENTS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_trigger_events_by_trigger
+            ON server_trigger_events (trigger_id, created_at, event_id)";
 
     /// `server_threads`: one row per thread, whole record as JSONB.
     pub(crate) const CREATE_THREADS_SQL: &str = "
@@ -1648,6 +1822,9 @@ mod postgres {
         CREATE_AGENTS_SQL,
         CREATE_AGENT_LEASES_SQL,
         CREATE_COORDINATIONS_SQL,
+        CREATE_TRIGGERS_SQL,
+        CREATE_TRIGGER_EVENTS_SQL,
+        CREATE_TRIGGER_EVENTS_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -1686,6 +1863,55 @@ mod postgres {
     pub(crate) const LIST_CRONS_SQL: &str = "SELECT payload FROM server_crons";
 
     pub(crate) const DELETE_CRON_SQL: &str = "DELETE FROM server_crons WHERE cron_id = $1";
+
+    /// Insert-only trigger create; returns no row on conflict → 409.
+    pub(crate) const INSERT_TRIGGER_SQL: &str = "
+        INSERT INTO server_triggers (trigger_id, payload)
+        VALUES ($1, $2)
+        ON CONFLICT (trigger_id) DO NOTHING
+        RETURNING trigger_id";
+
+    /// Full upsert for updates and bookkeeping counters.
+    pub(crate) const UPSERT_TRIGGER_SQL: &str = "
+        INSERT INTO server_triggers (trigger_id, payload)
+        VALUES ($1, $2)
+        ON CONFLICT (trigger_id) DO UPDATE SET payload = EXCLUDED.payload";
+
+    pub(crate) const SELECT_TRIGGER_SQL: &str =
+        "SELECT payload FROM server_triggers WHERE trigger_id = $1";
+
+    pub(crate) const LIST_TRIGGERS_SQL: &str = "SELECT payload FROM server_triggers";
+
+    pub(crate) const DELETE_TRIGGER_SQL: &str = "DELETE FROM server_triggers WHERE trigger_id = $1";
+
+    pub(crate) const DELETE_TRIGGER_EVENTS_SQL: &str =
+        "DELETE FROM server_trigger_events WHERE trigger_id = $1";
+
+    /// Event append, upserting on event id so debounce status transitions
+    /// (`pending` → `coalesced`/`failed`) rewrite the row in place.
+    pub(crate) const UPSERT_TRIGGER_EVENT_SQL: &str = "
+        INSERT INTO server_trigger_events (event_id, trigger_id, payload, created_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (event_id) DO UPDATE SET payload = EXCLUDED.payload";
+
+    pub(crate) const SELECT_TRIGGER_EVENT_SQL: &str =
+        "SELECT payload FROM server_trigger_events WHERE trigger_id = $1 AND event_id = $2";
+
+    pub(crate) const LIST_TRIGGER_EVENTS_SQL: &str = "
+        SELECT payload FROM server_trigger_events
+        WHERE trigger_id = $1 ORDER BY created_at, event_id";
+
+    /// Retention: keep the newest 256 events per trigger
+    /// ([`crate::triggers::MAX_EVENTS_PER_TRIGGER`]); the file backend
+    /// enforces the same cap in Rust.
+    pub(crate) const PRUNE_TRIGGER_EVENTS_SQL: &str = "
+        DELETE FROM server_trigger_events
+        WHERE trigger_id = $1 AND event_id NOT IN (
+            SELECT event_id FROM server_trigger_events
+            WHERE trigger_id = $1
+            ORDER BY created_at DESC, event_id DESC
+            LIMIT 256
+        )";
 
     /// Insert-only thread create; returns no row on conflict → 409.
     pub(crate) const INSERT_THREAD_SQL: &str = "
@@ -2518,6 +2744,128 @@ mod postgres {
                 .await
                 .map_err(db_err("delete cron"))?;
             Ok(result.rows_affected() > 0)
+        }
+
+        async fn create_trigger(&self, record: &TriggerRecord) -> StoreResult<bool> {
+            let payload = record_to_payload(record)?;
+            let row = sqlx::query(INSERT_TRIGGER_SQL)
+                .bind(&record.trigger_id)
+                .bind(payload)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("insert trigger"))?;
+            Ok(row.is_some())
+        }
+
+        async fn upsert_trigger(&self, record: &TriggerRecord) -> StoreResult<()> {
+            let payload = record_to_payload(record)?;
+            sqlx::query(UPSERT_TRIGGER_SQL)
+                .bind(&record.trigger_id)
+                .bind(payload)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("upsert trigger"))?;
+            Ok(())
+        }
+
+        async fn get_trigger(&self, trigger_id: &str) -> StoreResult<Option<TriggerRecord>> {
+            let row = sqlx::query(SELECT_TRIGGER_SQL)
+                .bind(trigger_id)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select trigger"))?;
+            row.map(|r| record_from_payload("trigger", r.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_triggers(&self) -> StoreResult<Vec<TriggerRecord>> {
+            let rows = sqlx::query(LIST_TRIGGERS_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list triggers"))?;
+            rows.into_iter()
+                .map(|r| record_from_payload("trigger", r.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn delete_trigger(&self, trigger_id: &str) -> StoreResult<bool> {
+            // Trigger + its event log in one transaction: a crash between
+            // the two deletes must not leave an orphaned log for a deleted
+            // trigger.
+            let mut tx = self
+                .pool()
+                .await?
+                .begin()
+                .await
+                .map_err(db_err("delete trigger"))?;
+            sqlx::query(DELETE_TRIGGER_EVENTS_SQL)
+                .bind(trigger_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("delete trigger events"))?;
+            let result = sqlx::query(DELETE_TRIGGER_SQL)
+                .bind(trigger_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("delete trigger"))?;
+            tx.commit().await.map_err(db_err("delete trigger"))?;
+            Ok(result.rows_affected() > 0)
+        }
+
+        async fn append_trigger_event(&self, record: &TriggerEventRecord) -> StoreResult<()> {
+            let payload = record_to_payload(record)?;
+            let mut tx = self
+                .pool()
+                .await?
+                .begin()
+                .await
+                .map_err(db_err("upsert trigger event"))?;
+            sqlx::query(UPSERT_TRIGGER_EVENT_SQL)
+                .bind(&record.event_id)
+                .bind(&record.trigger_id)
+                .bind(payload)
+                .bind(record.created_at)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("upsert trigger event"))?;
+            // Retention prune rides in the same transaction, so the cap
+            // holds exactly (the file backend prunes under its index lock).
+            sqlx::query(PRUNE_TRIGGER_EVENTS_SQL)
+                .bind(&record.trigger_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("prune trigger events"))?;
+            tx.commit().await.map_err(db_err("upsert trigger event"))?;
+            Ok(())
+        }
+
+        async fn get_trigger_event(
+            &self,
+            trigger_id: &str,
+            event_id: &str,
+        ) -> StoreResult<Option<TriggerEventRecord>> {
+            let row = sqlx::query(SELECT_TRIGGER_EVENT_SQL)
+                .bind(trigger_id)
+                .bind(event_id)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select trigger event"))?;
+            row.map(|r| record_from_payload("trigger event", r.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_trigger_events(
+            &self,
+            trigger_id: &str,
+        ) -> StoreResult<Vec<TriggerEventRecord>> {
+            let rows = sqlx::query(LIST_TRIGGER_EVENTS_SQL)
+                .bind(trigger_id)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list trigger events"))?;
+            rows.into_iter()
+                .map(|r| record_from_payload("trigger event", r.get::<Value, _>("payload")))
+                .collect()
         }
 
         async fn create_thread(
@@ -3767,7 +4115,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 21);
+            assert_eq!(MIGRATION_SQL.len(), 24);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -3823,6 +4171,13 @@ mod postgres {
             assert!(ALTER_TASKS_ADD_COST_USD_SQL.contains("cost_usd DOUBLE PRECISION"));
             assert!(CREATE_COORDINATIONS_SQL.contains("server_coordinations"));
             assert!(CREATE_COORDINATIONS_SQL.contains("JSONB"));
+            // Triggers: records as JSONB like assistants/crons; events carry
+            // a real trigger_id column for the per-trigger listing + prune.
+            assert!(CREATE_TRIGGERS_SQL.contains("server_triggers"));
+            assert!(CREATE_TRIGGERS_SQL.contains("JSONB"));
+            assert!(CREATE_TRIGGER_EVENTS_SQL.contains("server_trigger_events"));
+            assert!(CREATE_TRIGGER_EVENTS_SQL.contains("trigger_id TEXT NOT NULL"));
+            assert!(CREATE_TRIGGER_EVENTS_INDEX_SQL.contains("(trigger_id, created_at, event_id)"));
         }
 
         #[test]

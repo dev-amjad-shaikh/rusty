@@ -46,6 +46,7 @@ use crate::sse;
 use crate::supervision;
 use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
 use crate::threads::ThreadRecord;
+use crate::triggers;
 use crate::{store, GraphRegistry, ServerConfig, RESERVED_NAMES};
 
 /// Shared application state.
@@ -67,6 +68,10 @@ pub(crate) struct AppState {
     /// [`crate::router`] wires a token that never fires;
     /// [`crate::serve_with_shutdown`] wires the real one.
     pub shutdown: tokio_util::sync::CancellationToken,
+    /// Per-trigger debounce buffers (in-memory): events received inside a
+    /// trigger's `debounce_ms` window accumulate here and coalesce into one
+    /// action carrying the array of payloads. Keyed by internal trigger id.
+    pub trigger_debounce: Mutex<HashMap<String, crate::triggers::DebounceBuffer>>,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -122,6 +127,7 @@ pub(crate) fn router_with_shutdown(
         server_store,
         state_locks: Mutex::new(HashMap::new()),
         shutdown,
+        trigger_debounce: Mutex::new(HashMap::new()),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // The outbox relay: publishes pending outbox rows into the task queue
@@ -133,7 +139,7 @@ pub(crate) fn router_with_shutdown(
         state.shutdown.clone(),
     );
 
-    Router::new()
+    let authed = Router::new()
         .route("/ok", get(ok))
         .route("/info", get(info))
         .route("/threads", post(create_thread))
@@ -204,10 +210,41 @@ pub(crate) fn router_with_shutdown(
             "/agents/{agent_id}/activate/release",
             post(release_activation),
         )
+        .route(
+            "/triggers",
+            post(triggers::create_trigger).get(triggers::list_triggers),
+        )
+        .route(
+            "/triggers/{trigger_id}",
+            get(triggers::get_trigger)
+                .patch(triggers::update_trigger)
+                .delete(triggers::delete_trigger),
+        )
+        .route(
+            "/triggers/{trigger_id}/events",
+            get(triggers::list_trigger_events),
+        )
+        .route(
+            "/triggers/{trigger_id}/dead-letter",
+            get(triggers::list_dead_letter),
+        )
+        .route(
+            "/triggers/{trigger_id}/events/{event_id}/replay",
+            post(triggers::replay_event),
+        )
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             crate::auth::require_api_key,
-        ))
+        ));
+
+    Router::new()
+        // The trigger webhook authenticates by HMAC signature (per-trigger
+        // secret), not by API key: external senders (GitHub, Stripe, …)
+        // cannot present an `X-Api-Key`, so the signature is the credential
+        // — and it resolves the owning tenant among same-external-id
+        // triggers. Everything else stays behind the API-key layer.
+        .route("/triggers/{trigger_id}/webhook", post(triggers::webhook))
+        .merge(authed)
         // Outermost layer: permissive CORS so browser clients (e.g. the
         // Studio) can call the API from any origin, and OPTIONS preflights
         // are answered before the API-key middleware runs. Production
@@ -220,7 +257,7 @@ pub(crate) fn router_with_shutdown(
 // Helpers
 // --------------------------------------------------------------------- //
 
-fn internal_err<E: std::fmt::Display>(e: E) -> ApiError {
+pub(crate) fn internal_err<E: std::fmt::Display>(e: E) -> ApiError {
     ApiError::internal(e.to_string())
 }
 
@@ -247,7 +284,7 @@ async fn require_thread(
 /// separators; all-dots ids are rejected (parent-directory components), as
 /// are the reserved layout names in [`RESERVED_NAMES`] — an id of `crons`
 /// would otherwise write checkpoint files into the cron-records directory.
-fn validate_client_id(kind: &str, id: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_client_id(kind: &str, id: &str) -> Result<(), ApiError> {
     let ok = !id.is_empty()
         && id.len() <= 256
         && !id.contains('/')

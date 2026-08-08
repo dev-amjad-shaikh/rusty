@@ -47,6 +47,12 @@
 //! | `GET /assistants` / `GET /assistants/{id}` | list / fetch assistants |
 //! | `POST /crons` | schedule recurring runs (interval secs or 5-field cron expr) |
 //! | `GET /crons` / `DELETE /crons/{id}` | list / delete crons |
+//! | `POST /triggers` | create an event-driven trigger: name, target (assistant or thread), action (`start_run` / `resume_thread` / `send_message`), `{{event.*}}` input template, per-trigger webhook secret, optional debounce window |
+//! | `GET /triggers` / `GET /triggers/{id}` / `PATCH /triggers/{id}` / `DELETE /triggers/{id}` | trigger registry (tenant-scoped) |
+//! | `POST /triggers/{id}/webhook` | signed event ingress: HMAC-SHA256 over the raw body, `X-Rusty-Signature: sha256=<hex>`, constant-time compare; `401` unsigned/invalid. Not behind the API-key layer — the signature is the credential and resolves the owning tenant |
+//! | `GET /triggers/{id}/events` | the trigger's event log (payload hash, action, run id, status), newest first |
+//! | `GET /triggers/{id}/dead-letter` | failed events, inspectable and replayable |
+//! | `POST /triggers/{id}/events/{event_id}/replay` | re-execute a logged event immediately (the replay is itself logged) |
 //! | `PUT /store/{ns}/{key}` | upsert a JSON value in a namespace (`201` create, `200` replace) |
 //! | `GET /store/{ns}/{key}` / `DELETE /store/{ns}/{key}` | fetch / delete one item |
 //! | `GET /store/{ns}` | list a namespace's items |
@@ -95,6 +101,7 @@ mod store;
 mod supervision;
 mod tasks;
 mod threads;
+mod triggers;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -122,8 +129,9 @@ pub use runs::RunStatus;
 pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
 
 /// Names the JSON-file layout already owns at the store root
-/// (`agent_leases/`, `agents/`, `assistants/`, `crons/`, `journals/`,
-/// `outbox/`, `store/`, `tasks/`, `threads/`, plus the `latest` pointer
+/// (`agent_leases/`, `agents/`, `assistants/`, `coordinations/`, `crons/`,
+/// `journals/`, `outbox/`, `store/`, `tasks/`, `threads/`,
+/// `trigger_events/`, `triggers/`, plus the `latest` pointer
 /// file inside each thread's checkpoint dir).
 /// Client-chosen ids and tenant ids claiming one of these would write
 /// checkpoints into platform directories (or platform records into
@@ -140,6 +148,8 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "store",
     "tasks",
     "threads",
+    "trigger_events",
+    "triggers",
     "latest",
 ];
 
