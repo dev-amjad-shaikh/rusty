@@ -26,7 +26,6 @@ use std::path::{Path, PathBuf};
 
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
 use rusty_agent_runtime::journal::JournalSnapshot;
-use rusty_agent_runtime::record::EffectReceipt;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -35,6 +34,7 @@ use crate::agents::{
     MailboxClaimScope,
 };
 use crate::assistants::{self, AssistantRecord};
+use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::journals;
 use crate::outbox::{self, OutboxRecord};
@@ -150,16 +150,16 @@ pub(crate) trait ServerStore: Send + Sync {
         lease_ms: u64,
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<MutationOutcome>;
-    /// Settle the task held by `worker_id` as completed, storing `result`
-    /// and the effect `receipt` the worker reported with it (when any — see
-    /// [`crate::tasks::TaskRecord::receipt`]).
+    /// Settle the task held by `worker_id` as completed, storing the
+    /// worker's [`tasks::CompletionReport`]: result payload, effect receipt,
+    /// and settlement cost evidence (see [`crate::tasks::TaskRecord::receipt`]
+    /// and [`crate::tasks::TaskRecord::tokens`]).
     async fn complete_task(
         &self,
         tenant: &str,
         task_id: &str,
         worker_id: &str,
-        result: Value,
-        receipt: Option<EffectReceipt>,
+        report: tasks::CompletionReport,
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<MutationOutcome>;
     /// Record a failed attempt on the task held by `worker_id`: requeue with
@@ -308,6 +308,36 @@ pub(crate) trait ServerStore: Send + Sync {
     /// tenant).
     async fn list_agents(&self) -> StoreResult<Vec<AgentRecord>>;
 
+    // -- Coordination patterns (R0.7 wave 3) ---------------------------- //
+
+    /// Insert a new coordination record; `false` (no write) when the id
+    /// exists. Coordination ids are tenant-scoped in the id itself (the
+    /// agents convention), so there is no separate tenant argument.
+    async fn create_coordination(&self, record: &CoordinationRecord) -> StoreResult<bool>;
+    /// Overwrite an existing coordination record (the drive's settlement
+    /// latches mutate it in place); `false` (no write) when the id does
+    /// not exist.
+    async fn update_coordination(&self, record: &CoordinationRecord) -> StoreResult<bool>;
+    /// Fetch one coordination by its tenant-scoped id.
+    async fn get_coordination(
+        &self,
+        coordination_id: &str,
+    ) -> StoreResult<Option<CoordinationRecord>>;
+    /// Persist a journal snapshot and submit tasks through the
+    /// transactional outbox as one unit (R0.7 wave 3 — the coordination
+    /// drive's commit point): on Postgres, one transaction — the evidence
+    /// and the work commit together or not at all. On the JSON-file
+    /// backend the outbox rows land first and the journal second, the
+    /// ordering [`ServerStore::checkpoint_and_enqueue`] documents: a crash
+    /// may leave tasks whose journal events never landed (visible, and
+    /// re-journaled by the next drive), but never a journal claiming
+    /// submissions that do not exist.
+    async fn journal_and_enqueue(
+        &self,
+        snapshot: &JournalSnapshot,
+        tasks: &[TaskRecord],
+    ) -> StoreResult<()>;
+
     // -- Activation leases (R0.7 wave 1) -------------------------------- //
     //
     // The single-activation mechanism behind turn-serialized mailbox
@@ -414,6 +444,7 @@ pub(crate) struct JsonFileStore {
     tasks: Mutex<HashMap<String, TaskRecord>>,
     outbox: Mutex<HashMap<String, OutboxRecord>>,
     agents: Mutex<HashMap<String, AgentRecord>>,
+    coordinations: Mutex<HashMap<String, CoordinationRecord>>,
     agent_leases: Mutex<HashMap<String, ActivationLease>>,
 }
 
@@ -429,6 +460,7 @@ impl JsonFileStore {
             tasks: Mutex::new(tasks::load(root)),
             outbox: Mutex::new(outbox::load(root)),
             agents: Mutex::new(agents::load(root)),
+            coordinations: Mutex::new(coordination::load(root)),
             agent_leases: Mutex::new(agents::load_leases(root)),
         }
     }
@@ -662,6 +694,33 @@ impl ServerStore for JsonFileStore {
             .map_err(|e| format!("put checkpoint: {e}"))
     }
 
+    async fn journal_and_enqueue(
+        &self,
+        snapshot: &JournalSnapshot,
+        tasks: &[TaskRecord],
+    ) -> StoreResult<()> {
+        // Outbox-first, journal-second — the ordering
+        // `checkpoint_and_enqueue` documents: a crash may leave submitted
+        // tasks whose journal events never landed (the next drive
+        // re-journals them), but never a journal claiming submissions that
+        // do not exist. One JSON file cannot transact across the two.
+        {
+            let mut map = self.outbox.lock().await;
+            for record in tasks {
+                // A retried drive skips rows already pending.
+                if map.contains_key(&record.task_id) {
+                    continue;
+                }
+                let row = OutboxRecord::new(record.clone(), chrono::Utc::now());
+                outbox::persist(&self.root, &row)
+                    .await
+                    .map_err(io_err("persist outbox row"))?;
+                map.insert(row.outbox_id.clone(), row);
+            }
+        }
+        self.put_journal(snapshot).await
+    }
+
     async fn claim_task(
         &self,
         tenant: &str,
@@ -746,12 +805,11 @@ impl ServerStore for JsonFileStore {
         tenant: &str,
         task_id: &str,
         worker_id: &str,
-        result: Value,
-        receipt: Option<EffectReceipt>,
+        report: tasks::CompletionReport,
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<MutationOutcome> {
         self.mutate_task(tenant, task_id, worker_id, |task| {
-            task.complete(result, receipt, now);
+            task.complete(report.result, report.receipt, report.cost, now);
         })
         .await
     }
@@ -765,7 +823,13 @@ impl ServerStore for JsonFileStore {
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<MutationOutcome> {
         self.mutate_task(tenant, task_id, worker_id, |task| {
-            task.fail(report.error_class, &report.message, report.retryable, now);
+            task.fail(
+                report.error_class,
+                &report.message,
+                report.retryable,
+                report.cost,
+                now,
+            );
         })
         .await
     }
@@ -1013,6 +1077,46 @@ impl ServerStore for JsonFileStore {
 
     async fn list_agents(&self) -> StoreResult<Vec<AgentRecord>> {
         Ok(self.agents.lock().await.values().cloned().collect())
+    }
+
+    async fn create_coordination(&self, record: &CoordinationRecord) -> StoreResult<bool> {
+        let mut map = self.coordinations.lock().await;
+        if map.contains_key(&record.coordination_id) {
+            return Ok(false);
+        }
+        // Hold the lock across the file write so a concurrent create of the
+        // same id can't interleave (the agents convention).
+        coordination::persist(&self.root, record)
+            .await
+            .map_err(io_err("persist coordination"))?;
+        map.insert(record.coordination_id.clone(), record.clone());
+        Ok(true)
+    }
+
+    async fn update_coordination(&self, record: &CoordinationRecord) -> StoreResult<bool> {
+        let mut map = self.coordinations.lock().await;
+        if !map.contains_key(&record.coordination_id) {
+            return Ok(false);
+        }
+        // Persist before the index swap: a failed write must not leave
+        // in-memory state a restart would silently rewind.
+        coordination::persist(&self.root, record)
+            .await
+            .map_err(io_err("persist coordination"))?;
+        map.insert(record.coordination_id.clone(), record.clone());
+        Ok(true)
+    }
+
+    async fn get_coordination(
+        &self,
+        coordination_id: &str,
+    ) -> StoreResult<Option<CoordinationRecord>> {
+        Ok(self
+            .coordinations
+            .lock()
+            .await
+            .get(coordination_id)
+            .cloned())
     }
 
     async fn claim_activation(
@@ -1273,7 +1377,6 @@ mod postgres {
     use chrono::{DateTime, Utc};
     use rusty_agent_runtime::checkpoint::Checkpoint;
     use rusty_agent_runtime::journal::JournalSnapshot;
-    use rusty_agent_runtime::record::EffectReceipt;
     use serde_json::Value;
     use sqlx::{PgPool, Row};
     use tokio::sync::OnceCell;
@@ -1284,6 +1387,7 @@ mod postgres {
         MailboxClaimScope,
     };
     use crate::assistants::AssistantRecord;
+    use crate::coordination::CoordinationRecord;
     use crate::crons::CronRecord;
     use crate::outbox::OutboxRecord;
     use crate::store::StoreItem;
@@ -1369,6 +1473,9 @@ mod postgres {
             deadline         TIMESTAMPTZ,
             worker_version   TEXT,
             recipient        TEXT,
+            parent           TEXT,
+            tokens           JSONB,
+            cost_usd         DOUBLE PRECISION,
             next_attempt_at  TIMESTAMPTZ,
             created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -1426,6 +1533,31 @@ mod postgres {
         ALTER TABLE server_tasks
             ADD COLUMN IF NOT EXISTS recipient TEXT";
 
+    /// R0.7 wave-3 additive column for databases whose `server_tasks`
+    /// predates coordination patterns: the causal parent — the journal
+    /// event id the task was submitted under (`NULL` = submitted outside
+    /// any journaled causality). TEXT like `run_id`/`thread_id`: it names
+    /// an event, nothing filters on it, so no index.
+    pub(crate) const ALTER_TASKS_ADD_PARENT_SQL: &str = "
+        ALTER TABLE server_tasks
+            ADD COLUMN IF NOT EXISTS parent TEXT";
+
+    /// See [`ALTER_TASKS_ADD_PARENT_SQL`]: the settlement token usage the
+    /// worker reported (`NULL` = none reported). JSONB because the value is
+    /// a structured core contract ([`rusty_agent_runtime::llm::Usage`]),
+    /// stored verbatim like `receipt`.
+    pub(crate) const ALTER_TASKS_ADD_TOKENS_SQL: &str = "
+        ALTER TABLE server_tasks
+            ADD COLUMN IF NOT EXISTS tokens JSONB";
+
+    /// See [`ALTER_TASKS_ADD_PARENT_SQL`]: the settlement monetary cost the
+    /// worker reported (`NULL` = none reported). DOUBLE PRECISION matches
+    /// the evidence-not-accounting rule of
+    /// [`rusty_agent_runtime::record::RunEvent::cost_usd`].
+    pub(crate) const ALTER_TASKS_ADD_COST_USD_SQL: &str = "
+        ALTER TABLE server_tasks
+            ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION";
+
     /// `server_outbox`: the transactional outbox (R0.6 wave 2b). One row per
     /// pending task submission, 1:1 with the task it carries (`outbox_id` is
     /// the task id — re-writing the same row is a no-op). The task travels
@@ -1474,6 +1606,19 @@ mod postgres {
             acquired_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )";
 
+    /// `server_coordinations` (R0.7 wave 3): the coordination registry.
+    /// Same shape discipline as `server_agents` — the id is the primary key
+    /// (tenant-scoped inside the id itself) and the record travels as one
+    /// JSONB payload. Nothing filters on record fields: drives are
+    /// triggered by member-task settlements and reads, both of which
+    /// address the record by id.
+    pub(crate) const CREATE_COORDINATIONS_SQL: &str = "
+        CREATE TABLE IF NOT EXISTS server_coordinations (
+            coordination_id TEXT PRIMARY KEY,
+            payload         JSONB NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -1489,10 +1634,14 @@ mod postgres {
         ALTER_TASKS_ADD_RECEIPT_SQL,
         ALTER_TASKS_ADD_WORKER_VERSION_SQL,
         ALTER_TASKS_ADD_RECIPIENT_SQL,
+        ALTER_TASKS_ADD_PARENT_SQL,
+        ALTER_TASKS_ADD_TOKENS_SQL,
+        ALTER_TASKS_ADD_COST_USD_SQL,
         CREATE_OUTBOX_SQL,
         CREATE_OUTBOX_PENDING_INDEX_SQL,
         CREATE_AGENTS_SQL,
         CREATE_AGENT_LEASES_SQL,
+        CREATE_COORDINATIONS_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -1588,9 +1737,9 @@ mod postgres {
         INSERT INTO server_tasks (
             task_id, tenant, kind, payload, pool, status,
             attempt, max_attempts, error_class, effect, idempotency_key,
-            run_id, thread_id, deadline, worker_version, recipient, next_attempt_at, created_at, updated_at
+            run_id, thread_id, deadline, worker_version, recipient, parent, next_attempt_at, created_at, updated_at
         ) VALUES (
-            $1, $2, $3, $4, $5, 'queued', 0, $6, NULL, $7, $8, $9, $10, $11, $12, $13, NULL, $14, $14
+            $1, $2, $3, $4, $5, 'queued', 0, $6, NULL, $7, $8, $9, $10, $11, $12, $13, $15, NULL, $14, $14
         )
         ON CONFLICT DO NOTHING
         RETURNING task_id";
@@ -1599,7 +1748,7 @@ mod postgres {
     pub(crate) const SELECT_TASK_BY_IDEMPOTENCY_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
         FROM server_tasks
         WHERE tenant = $1 AND idempotency_key = $2";
 
@@ -1675,7 +1824,7 @@ mod postgres {
         WHERE task_id = $1
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// Heartbeat: extends the lease only while the caller holds it. No row
     /// means unknown/cross-tenant (404) or lease lost (409), distinguished
@@ -1687,49 +1836,52 @@ mod postgres {
         WHERE task_id = $1 AND tenant = $2 AND lease_owner = $3 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
-    /// Complete: settle only the caller's own lease, storing the result and
-    /// the effect receipt the worker reported with it (`$6`, JSONB — `NULL`
-    /// when none).
+    /// Complete: settle only the caller's own lease, storing the result,
+    /// the effect receipt (`$6`, JSONB — `NULL` when none), and the
+    /// settlement cost evidence (`$7` JSONB usage, `$8` cost — `NULL`s
+    /// when the worker reported nothing) (R0.7 wave 3).
     pub(crate) const COMPLETE_TASK_SQL: &str = "
         UPDATE server_tasks
         SET status = 'completed', result = $4, lease_owner = NULL,
             lease_expires_at = NULL, next_attempt_at = NULL, updated_at = $5,
-            receipt = $6
+            receipt = $6, tokens = $7, cost_usd = $8
         WHERE task_id = $1 AND tenant = $2 AND lease_owner = $3 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// Fail, step 1: lock the row (the requeue-vs-dead decision needs the
     /// current attempt count, and concurrent settlement must serialize).
     pub(crate) const FAIL_SELECT_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
         FROM server_tasks
         WHERE task_id = $1 AND tenant = $2
         FOR UPDATE";
 
     /// Fail, step 2: apply the decision computed in Rust
-    /// ([`crate::tasks::TaskRecord::fail`]) to the locked row.
+    /// ([`crate::tasks::TaskRecord::fail`]) to the locked row, including
+    /// the settlement cost evidence (`$7` JSONB usage, `$8` cost) the
+    /// worker reported with the failure (R0.7 wave 3).
     pub(crate) const FAIL_UPDATE_SQL: &str = "
         UPDATE server_tasks
         SET status = $2, error_class = $3, last_error = $4,
             lease_owner = NULL, lease_expires_at = NULL,
-            next_attempt_at = $5, updated_at = $6
+            next_attempt_at = $5, updated_at = $6, tokens = $7, cost_usd = $8
         WHERE task_id = $1
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// Cancel, step 1: lock the row (the terminal check and the transition
     /// must serialize against claims and settlements).
     pub(crate) const CANCEL_SELECT_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
         FROM server_tasks
         WHERE task_id = $1 AND tenant = $2
         FOR UPDATE";
@@ -1746,7 +1898,7 @@ mod postgres {
         WHERE task_id = $1
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// Run cancel, part 1: the run's non-leased, non-terminal tasks move to
     /// the terminal `cancelled` state immediately.
@@ -1758,7 +1910,7 @@ mod postgres {
           AND (status = 'queued' OR (status = 'failed' AND next_attempt_at IS NOT NULL))
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// Run cancel, part 2: the run's leased tasks keep their leases and
     /// get `cancel_requested` set — their holders learn on the next
@@ -1769,7 +1921,7 @@ mod postgres {
         WHERE tenant = $1 AND run_id = $2 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// Tenant-scoped existence probe distinguishing 404 from 409 after a
     /// lease-guarded update matched no row.
@@ -1779,20 +1931,20 @@ mod postgres {
     pub(crate) const SELECT_TASK_SQL: &str =
         "SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
         FROM server_tasks WHERE task_id = $1 AND tenant = $2";
 
     pub(crate) const LIST_TASKS_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
         FROM server_tasks
         WHERE tenant = $1 ORDER BY created_at, task_id";
 
     pub(crate) const LIST_TASKS_BY_STATUS_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
         FROM server_tasks
         WHERE tenant = $1 AND status = $2 ORDER BY created_at, task_id";
 
@@ -1904,6 +2056,23 @@ mod postgres {
         WHERE agent_id = $1
         RETURNING agent_id";
 
+    /// Coordination registry statements (R0.7 wave 3) — the
+    /// `server_agents` discipline (payload JSONB, id primary key) applied
+    /// to `server_coordinations`.
+    pub(crate) const INSERT_COORDINATION_SQL: &str = "
+        INSERT INTO server_coordinations (coordination_id, payload)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        RETURNING coordination_id";
+
+    pub(crate) const SELECT_COORDINATION_SQL: &str =
+        "SELECT payload FROM server_coordinations WHERE coordination_id = $1";
+
+    pub(crate) const UPDATE_COORDINATION_SQL: &str = "
+        UPDATE server_coordinations SET payload = $2
+        WHERE coordination_id = $1
+        RETURNING coordination_id";
+
     /// Agent cancel (R0.7 wave 2), part 1: the mailbox's queued and
     /// retry-scheduled messages go terminal-`cancelled` immediately. The
     /// recipient-scoped twin of [`CANCEL_RUN_FINALIZE_SQL`].
@@ -1915,7 +2084,7 @@ mod postgres {
           AND (status = 'queued' OR (status = 'failed' AND next_attempt_at IS NOT NULL))
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// Agent cancel, part 2: the mailbox's leased turn keeps its lease and
     /// gets `cancel_requested` set — its holder learns on the next
@@ -1927,7 +2096,7 @@ mod postgres {
         WHERE tenant = $1 AND recipient = $2 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
 
     /// The runtime's direct DLQ write (R0.7 wave 2): a task inserted
     /// terminal-`dead` with its evidence (`last_error`, payload) and no
@@ -2097,6 +2266,10 @@ mod postgres {
                 serde_json::from_value(raw).map_err(|e| format!("corrupt task receipt: {e}"))
             })
             .transpose()?;
+        let tokens = row
+            .get::<Option<Value>, _>("tokens")
+            .map(|raw| serde_json::from_value(raw).map_err(|e| format!("corrupt task tokens: {e}")))
+            .transpose()?;
         Ok(TaskRecord {
             task_id: row.get("task_id"),
             tenant: row.get("tenant"),
@@ -2113,8 +2286,11 @@ mod postgres {
             idempotency_key: row.get("idempotency_key"),
             result: row.get("result"),
             receipt,
+            tokens,
+            cost_usd: row.get("cost_usd"),
             run_id: row.get("run_id"),
             thread_id: row.get("thread_id"),
+            parent: row.get("parent"),
             cancel_requested: row.get("cancel_requested"),
             deadline: row.get("deadline"),
             worker_version: row.get("worker_version"),
@@ -2157,6 +2333,7 @@ mod postgres {
             .bind(&record.worker_version)
             .bind(&record.recipient)
             .bind(record.created_at)
+            .bind(&record.parent)
     }
 
     /// Assemble an [`OutboxRecord`] from one `server_outbox` row; a corrupt
@@ -2593,18 +2770,25 @@ mod postgres {
             tenant: &str,
             task_id: &str,
             worker_id: &str,
-            result: Value,
-            receipt: Option<EffectReceipt>,
+            report: tasks::CompletionReport,
             now: DateTime<Utc>,
         ) -> StoreResult<MutationOutcome> {
-            let receipt = receipt.as_ref().map(record_to_payload).transpose()?;
+            let receipt = report.receipt.as_ref().map(record_to_payload).transpose()?;
+            let tokens = report
+                .cost
+                .tokens
+                .as_ref()
+                .map(record_to_payload)
+                .transpose()?;
             let updated = sqlx::query(COMPLETE_TASK_SQL)
                 .bind(task_id)
                 .bind(tenant)
                 .bind(worker_id)
-                .bind(result)
+                .bind(report.result)
                 .bind(now)
                 .bind(receipt)
+                .bind(tokens)
+                .bind(report.cost.cost_usd)
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("complete task"))?;
@@ -2639,7 +2823,14 @@ mod postgres {
             // Retry / dead-letter / fail-outright, computed by the same
             // record logic the file backend runs — core's shared
             // `classify_retry` (one decision, one test surface).
-            task.fail(report.error_class, &report.message, report.retryable, now);
+            task.fail(
+                report.error_class,
+                &report.message,
+                report.retryable,
+                report.cost,
+                now,
+            );
+            let tokens = task.tokens.as_ref().map(record_to_payload).transpose()?;
             sqlx::query(FAIL_UPDATE_SQL)
                 .bind(&task.task_id)
                 .bind(task.status.as_str())
@@ -2647,6 +2838,8 @@ mod postgres {
                 .bind(&task.last_error)
                 .bind(task.next_attempt_at)
                 .bind(now)
+                .bind(tokens)
+                .bind(task.cost_usd)
                 .execute(&mut *tx)
                 .await
                 .map_err(db_err("fail task"))?;
@@ -3122,6 +3315,75 @@ mod postgres {
                 .collect()
         }
 
+        async fn create_coordination(&self, record: &CoordinationRecord) -> StoreResult<bool> {
+            let payload = record_to_payload(record)?;
+            let row = sqlx::query(INSERT_COORDINATION_SQL)
+                .bind(&record.coordination_id)
+                .bind(payload)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("insert coordination"))?;
+            Ok(row.is_some())
+        }
+
+        async fn update_coordination(&self, record: &CoordinationRecord) -> StoreResult<bool> {
+            let payload = record_to_payload(record)?;
+            let row = sqlx::query(UPDATE_COORDINATION_SQL)
+                .bind(&record.coordination_id)
+                .bind(payload)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("update coordination"))?;
+            Ok(row.is_some())
+        }
+
+        async fn get_coordination(
+            &self,
+            coordination_id: &str,
+        ) -> StoreResult<Option<CoordinationRecord>> {
+            let row = sqlx::query(SELECT_COORDINATION_SQL)
+                .bind(coordination_id)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select coordination"))?;
+            row.map(|r| record_from_payload("coordination", r.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn journal_and_enqueue(
+            &self,
+            snapshot: &JournalSnapshot,
+            tasks: &[TaskRecord],
+        ) -> StoreResult<()> {
+            // The one transaction the drive's commit point needs: the
+            // journal evidence and every outbox row commit together or not
+            // at all. Both inserts are idempotent (UPSERT on run_id, ON
+            // CONFLICT DO NOTHING on outbox_id), so a retried drive simply
+            // re-commits the same facts.
+            let journal = record_to_payload(snapshot)?;
+            let pool = self.pool().await?;
+            let mut tx = pool.begin().await.map_err(db_err("journal and enqueue"))?;
+            sqlx::query(UPSERT_JOURNAL_SQL)
+                .bind(&snapshot.run_id)
+                .bind(journal)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("journal and enqueue"))?;
+            for record in tasks {
+                let payload = record_to_payload(record)?;
+                sqlx::query(INSERT_OUTBOX_SQL)
+                    .bind(&record.task_id)
+                    .bind(&record.tenant)
+                    .bind(payload)
+                    .bind(record.created_at)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err("journal and enqueue"))?;
+            }
+            tx.commit().await.map_err(db_err("journal and enqueue"))?;
+            Ok(())
+        }
+
         async fn claim_activation(
             &self,
             agent_id: &str,
@@ -3480,7 +3742,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 17);
+            assert_eq!(MIGRATION_SQL.len(), 21);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -3526,6 +3788,16 @@ mod postgres {
             assert!(CREATE_AGENT_LEASES_SQL.contains("server_agent_leases"));
             assert!(CREATE_AGENT_LEASES_SQL.contains("fencing"));
             assert!(CREATE_AGENT_LEASES_SQL.contains("expires_at"));
+            // R0.7 wave 3: causal parentage and settlement cost arrive
+            // additively; the coordination registry gets its own table.
+            assert!(ALTER_TASKS_ADD_PARENT_SQL.contains("ALTER TABLE server_tasks"));
+            assert!(ALTER_TASKS_ADD_PARENT_SQL.contains("parent TEXT"));
+            assert!(ALTER_TASKS_ADD_TOKENS_SQL.contains("ALTER TABLE server_tasks"));
+            assert!(ALTER_TASKS_ADD_TOKENS_SQL.contains("tokens JSONB"));
+            assert!(ALTER_TASKS_ADD_COST_USD_SQL.contains("ALTER TABLE server_tasks"));
+            assert!(ALTER_TASKS_ADD_COST_USD_SQL.contains("cost_usd DOUBLE PRECISION"));
+            assert!(CREATE_COORDINATIONS_SQL.contains("server_coordinations"));
+            assert!(CREATE_COORDINATIONS_SQL.contains("JSONB"));
         }
 
         #[test]
@@ -3546,6 +3818,9 @@ mod postgres {
                 "receipt",
                 "worker_version",
                 "recipient",
+                "parent",
+                "tokens",
+                "cost_usd",
             ] {
                 assert!(CREATE_TASKS_SQL.contains(col), "missing column {col}");
             }
@@ -3602,12 +3877,15 @@ mod postgres {
                 assert!(sql.contains("status = 'leased'"));
             }
             // Complete also stores the reported effect receipt (additive
-            // JSONB column; NULL when none is reported).
+            // JSONB column; NULL when none is reported) and the wave-3
+            // settlement cost evidence.
             assert!(COMPLETE_TASK_SQL.contains("receipt = $6"));
+            assert!(COMPLETE_TASK_SQL.contains("tokens = $7, cost_usd = $8"));
             // Fail locks the row first: the attempt count read and the
             // requeue/dead write must serialize against other settlers.
             assert!(FAIL_SELECT_SQL.contains("FOR UPDATE"));
             assert!(FAIL_UPDATE_SQL.contains("lease_owner = NULL"));
+            assert!(FAIL_UPDATE_SQL.contains("tokens = $7, cost_usd = $8"));
         }
 
         #[test]
@@ -3852,6 +4130,7 @@ mod postgres {
                     thread_id: None,
                     deadline: None,
                     worker_version: None,
+                    parent: None,
                 },
                 Utc::now(),
             )

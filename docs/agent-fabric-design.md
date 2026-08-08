@@ -570,6 +570,43 @@ leaves zero orphan tasks (asserted by queue inspection).
 outbox-submitted, with `TeamTrace` cross-journal assembly. Exit: per-pattern integration
 tests covering member crash mid-pattern.
 
+> **Wave 3 status: implemented.** The typed contracts landed in core as written
+> (`CoordinationContract` tagged `pattern`, golden-tested — delegate with `ContextGrant`
+> narrow-only grants, fan-out with the in-flight window and `partial` / `fail_fast`
+> member-failure policy, race with the submission-time effect gate: every candidate must
+> declare a freely-repeatable effect because a loser is cancelled at an arbitrary point,
+> quorum with `majority_equal` / `first_k` resolvers — the `custom` resolver's wire shape is
+> pinned but rejected at submission, the wave-3 boundary). The server runtime is one
+> convergent driver (`coordination.rs`, the supervision precedent): the coordination journal
+> (`coordination:{tenant}:{id}`) is the latch book — `CoordinationStart`, one `MailboxSend`
+> per member, one `MailboxReceive` per settlement observation, `CoordinationEnd` — scanned
+> back out of the integrity-verified journal on every drive, so nothing the pattern knows
+> lives only in memory; member task ids (`{tenant}--{cid}--{member}`), idempotency keys, and
+> the outcome message id are derived, not minted, so retried drives converge. Settlement
+> hooks fire from the complete / terminal-fail / cancel routes after durability; claim-path
+> finalizations have no route hook, so `GET /coordination/{id}` reconciles on read
+> (documented impurity, convergent). The settled outcome is one fact in three views —
+> `CoordinationEnd` output, record, and the `coordination_result` message to the
+> delegator's mailbox (a reserved kind the delegator's manifest must declare, checked at
+> submission or the pattern would strand) — carrying every member's disposition in contract
+> order (missing members are journaled, never silent) and the waste accounting (race losers'
+> and cancelled members' reported `tokens` / `cost_usd`, new additive settlement-evidence
+> columns on `server_tasks`). A race whose candidates all fail dead-letters its outcome
+> quota-free (the root-escalation precedent); a quorum whose threshold becomes unreachable
+> fails open as `unreachable` and never silently downgrades k; the fan-out merge is
+> byte-deterministic in member task-id order, never completion order. `TeamTrace`
+> (`rusty-core/src/team_trace.rs`) assembles the cross-journal causal tree from verified
+> snapshots behind `GET /coordination/{id}/trace`, deterministic by construction. Both
+> backends: the file store keeps one JSON per coordination; Postgres adds the
+> `server_coordinations` payload table and commits journal + outbox rows in one
+> transaction (`journal_and_enqueue`). The exit criterion is automated in
+> `rusty-server/tests/coordination.rs` — every pattern crashed mid-flight: delegate member
+> crash mid-turn (lease lapse, re-claim at attempt 2, settle), fan-out partial and
+> fail-fast member deaths, race all-candidates-failed → DLQ, quorum majority resolving
+> with a crashed juror — plus the effect-gate 400s, window backpressure, deterministic
+> merge, trace connectivity, restart durability, deduplication, and tenant isolation;
+> parity over live Postgres in `rusty-server/tests/postgres_coordination.rs`.
+
 **Wave 4 — state scaling and numbers.** Channel-granularity CoW in `state.rs`, delta
 checkpoints in both durable checkpointers and the server store, the artifact store, and the
 benchmark suite extended with team-realistic workloads. Exit: numbers published in

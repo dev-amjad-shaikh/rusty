@@ -13,14 +13,19 @@ use axum::routing::{delete, get, post, put};
 use axum::{middleware, Extension, Json, Router};
 use chrono::Utc;
 use futures::Stream;
-use rusty_agent_runtime::agents::{AgentId, CapabilityManifest};
+use rusty_agent_runtime::agents::{
+    AgentId, CapabilityManifest, CoordinationContract, DelegateContract, FanOutContract,
+    QuorumContract, RaceContract, COORDINATION_RESULT_KIND,
+};
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
 use rusty_agent_runtime::journal::{Clock, Journal, JournalSnapshot, RngSource};
+use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::record::{EffectReceipt, RunEventKind};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
+use rusty_agent_runtime::team_trace::TeamTrace;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -30,6 +35,7 @@ use crate::agents::{
 };
 use crate::assistants::AssistantRecord;
 use crate::auth::TenantContext;
+use crate::coordination;
 use crate::crons::{self, CronRecord, OnRunCompleted};
 use crate::error::ApiError;
 use crate::runs::{
@@ -180,6 +186,15 @@ pub(crate) fn router_with_shutdown(
         .route("/agents/{agent_id}/restart", post(restart_agent))
         .route("/agents/{agent_id}/supervision", get(get_agent_supervision))
         .route("/teams/{team_id}/cancel", post(cancel_team))
+        .route("/coordination/delegate", post(submit_delegate))
+        .route("/coordination/fan_out", post(submit_fan_out))
+        .route("/coordination/race", post(submit_race))
+        .route("/coordination/quorum", post(submit_quorum))
+        .route("/coordination/{coordination_id}", get(get_coordination))
+        .route(
+            "/coordination/{coordination_id}/trace",
+            get(get_coordination_trace),
+        )
         .route("/agents/{agent_id}/activate", post(activate_agent))
         .route(
             "/agents/{agent_id}/activate/heartbeat",
@@ -1799,6 +1814,12 @@ struct EnqueueTaskPayload {
     /// equivalent for embedders.
     #[serde(default)]
     recipient: Option<String>,
+    /// Causal parentage (R0.7 wave 3): the journal event id this task is
+    /// submitted under, stitched into the team's trace by TeamTrace.
+    /// Optional — coordination member tasks carry it (the runtime sets it,
+    /// not the member); ordinary submissions leave it absent.
+    #[serde(default)]
+    parent: Option<String>,
 }
 
 /// Validate an enqueue payload and build the fresh [`TaskRecord`] it
@@ -1855,6 +1876,9 @@ fn build_task_record(
     if let Some(recipient) = &payload.recipient {
         agents::validate_recipient(recipient).map_err(ApiError::bad_request)?;
     }
+    if let Some(parent) = &payload.parent {
+        tasks::validate_label("parent", parent, 512).map_err(ApiError::bad_request)?;
+    }
 
     Ok(TaskRecord::new(
         tasks::NewTask {
@@ -1871,6 +1895,7 @@ fn build_task_record(
             deadline,
             worker_version: payload.worker_version,
             recipient: payload.recipient,
+            parent: payload.parent,
         },
         Utc::now(),
     ))
@@ -2077,6 +2102,14 @@ struct CompleteTaskPayload {
     /// run as an `effect_receipt` event when the task carries run linkage.
     #[serde(default)]
     receipt: Option<EffectReceipt>,
+    /// Settlement cost evidence (R0.7 wave 3): the token usage this task
+    /// consumed, reported at completion. Stored on the record, where the
+    /// coordination runtime's waste accounting reads it.
+    #[serde(default)]
+    tokens: Option<Usage>,
+    /// See `tokens`.
+    #[serde(default)]
+    cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2090,6 +2123,14 @@ struct FailTaskPayload {
     /// The worker's permanence judgment: `false` dead-letters immediately,
     /// regardless of remaining attempts.
     retryable: bool,
+    /// Settlement cost evidence (R0.7 wave 3): what the failed attempt
+    /// consumed, when the worker knows. A race loser's reported waste
+    /// survives on the record.
+    #[serde(default)]
+    tokens: Option<Usage>,
+    /// See `tokens`.
+    #[serde(default)]
+    cost_usd: Option<f64>,
 }
 
 /// Shared 404/409 mapping for the lease-guarded mutations: 404 when the task
@@ -2183,14 +2224,33 @@ async fn complete_task(
             tenant.tenant(),
             &task_id,
             &payload.worker_id,
-            payload.result,
-            payload.receipt,
+            tasks::CompletionReport {
+                result: payload.result,
+                receipt: payload.receipt,
+                cost: tasks::SettlementCost {
+                    tokens: payload.tokens,
+                    cost_usd: payload.cost_usd,
+                },
+            },
             Utc::now(),
         )
         .await
         .map_err(internal_err)?;
     let task = lease_outcome(outcome, &task_id, &payload.worker_id)?;
     journal_effect_receipt(&state, &tenant, &task).await;
+    // Coordination trigger (R0.7 wave 3): a settled member task drives its
+    // pattern forward. The settlement is already durable; the drive
+    // composes after it, never inside the lease guard (the supervision
+    // precedent).
+    coordination::on_task_settled(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        &tenant,
+        &task,
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
     Ok(Json(task.wire()))
 }
 
@@ -2296,6 +2356,10 @@ async fn fail_task(
                 error_class,
                 message: payload.message,
                 retryable: payload.retryable,
+                cost: tasks::SettlementCost {
+                    tokens: payload.tokens,
+                    cost_usd: payload.cost_usd,
+                },
             },
             Utc::now(),
         )
@@ -2360,6 +2424,21 @@ async fn fail_task(
             }
         }
     }
+    // Coordination trigger (R0.7 wave 3): a *terminally* settled member
+    // task drives its pattern forward — a retry-scheduled failure is not a
+    // settlement, so non-terminal failures take no coordination path. The
+    // drive composes after supervision, after durability.
+    if task.is_terminal() {
+        coordination::on_task_settled(
+            &state.server_store,
+            state.config.quota_for(tenant.tenant()),
+            &tenant,
+            &task,
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    }
     Ok(Json(json!({
         // A retry is outstanding exactly when a next attempt is scheduled;
         // a `failed` task with a null schedule failed outright.
@@ -2391,7 +2470,24 @@ async fn cancel_task(
         .await
         .map_err(internal_err)?;
     match outcome {
-        CancelOutcome::Applied(task) => Ok(Json(task.wire())),
+        CancelOutcome::Applied(task) => {
+            // Coordination trigger (R0.7 wave 3): an immediately-cancelled
+            // member task is a terminal settlement — drive its pattern. A
+            // signalled (leased) task is not settled yet; its holder's
+            // report lands the drive later.
+            if task.is_terminal() {
+                coordination::on_task_settled(
+                    &state.server_store,
+                    state.config.quota_for(tenant.tenant()),
+                    &tenant,
+                    &task,
+                    Utc::now(),
+                )
+                .await
+                .map_err(internal_err)?;
+            }
+            Ok(Json(task.wire()))
+        }
         CancelOutcome::Terminal(status) => Err(ApiError::conflict(format!(
             "task `{task_id}` is already terminal ({}) and cannot be cancelled",
             status.as_str()
@@ -2729,6 +2825,7 @@ async fn send_agent_message(
             deadline: payload.deadline,
             worker_version: None,
             recipient: Some(AgentId::new(agent_id.as_str()).mailbox_recipient()),
+            parent: None,
         },
         &tenant,
     )?;
@@ -3257,5 +3354,487 @@ async fn cancel_team(
     Ok(Json(json!({
         "team_id": team_id,
         "members": cancelled,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// Coordination patterns (R0.7 wave 3)
+// --------------------------------------------------------------------- //
+
+/// Member names the runtime reserves for its own derived task ids
+/// (`{tenant}--{cid}--outcome`, `{tenant}--{cid}--race-dlq`): a member
+/// carrying one would collide with the pattern's own outcome / DLQ tasks.
+const RESERVED_MEMBER_NAMES: &[&str] = &["outcome", "race-dlq"];
+
+#[derive(Debug, Deserialize)]
+struct SubmitDelegatePayload {
+    /// Caller-supplied id for convergent retries (minted when absent):
+    /// re-submitting with the same id returns the existing pattern
+    /// (`deduplicated: true`) instead of starting a second one.
+    #[serde(default)]
+    coordination_id: Option<String>,
+    /// The delegating agent (external id). The outcome is delivered to its
+    /// mailbox as a `coordination_result` message — its manifest must
+    /// declare that kind, checked here (400), or the pattern it starts
+    /// would be stranded. Absent = control-plane submission observed
+    /// through `GET /coordination/{id}` alone.
+    #[serde(default)]
+    delegator: Option<String>,
+    /// Causal parent event id, when the pattern is spawned by a journaled
+    /// step (an outer pattern's event, a delegator's turn event).
+    #[serde(default)]
+    parent: Option<String>,
+    /// The delegate contract.
+    delegate: DelegateContract,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitFanOutPayload {
+    #[serde(default)]
+    coordination_id: Option<String>,
+    #[serde(default)]
+    delegator: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+    fan_out: FanOutContract,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitRacePayload {
+    #[serde(default)]
+    coordination_id: Option<String>,
+    #[serde(default)]
+    delegator: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+    race: RaceContract,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitQuorumPayload {
+    #[serde(default)]
+    coordination_id: Option<String>,
+    #[serde(default)]
+    delegator: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+    quorum: QuorumContract,
+}
+
+/// `POST /coordination/delegate` — submit a delegate pattern → `201
+/// {coordination_id, start_event, submitted}`.
+async fn submit_delegate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitDelegatePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::Delegate(Box::new(payload.delegate)),
+    )
+    .await
+}
+
+/// `POST /coordination/fan_out` — submit a fan-out pattern → `201`.
+async fn submit_fan_out(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitFanOutPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::FanOut(payload.fan_out),
+    )
+    .await
+}
+
+/// `POST /coordination/race` — submit a race → `201`; `400` when any
+/// candidate's declared effect is not freely repeatable (the effect gate:
+/// a race loser is cancel-signalled at an arbitrary point, so every
+/// candidate must be safe to abandon).
+async fn submit_race(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitRacePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::Race(payload.race),
+    )
+    .await
+}
+
+/// `POST /coordination/quorum` — submit a quorum → `201`; `400` for a
+/// threshold outside `1..=members`, duplicate member names, or a custom
+/// resolver (a pinned wire shape wave 3 does not honor).
+async fn submit_quorum(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitQuorumPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::Quorum(payload.quorum),
+    )
+    .await
+}
+
+/// The shared submission pipeline for all four patterns: validate
+/// everything against the registry **before any write**, create the
+/// record, quota-gate, then run the first drive (which journals
+/// `CoordinationStart` and submits the initial window). One surface, so
+/// the patterns can never drift apart in what they accept — the
+/// `build_task_record` discipline.
+async fn submit_coordination(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    coordination_id: Option<String>,
+    delegator: Option<String>,
+    parent: Option<String>,
+    contract: CoordinationContract,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    // Structural validation first: the pattern's own rules (the race
+    // effect gate, quorum bounds, the fan-out window) before any registry
+    // lookup, and before any write.
+    contract
+        .validate()
+        .map_err(|violation| ApiError::bad_request(violation.to_string()))?;
+
+    let coordination_id = coordination_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("coordination_id", &coordination_id)?;
+    if let Some(parent) = &parent {
+        tasks::validate_label("parent", parent, 512).map_err(ApiError::bad_request)?;
+    }
+
+    // Every member: the target agent must be registered at the exact
+    // pinned manifest version and must accept the delegation's kind. An
+    // exact-version pin is the agent-level form of R0.6's worker version
+    // pinning — a redeploy never changes a pattern's semantics
+    // mid-flight.
+    for delegation in contract.members() {
+        coordination::validate_member_label("member", &delegation.member)
+            .map_err(ApiError::bad_request)?;
+        if RESERVED_MEMBER_NAMES.contains(&delegation.member.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "member name `{}` is reserved (it would collide with the pattern's own derived tasks)",
+                delegation.member
+            )));
+        }
+        tasks::validate_label("agent_id", &delegation.agent_id, 256)
+            .map_err(ApiError::bad_request)?;
+        let agent = state
+            .server_store
+            .get_agent(&tenant.scope(&delegation.agent_id))
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "member `{}` target agent `{}` is not registered",
+                    delegation.member, delegation.agent_id
+                ))
+            })?;
+        if agent.manifest.manifest_version != delegation.manifest_version {
+            return Err(ApiError::bad_request(format!(
+                "member `{}` pins manifest version `{}` but agent `{}` is registered at `{}` — the pin must match exactly",
+                delegation.member,
+                delegation.manifest_version,
+                delegation.agent_id,
+                agent.manifest.manifest_version
+            )));
+        }
+        if agent.manifest.accepts_kind(&delegation.kind).is_none() {
+            let declared: Vec<&str> = agent.manifest.accepts.keys().map(String::as_str).collect();
+            return Err(ApiError::bad_request(format!(
+                "member `{}` kind `{}` is not accepted by agent `{}` (manifest declares: {})",
+                delegation.member,
+                delegation.kind,
+                delegation.agent_id,
+                declared.join(", ")
+            )));
+        }
+        // The delegate's context grant may only narrow the target's
+        // declared scopes — a delegation is never a privilege escalation.
+        if let CoordinationContract::Delegate(delegate_contract) = &contract {
+            if let Some(grant) = &delegate_contract.context {
+                if !grant.narrows(&agent.manifest.scopes) {
+                    return Err(ApiError::bad_request(format!(
+                        "context grant widens agent `{}`'s declared scopes ({:?}) — grants may only narrow",
+                        delegation.agent_id, agent.manifest.scopes
+                    )));
+                }
+            }
+        }
+    }
+
+    // The delegator must be able to receive the outcome — the reserved
+    // kind check at the door (see `COORDINATION_RESULT_KIND`).
+    if let Some(delegator) = &delegator {
+        tasks::validate_label("delegator", delegator, 256).map_err(ApiError::bad_request)?;
+        let agent = state
+            .server_store
+            .get_agent(&tenant.scope(delegator))
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::bad_request(format!("delegator agent `{delegator}` is not registered"))
+            })?;
+        if agent
+            .manifest
+            .accepts_kind(COORDINATION_RESULT_KIND)
+            .is_none()
+        {
+            return Err(ApiError::bad_request(format!(
+                "delegator `{delegator}` does not accept `{COORDINATION_RESULT_KIND}` (its manifest must declare the reserved kind — a delegator that cannot receive the outcome would strand every pattern it starts)"
+            )));
+        }
+    }
+
+    let now = Utc::now();
+    let record = coordination::CoordinationRecord {
+        coordination_id: tenant.scope(&coordination_id),
+        delegator,
+        parent,
+        members: contract
+            .members()
+            .into_iter()
+            .map(|delegation| coordination::MemberRecord {
+                member: delegation.member.clone(),
+                agent_id: delegation.agent_id.clone(),
+                manifest_version: delegation.manifest_version.clone(),
+                task_id: coordination::member_task_id(
+                    tenant.tenant(),
+                    &coordination_id,
+                    &delegation.member,
+                ),
+                submitted: false,
+            })
+            .collect(),
+        contract,
+        settled: false,
+        outcome: None,
+        outcome_delivered: false,
+        dlq_written: false,
+        created_at: now,
+        updated_at: now,
+    };
+    let created = state
+        .server_store
+        .create_coordination(&record)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        // Convergent retry of a caller-supplied id: the existing pattern
+        // stands, the caller learns it was deduplicated — the enqueue
+        // idempotency-key discipline applied to whole patterns.
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "coordination_id": coordination_id,
+                "deduplicated": true,
+            })),
+        ));
+    }
+
+    // The submission quota applies to the pattern's initial window —
+    // member work is real queue pressure from the first drive on. Later
+    // windows are gated inside the drive itself.
+    let initial_window = match &record.contract {
+        CoordinationContract::FanOut(contract) => {
+            (contract.max_in_flight as usize).min(contract.members.len())
+        }
+        _ => record.members.len(),
+    };
+    enforce_task_quota(state, tenant, initial_window).await?;
+
+    let driven = coordination::drive(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        tenant,
+        record,
+        now,
+    )
+    .await
+    .map_err(internal_err)?;
+
+    let start_event = coordination::load_journal(&state.server_store, tenant, &coordination_id)
+        .await
+        .map_err(internal_err)?
+        .and_then(|journal| journal.events().first().map(|event| event.id.clone()));
+    let submitted: Vec<Value> = driven
+        .record
+        .members
+        .iter()
+        .filter(|member| member.submitted)
+        .map(|member| json!({"member": member.member, "task_id": member.task_id}))
+        .collect();
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "coordination_id": coordination_id,
+            "start_event": start_event,
+            "submitted": submitted,
+        })),
+    ))
+}
+
+/// `GET /coordination/{coordination_id}` — the pattern's record, current
+/// member dispositions, settled outcome (when done), and its journal
+/// events (integrity-verified).
+///
+/// Deliberately impure: the read **drives** the pattern first
+/// (reconcile-on-read). Claim-path finalizations — a member's deadline
+/// expiring unclaimed, an unanswered cancel — have no route hook, so
+/// without this drive a pattern whose member died silently would look
+/// open forever. The drive is convergent: a read that changes nothing
+/// writes nothing.
+async fn get_coordination(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(coordination_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("coordination_id", &coordination_id)?;
+    let Some(record) = state
+        .server_store
+        .get_coordination(&tenant.scope(&coordination_id))
+        .await
+        .map_err(internal_err)?
+    else {
+        return Err(ApiError::not_found(format!(
+            "coordination `{coordination_id}` not found"
+        )));
+    };
+    let driven = coordination::drive(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        &tenant,
+        record,
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
+    let journal = coordination::load_journal(&state.server_store, &tenant, &coordination_id)
+        .await
+        .map_err(internal_err)?;
+    let members: Vec<Value> = driven
+        .record
+        .members
+        .iter()
+        .map(|member| {
+            let disposition = driven
+                .dispositions
+                .iter()
+                .find(|d| d.member == member.member);
+            json!({
+                "member": member.member,
+                "agent_id": member.agent_id,
+                "manifest_version": member.manifest_version,
+                "task_id": member.task_id,
+                "submitted": member.submitted,
+                "disposition": disposition,
+            })
+        })
+        .collect();
+    let journal_wire = journal.map(|journal| {
+        json!({
+            "run_id": coordination::coordination_journal_run_id(tenant.tenant(), &coordination_id),
+            "events": journal.events(),
+        })
+    });
+    Ok(Json(json!({
+        "coordination_id": coordination_id,
+        "delegator": driven.record.delegator,
+        "parent": driven.record.parent,
+        "contract": driven.record.contract,
+        "members": members,
+        "settled": driven.record.settled,
+        "outcome": driven.record.outcome,
+        "journal": journal_wire,
+        "created_at": driven.record.created_at,
+        "updated_at": driven.record.updated_at,
+    })))
+}
+
+/// `GET /coordination/{coordination_id}/trace` — the TeamTrace: one
+/// connected causal tree across the pattern's journal and any member-task
+/// run journals. Member *supervision* journals are deliberately excluded:
+/// they carry no parent links into the pattern's tree, so including them
+/// would manufacture detached roots and break the connectivity signal.
+async fn get_coordination_trace(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(coordination_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("coordination_id", &coordination_id)?;
+    let Some(record) = state
+        .server_store
+        .get_coordination(&tenant.scope(&coordination_id))
+        .await
+        .map_err(internal_err)?
+    else {
+        return Err(ApiError::not_found(format!(
+            "coordination `{coordination_id}` not found"
+        )));
+    };
+    // Reconcile first (the get_coordination rationale) so the trace
+    // reflects the latest evidence, then assemble from verified snapshots.
+    let driven = coordination::drive(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        &tenant,
+        record,
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
+    let mut snapshots = Vec::new();
+    if let Some(journal) =
+        coordination::load_journal(&state.server_store, &tenant, &coordination_id)
+            .await
+            .map_err(internal_err)?
+    {
+        snapshots.push(journal.snapshot());
+    }
+    for member in &driven.record.members {
+        let Some(task) = state
+            .server_store
+            .get_task(tenant.tenant(), &member.task_id)
+            .await
+            .map_err(internal_err)?
+        else {
+            continue;
+        };
+        let Some(run_id) = &task.run_id else {
+            continue;
+        };
+        if let Some(snapshot) = state
+            .server_store
+            .get_journal(run_id)
+            .await
+            .map_err(internal_err)?
+        {
+            snapshots.push(snapshot);
+        }
+    }
+    let trace = TeamTrace::assemble(&snapshots);
+    Ok(Json(json!({
+        "coordination_id": coordination_id,
+        "connected": trace.is_connected(),
+        "trace": trace,
     })))
 }

@@ -1,0 +1,31 @@
+{
+  "pattern": "race",
+  "candidates": [
+    {
+      "member": "fast",
+      "agent_id": "fast-agent",
+      "manifest_version": "researcher/1.4.0",
+      "kind": "summarize",
+      "input": {
+        "kind": "inline",
+        "value": {
+          "topic": "fast"
+        }
+      },
+      "effect": "idempotent"
+    },
+    {
+      "member": "slow",
+      "agent_id": "slow-agent",
+      "manifest_version": "researcher/1.4.0",
+      "kind": "summarize",
+      "input": {
+        "kind": "inline",
+        "value": {
+          "topic": "slow"
+        }
+      },
+      "effect": "idempotent"
+    }
+  ]
+}

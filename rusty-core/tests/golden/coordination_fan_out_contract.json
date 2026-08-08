@@ -1,0 +1,33 @@
+{
+  "pattern": "fan_out",
+  "members": [
+    {
+      "member": "alpha",
+      "agent_id": "alpha-agent",
+      "manifest_version": "researcher/1.4.0",
+      "kind": "summarize",
+      "input": {
+        "kind": "inline",
+        "value": {
+          "topic": "alpha"
+        }
+      },
+      "effect": "pure"
+    },
+    {
+      "member": "beta",
+      "agent_id": "beta-agent",
+      "manifest_version": "researcher/1.4.0",
+      "kind": "summarize",
+      "input": {
+        "kind": "inline",
+        "value": {
+          "topic": "beta"
+        }
+      },
+      "effect": "read_only"
+    }
+  ],
+  "max_in_flight": 2,
+  "on_member_failure": "partial"
+}

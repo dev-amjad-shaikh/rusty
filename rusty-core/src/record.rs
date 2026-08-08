@@ -365,12 +365,18 @@ pub enum RunEventKind {
     /// carries the recipient (`agent:{agent_id}`), the message kind, and the
     /// task id the queue assigned. The sender-side half of the mailbox
     /// journal pair; the envelope's `parent` links it into the team's causal
-    /// tree. Inert in wave 1 — emission lands with the agent host.
+    /// tree. Wired in wave 3: the coordination runtime journals it into the
+    /// pattern's journal for every member task it submits. Host-emitted
+    /// sends land with the agent host.
     MailboxSend,
 
     /// An agent's activation began a turn on a mailbox message (R0.7): input
     /// carries the task id and idempotency key the turn is processing.
-    /// The recipient-side half of the mailbox pair. Inert in wave 1.
+    /// The recipient-side half of the mailbox pair. Wired in wave 3 as the
+    /// settlement observation: the coordination runtime journals it when a
+    /// member task settles, with the terminal status and result — the
+    /// pattern's evidence half of the pair. Host-emitted turn begins land
+    /// with the agent host.
     MailboxReceive,
 
     /// A supervision decision was made (R0.7 wave 2): output carries the
@@ -385,12 +391,16 @@ pub enum RunEventKind {
     /// A coordination pattern (delegate / fan-out / race / quorum) began
     /// (R0.7 wave 3): output carries the pattern's typed contract — members,
     /// thresholds, effect declarations. The team's causal root for every
-    /// event the pattern spawns. Contract only in wave 1.
+    /// event the pattern spawns. Wired in wave 3: the coordination runtime
+    /// journals it on the pattern's first drive, before any member task
+    /// exists.
     CoordinationStart,
 
     /// A coordination pattern settled (R0.7 wave 3): output carries the
     /// result reference and the per-member dispositions (completed, failed,
-    /// cancelled) — the fan-in evidence record. Contract only in wave 1.
+    /// cancelled) — the fan-in evidence record. Wired in wave 3: the
+    /// coordination runtime journals it exactly once, as the pattern's
+    /// terminal fact.
     CoordinationEnd,
 }
 

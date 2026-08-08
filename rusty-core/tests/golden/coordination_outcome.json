@@ -1,0 +1,61 @@
+{
+  "coordination_id": "c-42",
+  "pattern": "quorum",
+  "status": "completed",
+  "result": {
+    "kind": "inline",
+    "value": {
+      "answer": "X"
+    }
+  },
+  "members": [
+    {
+      "member": "juror-a",
+      "task_id": "acme--c-42--juror-a",
+      "settlement": "completed",
+      "result": {
+        "kind": "inline",
+        "value": {
+          "answer": "X"
+        }
+      },
+      "tokens": {
+        "prompt_tokens": 120,
+        "completion_tokens": 30,
+        "total_tokens": 150
+      },
+      "cost_usd": 0.0042
+    },
+    {
+      "member": "juror-b",
+      "task_id": "acme--c-42--juror-b",
+      "settlement": "failed",
+      "error_class": "transient",
+      "error": "model timed out"
+    },
+    {
+      "member": "juror-c",
+      "task_id": "acme--c-42--juror-c",
+      "settlement": "cancelled"
+    }
+  ],
+  "wasted_tokens": 150,
+  "wasted_cost_usd": 0.0042,
+  "resolver": {
+    "resolver": {
+      "resolver": "majority_equal"
+    },
+    "inputs": [
+      {
+        "answer": "X"
+      },
+      {
+        "answer": "X"
+      }
+    ],
+    "output": {
+      "answer": "X"
+    },
+    "decided": true
+  }
+}

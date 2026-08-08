@@ -330,6 +330,7 @@ async fn deliver_escalation(
                         thread_id: None,
                         deadline: None,
                         worker_version: None,
+                        parent: None,
                     },
                     now,
                 );
@@ -364,6 +365,7 @@ async fn deliver_escalation(
             thread_id: None,
             deadline: None,
             worker_version: None,
+            parent: None,
         },
         now,
     );

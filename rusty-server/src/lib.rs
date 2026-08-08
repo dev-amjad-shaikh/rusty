@@ -81,6 +81,7 @@
 mod agents;
 mod assistants;
 mod auth;
+mod coordination;
 mod crons;
 mod error;
 mod journals;
@@ -132,6 +133,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "agent_leases",
     "agents",
     "assistants",
+    "coordinations",
     "crons",
     "journals",
     "outbox",

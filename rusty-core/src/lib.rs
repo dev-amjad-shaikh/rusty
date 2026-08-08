@@ -41,14 +41,20 @@
 //!   serde-versioned [`durable::TaskEnvelope`]. Queue, leases, and workers
 //!   live in `rusty-server` / `rusty-worker`; these are the pure contracts
 //!   both sides agree on.
-//! - **Agent fabric** ([`agents`], R0.7 wave 1): the durable-agent
+//! - **Agent fabric** ([`agents`], R0.7): the durable-agent
 //!   contracts — stable [`agents::AgentId`] identity with its
 //!   `agent:{id}` mailbox/thread addressing grammar, the versioned
 //!   [`agents::CapabilityManifest`] (accepted message kinds, declared
-//!   [`agents::StateScope`]s, budget ceiling), and the agent
-//!   [`record::RunEventKind`] variants (`AgentSpawn`, `MailboxSend`, …).
-//!   The registry, activation leases, and turn-serialized mailbox live in
-//!   `rusty-server`; these are the pure contracts both sides agree on.
+//!   [`agents::StateScope`]s, budget ceiling), the agent
+//!   [`record::RunEventKind`] variants (`AgentSpawn`, `MailboxSend`, …),
+//!   and the typed coordination patterns (wave 3:
+//!   [`agents::CoordinationContract`] — delegate / fan-out / race /
+//!   quorum — with their outcomes and violation vocabulary).
+//!   The registry, activation leases, turn-serialized mailbox, and the
+//!   pattern runtime live in `rusty-server`; these are the pure contracts
+//!   both sides agree on. [`team_trace`] is the read-side half: it
+//!   stitches verified journal snapshots back into one cross-journal
+//!   causal tree.
 //! - **Effect kernel v2** ([`effects`], R0.7): the R0.5 [`record::Effect`]
 //!   taxonomy moved into the type system — marker traits declare an effect's
 //!   safety class at compile time, deterministic [`effects::EffectId`]s let
@@ -104,6 +110,7 @@ pub mod record;
 pub mod remote;
 pub mod replay;
 pub mod state;
+pub mod team_trace;
 pub mod tool;
 #[cfg(feature = "wasm")]
 pub mod wasm_node;
@@ -111,9 +118,13 @@ pub mod wasm_node;
 /// Convenience re-exports of the main public API.
 pub mod prelude {
     pub use crate::agents::{
-        agent_id_from_recipient, AgentBudget, AgentId, CapabilityManifest, EscalationNotice,
+        agent_id_from_recipient, AgentBudget, AgentId, CapabilityManifest, ContextGrant,
+        CoordinationContract, CoordinationKind, CoordinationMessage, CoordinationOutcome,
+        CoordinationStatus, CoordinationViolation, DelegateContract, Delegation, EscalationNotice,
+        FanOutContract, MemberDisposition, MemberFailurePolicy, MemberSettlement, QuorumContract,
+        QuorumOutcome, QuorumResolver, QuorumResolverRecord, QuorumTally, RaceContract,
         RestartPolicy, StateScope, SupervisionAttempt, SupervisionPolicy, SupervisionTrigger,
-        AGENT_RECIPIENT_PREFIX, ESCALATION_MESSAGE_KIND,
+        AGENT_RECIPIENT_PREFIX, COORDINATION_RESULT_KIND, ESCALATION_MESSAGE_KIND,
     };
     pub use crate::checkpoint::{
         Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
@@ -156,5 +167,6 @@ pub mod prelude {
         FIXTURE_FORMAT_VERSION,
     };
     pub use crate::state::{Reducer, State, StateSpec};
+    pub use crate::team_trace::{TeamTrace, TeamTraceNode};
     pub use crate::tool::{Tool, ToolExecutor, ToolRegistry};
 }

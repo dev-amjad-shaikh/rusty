@@ -45,6 +45,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use rusty_agent_runtime::durable::{classify_retry, ErrorClass, RetryDecision};
+use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::record::{Effect, EffectReceipt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -205,6 +206,18 @@ pub(crate) struct TaskRecord {
     /// `None` for tasks that report no receipt.
     #[serde(default)]
     pub receipt: Option<EffectReceipt>,
+    /// Settlement cost evidence (R0.7 wave 3): the token usage and monetary
+    /// cost the worker reported with the terminal settle (complete or
+    /// fail). Persisted on the record — not only journaled — because the
+    /// coordination runtime's waste accounting must survive the settle →
+    /// journal crash window: a server that crashes between the two still
+    /// recomputes the same outcome from the same records. Additive — `None`
+    /// for tasks whose workers report nothing.
+    #[serde(default)]
+    pub tokens: Option<Usage>,
+    /// See [`TaskRecord::tokens`].
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
     /// Run/thread linkage: the run this task belongs to. Set at enqueue
     /// time; `POST /runs/{run_id}/cancel` cancels every non-terminal task
     /// carrying its run id (the outbox wave will set these from the run
@@ -214,6 +227,13 @@ pub(crate) struct TaskRecord {
     /// See [`TaskRecord::run_id`].
     #[serde(default)]
     pub thread_id: Option<String>,
+    /// Causal parentage (R0.7 wave 3): the journal event id this task was
+    /// submitted under — for coordination member tasks, the `MailboxSend`
+    /// event in the pattern's journal. This is the link TeamTrace stitches
+    /// the task's own run journal onto. Additive — `None` for tasks
+    /// submitted outside any journaled causality.
+    #[serde(default)]
+    pub parent: Option<String>,
     /// Cancellation signalled to the lease holder: set by the cancel
     /// endpoint on a leased task, surfaced on heartbeat responses, and
     /// honored by the worker aborting the attempt and reporting
@@ -262,6 +282,8 @@ pub(crate) struct NewTask {
     pub run_id: Option<String>,
     pub thread_id: Option<String>,
     pub deadline: Option<DateTime<Utc>>,
+    /// Causal parentage (R0.7 wave 3; see [`TaskRecord::parent`]).
+    pub parent: Option<String>,
     /// Version pin (see [`TaskRecord::worker_version`]).
     pub worker_version: Option<String>,
 }
@@ -274,6 +296,40 @@ pub(crate) struct FailureReport {
     pub error_class: ErrorClass,
     pub message: String,
     pub retryable: bool,
+    /// The cost evidence the worker reported with the failure (R0.7 wave
+    /// 3); see [`TaskRecord::tokens`].
+    pub cost: SettlementCost,
+}
+
+/// A worker's report of a successful settle: the result payload, the effect
+/// receipt proving declared effects ran under policy, and the cost evidence
+/// reported with the settle. Grouped so the store trait's `complete_task`
+/// stays within the argument ceiling, mirroring [`FailureReport`].
+pub(crate) struct CompletionReport {
+    pub result: Value,
+    pub receipt: Option<EffectReceipt>,
+    pub cost: SettlementCost,
+}
+
+/// The cost evidence a worker reports with a terminal settle (R0.7 wave 3):
+/// token usage and monetary cost, independently optional — a worker may
+/// know one and not the other. `Copy` so it threads through the settle
+/// paths without ceremony.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct SettlementCost {
+    pub tokens: Option<Usage>,
+    pub cost_usd: Option<f64>,
+}
+
+impl SettlementCost {
+    /// No cost evidence reported — the pre-wave-3 default for every settle.
+    /// Used by the unit tests' settle calls; production settle paths build
+    /// the struct from the worker's payload fields.
+    #[allow(dead_code)]
+    pub(crate) const NONE: Self = Self {
+        tokens: None,
+        cost_usd: None,
+    };
 }
 
 impl TaskRecord {
@@ -293,6 +349,7 @@ impl TaskRecord {
             thread_id,
             deadline,
             worker_version,
+            parent,
         } = new;
         Self {
             task_id,
@@ -311,8 +368,11 @@ impl TaskRecord {
             idempotency_key,
             result: None,
             receipt: None,
+            tokens: None,
+            cost_usd: None,
             run_id,
             thread_id,
+            parent,
             cancel_requested: false,
             deadline,
             worker_version,
@@ -387,20 +447,23 @@ impl TaskRecord {
         self.updated_at = now;
     }
 
-    /// Settle the task successfully, storing `result` and the effect
-    /// `receipt` the worker reported with completion (when any). Caller
-    /// checked [`Self::leased_to`]. `error_class` / `last_error` from
-    /// earlier failed attempts are kept — they are the history of what this
-    /// task survived.
+    /// Settle the task successfully, storing `result`, the effect `receipt`,
+    /// and the settlement `cost` the worker reported with completion (when
+    /// any). Caller checked [`Self::leased_to`]. `error_class` / `last_error`
+    /// from earlier failed attempts are kept — they are the history of what
+    /// this task survived.
     pub(crate) fn complete(
         &mut self,
         result: Value,
         receipt: Option<EffectReceipt>,
+        cost: SettlementCost,
         now: DateTime<Utc>,
     ) {
         self.status = TaskStatus::Completed;
         self.result = Some(result);
         self.receipt = receipt;
+        self.tokens = cost.tokens;
+        self.cost_usd = cost.cost_usd;
         self.lease = None;
         self.next_attempt_at = None;
         self.updated_at = now;
@@ -467,6 +530,7 @@ impl TaskRecord {
         error_class: ErrorClass,
         message: &str,
         retryable: bool,
+        cost: SettlementCost,
         now: DateTime<Utc>,
     ) {
         let effect = self.effect.unwrap_or(if retryable {
@@ -505,6 +569,10 @@ impl TaskRecord {
         }
         self.error_class = Some(error_class);
         self.last_error = Some(message.to_string());
+        // Cost evidence is per-attempt: a later settle overwrites it, the
+        // same discipline as `last_error`.
+        self.tokens = cost.tokens;
+        self.cost_usd = cost.cost_usd;
         self.lease = None;
         self.updated_at = now;
     }
@@ -526,8 +594,11 @@ impl TaskRecord {
             "idempotency_key": self.idempotency_key,
             "result": self.result,
             "receipt": self.receipt,
+            "tokens": self.tokens,
+            "cost_usd": self.cost_usd,
             "run_id": self.run_id,
             "thread_id": self.thread_id,
+            "parent": self.parent,
             "cancel_requested": self.cancel_requested,
             "deadline": self.deadline,
             "worker_version": self.worker_version,
@@ -853,6 +924,7 @@ mod tests {
                 thread_id: None,
                 deadline: None,
                 worker_version: None,
+                parent: None,
             },
             Utc::now(),
         )
@@ -886,7 +958,13 @@ mod tests {
         task.claim("w-1", 60_000, t0);
         // The worker declares re-driving unsafe → RetryDecision::Fail via
         // the effect gate: terminal, next_attempt_at null, and NOT the DLQ.
-        task.fail(ErrorClass::Timeout, "charged twice maybe", false, t0);
+        task.fail(
+            ErrorClass::Timeout,
+            "charged twice maybe",
+            false,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Failed);
         assert_eq!(task.next_attempt_at, None);
         assert!(!task.claimable_at(t0 + Duration::days(365)));
@@ -900,7 +978,13 @@ mod tests {
         task.claim("w-1", 60_000, t0);
         // Class gate: invalid_input fails immediately even when the worker
         // answered retryable — the class taxonomy wins.
-        task.fail(ErrorClass::InvalidInput, "bad schema", true, t0);
+        task.fail(
+            ErrorClass::InvalidInput,
+            "bad schema",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Failed);
         assert_eq!(task.next_attempt_at, None);
     }
@@ -914,7 +998,13 @@ mod tests {
                 let t0 = Utc::now();
                 task.attempt = attempt - 1;
                 task.claim("w-1", 60_000, t0);
-                task.fail(ErrorClass::Transient, "hiccup", true, t0);
+                task.fail(
+                    ErrorClass::Transient,
+                    "hiccup",
+                    true,
+                    SettlementCost::NONE,
+                    t0,
+                );
                 assert_eq!(task.status, TaskStatus::Failed);
                 let at = task.next_attempt_at.expect("retry scheduled");
                 // Full jitter: delay in [0, base * 2^(attempt-1)], 5 min cap.
@@ -934,7 +1024,13 @@ mod tests {
         let t0 = Utc::now();
         task.claim("w-1", 60_000, t0);
         task.attempt = 3;
-        task.fail(ErrorClass::Unknown, "third strike", true, t0);
+        task.fail(
+            ErrorClass::Unknown,
+            "third strike",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Dead);
         assert_eq!(task.next_attempt_at, None);
         assert!(!task.claimable_at(t0 + Duration::days(365)));
@@ -948,7 +1044,13 @@ mod tests {
         task.effect = Some(Effect::NonIdempotent);
         let t0 = Utc::now();
         task.claim("w-1", 60_000, t0);
-        task.fail(ErrorClass::Timeout, "maybe it fired", true, t0);
+        task.fail(
+            ErrorClass::Timeout,
+            "maybe it fired",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Failed);
         assert_eq!(task.next_attempt_at, None, "effect gate: fail outright");
 
@@ -958,7 +1060,13 @@ mod tests {
         let mut task = record();
         task.effect = Some(Effect::Idempotent);
         task.claim("w-1", 60_000, t0);
-        task.fail(ErrorClass::Transient, "hiccup", false, t0);
+        task.fail(
+            ErrorClass::Transient,
+            "hiccup",
+            false,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Failed);
         assert!(
             task.next_attempt_at.is_some(),
@@ -1036,7 +1144,7 @@ mod tests {
         let expires = task.lease.as_ref().unwrap().expires_at;
         assert_eq!(expires, t0 + Duration::seconds(60));
 
-        task.complete(json!({"ok": true}), None, t0);
+        task.complete(json!({"ok": true}), None, SettlementCost::NONE, t0);
         assert_eq!(task.status, TaskStatus::Completed);
         assert_eq!(task.result, Some(json!({"ok": true})));
         assert!(task.lease.is_none());
@@ -1048,7 +1156,13 @@ mod tests {
         let mut task = record();
         let t0 = Utc::now();
         task.claim("w-1", 60_000, t0);
-        task.fail(ErrorClass::Timeout, "upstream timed out", true, t0);
+        task.fail(
+            ErrorClass::Timeout,
+            "upstream timed out",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Failed);
         assert_eq!(task.error_class, Some(ErrorClass::Timeout));
         assert_eq!(task.last_error.as_deref(), Some("upstream timed out"));
@@ -1061,12 +1175,18 @@ mod tests {
         task.claim("w-1", 60_000, at);
         assert_eq!(task.attempt, 2);
         assert!(task.next_attempt_at.is_none(), "claim clears the schedule");
-        task.fail(ErrorClass::Timeout, "again", true, at);
+        task.fail(ErrorClass::Timeout, "again", true, SettlementCost::NONE, at);
         assert_eq!(task.status, TaskStatus::Failed);
         let at = task.next_attempt_at.unwrap();
         task.claim("w-2", 60_000, at);
         assert_eq!(task.attempt, 3);
-        task.fail(ErrorClass::Timeout, "third strike", true, at);
+        task.fail(
+            ErrorClass::Timeout,
+            "third strike",
+            true,
+            SettlementCost::NONE,
+            at,
+        );
         assert_eq!(task.status, TaskStatus::Dead);
         assert!(task.next_attempt_at.is_none());
         assert!(!task.claimable_at(at + Duration::days(365)));
@@ -1110,7 +1230,13 @@ mod tests {
         let mut task = record();
         let t0 = Utc::now();
         task.claim("w-1", 60_000, t0);
-        task.fail(ErrorClass::Transient, "hiccup", true, t0);
+        task.fail(
+            ErrorClass::Transient,
+            "hiccup",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Failed);
         assert!(task.next_attempt_at.is_some(), "a retry is outstanding");
         // Non-terminal while a retry is scheduled: cancellation must
@@ -1142,6 +1268,7 @@ mod tests {
             ErrorClass::Cancelled,
             "cancelled by control plane",
             false,
+            SettlementCost::NONE,
             t0,
         );
         assert_eq!(task.status, TaskStatus::Cancelled);
@@ -1156,16 +1283,28 @@ mod tests {
         let t0 = Utc::now();
         let mut completed = record();
         completed.claim("w-1", 60_000, t0);
-        completed.complete(json!({"ok": true}), None, t0);
+        completed.complete(json!({"ok": true}), None, SettlementCost::NONE, t0);
 
         let mut dead = record();
         dead.claim("w-1", 60_000, t0);
         dead.attempt = dead.max_attempts;
-        dead.fail(ErrorClass::Unknown, "third strike", true, t0);
+        dead.fail(
+            ErrorClass::Unknown,
+            "third strike",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
 
         let mut failed_outright = record();
         failed_outright.claim("w-1", 60_000, t0);
-        failed_outright.fail(ErrorClass::InvalidInput, "bad schema", true, t0);
+        failed_outright.fail(
+            ErrorClass::InvalidInput,
+            "bad schema",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
 
         let mut cancelled = record();
         cancelled.cancel(t0);
@@ -1191,7 +1330,13 @@ mod tests {
         // Even with the worker answering retryable, the class gate fails
         // outright — and the cancelled class spells the terminal state
         // `cancelled` rather than the failure one.
-        task.fail(ErrorClass::Cancelled, "interrupted", true, t0);
+        task.fail(
+            ErrorClass::Cancelled,
+            "interrupted",
+            true,
+            SettlementCost::NONE,
+            t0,
+        );
         assert_eq!(task.status, TaskStatus::Cancelled);
         assert!(task.next_attempt_at.is_none());
         assert!(!task.claimable_at(t0 + Duration::days(365)));
@@ -1271,7 +1416,13 @@ mod tests {
         task.run_id = Some("run-9".to_string());
         task.deadline = DateTime::<Utc>::from_timestamp_millis(1_800_000_000_000);
         task.claim("w-1", 60_000, Utc::now());
-        task.fail(ErrorClass::Unknown, "it broke", true, Utc::now());
+        task.fail(
+            ErrorClass::Unknown,
+            "it broke",
+            true,
+            SettlementCost::NONE,
+            Utc::now(),
+        );
         let raw = serde_json::to_string(&task).unwrap();
         let back: TaskRecord = serde_json::from_str(&raw).unwrap();
         assert_eq!(back.task_id, task.task_id);
@@ -1351,12 +1502,74 @@ mod tests {
         assert!(loaded["task-1"].leased_to("w-1"));
 
         // Overwrite replaces; a corrupt file is skipped, not fatal.
-        task.complete(json!(1), None, Utc::now());
+        task.complete(json!(1), None, SettlementCost::NONE, Utc::now());
         persist(&root, &task).await.unwrap();
         std::fs::write(dir(&root).join("corrupt.json"), b"{nope").unwrap();
         let loaded = load(&root);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded["task-1"].status, TaskStatus::Completed);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn settlement_cost_is_stored_on_complete_and_fail() {
+        let usage = Usage {
+            prompt_tokens: 120,
+            completion_tokens: 30,
+            total_tokens: 150,
+        };
+        let cost = SettlementCost {
+            tokens: Some(usage),
+            cost_usd: Some(0.0042),
+        };
+        let mut task = record();
+        let t0 = Utc::now();
+        task.claim("w-1", 60_000, t0);
+        task.complete(json!({"ok": true}), None, cost, t0);
+        assert_eq!(task.tokens, Some(usage));
+        assert_eq!(task.cost_usd, Some(0.0042));
+        // The wire carries the evidence alongside the result.
+        assert_eq!(task.wire()["tokens"]["total_tokens"], json!(150));
+        assert_eq!(task.wire()["cost_usd"], json!(0.0042));
+
+        // Fail stores it the same way — a race loser's reported waste must
+        // survive on the record, not only in a journal.
+        let mut task = record();
+        task.claim("w-1", 60_000, t0);
+        task.fail(ErrorClass::Unknown, "gave up", false, cost, t0);
+        assert_eq!(task.tokens, Some(usage));
+        assert_eq!(task.cost_usd, Some(0.0042));
+
+        // A settle with no reported cost leaves the fields unset — and the
+        // wire spells them null, never invented zeros.
+        let mut task = record();
+        task.claim("w-1", 60_000, t0);
+        task.complete(json!(1), None, SettlementCost::NONE, t0);
+        assert_eq!(task.tokens, None);
+        assert!(task.wire()["tokens"].is_null());
+    }
+
+    #[test]
+    fn pre_wave3_records_deserialize_with_defaults() {
+        // A record file written before wave 3 has no tokens/cost/parent
+        // keys at all: additive evolution means it still loads, with the
+        // new fields defaulted.
+        let legacy = json!({
+            "task_id": "task-1",
+            "tenant": "acme",
+            "kind": "send_email",
+            "payload": {"to": "a@b.c"},
+            "pool": "default",
+            "status": "queued",
+            "attempt": 0,
+            "max_attempts": 3,
+            "cancel_requested": false,
+            "created_at": "2027-01-15T08:00:00Z",
+            "updated_at": "2027-01-15T08:00:00Z",
+        });
+        let record: TaskRecord = serde_json::from_value(legacy).unwrap();
+        assert_eq!(record.tokens, None);
+        assert_eq!(record.cost_usd, None);
+        assert_eq!(record.parent, None);
     }
 }
