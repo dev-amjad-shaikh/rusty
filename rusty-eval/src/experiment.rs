@@ -10,7 +10,7 @@
 //! The output is a serializable [`ExperimentReport`]: per-case-run detail
 //! (assertion verdicts with evidence, status, latency, cost), pass rates per
 //! assertion, latency percentiles, and totals — everything
-//! [`crate::compare`] needs to judge a candidate against a baseline.
+//! [`crate::compare()`] needs to judge a candidate against a baseline.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

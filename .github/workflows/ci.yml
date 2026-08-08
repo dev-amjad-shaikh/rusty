@@ -23,6 +23,7 @@ jobs:
           - { dir: rusty-server, pkg: rusty-server }
           - { dir: rusty-worker, pkg: rusty-worker }
           - { dir: rusty-otel, pkg: rusty-otel }
+          - { dir: rusty-eval, pkg: rusty-eval }
     steps:
       - uses: actions/checkout@v7
 
@@ -123,6 +124,7 @@ jobs:
           - { dir: rusty-server, pkg: rusty-server }
           - { dir: rusty-worker, pkg: rusty-worker }
           - { dir: rusty-otel, pkg: rusty-otel }
+          - { dir: rusty-eval, pkg: rusty-eval }
     steps:
       - uses: actions/checkout@v7
 

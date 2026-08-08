@@ -1,6 +1,6 @@
 //! Baseline-vs-candidate comparison of experiment reports.
 //!
-//! [`compare`] takes two [`ExperimentReport`]s — typically a stored baseline
+//! [`fn@compare`] takes two [`ExperimentReport`]s — typically a stored baseline
 //! and a fresh candidate — and answers the release question: did anything
 //! get worse beyond an acceptable threshold? It reports per-assertion pass
 //! rate deltas, per-case regressions and improvements, latency and cost
@@ -126,7 +126,7 @@ pub enum Regression {
         candidate_ms: u64,
         /// `candidate / baseline` (`inf` is serialized as `1e999`-style JSON
         /// only by extension; in practice this is a finite ratio or the
-        /// zero-baseline case, recorded as `-1.0` — see [`compare`]).
+        /// zero-baseline case, recorded as `-1.0` — see [`fn@compare`]).
         ratio: f64,
     },
 }
