@@ -653,6 +653,44 @@ under its idempotency key, and (3) `TeamTrace` assembly from the persisted journ
 spawn event by `parent` links, matching the golden expectation. Plus: the wave-4
 state-scaling numbers are published in `docs/benchmarks.md`.
 
+> **Release proof status: implemented.** Automated as
+> `rusty-server/tests/team_recovery.rs` — the `crash_recovery.rs` /
+> `agent_recovery.rs` harness grown to a team: `server_demo` plus three
+> `activity_worker_demo` agent hosts (the supervisor provider-less — its
+> `coordination_result` turns are not external effects). The supervisor's
+> fan-out `fo-1` (`alpha` → worker-a, `beta` → worker-b, both
+> `effect: idempotent`) runs with worker-a on the fast provider pause and
+> worker-b on the 30 s pause; when `alpha`'s settlement is journaled, the
+> delegated follow-up `d-1` (`follow` → worker-a) is submitted through the
+> public API on the supervisor's behalf, carrying the causal parent its
+> turn would have stamped — `alpha`'s `MailboxReceive` event, derived as
+> `coordination:default:fo-1:3` (the demo host deliberately has no
+> nested-submission behavior; the submission path is the one an agent's
+> turn would call). `d-1` settles, and with `beta`'s effect fsynced at the
+> provider and its host mid-pause, the test SIGKILLs worker-b's host, then
+> the server. Everything restarts from the same store dir / ledger file.
+> The three gate properties, asserted: (1) the provider ledger holds
+> exactly ONE invocation per idempotency key across all host generations
+> (three keys, three lines, all first-attempt fires); (2) `beta`'s message
+> ends `completed` at `attempt == 2` under its derived key
+> `coordination:fo-1:beta`, the result and receipt carrying the first
+> attempt's provider confirmation (`deduplicated: true`) — re-delivery
+> under the idempotency key; (3) both per-pattern traces
+> (`GET /coordination/{id}/trace`) are connected, and the UNION of the two
+> persisted journals — assembled client-side from the events the server
+> exposes, with `TeamTrace`'s exact semantics — is one connected tree of
+> exactly ten events rooted at `fo-1`'s `CoordinationStart`, matching the
+> golden expectation event-for-event (ids, kinds, contiguous seqs, parent
+> links), with `d-1`'s start stitched onto `fo-1:3`. Member *run* journals
+> do not exist at this layer — the demo hosts settle turns without
+> journaling runs (the wave-2 host integration boundary) — so the pattern
+> journals are the team's journals here. Flake discipline: every wait is a
+> poll against a deadline; the only coordination-specific rule is that
+> `GET /coordination/{id}` is a reconcile DRIVE, so journal reads are
+> sequenced after the outcome-message chain has proven every settlement
+> hook committed (task-visibility gates are pure reads) — the file
+> backend's documented one-writer boundary is never crossed.
+
 ## Composition with the Flight Recorder and Durable Work
 
 The three systems are one system seen from three sides:
