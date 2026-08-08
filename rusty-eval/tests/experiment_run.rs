@@ -17,7 +17,7 @@ use rusty_agent_runtime::tool::{Tool, ToolRegistry};
 
 use rusty_eval::{
     compare, AssertionPassRate, CaseChange, CompareThresholds, Dataset, EvalCase, Expectation,
-    ExperimentConfig, ExperimentReport, ExperimentRunner, ExpectedToolCall, LatencyStats,
+    ExpectedToolCall, ExperimentConfig, ExperimentReport, ExperimentRunner, LatencyStats,
     PreparedRun, Regression, ReportSummary, RuleBasedJudge, RunStatus, StatePredicate,
 };
 
@@ -39,7 +39,11 @@ impl ScriptedModel {
 
 #[async_trait::async_trait]
 impl ChatModel for ScriptedModel {
-    async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> RuntimeResult<ChatResponse> {
+    async fn chat(
+        &self,
+        _messages: &[ChatMessage],
+        _tools: &[Value],
+    ) -> RuntimeResult<ChatResponse> {
         let message = self
             .script
             .lock()
@@ -350,7 +354,10 @@ async fn comparison_of_identical_reports_is_clean() {
 
     assert!(!verdict.regressed);
     assert!(verdict.regressions.is_empty());
-    assert!(verdict.assertion_deltas.iter().all(|delta| delta.delta == 0.0));
+    assert!(verdict
+        .assertion_deltas
+        .iter()
+        .all(|delta| delta.delta == 0.0));
     assert!(verdict
         .case_deltas
         .iter()

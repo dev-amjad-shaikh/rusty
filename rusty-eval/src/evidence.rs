@@ -174,6 +174,9 @@ impl RunEvidence {
 
     /// The trajectory as bare tool names, in order.
     pub fn tool_names(&self) -> Vec<&str> {
-        self.tool_calls.iter().map(|call| call.name.as_str()).collect()
+        self.tool_calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect()
     }
 }

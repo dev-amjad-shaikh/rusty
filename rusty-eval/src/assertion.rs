@@ -127,9 +127,8 @@ impl Assertion {
                     passed: offending.is_empty(),
                     expected: json!({ "forbidden": names }),
                     observed: json!({ "called": offending }),
-                    detail: (!offending.is_empty()).then(|| {
-                        format!("blacklisted tool(s) called: {}", offending.join(", "))
-                    }),
+                    detail: (!offending.is_empty())
+                        .then(|| format!("blacklisted tool(s) called: {}", offending.join(", "))),
                 }
             }
             Assertion::MaxCost { usd } => AssertionResult {
@@ -138,7 +137,10 @@ impl Assertion {
                 expected: json!({ "max_usd": usd }),
                 observed: json!({ "usd": evidence.cost_usd }),
                 detail: (evidence.cost_usd > *usd).then(|| {
-                    format!("run cost ${:.6} exceeds the ${:.6} bound", evidence.cost_usd, usd)
+                    format!(
+                        "run cost ${:.6} exceeds the ${:.6} bound",
+                        evidence.cost_usd, usd
+                    )
                 }),
             },
             Assertion::MaxLatency { ms } => AssertionResult {
@@ -147,7 +149,10 @@ impl Assertion {
                 expected: json!({ "max_ms": ms }),
                 observed: json!({ "ms": evidence.latency_ms }),
                 detail: (evidence.latency_ms > *ms).then(|| {
-                    format!("run took {} ms, over the {ms} ms bound", evidence.latency_ms)
+                    format!(
+                        "run took {} ms, over the {ms} ms bound",
+                        evidence.latency_ms
+                    )
                 }),
             },
         }

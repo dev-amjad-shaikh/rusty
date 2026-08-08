@@ -270,8 +270,8 @@ impl Dataset {
             }
         }
 
-        let (name, version) = header
-            .ok_or_else(|| EvalError::Dataset("missing header line".to_owned()))?;
+        let (name, version) =
+            header.ok_or_else(|| EvalError::Dataset("missing header line".to_owned()))?;
         Self::new(name, version, cases)
     }
 

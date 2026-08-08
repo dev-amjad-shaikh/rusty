@@ -136,10 +136,12 @@ impl ExperimentRunner {
         for case in dataset.cases() {
             let mut runs = Vec::with_capacity(self.config.runs_per_case);
             for repetition in 0..self.config.runs_per_case {
-                runs.push(self.run_case_once(dataset, case, repetition, &prepare).await?);
+                runs.push(
+                    self.run_case_once(dataset, case, repetition, &prepare)
+                        .await?,
+                );
             }
-            let pass_rate =
-                runs.iter().filter(|run| run.passed).count() as f64 / runs.len() as f64;
+            let pass_rate = runs.iter().filter(|run| run.passed).count() as f64 / runs.len() as f64;
             case_reports.push(CaseReport {
                 case_id: case.id.clone(),
                 tags: case.tags.clone(),

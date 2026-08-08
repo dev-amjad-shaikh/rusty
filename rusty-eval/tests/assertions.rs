@@ -3,11 +3,11 @@
 
 use serde_json::{json, Map, Value};
 
+use rusty_agent_runtime::record::EventStatus;
 use rusty_eval::{
     Assertion, EvalCase, Expectation, ExpectedToolCall, RunEvidence, RunStatus, StatePredicate,
     ToolCallRecord,
 };
-use rusty_agent_runtime::record::EventStatus;
 
 /// Fabricate evidence: tool names in order (args `{}`), plus final state,
 /// latency, and cost.
@@ -42,7 +42,12 @@ fn with_args(mut evidence: RunEvidence, index: usize, args: Value) -> RunEvidenc
 
 #[test]
 fn tool_call_order_matches_as_subsequence() {
-    let ev = evidence(&["search", "calculator", "search", "email"], json!({}), 0, 0.0);
+    let ev = evidence(
+        &["search", "calculator", "search", "email"],
+        json!({}),
+        0,
+        0.0,
+    );
     let assertion = Assertion::ToolCallOrder {
         expected: vec![
             ExpectedToolCall::named("calculator"),

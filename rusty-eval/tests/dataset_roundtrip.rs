@@ -93,7 +93,10 @@ fn duplicate_case_ids_are_rejected() {
         "{\"kind\":\"case\",\"id\":\"x\",\"input\":{}}\n",
     );
     let error = Dataset::from_jsonl(text).unwrap_err();
-    assert!(error.to_string().contains("duplicate case id `x`"), "{error}");
+    assert!(
+        error.to_string().contains("duplicate case id `x`"),
+        "{error}"
+    );
 }
 
 #[test]

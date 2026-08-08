@@ -205,12 +205,7 @@ pub fn compare(
         .cases
         .iter()
         .map(|case| case.case_id.as_str())
-        .chain(
-            candidate
-                .cases
-                .iter()
-                .map(|case| case.case_id.as_str()),
-        )
+        .chain(candidate.cases.iter().map(|case| case.case_id.as_str()))
         .collect();
     ids.sort_unstable();
     ids.dedup();
@@ -248,9 +243,8 @@ pub fn compare(
     }
 
     // ---- latency ----
-    let ratio = |base: u64, cand: u64| -> Option<f64> {
-        (base > 0).then(|| cand as f64 / base as f64)
-    };
+    let ratio =
+        |base: u64, cand: u64| -> Option<f64> { (base > 0).then(|| cand as f64 / base as f64) };
     let baseline_p95 = baseline.summary.latency_ms.p95;
     let candidate_p95 = candidate.summary.latency_ms.p95;
     let p95_breach = match ratio(baseline_p95, candidate_p95) {
@@ -268,7 +262,10 @@ pub fn compare(
     let latency = LatencyDelta {
         baseline_p50: baseline.summary.latency_ms.p50,
         candidate_p50: candidate.summary.latency_ms.p50,
-        p50_ratio: ratio(baseline.summary.latency_ms.p50, candidate.summary.latency_ms.p50),
+        p50_ratio: ratio(
+            baseline.summary.latency_ms.p50,
+            candidate.summary.latency_ms.p50,
+        ),
         baseline_p95,
         candidate_p95,
         p95_ratio: ratio(baseline_p95, candidate_p95),
