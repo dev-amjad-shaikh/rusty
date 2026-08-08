@@ -350,7 +350,7 @@ fn build_react_agent(
             // record/replay mode each tool is wrapped with the invocation's
             // causal parent, then dispatched through the same batch executor
             // (parallel, order-preserving, panic-containing).
-            let tool_executor =
+            let mut tool_executor =
                 match &evidence {
                     EvidenceMode::None => tool_executor,
                     EvidenceMode::Record(journal) => {
@@ -384,6 +384,16 @@ fn build_react_agent(
                         ToolExecutor::new(wrapped)
                     }
                 };
+            // The executor attaches both cross-cutting boundaries to the
+            // node context. Re-attach them after evidence wrapping so the
+            // finalized, post-middleware call is admitted immediately before
+            // the recording/replay wrapper (and ultimately the tool) runs.
+            tool_executor = tool_executor
+                .with_middleware(ctx.middleware().clone())
+                .with_call_context(ctx.thread_id(), TOOLS_NODE);
+            if let Some(admission) = ctx.effect_admission() {
+                tool_executor = tool_executor.with_effect_admission(admission.clone());
+            }
             // Per-call error policy: see ToolExecutor::execute_batch docs.
             let results = tool_executor.execute_batch(&last.tool_calls).await;
             let appended = serde_json::to_value(&results)?;

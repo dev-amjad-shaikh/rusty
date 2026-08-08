@@ -61,11 +61,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::checkpoint::{Checkpoint, Checkpointer, InMemoryCheckpointer};
+use crate::effects::EffectRequest;
 use crate::error::{Result, RustyError};
 use crate::executor::{ExecutionOutcome, Executor, RunConfig, DEFAULT_MAX_STEPS};
 use crate::graph::Graph;
 use crate::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
-use crate::llm::{ChatMessage, ChatModel, ChatResponse, Usage};
+use crate::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall, Usage};
 use crate::record::{sha256_hex, Effect, EventStatus, PayloadRef, RunEvent, RunEventKind};
 use crate::state::{State, StateSpec};
 use crate::tool::Tool;
@@ -613,6 +614,18 @@ impl Tool for RecordingTool {
         self.inner.effect()
     }
 
+    fn effect_kind(&self) -> &str {
+        self.inner.effect_kind()
+    }
+
+    fn idempotency_key(&self, args: &Value) -> Option<String> {
+        self.inner.idempotency_key(args)
+    }
+
+    fn effect_request(&self, call: &ToolCall) -> EffectRequest {
+        self.inner.effect_request(call)
+    }
+
     async fn call(&self, args: Value) -> Result<Value> {
         let started = self.journal.clock().now();
         let result = self.inner.call(args.clone()).await;
@@ -691,6 +704,18 @@ impl Tool for ReplayingTool {
 
     fn effect(&self) -> Effect {
         self.inner.effect()
+    }
+
+    fn effect_kind(&self) -> &str {
+        self.inner.effect_kind()
+    }
+
+    fn idempotency_key(&self, args: &Value) -> Option<String> {
+        self.inner.idempotency_key(args)
+    }
+
+    fn effect_request(&self, call: &ToolCall) -> EffectRequest {
+        self.inner.effect_request(call)
     }
 
     async fn call(&self, args: Value) -> Result<Value> {

@@ -49,14 +49,18 @@
 //!   constructed, not a boolean that can be silently defaulted. Cross-process
 //!   attestation of approvals is R0.9's signed-receipt work.
 //!
-//! Scope of this wave: the types, the enforcement helpers, and the `RunConfig`
-//! extension points. The executor does not yet call the admission helpers —
-//! wiring them into node/tool dispatch is a later wave, deliberately: the
-//! untyped [`Effect`] path behaves exactly as before, and opting into the
-//! typed API changes nothing for existing graphs.
+//! Runtime enforcement is opt-in: enabling effect admission on an executor
+//! propagates a scoped [`EffectAdmissionContext`] through
+//! [`crate::node::NodeContext`]. The prebuilt ReAct tools node carries it into
+//! [`crate::tool::ToolExecutor`] automatically; custom nodes must do the same
+//! when they construct a tool executor. Calls on that guarded path are
+//! admitted after middleware has finalized their name and arguments but
+//! before the tool body runs. Direct calls to [`crate::tool::Tool::call`] are
+//! outside this cooperative boundary. Executors that do not enable it keep
+//! the pre-R0.7 behavior, so existing graphs remain source-compatible.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -140,6 +144,82 @@ pub fn derive_effect_id(
     ]
     .join("\n");
     EffectId(sha256_hex(material.as_bytes()))
+}
+
+/// The runtime description of one effect occurrence awaiting admission.
+///
+/// [`TypedEffect`] is the compile-time declaration surface; this value is its
+/// object-safe dispatch counterpart. A [`crate::tool::Tool`] produces one for
+/// each call after middleware has finalized the call. Its input hash is
+/// computed with the same canonical JSON convention as journal payloads, so
+/// approval tokens derived before execution match the id the dispatcher
+/// re-derives at the boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectRequest {
+    kind: String,
+    effect: Effect,
+    input_hash: String,
+    idempotency_key: Option<String>,
+}
+
+impl EffectRequest {
+    /// Describe an effect over canonical JSON `input`.
+    pub fn new(
+        kind: impl Into<String>,
+        effect: Effect,
+        input: &Value,
+        idempotency_key: Option<String>,
+    ) -> Self {
+        let input_hash = crate::record::PayloadRef::inline(input.clone())
+            .content_hash()
+            .expect("a serde_json::Value always serializes");
+        Self {
+            kind: kind.into(),
+            effect,
+            input_hash,
+            idempotency_key,
+        }
+    }
+
+    /// Bridge a typed declaration into the runtime admission surface.
+    pub fn from_typed<E: TypedEffect>(effect: &E) -> Self {
+        Self {
+            kind: effect.kind().to_owned(),
+            effect: E::EFFECT,
+            input_hash: effect.input_hash().to_owned(),
+            idempotency_key: effect.idempotency_key().map(str::to_owned),
+        }
+    }
+
+    /// Stable application-defined effect kind.
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    /// Wire-level safety class recorded for this occurrence.
+    pub fn effect(&self) -> Effect {
+        self.effect
+    }
+
+    /// Canonical input digest used in the deterministic effect id.
+    pub fn input_hash(&self) -> &str {
+        &self.input_hash
+    }
+
+    /// Stable idempotency key, when the declaration requires one.
+    pub fn idempotency_key(&self) -> Option<&str> {
+        self.idempotency_key.as_deref()
+    }
+
+    /// This occurrence's deterministic id in `scope`.
+    pub fn effect_id(&self, scope: &str) -> EffectId {
+        derive_effect_id(
+            scope,
+            self.kind(),
+            self.input_hash(),
+            self.idempotency_key(),
+        )
+    }
 }
 
 /// The typed half of the effect taxonomy: an effect type's contract with the
@@ -434,6 +514,158 @@ impl CompensationRegistry {
     /// The handler registered for `kind`, if any.
     pub fn handler_for(&self, kind: &str) -> Option<&CompensationHandler> {
         self.handlers.get(kind)
+    }
+}
+
+/// A run-scoped, fail-closed admission boundary for runtime effect requests.
+///
+/// The scope is normally a thread id. Approvals are indexed by their exact
+/// deterministic [`EffectId`], and compensations are captured when a request
+/// is admitted so the rollback path remains alive for the entire call.
+#[derive(Clone)]
+pub struct EffectAdmissionContext {
+    scope: String,
+    approvals: Arc<Mutex<BTreeMap<EffectId, ApprovalToken>>>,
+    compensations: CompensationRegistry,
+}
+
+impl std::fmt::Debug for EffectAdmissionContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let approvals = self.approvals.lock().unwrap_or_else(|e| e.into_inner());
+        f.debug_struct("EffectAdmissionContext")
+            .field("scope", &self.scope)
+            .field("approval_effect_ids", &approvals.keys())
+            .field("compensations", &self.compensations)
+            .finish()
+    }
+}
+
+impl EffectAdmissionContext {
+    /// Start an admission boundary for `scope` with no approvals or rollback
+    /// handlers. This is intentionally fail-closed for compensatable and
+    /// irreversible effects.
+    pub fn new(scope: impl Into<String>) -> Self {
+        Self {
+            scope: scope.into(),
+            approvals: Arc::new(Mutex::new(BTreeMap::new())),
+            compensations: CompensationRegistry::new(),
+        }
+    }
+
+    /// Attach the exact approval tokens available to this run.
+    pub fn with_approvals(mut self, approvals: impl IntoIterator<Item = ApprovalToken>) -> Self {
+        self.approvals = Arc::new(Mutex::new(
+            approvals
+                .into_iter()
+                .map(|token| (token.effect_id().clone(), token))
+                .collect(),
+        ));
+        self
+    }
+
+    /// Attach the run's registered rollback handlers.
+    pub fn with_compensations(mut self, compensations: CompensationRegistry) -> Self {
+        self.compensations = compensations;
+        self
+    }
+
+    /// The run scope used to derive effect ids.
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    /// Admit one effect occurrence, or reject it before its body runs.
+    ///
+    /// Pure and read-only calls require no additional evidence. Idempotent
+    /// calls require a stable key, compensatable calls require a registered
+    /// rollback handler, and non-idempotent calls atomically consume an
+    /// approval token for this exact content-addressed occurrence. Cloned
+    /// contexts share the same approval ledger, so one token admits one call
+    /// across parallel nodes and later super-steps.
+    pub fn admit(&self, request: &EffectRequest) -> Result<EffectPermit, EffectViolation> {
+        let effect_id = request.effect_id(self.scope());
+        let (compensation, approval) = match request.effect() {
+            Effect::Pure | Effect::ReadOnly => (None, None),
+            Effect::Idempotent => {
+                if request.idempotency_key().is_none() {
+                    return Err(EffectViolation::MissingIdempotencyKey {
+                        kind: request.kind().to_owned(),
+                    });
+                }
+                (None, None)
+            }
+            Effect::Compensatable => (
+                Some(
+                    self.compensations
+                        .handler_for(request.kind())
+                        .cloned()
+                        .ok_or_else(|| EffectViolation::MissingCompensation {
+                            kind: request.kind().to_owned(),
+                        })?,
+                ),
+                None,
+            ),
+            Effect::NonIdempotent => {
+                let approval = self
+                    .approvals
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&effect_id)
+                    .ok_or_else(|| EffectViolation::MissingApproval {
+                        kind: request.kind().to_owned(),
+                        effect_id: effect_id.clone(),
+                    })?;
+                (None, Some(approval))
+            }
+        };
+        Ok(EffectPermit {
+            effect_id,
+            compensation,
+            approval,
+        })
+    }
+}
+
+/// Evidence that one runtime effect occurrence passed admission.
+///
+/// The permit deliberately owns the selected compensation handler. The tool
+/// dispatcher keeps it alive until the call completes, preventing a registry
+/// update from removing the rollback path after admission but before the
+/// effect finishes.
+#[derive(Clone)]
+pub struct EffectPermit {
+    effect_id: EffectId,
+    compensation: Option<CompensationHandler>,
+    approval: Option<ApprovalToken>,
+}
+
+impl std::fmt::Debug for EffectPermit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EffectPermit")
+            .field("effect_id", &self.effect_id)
+            .field("has_compensation", &self.compensation.is_some())
+            .field(
+                "approved_by",
+                &self.approval.as_ref().map(ApprovalToken::approved_by),
+            )
+            .finish()
+    }
+}
+
+impl EffectPermit {
+    /// The admitted occurrence's deterministic id.
+    pub fn effect_id(&self) -> &EffectId {
+        &self.effect_id
+    }
+
+    /// The rollback handler captured for a compensatable occurrence.
+    pub fn compensation(&self) -> Option<&CompensationHandler> {
+        self.compensation.as_ref()
+    }
+
+    /// The one-shot approval consumed for an irreversible occurrence.
+    pub fn approval(&self) -> Option<&ApprovalToken> {
+        self.approval.as_ref()
     }
 }
 

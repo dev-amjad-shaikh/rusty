@@ -53,6 +53,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use crate::checkpoint::{Checkpoint, Checkpointer};
+use crate::effects::{CompensationRegistry, EffectAdmissionContext};
 use crate::error::{Result, RustyError};
 use crate::graph::{Edge, Graph, Route};
 use crate::journal::{Clock, EventDraft, Journal, RngSource};
@@ -222,12 +223,10 @@ pub struct RunConfig {
 
     /// Effect kernel v2 (R0.7): the approval tokens this run carries for its
     /// irreversible effects (see [`crate::effects::ApprovalToken`]). The
-    /// executor does not consult them yet — admission enforcement in
-    /// node/tool dispatch is a later wave; the field is the extension point
-    /// that lets the approval set travel with the run's configuration from
-    /// the start, so approvals gathered at submission time are in place when
-    /// enforcement lands. Empty by default; runs that execute no
-    /// irreversible effects need nothing here.
+    /// executor consults them when [`Executor::with_effect_admission`] has
+    /// enabled the guarded tool path. Empty by default; an irreversible call
+    /// dispatched through that path then fails admission before its body
+    /// runs.
     pub effect_approvals: Vec<crate::effects::ApprovalToken>,
 }
 
@@ -443,6 +442,10 @@ pub struct Executor {
     // invocation (and, via `NodeContext::middleware`, the tool/model calls
     // node code makes). An empty chain takes the original dispatch path.
     middleware: MiddlewareChain,
+    // Present only when guarded tool effect admission is enabled. The run's
+    // thread id and approval tokens are combined with these rollback handlers
+    // into an EffectAdmissionContext for each node invocation.
+    effect_compensations: Option<CompensationRegistry>,
 }
 
 impl Executor {
@@ -479,6 +482,26 @@ impl Executor {
     /// The attached middleware chain (empty when no layers were added).
     pub fn middleware(&self) -> &MiddlewareChain {
         &self.middleware
+    }
+
+    /// Builder-style: make guarded tool effect admission available to nodes.
+    ///
+    /// The supplied registry may be empty. Pure and read-only calls remain
+    /// automatic; idempotent calls require a key, compensatable calls require
+    /// a handler in this registry, and non-idempotent calls require a matching
+    /// token in [`RunConfig::effect_approvals`]. The prebuilt ReAct tools node
+    /// enforces this automatically. Custom nodes must pass
+    /// [`NodeContext::effect_admission`] to the [`crate::tool::ToolExecutor`]
+    /// they construct; direct [`crate::tool::Tool::call`] invocations are not
+    /// intercepted by the executor.
+    pub fn with_effect_admission(mut self, compensations: CompensationRegistry) -> Self {
+        self.effect_compensations = Some(compensations);
+        self
+    }
+
+    /// Whether this executor enforces the effect admission boundary.
+    pub fn effect_admission_enabled(&self) -> bool {
+        self.effect_compensations.is_some()
     }
 
     /// Builder-style: hold a token broadcast sender that nodes can clone to
@@ -711,6 +734,15 @@ impl Executor {
             }];
         }
 
+        // One shared context for the whole run: clones handed to parallel
+        // nodes share its approval ledger, and later super-steps observe
+        // tokens already consumed by earlier calls.
+        let effect_admission = self.effect_compensations.as_ref().map(|compensations| {
+            EffectAdmissionContext::new(config.thread_id.clone())
+                .with_approvals(config.effect_approvals.clone())
+                .with_compensations(compensations.clone())
+        });
+
         // ---- super-step loop ----
         let mut steps_run: usize = 0;
         loop {
@@ -755,6 +787,7 @@ impl Executor {
                     spec,
                     &config,
                     &recorder,
+                    effect_admission.as_ref(),
                     &mut state,
                     &active,
                     step,
@@ -802,6 +835,7 @@ impl Executor {
         spec: &StateSpec,
         config: &RunConfig,
         recorder: &Recorder,
+        effect_admission: Option<&EffectAdmissionContext>,
         state: &mut State,
         active: &[ActiveTask],
         step: usize,
@@ -831,6 +865,7 @@ impl Executor {
         //    private copy of the start-of-step snapshot, so fan-out items
         //    never collide in the shared state.
         let snapshot = state.clone();
+        let effect_admission = effect_admission.cloned();
         let mut join_set: JoinSet<(usize, String, Result<NodeOutput>, u64)> = JoinSet::new();
         // Per-invocation journal metadata, aligned with `active`: the input
         // event id (causal parent of the matching output) and the node's
@@ -900,6 +935,7 @@ impl Executor {
             // the real elapsed time.
             let clock = recorder.clock.clone();
             let chain = self.middleware.clone();
+            let effect_admission = effect_admission.clone();
             join_set.spawn(
                 async move {
                     let node_started = clock.now();
@@ -909,7 +945,11 @@ impl Executor {
                     // substitute output; after-hooks unwind over the result.
                     // No layers: the original dispatch, byte-identical.
                     let result = if chain.is_empty() {
-                        node.run(NodeContext::new(node_state, node_config)).await
+                        node.run(
+                            NodeContext::new(node_state, node_config)
+                                .with_optional_effect_admission(effect_admission),
+                        )
+                        .await
                     } else {
                         let mut call = NodeCall::new(
                             node_config.thread_id.clone(),
@@ -920,7 +960,8 @@ impl Executor {
                         chain
                             .run_node(&mut call, |call| {
                                 let ctx = NodeContext::new(call.state().clone(), node_config)
-                                    .with_middleware(chain.clone());
+                                    .with_middleware(chain.clone())
+                                    .with_optional_effect_admission(effect_admission);
                                 let node = Arc::clone(&node);
                                 async move { node.run(ctx).await }
                             })

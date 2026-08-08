@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use serde_json::{json, Value};
 
+use crate::effects::{EffectAdmissionContext, EffectRequest};
 use crate::error::{Result, RustyError};
 use crate::llm::{ChatMessage, ToolCall};
 use crate::middleware::{MiddlewareChain, ToolInvocation};
@@ -45,6 +46,39 @@ pub trait Tool: Send + Sync {
     /// tool's real behavior.
     fn effect(&self) -> crate::record::Effect {
         crate::record::Effect::NonIdempotent
+    }
+
+    /// Stable effect kind used for deterministic effect ids and compensation
+    /// lookup. Defaults to the tool name.
+    fn effect_kind(&self) -> &str {
+        self.name()
+    }
+
+    /// Stable idempotency key for this call, when [`Tool::effect`] declares
+    /// [`crate::record::Effect::Idempotent`]. The admission boundary rejects
+    /// an idempotent call that returns `None` here.
+    fn idempotency_key(&self, _args: &Value) -> Option<String> {
+        None
+    }
+
+    /// Describe this concrete call for the runtime admission boundary.
+    ///
+    /// The default combines the tool's declared class and stable kind with a
+    /// canonical hash of the post-middleware arguments and tool-call id. The
+    /// call id is the occurrence discriminator: two identical irreversible
+    /// calls cannot spend the same approval. Wrappers that override this
+    /// method must delegate it to remain transparent.
+    fn effect_request(&self, call: &ToolCall) -> EffectRequest {
+        let input = json!({
+            "arguments": &call.arguments,
+            "tool_call_id": &call.id,
+        });
+        EffectRequest::new(
+            self.effect_kind(),
+            self.effect(),
+            &input,
+            self.idempotency_key(&call.arguments),
+        )
     }
 
     /// Execute the tool with model-supplied arguments.
@@ -144,6 +178,7 @@ impl ToolRegistry {
 pub struct ToolExecutor {
     registry: ToolRegistry,
     middleware: MiddlewareChain,
+    effect_admission: Option<EffectAdmissionContext>,
     thread_id: String,
     node: String,
 }
@@ -170,6 +205,13 @@ impl ToolExecutor {
         self
     }
 
+    /// Builder-style: enforce the run-scoped effect boundary on every tool
+    /// body this executor dispatches.
+    pub fn with_effect_admission(mut self, context: EffectAdmissionContext) -> Self {
+        self.effect_admission = Some(context);
+        self
+    }
+
     /// Builder-style: label dispatched calls with the thread and node they
     /// originate from (flowing into the [`ToolInvocation`] context).
     pub fn with_call_context(
@@ -187,6 +229,11 @@ impl ToolExecutor {
         &self.middleware
     }
 
+    /// The attached effect boundary, if enforcement is enabled.
+    pub fn effect_admission(&self) -> Option<&EffectAdmissionContext> {
+        self.effect_admission.as_ref()
+    }
+
     /// Execute a batch of tool calls concurrently.
     ///
     /// Returns one [`ChatMessage::tool_result`] per call, **in the same
@@ -202,29 +249,25 @@ impl ToolExecutor {
         let futures = calls.iter().map(|call| {
             let registry = self.registry.clone();
             let chain = self.middleware.clone();
+            let effect_admission = self.effect_admission.clone();
             let thread_id = self.thread_id.clone();
             let node = self.node.clone();
             async move {
                 let result = std::panic::AssertUnwindSafe(async {
                     let value = if chain.is_empty() {
-                        let tool = registry.get(&call.name).ok_or_else(|| {
-                            RustyError::Tool(format!("unknown tool `{}`", call.name))
-                        })?;
-                        tool.call(call.arguments.clone()).await?
+                        dispatch_tool(&registry, call, effect_admission.as_ref()).await?
                     } else {
                         let mut invocation = ToolInvocation::new(thread_id, node, call.clone());
                         chain
                             .run_tool(&mut invocation, |invocation| {
                                 let registry = registry.clone();
+                                let effect_admission = effect_admission.clone();
                                 let call = invocation.call().clone();
                                 async move {
                                     // The lookup happens after before-hooks,
                                     // so a layer may rewrite the arguments —
                                     // or the target tool name itself.
-                                    let tool = registry.get(&call.name).ok_or_else(|| {
-                                        RustyError::Tool(format!("unknown tool `{}`", call.name))
-                                    })?;
-                                    tool.call(call.arguments).await
+                                    dispatch_tool(&registry, &call, effect_admission.as_ref()).await
                                 }
                             })
                             .await?
@@ -254,6 +297,25 @@ impl ToolExecutor {
         });
         futures::future::join_all(futures).await
     }
+}
+
+/// Resolve, admit, and invoke one finalized call. Middleware reaches this
+/// function only after its before-hooks have settled the tool name and
+/// arguments, so admission cannot be bypassed by rewriting a call after it
+/// was approved.
+async fn dispatch_tool(
+    registry: &ToolRegistry,
+    call: &ToolCall,
+    effect_admission: Option<&EffectAdmissionContext>,
+) -> Result<Value> {
+    let tool = registry
+        .get(&call.name)
+        .ok_or_else(|| RustyError::Tool(format!("unknown tool `{}`", call.name)))?;
+    let _permit = effect_admission
+        .map(|context| context.admit(&tool.effect_request(call)))
+        .transpose()
+        .map_err(|violation| RustyError::Tool(format!("effect admission denied: {violation}")))?;
+    tool.call(call.arguments.clone()).await
 }
 
 /// Best-effort extraction of a panic payload for error reporting.

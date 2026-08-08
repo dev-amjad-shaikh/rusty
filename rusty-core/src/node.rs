@@ -23,6 +23,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::effects::EffectAdmissionContext;
 use crate::error::{Result, RustyError};
 use crate::middleware::MiddlewareChain;
 use crate::state::State;
@@ -69,6 +70,7 @@ pub struct NodeContext {
     state: State,
     config: NodeConfig,
     middleware: MiddlewareChain,
+    effect_admission: Option<EffectAdmissionContext>,
 }
 
 impl NodeContext {
@@ -80,6 +82,7 @@ impl NodeContext {
             state,
             config,
             middleware: MiddlewareChain::new(),
+            effect_admission: None,
         }
     }
 
@@ -108,6 +111,28 @@ impl NodeContext {
     /// has no layers.
     pub fn middleware(&self) -> &MiddlewareChain {
         &self.middleware
+    }
+
+    /// The run-scoped effect boundary attached by an executor that enabled
+    /// admission enforcement. Nodes dispatching tools should pass this to
+    /// [`crate::tool::ToolExecutor::with_effect_admission`]. The prebuilt
+    /// ReAct tools node does so automatically.
+    pub fn effect_admission(&self) -> Option<&EffectAdmissionContext> {
+        self.effect_admission.as_ref()
+    }
+
+    /// Builder-style: attach a run-scoped effect admission boundary.
+    pub fn with_effect_admission(mut self, context: EffectAdmissionContext) -> Self {
+        self.effect_admission = Some(context);
+        self
+    }
+
+    pub(crate) fn with_optional_effect_admission(
+        mut self,
+        context: Option<EffectAdmissionContext>,
+    ) -> Self {
+        self.effect_admission = context;
+        self
     }
 
     /// The current thread id (shortcut for `config().thread_id`).
