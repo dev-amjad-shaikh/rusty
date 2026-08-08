@@ -1,6 +1,6 @@
 [package]
 name = "rusty-worker"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,7 +13,7 @@ keywords = ["agent", "graph", "llm", "worker", "langgraph"]
 categories = ["asynchronous", "network-programming"]
 
 [dependencies]
-rusty-agent-runtime = { path = "../rusty-core", version = "0.6" }
+rusty-agent-runtime = { path = "../rusty-core", version = "0.7" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
