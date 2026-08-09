@@ -39,7 +39,15 @@ globalThis.__memory = {
   memoryConsolidationConflictCurrent, memoryGovernanceIdList, memoryConsolidationValidateReceipt,
   memoryConsolidationSourcesHtml, memoryGovernanceCurrent, memoryGovernanceErrorText,
   memoryGovernanceTaskEvidence,
+  memoryConsolidationTaskContract, memoryConsolidationTaskFingerprint,
+  memoryConsolidationSummaryCheck, memoryConsolidationOutcome, memoryConsolidationSummaryQuery,
+  memoryConsolidationFollowDelay, memoryConsolidationFollowErrorText,
+  memoryConsolidationSummaryHtml, memoryConsolidationFollowHtml, memoryConsolidationTaskActionHtml,
+  memoryConsolidationFollowCurrent,
   setMemoryGovernanceTestState: (draft, conn) => { store.memoryGovernance = draft; store.conn = conn; },
+  setMemoryFollowTestState: (follow, request, conn) => {
+    store.memoryFollow = follow; store.memoryFollowRequest = request; store.conn = conn;
+  },
   memorySummaryHtml, memoryConflictsHtml, memoryErrorHtml,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -420,6 +428,86 @@ check("evidence: direct records say that no derivation IDs exist",
       distiller: validated.payload.distiller, key: validated.payload.key, tags: validated.payload.tags,
       priority: validated.payload.priority, written_at: "2026-08-09T08:00:00Z", run_id: null, parent: null },
   };
+  const summaryId = "d".repeat(64);
+  const governedSummary = {
+    memory_id: summaryId, kind: "summary", scope: { ...task.payload.scope }, key: task.payload.key,
+    tags: [...task.payload.tags], priority: task.payload.priority,
+    provenance: {
+      author: { type: "distiller", name: task.payload.distiller },
+      evidence: { source_memory_ids: [...task.payload.memory_ids] },
+      written_at: task.payload.written_at,
+    },
+    confidence: 0.7, validity: { valid_from: "2026-08-08T10:00:00Z" },
+    created_at: task.payload.written_at,
+    content: { kind: "inline", value: { tone: "concise <reviewed>" } },
+  };
+  const completedTask = { ...task, status: "completed", result: { memory_id: summaryId } };
+  const contract = M.memoryConsolidationTaskContract(task);
+  check("consolidation follow: durable task normalizes one exact immutable outcome contract",
+    contract.ok && contract.taskId === task.task_id && contract.sourceIds[0] === sourceA.memory_id &&
+    contract.distiller === task.payload.distiller && contract.key === task.payload.key &&
+    contract.priority === 3 && contract.pool === "memory-workers" &&
+    M.memoryConsolidationTaskFingerprint(task) === M.memoryConsolidationTaskFingerprint({ ...task, status: "leased" }));
+  check("consolidation follow: summary query is scope- and kind-bounded without hiding policy mismatches",
+    JSON.stringify(M.memoryConsolidationSummaryQuery(contract)) === JSON.stringify({
+      scope: task.payload.scope, kinds: ["summary"], include_expired: true, include_superseded: true,
+    }));
+  check("consolidation follow: exact summary binds source set, scope, attribution, time, and reviewed policy",
+    M.memoryConsolidationSummaryCheck(contract, governedSummary).match &&
+    M.memoryConsolidationOutcome(completedTask, [governedSummary]).state === "proven" &&
+    M.memoryConsolidationOutcome(completedTask, [governedSummary]).summary.memory_id === summaryId);
+  check("consolidation follow: summary proof and task settlement remain independent evidence",
+    M.memoryConsolidationOutcome({ ...completedTask, status: "dead" }, [governedSummary]).state === "proven" &&
+    M.memoryConsolidationOutcome({ ...task, status: "queued" }, []).state === "waiting" &&
+    M.memoryConsolidationOutcome(completedTask, []).label.includes("without summary proof"));
+  check("consolidation follow: policy drift cannot masquerade as the reviewed governed summary",
+    M.memoryConsolidationOutcome(completedTask, [{ ...governedSummary, key: "other" }]).state === "attention" &&
+    M.memoryConsolidationOutcome(completedTask, [{ ...governedSummary, key: "other" }]).differences.includes("summary key") &&
+    M.memoryConsolidationOutcome(completedTask, [{ ...governedSummary,
+      provenance: { ...governedSummary.provenance, author: { type: "distiller", name: "other" } } }]).state === "attention" &&
+    M.memoryConsolidationOutcome(completedTask, [{ ...governedSummary, created_at: "2026-08-09T08:00:01Z" }]).state === "attention");
+  check("consolidation follow: contradictory result ids and duplicate exact summaries fail closed",
+    M.memoryConsolidationOutcome({ ...completedTask, result: { memory_id: "e".repeat(64) } }, [governedSummary]).state === "attention" &&
+    M.memoryConsolidationOutcome(completedTask, [governedSummary, { ...governedSummary, memory_id: "f".repeat(64) }]).label.includes("Multiple") &&
+    M.memoryConsolidationOutcome(completedTask, [governedSummary], true).label.includes("incomplete"));
+  check("consolidation follow: malformed task contracts never gain a Memory handoff",
+    !M.memoryConsolidationTaskContract({ ...task, payload: { ...task.payload, tags: "reviewed" } }).ok &&
+    !M.memoryConsolidationTaskContract({ ...task, payload: { ...task.payload, memory_ids: [sourceA.memory_id, sourceA.memory_id] } }).ok &&
+    !M.memoryConsolidationTaskContract({ ...task, task_id: 42 }).ok &&
+    !M.memoryConsolidationTaskContract({ ...task, payload: { ...task.payload, scope: { scope: "user", id: 7 } } }).ok &&
+    !M.memoryConsolidationTaskContract({ ...task, payload: { ...task.payload, written_at: 12 } }).ok &&
+    M.memoryConsolidationTaskActionHtml({ ...task, kind: "ordinary" }) === "" &&
+    M.memoryConsolidationTaskActionHtml(task).includes("Follow memory outcome"));
+  const followHtml = M.memoryConsolidationFollowHtml({ taskId: task.task_id, task: completedTask, contract,
+    outcome: M.memoryConsolidationOutcome(completedTask, [governedSummary]), auto: true, refreshing: false,
+    failures: 0, error: "", lastChecked: now });
+  check("consolidation follow: accessible evidence path exposes task, summary, source identities, and escaped content",
+    followHtml.includes('aria-label="Consolidation evidence path"') && followHtml.includes("Governed summary proven") &&
+    followHtml.includes(summaryId) && followHtml.includes(sourceA.memory_id) &&
+    followHtml.includes("concise &lt;reviewed&gt;") && !followHtml.includes("<reviewed>") &&
+    followHtml.includes('data-memory-follow-summary'));
+  check("consolidation follow: live polling is visible-workspace and nonterminal only",
+    M.memoryConsolidationFollowDelay("memory", "visible", { auto: true, refreshing: false,
+      failures: 0, outcome: { state: "waiting" } }) === 1500 &&
+    M.memoryConsolidationFollowDelay("memory", "visible", { auto: true, refreshing: false,
+      failures: 9, outcome: { state: "waiting" } }) === 20000 &&
+    M.memoryConsolidationFollowDelay("tasks", "visible", { auto: true, refreshing: false,
+      failures: 0, outcome: { state: "waiting" } }) === null &&
+    M.memoryConsolidationFollowDelay("memory", "hidden", { auto: true, refreshing: false,
+      failures: 0, outcome: { state: "waiting" } }) === null &&
+    M.memoryConsolidationFollowDelay("memory", "visible", { auto: true, refreshing: false,
+      failures: 0, outcome: { state: "proven" } }) === null);
+  const followState = { taskId: task.task_id };
+  M.setMemoryFollowTestState(followState, 7, { baseUrl: "http://tenant-b", apiKey: "b" });
+  check("consolidation follow: late refreshes are owned by task state, request generation, and tenant",
+    M.memoryConsolidationFollowCurrent(followState, 7, { baseUrl: "http://tenant-b", apiKey: "b" }) &&
+    !M.memoryConsolidationFollowCurrent({ taskId: task.task_id }, 7, { baseUrl: "http://tenant-b", apiKey: "b" }) &&
+    !M.memoryConsolidationFollowCurrent(followState, 6, { baseUrl: "http://tenant-b", apiKey: "b" }) &&
+    !M.memoryConsolidationFollowCurrent(followState, 7, { baseUrl: "http://tenant-a", apiKey: "a" }));
+  check("consolidation follow: route absence, missing evidence, and transport failure remain distinct",
+    M.memoryConsolidationFollowErrorText({ status: 404, body: { raw: "missing" } }).includes("does not expose") &&
+    M.memoryConsolidationFollowErrorText({ status: 404, body: { error: "not_found" } }).includes("no longer exists") &&
+    M.memoryConsolidationFollowErrorText(new Error("offline")) === "offline");
   const response = { task_id: task.task_id, kind: "memory_consolidation", deduplicated: false };
   check("consolidation receipt: enqueue identity is corroborated against the durable task payload",
     M.memoryConsolidationValidateReceipt(response, validated.payload, task).ok);
@@ -631,6 +719,28 @@ check("consolidation responsive: consequence, form, and review collapse without 
   html.includes(".memory-consequence { grid-template-columns: 1fr; }") &&
   html.includes(".memory-governance-body { grid-template-columns: 1fr; }") &&
   html.includes(".memory-governance-fields { grid-template-columns: 1fr; }"));
+check("consolidation follow lifecycle: accepted receipts and discovered durable tasks share one evidence workspace",
+  html.includes("memoryConsolidationFollowStart(receipt.task)") &&
+  html.includes('data-memory-follow-task-id=') &&
+  html.includes("memoryConsolidationFollowOpen(task)") &&
+  html.includes('id="memory-follow" aria-labelledby="memory-follow-title" hidden'));
+check("consolidation follow reads: task contract, scoped summaries, and result record are independently corroborated",
+  html.includes('apiForConnection(connection, "GET", `/tasks/${encodeURIComponent(follow.taskId)}`)') &&
+  html.includes('apiForConnection(connection, "POST", "/memory/query", memoryConsolidationSummaryQuery(follow.contract))') &&
+  html.includes('apiForConnection(connection, "GET", `/memory/${encodeURIComponent(resultId)}`)') &&
+  html.includes("memoryConsolidationTaskFingerprint(task) !== follow.fingerprint"));
+check("consolidation follow isolation: connection reset and request ownership stop prior-tenant refreshes",
+  html.includes("store.memoryFollowRequest += 1") && html.includes("store.memoryFollow = null") &&
+  html.includes("memoryConsolidationFollowCurrent(follow, request, connection)") &&
+  html.includes("connectionIdentityChanged(connection, store.conn)"));
+check("consolidation follow accessibility: live state, refresh, task, summary, and close actions stay labelled",
+  html.includes('role="list" aria-label="Consolidation evidence path"') &&
+  html.includes('id="chk-memory-follow-auto"') && html.includes('aria-disabled="${value.refreshing}"') &&
+  html.includes('id="memory-follow-error"') && html.includes('data-memory-follow-summary'));
+check("consolidation follow responsive: evidence path and summary metadata collapse to one column",
+  html.includes(".memory-follow-path { grid-template-columns: 1fr; }") &&
+  html.includes(".memory-follow-joint { transform: rotate(90deg); }") &&
+  html.includes(".memory-follow-summary dl { grid-template-columns: 1fr;"));
 check("responsive shell: mobile navigation leaves the workspace in the first viewport",
   html.includes("max-height: 34vh; overflow-y: auto") && html.includes("@media (max-width: 1120px)"));
 check("accessibility: small memory metadata uses the higher-contrast dim token",

@@ -310,10 +310,17 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   Sources remain independently live until a worker writes a
   governed summary record that names them in `evidence.source_memory_ids`; task settlement is a separate
   later operation and is not the supersession gate. Ambiguous responses
-  lock the exact request for a deduplicated retry, and a confirmed receipt opens directly in Durable Work.
+  lock the exact request for a deduplicated retry. A confirmed receipt now opens a session-scoped outcome
+  path, and every valid `memory_consolidation` detail in Durable Work can reattach to the same path. Studio
+  rereads the durable task, queries only summaries at its exact scope, and accepts one outcome only when the
+  immutable source set, distiller attribution, learning instant, key, tags, and retrieval priority match the
+  frozen task contract. A contradictory task result, multiple exact summaries, policy drift, or a completed
+  task without summary proof becomes attention evidence rather than a selected winner. Live follow runs only
+  while Memory is visible, stops at a terminal evidence state, preserves the last confirmed result during an
+  outage, and bounds summary inspection to 2,000 records. The resulting summary can be opened directly in the
+  ledger; no task or memory content is persisted by this browser handoff.
   Studio does not yet capture run-event or prompt-hash corrections, approve or reject memory candidates,
-  follow a consolidation from durable work into its resulting summary inside the Memory workspace, expire, or expose record/scope
-  forgetting controls. A direct correction is attributed by the author supplied in the request;
+  expire, or expose record/scope forgetting controls. A direct correction is attributed by the author supplied in the request;
   that label is not proof of an authenticated human principal until the platform exposes attributed
   identities and authority. Although the correction request contract accepts a rationale, the current
   record, receipt, and journal contracts do not retain it, so Studio does not collect a reason until it
@@ -404,8 +411,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
   route compatibility, explicit render bounds, exact consolidation payloads, source/scope validation,
-  durable-task corroboration, deduplicated retries, connection isolation, responsive consequence
-  rendering, and queued-versus-resolved truthfulness.
+  durable-task corroboration, deduplicated retries, connection isolation, exact task-to-summary follow-through,
+  duplicate/mismatch/terminal outcome handling, visibility-aware polling, responsive consequence rendering,
+  and queued-versus-resolved truthfulness.
 - `node studio/test-home.mjs` — 26 assertions over disconnected onboarding, honest server-versus-browser
   evidence, privacy-minimized run summaries, deterministic recency and attention routing, bounded hostile
   history, memory-unknown semantics, next-action guidance, identifier escaping, responsive layout,

@@ -869,6 +869,41 @@
   .memory-governance-review dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 9px; margin: 0; }
   .memory-governance-review dt { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
   .memory-governance-review dd { margin: 0; font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .memory-follow {
+    margin: 0 0 14px; padding: 0; overflow: hidden; border-color: #456176;
+    background: linear-gradient(120deg, #17232a, var(--bg-panel) 46%);
+  }
+  .memory-follow[hidden] { display: none; }
+  .memory-follow-head {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    padding: 14px 16px 12px; border-bottom: 1px solid #365064;
+  }
+  .memory-follow-head h2 { margin: 0; font-size: 17px; }
+  .memory-follow-head p { margin: 4px 0 0; max-width: 760px; color: var(--text-dim); font-size: 11.5px; }
+  .memory-follow-actions { display: flex; justify-content: flex-end; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .memory-follow-live { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 10.5px; }
+  .memory-follow-path {
+    display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr);
+    gap: 5px; align-items: stretch; padding: 12px 16px;
+  }
+  .memory-follow-stage { min-width: 0; padding: 10px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset); }
+  .memory-follow-stage b { display: block; color: var(--text); font-size: 11.5px; }
+  .memory-follow-stage span { display: block; margin-top: 3px; color: var(--text-dim); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .memory-follow-stage.proven { border-color: #4e7148; background: #182419; }
+  .memory-follow-stage.attention { border-color: #8b642e; background: #302419; }
+  .memory-follow-joint { align-self: center; color: #7da0b8; font: 700 17px var(--mono); text-align: center; }
+  .memory-follow-status { margin: 0 16px 12px; }
+  .memory-follow-status.stale { border-left-color: #b17c3a; }
+  .memory-follow-status.proven { border-left-color: var(--ok); background: #172419; }
+  .memory-follow-summary { margin: 0 16px 16px; padding: 12px; border: 1px solid #456176; border-radius: 7px; background: #152129; }
+  .memory-follow-summary h3 { margin: 0 0 3px; font-size: 13px; }
+  .memory-follow-summary code { display: block; color: var(--text-dim); font-size: 9px; overflow-wrap: anywhere; }
+  .memory-follow-summary pre { max-height: 180px; margin: 9px 0; padding: 8px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--bg-inset); }
+  .memory-follow-summary dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 8px; margin: 0; }
+  .memory-follow-summary dt { color: var(--text-dim); font-size: 9px; text-transform: uppercase; }
+  .memory-follow-summary dd { margin: 0; font: 10px var(--mono); overflow-wrap: anywhere; }
+  .memory-follow-sources { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
+  .memory-follow-sources code { padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-inset); }
   .memory-governance-error { margin: 11px 16px 0; border-left-color: var(--err); }
   .memory-governance-lock { margin: 11px 16px 0; border-color: #7b6428; background: #312918; }
   .memory-governance-receipt { margin: 11px 16px 0; border-color: #45623e; background: #192419; }
@@ -1269,6 +1304,7 @@
     .memory-correction-form { border-right: 0; border-bottom: 1px solid #544824; }
     .memory-governance-body { grid-template-columns: 1fr; }
     .memory-governance-form { border-right: 0; border-bottom: 1px solid #56422c; }
+    .memory-follow-head { flex-direction: column; }
   }
   @media (max-width: 680px) {
     header { padding: 8px 10px; }
@@ -1340,6 +1376,10 @@
     .memory-governance-fields .wide { grid-column: auto; }
     .memory-governance-review dl { grid-template-columns: 1fr; gap: 2px; }
     .memory-governance-review dd { margin-bottom: 6px; }
+    .memory-follow-path { grid-template-columns: 1fr; }
+    .memory-follow-joint { transform: rotate(90deg); }
+    .memory-follow-summary dl { grid-template-columns: 1fr; gap: 2px; }
+    .memory-follow-summary dd { margin-bottom: 6px; }
     .fabric-patterns { grid-template-columns: 1fr; }
     .fabric-decision-braid { grid-template-columns: 1fr; }
     .fabric-braid-member::after { display: none; }
@@ -1712,6 +1752,7 @@
           </div>
         </div>
 
+        <section class="card memory-follow" id="memory-follow" aria-labelledby="memory-follow-title" hidden></section>
         <section class="card memory-governance" id="memory-governance" aria-labelledby="memory-governance-title" hidden></section>
         <section class="card memory-correction" id="memory-correction" aria-labelledby="memory-correction-title" hidden></section>
         <span class="sr-only" id="memory-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
@@ -2087,6 +2128,9 @@ const store = {
   memoryLifecycleTimer: null,
   memoryCorrection: null, // connection-scoped selected-record correction draft and retry receipt
   memoryGovernance: null, // connection-scoped consolidation decision and durable task receipt
+  memoryFollow: null, // connection-scoped durable consolidation task and governed-summary evidence
+  memoryFollowRequest: 0,
+  memoryFollowTimer: null,
   learn: null,         // bounded candidate/version evidence, filters, selection, and action drafts
   learnUnsupported: false, // server build has no governed-learning routes
   learnRequest: 0,     // generation guard for candidate/version reads and lifecycle actions
@@ -3555,6 +3599,10 @@ function connectionResetWorkspace() {
   store.memoryUnsupported = false;
   store.memoryCorrection = null;
   store.memoryGovernance = null;
+  store.memoryFollowRequest += 1;
+  clearTimeout(store.memoryFollowTimer);
+  store.memoryFollowTimer = null;
+  store.memoryFollow = null;
   clearTimeout(store.learnSearchTimer);
   store.learnSearchTimer = null;
   store.learn = null;
@@ -3837,6 +3885,8 @@ function renderMain() {
   if (!memory) {
     clearTimeout(store.memoryLifecycleTimer);
     store.memoryLifecycleTimer = null;
+    clearTimeout(store.memoryFollowTimer);
+    store.memoryFollowTimer = null;
   }
   $("home-view").style.display = home ? "block" : "none";
   $("tasks-view").style.display = tasks ? "block" : "none";
@@ -9112,6 +9162,206 @@ function memoryConsolidationSourcesHtml(draft) {
     }).join("") + `</div></section>`;
 }
 
+function memoryConsolidationTaskContract(task) {
+  const durable = task && typeof task === "object" && !Array.isArray(task) ? task : {};
+  const payload = durable.payload && typeof durable.payload === "object" && !Array.isArray(durable.payload)
+    ? durable.payload : {};
+  const ids = Array.isArray(payload.memory_ids) && payload.memory_ids.every((id) => typeof id === "string")
+    ? memoryGovernanceIdList(payload.memory_ids) : null;
+  const scope = payload.scope && typeof payload.scope === "object" && !Array.isArray(payload.scope) ? payload.scope : {};
+  const statuses = new Set(["queued", "leased", "failed", "completed", "dead", "cancelled"]);
+  const keyPresent = Object.prototype.hasOwnProperty.call(payload, "key") && payload.key != null;
+  const tags = Array.isArray(payload.tags) ? payload.tags : null;
+  const writtenAt = typeof payload.written_at === "string" ? payload.written_at : "";
+  const priority = payload.priority == null ? 0 : payload.priority;
+  const pool = durable.pool == null ? "default" : durable.pool;
+  let error = "";
+  if (durable.kind !== "memory_consolidation") error = "This task is not a memory consolidation.";
+  else if (typeof durable.task_id !== "string" || !memoryCorrectionWireText(durable.task_id)) error = "The task has no safe durable identity.";
+  else if (!ids || !ids.length) error = "The task does not name a bounded set of immutable memory sources.";
+  else if (typeof scope.scope !== "string" || typeof scope.id !== "string" || scope.scope === "run" || !MEMORY_CORRECTION_SCOPES.has(scope.scope) || !memoryCorrectionWireText(scope.id)) error = "The task does not carry one supported non-run memory scope.";
+  else if (typeof payload.distiller !== "string" || !memoryCorrectionWireText(payload.distiller)) error = "The task has no valid distiller identity.";
+  else if (keyPresent && (typeof payload.key !== "string" || !memoryCorrectionWireText(payload.key))) error = "The task carries an invalid summary key.";
+  else if (!tags || tags.length > MEMORY_GOVERNANCE_TAG_LIMIT || tags.some((tag) => typeof tag !== "string" || !memoryCorrectionWireText(tag)) || new Set(tags).size !== tags.length) error = "The task carries invalid or duplicate summary tags.";
+  else if (!Number.isSafeInteger(priority) || Object.is(priority, -0)) error = "The task carries an invalid summary priority.";
+  else if (typeof pool !== "string" || !memoryGovernancePool(pool)) error = "The task carries an invalid queue pool.";
+  else if (!statuses.has(durable.status)) error = "The task carries an unknown lifecycle status.";
+  else if (!/^\d{4}-\d{2}-\d{2}T/.test(writtenAt) || !Number.isFinite(Date.parse(writtenAt))) error = "The task has no valid consolidation learning instant.";
+  if (error) return { ok: false, error };
+  return {
+    ok: true,
+    taskId: durable.task_id,
+    sourceIds: ids.slice().sort(),
+    scope: { scope: scope.scope, id: scope.id },
+    distiller: payload.distiller,
+    key: keyPresent ? payload.key : null,
+    tags: tags.slice(),
+    priority,
+    pool,
+    writtenAt,
+  };
+}
+
+function memoryConsolidationTaskFingerprint(task) {
+  const contract = memoryConsolidationTaskContract(task);
+  return contract.ok ? JSON.stringify({
+    taskId: contract.taskId, sourceIds: contract.sourceIds, scope: contract.scope,
+    distiller: contract.distiller, key: contract.key, tags: contract.tags,
+    priority: contract.priority, pool: contract.pool, writtenAt: contract.writtenAt,
+  }) : "";
+}
+
+function memoryConsolidationSummaryCheck(contract, record) {
+  const summary = record && typeof record === "object" && !Array.isArray(record) ? record : {};
+  const provenance = summary.provenance && typeof summary.provenance === "object" ? summary.provenance : {};
+  const author = provenance.author && typeof provenance.author === "object" ? provenance.author : {};
+  const evidence = provenance.evidence && typeof provenance.evidence === "object" ? provenance.evidence : {};
+  const sourceIds = Array.isArray(evidence.source_memory_ids) && evidence.source_memory_ids.every((id) => typeof id === "string")
+    ? memoryGovernanceIdList(evidence.source_memory_ids) : null;
+  const sourceMatch = Boolean(sourceIds && memoryCorrectionSameValue(sourceIds.slice().sort(), contract.sourceIds));
+  const differences = [];
+  if (summary.kind !== "summary") differences.push("record kind");
+  if (typeof summary.memory_id !== "string" || !memoryCorrectionMemoryId(summary.memory_id)) differences.push("summary identity");
+  if (!summary.scope || typeof summary.scope.scope !== "string" || typeof summary.scope.id !== "string" || !memoryScopeEqual(summary.scope, contract.scope)) differences.push("scope");
+  if (!sourceMatch) differences.push("source evidence");
+  if (author.type !== "distiller" || author.name !== contract.distiller) differences.push("distiller attribution");
+  if (provenance.written_at !== contract.writtenAt || summary.created_at !== contract.writtenAt) differences.push("learning instant");
+  if ((summary.key == null ? null : summary.key) !== contract.key) differences.push("summary key");
+  if (!Array.isArray(summary.tags) && summary.tags != null || !memoryCorrectionSameValue(Array.isArray(summary.tags) ? summary.tags : [], contract.tags)) differences.push("tags");
+  if ((summary.priority == null ? 0 : summary.priority) !== contract.priority) differences.push("retrieval priority");
+  if (summary.candidacy != null) differences.push("candidate lifecycle");
+  if (summary.supersedes != null) differences.push("unexpected direct supersession");
+  return { match: differences.length === 0, sourceMatch, differences };
+}
+
+function memoryConsolidationOutcome(task, records, truncated = false) {
+  const contract = memoryConsolidationTaskContract(task);
+  if (!contract.ok) return { state: "invalid", label: "Unverifiable task", message: contract.error, contract, summary: null, differences: [] };
+  const bounded = Array.isArray(records) ? records.slice(0, MEMORY_GOVERNANCE_RECEIPT_LIMIT) : [];
+  const checks = bounded.map((record) => ({ record, check: memoryConsolidationSummaryCheck(contract, record) }));
+  const exact = checks.filter((item) => item.check.match);
+  const related = checks.filter((item) => item.check.sourceMatch);
+  const resultId = task && task.result && typeof task.result === "object" && typeof task.result.memory_id === "string" && memoryCorrectionMemoryId(task.result.memory_id)
+    ? task.result.memory_id : null;
+  if (truncated) {
+    return { state: "attention", label: "Summary search incomplete",
+      message: `The scope returned more than ${MEMORY_GOVERNANCE_RECEIPT_LIMIT} summaries. Studio cannot prove a unique outcome from this bounded inspection.`,
+      contract, summary: null, differences: [] };
+  }
+  if (exact.length > 1) {
+    return { state: "attention", label: "Multiple governed summaries",
+      message: "More than one summary satisfies the same task contract. Do not choose one silently; inspect the worker and records.",
+      contract, summary: null, differences: [] };
+  }
+  if (exact.length === 1) {
+    const summary = exact[0].record;
+    if (resultId && resultId !== summary.memory_id) {
+      return { state: "attention", label: "Task result contradicts memory",
+        message: `The task result names ${shortId(resultId)}, but the unique governed summary is ${shortId(summary.memory_id)}.`,
+        contract, summary, differences: ["task result identity"] };
+    }
+    const taskStatus = String(task.status || "unknown");
+    return { state: "proven", label: "Governed summary proven",
+      message: taskStatus === "completed"
+        ? "The exact summary record exists and the durable task is completed. Its source evidence supersedes the reviewed records."
+        : `The exact summary record exists. Task status is ${taskStatus}; task settlement remains separate evidence.`,
+      contract, summary, differences: [] };
+  }
+  if (related.length) {
+    const differences = Array.from(new Set(related.flatMap((item) => item.check.differences))).sort();
+    return { state: "attention", label: "Summary policy mismatch",
+      message: `A summary names the exact sources but differs from the task contract in ${differences.join(", ")}.`,
+      contract, summary: null, differences };
+  }
+  if (task.status === "completed") {
+    return { state: "attention", label: "Completed without summary proof",
+      message: "The durable task is completed, but this scope has no governed summary matching its source set and policy.",
+      contract, summary: null, differences: [] };
+  }
+  if (taskIsTerminal(task)) {
+    return { state: "attention", label: `Task ${task.status}`,
+      message: `The durable task is ${task.status} and no governed summary proves that the sources were superseded.`,
+      contract, summary: null, differences: [] };
+  }
+  return { state: "waiting", label: "Waiting for governed summary",
+    message: task.status === "failed" && task.next_attempt_at
+      ? `The last attempt failed and Rusty scheduled a retry at ${task.next_attempt_at}. No governed summary exists yet.`
+      : `The durable task is ${task.status}. No governed summary matching the reviewed contract exists yet.`,
+    contract, summary: null, differences: [] };
+}
+
+function memoryConsolidationSummaryQuery(contract) {
+  return { scope: { ...contract.scope }, kinds: ["summary"], include_expired: true, include_superseded: true };
+}
+
+function memoryConsolidationFollowDelay(view, visibility, follow) {
+  if (view !== "memory" || visibility !== "visible" || !follow || !follow.auto || follow.refreshing ||
+      !follow.outcome || follow.outcome.state !== "waiting") return null;
+  const failures = Math.max(0, Number(follow.failures) || 0);
+  return [1500, 3000, 6000, 12000, 20000][Math.min(failures, 4)];
+}
+
+function memoryConsolidationFollowErrorText(error) {
+  const status = Number(error && error.status);
+  const raw = error && error.body && Object.prototype.hasOwnProperty.call(error.body, "raw");
+  if (status === 404 && raw) return "This server does not expose the durable-task or governed-memory route needed to follow consolidation.";
+  if (status === 404) return "The task or a task-named summary record no longer exists in this tenant. Last confirmed evidence remains visible.";
+  return String(error && error.body && error.body.message || error && error.message || "Consolidation evidence could not be refreshed.");
+}
+
+function memoryConsolidationSummaryHtml(summary, contract) {
+  if (!summary) return "";
+  const provenance = summary.provenance || {};
+  const sourceIds = contract.sourceIds || [];
+  const shown = sourceIds.slice(0, MEMORY_CONSOLIDATION_SOURCE_LIMIT);
+  return `<article class="memory-follow-summary" aria-labelledby="memory-follow-summary-title">` +
+    `<h3 id="memory-follow-summary-title">Governed summary evidence</h3>` +
+    `<code>${escapeHtml(summary.memory_id)}</code><pre>${escapeHtml(memoryJsonText(memoryContentValue(summary), 6000))}</pre><dl>` +
+    `<dt>Scope</dt><dd>${escapeHtml(`${contract.scope.scope}:${contract.scope.id}`)}</dd>` +
+    `<dt>Distiller</dt><dd>${escapeHtml(`distiller:${contract.distiller}`)}</dd>` +
+    `<dt>Written</dt><dd>${escapeHtml(contract.writtenAt)}</dd>` +
+    `<dt>Key</dt><dd>${escapeHtml(contract.key || "unnamed summary")}</dd>` +
+    `<dt>Sources</dt><dd>${sourceIds.length} exact immutable record${sourceIds.length === 1 ? "" : "s"}</dd></dl>` +
+    `<div class="memory-follow-sources" aria-label="Summary source identities">${shown.map((id) => `<code>${escapeHtml(id)}</code>`).join("")}` +
+    (sourceIds.length > shown.length ? `<span class="muted tiny">+${sourceIds.length - shown.length} more identities retained in the task contract</span>` : "") + `</div>` +
+    `<div class="memory-follow-actions" style="margin-top:10px"><button class="primary" type="button" id="btn-memory-follow-summary" data-memory-follow-summary>Inspect summary in ledger</button></div></article>`;
+}
+
+function memoryConsolidationFollowHtml(follow) {
+  const value = follow && typeof follow === "object" ? follow : {};
+  const task = value.task || {};
+  const outcome = value.outcome || { state: "waiting", label: "Loading evidence", message: "Reading durable task and governed memory evidence." };
+  const contract = value.contract || memoryConsolidationTaskContract(task);
+  const sourceCount = contract.ok ? contract.sourceIds.length : 0;
+  const summary = outcome.summary || null;
+  const taskClass = task.status === "completed" ? "proven" : taskIsTerminal(task) ? "attention" : "";
+  const outcomeClass = outcome.state === "proven" ? "proven" : outcome.state === "attention" || outcome.state === "invalid" ? "attention" : "";
+  const error = value.error
+    ? `<div class="note memory-follow-status stale" role="alert" tabindex="-1" id="memory-follow-error"><b>Live evidence is stale.</b><br>${escapeHtml(value.error)}${value.lastChecked ? ` Last confirmed ${escapeHtml(value.lastChecked)}.` : ""}</div>` : "";
+  return `<div class="memory-follow-head"><div><h2 id="memory-follow-title" tabindex="-1">Consolidation outcome</h2>` +
+    `<p>Follow one durable task until governed memory—not task status alone—proves the exact summary and supersession consequence.</p></div>` +
+    `<div class="memory-follow-actions"><label class="memory-follow-live"><input id="chk-memory-follow-auto" type="checkbox" data-memory-follow-auto ${value.auto ? "checked" : ""}> Live follow</label>` +
+    `<button class="small" type="button" id="btn-memory-follow-refresh" data-memory-follow-refresh aria-disabled="${value.refreshing}">${value.refreshing ? "Refreshing…" : "Refresh evidence"}</button>` +
+    `<button class="small" type="button" id="btn-memory-follow-task" data-memory-follow-task>Open task</button>` +
+    `<button class="small" type="button" id="btn-memory-follow-close" data-memory-follow-close>Close</button></div></div>` +
+    `<div class="memory-follow-path" role="list" aria-label="Consolidation evidence path">` +
+    `<div class="memory-follow-stage proven" role="listitem"><b>01 · Source contract</b><span>${sourceCount} source${sourceCount === 1 ? "" : "s"} · ${contract.ok ? escapeHtml(`${contract.scope.scope}:${contract.scope.id}`) : "invalid"}</span></div>` +
+    `<div class="memory-follow-joint" aria-hidden="true">→</div>` +
+    `<div class="memory-follow-stage ${taskClass}" role="listitem"><b>02 · Durable task</b><span>${escapeHtml(String(task.status || "loading"))} · ${escapeHtml(shortId(value.taskId || task.task_id || "unknown"))}</span></div>` +
+    `<div class="memory-follow-joint" aria-hidden="true">→</div>` +
+    `<div class="memory-follow-stage ${outcomeClass}" role="listitem"><b>03 · Governed memory</b><span>${escapeHtml(outcome.label)}</span></div></div>` +
+    error + `<div class="note memory-follow-status ${outcome.state === "proven" ? "proven" : ""}" role="status" aria-live="polite"><b>${escapeHtml(outcome.label)}</b><br>${escapeHtml(outcome.message)}` +
+    (value.lastChecked ? `<br><span class="muted tiny">Evidence checked ${escapeHtml(value.lastChecked)}.</span>` : "") + `</div>` +
+    memoryConsolidationSummaryHtml(summary, contract.ok ? contract : { sourceIds: [], scope: {}, distiller: "", writtenAt: "", key: null });
+}
+
+function memoryConsolidationTaskActionHtml(task) {
+  if (!task || task.kind !== "memory_consolidation") return "";
+  const contract = memoryConsolidationTaskContract(task);
+  if (!contract.ok) return ` <span class="muted tiny">Memory outcome unavailable: ${escapeHtml(contract.error)}</span>`;
+  return ` <button class="small primary" type="button" data-memory-follow-task-id="${escapeHtml(contract.taskId)}" aria-label="Follow governed memory outcome for task ${escapeHtml(contract.taskId)}">Follow memory outcome</button>`;
+}
+
 
 function memoryCorrectionGeneratedId(cryptography = globalThis.crypto) {
   if (!cryptography || typeof cryptography.randomUUID !== "function") {
@@ -10074,8 +10324,9 @@ async function memoryGovernanceAccept(draft, receipt, generation, connection) {
   draft.error = "";
   draft.fieldErrors = Object.create(null);
   draft.receipt = receipt;
+  memoryConsolidationFollowStart(receipt.task);
   memoryGovernanceRender();
-  await memoryLoad(true);
+  await Promise.all([memoryLoad(true), memoryConsolidationFollowRefresh({ quiet: true })]);
   if (store.memoryGovernance !== draft || connectionIdentityChanged(connection, store.conn)) return;
   memoryRender();
   $("memory-governance-title")?.focus({ preventScroll: true });
@@ -10086,6 +10337,195 @@ async function memoryGovernanceAccept(draft, receipt, generation, connection) {
 function memoryGovernanceTaskEvidence(draft) {
   const value = draft && typeof draft === "object" ? draft : {};
   return value.receipt || value.collision || null;
+}
+
+function memoryConsolidationFollowStart(task) {
+  const contract = memoryConsolidationTaskContract(task);
+  if (!contract.ok) return { ok: false, error: contract.error };
+  const outcome = memoryConsolidationOutcome(task, []);
+  store.memoryFollowRequest += 1;
+  clearTimeout(store.memoryFollowTimer);
+  store.memoryFollowTimer = null;
+  store.memoryFollow = {
+    taskId: contract.taskId, task, contract, fingerprint: memoryConsolidationTaskFingerprint(task),
+    outcome, records: [], refreshing: false, auto: true, failures: 0,
+    error: "", lastChecked: null,
+  };
+  memoryConsolidationFollowRender();
+  return { ok: true, follow: store.memoryFollow };
+}
+
+function memoryConsolidationFollowCurrent(follow, request, connection) {
+  return store.memoryFollow === follow && request === store.memoryFollowRequest &&
+    !connectionIdentityChanged(connection, store.conn);
+}
+
+function memoryConsolidationFollowRender() {
+  const panel = $("memory-follow");
+  const follow = store.memoryFollow;
+  const active = document.activeElement;
+  const restoreId = active && panel.contains(active) ? active.id : "";
+  panel.hidden = !follow;
+  if (!follow) { panel.innerHTML = ""; return; }
+  panel.setAttribute("aria-busy", follow.refreshing ? "true" : "false");
+  panel.innerHTML = memoryConsolidationFollowHtml(follow);
+  if (restoreId) (document.getElementById(restoreId) || $("memory-follow-title"))?.focus({ preventScroll: true });
+  memoryConsolidationFollowSchedule();
+}
+
+function memoryConsolidationFollowSchedule() {
+  clearTimeout(store.memoryFollowTimer);
+  store.memoryFollowTimer = null;
+  const follow = store.memoryFollow;
+  const delay = memoryConsolidationFollowDelay(store.view, document.visibilityState, follow);
+  if (delay == null) return;
+  const connection = store.conn && { ...store.conn };
+  const taskId = follow.taskId;
+  store.memoryFollowTimer = setTimeout(() => {
+    store.memoryFollowTimer = null;
+    if (!store.memoryFollow || store.memoryFollow.taskId !== taskId || !store.conn ||
+        connectionIdentityChanged(connection, store.conn) || store.view !== "memory") return;
+    memoryConsolidationFollowRefresh({ quiet: true });
+  }, delay);
+}
+
+function memoryConsolidationFollowMergeSummary(summary, contract) {
+  const state = store.memory;
+  if (!summary || !state || state.loading || state.error || !Array.isArray(state.records)) return;
+  if (!state.records.some((record) => record && record.memory_id === summary.memory_id)) {
+    state.records.unshift(summary);
+    if (state.searchIndex instanceof Map) state.searchIndex.set(summary.memory_id, memorySearchText(summary));
+  }
+  if (!(state.superseded instanceof Set)) state.superseded = new Set();
+  const available = new Set(state.records.map((record) => String(record && record.memory_id || "")));
+  for (const id of contract.sourceIds) if (available.has(id)) state.superseded.add(id);
+}
+
+async function memoryConsolidationFollowRefresh(options = {}) {
+  const follow = store.memoryFollow;
+  const connection = store.conn && { ...store.conn };
+  if (!follow || !connection || follow.refreshing) return false;
+  const request = ++store.memoryFollowRequest;
+  const priorState = follow.outcome && follow.outcome.state;
+  const priorSummaryId = follow.outcome && follow.outcome.summary && follow.outcome.summary.memory_id;
+  follow.refreshing = true;
+  follow.error = "";
+  memoryConsolidationFollowRender();
+  try {
+    const task = await apiForConnection(connection, "GET", `/tasks/${encodeURIComponent(follow.taskId)}`);
+    if (!memoryConsolidationFollowCurrent(follow, request, connection)) return false;
+    if (memoryConsolidationTaskFingerprint(task) !== follow.fingerprint) {
+      throw new Error("The durable task contract changed after it was selected. Studio will not bind new evidence to the frozen source set.");
+    }
+    const body = await apiForConnection(connection, "POST", "/memory/query", memoryConsolidationSummaryQuery(follow.contract));
+    if (!memoryConsolidationFollowCurrent(follow, request, connection)) return false;
+    const all = Array.isArray(body && body.records) ? body.records : [];
+    const truncated = all.length > MEMORY_GOVERNANCE_RECEIPT_LIMIT;
+    const records = all.slice(0, MEMORY_GOVERNANCE_RECEIPT_LIMIT);
+    const resultId = task && task.result && typeof task.result === "object" && typeof task.result.memory_id === "string" && memoryCorrectionMemoryId(task.result.memory_id)
+      ? task.result.memory_id : null;
+    if (resultId && !records.some((record) => record && record.memory_id === resultId)) {
+      try {
+        const direct = await apiForConnection(connection, "GET", `/memory/${encodeURIComponent(resultId)}`);
+        if (!memoryConsolidationFollowCurrent(follow, request, connection)) return false;
+        if (direct && typeof direct === "object") records.push(direct);
+      } catch (error) {
+        if (!memoryConsolidationFollowCurrent(follow, request, connection)) return false;
+        const structuredMissing = Number(error && error.status) === 404 && error.body && error.body.error === "not_found";
+        if (!structuredMissing) throw error;
+      }
+    }
+    const outcome = memoryConsolidationOutcome(task, records, truncated);
+    follow.task = task;
+    follow.records = records;
+    follow.outcome = outcome;
+    follow.refreshing = false;
+    follow.failures = 0;
+    follow.error = "";
+    follow.lastChecked = new Date().toISOString();
+    if (outcome.summary) memoryConsolidationFollowMergeSummary(outcome.summary, follow.contract);
+    memoryConsolidationFollowRender();
+    if (store.view === "memory") memoryRender();
+    const summaryId = outcome.summary && outcome.summary.memory_id;
+    if (priorState !== outcome.state || priorSummaryId !== summaryId || !options.quiet) {
+      $("memory-announcer").textContent = `${outcome.label}. ${outcome.message}`;
+    }
+    return true;
+  } catch (error) {
+    if (!memoryConsolidationFollowCurrent(follow, request, connection)) return false;
+    follow.refreshing = false;
+    follow.failures += 1;
+    follow.error = memoryConsolidationFollowErrorText(error);
+    memoryConsolidationFollowRender();
+    if (!options.quiet) $("memory-announcer").textContent = `Consolidation evidence refresh failed. ${follow.error}`;
+    return false;
+  }
+}
+
+async function memoryConsolidationFollowOpen(task) {
+  const started = memoryConsolidationFollowStart(task);
+  if (!started.ok) { toast(started.error, "err"); return false; }
+  store.view = "memory";
+  renderMain();
+  $("main").scrollTop = 0;
+  $("memory-follow-title")?.focus({ preventScroll: true });
+  $("memory-follow")?.scrollIntoView({ block: "start" });
+  await memoryConsolidationFollowRefresh({ quiet: true });
+  return true;
+}
+
+async function memoryConsolidationFollowOpenTask() {
+  const follow = store.memoryFollow;
+  if (!follow || !follow.taskId) return;
+  const connection = store.conn && { ...store.conn };
+  if (!connection) return;
+  const durable = follow.task;
+  openTasks();
+  $("sel-task-status").value = "";
+  await tasksLoad(true);
+  if (connectionIdentityChanged(connection, store.conn)) return;
+  if (store.tasks && !store.tasks.error) {
+    if (!store.tasks.list.some((task) => task && task.task_id === follow.taskId) && durable) store.tasks.list.unshift(durable);
+    store.tasks.selected = follow.taskId;
+    tasksRender();
+  }
+  $("tasks-title").focus({ preventScroll: true });
+}
+
+function memoryConsolidationFollowSelectSummary() {
+  const follow = store.memoryFollow;
+  const summary = follow && follow.outcome && follow.outcome.summary;
+  if (!summary || !store.memory || store.memory.loading || store.memory.error) return;
+  memoryConsolidationFollowMergeSummary(summary, follow.contract);
+  store.memory.reviewIds = null;
+  $("inp-memory-search").value = "";
+  $("sel-memory-scope").value = "";
+  $("sel-memory-kind").value = "";
+  $("sel-memory-state").value = "";
+  store.memory.selected = summary.memory_id;
+  memoryRender();
+  $("memory-detail-title")?.focus({ preventScroll: true });
+  $("memory-detail")?.scrollIntoView({ block: "nearest" });
+}
+
+function memoryConsolidationFollowClose() {
+  if (!store.memoryFollow || store.memoryFollow.refreshing) return;
+  store.memoryFollowRequest += 1;
+  clearTimeout(store.memoryFollowTimer);
+  store.memoryFollowTimer = null;
+  store.memoryFollow = null;
+  memoryConsolidationFollowRender();
+  ($("memory-governance-title") || $("memory-title"))?.focus({ preventScroll: true });
+}
+
+function memoryConsolidationFollowSetAuto(enabled) {
+  const follow = store.memoryFollow;
+  if (!follow) return;
+  follow.auto = Boolean(enabled);
+  memoryConsolidationFollowRender();
+  $("memory-announcer").textContent = follow.auto
+    ? "Live consolidation follow enabled while the Memory workspace is visible."
+    : "Live consolidation follow paused. Confirmed evidence remains visible.";
 }
 
 async function memoryGovernanceOpenTask() {
@@ -10405,6 +10845,7 @@ function memoryRender() {
     }
   }
   $("btn-memory-refresh").disabled = correctionBusy || governanceBusy;
+  memoryConsolidationFollowRender();
   memoryCorrectionRender();
   memoryGovernanceRender();
   if (!state || state.loading) {
@@ -10508,6 +10949,12 @@ function openMemory() {
   renderMain();
   $("main").scrollTop = 0;
   $("memory-title").focus({ preventScroll: true });
+}
+
+async function memoryRefreshAll() {
+  const reads = [memoryLoad(false)];
+  if (store.memoryFollow) reads.push(memoryConsolidationFollowRefresh({ quiet: false }));
+  await Promise.all(reads);
 }
 
 /* ---------------- governed learning (R0.8) ----------------
@@ -12129,7 +12576,8 @@ function taskDetailHtml(task) {
     ? ` disabled title="already terminal — cancellation can no longer change it"`
     : "";
   html += `<div style="margin-top:10px">` +
-    `<button class="small" data-cancel-id="${escapeHtml(t.task_id || "")}"${disabled}>Cancel task</button>`;
+    `<button class="small" data-cancel-id="${escapeHtml(t.task_id || "")}"${disabled}>Cancel task</button>` +
+    memoryConsolidationTaskActionHtml(t);
   if (terminal) {
     html += ` <span class="muted tiny">terminal tasks cannot be cancelled (the server answers 409)</span>`;
   }
@@ -12573,13 +13021,16 @@ function init() {
   document.addEventListener("visibilitychange", () => {
     clearTimeout(store.fabricFollowTimer);
     store.fabricFollowTimer = null;
+    clearTimeout(store.memoryFollowTimer);
+    store.memoryFollowTimer = null;
     if (document.visibilityState === "visible") fabricScheduleCoordinationFollow();
+    if (document.visibilityState === "visible") memoryConsolidationFollowSchedule();
   });
 
   // Governed memory: immutable records, provenance, lifecycle filters,
   // and a conflict review path that never implies automatic resolution.
   $("btn-memory-open").onclick = openMemory;
-  $("btn-memory-refresh").onclick = () => memoryLoad(false);
+  $("btn-memory-refresh").onclick = memoryRefreshAll;
   $("btn-memory-clear").onclick = memoryClearFilters;
   $("inp-memory-search").addEventListener("input", () => {
     clearTimeout(store.memorySearchTimer);
@@ -12627,6 +13078,19 @@ function init() {
     if (consolidate) { memoryGovernanceOpenConsolidationForRecord(consolidate.getAttribute("data-memory-consolidate-record")); return; }
     const target = e.target.closest("[data-memory-select]");
     if (target) memorySelect(target.getAttribute("data-memory-select"), true);
+  });
+  $("memory-follow").addEventListener("change", (event) => {
+    if (event.target.closest("[data-memory-follow-auto]")) memoryConsolidationFollowSetAuto(event.target.checked);
+  });
+  $("memory-follow").addEventListener("click", (event) => {
+    if (event.target.closest("[data-memory-follow-refresh]")) {
+      if (!store.memoryFollow || store.memoryFollow.refreshing) return;
+      memoryConsolidationFollowRefresh({ quiet: false });
+      return;
+    }
+    if (event.target.closest("[data-memory-follow-task]")) { memoryConsolidationFollowOpenTask(); return; }
+    if (event.target.closest("[data-memory-follow-summary]")) { memoryConsolidationFollowSelectSummary(); return; }
+    if (event.target.closest("[data-memory-follow-close]")) memoryConsolidationFollowClose();
   });
   $("memory-governance").addEventListener("input", memoryGovernanceHandleEdit);
   $("memory-governance").addEventListener("change", memoryGovernanceHandleEdit);
@@ -12717,6 +13181,13 @@ function init() {
   $("btn-tasks-refresh").onclick = () => tasksLoad(false);
   $("sel-task-status").onchange = () => tasksLoad(false);
   $("tasks-detail").addEventListener("click", (e) => {
+    const follow = e.target.closest("[data-memory-follow-task-id]");
+    if (follow) {
+      const taskId = follow.getAttribute("data-memory-follow-task-id");
+      const task = store.tasks && store.tasks.list.find((item) => item && item.task_id === taskId);
+      if (task) memoryConsolidationFollowOpen(task);
+      return;
+    }
     const target = e.target.closest("[data-cancel-id]");
     if (target && !target.disabled) taskCancel(target.getAttribute("data-cancel-id"));
   });
