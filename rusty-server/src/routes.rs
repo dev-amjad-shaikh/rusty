@@ -23,11 +23,12 @@ use rusty_agent_runtime::checkpoint::{
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
-    assemble, memory_effect_key, memory_read_request, ContextBudget, MemoryEvidence, MemoryKind,
-    MemoryProvenance, MemoryQuery, MemoryRecord, MemoryScope, ProvenanceAuthor, ScopeAddress,
-    ValidityWindow,
+    assemble, detect_conflicts, memory_effect_key, memory_forget_effect_key, memory_read_request,
+    plan_forget, Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason,
+    MemoryEvidence, MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
+    MemoryScope, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
-use rusty_agent_runtime::record::{Effect, EffectReceipt, RunEventKind};
+use rusty_agent_runtime::record::{sha256_hex, Effect, EffectReceipt, PayloadRef, RunEventKind};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
@@ -198,9 +199,15 @@ pub(crate) fn router_with_shutdown(
         .route("/agents/{agent_id}/supervision", get(get_agent_supervision))
         .route("/teams/{team_id}/cancel", post(cancel_team))
         .route("/memory", post(write_memory))
-        // The static segment wins over `/memory/{memory_id}` — the query
-        // endpoint is not a record address.
+        // The static segments win over `/memory/{memory_id}` — query,
+        // corrections, consolidation, conflicts, and forgetting are
+        // operations, not record addresses.
         .route("/memory/query", post(query_memory))
+        .route("/memory/corrections", post(submit_correction))
+        .route("/memory/consolidate", post(enqueue_consolidation))
+        .route("/memory/conflicts", post(list_memory_conflicts))
+        .route("/memory/forget", post(forget_memory))
+        .route("/memory/forget_scope", post(forget_memory_scope))
         .route("/memory/{memory_id}", get(get_memory))
         .route("/coordination/delegate", post(submit_delegate))
         .route("/coordination/fan_out", post(submit_fan_out))
@@ -2447,6 +2454,74 @@ struct WriteMemoryPayload {
     parent: Option<String>,
 }
 
+/// The scope-authorization write gate (the design's gates), shared by
+/// `POST /memory` and the wave-2 correction/consolidation surfaces so the
+/// paths can never drift apart:
+/// - `run` scope → `400` unless `allow_run`: the runtime writes
+///   run-scoped memory on a run's behalf, and the correction loop is the
+///   one governed client path that may join it (a run-scope correction is
+///   adopted directly — it affects only the run that produced it).
+/// - `agent` scope → the agent must be registered in this tenant (`404`)
+///   and its manifest must declare `StateScope::Private` (`403`) — agent
+///   memory is the agent's own, and the manifest is what grants it.
+/// - `tenant` scope → the scope id must be the caller's own tenant
+///   (`403`): tenant isolation is not a scope a caller can cross.
+/// - `team` / `user` scopes ride tenant namespacing unchanged.
+async fn check_memory_scope_gate(
+    state: &AppState,
+    tenant: &TenantContext,
+    scope: &ScopeAddress,
+    allow_run: bool,
+) -> Result<(), ApiError> {
+    tasks::validate_label("scope.id", &scope.id, 256).map_err(ApiError::bad_request)?;
+    match scope.scope {
+        MemoryScope::Run if !allow_run => Err(ApiError::bad_request(
+            "`run`-scoped memory is runtime-only: the runtime writes it on a run's \
+             behalf — the API accepts `agent`, `team`, `user`, and `tenant` scopes"
+                .to_string(),
+        )),
+        MemoryScope::Run => Ok(()),
+        MemoryScope::Agent => {
+            let scoped_agent = tenant.scope(&scope.id);
+            let agent = state
+                .server_store
+                .get_agent(&scoped_agent)
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| ApiError::not_found(format!("agent `{}` not found", scope.id)))?;
+            if !agent.manifest.scopes.contains(&StateScope::Private) {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    format!(
+                        "agent `{}` does not declare the `private` state scope in its manifest \
+                         — agent-scoped memory is the agent's own, and the manifest is what \
+                         grants it",
+                        scope.id
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        MemoryScope::Tenant => {
+            if scope.id != tenant.tenant() {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    format!(
+                        "tenant-scoped memory id `{}` is not the caller's tenant `{}` — \
+                         tenant isolation is not a scope a caller can cross",
+                        scope.id,
+                        tenant.tenant()
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        MemoryScope::Team | MemoryScope::User => Ok(()),
+    }
+}
+
 /// `POST /memory` — write a governed memory record → `201 {memory_id,
 /// created, record}`; `200` + `created: false` when the content address
 /// is already stored (content addressing makes the write idempotent by
@@ -2465,54 +2540,7 @@ async fn write_memory(
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<WriteMemoryPayload>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    tasks::validate_label("scope.id", &payload.scope.id, 256).map_err(ApiError::bad_request)?;
-    match payload.scope.scope {
-        MemoryScope::Run => {
-            return Err(ApiError::bad_request(
-                "`run`-scoped memory is runtime-only: the runtime writes it on a run's \
-                 behalf — the API accepts `agent`, `team`, `user`, and `tenant` scopes"
-                    .to_string(),
-            ));
-        }
-        MemoryScope::Agent => {
-            let scoped_agent = tenant.scope(&payload.scope.id);
-            let agent = state
-                .server_store
-                .get_agent(&scoped_agent)
-                .await
-                .map_err(internal_err)?
-                .ok_or_else(|| {
-                    ApiError::not_found(format!("agent `{}` not found", payload.scope.id))
-                })?;
-            if !agent.manifest.scopes.contains(&StateScope::Private) {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "forbidden",
-                    format!(
-                        "agent `{}` does not declare the `private` state scope in its manifest \
-                         — agent-scoped memory is the agent's own, and the manifest is what \
-                         grants it",
-                        payload.scope.id
-                    ),
-                ));
-            }
-        }
-        MemoryScope::Tenant => {
-            if payload.scope.id != tenant.tenant() {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "forbidden",
-                    format!(
-                        "tenant-scoped memory id `{}` is not the caller's tenant `{}` — \
-                         tenant isolation is not a scope a caller can cross",
-                        payload.scope.id,
-                        tenant.tenant()
-                    ),
-                ));
-            }
-        }
-        MemoryScope::Team | MemoryScope::User => {}
-    }
+    check_memory_scope_gate(&state, &tenant, &payload.scope, false).await?;
     let confidence = match (payload.confidence, &payload.author) {
         (Some(confidence), _) => confidence,
         (None, ProvenanceAuthor::Human { .. }) => 1.0,
@@ -2826,6 +2854,720 @@ async fn try_journal_memory_event(
         .put_journal(&journal.snapshot())
         .await
         .map_err(|e| format!("persist journal: {e}"))
+}
+
+// --------------------------------------------------------------------- //
+// The correction loop and memory operations (R0.8 Rusty Learn, wave 2)
+//
+// The correction loop's record-plane half (`docs/learn-design.md`, "The
+// correction loop"): a correction becomes an attributed candidate memory
+// or example — never an in-place rewrite of what it corrects. The memory
+// operations — consolidation, conflict detection, forgetting — are
+// journaled transitions over the store, never background daemons.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct CorrectionPayload {
+    /// The correction contract (core's `Correction`, golden-pinned).
+    /// Author attribution is validated at deserialization — an
+    /// unattributed correction never reaches this handler.
+    #[serde(flatten)]
+    correction: Correction,
+    /// Journal the derived writes into this run's journal as
+    /// `memory_write` events (best-effort, the wave-1 discipline).
+    /// Defaults to the corrected run when the target is a journaled run
+    /// event — the correction names the run it belongs to.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// The input a journaled run event saw, resolved from the snapshot:
+/// artifact-referenced payloads re-inline from the snapshot's artifact map
+/// (the same resolution `MemoryReplaySource` applies). `None` when the
+/// event carries no input payload — the example then records null, the
+/// honest shape of "the event had no input".
+fn correction_event_input(
+    event: &rusty_agent_runtime::record::RunEvent,
+    snapshot: &JournalSnapshot,
+) -> Option<Value> {
+    match event.input.as_ref()? {
+        PayloadRef::Inline(value) => Some(value.clone()),
+        PayloadRef::Artifact(reference) => snapshot.artifacts.get(&reference.sha256).cloned(),
+    }
+}
+
+/// `POST /memory/corrections` — submit a human correction → `201
+/// {correction_id, attribution, candidate, memory_id, created, record,
+/// superseded, example_id}` (`200` + `created: false` when this tenant
+/// already holds a record derived from the same correction id — the id
+/// rides the derived records' provenance evidence, so a retried
+/// submission resolves what the first attempt wrote rather than minting
+/// a second record with a new learning instant).
+///
+/// The three rules (`docs/learn-design.md`):
+///
+/// 1. **Attribution travels with the derived record**: `human:{author}`
+///    provenance with the correction id in evidence, confidence 1.0 — the
+///    claim is the person's, stated plainly.
+/// 2. **Scope decides the path**: run scope is adopted directly (the one
+///    place the API admits run scope, exactly because adoption affects
+///    only the run that produced it); agent scope or wider becomes a
+///    candidate — `candidacy: pending`, queryable via `candidates_only` —
+///    because a wrong human correction at tenant scope is a production
+///    incident with a name attached.
+/// 3. **Corrections enter evaluation as examples**: a target of
+///    `{type: run_event}` additionally yields an `example`-kind record —
+///    the input the run saw (read from the journaled event, never re-asked
+///    of the world) plus the corrected behavior.
+///
+/// A correction targeting a memory record inherits the target's key, and
+/// a same-key correction-sourced write auto-supersedes the prior record
+/// (open question 5: corrections are trusted because they are
+/// attributed). There is no correction event kind: the derived writes
+/// journal through the memory-write seam with the correction's
+/// attribution in their provenance.
+async fn submit_correction(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CorrectionPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let correction = payload.correction;
+    tasks::validate_label("correction_id", &correction.correction_id, 256)
+        .map_err(ApiError::bad_request)?;
+    tasks::validate_label("author", &correction.author, 256).map_err(ApiError::bad_request)?;
+    // The shared gate, with the correction loop's one exception.
+    check_memory_scope_gate(&state, &tenant, &correction.scope, true).await?;
+
+    // Retry convergence on the correction id: it rides the derived
+    // records' provenance evidence, so a resubmission resolves what the
+    // first attempt wrote instead of minting a second record with a new
+    // `written_at` (hence a new content address). The search spans
+    // superseded and expired records — a retried submission must
+    // converge even after a later correction superseded the first's
+    // record.
+    let prior = state
+        .server_store
+        .query_memory(
+            tenant.tenant(),
+            &MemoryQuery {
+                scope: Some(correction.scope.clone()),
+                include_expired: true,
+                include_superseded: true,
+                ..MemoryQuery::default()
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    let names_correction = |record: &MemoryRecord| {
+        record.provenance.evidence.correction_id.as_deref()
+            == Some(correction.correction_id.as_str())
+    };
+    if let Some(prior_memory) = prior
+        .iter()
+        .find(|record| record.kind == MemoryKind::Fact && names_correction(record))
+    {
+        let example_id = prior
+            .iter()
+            .find(|record| record.kind == MemoryKind::Example && names_correction(record))
+            .map(|record| record.memory_id.clone());
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "correction_id": correction.correction_id,
+                "attribution": correction.attribution(),
+                "candidate": prior_memory.candidacy.is_some(),
+                "memory_id": prior_memory.memory_id,
+                "created": false,
+                "record": prior_memory,
+                "superseded": prior_memory.supersedes,
+                "example_id": example_id,
+            })),
+        ));
+    }
+
+    let now = Utc::now();
+    let mut key = None;
+    let mut example_input = None;
+    let mut journal_run_id = payload.run_id.clone();
+    match &correction.target {
+        CorrectionTarget::Memory { memory_id } => {
+            // The target must resolve (unknown or cross-tenant → 404, the
+            // two indistinguishable by design): the derived record
+            // inherits its key, which is what fires the same-key
+            // auto-supersession below.
+            let target = state
+                .server_store
+                .get_memory(tenant.tenant(), memory_id)
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("correction target memory `{memory_id}` not found"))
+                })?;
+            key = target.key;
+        }
+        CorrectionTarget::RunEvent { run_id, event_id } => {
+            let snapshot = state
+                .server_store
+                .get_journal(run_id)
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!(
+                        "correction target run `{run_id}` has no persisted journal"
+                    ))
+                })?;
+            // Ownership, the journalers' rule: correcting another
+            // tenant's run answers 404, never 403.
+            let internal_thread_id = tenant.scope(&snapshot.thread_id);
+            let owned = state
+                .server_store
+                .get_thread(&internal_thread_id)
+                .await
+                .map_err(internal_err)?
+                .is_some();
+            if !owned {
+                return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+            }
+            let event = snapshot
+                .events
+                .iter()
+                .find(|event| &event.id == event_id)
+                .ok_or_else(|| {
+                    ApiError::not_found(format!(
+                        "run `{run_id}` has no journaled event `{event_id}`"
+                    ))
+                })?;
+            example_input = Some(correction_event_input(event, &snapshot).unwrap_or(Value::Null));
+            journal_run_id = journal_run_id.or(Some(run_id.clone()));
+        }
+        CorrectionTarget::Prompt { .. } => {}
+    }
+
+    // Same-key correction-sourced writes auto-supersede the prior record
+    // (open question 5). The current truth at the key is the top-ranked
+    // live record — the assembly's total order, unbounded. A second live
+    // record at the key, when one exists, is conflict evidence, and this
+    // endpoint leaves it for the review listing.
+    let mut supersedes = None;
+    if let Some(key) = &key {
+        let live = state
+            .server_store
+            .query_memory(
+                tenant.tenant(),
+                &MemoryQuery {
+                    scope: Some(correction.scope.clone()),
+                    key: Some(key.clone()),
+                    ..MemoryQuery::default()
+                },
+                now,
+            )
+            .await
+            .map_err(internal_err)?;
+        supersedes = assemble(live, &ContextBudget::new(u32::MAX))
+            .map_err(internal_err)?
+            .records
+            .into_iter()
+            .next()
+            .map(|record| record.memory_id);
+    }
+
+    let candidacy = correction.is_candidate().then_some(Candidacy::Pending);
+    let provenance = MemoryProvenance {
+        author: correction.author_as_provenance(),
+        evidence: correction.evidence(),
+        written_at: now,
+    };
+    let build = |kind: MemoryKind, content: Value| -> Result<MemoryRecord, ApiError> {
+        let mut record = MemoryRecord::new(
+            kind,
+            correction.scope.clone(),
+            provenance.clone(),
+            1.0,
+            ValidityWindow::starting(now),
+            now,
+            content,
+        )
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+        if let Some(key) = &key {
+            record = record.with_key(key.clone());
+        }
+        if let Some(supersedes) = &supersedes {
+            record = record.with_supersedes(supersedes.clone());
+        }
+        if let Some(candidacy) = candidacy {
+            record = record.with_candidacy(candidacy);
+        }
+        Ok(record)
+    };
+
+    // The candidate (or, at run scope, the adopted) memory: the corrected
+    // content asserted at the target scope.
+    let memory = build(MemoryKind::Fact, correction.corrected.clone())?;
+    let created = state
+        .server_store
+        .put_memory(tenant.tenant(), &memory, &correction.corrected)
+        .await
+        .map_err(internal_err)?;
+    if let Some(run_id) = &journal_run_id {
+        journal_memory_write(&state, &tenant, run_id, &memory, payload.parent.clone()).await;
+    }
+
+    // The dataset-example half of the exit criterion: a correction whose
+    // target is a journaled run event also yields an `example`-kind
+    // record. (Run-event targets carry no inherited key, so the example
+    // never joins the supersession chain — it is dataset evidence, not a
+    // contender for the key.)
+    let mut example_id = None;
+    if let Some(input) = example_input {
+        let content = json!({
+            "input": input,
+            "corrected": correction.corrected,
+        });
+        let example = build(MemoryKind::Example, content.clone())?;
+        example_id = Some(example.memory_id.clone());
+        state
+            .server_store
+            .put_memory(tenant.tenant(), &example, &content)
+            .await
+            .map_err(internal_err)?;
+        if let Some(run_id) = &journal_run_id {
+            journal_memory_write(&state, &tenant, run_id, &example, payload.parent.clone()).await;
+        }
+    }
+
+    // Serve the stored record, re-read (the write_memory rule: spilled
+    // bodies re-inline, and a dedupe must show what is actually stored).
+    let stored = state
+        .server_store
+        .get_memory(tenant.tenant(), &memory.memory_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::internal(
+                "correction-derived record missing immediately after write".to_string(),
+            )
+        })?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(json!({
+            "correction_id": correction.correction_id,
+            "attribution": correction.attribution(),
+            "candidate": candidacy.is_some(),
+            "memory_id": stored.memory_id,
+            "created": created,
+            "record": stored,
+            "superseded": memory.supersedes,
+            "example_id": example_id,
+        })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ConsolidatePayload {
+    /// The scope every named record must live at: one scope per
+    /// consolidation — a summary spans scopes never.
+    scope: ScopeAddress,
+    /// Exactly the records the task reads (explicit ids, the auditable
+    /// selector), in any order; sorted and deduped at enqueue.
+    memory_ids: Vec<String>,
+    /// The distiller's name, recorded on the summary's provenance.
+    distiller: String,
+    /// The summary's lookup key, when it answers a named question.
+    #[serde(default)]
+    key: Option<String>,
+    /// The summary's tags.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// The summary's explicit priority (default 0).
+    #[serde(default)]
+    priority: i64,
+    /// The queue pool the task lands in (default `default`).
+    #[serde(default)]
+    pool: Option<String>,
+    /// Run linkage for the task record; the executing worker passes it
+    /// through to the summary write to journal it.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// Causal parentage for the task record.
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /memory/consolidate` — enqueue a consolidation as a durable task
+/// (`memory_consolidation`, R0.6 machinery: leased, retried under the
+/// shared `ErrorClass` taxonomy, dead-lettered with evidence,
+/// quota-counted) → `201 {task_id, deduplicated, kind}` (`200` +
+/// `deduplicated: true` when the same scope + source set already names a
+/// live task — the derived idempotency key makes retried submissions
+/// converge).
+///
+/// Orchestration is the runtime's; the distillation semantics are the
+/// claiming worker's (the distiller boundary): the worker claims the
+/// task, reads the named records, and writes its summary through the
+/// governed write path (`kind: summary`, the distiller author, the source
+/// ids in `evidence.source_memory_ids`, the task payload's `written_at`
+/// as `written_at` — minted once at enqueue, so a retried execution names
+/// the same learning instant and its content-addressed write converges).
+/// The summary's source naming supersedes the sources in default
+/// retrieval; execution settles the task through the unchanged
+/// heartbeat/complete/fail protocol.
+///
+/// `400` when `memory_ids` is empty or names a record outside the
+/// declared scope; `404` when a named record does not resolve in this
+/// tenant — a task that cannot read its inputs must not queue.
+async fn enqueue_consolidation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ConsolidatePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if payload.memory_ids.is_empty() {
+        return Err(ApiError::bad_request(
+            "`memory_ids` must name at least one record — a summary that names no \
+             sources is not a consolidation"
+                .to_string(),
+        ));
+    }
+    tasks::validate_label("distiller", &payload.distiller, 256).map_err(ApiError::bad_request)?;
+    if let Some(key) = &payload.key {
+        tasks::validate_label("key", key, 256).map_err(ApiError::bad_request)?;
+    }
+    // The shared gate, without the correction loop's run-scope exception:
+    // consolidation produces an ordinary governed write, and run scope
+    // stays runtime-only.
+    check_memory_scope_gate(&state, &tenant, &payload.scope, false).await?;
+    // Fail fast: every named record must resolve in this tenant and live
+    // at the declared scope. A record forgotten between enqueue and
+    // execution surfaces at claim time as an `invalid_input` failure.
+    let mut sorted_ids = payload.memory_ids.clone();
+    sorted_ids.sort();
+    sorted_ids.dedup();
+    for memory_id in &sorted_ids {
+        let record = state
+            .server_store
+            .get_memory(tenant.tenant(), memory_id)
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| ApiError::not_found(format!("memory `{memory_id}` not found")))?;
+        if record.scope != payload.scope {
+            return Err(ApiError::bad_request(format!(
+                "memory `{memory_id}` lives at `{}`, not the declared scope `{}` — a \
+                 consolidation spans scopes never",
+                record.scope.as_address(),
+                payload.scope.as_address()
+            )));
+        }
+    }
+    // The idempotency key names the exact work — one scope, one sorted
+    // source set — so retried submissions converge on the live task.
+    let idempotency_key = format!(
+        "memory_consolidation:{}:{}",
+        payload.scope.as_address(),
+        sha256_hex(sorted_ids.join(",").as_bytes())
+    );
+    let now = Utc::now();
+    let record = build_task_record(
+        EnqueueTaskPayload {
+            kind: tasks::MEMORY_CONSOLIDATION_KIND.to_string(),
+            payload: json!({
+                "scope": payload.scope,
+                "memory_ids": sorted_ids,
+                "distiller": payload.distiller,
+                "key": payload.key,
+                "tags": payload.tags,
+                "priority": payload.priority,
+                "written_at": now,
+                "run_id": payload.run_id,
+                "parent": payload.parent,
+            }),
+            pool: payload.pool,
+            max_attempts: None,
+            idempotency_key: Some(idempotency_key),
+            effect: None,
+            run_id: payload.run_id,
+            thread_id: None,
+            deadline: None,
+            worker_version: None,
+            recipient: None,
+            parent: payload.parent,
+        },
+        &tenant,
+    )?;
+    enforce_task_quota(&state, &tenant, 1).await?;
+    let (task, deduplicated) = state
+        .server_store
+        .enqueue_task(&record)
+        .await
+        .map_err(internal_err)?;
+    let status = if deduplicated {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((
+        status,
+        Json(json!({
+            "task_id": task.task_id,
+            "deduplicated": deduplicated,
+            "kind": tasks::MEMORY_CONSOLIDATION_KIND,
+        })),
+    ))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ConflictsPayload {
+    /// Restrict the review listing to one scope address.
+    #[serde(default)]
+    scope: Option<ScopeAddress>,
+}
+
+/// `POST /memory/conflicts` — the conflict review listing: live records
+/// sharing a key with overlapping validity windows and contradictory
+/// content, flagged. Detection is evidence and resolution is governance
+/// (the design's rule; open question 5's distiller half): this endpoint
+/// changes nothing, and nothing anywhere in the runtime resolves the
+/// pairs it returns.
+async fn list_memory_conflicts(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ConflictsPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let universe = memory_universe(&state, &tenant).await?;
+    let mut conflicts = detect_conflicts(&universe, Utc::now());
+    if let Some(scope) = &payload.scope {
+        conflicts.retain(|conflict| &conflict.scope == scope);
+    }
+    Ok(Json(json!({ "conflicts": conflicts })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ForgetPayload {
+    /// The record to erase (bare content address).
+    memory_id: String,
+    /// Why it is forgotten — carried on the tombstone.
+    reason: ForgetReason,
+    /// Journal the tombstone into this run's journal (best-effort, the
+    /// wave-1 discipline): the deletion is durable either way; the
+    /// journaled tombstone is the auditable receipt.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// The tenant's whole memory namespace — expired and superseded records
+/// included: the universe forget planning and conflict detection run
+/// over. Both walk relationships (source naming, supersession), and a
+/// relationship does not stop existing because a record aged out of
+/// default retrieval.
+async fn memory_universe(
+    state: &AppState,
+    tenant: &TenantContext,
+) -> Result<Vec<MemoryRecord>, ApiError> {
+    state
+        .server_store
+        .query_memory(
+            tenant.tenant(),
+            &MemoryQuery {
+                include_expired: true,
+                include_superseded: true,
+                ..MemoryQuery::default()
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)
+}
+
+/// `POST /memory/forget` — erase one record → `200 {forgotten,
+/// invalidated, tombstone}`. Real deletion from the store (derived state
+/// is erasable; run journals are hash-chained evidence and are not —
+/// open question 4), invalidation of the dependent summaries by walking
+/// the source naming in reverse, transitively (they are deleted with it:
+/// a summary built on erased evidence that keeps serving content
+/// distilled from the forgotten record is not forgetting), and a
+/// journaled `memory_forget` tombstone carrying metadata only — the id,
+/// scope, reason, and dependent invalidations, never the forgotten
+/// content: the tombstone struct has no content field to leak through.
+/// `404` for unknown or cross-tenant addresses.
+async fn forget_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ForgetPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_memory(tenant.tenant(), &payload.memory_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("memory `{}` not found", payload.memory_id)))?;
+    let universe = memory_universe(&state, &tenant).await?;
+    let plan = plan_forget(&universe, std::slice::from_ref(&payload.memory_id));
+    for memory_id in plan.forgotten.iter().chain(plan.invalidated.iter()) {
+        state
+            .server_store
+            .delete_memory(tenant.tenant(), memory_id)
+            .await
+            .map_err(internal_err)?;
+    }
+    let tombstone = MemoryForgetTombstone {
+        memory_id: payload.memory_id.clone(),
+        scope: record.scope.clone(),
+        reason: payload.reason,
+        invalidated: plan.invalidated,
+    };
+    if let Some(run_id) = &payload.run_id {
+        journal_memory_forget(&state, &tenant, run_id, &tombstone, payload.parent).await;
+    }
+    Ok(Json(json!({
+        "forgotten": plan.forgotten,
+        "invalidated": tombstone.invalidated,
+        "tombstone": tombstone,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ForgetScopePayload {
+    /// The scope address to erase wholesale (erasure requests).
+    scope: ScopeAddress,
+    /// Why the scope is forgotten — carried on every tombstone.
+    reason: ForgetReason,
+    /// Journal the tombstones into this run's journal (best-effort; one
+    /// `memory_forget` event per forgotten record — the tombstone
+    /// contract names a single id).
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /memory/forget_scope` — erase every record at a scope address
+/// (erasure requests) → `200 {forgotten, invalidated, tombstones}`. Same
+/// semantics as [`forget_memory`], scaled to the scope: each forgotten
+/// record gets its own tombstone carrying the dependents attributable to
+/// its own erasure, and summaries anywhere in the namespace that named a
+/// forgotten record are invalidated with it.
+///
+/// Idempotent by construction: an empty scope answers `200` with empty
+/// lists. Tenant scope requires the caller's own tenant (`403`); the
+/// agent-manifest check deliberately does not apply — an erasure request
+/// must not depend on the agent still being registered.
+async fn forget_memory_scope(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ForgetScopePayload>,
+) -> Result<Json<Value>, ApiError> {
+    tasks::validate_label("scope.id", &payload.scope.id, 256).map_err(ApiError::bad_request)?;
+    if payload.scope.scope == MemoryScope::Tenant && payload.scope.id != tenant.tenant() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            format!(
+                "tenant-scoped erasure id `{}` is not the caller's tenant `{}` — \
+                 tenant isolation is not a scope a caller can cross",
+                payload.scope.id,
+                tenant.tenant()
+            ),
+        ));
+    }
+    let universe = memory_universe(&state, &tenant).await?;
+    let targets: Vec<String> = universe
+        .iter()
+        .filter(|record| record.scope == payload.scope)
+        .map(|record| record.memory_id.clone())
+        .collect();
+    if targets.is_empty() {
+        return Ok(Json(json!({
+            "forgotten": [],
+            "invalidated": [],
+            "tombstones": 0,
+        })));
+    }
+    let scopes: HashMap<&str, ScopeAddress> = universe
+        .iter()
+        .map(|record| (record.memory_id.as_str(), record.scope.clone()))
+        .collect();
+    let plan = plan_forget(&universe, &targets);
+    for memory_id in plan.forgotten.iter().chain(plan.invalidated.iter()) {
+        state
+            .server_store
+            .delete_memory(tenant.tenant(), memory_id)
+            .await
+            .map_err(internal_err)?;
+    }
+    // One tombstone per forgotten record, each naming the dependents
+    // attributable to its own erasure (the single-target plan against
+    // the pre-deletion universe).
+    let mut tombstones = Vec::with_capacity(plan.forgotten.len());
+    for memory_id in &plan.forgotten {
+        let single = plan_forget(&universe, std::slice::from_ref(memory_id));
+        let scope = scopes
+            .get(memory_id.as_str())
+            .expect("forgotten ids come from the universe")
+            .clone();
+        tombstones.push(MemoryForgetTombstone {
+            memory_id: memory_id.clone(),
+            scope,
+            reason: payload.reason,
+            invalidated: single.invalidated,
+        });
+    }
+    if let Some(run_id) = &payload.run_id {
+        for tombstone in &tombstones {
+            journal_memory_forget(&state, &tenant, run_id, tombstone, payload.parent.clone()).await;
+        }
+    }
+    Ok(Json(json!({
+        "forgotten": plan.forgotten,
+        "invalidated": plan.invalidated,
+        "tombstones": tombstones.len(),
+    })))
+}
+
+/// Journal a forgetting tombstone into the given run's persisted journal
+/// — best-effort, the [`journal_memory_write`] discipline: the deletion
+/// is already durable in the store, so a journaling failure is logged,
+/// never surfaced as a request failure. The event is an
+/// [`Effect::Idempotent`] effect under the derived
+/// `memory_forget:{scope}:{memory_id}` key (retried erasures converge);
+/// the tombstone is metadata-only by construction — no content field
+/// exists to serialize.
+async fn journal_memory_forget(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    tombstone: &MemoryForgetTombstone,
+    parent: Option<String>,
+) {
+    let draft = EventDraft::new(RunEventKind::MemoryForget, Effect::Idempotent).input(json!({
+        "effect_key": memory_forget_effect_key(&tombstone.scope, &tombstone.memory_id),
+        "memory_id": tombstone.memory_id,
+    }));
+    let draft = match serde_json::to_value(tombstone) {
+        Ok(output) => draft.output(output),
+        Err(error) => {
+            tracing::warn!(%run_id, %error, "memory tombstone failed to serialize; journaling skipped");
+            return;
+        }
+    };
+    if let Err(error) = try_journal_memory_event(state, tenant, run_id, parent, draft).await {
+        tracing::warn!(
+            %run_id,
+            memory_id = %tombstone.memory_id,
+            %error,
+            "forgetting is durable in the store; tombstone journaling skipped"
+        );
+    }
 }
 
 /// `POST /tasks/{id}/fail` — record a failed attempt → `200 {requeued,

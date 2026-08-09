@@ -491,6 +491,13 @@ pub(crate) trait ServerStore: Send + Sync {
         query: &MemoryQuery,
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<Vec<MemoryRecord>>;
+    /// Remove one memory record by its (bare) content address,
+    /// tenant-scoped (`false` for unknown or cross-tenant addresses).
+    /// Forgetting (R0.8 wave 2) is real deletion of derived state —
+    /// journals are hash-chained evidence and are never touched, and
+    /// spilled content-addressed blobs stay (shared evidence under the
+    /// same boundary, design open question 4).
+    async fn delete_memory(&self, tenant: &str, memory_id: &str) -> StoreResult<bool>;
 }
 
 // --------------------------------------------------------------------- //
@@ -1543,6 +1550,15 @@ impl ServerStore for JsonFileStore {
         }
         Ok(matched)
     }
+
+    async fn delete_memory(&self, tenant: &str, memory_id: &str) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, memory_id);
+        // File before index (the put path's ordering, inverted): a crash
+        // between the two leaves an in-memory entry the next reload
+        // clears, never a record file no index remembers.
+        memory::remove(&self.root, &scoped).await?;
+        Ok(self.memories.lock().await.remove(&scoped).is_some())
+    }
 }
 
 impl JsonFileStore {
@@ -2473,6 +2489,27 @@ mod postgres {
     /// `MemoryQuery::matches` in Rust.
     pub(crate) const SUPERSEDED_MEMORY_SQL: &str =
         "SELECT supersedes FROM server_memory WHERE tenant = $1 AND supersedes IS NOT NULL";
+
+    /// The summary-source half of the superseded set (R0.8 wave 2): a
+    /// `summary` record supersedes the records it names in
+    /// `provenance.evidence.source_memory_ids` — core's
+    /// [`superseded_set`](rusty_agent_runtime::memory::superseded_set)
+    /// rule, and the same naming dependent-summary invalidation walks on
+    /// forgetting. Evidence is not column-mapped, so the ids come out of
+    /// the JSONB payload (`#>>` yields the array's text form, parsed back
+    /// in Rust); `kind = 'summary'` keeps the scan exact against the
+    /// `server_memory_query` index.
+    pub(crate) const SUMMARY_SOURCES_MEMORY_SQL: &str = r#"
+        SELECT payload #>> '{provenance,evidence,source_memory_ids}' AS source_ids
+        FROM server_memory
+        WHERE tenant = $1 AND kind = 'summary'"#;
+
+    /// Forgetting (R0.8 wave 2): real deletion of derived state, scoped by
+    /// the tenant-prefixed id. The spilled blob in `rusty_artifacts`
+    /// stays — shared, content-addressed evidence under the
+    /// journal-erasure boundary (open question 4).
+    pub(crate) const DELETE_MEMORY_SQL: &str =
+        "DELETE FROM server_memory WHERE memory_id = $1 RETURNING memory_id";
 
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
@@ -4250,10 +4287,26 @@ mod postgres {
                 .fetch_all(pool)
                 .await
                 .map_err(db_err("memory superseded scan"))?;
-            let superseded: std::collections::HashSet<String> = superseded_rows
+            let mut superseded: std::collections::HashSet<String> = superseded_rows
                 .into_iter()
                 .map(|row| row.get::<String, _>("supersedes"))
                 .collect();
+            // The wave-2 half of the set: a summary's named sources are
+            // superseded too (core's `superseded_set` — one definition,
+            // two backends).
+            let summary_rows = sqlx::query(SUMMARY_SOURCES_MEMORY_SQL)
+                .bind(tenant)
+                .fetch_all(pool)
+                .await
+                .map_err(db_err("memory summary-source scan"))?;
+            for row in summary_rows {
+                let raw: Option<String> = row.get("source_ids");
+                if let Some(ids) =
+                    raw.and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+                {
+                    superseded.extend(ids);
+                }
+            }
 
             // SQL pre-filters on the column-mapped clauses — each clause
             // spells exactly the `MemoryQuery::matches` semantics for its
@@ -4334,6 +4387,15 @@ mod postgres {
                 }
             }
             Ok(matched)
+        }
+
+        async fn delete_memory(&self, tenant: &str, memory_id: &str) -> StoreResult<bool> {
+            let row = sqlx::query(DELETE_MEMORY_SQL)
+                .bind(crate::auth::scope_id(tenant, memory_id))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("delete memory"))?;
+            Ok(row.is_some())
         }
     }
 

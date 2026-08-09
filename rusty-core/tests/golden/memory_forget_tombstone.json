@@ -1,0 +1,12 @@
+{
+  "memory_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scope": {
+    "scope": "user",
+    "id": "user-7"
+  },
+  "reason": "erasure_request",
+  "invalidated": [
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  ]
+}

@@ -652,6 +652,68 @@ async fn memory_supersession_and_expiry_are_retrieval_filters() {
     let _ = std::fs::remove_dir_all(store);
 }
 
+/// A summary supersedes the sources it names in
+/// `evidence.source_memory_ids` (wave 2): consolidation supersedes what
+/// it consolidates, so default retrieval serves the summary alone while
+/// the sources stay queryable as evidence.
+#[tokio::test]
+async fn memory_summary_supersedes_its_sources_in_default_retrieval() {
+    let (app, store) = app();
+    let a = write(&app, write_payload(json!({"content": {"fact": "alpha"}}))).await;
+    let b = write(&app, write_payload(json!({"content": {"fact": "beta"}}))).await;
+    let source_ids = vec![
+        a["memory_id"].as_str().unwrap().to_string(),
+        b["memory_id"].as_str().unwrap().to_string(),
+    ];
+    let summary = write(
+        &app,
+        write_payload(json!({
+            "kind": "summary",
+            "content": {"combined": ["alpha", "beta"]},
+            "author": {"type": "distiller", "name": "test-distiller"},
+            "confidence": 1.0,
+            "evidence": {"source_memory_ids": source_ids},
+        })),
+    )
+    .await;
+
+    let (_, v) = call(
+        &app,
+        "POST",
+        "/memory/query",
+        Some(json!({"scope": {"scope": "user", "id": "user-7"}})),
+    )
+    .await;
+    let ids: Vec<&str> = v["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["memory_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![summary["memory_id"].as_str().unwrap()],
+        "default retrieval serves the summary alone"
+    );
+    let (_, v) = call(
+        &app,
+        "POST",
+        "/memory/query",
+        Some(json!({
+            "scope": {"scope": "user", "id": "user-7"},
+            "include_superseded": true,
+        })),
+    )
+    .await;
+    assert_eq!(
+        v["records"].as_array().unwrap().len(),
+        3,
+        "sources stay queryable as evidence"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
 // --------------------------------------------------------------------- //
 // Tenant isolation
 // --------------------------------------------------------------------- //

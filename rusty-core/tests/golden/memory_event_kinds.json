@@ -1,4 +1,5 @@
 [
   "memory_read",
-  "memory_write"
+  "memory_write",
+  "memory_forget"
 ]

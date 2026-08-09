@@ -1,0 +1,15 @@
+{
+  "scope": {
+    "scope": "agent",
+    "id": "researcher-7"
+  },
+  "key": "timezone",
+  "memory_ids": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "overlap": {
+    "valid_from": "2025-06-15T15:06:40Z",
+    "valid_until": "2028-08-16T00:53:20Z"
+  }
+}

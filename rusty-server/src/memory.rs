@@ -79,6 +79,23 @@ pub(crate) async fn persist(root: &Path, scoped_id: &str, record: &MemoryRecord)
     tokio::fs::rename(&tmp, path).await
 }
 
+/// Remove one record file (forgetting, R0.8 wave 2): real deletion of
+/// derived state. `false` when the file was already gone — a missing file
+/// is not an error, because the store's index is the authority on whether
+/// the record was held at all. Spilled bodies under `memory_artifacts/`
+/// deliberately stay: they are shared, content-addressed blobs (another
+/// record may reference the same bytes), and the journal-erasure boundary
+/// (design open question 4) classes them with evidence, not derived
+/// state.
+pub(crate) async fn remove(root: &Path, scoped_id: &str) -> Result<bool, String> {
+    let path = dir(root).join(format!("{scoped_id}.json"));
+    match tokio::fs::remove_file(&path).await {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("remove memory record {}: {e}", path.display())),
+    }
+}
+
 /// Recursively collect `*.json` files under `root` (tenant
 /// subdirectories hold that tenant's records), mirroring the agents
 /// loader.

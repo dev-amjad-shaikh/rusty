@@ -529,6 +529,35 @@ and a dataset example; `forget` removes the record and invalidates its
 dependent summaries, with the tombstone journaled and the store verified
 clean by query.
 
+> **Wave 2 status: implemented.** The contracts landed as written
+> (`Correction` / `CorrectionTarget` / `ForgetReason` /
+> `MemoryForgetTombstone` / `MemoryConflict`, with goldens in
+> `rusty-core/tests/golden/`), with four additive refinements: candidacy
+> is a `candidacy` mark on `MemoryRecord` (queryable via
+> `MemoryQuery.candidates_only`) rather than a separate store;
+> `apply_query`'s superseded set grew to cover a summary's
+> `evidence.source_memory_ids`, so consolidation supersedes what it
+> consolidates in default retrieval; the consolidation task mints its
+> `written_at` at enqueue, so a retried execution names the same learning
+> instant and its content-addressed summary write converges; and
+> forgetting joins `RunEventKind` as `memory_forget` while corrections
+> deliberately get no event kind — the derived writes journal through the
+> memory-write seam with the correction's attribution in their
+> provenance. The server surface is `POST /memory/corrections`
+> (attributed candidate at agent scope or wider, direct adoption at run
+> scope, same-key auto-supersession, a dataset example for run-event
+> targets, retry-convergent on the correction id), `POST
+> /memory/consolidate` (a durable `memory_consolidation` task the
+> claiming worker distills — the runtime orchestrates, the worker
+> distills), `GET /memory/conflicts` (same-key contradictions, flagged
+> never resolved), `POST /memory/forget` and `POST /memory/forget_scope`
+> (transitive summary invalidation via `plan_forget`, metadata-only
+> tombstones journaled into the target run). Both exit criteria are
+> automated tests in `rusty-server/tests/corrections.rs`: the agent-scope
+> correction yields an attributed candidate and a dataset example, and
+> `forget` removes the record, invalidates its dependent summaries, and
+> journals a tombstone whose events carry no forgotten content.
+
 **Wave 3 — candidates and the promotion gate.** `rusty-core/src/learn.rs`
 (`CandidateKind`, `Candidate`, `PromotionEnvelope`, the active-version
 pointer), the evaluation composition (replay + `ExperimentRunner` +

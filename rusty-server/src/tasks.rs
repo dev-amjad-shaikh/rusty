@@ -53,6 +53,19 @@ use serde_json::{json, Value};
 /// The pool every task lands in when the enqueue payload names none.
 pub(crate) const DEFAULT_POOL: &str = "default";
 
+/// The task kind a memory consolidation enqueues as (R0.8 Rusty Learn,
+/// wave 2): distilling N records in a scope into the one `summary` record
+/// that names and supersedes them. The queue machinery is the unchanged
+/// R0.6 one — leased, retried under the shared [`ErrorClass`] taxonomy,
+/// dead-lettered with evidence, quota-counted per tenant; the payload
+/// names exactly the records the task reads (explicit ids, the auditable
+/// selector) plus the `written_at` minted at enqueue, so a retried
+/// execution names the same learning instant and its content-addressed
+/// summary write converges. The distillation semantics stay with the
+/// claiming worker, never the queue — the same boundary the design draws
+/// for distillers.
+pub(crate) const MEMORY_CONSOLIDATION_KIND: &str = "memory_consolidation";
+
 /// Default attempt ceiling when the enqueue payload sets none. Three
 /// attempts = the initial try plus two retries before dead-lettering.
 pub(crate) const DEFAULT_MAX_ATTEMPTS: u32 = 3;

@@ -1,4 +1,4 @@
-//! Governed memory integration tests (R0.8 Rusty Learn, wave 1).
+//! Governed memory integration tests (R0.8 Rusty Learn, waves 1–2).
 //!
 //! Four test groups:
 //!
@@ -9,7 +9,9 @@
 //!   To bless an intentional contract change, re-run with `UPDATE_GOLDEN=1`
 //!   and review the diff. (The new `RunEventKind` variants' wire names are
 //!   pinned in `memory_event_kinds.json`; the exhaustive
-//!   `run_event_kind.json` list is owned by another test file.)
+//!   `run_event_kind.json` list is owned by another test file.) Wave 2 adds
+//!   the `Correction` contract (with its target enum), the
+//!   `MemoryForgetTombstone`, and the `MemoryConflict` review item.
 //! - **Retrieval semantics** — the structured filters, the deterministic
 //!   assembly rank, and the token-bounded packing (bytes÷4 estimate with
 //!   the declared margin) over the in-memory store.
@@ -21,6 +23,11 @@
 //!   through `ExactReplay::run_and_verify`; and the two negative proofs:
 //!   a divergent request fails loudly, a live store cannot impersonate the
 //!   journaled assembly.
+//! - **Wave 2: the correction loop and memory operations** — attribution
+//!   validation, candidacy, same-key supersession semantics (a summary
+//!   supersedes its sources), conflict detection (flags, never resolves),
+//!   consolidation's summary invariants, and forget planning (the
+//!   transitive dependent-summary walk).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,8 +41,10 @@ use rusty_agent_runtime::executor::{ExecutionOutcome, Executor, RunConfig};
 use rusty_agent_runtime::graph::{Graph, GraphBuilder};
 use rusty_agent_runtime::journal::{Clock, Journal, JournalSnapshot, RngSource, PARENT_EVENT_KEY};
 use rusty_agent_runtime::memory::{
-    apply_query, assemble, estimated_tokens, memory_effect_key, BudgetOverflow, ContextBudget,
-    InMemoryMemoryStore, MemoryEvidence, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
+    apply_query, assemble, consolidation_summary, detect_conflicts, estimated_tokens,
+    memory_effect_key, memory_forget_effect_key, plan_forget, BudgetOverflow, Candidacy,
+    ContextBudget, Correction, CorrectionTarget, ForgetReason, InMemoryMemoryStore, MemoryEvidence,
+    MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
     MemoryReplaySource, MemoryScope, MemorySource, MemoryStore, ProvenanceAuthor, ScopeAddress,
     ValidityWindow, DEFAULT_TOKEN_MARGIN_PERCENT, MEMORY_SCHEMA_VERSION, TOKEN_BYTES_PER_ESTIMATE,
 };
@@ -172,6 +181,7 @@ fn golden_memory_query_shape() {
         authored_by: Some(ProvenanceAuthor::Human {
             human_id: "amjad".into(),
         }),
+        candidates_only: false,
         as_of: Some(ts(1_800_000_000_000)),
     };
     assert_golden("memory_query.json", &query);
@@ -221,14 +231,167 @@ fn golden_memory_assembly_shape() {
 
 #[test]
 fn golden_memory_event_kinds_shape() {
-    // The two additive R0.8 wave-1 variants' wire names. The exhaustive
+    // The additive R0.8 variants' wire names: `memory_read` / `memory_write`
+    // (wave 1) and `memory_forget` (wave 2's tombstone). The exhaustive
     // `run_event_kind.json` list is owned by `tests/agents.rs` (outside this
     // stream's file scope); the names are pinned here so no wire shape
-    // lands unpinned.
+    // lands unpinned. Corrections journal through `memory_write` — there is
+    // no correction event kind, by design.
     assert_golden(
         "memory_event_kinds.json",
-        &vec![RunEventKind::MemoryRead, RunEventKind::MemoryWrite],
+        &vec![
+            RunEventKind::MemoryRead,
+            RunEventKind::MemoryWrite,
+            RunEventKind::MemoryForget,
+        ],
     );
+}
+
+// ---------- wave 2: the correction loop and memory operations ----------
+
+/// The golden correction: every populated field exercised, with the
+/// run-event target (the richest variant).
+fn full_correction() -> Correction {
+    Correction {
+        correction_id: "correction-9".into(),
+        author: "amjad".into(),
+        target: CorrectionTarget::RunEvent {
+            run_id: "run-abc".into(),
+            event_id: "run-abc:7".into(),
+        },
+        corrected: json!({"answer": "42", "unit": " AED"}),
+        scope: ScopeAddress::new(MemoryScope::Agent, "researcher-7"),
+        rationale: Some("the run quoted the pre-2024 exchange rate".into()),
+    }
+}
+
+#[test]
+fn golden_correction_shape() {
+    assert_golden("correction.json", &full_correction());
+}
+
+#[test]
+fn golden_correction_target_shape() {
+    // All three targets in declaration order: what a correction may correct
+    // is the contract.
+    assert_golden(
+        "correction_target.json",
+        &vec![
+            CorrectionTarget::RunEvent {
+                run_id: "run-abc".into(),
+                event_id: "run-abc:7".into(),
+            },
+            CorrectionTarget::Memory {
+                memory_id: "a".repeat(64),
+            },
+            CorrectionTarget::Prompt {
+                prompt_hash: "b".repeat(64),
+            },
+        ],
+    );
+}
+
+#[test]
+fn golden_memory_forget_tombstone_shape() {
+    // The tombstone carries metadata by construction — id, scope, reason,
+    // dependent invalidations; there is no content field a serializer could
+    // leak the forgotten bytes through.
+    assert_golden(
+        "memory_forget_tombstone.json",
+        &MemoryForgetTombstone {
+            memory_id: "a".repeat(64),
+            scope: ScopeAddress::new(MemoryScope::User, "user-7"),
+            reason: ForgetReason::ErasureRequest,
+            invalidated: vec!["c".repeat(64), "d".repeat(64)],
+        },
+    );
+}
+
+#[test]
+fn golden_memory_conflict_shape() {
+    assert_golden(
+        "memory_conflict.json",
+        &rusty_agent_runtime::memory::MemoryConflict {
+            scope: ScopeAddress::new(MemoryScope::Agent, "researcher-7"),
+            key: "timezone".into(),
+            memory_ids: vec!["a".repeat(64), "b".repeat(64)],
+            overlap: ValidityWindow {
+                valid_from: ts(1_750_000_000_000),
+                valid_until: Some(ts(1_850_000_000_000)),
+            },
+        },
+    );
+}
+
+#[test]
+fn correction_attribution_and_scope_path() {
+    let correction = full_correction();
+    assert_eq!(
+        correction.attribution(),
+        "human:amjad via correction:correction-9"
+    );
+    assert_eq!(
+        correction.author_as_provenance(),
+        ProvenanceAuthor::Human {
+            human_id: "amjad".into()
+        }
+    );
+    let evidence = correction.evidence();
+    assert_eq!(evidence.correction_id.as_deref(), Some("correction-9"));
+    assert_eq!(evidence.run_id.as_deref(), Some("run-abc"));
+    assert_eq!(evidence.event_ids, vec!["run-abc:7".to_string()]);
+    // Agent scope is candidacy; run scope adopts directly.
+    assert!(correction.is_candidate());
+    let run_scope = Correction {
+        scope: ScopeAddress::new(MemoryScope::Run, "run-abc"),
+        ..full_correction()
+    };
+    assert!(!run_scope.is_candidate());
+}
+
+#[test]
+fn correction_without_an_author_is_rejected_at_deserialization() {
+    // The load-bearing validation: a correction that cannot name its
+    // corrector is indistinguishable from a prompt edit.
+    let mut wire = serde_json::to_value(full_correction()).unwrap();
+    wire["author"] = json!("   ");
+    assert!(serde_json::from_value::<Correction>(wire).is_err());
+    let mut wire = serde_json::to_value(full_correction()).unwrap();
+    wire["correction_id"] = json!("");
+    assert!(serde_json::from_value::<Correction>(wire).is_err());
+    let mut wire = serde_json::to_value(full_correction()).unwrap();
+    wire.as_object_mut().unwrap().remove("author");
+    assert!(serde_json::from_value::<Correction>(wire).is_err());
+}
+
+#[test]
+fn candidacy_marks_candidates_and_filters_them() {
+    let candidate = record_with_candidacy(true);
+    let adopted = record_with_candidacy(false);
+    let universe = vec![candidate.clone(), adopted.clone()];
+    let query = MemoryQuery {
+        candidates_only: true,
+        ..MemoryQuery::default()
+    };
+    assert_eq!(apply_query(&universe, &query, ts(6_000)), vec![candidate]);
+    // Candidacy stays absent from the wire when unset (additive field).
+    let wire = serde_json::to_value(&adopted).unwrap();
+    assert!(!wire.as_object().unwrap().contains_key("candidacy"));
+}
+
+/// A fact at user scope, marked pending-candidate (or not).
+fn record_with_candidacy(candidate: bool) -> MemoryRecord {
+    let record = seeded_record(
+        MemoryKind::Fact,
+        Some(if candidate { "cand" } else { "adopt" }),
+        0.9,
+        1_000,
+    );
+    if candidate {
+        record.with_candidacy(Candidacy::Pending)
+    } else {
+        record
+    }
 }
 
 // ---------- contract behavior ----------
@@ -812,4 +975,307 @@ async fn replay_verification_catches_a_re_queried_store() {
     let error = replay.verify(&outcome.journal).unwrap_err();
     assert!(matches!(error, RustyError::Replay(_)));
     assert!(error.to_string().contains("event mismatch"));
+}
+
+// ---------- wave 2: consolidation, conflict detection, forgetting ----------
+
+/// A distiller-authored record at user scope (confidence must be declared
+/// for non-human authors).
+fn distiller_record(
+    kind: MemoryKind,
+    key: Option<&str>,
+    content: Value,
+    confidence: f64,
+    validity: ValidityWindow,
+    created_ms: i64,
+) -> MemoryRecord {
+    let record = MemoryRecord::new(
+        kind,
+        ScopeAddress::new(MemoryScope::User, "user-7"),
+        MemoryProvenance {
+            author: ProvenanceAuthor::Distiller {
+                name: "test-distiller".into(),
+            },
+            evidence: MemoryEvidence::default(),
+            written_at: ts(created_ms),
+        },
+        confidence,
+        validity,
+        ts(created_ms),
+        content,
+    )
+    .unwrap();
+    match key {
+        Some(key) => record.with_key(key),
+        None => record,
+    }
+}
+
+#[test]
+fn a_summary_supersedes_its_sources_in_default_retrieval() {
+    let a = seeded_record(MemoryKind::Fact, Some("a"), 0.9, 1_000);
+    let b = seeded_record(MemoryKind::Fact, Some("b"), 0.8, 2_000);
+    let summary = consolidation_summary(
+        ScopeAddress::new(MemoryScope::User, "user-7"),
+        "consolidator-v1",
+        &[a.clone(), b.clone()],
+        json!({"distilled": "both facts"}),
+        ts(3_000),
+    )
+    .unwrap();
+    let universe = vec![a.clone(), b.clone(), summary.clone()];
+
+    // Default retrieval serves the summary alone: consolidation supersedes
+    // the records it distills (the source-naming half of the superseded
+    // set). The sources stay queryable as evidence.
+    let all = MemoryQuery::default();
+    assert_eq!(
+        apply_query(&universe, &all, ts(6_000)),
+        vec![summary.clone()]
+    );
+    let with_evidence = MemoryQuery {
+        include_superseded: true,
+        ..MemoryQuery::default()
+    };
+    assert_eq!(apply_query(&universe, &with_evidence, ts(6_000)).len(), 3);
+}
+
+#[test]
+fn consolidation_summary_carries_the_runtime_owned_invariants() {
+    let strong = seeded_record(MemoryKind::Fact, Some("a"), 0.9, 1_000);
+    let weak = seeded_record(MemoryKind::Fact, Some("b"), 0.4, 2_000);
+    let summary = consolidation_summary(
+        ScopeAddress::new(MemoryScope::Agent, "researcher-7"),
+        "consolidator-v1",
+        &[strong.clone(), weak.clone()],
+        json!({"distilled": true}),
+        ts(3_000),
+    )
+    .unwrap();
+
+    assert_eq!(summary.kind, MemoryKind::Summary);
+    assert_eq!(
+        summary.provenance.author,
+        ProvenanceAuthor::Distiller {
+            name: "consolidator-v1".into()
+        }
+    );
+    // The sources are named, sorted — the naming that supersedes them and
+    // that dependent-summary invalidation walks on forgetting.
+    let mut expected_ids = vec![strong.memory_id.clone(), weak.memory_id.clone()];
+    expected_ids.sort();
+    assert_eq!(summary.provenance.evidence.source_memory_ids, expected_ids);
+    // Confidence is the minimum of the sources': a summary is no stronger
+    // than its weakest source.
+    assert_eq!(summary.confidence, 0.4);
+    // Validity spans the sources; the seeded windows close at 10_000.
+    assert_eq!(summary.validity.valid_from, ts(0));
+    assert_eq!(summary.validity.valid_until, Some(ts(10_000)));
+
+    // An open-ended source makes the summary open-ended.
+    let open = MemoryRecord::new(
+        MemoryKind::Fact,
+        ScopeAddress::new(MemoryScope::User, "user-7"),
+        MemoryProvenance {
+            author: ProvenanceAuthor::System,
+            evidence: MemoryEvidence::default(),
+            written_at: ts(500),
+        },
+        1.0,
+        ValidityWindow::starting(ts(0)),
+        ts(500),
+        json!({"open": true}),
+    )
+    .unwrap();
+    let summary = consolidation_summary(
+        ScopeAddress::new(MemoryScope::User, "user-7"),
+        "consolidator-v1",
+        &[strong, open],
+        json!({"distilled": true}),
+        ts(3_000),
+    )
+    .unwrap();
+    assert_eq!(summary.validity.valid_until, None);
+
+    // A summary that names no sources is not a consolidation.
+    assert!(consolidation_summary(
+        ScopeAddress::new(MemoryScope::User, "user-7"),
+        "consolidator-v1",
+        &[],
+        json!({}),
+        ts(3_000),
+    )
+    .is_err());
+}
+
+#[test]
+fn conflict_detection_flags_and_never_resolves() {
+    let window = ValidityWindow {
+        valid_from: ts(0),
+        valid_until: Some(ts(10_000)),
+    };
+    let one = distiller_record(
+        MemoryKind::Fact,
+        Some("timezone"),
+        json!({"tz": "UTC+4"}),
+        0.9,
+        window.clone(),
+        1_000,
+    );
+    let two = distiller_record(
+        MemoryKind::Fact,
+        Some("timezone"),
+        json!({"tz": "UTC+1"}),
+        0.8,
+        window.clone(),
+        2_000,
+    );
+    // Same key, disjoint windows: no overlap, no conflict.
+    let later = distiller_record(
+        MemoryKind::Fact,
+        Some("timezone"),
+        json!({"tz": "UTC+4"}),
+        0.9,
+        ValidityWindow {
+            valid_from: ts(10_000),
+            valid_until: None,
+        },
+        3_000,
+    );
+    // Same key, overlapping window, *equal* content: agreement, not
+    // conflict.
+    let agreeing = distiller_record(
+        MemoryKind::Fact,
+        Some("timezone"),
+        json!({"tz": "UTC+4"}),
+        0.7,
+        window.clone(),
+        4_000,
+    );
+    // Unrelated record sharing nothing.
+    let other = distiller_record(
+        MemoryKind::Fact,
+        Some("tone"),
+        json!({"tone": "brief"}),
+        0.9,
+        window.clone(),
+        5_000,
+    );
+    let universe = vec![
+        one.clone(),
+        two.clone(),
+        later.clone(),
+        agreeing.clone(),
+        other.clone(),
+    ];
+    let conflicts = detect_conflicts(&universe, ts(6_000));
+    // Two contradictory pairs: `one` vs `two`, and `two` vs `agreeing`
+    // (`one` and `agreeing` assert equal content; `later`'s window is
+    // disjoint; `other` shares no key).
+    let mut expected_pairs = vec![
+        {
+            let mut pair = vec![one.memory_id.clone(), two.memory_id.clone()];
+            pair.sort();
+            pair
+        },
+        {
+            let mut pair = vec![two.memory_id.clone(), agreeing.memory_id.clone()];
+            pair.sort();
+            pair
+        },
+    ];
+    expected_pairs.sort();
+    let flagged: Vec<Vec<String>> = conflicts
+        .iter()
+        .map(|conflict| conflict.memory_ids.clone())
+        .collect();
+    assert_eq!(flagged, expected_pairs);
+    assert!(conflicts.iter().all(|conflict| conflict.key == "timezone"));
+    assert!(conflicts.iter().all(|conflict| conflict.overlap == window));
+
+    // Supersession is disciplined replacement, not conflict: when `two`
+    // supersedes `one`, that pair drops out of the flags (and `one`, now
+    // superseded, leaves the live set entirely) — the `two` vs `agreeing`
+    // contradiction stands.
+    let two = two.with_supersedes(one.memory_id.clone());
+    let universe = vec![one, two.clone(), later, agreeing.clone(), other];
+    let conflicts = detect_conflicts(&universe, ts(6_000));
+    let mut expected_pair = vec![two.memory_id.clone(), agreeing.memory_id.clone()];
+    expected_pair.sort();
+    assert_eq!(
+        conflicts
+            .iter()
+            .map(|conflict| conflict.memory_ids.clone())
+            .collect::<Vec<_>>(),
+        vec![expected_pair]
+    );
+}
+
+#[test]
+fn plan_forget_walks_dependent_summaries_transitively() {
+    let a = seeded_record(MemoryKind::Fact, Some("a"), 0.9, 1_000);
+    let b = seeded_record(MemoryKind::Fact, Some("b"), 0.8, 2_000);
+    let c = seeded_record(MemoryKind::Fact, Some("c"), 0.7, 3_000);
+    let summary = consolidation_summary(
+        ScopeAddress::new(MemoryScope::User, "user-7"),
+        "consolidator-v1",
+        &[a.clone(), b.clone()],
+        json!({"ab": true}),
+        ts(4_000),
+    )
+    .unwrap();
+    // A summary of the summary: the transitive case.
+    let meta = consolidation_summary(
+        ScopeAddress::new(MemoryScope::User, "user-7"),
+        "consolidator-v1",
+        &[summary.clone(), c.clone()],
+        json!({"abc": true}),
+        ts(5_000),
+    )
+    .unwrap();
+    let universe = vec![
+        a.clone(),
+        b.clone(),
+        c.clone(),
+        summary.clone(),
+        meta.clone(),
+    ];
+
+    // Forgetting `a` invalidates the summary that named it and,
+    // transitively, the summary that named that summary. `c` stands alone.
+    let plan = plan_forget(&universe, std::slice::from_ref(&a.memory_id));
+    assert_eq!(plan.forgotten, vec![a.memory_id.clone()]);
+    let mut expected = vec![summary.memory_id.clone(), meta.memory_id.clone()];
+    expected.sort();
+    assert_eq!(plan.invalidated, expected);
+
+    // Forgetting both sources of one summary invalidates it once.
+    let plan = plan_forget(&universe, &[a.memory_id.clone(), b.memory_id.clone()]);
+    let mut expected_forgotten = vec![a.memory_id.clone(), b.memory_id.clone()];
+    expected_forgotten.sort();
+    assert_eq!(plan.forgotten, expected_forgotten);
+    assert_eq!(plan.invalidated, expected);
+
+    // Absent targets are skipped — the caller decides whether absence is
+    // an error.
+    let plan = plan_forget(&universe, &["f".repeat(64)]);
+    assert!(plan.forgotten.is_empty() && plan.invalidated.is_empty());
+}
+
+#[tokio::test]
+async fn in_memory_store_removes_records() {
+    let store = InMemoryMemoryStore::new();
+    let record = seeded_record(MemoryKind::Fact, Some("removable"), 0.9, 1_000);
+    assert!(store.put(&record).await.unwrap());
+    assert!(store.remove(&record.memory_id).await.unwrap());
+    assert!(!store.remove(&record.memory_id).await.unwrap());
+    assert!(store.get(&record.memory_id).await.unwrap().is_none());
+}
+
+#[test]
+fn memory_forget_effect_key_is_the_derived_form() {
+    assert_eq!(
+        memory_forget_effect_key(&ScopeAddress::new(MemoryScope::User, "user-7"), "m-1"),
+        "memory_forget:user:user-7:m-1"
+    );
 }

@@ -1,6 +1,8 @@
-//! Governed memory (R0.8 Rusty Learn, wave 1): the record model, the
+//! Governed memory (R0.8 Rusty Learn, waves 1–2): the record model, the
 //! structured retrieval contract with its token-bounded deterministic
-//! assembly, and the journaled read/write seam.
+//! assembly, the journaled read/write seam, and — from wave 2 — the
+//! correction loop and the memory operations (consolidation, conflict
+//! detection, forgetting) as journaled, evidence-carrying transitions.
 //!
 //! The design doc is `docs/learn-design.md` ("Governed memory"); the
 //! learning rule it answers to: **no learning process may silently rewrite a
@@ -62,6 +64,46 @@
 //! converge, and the write is journaled as [`RunEventKind::MemoryWrite`]
 //! with its provenance. Writes are never served during replay — a replayed
 //! run issuing a write has diverged from its evidence.
+//!
+//! # The correction loop and the memory operations (wave 2)
+//!
+//! Wave 2 lands the correction loop's record-plane half: [`Correction`] is
+//! the highest-trust input the learning system has, so the loop's rule is
+//! **a correction becomes an attributed candidate memory or example — never
+//! an in-place rewrite of what it corrects**. The derived record carries
+//! `human:{author}` provenance with the correction id in evidence (the
+//! design's `human:{author} via correction:{id}` attribution), confidence
+//! 1.0, and — at agent scope or wider — a [`Candidacy`] mark: candidacy,
+//! not adoption, because a wrong human correction at tenant scope is a
+//! production incident with a name attached and evaluation is cheap
+//! insurance. Run scope adopts directly: it affects only the run that
+//! produced it. Same-key correction-sourced writes auto-supersede the prior
+//! record (open question 5's asymmetry: corrections are trusted because
+//! they are attributed; distillations are not because they are inferred).
+//!
+//! The three memory operations are journaled transitions over the store,
+//! never background daemons:
+//!
+//! - **Consolidation** — [`consolidation_summary`] builds the one `summary`
+//!   record that distills N sources: it names them in
+//!   [`MemoryEvidence::source_memory_ids`] (which is also what makes
+//!   dependent-summary invalidation computable on forgetting) and
+//!   supersedes them — [`apply_query`] treats a summary's sources as
+//!   superseded, so default retrieval serves the summary alone. The
+//!   distillation semantics stay with the caller; the runtime owns the
+//!   record's invariants.
+//! - **Conflict detection** — [`detect_conflicts`] flags live records that
+//!   share a key, overlap in validity, and carry contradictory content.
+//!   It flags ([`MemoryConflict`], a review item); it never resolves.
+//! - **Forgetting** — [`plan_forget`] computes the erasure before anything
+//!   is deleted: the targets plus the dependent summaries invalidated by
+//!   walking the source naming in reverse, transitively. Deletion is real
+//!   (derived state is erasable; run journals are hash-chained evidence and
+//!   are not — open question 4), and the receipt is the journaled
+//!   [`RunEventKind::MemoryForget`] tombstone: [`MemoryForgetTombstone`]
+//!   carries the id, scope, reason, and dependent invalidations — metadata
+//!   by construction, with no content field a careless serializer could
+//!   leak the forgotten bytes through.
 //!
 //! # Token accounting
 //!
@@ -143,6 +185,23 @@ pub enum MemoryKind {
     /// names in [`MemoryEvidence::source_memory_ids`] — the naming is what
     /// makes dependent-summary invalidation computable on forgetting.
     Summary,
+}
+
+/// The governance state of a correction-derived record (R0.8 wave 2).
+/// Closed enum with the single honest state this wave needs — wave 3's
+/// evaluation outcomes extend it additively, the same evolution rule
+/// [`RunEventKind`] follows. Not part of the content address: candidacy is
+/// governance state, not identity — the same reading `tags` and `priority`
+/// already take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Candidacy {
+    /// Attributed and stored, but unevaluated. The design's scope-decides-
+    /// the-path rule: a correction at agent scope or wider becomes a
+    /// candidate, because a wrong human correction at tenant scope is a
+    /// production incident with a name attached, and the evaluation step is
+    /// cheap insurance against it.
+    Pending,
 }
 
 /// The scope a memory lives at: whose memory it is and how far its
@@ -442,11 +501,18 @@ pub struct MemoryRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
 
-    /// The memory id this record replaces, when it does. Supersession is a
+    /// The record this one replaces, when it does. Supersession is a
     /// chain of immutable records; the superseded record is retained as
     /// evidence but filtered from default retrieval.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<String>,
+
+    /// Set when the record is a correction-derived candidate pending
+    /// evaluation (R0.8 wave 2; [`Candidacy`]). Additive: absent from the
+    /// wire while unset, and outside the content address (candidacy is
+    /// governance state, not identity).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidacy: Option<Candidacy>,
 
     /// The record body: inline at or below [`INLINE_PAYLOAD_MAX_BYTES`],
     /// content-addressed above — the journal's own payload discipline, so
@@ -499,6 +565,7 @@ impl MemoryRecord {
             created_at,
             expires_at: None,
             supersedes: None,
+            candidacy: None,
             content: content_ref,
             embedding: None,
         })
@@ -532,6 +599,13 @@ impl MemoryRecord {
     /// Builder-style: name the record this one supersedes.
     pub fn with_supersedes(mut self, supersedes: impl Into<String>) -> Self {
         self.supersedes = Some(supersedes.into());
+        self
+    }
+
+    /// Builder-style: mark the record as a correction-derived candidate
+    /// (R0.8 wave 2; [`Candidacy`]).
+    pub fn with_candidacy(mut self, candidacy: Candidacy) -> Self {
+        self.candidacy = Some(candidacy);
         self
     }
 
@@ -642,6 +716,14 @@ pub struct MemoryQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_by: Option<ProvenanceAuthor>,
 
+    /// Restrict to correction-derived candidates pending evaluation (R0.8
+    /// wave 2; default: all records, candidates or not). This is how the
+    /// evaluation half of the loop finds its queue: candidacy is a
+    /// governance mark, so it filters like one — structurally, never by
+    /// content.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub candidates_only: bool,
+
     /// The instant expiry is evaluated against. When unset, the reader
     /// stamps it through the run's clock at read time (wall clock for live
     /// reads; the deterministic logical clock for recorded runs) — so the
@@ -698,30 +780,61 @@ impl MemoryQuery {
                 return false;
             }
         }
+        if self.candidates_only && record.candidacy.is_none() {
+            return false;
+        }
         true
     }
 }
 
 /// Apply `query` to a universe of records (one tenant's namespace), pure:
-/// the superseded set is computed over the universe (a record is superseded
-/// when any record in the universe names it in `supersedes`), then every
-/// declared filter runs through [`MemoryQuery::matches`]. Both store
-/// backends share this function — the JSON backend scans and applies it
-/// directly; Postgres pre-filters on columns and applies the same function
-/// to the reduced set, so filter semantics live in exactly one place.
+/// the superseded set is computed over the universe, then every declared
+/// filter runs through [`MemoryQuery::matches`]. Both store backends share
+/// this function — the JSON backend scans and applies it directly; Postgres
+/// pre-filters on columns and applies the same function to the reduced set,
+/// so filter semantics live in exactly one place.
+///
+/// The superseded set has two halves. A record is superseded when another
+/// record names it in `supersedes` (the wave-1 rule) — **or, from wave 2,
+/// when a `summary` record names it in
+/// [`MemoryEvidence::source_memory_ids`]**: consolidation supersedes the
+/// records it distills, and the naming is the same one dependent-summary
+/// invalidation walks on forgetting.
 pub fn apply_query(
     universe: &[MemoryRecord],
     query: &MemoryQuery,
     now: DateTime<Utc>,
 ) -> Vec<MemoryRecord> {
-    let superseded: HashSet<&str> = universe
-        .iter()
-        .filter_map(|record| record.supersedes.as_deref())
-        .collect();
+    let superseded: HashSet<&str> = superseded_set(universe);
     universe
         .iter()
         .filter(|record| query.matches(record, superseded.contains(record.memory_id.as_str()), now))
         .cloned()
+        .collect()
+}
+
+/// The tenant namespace's superseded set, as [`apply_query`] defines it:
+/// everything named in a `supersedes` field, plus everything a `summary`
+/// record names as a source (see its docs). Shared by conflict detection
+/// and forget planning, which must agree with retrieval about what is
+/// superseded — three readers, one definition.
+pub fn superseded_set(universe: &[MemoryRecord]) -> HashSet<&str> {
+    universe
+        .iter()
+        .filter_map(|record| record.supersedes.as_deref())
+        .chain(
+            universe
+                .iter()
+                .filter(|record| record.kind == MemoryKind::Summary)
+                .flat_map(|record| {
+                    record
+                        .provenance
+                        .evidence
+                        .source_memory_ids
+                        .iter()
+                        .map(String::as_str)
+                }),
+        )
         .collect()
 }
 
@@ -909,6 +1022,466 @@ pub fn assemble(records: Vec<MemoryRecord>, budget: &ContextBudget) -> Result<Me
 }
 
 // --------------------------------------------------------------------- //
+// The correction loop (R0.8 wave 2)
+// --------------------------------------------------------------------- //
+
+/// Reject an empty (or all-whitespace) identity at deserialization: a
+/// correction that cannot name its corrector is indistinguishable from a
+/// prompt edit, so attribution is enforced where the contract is parsed,
+/// not where it is consumed.
+fn deserialize_non_empty_id<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "identity must be non-empty — attribution is mandatory",
+        ));
+    }
+    Ok(value)
+}
+
+/// What a correction corrects. Closed enum — the three targets the design
+/// names; consumers match exhaustively.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CorrectionTarget {
+    /// A journaled run event (`{run_id}:{seq}`). The correction also yields
+    /// an `example`-kind record — the input the run saw (read from the
+    /// journaled event, never re-asked of the world) plus the corrected
+    /// behavior — which the distiller folds into a versioned dataset: the
+    /// correction is both the fix and the regression test.
+    RunEvent {
+        /// The run whose journal holds the event.
+        run_id: String,
+        /// The journaled event's id inside that run.
+        event_id: String,
+    },
+    /// A memory record, by content address. The derived record inherits the
+    /// target's key, so a same-key correction auto-supersedes the prior
+    /// record (open question 5).
+    Memory {
+        /// The corrected record's content address.
+        memory_id: String,
+    },
+    /// A pinned prompt hash from the run manifest
+    /// ([`crate::record::RunManifest::pin_prompt`]).
+    Prompt {
+        /// The pinned prompt's content hash.
+        prompt_hash: String,
+    },
+}
+
+/// A human correction: the highest-trust input the learning system has, and
+/// the loop treats it accordingly — **a correction becomes an attributed
+/// candidate memory or example, never an in-place rewrite of what it
+/// corrects.**
+///
+/// `author` is mandatory and validated at deserialization (see
+/// `deserialize_non_empty_id`); attribution then travels with every
+/// derived record as `human:{author}` provenance with the correction id in
+/// evidence — the design's `human:{author} via correction:{id}` string —
+/// so every later consumer (distiller, evaluator, auditor) can trace the
+/// record to the person and the moment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Correction {
+    /// The correction's own id, caller-minted; carried in the derived
+    /// records' evidence (and therefore their content addresses — two
+    /// corrections with identical corrected content stay distinct records).
+    #[serde(deserialize_with = "deserialize_non_empty_id")]
+    pub correction_id: String,
+
+    /// The correcting human's identity. Mandatory.
+    #[serde(deserialize_with = "deserialize_non_empty_id")]
+    pub author: String,
+
+    /// What it corrects.
+    pub target: CorrectionTarget,
+
+    /// The corrected content: what the derived record asserts.
+    pub corrected: Value,
+
+    /// The scope the result should live at. Scope decides the path
+    /// ([`Correction::is_candidate`]): run scope is adopted directly (it
+    /// affects only the run that produced it); agent scope or wider becomes
+    /// a candidate pending evaluation.
+    pub scope: ScopeAddress,
+
+    /// Why the correction is right, when the corrector said. Optional; the
+    /// attribution is not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+}
+
+impl Correction {
+    /// The derived records' author: `human:{author}`.
+    pub fn author_as_provenance(&self) -> ProvenanceAuthor {
+        ProvenanceAuthor::Human {
+            human_id: self.author.clone(),
+        }
+    }
+
+    /// The attribution string the design spells: `human:{author} via
+    /// correction:{id}`. The derived record carries it structurally (author
+    /// plus evidence); this is the human-facing form, for responses and
+    /// audit output.
+    pub fn attribution(&self) -> String {
+        format!(
+            "human:{} via correction:{}",
+            self.author, self.correction_id
+        )
+    }
+
+    /// The evidence every derived record carries: the correction id, plus
+    /// the run linkage when the target is a journaled run event.
+    pub fn evidence(&self) -> MemoryEvidence {
+        let (run_id, event_ids) = match &self.target {
+            CorrectionTarget::RunEvent { run_id, event_id } => {
+                (Some(run_id.clone()), vec![event_id.clone()])
+            }
+            _ => (None, Vec::new()),
+        };
+        MemoryEvidence {
+            run_id,
+            event_ids,
+            correction_id: Some(self.correction_id.clone()),
+            ..MemoryEvidence::default()
+        }
+    }
+
+    /// The scope-decides-the-path rule: `true` when this correction's
+    /// derived records are candidates pending evaluation (agent scope or
+    /// wider), `false` at run scope, where a correction is adopted directly
+    /// — it affects only the run that produced it.
+    pub fn is_candidate(&self) -> bool {
+        self.scope.scope != MemoryScope::Run
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Forgetting (R0.8 wave 2): real deletion with a journaled receipt
+// --------------------------------------------------------------------- //
+
+/// Why a record was forgotten. Closed enum, carried on the tombstone: the
+/// reason is what distinguishes a reaper's expiry from a GDPR-shaped
+/// erasure request in the audit trail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForgetReason {
+    /// The record's TTL lapsed. Expiration stays a retrieval filter too —
+    /// this is the operator-driven sweep acting on it, journaled.
+    Expired,
+    /// The record was wrong (or its correction superseded the need for it)
+    /// and is withdrawn.
+    Retracted,
+    /// An erasure request (a user's, an operator's compliance pass).
+    ErasureRequest,
+}
+
+/// The journaled receipt of a forgetting — the
+/// [`RunEventKind::MemoryForget`] event's output payload. **Metadata by
+/// construction**: the forgotten id, its scope, the reason, and the
+/// dependent invalidations. There is no content field to leave unset — a
+/// tombstone that *could* carry the forgotten bytes would be one careless
+/// serializer away from defeating the erasure it receipts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryForgetTombstone {
+    /// The forgotten record's content address.
+    pub memory_id: String,
+
+    /// The scope the record lived at.
+    pub scope: ScopeAddress,
+
+    /// Why it was forgotten.
+    pub reason: ForgetReason,
+
+    /// The dependent summaries the erasure invalidated (the reverse walk
+    /// over source naming, transitively — see [`plan_forget`]). Their ids,
+    /// never their content.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invalidated: Vec<String>,
+}
+
+/// The derived idempotency key of a forgetting:
+/// `memory_forget:{scope}:{memory_id}`. Retried erasures converge on one
+/// key — forgetting an already-forgotten record is the same journaled
+/// effect, not a second one.
+pub fn memory_forget_effect_key(scope: &ScopeAddress, memory_id: &str) -> String {
+    format!("memory_forget:{}:{memory_id}", scope.as_address())
+}
+
+/// What a forgetting will do, computed over the namespace **before**
+/// anything is deleted: the explicitly forgotten records and the dependent
+/// summaries the erasure invalidates. Planning is a pure function of store
+/// state, so the route can journal exactly what it is about to do — the
+/// tombstone names this plan, and the deletion then executes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForgetPlan {
+    /// The explicitly forgotten records (the targets that exist in the
+    /// namespace), sorted for determinism.
+    pub forgotten: Vec<String>,
+
+    /// The dependent summaries invalidated by the erasure, sorted: every
+    /// `summary` record that names a removed record in
+    /// [`MemoryEvidence::source_memory_ids`], transitively (a summary of
+    /// summaries goes too). They are deleted with the targets — a summary
+    /// built on erased evidence is derived state, and leaving it serving
+    /// content distilled from the forgotten record is not forgetting
+    /// (Cao & Yang's point, per the design).
+    pub invalidated: Vec<String>,
+}
+
+/// Plan a forgetting over `universe` (one tenant's namespace): `targets`
+/// are the records to erase; the dependent-summary walk runs in reverse
+/// over source naming until the closure stops growing. Targets absent from
+/// the universe are skipped (the caller decides whether absence is an
+/// error — the single-id route 404s before planning).
+pub fn plan_forget(universe: &[MemoryRecord], targets: &[String]) -> ForgetPlan {
+    let mut removed: HashSet<&str> = universe
+        .iter()
+        .filter(|record| targets.iter().any(|t| t == &record.memory_id))
+        .map(|record| record.memory_id.as_str())
+        .collect();
+    // The fixpoint: a summary joins the removal set whenever it names a
+    // record already in it. Terminates because the set grows monotonically
+    // over a finite universe.
+    loop {
+        let mut grew = false;
+        for record in universe {
+            if record.kind != MemoryKind::Summary || removed.contains(record.memory_id.as_str()) {
+                continue;
+            }
+            if record
+                .provenance
+                .evidence
+                .source_memory_ids
+                .iter()
+                .any(|source| removed.contains(source.as_str()))
+            {
+                removed.insert(record.memory_id.as_str());
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    let mut forgotten: Vec<String> = removed
+        .iter()
+        .filter(|id| targets.iter().any(|t| t.as_str() == **id))
+        .map(|id| id.to_string())
+        .collect();
+    forgotten.sort();
+    let mut invalidated: Vec<String> = removed
+        .iter()
+        .filter(|id| !forgotten.iter().any(|f| f.as_str() == **id))
+        .map(|id| id.to_string())
+        .collect();
+    invalidated.sort();
+    ForgetPlan {
+        forgotten,
+        invalidated,
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Conflict detection (R0.8 wave 2): evidence, never resolution
+// --------------------------------------------------------------------- //
+
+/// A flagged conflict: two live records that share a key, overlap in
+/// validity, and carry contradictory content. A review item — the design's
+/// rule is that detection is evidence and resolution is governance, so
+/// nothing here (or anywhere in the runtime) resolves the pair: Zep and
+/// Mem0 resolve contradictions inside the ingestion pipeline with an LLM,
+/// which is precisely the silent-mutation pattern the learning rule exists
+/// to forbid.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryConflict {
+    /// The scope the conflicted records live at.
+    pub scope: ScopeAddress,
+
+    /// The key they share.
+    pub key: String,
+
+    /// The two records' content addresses, sorted.
+    pub memory_ids: Vec<String>,
+
+    /// The interval both records claim to be true over — the overlap of
+    /// their validity windows.
+    pub overlap: ValidityWindow,
+}
+
+/// Flag the conflicts in `universe` (one tenant's namespace) at `now`.
+///
+/// "Live" excludes exactly what default retrieval excludes: superseded
+/// records (a superseded record is replaced evidence, not a contender) and
+/// records expired at `now`. "Contradictory" is structural and honest about
+/// it: with no semantic judge in the runtime, contradiction means the two
+/// records assert *different canonical content* for the same key over an
+/// overlapping interval — semantics belong to the reviewer the flag is for.
+/// A pair where one record supersedes the other is disciplined replacement,
+/// not conflict. The output is deterministically ordered (scope, key, ids),
+/// so equal store state flags byte-equal review items.
+pub fn detect_conflicts(universe: &[MemoryRecord], now: DateTime<Utc>) -> Vec<MemoryConflict> {
+    let superseded = superseded_set(universe);
+    let is_live = |record: &MemoryRecord| {
+        !superseded.contains(record.memory_id.as_str())
+            && record.expires_at.is_none_or(|expires| expires > now)
+    };
+    let mut groups: BTreeMap<(String, &str), Vec<&MemoryRecord>> = BTreeMap::new();
+    for record in universe.iter().filter(|r| is_live(r)) {
+        let Some(key) = record.key.as_deref() else {
+            continue;
+        };
+        groups
+            .entry((record.scope.as_address(), key))
+            .or_default()
+            .push(record);
+    }
+    let mut conflicts = Vec::new();
+    for ((_, key), mut group) in groups {
+        group.sort_by(|a, b| a.memory_id.cmp(&b.memory_id));
+        for (i, a) in group.iter().enumerate() {
+            for b in &group[i + 1..] {
+                if a.supersedes.as_deref() == Some(b.memory_id.as_str())
+                    || b.supersedes.as_deref() == Some(a.memory_id.as_str())
+                {
+                    continue;
+                }
+                let Some(overlap) = validity_overlap(&a.validity, &b.validity) else {
+                    continue;
+                };
+                if same_content(a, b) {
+                    continue;
+                }
+                conflicts.push(MemoryConflict {
+                    scope: a.scope.clone(),
+                    key: key.to_string(),
+                    memory_ids: vec![a.memory_id.clone(), b.memory_id.clone()],
+                    overlap,
+                });
+            }
+        }
+    }
+    conflicts.sort_by(|a, b| {
+        a.scope
+            .as_address()
+            .cmp(&b.scope.as_address())
+            .then_with(|| a.key.cmp(&b.key))
+            .then_with(|| a.memory_ids.cmp(&b.memory_ids))
+    });
+    conflicts
+}
+
+/// The intersection of two validity windows: `[max(from), min(until))`,
+/// `None` when the windows are disjoint. Open-endedness composes (open ∩
+/// closed is the closed end; open ∩ open stays open).
+fn validity_overlap(a: &ValidityWindow, b: &ValidityWindow) -> Option<ValidityWindow> {
+    let valid_from = a.valid_from.max(b.valid_from);
+    let valid_until = match (a.valid_until, b.valid_until) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (x, y) => x.or(y),
+    };
+    if valid_until.is_some_and(|until| valid_from >= until) {
+        return None;
+    }
+    Some(ValidityWindow {
+        valid_from,
+        valid_until,
+    })
+}
+
+/// Content equality by canonical hash, so inline and artifact-referenced
+/// forms of the same body compare equal (the payload discipline's rule
+/// applied to conflict detection).
+fn same_content(a: &MemoryRecord, b: &MemoryRecord) -> bool {
+    match (a.content.content_hash(), b.content.content_hash()) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a.content == b.content,
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Consolidation (R0.8 wave 2): the runtime-owned summary invariants
+// --------------------------------------------------------------------- //
+
+/// Build the one `summary` record that distills `sources`, under the
+/// invariants the runtime owns: the sources are named in
+/// [`MemoryEvidence::source_memory_ids`] (which supersedes them — see
+/// [`apply_query`] — and makes dependent-summary invalidation computable on
+/// forgetting), the author is `distiller:{name}`, and the confidence is the
+/// **minimum of the sources'**: a summary is a claim no stronger than its
+/// weakest source, and the model is honest about that.
+///
+/// What the runtime deliberately does not own: `content`. The distillation
+/// semantics are application code (open question 2's boundary, the same one
+/// the distiller contract draws); this function is the orchestration around
+/// them. The record's validity spans the sources (earliest `valid_from`;
+/// the latest `valid_until` when every source is closed, open-ended
+/// otherwise — a summary cannot outclaim the evidence it distills).
+///
+/// Fails when `sources` is empty: a summary that names no sources is not a
+/// consolidation, and an unnamed derivation cannot be audited or forgotten
+/// correctly.
+pub fn consolidation_summary(
+    scope: ScopeAddress,
+    distiller: impl Into<String>,
+    sources: &[MemoryRecord],
+    content: Value,
+    now: DateTime<Utc>,
+) -> Result<MemoryRecord> {
+    if sources.is_empty() {
+        return Err(invalid(
+            "consolidation needs at least one source record — a summary that names no \
+             sources is not a consolidation, and an unnamed derivation can neither be \
+             audited nor forgotten correctly",
+        ));
+    }
+    let mut source_ids: Vec<String> = sources
+        .iter()
+        .map(|record| record.memory_id.clone())
+        .collect();
+    source_ids.sort();
+    let confidence = sources
+        .iter()
+        .map(|record| record.confidence)
+        .fold(f64::INFINITY, f64::min);
+    let valid_from = sources
+        .iter()
+        .map(|record| record.validity.valid_from)
+        .min()
+        .expect("sources is non-empty");
+    let valid_until = sources
+        .iter()
+        .map(|record| record.validity.valid_until)
+        .collect::<Option<Vec<DateTime<Utc>>>>()
+        .and_then(|untils| untils.into_iter().max());
+    let provenance = MemoryProvenance {
+        author: ProvenanceAuthor::Distiller {
+            name: distiller.into(),
+        },
+        evidence: MemoryEvidence {
+            source_memory_ids: source_ids,
+            ..MemoryEvidence::default()
+        },
+        written_at: now,
+    };
+    MemoryRecord::new(
+        MemoryKind::Summary,
+        scope,
+        provenance,
+        confidence,
+        ValidityWindow {
+            valid_from,
+            valid_until,
+        },
+        now,
+        content,
+    )
+}
+
+// --------------------------------------------------------------------- //
 // The store contract
 // --------------------------------------------------------------------- //
 
@@ -937,6 +1510,12 @@ pub trait MemoryStore: Send + Sync + std::fmt::Debug {
     /// semantics live in [`apply_query`]; dev-scale stores scan, and larger
     /// backends pre-filter on columns before applying the same function.
     async fn all(&self) -> Result<Vec<MemoryRecord>>;
+
+    /// Remove `memory_id` from the store (`false` when absent). Forgetting
+    /// (R0.8 wave 2) is real deletion of derived state — journals are
+    /// hash-chained evidence and are never touched (open question 4's
+    /// boundary).
+    async fn remove(&self, memory_id: &str) -> Result<bool>;
 
     /// The records matching `query`, expiry evaluated at `now`. The default
     /// implementation scans via [`MemoryStore::all`] and applies
@@ -985,6 +1564,10 @@ impl MemoryStore for InMemoryMemoryStore {
 
     async fn all(&self) -> Result<Vec<MemoryRecord>> {
         Ok(self.lock().values().cloned().collect())
+    }
+
+    async fn remove(&self, memory_id: &str) -> Result<bool> {
+        Ok(self.lock().remove(memory_id).is_some())
     }
 }
 

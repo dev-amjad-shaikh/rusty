@@ -423,6 +423,20 @@ pub enum RunEventKind {
     /// [`crate::memory::MemoryRecord`] with its provenance — the write's
     /// attribution is journaled, not implied.
     MemoryWrite,
+
+    /// A memory record was forgotten (R0.8 wave 2): real deletion of
+    /// derived state, with the journaled tombstone as the erasure receipt.
+    /// An [`Effect::Idempotent`] effect under the derived key
+    /// `memory_forget:{scope}:{memory_id}` (see
+    /// [`crate::memory::memory_forget_effect_key`]), so retried erasures
+    /// converge. Input carries the effect key and the memory id; output
+    /// carries the [`crate::memory::MemoryForgetTombstone`] — the id, scope,
+    /// reason, and dependent invalidations, metadata by construction:
+    /// the tombstone has no content field, so the forgotten bytes cannot
+    /// leak through the receipt of their erasure. Corrections are not a
+    /// separate variant: they journal through `MemoryWrite` with the
+    /// correction's attribution in the derived record's provenance.
+    MemoryForget,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.
