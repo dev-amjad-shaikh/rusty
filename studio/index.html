@@ -317,6 +317,30 @@
   }
   .workbench-head h1 { margin: 0; font-size: 24px; letter-spacing: -.5px; }
   .workbench-head p { margin: 4px 0 0; color: var(--text-dim); max-width: 620px; }
+  .agent-journey {
+    display: grid; grid-template-columns: repeat(3, 1fr); margin: 0 0 16px;
+    border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+    background: var(--bg-inset);
+  }
+  .journey-step {
+    position: relative; min-width: 0; padding: 11px 14px 12px 46px;
+    border-right: 1px solid var(--border); color: var(--text-faint);
+  }
+  .journey-step:last-child { border-right: 0; }
+  .journey-step .step-index {
+    position: absolute; left: 14px; top: 12px; width: 22px; height: 22px;
+    display: grid; place-items: center; border: 1px solid var(--border-hi);
+    border-radius: 50%; font: 700 10px var(--mono); color: var(--text-faint);
+  }
+  .journey-step strong { display: block; color: var(--text-dim); font-size: 12.5px; }
+  .journey-step span:last-child { display: block; margin-top: 2px; font-size: 10.5px; }
+  .journey-step.active { background: #2e2a20; }
+  .journey-step.active .step-index { border-color: var(--accent); color: #efdfae; }
+  .journey-step.active strong { color: #f0eadf; }
+  .journey-step.complete .step-index { background: #315b78; border-color: #6fa8dc; color: #eef7ff; }
+  .journey-step.complete strong { color: #91b9dc; }
+  .journey-step.attention .step-index { border-color: var(--err); color: #eac5c0; }
+  .journey-step.attention strong { color: #eac5c0; }
   .agent-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
   .agent-toolbar input, .agent-form input, .agent-form select, .agent-form textarea,
   .agent-test textarea {
@@ -353,11 +377,24 @@
   .agent-kv .v { font-family: var(--mono); font-size: 11.5px; word-break: break-word; }
   .agent-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
   .agent-form label, .agent-test label { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim); font-size: 11.5px; }
+  .field-help { color: var(--text-faint); font-size: 10.5px; font-weight: 400; }
   .agent-form label.wide { grid-column: 1 / -1; }
   .agent-form textarea, .agent-test textarea { min-height: 82px; resize: vertical; font-family: var(--mono); }
   .agent-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+  .agent-advanced { grid-column: 1 / -1; border-top: 1px solid var(--border); padding-top: 8px; }
+  .agent-advanced summary, .run-evidence summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
+  .agent-advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 10px; }
+  .agent-advanced-grid .wide { grid-column: 1 / -1; }
   .agent-test { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 14px; }
+  .agent-test h3 { margin: 0 0 3px; font-size: 15px; }
+  .agent-test > p { margin: 0 0 10px; color: var(--text-dim); font-size: 11.5px; }
+  .agent-test textarea.agent-prompt { min-height: 96px; font-family: var(--sans); font-size: 13.5px; line-height: 1.5; }
   .agent-test-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .run-outcome { display: inline-flex; gap: 7px; align-items: baseline; }
+  .run-outcome strong { font-size: 11.5px; }
+  .run-outcome.success strong { color: #cfe3c6; }
+  .run-outcome.error strong { color: #eac5c0; }
+  .run-evidence { margin-top: 10px; }
   .agent-summary {
     display: grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); gap: 8px; margin-bottom: 12px;
   }
@@ -375,6 +412,18 @@
     main { overflow: visible; }
     .agent-form { grid-template-columns: 1fr; }
     .agent-form label.wide, .agent-form-actions { grid-column: auto; }
+    .agent-journey { grid-template-columns: 1fr; }
+    .journey-step { border-right: 0; border-bottom: 1px solid var(--border); }
+    .journey-step:last-child { border-bottom: 0; }
+    .agent-advanced-grid { grid-template-columns: 1fr; }
+    .agent-advanced-grid .wide { grid-column: auto; }
+  }
+
+  :is(button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .badge.running { animation: none; }
   }
 
   .empty { color: var(--text-faint); font-style: italic; padding: 24px 0; text-align: center; }
@@ -439,24 +488,31 @@
         <div class="workbench-head">
           <div>
             <h1>Agent workbench</h1>
-            <p>Create durable graph bindings, check whether they are runnable, and exercise them against the real runtime before opening the full trace.</p>
+            <p>Create an agent, give it a real task, and inspect exactly what happened.</p>
           </div>
           <button class="primary" id="btn-agent-create-open">Create agent</button>
         </div>
 
+        <div class="agent-journey" id="agent-journey" aria-live="polite"></div>
+
         <div class="card" id="agent-create-panel" style="display:none">
-          <h2 class="section" style="margin-top:0">Create durable agent</h2>
-          <div class="note tiny">An agent currently binds a registered graph to durable config and metadata. Model, prompt, tool, and memory policies become editable here only when their runtime contracts exist.</div>
+          <h2 class="section" style="margin-top:0">Create an agent</h2>
+          <div class="note tiny">Choose what this agent does. You can tune its runtime settings later.</div>
           <div class="agent-form">
-            <label>Name <input id="inp-agent-name" type="text" placeholder="Research coordinator"></label>
-            <label>Registered graph <select id="sel-agent-graph"></select></label>
-            <label>Agent ID <input id="inp-agent-id" type="text" spellcheck="false" placeholder="generated when empty"></label>
-            <label>Recursion limit <input id="inp-agent-limit" type="number" min="1" step="1" placeholder="runtime default"></label>
-            <label class="wide">Description <textarea id="inp-agent-description" placeholder="What this agent is responsible for"></textarea></label>
-            <label class="wide">Tags <input id="inp-agent-tags" type="text" placeholder="research, production (comma separated)"></label>
+            <label>Name <input id="inp-agent-name" type="text" autocomplete="off" placeholder="Research coordinator"></label>
+            <label>Behavior <select id="sel-agent-graph" aria-describedby="agent-graph-help"></select><span class="field-help" id="agent-graph-help">The runtime workflow this agent will use.</span></label>
+            <label class="wide">Responsibility <textarea id="inp-agent-description" placeholder="Research a question and return a concise, sourced answer."></textarea></label>
+            <details class="agent-advanced">
+              <summary>Advanced settings</summary>
+              <div class="agent-advanced-grid">
+                <label>Agent ID <input id="inp-agent-id" type="text" spellcheck="false" placeholder="Generated automatically"></label>
+                <label>Step limit <input id="inp-agent-limit" type="number" min="1" step="1" placeholder="Runtime default"></label>
+                <label class="wide">Tags <input id="inp-agent-tags" type="text" placeholder="research, production"></label>
+              </div>
+            </details>
             <div class="agent-form-actions">
               <button id="btn-agent-create-cancel">Cancel</button>
-              <button class="primary" id="btn-agent-create">Create agent</button>
+              <button class="primary" id="btn-agent-create">Create and continue</button>
             </div>
           </div>
         </div>
@@ -528,7 +584,7 @@
           <div id="run-result"><div class="empty">No run result yet.</div></div>
         </div>
 
-        <div class="card">
+        <div class="card" id="flight-recorder-card">
           <h2 class="section" style="margin-top:0">
             Flight Recorder
             <button class="small" id="btn-rec-refresh" style="float:right">reload</button>
@@ -658,6 +714,7 @@ const store = {
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
   agents: null,        // { list, selected, error } for the durable-agent workbench
   agentRuns: {},       // successful/failed tests started from this browser session, keyed by assistant id
+  agentCreateOpen: false, // creation form temporarily owns the guided journey
   agentsUnsupported: false, // server build has no /assistants routes
 };
 
@@ -751,10 +808,15 @@ function currentThread() {
 
 /* ---------------- connect ---------------- */
 
+function connectionIdentityChanged(previous, next) {
+  return !previous || !next || previous.baseUrl !== next.baseUrl || previous.apiKey !== next.apiKey;
+}
+
 async function connect() {
   const baseUrl = $("inp-url").value.trim().replace(/\/+$/, "");
   const apiKey = $("inp-key").value;
   if (!baseUrl) { toast("Enter a server base URL.", "err"); return; }
+  const previousConnection = store.conn;
   store.conn = { baseUrl, apiKey };
   $("conn-status").textContent = "connecting…";
   try {
@@ -763,6 +825,15 @@ async function connect() {
     $("conn-status").textContent = "connection failed";
     toast(e.message, "err");
     return;
+  }
+  if (connectionIdentityChanged(previousConnection, store.conn)) {
+    store.agentRuns = {};
+    store.agentCreateOpen = false;
+    store.agents = null;
+    store.agentsUnsupported = false;
+    $("agent-create-panel").style.display = "none";
+    $("sel-agent-graph").innerHTML = "";
+    for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
   }
   saveConn();
   loadThreads();
@@ -1946,9 +2017,56 @@ function agentCardHtml(agent, readiness) {
     agentReadinessHtml(readiness, false);
 }
 
+function agentGraphLabel(graph) {
+  if (graph === "react_agent") return "Conversational agent";
+  if (graph === "pipeline") return "Workflow pipeline";
+  return String(graph || "Unknown behavior").replaceAll("_", " ");
+}
+
 function agentDefaultInput(graph) {
-  if (graph === "react_agent") return { messages: [{ role: "user", content: "say pong" }] };
+  if (graph === "react_agent") return { messages: [{ role: "user", content: "Reply with a short hello." }] };
   return {};
+}
+
+function agentBuildRunInput(agent, value) {
+  const graph = agent && agent.graph;
+  const raw = String(value || "");
+  if (graph === "react_agent") {
+    const task = raw.trim();
+    if (!task) throw new Error("Enter a task for the agent.");
+    return { messages: [{ role: "user", content: task }] };
+  }
+  let input;
+  try { input = JSON.parse(raw || "{}"); }
+  catch (error) { throw new Error(`Input data is not valid JSON: ${error.message}`); }
+  if (!input || Array.isArray(input) || typeof input !== "object") {
+    throw new Error("Input data must be a JSON object.");
+  }
+  return input;
+}
+
+function agentJourney(agent, testRun, creating) {
+  if (creating) {
+    return [
+      { label: "Create", detail: "Define this agent", state: "active" },
+      { label: "Run", detail: "Give it a real task", state: "pending" },
+      { label: "Inspect", detail: "See decisions and events", state: "pending" },
+    ];
+  }
+  const hasAgent = Boolean(agent && agent.assistant_id);
+  const hasRun = Boolean(testRun);
+  const hasTrace = Boolean(testRun && testRun.thread_id);
+  return [
+    { label: "Create", detail: hasAgent ? agent.name || "Agent ready" : "Name its responsibility", state: hasAgent ? "complete" : "active" },
+    { label: "Run", detail: !hasAgent ? "Give it a real task" : !hasRun ? "Ready for a first task" : testRun.status === "success" ? "First run succeeded" : "Run needs attention", state: !hasAgent ? "pending" : !hasRun ? "active" : testRun.status === "success" ? "complete" : "attention" },
+    { label: "Inspect", detail: hasTrace ? "Run ready to inspect" : "See decisions and events", state: hasTrace ? "active" : "pending" },
+  ];
+}
+
+function agentJourneyHtml(agent, testRun, creating) {
+  return agentJourney(agent, testRun, creating).map((step, index) =>
+    `<div class="journey-step ${step.state}"><span class="step-index">${index + 1}</span>` +
+    `<strong>${escapeHtml(step.label)}</strong><span>${escapeHtml(step.detail)}</span></div>`).join("");
 }
 
 function agentBuildCreatePayload(fields) {
@@ -1974,10 +2092,11 @@ function agentErrorHtml(status, body) {
 }
 
 function agentTestResultHtml(run) {
-  if (!run) return `<span class="muted tiny">No workbench test in this browser session.</span>`;
-  const tone = run.status === "success" ? "success" : "error";
+  if (!run) return `<span class="muted tiny">No run yet.</span>`;
+  const success = run.status === "success";
   const detail = run.error ? escapeHtml(run.error) : `run ${escapeHtml(shortId(run.run_id))}`;
-  return `<span class="badge ${tone}">${escapeHtml(run.status)}</span> <span class="muted tiny">${detail}</span>`;
+  return `<span class="run-outcome ${success ? "success" : "error"}"><strong>${success ? "Run succeeded" : "Run needs attention"}</strong>` +
+    `<span class="muted tiny">${detail}</span></span>`;
 }
 
 function agentDetailHtml(agent, readiness, testRun) {
@@ -1985,8 +2104,13 @@ function agentDetailHtml(agent, readiness, testRun) {
   const meta = agent.metadata || {};
   const config = agent.config || {};
   const tags = agentTags(agent);
+  const conversational = agent.graph === "react_agent";
+  const runnable = readiness.steps[1] && readiness.steps[1].ready;
+  const input = conversational
+    ? `<label>Give it a task<textarea class="agent-prompt" id="inp-agent-prompt" spellcheck="true" placeholder="Ask for an outcome, not implementation details.">${escapeHtml(agentDefaultInput(agent.graph).messages[0].content)}</textarea></label>`
+    : `<label>Starting data (JSON)<textarea id="inp-agent-test" spellcheck="false">${escapeHtml(pretty(agentDefaultInput(agent.graph)))}</textarea><span class="field-help">This workflow accepts structured input.</span></label>`;
   return `<div class="agent-detail-head"><div><h2>${escapeHtml(agent.name || "Unnamed agent")}</h2>` +
-    `<div class="muted tiny">Durable graph binding</div></div>` +
+    `<div class="muted tiny">${escapeHtml(meta.description || agentGraphLabel(agent.graph))}</div></div>` +
     `<span class="badge ${readiness.ready === readiness.total ? "success" : "pending"}">${readiness.ready}/${readiness.total} ready</span></div>` +
     agentReadinessHtml(readiness, true) +
     `<div class="agent-kv">` +
@@ -1997,11 +2121,11 @@ function agentDetailHtml(agent, readiness, testRun) {
       `<span class="k">Description</span><span class="v">${escapeHtml(meta.description || "—")}</span>` +
       `<span class="k">Tags</span><span class="v">${escapeHtml(tags.join(", ") || "—")}</span>` +
     `</div>` +
-    `<div class="agent-test"><label>Test input (JSON)<textarea id="inp-agent-test" spellcheck="false">${escapeHtml(pretty(agentDefaultInput(agent.graph)))}</textarea></label>` +
-    `<div class="agent-test-actions"><button class="primary" data-agent-run="${escapeHtml(agent.assistant_id)}">Run test</button>` +
-    (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}">Open run thread</button>` : "") +
+    `<div class="agent-test"><h3>Try it now</h3><p>This creates a real run. Nothing here is simulated.</p>${input}` +
+    `<div class="agent-test-actions"><button class="primary" data-agent-run="${escapeHtml(agent.assistant_id)}"${runnable ? "" : " disabled"}>Run agent</button>` +
+    (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}" data-agent-open-run="${escapeHtml(testRun.run_id || "")}">Inspect run</button>` : "") +
     `<span id="agent-test-status">${agentTestResultHtml(testRun)}</span></div>` +
-    `<div id="agent-test-result">${testRun && testRun.result ? `<pre class="json">${escapeHtml(pretty(testRun.result))}</pre>` : ""}</div></div>`;
+    `<div id="agent-test-result">${testRun && testRun.result ? `<details class="run-evidence"><summary>View result data</summary><pre class="json">${escapeHtml(pretty(testRun.result))}</pre></details>` : ""}</div></div>`;
 }
 
 function agentsUpdateSidebar() {
@@ -2038,6 +2162,9 @@ function agentsRender() {
   const list = state.list || [];
   const tested = list.filter((agent) => store.agentRuns[agent.assistant_id] && store.agentRuns[agent.assistant_id].status === "success").length;
   const runnable = list.filter((agent) => agentReadiness(agent, store.info, store.agentRuns[agent.assistant_id]).steps[1].ready).length;
+  const selected = list.find((agent) => agent.assistant_id === state.selected) || null;
+  const selectedRun = selected && store.agentRuns[selected.assistant_id];
+  $("agent-journey").innerHTML = agentJourneyHtml(selected, selectedRun, store.agentCreateOpen);
   $("agent-summary").innerHTML =
     `<div><b>${list.length}</b><span>Durable agents</span></div>` +
     `<div><b>${runnable}</b><span>Runnable now</span></div>` +
@@ -2066,23 +2193,28 @@ function agentsRender() {
       listEl.appendChild(item);
     }
   }
-  const selected = list.find((agent) => agent.assistant_id === state.selected) || null;
   $("agent-detail").innerHTML = agentDetailHtml(
     selected,
-    agentReadiness(selected, store.info, selected && store.agentRuns[selected.assistant_id]),
-    selected && store.agentRuns[selected.assistant_id],
+    agentReadiness(selected, store.info, selectedRun),
+    selectedRun,
   );
 }
 
 function agentOpenCreate() {
+  store.agentCreateOpen = true;
   const select = $("sel-agent-graph");
   select.innerHTML = (((store.info && store.info.graphs) || []).map((g) =>
-    `<option value="${escapeHtml(g.name)}">${escapeHtml(g.name)}</option>`).join(""));
+    `<option value="${escapeHtml(g.name)}">${escapeHtml(agentGraphLabel(g.name))} · ${escapeHtml(g.name)}</option>`).join(""));
   $("agent-create-panel").style.display = "block";
+  $("agent-journey").innerHTML = agentJourneyHtml(null, null, true);
   $("inp-agent-name").focus();
 }
 
-function agentCloseCreate() { $("agent-create-panel").style.display = "none"; }
+function agentCloseCreate() {
+  store.agentCreateOpen = false;
+  $("agent-create-panel").style.display = "none";
+  agentsRender();
+}
 
 async function agentCreate() {
   const payload = agentBuildCreatePayload({
@@ -2105,7 +2237,9 @@ async function agentCreate() {
     for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
     agentsUpdateSidebar();
     agentsRender();
-    toast(`agent ${created.name} created`, "ok");
+    const firstTask = $("inp-agent-prompt") || $("inp-agent-test");
+    if (firstTask) firstTask.focus();
+    toast(`${created.name} is ready for a first run`, "ok");
   } catch (e) { toast(e.message, "err"); }
   finally { $("btn-agent-create").disabled = false; }
 }
@@ -2114,8 +2248,9 @@ async function agentRunTest(assistantId) {
   const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
   if (!agent) return;
   let input;
-  try { input = JSON.parse($("inp-agent-test").value || "{}"); }
-  catch (e) { toast(`test input is not valid JSON: ${e.message}`, "err"); return; }
+  const inputEl = $("inp-agent-prompt") || $("inp-agent-test");
+  try { input = agentBuildRunInput(agent, inputEl && inputEl.value); }
+  catch (e) { toast(e.message, "err"); if (inputEl) inputEl.focus(); return; }
   const button = $("agent-detail").querySelector("[data-agent-run]");
   if (button) button.disabled = true;
   $("agent-test-status").innerHTML = badge("running") + ` <span class="muted tiny">creating test thread…</span>`;
@@ -2135,14 +2270,21 @@ async function agentRunTest(assistantId) {
   }
 }
 
-function agentOpenThread(threadId) {
+async function agentOpenThread(threadId, runId) {
   if (!store.threads.some((thread) => thread.thread_id === threadId)) return;
   store.selected = threadId;
   store.view = "thread";
   saveThreads();
   renderThreads();
   renderMain();
-  $("main").scrollTop = 0;
+  if (runId) {
+    noteRunId(runId);
+    await recLoad(runId, true);
+    const recorder = $("flight-recorder-card");
+    if (recorder) recorder.scrollIntoView({ block: "start" });
+  } else {
+    $("main").scrollTop = 0;
+  }
 }
 
 function openAgents() {
@@ -2478,7 +2620,10 @@ function init() {
     const run = e.target.closest("[data-agent-run]");
     if (run && !run.disabled) { agentRunTest(run.getAttribute("data-agent-run")); return; }
     const thread = e.target.closest("[data-agent-open-thread]");
-    if (thread) agentOpenThread(thread.getAttribute("data-agent-open-thread"));
+    if (thread) agentOpenThread(
+      thread.getAttribute("data-agent-open-thread"),
+      thread.getAttribute("data-agent-open-run"),
+    );
   });
 
   // Durable tasks: open the tenant-wide queue view, filter, refresh, and

@@ -21,8 +21,10 @@ const sandbox = {};
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__workbench = {
+  connectionIdentityChanged,
   agentTags, agentSearchItems, agentReadiness, agentReadinessHtml,
-  agentCardHtml, agentDefaultInput, agentBuildCreatePayload,
+  agentCardHtml, agentGraphLabel, agentDefaultInput, agentBuildRunInput,
+  agentJourney, agentJourneyHtml, agentBuildCreatePayload,
   agentErrorHtml, agentTestResultHtml, agentDetailHtml,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -46,6 +48,13 @@ function eq(name, got, want) {
   check(name, JSON.stringify(got) === JSON.stringify(want),
     `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 }
+
+check("connection scope: same server and tenant retains session evidence",
+  W.connectionIdentityChanged({ baseUrl: "/api", apiKey: "tenant-a" }, { baseUrl: "/api", apiKey: "tenant-a" }) === false);
+check("connection scope: changing server clears session evidence",
+  W.connectionIdentityChanged({ baseUrl: "/api", apiKey: "tenant-a" }, { baseUrl: "http://other", apiKey: "tenant-a" }) === true);
+check("connection scope: changing tenant key clears session evidence",
+  W.connectionIdentityChanged({ baseUrl: "/api", apiKey: "tenant-a" }, { baseUrl: "/api", apiKey: "tenant-b" }) === true);
 
 eq("tags: array is preserved", W.agentTags(agent), ["research", "production"]);
 eq("tags: comma-separated legacy value is normalized",
@@ -86,7 +95,52 @@ check("search: non-match is excluded", W.agentSearchItems([agent], "billing").le
 
 eq("default input: pipeline is empty object", W.agentDefaultInput("pipeline"), {});
 check("default input: ReAct is immediately runnable",
-  W.agentDefaultInput("react_agent").messages[0].content === "say pong");
+  W.agentDefaultInput("react_agent").messages[0].content === "Reply with a short hello.");
+check("graph labels: built-in behaviors are understandable",
+  W.agentGraphLabel("react_agent") === "Conversational agent" && W.agentGraphLabel("pipeline") === "Workflow pipeline");
+
+{
+  eq("run input: conversational task becomes a user message",
+    W.agentBuildRunInput(agent, "  Find three sources.  "),
+    { messages: [{ role: "user", content: "Find three sources." }] });
+  check("run input: conversational task cannot be empty", (() => {
+    try { W.agentBuildRunInput(agent, "  "); return false; }
+    catch (error) { return error.message === "Enter a task for the agent."; }
+  })());
+  eq("run input: workflow data remains structured",
+    W.agentBuildRunInput({ graph: "pipeline" }, '{"topic":"rust"}'), { topic: "rust" });
+  for (const value of ["[]", "null", '"topic"', "7"]) {
+    check(`run input: workflow rejects non-object ${value}`, (() => {
+      try { W.agentBuildRunInput({ graph: "pipeline" }, value); return false; }
+      catch (error) { return error.message === "Input data must be a JSON object."; }
+    })());
+  }
+  check("run input: malformed workflow data has a plain error", (() => {
+    try { W.agentBuildRunInput({ graph: "pipeline" }, "{"); return false; }
+    catch (error) { return error.message.includes("Input data is not valid JSON"); }
+  })());
+}
+
+{
+  eq("journey: empty workbench starts at create",
+    W.agentJourney(null, null).map((step) => step.state), ["active", "pending", "pending"]);
+  eq("journey: selected agent advances to run",
+    W.agentJourney(agent, null).map((step) => step.state), ["complete", "active", "pending"]);
+  eq("journey: successful run exposes inspection",
+    W.agentJourney(agent, { status: "success", thread_id: "thread-42" }).map((step) => step.state),
+    ["complete", "complete", "active"]);
+  eq("journey: failed run is visibly actionable without inventing a trace",
+    W.agentJourney(agent, { status: "error" }).map((step) => step.state),
+    ["complete", "attention", "pending"]);
+  eq("journey: opening creation always returns focus to create",
+    W.agentJourney(agent, { status: "success", thread_id: "thread-42" }, true).map((step) => step.state),
+    ["active", "pending", "pending"]);
+  check("journey: a thread is inspectable without claiming recorder availability",
+    W.agentJourney(agent, { status: "success", thread_id: "thread-42" })[2].detail === "Run ready to inspect");
+  const journey = W.agentJourneyHtml({ ...agent, name: "Research <Coordinator>" }, null);
+  check("journey: labels the real sequence and escapes names",
+    journey.includes("Create") && journey.includes("Run") && journey.includes("Inspect") && journey.includes("&lt;Coordinator&gt;"));
+}
 
 {
   const payload = W.agentBuildCreatePayload({
@@ -112,10 +166,15 @@ check("server error message is escaped",
   check("detail exposes durable identity and configuration",
     detail.includes("research-coordinator") && detail.includes("12") && detail.includes("production"));
   check("detail provides real run and open-thread actions",
-    detail.includes('data-agent-run="research-coordinator"') && detail.includes('data-agent-open-thread="thread-42"'));
-  check("detail escapes names and pre-fills test input", detail.includes("Research &lt;Coordinator&gt;") && detail.includes("say pong"));
+    detail.includes('data-agent-run="research-coordinator"') &&
+    detail.includes('data-agent-open-thread="thread-42"') &&
+    detail.includes('data-agent-open-run="019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d"'));
+  check("detail uses a plain-language task instead of raw JSON for conversational agents",
+    detail.includes('id="inp-agent-prompt"') && detail.includes("Reply with a short hello.") && !detail.includes("Test input (JSON)"));
+  check("detail escapes names and offers the trace as the next step",
+    detail.includes("Research &lt;Coordinator&gt;") && detail.includes("Inspect run"));
   check("successful evidence is rendered with success tone",
-    W.agentTestResultHtml(run).includes('badge success'));
+    W.agentTestResultHtml(run).includes("Run succeeded"));
   check("failed evidence carries its message",
     W.agentTestResultHtml({ status: "error", error: "graph unavailable" }).includes("graph unavailable"));
 }
