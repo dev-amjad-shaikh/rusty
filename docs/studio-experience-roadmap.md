@@ -81,6 +81,9 @@ Studio is a useful engineering console, not yet the complete experience describe
 
 ### Available now
 
+- Start from a coherent Home mission board that shows the complete evidence-led journey, distinguishes
+  current server catalog state from bounded browser recall, recommends the next action, and continues
+  directly into the latest remembered agent or team evidence without retaining prompts or results.
 - Connect to a local or remote Rusty server.
 - View registered graphs and create or attach threads.
 - Create an assistant through the Agent Workbench.
@@ -152,7 +155,9 @@ Each milestone is a complete user outcome. A milestone is not complete because i
 
 **Outcome:** connect, create an agent, run a task, and inspect the run.
 
-Status: **partially delivered**. The guided path works. Connection onboarding, safe server profiles, compatibility reporting, and a coherent Home surface remain.
+Status: **usable foundation delivered**. The guided path and evidence-led Home mission board work,
+including honest local/server signals and direct continuation into recent agent or team evidence.
+Connection onboarding, safe server profiles, and versioned compatibility reporting remain.
 
 Connection and session requirements:
 

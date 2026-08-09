@@ -13,11 +13,17 @@ studio/
 ├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
 ├── test-learn.mjs     ← node unit tests for the governed-learning control room
+├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
 └── test-all.mjs       ← discovers and runs every Studio test suite
 ```
 
 ## What it does
 
+- **Mission board** — the default Studio Home connects **Shape → Run → Understand → Improve → Govern**
+  on one evidence rail. It recommends the next honest action, combines only bounded connection-scoped
+  run metadata, and can continue into the latest agent or team evidence without copying an identifier.
+  Server catalog counts, browser-scoped blueprints and run recall, and not-yet-loaded memory evidence
+  are labelled distinctly; prompts, results, and connection credentials never enter the Home model.
 - **Connect bar** — server base URL (default `http://127.0.0.1:8100`) + optional API key (`X-Api-Key`
   header). Connect calls `GET /info` and shows the service version, checkpointer kind, and every registered
   graph with its channel names. URL, key, and thread list persist in `localStorage`.
@@ -380,6 +386,14 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
   route compatibility, and explicit render bounds.
+- `node studio/test-home.mjs` — 26 assertions over disconnected onboarding, honest server-versus-browser
+  evidence, privacy-minimized run summaries, deterministic recency and attention routing, bounded hostile
+  history, memory-unknown semantics, next-action guidance, identifier escaping, responsive layout,
+  labelled journey stages, asynchronous focus continuity, and labelled focus handoff into every workspace.
+- Live against `cargo run -p rusty-server --example server_demo`: Home moved from a disconnected local-first
+  state to a confirmed server with two registered behaviors, then updated its agent/team/learning signals
+  from asynchronous server reads. Its primary action opened the real first-agent form. At 390 × 844 the
+  hero, five-stage evidence rail, signals, and action remained readable with no horizontal overflow.
 - `node studio/test-learn.mjs` — 138 assertions over immutable candidate and version-pointer
   normalization, prompt/policy/memory/tool proposal rendering, bounded search and filters, provenance,
   evaluation verdicts, active/canary/mismatch/unknown serving states, real replay-fixture preflight,
@@ -468,6 +482,6 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   against `rusty-server/src/routes.rs`, `src/runs.rs`, `src/sse.rs`, and `examples/server_demo.rs`;
   fork/replay and the CORS preflight are covered by server integration tests (`tests/time_travel.rs`,
   `tests/cors.rs`). The Flight Recorder wire shape matches `rusty-core/tests/golden/run_event.json`.
-- No browser is available in this environment, so DOM interaction was verified by unit-testing the
-  render functions under node (above) rather than by clicking through — the honest next step is the
-  Option-A demo flow.
+- The earlier Flight Recorder slice was initially DOM-verified through its node render harness. The current
+  Home journey has additionally been exercised in a real browser against the local demo server as described
+  above.

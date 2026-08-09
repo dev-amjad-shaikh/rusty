@@ -376,6 +376,47 @@
     color: var(--interrupt); padding: 4px 0; border-bottom: 1px solid var(--border);
   }
 
+  /* ---------- Studio home ---------- */
+  .home-hero {
+    position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: 26px; align-items: end; padding: 24px; border: 1px solid #584738; border-radius: 10px;
+    background: linear-gradient(118deg, #2d251e 0%, #211e1a 58%, #18201c 100%);
+  }
+  .home-hero::after { content: ""; position: absolute; right: -46px; top: -70px; width: 190px; height: 190px; border: 1px solid rgba(198,136,96,.18); border-radius: 50%; box-shadow: 0 0 0 28px rgba(198,136,96,.035), 0 0 0 58px rgba(141,172,123,.025); pointer-events: none; }
+  .home-kicker { color: #d19a71; font: 700 10px var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+  .home-hero h1 { max-width: 760px; margin: 7px 0 6px; font-size: clamp(25px, 3vw, 38px); line-height: 1.06; letter-spacing: -1.2px; }
+  .home-hero p { max-width: 720px; margin: 0; color: #b8b0a3; font-size: 13px; line-height: 1.55; }
+  .home-hero-action { position: relative; z-index: 1; min-width: 190px; text-align: right; }
+  .home-hero-action span { display: block; margin-bottom: 7px; color: var(--text-dim); font: 10px var(--mono); }
+  .home-hero-action button { width: 100%; }
+  .home-evidence-rail { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 14px 0; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-inset); list-style: none; overflow: hidden; }
+  .home-evidence-rail::before { content: ""; position: absolute; top: 25px; left: 9%; right: 9%; height: 1px; background: #5a4938; }
+  .home-stage { position: relative; min-width: 0; padding: 41px 12px 12px; border-right: 1px solid var(--border); }
+  .home-stage:last-child { border-right: 0; }
+  .home-stage::before { content: ""; position: absolute; z-index: 1; top: 19px; left: 13px; width: 11px; height: 11px; border: 2px solid #64584c; border-radius: 50%; background: var(--bg-inset); }
+  .home-stage.ready::before { border-color: #8dac7b; background: #263623; }
+  .home-stage.current::before { border-color: #d19a71; background: #4a2e20; box-shadow: 0 0 0 4px rgba(209,154,113,.1); }
+  .home-stage b, .home-stage span { display: block; }
+  .home-stage b { font-size: 11.5px; }
+  .home-stage span { margin-top: 3px; color: var(--text-dim); font-size: 9.5px; line-height: 1.35; }
+  .home-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); gap: 14px; }
+  .home-panel { padding: 15px; }
+  .home-panel-head { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 11px; }
+  .home-panel-head h2 { margin: 0; font-size: 15px; }
+  .home-panel-head span { color: var(--text-faint); font: 9.5px var(--mono); text-transform: uppercase; letter-spacing: .6px; }
+  .home-signals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .home-signal { min-width: 0; padding: 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-raised); }
+  .home-signal b, .home-signal span, .home-signal small { display: block; }
+  .home-signal b { color: #eee8dd; font-size: 20px; }
+  .home-signal span { margin-top: 2px; font-size: 11px; }
+  .home-signal small { margin-top: 5px; color: var(--text-faint); font: 9.5px var(--mono); }
+  .home-continue { display: grid; gap: 10px; }
+  .home-continue strong { font-size: 14px; overflow-wrap: anywhere; }
+  .home-continue p { margin: 0; color: var(--text-dim); font-size: 11.5px; line-height: 1.45; }
+  .home-continue-meta { color: #d19a71; font: 10px var(--mono); text-transform: uppercase; letter-spacing: .55px; }
+  .home-continue-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+  .home-truth { margin-top: 14px; padding: 9px 11px; border-left: 3px solid #6f8062; background: #1b211a; color: var(--text-dim); font-size: 10.5px; line-height: 1.45; }
+
   /* ---------- agent workbench ---------- */
   .workbench-head {
     display: flex; justify-content: space-between; gap: 18px; align-items: flex-start;
@@ -1060,6 +1101,7 @@
   @media (max-width: 900px) {
     aside { width: 250px; flex-basis: 250px; }
     .agent-layout { grid-template-columns: 1fr; }
+    .home-grid { grid-template-columns: 1fr; }
     .workbench-head { flex-direction: column; }
     .rec-story-spine { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .rec-story-spine::before { display: none; }
@@ -1096,6 +1138,14 @@
       border-right: 0; border-bottom: 1px solid var(--border);
     }
     main { overflow: visible; }
+    .home-hero { grid-template-columns: 1fr; padding: 18px; }
+    .home-hero-action { min-width: 0; text-align: left; }
+    .home-evidence-rail { grid-template-columns: 1fr; }
+    .home-evidence-rail::before { top: 18px; bottom: 18px; left: 18px; right: auto; width: 1px; height: auto; }
+    .home-stage { padding: 11px 12px 11px 41px; border-right: 0; border-bottom: 1px solid var(--border); }
+    .home-stage:last-child { border-bottom: 0; }
+    .home-stage::before { top: 14px; left: 12px; }
+    .home-signals { grid-template-columns: 1fr; }
     .agent-form { grid-template-columns: 1fr; }
     .agent-form label.wide, .agent-form-actions { grid-column: auto; }
     .agent-copy-summary { grid-template-columns: 1fr; }
@@ -1222,6 +1272,9 @@
 
   <div id="body">
     <aside>
+      <h2 class="section">Studio</h2>
+      <button class="small primary" id="btn-home-open" style="width:100%">Open mission board</button>
+
       <h2 class="section">Agents</h2>
       <button class="small primary" id="btn-agents-open" style="width:100%">Open agent workbench</button>
       <div class="muted tiny" id="agent-side-count" style="margin:6px 2px 0">Connect to load assistant configurations.</div>
@@ -1261,12 +1314,13 @@
     </aside>
 
     <main id="main">
-      <div class="empty" id="main-empty">Open the agent workbench, team observatory, memory ledger, or learning control room—or select a thread to debug a run.</div>
+      <div id="home-view" aria-labelledby="home-title"><div class="empty">Loading the Studio mission board.</div></div>
+      <div class="empty" id="main-empty" style="display:none">Choose a Studio workspace or a local thread.</div>
 
-      <div id="agents-view" style="display:none">
+      <div id="agents-view" style="display:none" aria-labelledby="agents-title">
         <div class="workbench-head">
           <div>
-            <h1>Agent workbench</h1>
+            <h1 id="agents-title" tabindex="-1">Agent workbench</h1>
             <p>Create an agent, give it a real task, and inspect exactly what happened.</p>
           </div>
           <button class="primary" id="btn-agent-create-open">Create agent</button>
@@ -1543,7 +1597,7 @@
 
       <div id="thread-view" style="display:none">
 
-        <div id="thread-head">
+        <div id="thread-head" tabindex="-1" aria-label="Selected thread workspace">
           <span class="tid" id="th-id"></span>
           <span class="badge" id="th-graph"></span>
           <span class="muted tiny" id="th-created"></span>
@@ -1663,9 +1717,9 @@
 
       </div>
 
-      <div id="tasks-view" style="display:none">
+      <div id="tasks-view" style="display:none" aria-labelledby="tasks-title">
         <div class="card">
-          <h2 class="section" style="margin-top:0">
+          <h2 class="section" id="tasks-title" tabindex="-1" style="margin-top:0">
             Durable tasks
             <button class="small" id="btn-tasks-refresh" style="float:right">refresh</button>
           </h2>
@@ -1768,10 +1822,12 @@ const store = {
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, partial } for fork compare
-  view: "thread",      // "thread" | "tasks" | "agents" | "fabric" | "memory" | "learn" — active workspace
+  view: "home",        // "home" | "thread" | "tasks" | "agents" | "fabric" | "memory" | "learn" — active workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
   agents: null,        // { list, selected, error } for the assistant-configuration workbench
+  agentRequest: 0,     // generation guard: assistant catalogs never cross connection boundaries
+  agentFocusRecord: null, // remembered run row that should receive focus after Home navigation
   agentRuns: Object.create(null),       // latest full run from this browser session, keyed by assistant id
   agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
   agentCreateOpen: false, // creation form temporarily owns the guided journey
@@ -2268,6 +2324,273 @@ function currentThread() {
   return store.threads.find((t) => t.thread_id === store.selected) || null;
 }
 
+/* ---------------- Studio home ----------------
+ * The mission board joins already-known local evidence without pretending
+ * that browser recall is server discovery. It is a navigation model, not a
+ * second cache: each workspace remains responsible for fresh server truth.
+ * ------------------------------------------------------------------------- */
+
+function homeTime(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function homeServerEvidence(value, unsupported, connected) {
+  if (!connected) return { known: false, loading: false, stale: false, unavailable: false, disconnected: true };
+  if (!value || value.loading) return { known: false, loading: true, stale: false, unavailable: false };
+  if (value.error || unsupported) {
+    const retained = (Array.isArray(value.list) && value.list.length > 0) ||
+      (Array.isArray(value.records) && value.records.length > 0);
+    return { known: false, loading: false, stale: retained, unavailable: true };
+  }
+  return { known: true, loading: false, stale: false, unavailable: false };
+}
+
+function homeEvidenceNote(evidence, loaded, loading, unavailable) {
+  if (evidence.known) return loaded;
+  if (evidence.disconnected) return "connect to load";
+  if (evidence.loading) return loading;
+  return evidence.stale ? `stale · ${unavailable}` : unavailable;
+}
+
+function homeSnapshot(state) {
+  const source = state && typeof state === "object" ? state : {};
+  const connected = Boolean(source.conn && source.info);
+  const assistants = Array.isArray(source.agents && source.agents.list) ? source.agents.list : [];
+  const agentEvidence = homeServerEvidence(source.agents, source.agentsUnsupported, connected);
+  const agentRuns = Object.entries(source.agentRunHistory || {})
+    .slice(0, AGENT_RUN_GLOBAL_ASSISTANT_LIMIT).flatMap(([assistantId, runs]) =>
+    (Array.isArray(runs) ? runs : []).slice(0, AGENT_RUN_HISTORY_LIMIT).map((run) => ({
+      family: "agent", assistant_id: assistantId, record_id: run && run.record_id, run_id: run && run.run_id,
+      thread_id: run && run.thread_id, graph: run && run.graph, status: run && run.status,
+      started_at: run && run.started_at, finished_at: run && run.finished_at,
+    })));
+  const teamRuns = (Array.isArray(source.fabricRunHistory) ? source.fabricRunHistory : [])
+    .slice(0, FABRIC_RUN_HISTORY_LIMIT)
+    .map((run) => ({
+      family: "team", coordination_id: run && run.coordination_id, pattern: run && run.pattern,
+      status: run && run.status, member_count: run && run.member_count, settled_count: run && run.settled_count,
+      observed_at: run && run.observed_at, stale: run && run.stale,
+    }));
+  const allRuns = [...agentRuns, ...teamRuns].sort((left, right) =>
+    Math.max(homeTime(right.observed_at), homeTime(right.finished_at), homeTime(right.started_at)) -
+    Math.max(homeTime(left.observed_at), homeTime(left.finished_at), homeTime(left.started_at)));
+  const fabricList = Array.isArray(source.fabric && source.fabric.list) ? source.fabric.list : [];
+  const teams = fabricList.length ? fabricGroups(fabricList).filter((group) => group.teamId).length : 0;
+  const teamEvidence = homeServerEvidence(source.fabric, source.fabricUnsupported, connected);
+  const memoryKnown = Boolean(source.memory && !source.memory.loading && !source.memory.error);
+  const memoryRecords = memoryKnown ? Number(source.memory.totalRecords || 0) : null;
+  const memoryConflicts = memoryKnown && Number.isFinite(Number(source.memory.totalConflicts))
+    ? Number(source.memory.totalConflicts) : null;
+  const candidates = Array.isArray(source.learn && source.learn.records) ? source.learn.records : [];
+  const learningEvidence = homeServerEvidence(source.learn, source.learnUnsupported, connected);
+  const reportedCandidates = source.learn && source.learn.totalCandidates;
+  const candidateTotal = learningEvidence.known && reportedCandidates !== null && reportedCandidates !== undefined &&
+    Number.isSafeInteger(Number(reportedCandidates)) ? Math.max(0, Number(reportedCandidates)) : candidates.length;
+  const attentionRuns = allRuns.filter((run) => run.stale === true ||
+    ["failed", "unreachable", "error", "interrupted"].includes(String(run.status || "")));
+  const snapshot = {
+    connected,
+    service: connected ? `${source.info.service || "Rusty Server"} v${source.info.version || "?"}` : "Not connected",
+    graph_count: connected && Array.isArray(source.info.graphs) ? source.info.graphs.length : 0,
+    assistant_known: agentEvidence.known,
+    assistant_loading: agentEvidence.loading,
+    assistant_count: agentEvidence.known ? assistants.length : null,
+    assistant_note: homeEvidenceNote(agentEvidence, "server catalog", "loading server catalog", "agent catalog unavailable"),
+    team_known: teamEvidence.known,
+    team_loading: teamEvidence.loading,
+    team_count: teamEvidence.known ? teams : null,
+    team_note: homeEvidenceNote(teamEvidence, "server registry", "loading server registry", "team registry unavailable"),
+    blueprint_count: Array.isArray(source.fabricBlueprints) ? source.fabricBlueprints.length : 0,
+    run_count: allRuns.length,
+    attention_count: attentionRuns.length,
+    thread_count: Array.isArray(source.threads) ? source.threads.length : 0,
+    memory_known: memoryKnown,
+    memory_records: memoryRecords,
+    memory_conflicts: memoryConflicts,
+    candidate_known: learningEvidence.known,
+    candidate_count: learningEvidence.known ? candidateTotal : null,
+    candidate_note: homeEvidenceNote(learningEvidence, "server candidates", "loading candidates", "learning evidence unavailable"),
+    latest: allRuns[0] || null,
+    attention: attentionRuns[0] || null,
+  };
+  snapshot.next = homePrimaryAction(snapshot);
+  return snapshot;
+}
+
+function homePrimaryAction(snapshot) {
+  if (!snapshot.connected) return { action: "connect", label: "Connect local Rusty", hint: "Start with a server you control." };
+  if (!snapshot.assistant_known) return { action: "agents", label: "Check agent catalog", hint: snapshot.assistant_loading ? "Waiting for current server evidence." : "The catalog needs a successful refresh." };
+  if (!snapshot.assistant_count) return { action: "create-agent", label: "Shape your first agent", hint: "Create a real runnable configuration." };
+  if (!snapshot.run_count) return { action: "agents", label: "Run a real task", hint: "Test an agent and keep its evidence." };
+  if (snapshot.attention_count) return { action: "attention", label: "Investigate attention", hint: `${snapshot.attention_count} remembered run${snapshot.attention_count === 1 ? " needs" : "s need"} review.` };
+  if (snapshot.candidate_count) return { action: "learn", label: "Review proposed change", hint: `${snapshot.candidate_count} governed candidate${snapshot.candidate_count === 1 ? "" : "s"} retained.` };
+  return { action: "continue", label: "Continue from evidence", hint: "Return to the most recent remembered run." };
+}
+
+function homeAttentionRoute(record) {
+  const run = record && typeof record === "object" ? record : {};
+  if (run.family === "team") return { action: "team-run", id: run.coordination_id || "", owner: "" };
+  if (run.family === "agent" && run.thread_id && run.graph) {
+    return { action: "thread-run", id: run.thread_id, run_id: run.run_id || "", graph: run.graph, owner: run.assistant_id || "" };
+  }
+  if (run.family === "agent") return { action: "agent-run", id: run.record_id || "", owner: run.assistant_id || "" };
+  return { action: "continue", id: "", owner: "" };
+}
+
+function homeStageHtml(name, detail, tone) {
+  return `<li class="home-stage ${tone}" aria-label="${escapeHtml(`${name}: ${detail}`)}"><b>${escapeHtml(name)}</b><span>${escapeHtml(detail)}</span></li>`;
+}
+
+function homeHtml(snapshot) {
+  const connected = snapshot.connected;
+  const shaped = (snapshot.assistant_count || 0) + snapshot.blueprint_count > 0;
+  const ran = snapshot.run_count > 0;
+  const understood = ran && snapshot.attention_count === 0;
+  const improved = snapshot.memory_records > 0 || snapshot.candidate_count > 0;
+  const governed = snapshot.candidate_count > 0;
+  const stageTone = (ready, current) => ready ? "ready" : current ? "current" : "";
+  const latest = snapshot.latest;
+  let continueHtml;
+  if (!latest) {
+    continueHtml = `<div class="home-continue"><span class="home-continue-meta">No remembered runs yet</span>` +
+      `<strong>Your first useful evidence starts with a real task.</strong>` +
+      `<p>Studio keeps bounded run metadata in this browser. Prompts and results do not enter the Home summary.</p>` +
+      `<div class="home-continue-actions"><button class="primary" type="button" data-home-action="${connected ? "agents" : "connect"}">${connected ? "Open agent workbench" : "Connect a server"}</button></div></div>`;
+  } else if (latest.family === "team") {
+    continueHtml = `<div class="home-continue"><span class="home-continue-meta">Latest team coordination · ${escapeHtml(latest.status || "unknown")}</span>` +
+      `<strong>${escapeHtml(latest.coordination_id || "Remembered coordination")}</strong>` +
+      `<p>${escapeHtml(latest.pattern || "unknown")} · ${Number(latest.settled_count || 0)}/${Number(latest.member_count || 0)} members settled${latest.stale ? " · last observation is stale" : ""}</p>` +
+      `<div class="home-continue-actions"><button class="primary" type="button" data-home-action="team-run" data-home-id="${escapeHtml(latest.coordination_id || "")}">Inspect team evidence</button>` +
+      `<button type="button" data-home-action="fabric">Open team observatory</button></div></div>`;
+  } else {
+    continueHtml = `<div class="home-continue"><span class="home-continue-meta">Latest agent run · ${escapeHtml(latest.status || "unknown")}</span>` +
+      `<strong>${escapeHtml(latest.run_id || latest.record_id || "Remembered run")}</strong>` +
+      `<p>${escapeHtml(latest.graph || "unknown behavior")} · browser recall for ${escapeHtml(latest.assistant_id || "assistant")}</p>` +
+      `<div class="home-continue-actions"><button class="primary" type="button" data-home-action="agent-run" data-home-owner="${escapeHtml(latest.assistant_id || "")}">Open agent evidence</button>` +
+      (latest.thread_id ? `<button type="button" data-home-action="thread" data-home-id="${escapeHtml(latest.thread_id)}">Open thread</button>` : "") +
+      `</div></div>`;
+  }
+  const memoryValue = snapshot.memory_known ? snapshot.memory_records : "—";
+  const memoryNote = snapshot.memory_known
+    ? `${snapshot.memory_conflicts == null ? "conflict state unavailable" : `${snapshot.memory_conflicts} conflict${snapshot.memory_conflicts === 1 ? "" : "s"}`}`
+    : "open ledger to load server truth";
+  const memoryStage = snapshot.memory_known ? `${snapshot.memory_records} memory` : "memory not loaded";
+  const candidateStage = snapshot.candidate_known ? `${snapshot.candidate_count} candidates` : snapshot.candidate_note;
+  const agentStage = snapshot.assistant_known ? `${snapshot.assistant_count} agents` : snapshot.assistant_note;
+  return `<section class="home-hero"><div><span class="home-kicker">Rusty Studio · evidence-led workspace</span>` +
+    `<h1 id="home-title" tabindex="-1">Build the system. Keep the proof beside it.</h1>` +
+    `<p>Move from a real configuration to a real run, causal evidence, governed memory, and reversible learning without copying identifiers between tools.</p></div>` +
+    `<div class="home-hero-action"><span>${escapeHtml(snapshot.service)} · ${connected ? `${snapshot.graph_count} registered behavior${snapshot.graph_count === 1 ? "" : "s"}` : "local first"}</span>` +
+    `<button class="primary" type="button" data-home-action="${snapshot.next.action}">${escapeHtml(snapshot.next.label)}</button></div></section>` +
+    `<ol class="home-evidence-rail" aria-label="Rusty Studio journey">` +
+      homeStageHtml("Shape", shaped ? `${agentStage} · ${snapshot.blueprint_count} team blueprints` : (snapshot.assistant_known ? "Define one useful responsibility" : agentStage), stageTone(shaped, connected && snapshot.assistant_known)) +
+      homeStageHtml("Run", ran ? `${snapshot.run_count} remembered runs` : "Test with real work", stageTone(ran, shaped)) +
+      homeStageHtml("Understand", ran ? (snapshot.attention_count ? `${snapshot.attention_count} need review` : "Evidence ready") : "Follow causal execution", stageTone(understood, ran)) +
+      homeStageHtml("Improve", improved ? `${memoryStage} · ${candidateStage}` : "Correct memory or propose change", stageTone(improved, understood)) +
+      homeStageHtml("Govern", governed ? "Candidate decisions available" : (snapshot.candidate_known ? "Evaluate before promotion" : snapshot.candidate_note), stageTone(governed, improved)) +
+    `</ol>` +
+    `<div class="home-grid"><section class="card home-panel" aria-labelledby="home-system-title"><div class="home-panel-head"><h2 id="home-system-title">System signals</h2><span>current connection</span></div>` +
+      `<div class="home-signals">` +
+        `<button class="home-signal" type="button" data-home-action="agents"><b>${snapshot.assistant_known ? snapshot.assistant_count : "—"}</b><span>Agent configurations</span><small>${connected ? snapshot.assistant_note : "connect to discover"}</small></button>` +
+        `<button class="home-signal" type="button" data-home-action="fabric"><b>${snapshot.team_known ? snapshot.team_count : "—"} / ${snapshot.blueprint_count}</b><span>Teams / blueprints</span><small>${escapeHtml(snapshot.team_note)} / browser structure</small></button>` +
+        `<button class="home-signal" type="button" data-home-action="continue"><b>${snapshot.run_count}</b><span>Remembered runs</span><small>${snapshot.attention_count} need attention · browser recall</small></button>` +
+        `<button class="home-signal" type="button" data-home-action="memory"><b>${memoryValue}</b><span>Governed memory</span><small>${escapeHtml(memoryNote)}</small></button>` +
+      `</div><div class="home-truth">Home uses bounded browser recall for recent work and asks each workspace for current server evidence. It never presents local history as fleet-wide discovery.</div></section>` +
+      `<section class="card home-panel" aria-labelledby="home-continue-title"><div class="home-panel-head"><h2 id="home-continue-title">Continue with evidence</h2><span>${snapshot.thread_count} local thread${snapshot.thread_count === 1 ? "" : "s"}</span></div>${continueHtml}</section></div>`;
+}
+
+function homeFocusIdentity(view) {
+  const active = document.activeElement;
+  if (!view || !active || !view.contains(active)) return null;
+  const target = active.closest && active.closest("[data-home-action]");
+  if (!target) return { action: null, id: "", owner: "", index: 0 };
+  const action = target.getAttribute("data-home-action") || "";
+  const id = target.getAttribute("data-home-id") || "";
+  const owner = target.getAttribute("data-home-owner") || "";
+  const matches = Array.from(view.querySelectorAll("[data-home-action]")).filter((item) =>
+    (item.getAttribute("data-home-action") || "") === action &&
+    (item.getAttribute("data-home-id") || "") === id &&
+    (item.getAttribute("data-home-owner") || "") === owner);
+  return { action, id, owner, index: Math.max(0, matches.indexOf(target)) };
+}
+
+function homeRestoreFocus(view, identity) {
+  if (!view || !identity) return;
+  const matches = identity.action === null ? [] : Array.from(view.querySelectorAll("[data-home-action]")).filter((item) =>
+    (item.getAttribute("data-home-action") || "") === identity.action &&
+    (item.getAttribute("data-home-id") || "") === identity.id &&
+    (item.getAttribute("data-home-owner") || "") === identity.owner);
+  const target = matches[identity.index] || matches[0] || view.querySelector("#home-title");
+  target?.focus({ preventScroll: true });
+}
+
+function homeRender() {
+  const view = $("home-view");
+  if (!view) return;
+  const focusIdentity = homeFocusIdentity(view);
+  view.innerHTML = homeHtml(homeSnapshot(store));
+  homeRestoreFocus(view, focusIdentity);
+}
+
+function openHome(focus = true) {
+  store.view = "home";
+  renderMain();
+  $("main").scrollTop = 0;
+  if (focus) $("home-title")?.focus({ preventScroll: true });
+}
+
+function homeNavigate(action, id, owner) {
+  if (action === "connect") { $("inp-url").focus(); return; }
+  if (action === "create-agent") { openAgents(); agentOpenCreate(); return; }
+  if (action === "agents") { openAgents(); return; }
+  if (action === "fabric") { openFabric(); return; }
+  if (action === "memory") { openMemory(); return; }
+  if (action === "learn") { openLearn(); return; }
+  if (action === "tasks") { openTasks(); return; }
+  const snapshot = homeSnapshot(store);
+  if (action === "attention") {
+    if (!snapshot.attention) { homeNavigate("continue", "", ""); return; }
+    const route = homeAttentionRoute(snapshot.attention);
+    if (route.action === "thread-run") {
+      agentOpenThread(route.id, route.run_id, route.graph);
+      return;
+    }
+    homeNavigate(route.action, route.id, route.owner);
+    return;
+  }
+  if (action === "continue") {
+    if (!snapshot.latest) { snapshot.connected ? openAgents() : $("inp-url").focus(); return; }
+    if (snapshot.latest.family === "team") homeNavigate("team-run", snapshot.latest.coordination_id, "");
+    else homeNavigate("agent-run", "", snapshot.latest.assistant_id);
+    return;
+  }
+  if (action === "agent-run") {
+    if (store.agents && store.agents.list.some((agent) => agent.assistant_id === owner)) store.agents.selected = owner;
+    store.agentFocusRecord = id || null;
+    openAgents();
+    return;
+  }
+  if (action === "team-run") {
+    openFabric();
+    if (fabricRunSafeId(id)) {
+      $("inp-fabric-coordination").value = id;
+      fabricLoadCoordination(id, { source: "attached" });
+    }
+    return;
+  }
+  if (action === "thread") {
+    const thread = store.threads.find((item) => item.thread_id === id);
+    if (!thread) return;
+    store.selected = thread.thread_id;
+    store.view = "thread";
+    saveThreads();
+    renderThreads();
+    renderMain();
+    $("thread-head")?.focus({ preventScroll: true });
+  }
+}
+
 /* ---------------- connect ---------------- */
 
 function connectionIdentityChanged(previous, next) {
@@ -2297,6 +2620,7 @@ async function connect() {
   store.conn = connectionAfterAttempt(previousConnection, candidateConnection, true);
   store.info = info;
   if (connectionIdentityChanged(previousConnection, store.conn)) {
+    store.agentRequest += 1;
     store.memoryRequest += 1;
     store.fabricRequest += 1;
     store.learnRequest += 1;
@@ -2470,6 +2794,7 @@ function renderThreads() {
 /* ---------------- main panel ---------------- */
 
 function renderMain() {
+  const home = store.view === "home";
   const tasks = store.view === "tasks";
   const agents = store.view === "agents";
   const fabric = store.view === "fabric";
@@ -2485,14 +2810,21 @@ function renderMain() {
     clearTimeout(store.memoryLifecycleTimer);
     store.memoryLifecycleTimer = null;
   }
+  $("home-view").style.display = home ? "block" : "none";
   $("tasks-view").style.display = tasks ? "block" : "none";
   $("agents-view").style.display = agents ? "block" : "none";
   $("fabric-view").style.display = fabric ? "block" : "none";
   $("memory-view").style.display = memory ? "block" : "none";
   $("learn-view").style.display = learn ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !tasks && !agents && !fabric && !memory && !learn && !t ? "block" : "none";
-  $("thread-view").style.display = !tasks && !agents && !fabric && !memory && !learn && t ? "block" : "none";
+  $("main-empty").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !t ? "block" : "none";
+  $("thread-view").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && t ? "block" : "none";
+  if (home) {
+    stopPoll();
+    abortStream();
+    homeRender();
+    return;
+  }
   if (tasks) {
     tasksLoad(true); // quiet: a pre-R0.6 server shows a panel note, not toast spam
     return;
@@ -3838,7 +4170,7 @@ function agentRunHistoryHtml(history) {
     const inspect = run.thread_id && run.graph
       ? `<button class="small" data-agent-open-thread="${escapeHtml(run.thread_id)}" data-agent-open-run="${escapeHtml(run.run_id)}" data-agent-open-graph="${escapeHtml(run.graph)}" aria-label="Inspect ${escapeHtml(runLabel)}">Inspect</button>`
       : "";
-    return `<article class="agent-run-row run-${tone}"><div>` +
+    return `<article class="agent-run-row run-${tone}" data-agent-run-record="${escapeHtml(run.record_id)}" tabindex="-1"><div>` +
       `<div class="agent-run-line">${badge(run.status)}` +
       `<time${timeAttribute}>${escapeHtml(agentRunTimeLabel(run.started_at))}</time>` +
       `<span class="agent-run-duration">${escapeHtml(agentDurationLabel(run.duration_ms))}</span></div>` +
@@ -4574,22 +4906,33 @@ function agentsUpdateSidebar() {
 
 async function agentsLoad(quiet) {
   if (!store.conn) return;
-  if (!store.agents) store.agents = { list: [], selected: null, error: null };
+  const request = ++store.agentRequest;
+  const connection = { ...store.conn };
+  const current = () => request === store.agentRequest &&
+    !connectionIdentityChanged(connection, store.conn);
+  const previous = store.agents || { list: [], selected: null, error: null };
+  store.agents = { ...previous, list: Array.isArray(previous.list) ? previous.list : [], loading: true, error: null };
+  if (store.view === "home") homeRender();
   try {
-    const list = await api("GET", "/assistants");
+    const list = await apiForConnection(connection, "GET", "/assistants");
+    if (!current()) return;
     store.agents.list = Array.isArray(list) ? list : [];
     store.agents.error = null;
+    store.agents.loading = false;
     store.agentsUnsupported = false;
     if (!store.agents.list.some((a) => a.assistant_id === store.agents.selected)) {
       store.agents.selected = store.agents.list[0] ? store.agents.list[0].assistant_id : null;
     }
   } catch (e) {
+    if (!current()) return;
+    store.agents.loading = false;
     store.agents.error = { status: e.status, body: e.body };
     store.agentsUnsupported = e.status === 404;
     if (!quiet) toast(e.message, "err");
   }
   agentsUpdateSidebar();
   if (store.view === "agents") agentsRender();
+  else if (store.view === "home") homeRender();
 }
 
 function agentsRender() {
@@ -4640,6 +4983,12 @@ function agentsRender() {
     selectedHistory,
     store.info,
   );
+  if (store.agentFocusRecord) {
+    const target = Array.from($("agent-detail").querySelectorAll("[data-agent-run-record]")).find((item) =>
+      item.getAttribute("data-agent-run-record") === store.agentFocusRecord);
+    store.agentFocusRecord = null;
+    (target || $("agents-title")).focus({ preventScroll: true });
+  }
 }
 
 function agentGraphNames() {
@@ -5076,6 +5425,7 @@ function openAgents() {
   store.view = "agents";
   renderMain();
   $("main").scrollTop = 0;
+  $("agents-title").focus({ preventScroll: true });
 }
 
 /* ---------------- Agent Fabric team observatory (R0.7) ----------------
@@ -7346,6 +7696,7 @@ async function fabricLoad(quiet, force) {
   store.fabric.composer.needsRender = true;
   fabricUpdateSidebar();
   if (store.view === "fabric") fabricRender();
+  else if (store.view === "home") homeRender();
   if (!store.fabric.error && store.fabric.selectedGroup) fabricLoadGroupStatuses(store.fabric.selectedGroup);
   if (!store.fabric.error && store.fabric.selectedAgent) fabricLoadMemberEvidence(store.fabric.selectedAgent);
 }
@@ -8369,6 +8720,7 @@ async function memoryLoad(quiet) {
       error: `<div class="note">Connect to a Rusty server before opening governed memory.</div>`,
     };
     memoryRender();
+    if (store.view === "home") homeRender();
     return;
   }
   store.memory = { ...previous, loading: true };
@@ -8390,6 +8742,7 @@ async function memoryLoad(quiet) {
     $("memory-side-count").textContent = noRoute ? "Memory is unavailable on this server build." : "Memory could not be loaded.";
     if (!quiet && !noRoute) toast(error.message || "Memory could not be loaded.", "err");
     memoryRender();
+    if (store.view === "home") homeRender();
     return;
   }
   const recordsBody = recordsResult.value || {};
@@ -8423,6 +8776,7 @@ async function memoryLoad(quiet) {
   $("memory-side-count").textContent = `${rawRecords.length} retained record${rawRecords.length === 1 ? "" : "s"} · ` +
     (Array.isArray(conflicts) ? `${totalConflicts} conflict${totalConflicts === 1 ? "" : "s"}` : "conflict status unavailable");
   memoryRender();
+  if (store.view === "home") homeRender();
 }
 
 function memoryFilters() {
@@ -9773,6 +10127,7 @@ async function learnLoad(quiet) {
       loading: false, error: `<div class="note">Connect to a Rusty server before opening governed learning.</div>`,
       versionsError: null, totalCandidates: 0, totalVersions: 0, snapshotTruncated: false, searchIndex: new Map(), notice: null };
     learnRender();
+    if (store.view === "home") homeRender();
     return { candidates: false, versions: false };
   }
   store.learn = { ...previous, loading: true, action: null, notice: null };
@@ -9792,6 +10147,7 @@ async function learnLoad(quiet) {
     $("learn-side-count").textContent = noRoute ? "Learning is unavailable on this server build." : "Learning evidence could not be loaded.";
     if (!quiet && !noRoute) toast(error.message || "Learning evidence could not be loaded.", "err");
     learnRender();
+    if (store.view === "home") homeRender();
     return { candidates: false, versions: false };
   }
   const candidates = learnCandidateSnapshot(candidatesResult.value);
@@ -9801,6 +10157,7 @@ async function learnLoad(quiet) {
       totalCandidates: candidates.total, totalVersions: 0, snapshotTruncated: candidates.truncated, searchIndex: new Map(), notice: null };
     $("learn-side-count").textContent = "Learning evidence violates the expected contract.";
     learnRender();
+    if (store.view === "home") homeRender();
     return { candidates: false, versions: false };
   }
   const records = candidates.records;
@@ -9825,6 +10182,7 @@ async function learnLoad(quiet) {
   $("learn-side-count").textContent = `${candidates.total} candidate${candidates.total === 1 ? "" : "s"} · ` +
     (versionsError ? "serving state unavailable" : `${totalVersions} serving surface${totalVersions === 1 ? "" : "s"}`);
   learnRender();
+  if (store.view === "home") homeRender();
   return { candidates: true, versions: !versionsError };
 }
 
@@ -10333,6 +10691,8 @@ async function taskCancel(taskId) {
 function openTasks() {
   store.view = "tasks";
   renderMain();
+  $("main").scrollTop = 0;
+  $("tasks-title").focus({ preventScroll: true });
 }
 
 function init() {
@@ -10408,6 +10768,13 @@ function init() {
 
   // Agent workbench: durable assistant catalog, guided creation, and a
   // runtime-backed test that leaves behind a normal debuggable thread.
+  $("btn-home-open").onclick = () => openHome();
+  $("home-view").addEventListener("click", (event) => {
+    const target = event.target.closest("[data-home-action]");
+    if (!target) return;
+    homeNavigate(target.getAttribute("data-home-action"), target.getAttribute("data-home-id") || "",
+      target.getAttribute("data-home-owner") || "");
+  });
   $("btn-agents-open").onclick = openAgents;
   $("btn-agents-refresh").onclick = () => agentsLoad(false);
   $("inp-agent-search").addEventListener("input", agentsRender);
@@ -10744,6 +11111,7 @@ function init() {
     if (target && !target.disabled) taskCancel(target.getAttribute("data-cancel-id"));
   });
 
+  renderMain();
   if (store.conn) {
     loadThreads();
     renderThreads();
