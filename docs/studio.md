@@ -23,8 +23,13 @@ studio/
 - **Agent workbench** — a user-facing catalog for durable assistants. Create an agent from a registered
   behavior, inspect its runtime configuration and readiness, copy an existing agent without carrying
   over identity or run history, give it a real task, and move directly into the resulting thread and
-  trace. A bounded, connection-scoped browser ledger preserves only safe run metadata (identity,
-  status, timing, and stable error category); prompts and result payloads are deliberately not stored.
+  trace. The configuration workshop separates fields the server executes (**Runs with**) from catalog
+  metadata (**Describes**) and unknown or graph-specific fields stored without silent field loss (**Preserves**). A
+  versioned `rusty.assistant/v1` JSON manifest can be imported, reviewed, edited explicitly, and exported;
+  imports reject unknown top-level fields rather than silently losing them, and secret-looking values
+  stay hidden in the evidence preview. A bounded, connection-scoped browser ledger preserves only safe
+  run metadata (identity, status, timing, and stable error category); prompts and result payloads are
+  deliberately not stored.
 - **Governed memory ledger** — a tenant-wide workspace over `POST /memory/query` and
   `POST /memory/conflicts`. It retrieves active, candidate, expired, and superseded records so an
   operator can audit what Rusty retained rather than seeing only the current answer. Search and
@@ -186,6 +191,22 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
 
 ## Limitations (by design or by server version)
 
+- **Assistant configuration reflects the current server contract.** The graph binding is enforced and
+  `config.recursion_limit` is applied as a run default. Responsibility and tags are catalog metadata,
+  not prompt instructions. Other `config` / `metadata` fields round-trip without silent field loss, but the generic server
+  makes no claim that they affect execution; the evidence rail says so. First-class model, tool, memory,
+  output, guardrail, and budget controls remain blocked on typed discovery and persistence contracts.
+  Portable manifests are bounded to 64 KiB, 16 nesting levels, and 2,000 JSON values. Numeric values
+  that a browser would mutate (non-finite results, negative zero, non-round-tripping large integers, or
+  alternate decimal/exponent forms) are rejected before import. Exactly representable large integer
+  tokens remain portable. A numeric `recursion_limit` must also use an unsigned integer JSON
+  token: decimal and exponent forms are rejected because the Rust server does not apply them. Studio
+  retains raw numeric tokens throughout configuration and metadata when reading server records. Copy
+  and export fail closed whenever browser serialization would change any stored numeric token or its
+  graph-specific meaning. Secret-looking fields, including
+  case-insensitive authorization header tuples, are
+  redacted in previews, and exporting their stored values requires deliberate confirmation. Unapplied
+  JSON edits block creation and export so the guided and exact representations cannot silently diverge.
 - **The memory ledger is an audit surface, not an editor.** This first governed-memory slice is
   intentionally read-only: correction, approval/rejection of candidates, conflict resolution, and
   forgetting remain server-governed operations until their policy and audit contracts can be preserved
@@ -226,7 +247,11 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
 
 ## Verification performed
 
-- `node studio/test-all.mjs` — discovers every Studio suite and fails if any suite fails. The governed
+- `node studio/test-all.mjs` — discovers every Studio suite and fails if any suite fails. The Agent
+  Workbench suite covers configuration validation, the Runs with / Describes / Preserves contract,
+  versioned manifest round-trips, preservation of unusual JSON shapes, lossy-number and unknown-field rejection,
+  secret redaction, file/depth/cardinality bounds, portable filenames, duplication, real-run inputs, and
+  accessible interaction markup. The governed
   memory suite covers immutable content handling, every frozen provenance-author variant, active /
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,

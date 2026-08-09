@@ -84,6 +84,8 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Connect to a local or remote Rusty server.
 - View registered graphs and create or attach threads.
 - Create an assistant through the Agent Workbench.
+- Safely duplicate an assistant, review the configuration contract, and import or export a bounded,
+  versioned assistant manifest without copying run history.
 - Follow a guided Create → Run → Inspect first-run path.
 - Run in background, blocking, or streaming modes.
 - Inspect state, checkpoint history, interrupts, and resumes.
@@ -94,8 +96,10 @@ Studio is a useful engineering console, not yet the complete experience describe
 
 ### Material gaps
 
-- Assistant editing, duplication, versioning, archive, and deletion are absent.
-- Model, tool, memory, output, guardrail, and budget configuration lack first-class forms.
+- Assistant editing, versioning, archive, restore, and deletion are absent. Safe duplication is available.
+- The configuration workshop covers the current persisted contract: graph, runtime step limit, catalog
+  metadata, exact advanced JSON, and manifest portability. Model, tool, memory, output, guardrail, and
+  budget configuration still lack typed server discovery and first-class runtime forms.
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
 - Durable agents and assistants are separate concepts without a coherent UI explanation.
 - Multi-agent topology and coordination contracts have no visual workspace.
@@ -135,6 +139,10 @@ Exit criteria:
 ### ES1 — Agent workshop · lifecycle and configuration
 
 **Outcome:** create and safely manage a real agent configuration.
+
+Status: **partially delivered**. Creation, safe duplication, a readable configuration contract, bounded
+manifest import/export, validation, and real-run handoff work against the current assistant API. Editing,
+immutable versions, archive/delete, typed capability discovery, and governed runtime configuration remain.
 
 Scope:
 
@@ -295,22 +303,22 @@ Exit criteria:
 
 The milestones overlap in enabling contracts, but delivery remains vertical and user-visible. The recommended order is:
 
-| Order | Vertical slice | Why now |
-|---:|---|---|
-| 1 | Recent runs in the Agent Workbench, with status and one-click Inspect | Extends the delivered first-run journey into a repeatable daily workflow without pretending the whole Studio is complete |
-| 2 | Assistant edit and duplicate, with a readable configuration summary | Establishes lifecycle management as soon as the server route surface is free to extend |
-| 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Replaces the current create-only form and raw configuration gap |
-| 4 | Run desk with search/filter and durable server discovery | Removes browser-local run/thread dependence |
-| 5 | Flight Recorder investigation layout and manifest/effect context | Makes Rusty's strongest runtime advantage understandable |
-| 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
-| 7 | Durable interrupt and human-review inbox | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
-| 8 | Durable agent/team inventory and read-only TeamTrace visualization | Exposes the already-shipped Agent Fabric before adding editing complexity |
-| 9 | Visual team creation for delegate and fan-out | Delivers the most common multi-agent patterns first |
-| 10 | Race, quorum, supervision, recovery, and team preflight | Completes safe multi-agent construction |
-| 11 | Evaluation experiment workspace and comparison report | Converts the existing quality library into a product workflow |
-| 12 | Failure clusters, annotation queues, and release gates | Closes the human quality loop |
-| 13 | Learning candidate inbox, promotion, canary, and rollback | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
-| 14 | Environment, deployment, and fleet surfaces | Builds operations on stable identity, version, quality, and audit concepts |
+| Order | Vertical slice | Status | Why now |
+|---:|---|---|---|
+| 1 | Recent runs in the Agent Workbench, with status and one-click Inspect | Delivered locally; durable discovery remains in order 4 | Extends the delivered first-run journey into a repeatable daily workflow without pretending the whole Studio is complete |
+| 2 | Assistant edit and duplicate, with a readable configuration summary | Partial — safe duplicate and summary delivered; edit/version endpoints pending | Establishes lifecycle management as soon as the server route surface is free to extend |
+| 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract and manifest portability delivered; typed model/tool/memory controls pending | Replaces the current create-only form and raw configuration gap |
+| 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
+| 5 | Flight Recorder investigation layout and manifest/effect context | Partial — technical recorder delivered; investigation redesign pending | Makes Rusty's strongest runtime advantage understandable |
+| 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, and conflict review delivered; governed mutations pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
+| 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
+| 8 | Durable agent/team inventory and read-only TeamTrace visualization | Not started | Exposes the already-shipped Agent Fabric before adding editing complexity |
+| 9 | Visual team creation for delegate and fan-out | Not started | Delivers the most common multi-agent patterns first |
+| 10 | Race, quorum, supervision, recovery, and team preflight | Not started | Completes safe multi-agent construction |
+| 11 | Evaluation experiment workspace and comparison report | Platform API needed | Converts the existing quality library into a product workflow |
+| 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |
+| 13 | Learning candidate inbox, promotion, canary, and rollback | Policy-plane integration pending | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
+| 14 | Environment, deployment, and fleet surfaces | Not started | Builds operations on stable identity, version, quality, and audit concepts |
 
 If a required server contract is actively changing, work proceeds on the highest-value independent Studio slice rather than inventing a temporary API or blocking visible progress.
 

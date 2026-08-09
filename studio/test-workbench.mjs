@@ -56,11 +56,17 @@ globalThis.__workbench = {
   agentCardHtml, agentGraphLabel, agentDefaultInput, agentBuildRunInput,
   agentRunTone, agentErrorCategory, agentNormalizeRunRecord, agentMergeRunHistory,
   agentDurationLabel, agentRunTimeLabel, agentRunHistoryHtml,
-  agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft,
-  agentSensitiveKey, agentRedactedValue, agentCopyManifestText, agentCopyContextHtml,
+  agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft, agentCopySourceSnapshot,
+  agentSensitiveKey, agentSensitiveValueKeys, agentRedactedValue, agentCopyManifestText, agentCopyContextHtml,
+  agentUtf8Length, agentClientIdError, agentValidateDraft, agentManifestScan, agentPortableManifest,
+  agentManifestText, agentParseManifestText, agentManifestFilename, agentManifestDraft,
+  agentParseJsonWithNumberKinds, agentValidateManifestNumbers, agentValidateRuntimeLimitLexemes,
+  agentRuntimeLimitValue, agentRuntimeLimitRoundTrips, agentStoredNumbersRoundTrip, agentManifestActionError,
+  agentReadManifestFile,
+  agentConfigurationEvidence, agentConfigurationEvidenceHtml, agentImportContextHtml,
   agentCopyIdentityConflict, agentBuildCreatePayload,
   agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
-  agentCreate, store,
+  agentOpenCreate, agentCreate, store,
 };`, sandbox, { filename: "index.html<script>" });
 
 const W = sandbox.__workbench;
@@ -250,6 +256,231 @@ check("graph labels: built-in behaviors are understandable",
 }
 
 {
+  const valid = W.agentValidateDraft({
+    name: "Research", graph: "react_agent", assistantId: "research-v2", recursionLimit: "20",
+  }, ["react_agent", "pipeline"]);
+  check("configuration validation: a registered behavior and valid runtime fields pass", valid.valid);
+  const missing = W.agentValidateDraft({ name: "", graph: "missing", assistantId: "../agent", recursionLimit: "1.5" }, ["react_agent"]);
+  check("configuration validation: all actionable field errors are retained",
+    !missing.valid && missing.first === "name" && missing.errors.graph.includes("not registered") &&
+    missing.errors.assistantId.includes("path separators") && missing.errors.recursionLimit.includes("whole number"));
+  check("configuration validation: optional generated identity is accepted",
+    W.agentClientIdError("") === "" && W.agentClientIdError("...").includes("only dots") &&
+    W.agentClientIdError("assistants").includes("reserved"));
+  check("configuration validation: identifier bounds mirror server UTF-8 bytes, not JavaScript code units",
+    W.agentUtf8Length("é") === 2 && W.agentClientIdError("é".repeat(129)).includes("UTF-8 bytes"));
+  check("configuration validation: unsafe integer limits are rejected", !W.agentValidateDraft({
+    name: "A", graph: "react_agent", recursionLimit: String(Number.MAX_SAFE_INTEGER + 1),
+  }, ["react_agent"]).valid);
+  check("configuration validation: zero mirrors the server's unsigned runtime limit",
+    W.agentValidateDraft({ name: "A", graph: "react_agent", recursionLimit: "0" }, ["react_agent"]).valid);
+  check("configuration validation: an explicit empty behavior registry rejects every graph",
+    W.agentValidateDraft({ name: "A", graph: "react_agent" }, []).errors.graph.includes("no registered behaviors"));
+  check("configuration validation: whitespace identity is rejected rather than silently replaced",
+    W.agentValidateDraft({ name: "A", graph: "react_agent", assistantId: "   " }, ["react_agent"]).errors.assistantId.includes("whitespace"));
+}
+
+{
+  const portable = W.agentPortableManifest(agent);
+  check("manifest export: carries an explicit version and durable identity",
+    portable.format === "rusty.assistant/v1" && portable.assistant_id === "research-coordinator");
+  eq("manifest export: preserves exact config and metadata", { config: portable.config, metadata: portable.metadata },
+    { config: agent.config, metadata: agent.metadata });
+  const raw = W.agentManifestText(portable, false);
+  const parsed = W.agentParseManifestText(raw, ["react_agent", "pipeline"]);
+  eq("manifest import: exported JSON round-trips without data loss", parsed, portable);
+  check("manifest import: non-object config and metadata remain legal exact values", (() => {
+    const unusual = { format: "rusty.assistant/v1", name: "Opaque", graph: "pipeline", config: ["x"], metadata: "catalog" };
+    const roundTrip = W.agentParseManifestText(JSON.stringify(unusual), ["pipeline"]);
+    return Array.isArray(roundTrip.config) && roundTrip.metadata === "catalog";
+  })());
+  check("manifest import: unsupported recursion values are preserved without a false runtime claim", (() => {
+    const unusual = { format: "rusty.assistant/v1", name: "Opaque", graph: "pipeline", config: { recursion_limit: "five" } };
+    const roundTrip = W.agentParseManifestText(JSON.stringify(unusual), ["pipeline"]);
+    const draft = W.agentManifestDraft(roundTrip);
+    const payload = W.agentBuildCreatePayload({ ...draft, description: "", tags: "" }, roundTrip);
+    const evidence = W.agentConfigurationEvidence(payload, ["pipeline"]);
+    return draft.recursionLimit === "" && payload.config.recursion_limit === "five" &&
+      evidence.runtimeLimit === "server default" && evidence.unsupportedRuntimeLimit;
+  })());
+  check("manifest import: unusual descriptive shapes are preserved instead of stringified", (() => {
+    const unusual = { format: "rusty.assistant/v1", name: "Opaque", graph: "pipeline",
+      metadata: { description: { localized: "Evidence" }, tags: [{ id: "research" }], owner: "quality" } };
+    const draft = W.agentManifestDraft(unusual);
+    const payload = W.agentBuildCreatePayload({ ...draft, recursionLimit: "" }, unusual);
+    const evidence = W.agentConfigurationEvidence(payload, ["pipeline"]);
+    return draft.description === "" && draft.tags === "" &&
+      JSON.stringify(payload.metadata.description) === '{"localized":"Evidence"}' &&
+      JSON.stringify(payload.metadata.tags) === '[{"id":"research"}]' &&
+      evidence.unsupportedDescription && evidence.unsupportedTags;
+  })());
+  check("manifest import: untouched legacy tags retain their exact stored type", (() => {
+    const legacy = { format: "rusty.assistant/v1", name: "Legacy", graph: "pipeline", metadata: { tags: "research,production" } };
+    const draft = W.agentManifestDraft(legacy);
+    const payload = W.agentBuildCreatePayload({ ...draft, recursionLimit: "", description: "" }, legacy);
+    return draft.tags === "research, production" && payload.metadata.tags === "research,production";
+  })());
+  check("manifest import: unknown top-level fields are rejected instead of dropped", (() => {
+    try { W.agentParseManifestText(JSON.stringify({ ...portable, model: "ignored" }), ["react_agent"]); return false; }
+    catch (error) { return error.message.includes("Unknown top-level field") && error.message.includes("Nothing was imported"); }
+  })());
+  check("manifest import: unknown formats are rejected", (() => {
+    try { W.agentParseManifestText(JSON.stringify({ ...portable, format: "rusty.assistant/v2" }), ["react_agent"]); return false; }
+    catch (error) { return error.message.includes("rusty.assistant/v1"); }
+  })());
+  check("manifest import: values that JavaScript would mutate are rejected", (() => {
+    const values = ["1e400", "9007199254740993", "-0", "9007199254740993.0"];
+    return values.every((value) => {
+      try {
+        W.agentParseManifestText(`{"format":"rusty.assistant/v1","name":"A","graph":"react_agent","config":{"value":${value}}}`, ["react_agent"]);
+        return false;
+      } catch (error) { return /finite range|browser-safe range|negative zero|preserved exactly/.test(error.message); }
+    });
+  })());
+  check("manifest import: alternate numeric tokens that would be rewritten are rejected", (() => {
+    try {
+      W.agentParseManifestText('{"format":"rusty.assistant/v1","name":"A","graph":"react_agent","config":{"timeout":1e3}}', ["react_agent"]);
+      return false;
+    } catch (error) { return error.message.includes("preserved exactly"); }
+  })());
+  check("manifest import: float and exponent step limits cannot change server semantics", (() => {
+    return ["12.0", "1.2e1"].every((value) => {
+      try {
+        W.agentParseManifestText(`{"format":"rusty.assistant/v1","name":"A","graph":"react_agent","config":{"recursion_limit":${value}}}`, ["react_agent"]);
+        return false;
+      } catch (error) { return error.message.includes("unsigned integer JSON token"); }
+    });
+  })());
+  check("manifest import: unavailable graphs are rejected before server mutation", (() => {
+    try { W.agentParseManifestText(raw, ["pipeline"]); return false; }
+    catch (error) { return error.message.includes("not registered"); }
+  })());
+  check("manifest import: oversized text is bounded", (() => {
+    try { W.agentParseManifestText(" ".repeat(65537), ["react_agent"]); return false; }
+    catch (error) { return error.message.includes("64 KiB"); }
+  })());
+  check("manifest import: multibyte text uses the documented byte bound", (() => {
+    try { W.agentParseManifestText("é".repeat(32769), ["react_agent"]); return false; }
+    catch (error) { return error.message.includes("64 KiB"); }
+  })());
+  check("manifest file import: declared and actual size are both bounded", await (async () => {
+    const good = await W.agentReadManifestFile({ size: 10, async text() { return "{}"; } });
+    let declared = false;
+    let actual = false;
+    try { await W.agentReadManifestFile({ size: 65537, async text() { return "{}"; } }); }
+    catch (error) { declared = error.message.includes("64 KiB"); }
+    try { await W.agentReadManifestFile({ size: 1, async text() { return "x".repeat(65537); } }); }
+    catch (error) { actual = error.message.includes("64 KiB"); }
+    return good === "{}" && declared && actual && await W.agentReadManifestFile(null) === null;
+  })());
+  check("manifest import: deep and high-cardinality values are bounded", (() => {
+    let deep = {};
+    let cursor = deep;
+    for (let index = 0; index < 18; index++) { cursor.next = {}; cursor = cursor.next; }
+    try { W.agentManifestScan(deep); return false; }
+    catch (depthError) {
+      try { W.agentManifestScan({ values: Array(2100).fill(0) }); return false; }
+      catch (nodeError) { return depthError.message.includes("nesting") && nodeError.message.includes("values"); }
+    }
+  })());
+  check("manifest export: filenames are portable and bounded",
+    W.agentManifestFilename(" Résumé / Research Agent ") === "resume-research-agent.rusty-agent.json" &&
+    W.agentManifestFilename("!") === "agent.rusty-agent.json");
+  const secrets = W.agentManifestScan({ config: { provider: { api_key: "private" } }, metadata: { owner: "safe" } });
+  check("manifest preview: secret-looking paths are located without exposing their value",
+    secrets.sensitivePaths.includes("$.config.provider.api_key") &&
+    !W.agentManifestText(portable, true).includes("private-provider-token"));
+  const headerTuple = { config: { headers: [{ name: "Authorization", value: "Bearer private" }] } };
+  check("manifest preview: credential header tuples redact their sibling value and trigger review",
+    W.agentManifestScan(headerTuple).sensitivePaths.includes("$.config.headers[0].value") &&
+    W.agentManifestText(headerTuple, true).includes('"value": "[hidden]"') &&
+    !W.agentManifestText(headerTuple, true).includes("Bearer private"));
+  const casedHeaderTuple = { config: { headers: [{ Name: "Authorization", Value: "Bearer private" }] } };
+  check("manifest preview: credential header tuple property names are case-insensitive",
+    W.agentManifestScan(casedHeaderTuple).sensitivePaths.includes("$.config.headers[0].Value") &&
+    W.agentManifestText(casedHeaderTuple, true).includes('"Value": "[hidden]"') &&
+    !W.agentManifestText(casedHeaderTuple, true).includes("Bearer private"));
+}
+
+{
+  const configured = {
+    ...agent,
+    config: { recursion_limit: 12, temperature: 0.2, runtime: { mode: "careful" } },
+    metadata: { description: "Collect evidence", tags: ["research"], owner: "quality" },
+  };
+  const evidence = W.agentConfigurationEvidence(configured, ["react_agent"]);
+  check("configuration evidence: separates enforced runtime values from preserved fields",
+    evidence.graphAvailable && evidence.runtimeLimit === "12 steps" && evidence.preservedFields === 3);
+  const unavailable = W.agentConfigurationEvidence(configured, ["pipeline"]);
+  check("configuration evidence: unavailable behavior is explicit", unavailable.graphAvailable === false);
+  check("configuration evidence: an empty server registry is not treated as a wildcard",
+    W.agentConfigurationEvidence(configured, []).graphAvailable === false);
+  const zeroLimit = W.agentConfigurationEvidence({ ...configured, config: { recursion_limit: 0 } }, ["react_agent"]);
+  const lockedLimit = W.agentConfigurationEvidence({ ...configured, config: { recursion_limit: 9007199254740992 } }, ["react_agent"]);
+  check("configuration evidence: server-valid zero and large u64 limits are reported as applied",
+    zeroLimit.runtimeLimit === "0 steps" && !zeroLimit.unsupportedRuntimeLimit &&
+    lockedLimit.runtimeLimit === "9007199254740992 steps" && lockedLimit.lockedRuntimeLimit);
+  check("configuration evidence: raw server number kinds mirror serde_json as_u64", (() => {
+    const integer = W.agentParseJsonWithNumberKinds('{"config":{"recursion_limit":12}}');
+    const float = W.agentParseJsonWithNumberKinds('{"config":{"recursion_limit":12.0}}');
+    const exponent = W.agentParseJsonWithNumberKinds('{"config":{"recursion_limit":1.2e1}}');
+    const max = W.agentParseJsonWithNumberKinds('{"config":{"recursion_limit":18446744073709551615}}');
+    const over = W.agentParseJsonWithNumberKinds('{"config":{"recursion_limit":18446744073709551616}}');
+    return W.agentRuntimeLimitValue(integer.config) === 12 &&
+      W.agentRuntimeLimitValue(float.config) === null && W.agentRuntimeLimitValue(exponent.config) === null &&
+      W.agentRuntimeLimitValue(max.config) === "18446744073709551615" &&
+      W.agentRuntimeLimitValue(over.config) === null && !W.agentRuntimeLimitRoundTrips(max.config) &&
+      W.agentCopyContextHtml({ name: "Float", graph: "pipeline", config: float.config }).includes("Step limit<b>runtime default") &&
+      W.agentCopyContextHtml({ name: "Integer", graph: "pipeline", config: integer.config }).includes("Step limit<b>12");
+  })());
+  check("configuration portability: lossy server number tokens fail closed", (() => {
+    const float = W.agentParseJsonWithNumberKinds('{"name":"Legacy","graph":"pipeline","config":{"recursion_limit":12.0}}');
+    try { W.agentPortableManifest(float); return false; }
+    catch (exportError) {
+      try { W.agentBuildCreatePayload({ name: "Copy", graph: "pipeline" }, float); return false; }
+      catch (copyError) { return exportError.message.includes("number token") && copyError.message.includes("number token"); }
+    }
+  })());
+  check("configuration portability: exact unsafe integers export and re-import consistently", (() => {
+    const source = W.agentParseJsonWithNumberKinds(
+      '{"assistant_id":"exact-unsafe","name":"Exact unsafe","graph":"pipeline","config":{"recursion_limit":9007199254740992,"custom_budget":9007199254740992}}');
+    const portable = W.agentPortableManifest(source);
+    const imported = W.agentParseManifestText(W.agentManifestText(portable, false), ["pipeline"]);
+    return imported.config.recursion_limit === 9007199254740992 &&
+      imported.config.custom_budget === 9007199254740992 && W.agentStoredNumbersRoundTrip(imported.config);
+  })());
+  check("configuration portability: lossy arbitrary config and metadata numbers are blocked", (() => {
+    const sources = [
+      W.agentParseJsonWithNumberKinds(
+        '{"assistant_id":"lossy-config","name":"Lossy config","graph":"pipeline","config":{"custom_budget":9007199254740993}}'),
+      W.agentParseJsonWithNumberKinds(
+        '{"assistant_id":"lossy-metadata","name":"Lossy metadata","graph":"pipeline","metadata":{"score":12.0}}'),
+    ];
+    return sources.every((source) => {
+      const evidence = W.agentConfigurationEvidence(source, ["pipeline"]);
+      const evidenceHtml = W.agentConfigurationEvidenceHtml(source, ["pipeline"], "lossy-contract");
+      if (!evidence.portableError.includes("number token") || !evidenceHtml.includes("number token")) return false;
+      try { W.agentPortableManifest(source); return false; }
+      catch (exportError) {
+        try { W.agentBuildCreatePayload({ name: "Copy", graph: "pipeline" }, source); return false; }
+        catch (copyError) { return exportError.message.includes("number token") && copyError.message.includes("number token"); }
+      }
+    });
+  })());
+  const unusual = W.agentConfigurationEvidence({ name: "Opaque", graph: "pipeline", config: [], metadata: "x" }, ["pipeline"]);
+  check("configuration evidence: non-object stored shapes are disclosed",
+    unusual.configShape === "non-object" && unusual.metadataShape === "non-object" && unusual.preservedFields === 2);
+  const evidenceHtml = W.agentConfigurationEvidenceHtml({
+    ...configured, name: "Research <unsafe>", config: { ...configured.config, api_key: "private" },
+  }, ["react_agent"], "contract-test");
+  check("configuration evidence: rail carries all three truthful boundaries",
+    evidenceHtml.includes("Runs with") && evidenceHtml.includes("Describes") && evidenceHtml.includes("Preserves") &&
+    evidenceHtml.includes("Stored is not the same as executed"));
+  check("configuration evidence: output escapes identity and redacts secret-looking values",
+    evidenceHtml.includes("Research &lt;unsafe&gt;") && !evidenceHtml.includes("private") && evidenceHtml.includes("secret-looking path"));
+}
+
+{
   const source = {
     ...agent,
     name: "Research <Coordinator>",
@@ -270,6 +501,16 @@ check("graph labels: built-in behaviors are understandable",
     copied.config.temperature === 0.2 && copied.config.runtime.mode === "careful" &&
     copied.config.recursion_limit === 18 && copied.metadata.owner === "quality" &&
     copied.metadata.description === "Review evidence" && JSON.stringify(source) === before);
+  check("copy payload: editing a server integer replaces stale token provenance everywhere", (() => {
+    const apiSource = W.agentParseJsonWithNumberKinds(
+      '{"assistant_id":"api-12","name":"API","graph":"react_agent","config":{"recursion_limit":12,"temperature":0.2}}');
+    const apiDraft = W.agentCopyDraft(apiSource);
+    const edited = W.agentBuildCreatePayload({ ...apiDraft, name: "API 18", recursionLimit: "18", description: "", tags: "" }, apiSource);
+    const portable = W.agentPortableManifest(edited);
+    const evidence = W.agentConfigurationEvidence(edited, ["react_agent"]);
+    return edited.config.recursion_limit === 18 && portable.config.recursion_limit === 18 &&
+      evidence.runtimeLimit === "18 steps" && W.agentRuntimeLimitRoundTrips(edited.config);
+  })());
   eq("copy payload: known metadata changes are deliberate",
     copied.metadata.tags, ["research", "review"]);
   const cleared = W.agentBuildCreatePayload({ ...draft, recursionLimit: "", description: "", tags: "" }, source);
@@ -320,6 +561,8 @@ check("graph labels: built-in behaviors are understandable",
   check("copy payload: arbitrary JSON round-trip does not mutate its source",
     JSON.stringify(arbitrary) === arbitraryBefore &&
     W.agentCopyManifestText(arbitrary).includes("opaque metadata"));
+  check("manifest synchronization: raw edits block actions while guided-only edits do not",
+    W.agentManifestActionError(true).includes("Apply the edited JSON") && W.agentManifestActionError(false) === "");
 }
 
 {
@@ -327,6 +570,7 @@ check("graph labels: built-in behaviors are understandable",
     return {
       value, disabled: false, style: {}, className: "", textContent: "", focused: false,
       focus() { this.focused = true; },
+      setAttribute(name, next) { this[name] = next; },
       removeAttribute(name) { delete this[name]; },
     };
   }
@@ -335,9 +579,21 @@ check("graph labels: built-in behaviors are understandable",
     "inp-agent-name": "Copy draft", "sel-agent-graph": "react_agent",
     "inp-agent-id": agent.assistant_id, "inp-agent-limit": "12",
     "inp-agent-description": "Collect evidence", "inp-agent-tags": "research",
-    "btn-agent-create": "", toast: "",
+    "btn-agent-create": "", "agent-form-error": "", toast: "",
   })) uiElements.set(id, element(value));
+  W.store.info = info;
+  const legacyFloat = W.agentParseJsonWithNumberKinds(
+    '{"assistant_id":"legacy-float","name":"Legacy float","graph":"pipeline","config":{"recursion_limit":12.0}}');
+  const legacySnapshot = W.agentCopySourceSnapshot(legacyFloat);
+  const callsBeforeBlockedOpen = fetchCalls.length;
+  check("copy-open interaction: raw number provenance survives the source snapshot",
+    !W.agentRuntimeLimitRoundTrips(legacySnapshot.config) &&
+    W.agentConfigurationEvidence(legacySnapshot, ["pipeline"]).unsupportedRuntimeLimit);
+  check("copy-open interaction: a behavior-changing legacy copy is blocked visibly before mutation",
+    W.agentOpenCreate(legacyFloat) === false && fetchCalls.length === callsBeforeBlockedOpen &&
+    uiElements.get("toast").textContent.includes("cannot be copied") && !W.store.agentCreateOpen);
   W.store.agentCopySource = JSON.parse(JSON.stringify(agent));
+  W.store.agentManifestSource = JSON.parse(JSON.stringify(agent));
   const callsBeforeConflict = fetchCalls.length;
   await W.agentCreate();
   check("copy interaction: source identity is rejected before any POST",
@@ -449,6 +705,11 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     detail.includes('data-agent-open-run="019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d"'));
   check("detail offers a source-safe copy action",
     detail.includes('data-agent-copy="research-coordinator"') && detail.includes(">Copy agent</button>"));
+  check("detail makes configuration portable and explains its runtime contract",
+    detail.includes('data-agent-export="research-coordinator"') && detail.includes(">Export manifest</button>") &&
+    detail.includes('aria-labelledby="agent-config-summary-heading"') &&
+    detail.includes('id="agent-config-summary-heading">Configuration contract') &&
+    detail.includes("Runs with") && detail.includes("Preserves"));
   check("detail uses a plain-language task instead of raw JSON for conversational agents",
     detail.includes('id="inp-agent-prompt"') && detail.includes("Reply with a short hello.") && !detail.includes("Test input (JSON)"));
   check("detail escapes names and offers the trace as the next step",
@@ -482,6 +743,24 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes('id="agent-create-panel" role="region" aria-labelledby="agent-create-title"') &&
     html.includes('id="agent-copy-context" role="note" hidden') &&
     html.includes('id="agent-create-form"') && html.includes('type="submit" class="primary" id="btn-agent-create"'));
+  check("configuration workshop exposes bounded import, draft export, and an explicit apply step",
+    html.includes('id="inp-agent-import" type="file" accept="application/json,.json" hidden') &&
+    html.includes('id="btn-agent-export-draft"') && html.includes('id="inp-agent-manifest"') &&
+    html.includes('id="btn-agent-manifest-apply"') && html.includes("Unknown top-level fields are rejected"));
+  check("configuration workshop preserves server number provenance at the copy-open boundary",
+    html.includes("store.agentCopySource = agentCopySourceSnapshot(source)") &&
+    html.includes("This agent cannot be copied without changing a stored JSON number token."));
+  check("configuration workshop labels descriptive fields honestly and announces validation",
+    html.includes("The current runtime does not inject it as instructions") &&
+    html.includes("Guided fields changed · refresh JSON before editing it") &&
+    html.includes("JSON edited · apply or refresh before creating or exporting") &&
+    html.includes("Discard unapplied JSON edits") &&
+    html.includes('id="agent-form-error" role="alert"') &&
+    html.includes('id="agent-manifest-status" role="status"') &&
+    html.includes('id="agent-contract-preview" aria-labelledby="agent-contract-title"'));
+  check("configuration workshop carries responsive and reduced-motion quality hooks",
+    html.includes(".agent-workshop { grid-template-columns: 1fr;") &&
+    html.includes('@media (prefers-reduced-motion: reduce)'));
   check("copy outcomes are announced through an atomic live region",
     html.includes('id="toast" role="status" aria-live="polite" aria-atomic="true"'));
 }

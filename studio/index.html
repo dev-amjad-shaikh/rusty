@@ -404,6 +404,44 @@
   .agent-advanced summary, .run-evidence summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
   .agent-advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 10px; }
   .agent-advanced-grid .wide { grid-column: 1 / -1; }
+  .agent-workshop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 340px); gap: 18px; align-items: start; }
+  .agent-workshop .agent-form { min-width: 0; }
+  .agent-form-section { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .agent-form-section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+  .agent-form-section b { color: #eef7ff; font-size: 12.5px; }
+  .agent-form-section span { color: var(--text-dim); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .7px; }
+  .agent-workshop .field-help { color: #9a9080; }
+  .agent-manifest-tools { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .agent-manifest-tools .field-help { flex: 1 1 220px; }
+  .agent-manifest-editor { width: 100%; min-height: 210px !important; font-family: var(--mono) !important; font-size: 11.5px !important; tab-size: 2; }
+  .agent-manifest-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .agent-contract-panel { position: sticky; top: 0; min-width: 0; border: 1px solid #405d74; border-radius: 8px; overflow: hidden; background: #151d23; }
+  .agent-contract-head { padding: 12px 14px; border-bottom: 1px solid #314858; }
+  .agent-contract-kicker { color: #91b9dc; font: 700 9.5px var(--mono); letter-spacing: .8px; text-transform: uppercase; }
+  .agent-contract-head h3 { margin: 3px 0 2px; color: #eef7ff; font-size: 15px; }
+  .agent-contract-head p { margin: 0; color: #9cabb6; font-size: 10.5px; }
+  .agent-contract-flow { display: grid; }
+  .agent-contract-step { position: relative; padding: 12px 14px 12px 43px; border-bottom: 1px solid #293d4c; }
+  .agent-contract-step:last-child { border-bottom: 0; }
+  .agent-contract-step::before { content: ""; position: absolute; left: 20px; top: 0; bottom: 0; width: 1px; background: #405d74; }
+  .agent-contract-step:first-child::before { top: 21px; }
+  .agent-contract-step:last-child::before { bottom: calc(100% - 21px); }
+  .agent-contract-node { position: absolute; left: 15px; top: 17px; width: 11px; height: 11px; border: 2px solid #6fa8dc; border-radius: 50%; background: #151d23; }
+  .agent-contract-step.describes .agent-contract-node { border-color: #b9a061; }
+  .agent-contract-step.preserves .agent-contract-node { border-color: #8dac7b; }
+  .agent-contract-label { display: block; color: #91b9dc; font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .7px; }
+  .agent-contract-step.describes .agent-contract-label { color: #d4bf82; }
+  .agent-contract-step.preserves .agent-contract-label { color: #b7cba9; }
+  .agent-contract-value { display: block; margin-top: 3px; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+  .agent-contract-detail { display: block; margin-top: 3px; color: #8e9aa3; font-size: 10.5px; line-height: 1.4; }
+  .agent-contract-foot { padding: 10px 14px; border-top: 1px solid #314858; background: #18232c; }
+  .agent-contract-foot summary { color: #b9cddd; cursor: pointer; font-size: 11px; }
+  .agent-contract-foot pre { max-height: 250px; margin: 8px 0 0; overflow: auto; }
+  .agent-contract-warning { margin: 8px 0 0; color: #e5ce93; font-size: 10.5px; }
+  .agent-config-summary { margin: 14px 0; }
+  .agent-config-summary > h3 { margin: 0 0 3px; font-size: 15px; }
+  .agent-config-summary > p { margin: 0 0 9px; color: var(--text-dim); font-size: 11.5px; }
+  .agent-config-summary .agent-contract-panel { position: static; }
   .agent-test { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 14px; }
   .agent-test h3 { margin: 0 0 3px; font-size: 15px; }
   .agent-test > p { margin: 0 0 10px; color: var(--text-dim); font-size: 11.5px; }
@@ -547,6 +585,8 @@
   .memory-manifest { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
   .memory-manifest summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
   @media (max-width: 1120px) {
+    .agent-workshop { grid-template-columns: 1fr; }
+    .agent-contract-panel { position: static; }
     .memory-layout { grid-template-columns: 1fr; }
     .memory-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .memory-toolbar label:first-child { grid-column: 1 / -1; }
@@ -573,6 +613,7 @@
     .journey-step:last-child { border-bottom: 0; }
     .agent-advanced-grid { grid-template-columns: 1fr; }
     .agent-advanced-grid .wide { grid-column: auto; }
+    .agent-form-section, .agent-manifest-tools { grid-column: auto; }
     .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-run-row { grid-template-columns: 1fr; }
     .agent-run-row button { justify-self: start; }
@@ -673,26 +714,49 @@
         <div class="sr-only" id="agent-run-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
         <div class="card" id="agent-create-panel" role="region" aria-labelledby="agent-create-title" style="display:none">
-          <h2 class="section" id="agent-create-title" style="margin-top:0">Create an agent</h2>
-          <div class="note tiny" id="agent-create-note">Choose what this agent does. You can tune its runtime settings later.</div>
+          <h2 class="section" id="agent-create-title" style="margin-top:0">Configure an agent</h2>
+          <div class="note tiny" id="agent-create-note">Shape the durable configuration Rusty stores, then review exactly what the runtime will honor.</div>
           <div class="agent-copy-receipt" id="agent-copy-context" role="note" hidden></div>
-          <form class="agent-form" id="agent-create-form">
-            <label>Name <input id="inp-agent-name" type="text" autocomplete="off" placeholder="Research coordinator"></label>
-            <label>Behavior <select id="sel-agent-graph" aria-describedby="agent-graph-help"></select><span class="field-help" id="agent-graph-help">The runtime workflow this agent will use.</span></label>
-            <label class="wide">Responsibility <textarea id="inp-agent-description" placeholder="Research a question and return a concise, sourced answer."></textarea></label>
-            <details class="agent-advanced">
-              <summary>Advanced settings</summary>
-              <div class="agent-advanced-grid">
-                <label>Agent ID <input id="inp-agent-id" type="text" spellcheck="false" placeholder="Generated automatically"></label>
-                <label>Step limit <input id="inp-agent-limit" type="number" min="1" step="1" placeholder="Runtime default"></label>
-                <label class="wide">Tags <input id="inp-agent-tags" type="text" placeholder="research, production"></label>
+          <div class="agent-workshop">
+            <form class="agent-form" id="agent-create-form" novalidate>
+              <span class="sr-only" id="agent-form-error" role="alert"></span>
+              <div class="agent-form-section"><span>01 · Purpose</span><b>What is this agent responsible for?</b></div>
+              <label>Name <input id="inp-agent-name" type="text" autocomplete="off" maxlength="512" placeholder="Research coordinator"></label>
+              <label>Tags <input id="inp-agent-tags" type="text" placeholder="research, production"><span class="field-help">Catalog labels only; they do not change execution.</span></label>
+              <label class="wide">Responsibility <textarea id="inp-agent-description" placeholder="Research a question and return a concise, sourced answer."></textarea><span class="field-help">A human-readable catalog description. The current runtime does not inject it as instructions.</span></label>
+
+              <div class="agent-form-section"><span>02 · Runtime</span><b>Which registered behavior runs it?</b></div>
+              <label>Behavior <select id="sel-agent-graph" aria-describedby="agent-graph-help"></select><span class="field-help" id="agent-graph-help">A registered graph binding enforced on every assistant run.</span></label>
+              <label>Step limit <input id="inp-agent-limit" type="number" min="0" step="1" inputmode="numeric" placeholder="Runtime default" aria-describedby="agent-limit-help"><span class="field-help" id="agent-limit-help">The only assistant config field the current server applies as a run default. Zero allows no graph steps.</span></label>
+
+              <div class="agent-form-section"><span>03 · Portability</span><b>Keep the exact configuration reviewable.</b></div>
+              <div class="agent-manifest-tools">
+                <button type="button" class="small" id="btn-agent-import">Import manifest</button>
+                <button type="button" class="small" id="btn-agent-export-draft">Export draft</button>
+                <input id="inp-agent-import" type="file" accept="application/json,.json" hidden>
+                <span class="field-help" id="agent-manifest-status" role="status">Rusty assistant manifest · v1</span>
               </div>
-            </details>
-            <div class="agent-form-actions">
-              <button type="button" id="btn-agent-create-cancel">Cancel</button>
-              <button type="submit" class="primary" id="btn-agent-create">Create and continue</button>
-            </div>
-          </form>
+              <details class="agent-advanced">
+                <summary>Advanced identity and manifest</summary>
+                <div class="agent-advanced-grid">
+                  <label>Agent ID <input id="inp-agent-id" type="text" spellcheck="false" maxlength="256" placeholder="Generated automatically"><span class="field-help">Stable server identity. Leave blank for a generated ID.</span></label>
+                  <label class="wide">Exact manifest (JSON)
+                    <textarea class="agent-manifest-editor" id="inp-agent-manifest" spellcheck="false" aria-describedby="agent-manifest-help"></textarea>
+                    <span class="field-help" id="agent-manifest-help">Exact values, including secret-looking fields, are visible here. Apply JSON to replace this draft. Unknown top-level fields are rejected so configuration is never silently dropped.</span>
+                  </label>
+                </div>
+                <div class="agent-manifest-actions">
+                  <button type="button" class="small" id="btn-agent-manifest-apply">Apply JSON</button>
+                  <button type="button" class="small" id="btn-agent-manifest-refresh">Refresh from fields</button>
+                </div>
+              </details>
+              <div class="agent-form-actions">
+                <button type="button" id="btn-agent-create-cancel">Cancel</button>
+                <button type="submit" class="primary" id="btn-agent-create">Create and continue</button>
+              </div>
+            </form>
+            <section class="agent-contract-panel" id="agent-contract-preview" aria-labelledby="agent-contract-title"></section>
+          </div>
         </div>
 
         <div class="agent-summary" id="agent-summary"></div>
@@ -932,6 +996,15 @@ const AGENT_RUN_SCOPE_LIMIT = 8;
 const AGENT_RUN_ASSISTANT_LIMIT = 40;
 const AGENT_RUN_GLOBAL_ASSISTANT_LIMIT = 80;
 const AGENT_RUN_STORAGE_LIMIT = 196608;
+const AGENT_MANIFEST_FORMAT = "rusty.assistant/v1";
+const AGENT_MANIFEST_TEXT_LIMIT = 65536;
+const AGENT_MANIFEST_DEPTH_LIMIT = 16;
+const AGENT_MANIFEST_NODE_LIMIT = 2000;
+const AGENT_NUMBER_TOKENS = Symbol("rusty.json.number_tokens");
+const AGENT_RESERVED_IDS = new Set([
+  "agent_leases", "agents", "assistants", "coordinations", "crons", "journals", "learn", "memory",
+  "memory_artifacts", "outbox", "store", "tasks", "threads", "trigger_events", "triggers", "latest",
+]);
 
 const $ = (id) => document.getElementById(id);
 
@@ -955,6 +1028,8 @@ const store = {
   agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
   agentCreateOpen: false, // creation form temporarily owns the guided journey
   agentCopySource: null, // source snapshot while a copy-to-draft form is open
+  agentManifestSource: null, // imported/copied config + metadata preserved while the workshop is open
+  agentManifestDirty: false, // exact JSON has unapplied edits that must never be ignored
   agentsUnsupported: false, // server build has no /assistants routes
   memory: null,        // bounded audit snapshot + conflicts, selection, search index, and load state
   memoryUnsupported: false, // server build has no governed-memory query route
@@ -1151,7 +1226,7 @@ async function apiForConnection(connection, method, path, body) {
   }
   const text = await res.text();
   let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
+  try { json = text ? agentParseJsonWithNumberKinds(text) : null; } catch { json = { raw: text }; }
   if (!res.ok) throw new ApiError(res.status, json);
   return json;
 }
@@ -1228,13 +1303,15 @@ async function connect() {
     store.agentRunHistory = Object.create(null);
     store.agentCreateOpen = false;
     store.agentCopySource = null;
+    store.agentManifestSource = null;
+    store.agentManifestDirty = false;
     store.agents = null;
     store.agentsUnsupported = false;
     store.memory = null;
     store.memoryUnsupported = false;
     $("agent-create-panel").style.display = "none";
     $("sel-agent-graph").innerHTML = "";
-    for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
+    for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
   }
   saveConn();
   loadThreads();
@@ -2618,8 +2695,33 @@ function agentJourneyHtml(agent, testRun, creating) {
 function agentCopyableValue(value) {
   if (value === undefined) return undefined;
   try {
-    return JSON.parse(JSON.stringify(value));
+    const copy = JSON.parse(JSON.stringify(value));
+    const pending = [{ source: value, target: copy }];
+    while (pending.length) {
+      const current = pending.pop();
+      if (!current.source || typeof current.source !== "object" || !current.target || typeof current.target !== "object") continue;
+      if (Object.prototype.hasOwnProperty.call(current.source, AGENT_NUMBER_TOKENS)) {
+        Object.defineProperty(current.target, AGENT_NUMBER_TOKENS, {
+          value: Object.assign(Object.create(null), current.source[AGENT_NUMBER_TOKENS]),
+          enumerable: false, configurable: true,
+        });
+      }
+      if (Array.isArray(current.source) && Array.isArray(current.target)) {
+        for (let index = 0; index < current.source.length; index++) {
+          pending.push({ source: current.source[index], target: current.target[index] });
+        }
+      } else if (agentPlainObject(current.source) && agentPlainObject(current.target)) {
+        for (const key of Object.keys(current.source)) {
+          pending.push({ source: current.source[key], target: current.target[key] });
+        }
+      }
+    }
+    return copy;
   } catch { return undefined; }
+}
+
+function agentCopySourceSnapshot(source) {
+  return source && typeof source === "object" ? agentCopyableValue(source) : null;
 }
 
 function agentCopyableMap(value) {
@@ -2627,6 +2729,12 @@ function agentCopyableMap(value) {
   if (!agentPlainObject(parsed)) return Object.create(null);
   const copy = Object.create(null);
   for (const [key, item] of Object.entries(parsed)) copy[key] = item;
+  if (Object.prototype.hasOwnProperty.call(parsed, AGENT_NUMBER_TOKENS)) {
+    Object.defineProperty(copy, AGENT_NUMBER_TOKENS, {
+      value: Object.assign(Object.create(null), parsed[AGENT_NUMBER_TOKENS]),
+      enumerable: false, configurable: true,
+    });
+  }
   return copy;
 }
 
@@ -2634,18 +2742,407 @@ function agentSensitiveKey(key) {
   return /(secret|token|password|credential|api.?key|auth(?:entication|orization)?|cookie|private.?key|access.?key|bearer|session|connection.?string)/i.test(String(key));
 }
 
+function agentSensitiveValueKeys(value) {
+  if (!agentPlainObject(value)) return new Set();
+  const entries = Object.entries(value);
+  const descriptor = entries.find(([key, item]) =>
+    /^(name|key|header)$/i.test(key) && typeof item === "string" && agentSensitiveKey(item));
+  return descriptor
+    ? new Set(entries.filter(([key]) => /^(value|content)$/i.test(key)).map(([key]) => key))
+    : new Set();
+}
+
+function agentUtf8Length(value) {
+  let bytes = 0;
+  for (const character of String(value || "")) {
+    const point = character.codePointAt(0);
+    bytes += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+  }
+  return bytes;
+}
+
+function agentClientIdError(value) {
+  const id = String(value || "");
+  if (!id) return "";
+  if (agentUtf8Length(id) > 256) return "Agent ID must be 256 UTF-8 bytes or fewer.";
+  if (id.includes("/") || id.includes("\\")) return "Agent ID cannot contain path separators.";
+  if ([...id].every((character) => character === ".")) return "Agent ID cannot contain only dots.";
+  if (AGENT_RESERVED_IDS.has(id)) return `Agent ID \`${id}\` is reserved by the server.`;
+  return "";
+}
+
+function agentValidateDraft(fields, graphNames) {
+  const source = fields && typeof fields === "object" ? fields : {};
+  const hasGraphRegistry = Array.isArray(graphNames);
+  const names = Array.isArray(graphNames) ? graphNames.map(String) : [];
+  const name = String(source.name || "").trim();
+  const graph = String(source.graph || "").trim();
+  const rawAssistantId = String(source.assistantId || "");
+  const assistantId = rawAssistantId.trim();
+  const rawLimit = String(source.recursionLimit ?? "").trim();
+  const errors = Object.create(null);
+  if (!name) errors.name = "Enter an agent name.";
+  if (!graph) errors.graph = "Choose a registered behavior.";
+  else if (hasGraphRegistry && !names.includes(graph)) errors.graph = names.length
+    ? `Behavior \`${graph}\` is not registered on this server.`
+    : "The connected server has no registered behaviors.";
+  if (rawAssistantId && !assistantId) errors.assistantId = "Agent ID cannot contain only whitespace.";
+  const idError = agentClientIdError(assistantId);
+  if (!errors.assistantId && idError) errors.assistantId = idError;
+  if (rawLimit) {
+    const limit = Number(rawLimit);
+    if (!Number.isSafeInteger(limit) || limit < 0) {
+      errors.recursionLimit = "Step limit must be a non-negative whole number.";
+    }
+  }
+  const order = ["name", "graph", "assistantId", "recursionLimit"];
+  const first = order.find((key) => errors[key]) || "";
+  return { valid: !first, errors, first };
+}
+
+function agentManifestScan(value) {
+  const stack = [{ value, path: "$", depth: 0 }];
+  const seen = new WeakSet();
+  const sensitivePaths = [];
+  let nodes = 0;
+  let maxDepth = 0;
+  while (stack.length) {
+    const current = stack.pop();
+    nodes += 1;
+    maxDepth = Math.max(maxDepth, current.depth);
+    if (nodes > AGENT_MANIFEST_NODE_LIMIT) {
+      throw new Error(`Manifest exceeds ${AGENT_MANIFEST_NODE_LIMIT.toLocaleString()} values.`);
+    }
+    if (current.depth > AGENT_MANIFEST_DEPTH_LIMIT) {
+      throw new Error(`Manifest nesting exceeds ${AGENT_MANIFEST_DEPTH_LIMIT} levels.`);
+    }
+    if (!current.value || typeof current.value !== "object") continue;
+    if (seen.has(current.value)) throw new Error("Manifest contains a circular value.");
+    seen.add(current.value);
+    if (Array.isArray(current.value)) {
+      for (let index = current.value.length - 1; index >= 0; index--) {
+        stack.push({ value: current.value[index], path: `${current.path}[${index}]`, depth: current.depth + 1 });
+      }
+      continue;
+    }
+    const entries = Object.entries(current.value);
+    const sensitiveValueKeys = agentSensitiveValueKeys(current.value);
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const [key, item] = entries[index];
+      const path = `${current.path}.${key}`;
+      if ((agentSensitiveKey(key) || sensitiveValueKeys.has(key)) && sensitivePaths.length < 20) sensitivePaths.push(path);
+      stack.push({ value: item, path, depth: current.depth + 1 });
+    }
+  }
+  return { nodes, maxDepth, sensitivePaths };
+}
+
+function agentParseJsonWithNumberKinds(raw) {
+  return JSON.parse(raw, function (key, value, context) {
+    if (typeof value === "number" && this && typeof this === "object") {
+      if (!Object.prototype.hasOwnProperty.call(this, AGENT_NUMBER_TOKENS)) {
+        Object.defineProperty(this, AGENT_NUMBER_TOKENS, {
+          value: Object.create(null), enumerable: false, configurable: true,
+        });
+      }
+      this[AGENT_NUMBER_TOKENS][key] = context && typeof context.source === "string" ? context.source : null;
+    }
+    return value;
+  });
+}
+
+function agentValidateRuntimeLimitLexemes(raw) {
+  for (let index = 0; index < raw.length; index++) {
+    if (raw[index] !== '"') continue;
+    const start = index;
+    let escaped = false;
+    index += 1;
+    while (index < raw.length) {
+      const character = raw[index];
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') break;
+      index += 1;
+    }
+    if (index >= raw.length) return;
+    let key;
+    try { key = JSON.parse(raw.slice(start, index + 1)); } catch { continue; }
+    if (key !== "recursion_limit") continue;
+    let cursor = index + 1;
+    while (/\s/.test(raw[cursor] || "")) cursor += 1;
+    if (raw[cursor] !== ":") continue;
+    cursor += 1;
+    while (/\s/.test(raw[cursor] || "")) cursor += 1;
+    const match = raw.slice(cursor).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+    if (match && /[.eE]/.test(match[0])) {
+      throw new Error("Manifest `recursion_limit` must use an unsigned integer JSON token without a decimal point or exponent.");
+    }
+  }
+}
+
+function agentValidateManifestNumbers(raw) {
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index++) {
+    const character = raw[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; continue; }
+    if (character !== "-" && (character < "0" || character > "9")) continue;
+    const match = raw.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+    if (!match) continue;
+    const token = match[0];
+    const number = Number(token);
+    if (!Number.isFinite(number)) throw new Error(`Manifest number \`${token}\` is outside the supported finite range.`);
+    if (Object.is(number, -0)) throw new Error("Manifest numbers cannot use negative zero because browsers cannot preserve it during editing.");
+    const exactSerialization = JSON.stringify(number) === token;
+    if (Number.isInteger(number) && !Number.isSafeInteger(number) && !exactSerialization) {
+      throw new Error(`Manifest integer \`${token}\` is outside the browser-safe range.`);
+    }
+    if (!exactSerialization) {
+      throw new Error(`Manifest number \`${token}\` cannot be preserved exactly by this browser.`);
+    }
+    index += token.length - 1;
+  }
+}
+
+function agentPortableManifest(source) {
+  const record = source && typeof source === "object" ? source : {};
+  const name = String(record.name || "").trim();
+  const graph = String(record.graph || "").trim();
+  const assistantId = String(record.assistant_id || "").trim();
+  const manifest = { format: AGENT_MANIFEST_FORMAT, name, graph };
+  if (assistantId) manifest.assistant_id = assistantId;
+  for (const key of ["config", "metadata"]) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+    if (!agentStoredNumbersRoundTrip(record[key])) {
+      throw new Error(`This stored ${key} value cannot be exported without changing a JSON number token.`);
+    }
+    const copied = agentCopyableValue(record[key]);
+    if (copied === undefined && record[key] !== undefined) {
+      throw new Error(`${key} cannot be represented as JSON.`);
+    }
+    if (copied !== undefined) manifest[key] = copied;
+  }
+  agentManifestScan(manifest);
+  return manifest;
+}
+
+function agentManifestText(manifest, redacted) {
+  const value = redacted ? agentRedactedValue(manifest) : manifest;
+  return JSON.stringify(value, null, 2) + "\n";
+}
+
+function agentParseManifestText(text, graphNames) {
+  const raw = String(text || "");
+  if (agentUtf8Length(raw) > AGENT_MANIFEST_TEXT_LIMIT) {
+    throw new Error(`Manifest is larger than ${Math.round(AGENT_MANIFEST_TEXT_LIMIT / 1024)} KiB.`);
+  }
+  if (!raw.trim()) throw new Error("Paste or choose a Rusty assistant manifest first.");
+  agentValidateRuntimeLimitLexemes(raw);
+  agentValidateManifestNumbers(raw);
+  let parsed;
+  try { parsed = agentParseJsonWithNumberKinds(raw); }
+  catch (error) { throw new Error(`Manifest is not valid JSON: ${error.message}`); }
+  if (!agentPlainObject(parsed)) throw new Error("Manifest must be a JSON object.");
+  const allowed = new Set(["format", "name", "graph", "assistant_id", "config", "metadata"]);
+  const unknown = Object.keys(parsed).filter((key) => !allowed.has(key));
+  if (unknown.length) {
+    throw new Error(`Unknown top-level field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}. Nothing was imported.`);
+  }
+  if (parsed.format !== AGENT_MANIFEST_FORMAT) {
+    throw new Error(`Manifest format must be \`${AGENT_MANIFEST_FORMAT}\`.`);
+  }
+  if (typeof parsed.name !== "string" || !parsed.name.trim()) throw new Error("Manifest needs a non-empty string `name`.");
+  if (typeof parsed.graph !== "string" || !parsed.graph.trim()) throw new Error("Manifest needs a non-empty string `graph`.");
+  if (parsed.assistant_id !== undefined && typeof parsed.assistant_id !== "string") {
+    throw new Error("Manifest `assistant_id` must be a string when present.");
+  }
+  const parsedRuntimeLimit = agentRuntimeLimitValue(parsed.config);
+  const validation = agentValidateDraft({
+    name: parsed.name,
+    graph: parsed.graph,
+    assistantId: parsed.assistant_id,
+    recursionLimit: typeof parsedRuntimeLimit === "number" && Number.isSafeInteger(parsedRuntimeLimit) ? parsedRuntimeLimit : "",
+  }, graphNames);
+  if (!validation.valid) throw new Error(validation.errors[validation.first]);
+  agentManifestScan(parsed);
+  return agentCopyableValue(parsed);
+}
+
+function agentManifestFilename(name) {
+  const stem = String(name || "agent").trim().toLowerCase()
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "agent";
+  return `${stem}.rusty-agent.json`;
+}
+
+function agentConfigurationEvidence(source, graphNames) {
+  const record = source && typeof source === "object" ? source : {};
+  const config = agentPlainObject(record.config) ? record.config : null;
+  const metadata = agentPlainObject(record.metadata) ? record.metadata : null;
+  const graph = String(record.graph || "").trim();
+  const limit = agentRuntimeLimitValue(config);
+  const runtimeLimit = limit !== null ? `${limit} step${limit === 1 ? "" : "s"}` : "server default";
+  const graphAvailable = !Array.isArray(graphNames) || graphNames.map(String).includes(graph);
+  const extraConfig = config ? Object.keys(config).filter((key) => key !== "recursion_limit" || limit === null).length
+    : Object.prototype.hasOwnProperty.call(record, "config") && record.config != null ? 1 : 0;
+  const extraMetadata = metadata ? Object.keys(metadata).filter((key) =>
+    !["description", "tags"].includes(key) || !agentMetadataFieldEditable(metadata, key)).length
+    : Object.prototype.hasOwnProperty.call(record, "metadata") && record.metadata != null ? 1 : 0;
+  const tags = agentTags(record);
+  let sensitivePaths = [];
+  let portableError = "";
+  try { sensitivePaths = agentManifestScan(agentPortableManifest(record)).sensitivePaths; }
+  catch (error) { portableError = error && error.message ? error.message : "Portable manifest unavailable."; }
+  return {
+    graph,
+    graphAvailable,
+    runtimeLimit,
+    name: String(record.name || "").trim(),
+    description: metadata && agentMetadataFieldEditable(metadata, "description") ? String(metadata.description || "").trim() : "",
+    tags: metadata && agentMetadataFieldEditable(metadata, "tags") ? tags : [],
+    preservedFields: extraConfig + extraMetadata,
+    configShape: config ? "object" : record.config == null ? "empty" : "non-object",
+    metadataShape: metadata ? "object" : record.metadata == null ? "empty" : "non-object",
+    unsupportedRuntimeLimit: Boolean(config && Object.prototype.hasOwnProperty.call(config, "recursion_limit") && limit === null),
+    lockedRuntimeLimit: Boolean(limit !== null && !Number.isSafeInteger(limit)),
+    unsupportedDescription: Boolean(metadata && !agentMetadataFieldEditable(metadata, "description")),
+    unsupportedTags: Boolean(metadata && !agentMetadataFieldEditable(metadata, "tags")),
+    sensitivePaths,
+    portableError,
+  };
+}
+
+function agentConfigurationEvidenceHtml(source, graphNames, titleId) {
+  const evidence = agentConfigurationEvidence(source, graphNames);
+  const id = String(titleId || "agent-contract-title");
+  const runtimeValue = evidence.graph
+    ? `${agentGraphLabel(evidence.graph)} · ${evidence.runtimeLimit}` : "Choose a behavior";
+  const runtimeDetail = !evidence.graphAvailable
+    ? "This graph is not registered on the connected server."
+    : evidence.runtimeLimit === "server default"
+      ? "The server binds the graph; runs use the server's default step limit."
+      : "The server binds the graph and applies this step limit to runs.";
+  const descriptionValue = evidence.name || "Name this agent";
+  const descriptionDetail = evidence.description
+    ? evidence.description : evidence.tags.length ? `Cataloged as ${evidence.tags.join(", ")}` : "Responsibility and tags help people find it; they are not runtime instructions.";
+  const preservedLabel = `${evidence.preservedFields} advanced field${evidence.preservedFields === 1 ? "" : "s"}`;
+  const shapeWarning = evidence.portableError
+    ? evidence.portableError
+    : evidence.configShape === "non-object" || evidence.metadataShape === "non-object"
+    ? "A non-object config or metadata value is preserved exactly; its guided shortcuts stay locked."
+    : evidence.unsupportedRuntimeLimit
+      ? "The stored recursion_limit is not an unsigned integer. It is preserved, but the server will not apply it as a run default."
+      : evidence.lockedRuntimeLimit
+        ? "The server applies this stored step limit, but it is outside the browser-safe editing range. The guided shortcut stays locked."
+      : evidence.unsupportedDescription || evidence.unsupportedTags
+        ? "A descriptive shortcut has an unsupported stored shape. It is preserved exactly and stays locked."
+      : "";
+  const secretWarning = evidence.sensitivePaths.length
+    ? `${evidence.sensitivePaths.length} secret-looking path${evidence.sensitivePaths.length === 1 ? "" : "s"} hidden in this preview.` : "";
+  let manifestPreview = "Manifest unavailable.";
+  try { manifestPreview = agentManifestText(agentPortableManifest(source), true); } catch { /* retain honest fallback */ }
+  return `<div class="agent-contract-head"><span class="agent-contract-kicker">Configuration evidence</span>` +
+    `<h3 id="${escapeHtml(id)}">What this draft means</h3><p>Stored is not the same as executed. This rail keeps the boundary visible.</p></div>` +
+    `<div class="agent-contract-flow">` +
+      `<div class="agent-contract-step"><span class="agent-contract-node" aria-hidden="true"></span>` +
+        `<span class="agent-contract-label">Runs with</span><strong class="agent-contract-value">${escapeHtml(runtimeValue)}</strong>` +
+        `<span class="agent-contract-detail">${escapeHtml(runtimeDetail)}</span></div>` +
+      `<div class="agent-contract-step describes"><span class="agent-contract-node" aria-hidden="true"></span>` +
+        `<span class="agent-contract-label">Describes</span><strong class="agent-contract-value">${escapeHtml(descriptionValue)}</strong>` +
+        `<span class="agent-contract-detail">${escapeHtml(descriptionDetail)}</span></div>` +
+      `<div class="agent-contract-step preserves"><span class="agent-contract-node" aria-hidden="true"></span>` +
+        `<span class="agent-contract-label">Preserves</span><strong class="agent-contract-value">${escapeHtml(preservedLabel)}</strong>` +
+        `<span class="agent-contract-detail">Stored as reviewed for clients or graph-specific use; the server makes no generic runtime claim.</span></div>` +
+    `</div><div class="agent-contract-foot"><details><summary>Review portable manifest</summary>` +
+      `<pre class="json">${escapeHtml(manifestPreview)}</pre></details>` +
+      (shapeWarning ? `<p class="agent-contract-warning">${escapeHtml(shapeWarning)}</p>` : "") +
+      (secretWarning ? `<p class="agent-contract-warning">${escapeHtml(secretWarning)}</p>` : "") +
+    `</div>`;
+}
+
+function agentRuntimeLimitValue(config) {
+  if (!agentPlainObject(config)) return null;
+  const value = config.recursion_limit;
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value) || value < 0) return null;
+  const tokens = config[AGENT_NUMBER_TOKENS];
+  if (tokens && Object.prototype.hasOwnProperty.call(tokens, "recursion_limit")) {
+    const token = tokens.recursion_limit;
+    if (typeof token !== "string" || !/^(?:0|[1-9]\d*)$/.test(token)) return null;
+    try { return BigInt(token) <= 18446744073709551615n ? (Number.isSafeInteger(value) ? value : token) : null; }
+    catch { return null; }
+  }
+  return value < 18446744073709552000 ? value : null;
+}
+
+function agentRuntimeLimitRoundTrips(config) {
+  return agentStoredNumbersRoundTrip(config);
+}
+
+function agentStoredNumbersRoundTrip(value) {
+  const pending = [value];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object") continue;
+    const tokens = current[AGENT_NUMBER_TOKENS];
+    if (tokens && typeof tokens === "object") {
+      for (const [key, token] of Object.entries(tokens)) {
+        if (typeof current[key] === "number" && (typeof token !== "string" || JSON.stringify(current[key]) !== token)) return false;
+      }
+    }
+    for (const item of Array.isArray(current) ? current : Object.values(current)) pending.push(item);
+  }
+  return true;
+}
+
+function agentForgetNumberToken(value, key) {
+  if (!value || typeof value !== "object") return;
+  const tokens = value[AGENT_NUMBER_TOKENS];
+  if (!tokens || typeof tokens !== "object") return;
+  delete tokens[key];
+  if (!Object.keys(tokens).length) delete value[AGENT_NUMBER_TOKENS];
+}
+
+function agentMetadataFieldEditable(metadata, key) {
+  if (!agentPlainObject(metadata) || !Object.prototype.hasOwnProperty.call(metadata, key)) return true;
+  if (key === "description") return typeof metadata.description === "string";
+  if (key === "tags") return typeof metadata.tags === "string" ||
+    (Array.isArray(metadata.tags) && metadata.tags.every((tag) => typeof tag === "string"));
+  return true;
+}
+
 function agentCopyDraft(agent) {
   const source = agent && typeof agent === "object" ? agent : {};
   const config = agentCopyableMap(source.config);
   const metadata = agentCopyableMap(source.metadata);
-  const limit = Number(config.recursion_limit);
+  const limit = agentRuntimeLimitValue(config);
   return {
     name: `Copy of ${String(source.name || "Unnamed agent")}`,
     graph: String(source.graph || ""),
     assistantId: "",
-    recursionLimit: Number.isInteger(limit) && limit > 0 ? String(limit) : "",
-    description: String(metadata.description || ""),
-    tags: agentTags(source).join(", "),
+    recursionLimit: limit === null || !Number.isSafeInteger(limit) ? "" : String(limit),
+    description: agentMetadataFieldEditable(metadata, "description") ? String(metadata.description || "") : "",
+    tags: agentMetadataFieldEditable(metadata, "tags") ? agentTags(source).join(", ") : "",
+  };
+}
+
+function agentManifestDraft(manifest) {
+  const source = manifest && typeof manifest === "object" ? manifest : {};
+  const config = agentPlainObject(source.config) ? source.config : {};
+  const metadata = agentPlainObject(source.metadata) ? source.metadata : {};
+  const limit = agentRuntimeLimitValue(config);
+  return {
+    name: String(source.name || ""),
+    graph: String(source.graph || ""),
+    assistantId: String(source.assistant_id || ""),
+    recursionLimit: limit === null || !Number.isSafeInteger(limit) ? "" : String(limit),
+    description: agentMetadataFieldEditable(metadata, "description") ? String(metadata.description || "") : "",
+    tags: agentMetadataFieldEditable(metadata, "tags") ? agentTags(source).join(", ") : "",
   };
 }
 
@@ -2660,8 +3157,9 @@ function agentRedactedValue(value, depth) {
   if (agentPlainObject(value)) {
     const result = Object.create(null);
     const entries = Object.entries(value);
+    const sensitiveValueKeys = agentSensitiveValueKeys(value);
     for (const [key, item] of entries.slice(0, 100)) {
-      result[key] = agentSensitiveKey(key)
+      result[key] = agentSensitiveKey(key) || sensitiveValueKeys.has(key)
         ? "[hidden]" : agentRedactedValue(item, level + 1);
     }
     if (entries.length > 100) result["…"] = `[${entries.length - 100} more fields]`;
@@ -2686,7 +3184,7 @@ function agentCopyContextHtml(agent) {
   const source = agent && typeof agent === "object" ? agent : {};
   const config = agentCopyableMap(source.config);
   const metadata = agentCopyableMap(source.metadata);
-  const limit = Number(config.recursion_limit);
+  const limit = agentRuntimeLimitValue(config);
   const storedFields = Object.keys(config).length + Object.keys(metadata).length +
     (!agentPlainObject(source.config) && source.config != null ? 1 : 0) +
     (!agentPlainObject(source.metadata) && source.metadata != null ? 1 : 0);
@@ -2697,7 +3195,7 @@ function agentCopyContextHtml(agent) {
     `<div class="agent-copy-id">${escapeHtml(source.assistant_id || "identity unavailable")}</div>` +
     `<div class="agent-copy-summary">` +
       `<span>Behavior<b>${escapeHtml(agentGraphLabel(source.graph))}</b></span>` +
-      `<span>Step limit<b>${Number.isInteger(limit) && limit > 0 ? escapeHtml(String(limit)) : "runtime default"}</b></span>` +
+      `<span>Step limit<b>${limit !== null ? escapeHtml(String(limit)) : "runtime default"}</b></span>` +
       `<span>Carried fields<b>${storedFields} stored field${storedFields === 1 ? "" : "s"}</b></span>` +
     `</div><p>The source agent, its runs, threads, and evidence stay unchanged. ` +
     `This draft becomes a separate durable agent.</p>` +
@@ -2705,6 +3203,23 @@ function agentCopyContextHtml(agent) {
     `<details class="agent-copy-manifest"><summary>Review carried manifest</summary>` +
       `<pre class="json">${escapeHtml(agentCopyManifestText(source))}</pre>` +
       `<p>Sensitive-looking values are hidden in this preview and still carried unchanged.</p></details>`;
+}
+
+function agentImportContextHtml(manifest, label) {
+  const source = manifest && typeof manifest === "object" ? manifest : {};
+  let scan = { sensitivePaths: [] };
+  try { scan = agentManifestScan(source); } catch { /* parser already reported structural errors */ }
+  return `<div class="agent-copy-flow">Portable manifest → new draft</div>` +
+    `<h3>${escapeHtml(source.name || "Imported agent")}</h3>` +
+    `<div class="agent-copy-id">${escapeHtml(label || AGENT_MANIFEST_FORMAT)}</div>` +
+    `<div class="agent-copy-summary">` +
+      `<span>Behavior<b>${escapeHtml(agentGraphLabel(source.graph))}</b></span>` +
+      `<span>Format<b>${escapeHtml(source.format || "unknown")}</b></span>` +
+      `<span>Secret check<b>${scan.sensitivePaths.length ? `${scan.sensitivePaths.length} review` : "clear"}</b></span>` +
+    `</div><p>Review the imported identity and exact stored fields before creating anything. ` +
+    `The import has not changed the server.</p>` +
+    (scan.sensitivePaths.length
+      ? `<p>Secret-looking values remain in the draft but stay hidden in the evidence preview.</p>` : "");
 }
 
 function agentCopyIdentityConflict(source, payload) {
@@ -2721,24 +3236,51 @@ function agentBuildCreatePayload(fields, source) {
   const hasSource = Boolean(source && typeof source === "object");
   const hasSourceConfig = hasSource && Object.prototype.hasOwnProperty.call(source, "config");
   const hasSourceMetadata = hasSource && Object.prototype.hasOwnProperty.call(source, "metadata");
+  if ((hasSourceConfig && !agentStoredNumbersRoundTrip(source.config)) ||
+      (hasSourceMetadata && !agentStoredNumbersRoundTrip(source.metadata))) {
+    throw new Error("This stored configuration cannot be copied without changing a JSON number token.");
+  }
   let config = hasSourceConfig ? agentCopyableValue(source.config) : undefined;
   let metadata = hasSourceMetadata ? agentCopyableValue(source.metadata) : undefined;
   const assistantId = String(fields && fields.assistantId || "").trim();
-  const limit = Number(fields && fields.recursionLimit);
-  const description = String(fields && fields.description || "").trim();
-  const tags = String(fields && fields.tags || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const rawLimit = String((fields && fields.recursionLimit) ?? "").trim();
+  const limit = Number(rawLimit);
+  const rawDescription = String(fields && fields.description || "");
+  const description = rawDescription.trim();
+  const rawTags = String(fields && fields.tags || "");
+  const tags = rawTags.split(",").map((x) => x.trim()).filter(Boolean);
   if (assistantId) payload.assistant_id = assistantId;
   if (agentPlainObject(config)) {
-    if (Number.isInteger(limit) && limit > 0) config.recursion_limit = limit;
-    else delete config.recursion_limit;
-  } else if ((config == null) && Number.isInteger(limit) && limit > 0) {
+    const hasSourceLimit = Object.prototype.hasOwnProperty.call(config, "recursion_limit");
+    const sourceLimit = agentRuntimeLimitValue(config);
+    const sourceLimitLocked = hasSourceLimit && (sourceLimit === null || !Number.isSafeInteger(sourceLimit));
+    if (Number.isSafeInteger(limit) && limit >= 0 && rawLimit) {
+      config.recursion_limit = limit;
+      agentForgetNumberToken(config, "recursion_limit");
+    } else if (!sourceLimitLocked) {
+      delete config.recursion_limit;
+      agentForgetNumberToken(config, "recursion_limit");
+    }
+  } else if ((config == null) && Number.isSafeInteger(limit) && limit >= 0 && rawLimit) {
     config = { recursion_limit: limit };
   }
   if (agentPlainObject(metadata)) {
-    if (description) metadata.description = description;
-    else delete metadata.description;
-    if (tags.length) metadata.tags = tags;
-    else delete metadata.tags;
+    const sourceMetadata = hasSourceMetadata && agentPlainObject(source.metadata) ? source.metadata : null;
+    const hasSourceDescription = Boolean(sourceMetadata && Object.prototype.hasOwnProperty.call(sourceMetadata, "description"));
+    const descriptionEditable = agentMetadataFieldEditable(sourceMetadata, "description");
+    const descriptionUnchanged = hasSourceDescription && descriptionEditable && rawDescription === String(sourceMetadata.description);
+    if (descriptionEditable && !descriptionUnchanged) {
+      if (description) metadata.description = description;
+      else delete metadata.description;
+    }
+    const hasSourceTags = Boolean(sourceMetadata && Object.prototype.hasOwnProperty.call(sourceMetadata, "tags"));
+    const tagsEditable = agentMetadataFieldEditable(sourceMetadata, "tags");
+    const sourceTagDraft = sourceMetadata ? agentTags({ metadata: sourceMetadata }).join(", ") : "";
+    const tagsUnchanged = hasSourceTags && tagsEditable && rawTags === sourceTagDraft;
+    if (tagsEditable && !tagsUnchanged) {
+      if (tags.length) metadata.tags = tags;
+      else delete metadata.tags;
+    }
   } else if (metadata == null && (description || tags.length)) {
     metadata = {};
     if (description) metadata.description = description;
@@ -2789,11 +3331,9 @@ function agentAnnounceRun(run) {
   if (announcer) announcer.textContent = agentRunAnnouncement(run);
 }
 
-function agentDetailHtml(agent, readiness, testRun, runHistory) {
+function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
   if (!agent) return `<div class="empty">Select an agent to inspect and test it.</div>`;
   const meta = agent.metadata || {};
-  const config = agent.config || {};
-  const tags = agentTags(agent);
   const conversational = agent.graph === "react_agent";
   const runnable = readiness.steps[1] && readiness.steps[1].ready;
   const input = conversational
@@ -2801,7 +3341,8 @@ function agentDetailHtml(agent, readiness, testRun, runHistory) {
     : `<label>Starting data (JSON)<textarea id="inp-agent-test" spellcheck="false">${escapeHtml(pretty(agentDefaultInput(agent.graph)))}</textarea><span class="field-help">This workflow accepts structured input.</span></label>`;
   return `<div class="agent-detail-head"><div><h2>${escapeHtml(agent.name || "Unnamed agent")}</h2>` +
     `<div class="muted tiny">${escapeHtml(meta.description || agentGraphLabel(agent.graph))}</div></div>` +
-    `<div class="agent-detail-actions"><button class="small" type="button" data-agent-copy="${escapeHtml(agent.assistant_id || "")}"` +
+    `<div class="agent-detail-actions"><button class="small" type="button" data-agent-export="${escapeHtml(agent.assistant_id || "")}">Export manifest</button>` +
+      `<button class="small" type="button" data-agent-copy="${escapeHtml(agent.assistant_id || "")}"` +
       `${runnable ? "" : ` disabled title="Register this graph before copying the agent"`}>Copy agent</button>` +
       `<span class="badge ${readiness.ready === readiness.total ? "success" : "pending"}">${readiness.ready}/${readiness.total} ready</span></div></div>` +
     agentReadinessHtml(readiness, true) +
@@ -2809,10 +3350,12 @@ function agentDetailHtml(agent, readiness, testRun, runHistory) {
       `<span class="k">Agent ID</span><span class="v">${escapeHtml(agent.assistant_id || "—")}</span>` +
       `<span class="k">Graph</span><span class="v">${escapeHtml(agent.graph || "—")}</span>` +
       `<span class="k">Created</span><span class="v">${escapeHtml(agent.created_at || "—")}</span>` +
-      `<span class="k">Recursion limit</span><span class="v">${escapeHtml(config.recursion_limit ?? "runtime default")}</span>` +
-      `<span class="k">Description</span><span class="v">${escapeHtml(meta.description || "—")}</span>` +
-      `<span class="k">Tags</span><span class="v">${escapeHtml(tags.join(", ") || "—")}</span>` +
     `</div>` +
+    `<section class="agent-config-summary" aria-labelledby="agent-config-summary-heading"><h3 id="agent-config-summary-heading">Configuration contract</h3>` +
+      `<p>See which fields execute, which fields describe, and which fields are only stored.</p>` +
+      `<div class="agent-contract-panel" aria-labelledby="agent-config-summary-title">` +
+        agentConfigurationEvidenceHtml(agent, ((info && info.graphs) || []).map((graph) => graph && graph.name).filter(Boolean), "agent-config-summary-title") +
+      `</div></section>` +
     `<div class="agent-test"><h3>Try it now</h3><p>This creates a real run. Nothing here is simulated.</p>${input}` +
     `<div class="agent-test-actions"><button class="primary" data-agent-run="${escapeHtml(agent.assistant_id)}"${runnable ? "" : " disabled"}>Run agent</button>` +
     (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}" data-agent-open-run="${escapeHtml(testRun.run_id || "")}" data-agent-open-graph="${escapeHtml(agent.graph || "")}">Inspect latest</button>` : "") +
@@ -2898,63 +3441,296 @@ function agentsRender() {
     agentReadiness(selected, store.info, selectedEvidence),
     selectedRun,
     selectedHistory,
+    store.info,
   );
 }
 
-function agentResetCreateForm() {
-  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
+function agentGraphNames() {
+  return (((store.info && store.info.graphs) || []).map((graph) => graph && graph.name).filter(Boolean));
+}
+
+function agentFormFields() {
+  return {
+    name: $("inp-agent-name").value,
+    graph: $("sel-agent-graph").value,
+    assistantId: $("inp-agent-id").value,
+    recursionLimit: $("inp-agent-limit").value,
+    description: $("inp-agent-description").value,
+    tags: $("inp-agent-tags").value,
+  };
+}
+
+function agentPopulateDraft(draft) {
+  const value = draft && typeof draft === "object" ? draft : {};
+  $("inp-agent-name").value = value.name || "";
+  $("sel-agent-graph").value = value.graph || "";
+  $("inp-agent-id").value = value.assistantId || "";
+  $("inp-agent-limit").value = value.recursionLimit || "";
+  $("inp-agent-description").value = value.description || "";
+  $("inp-agent-tags").value = value.tags || "";
+}
+
+function agentSetShortcutLocks(source) {
   for (const id of ["inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) {
     $(id).disabled = false;
     $(id).removeAttribute("title");
   }
-  $("agent-create-title").textContent = "Create an agent";
-  $("agent-create-note").textContent = "Choose what this agent does. You can tune its runtime settings later.";
+  const hasStoredLimit = source && agentPlainObject(source.config) &&
+    Object.prototype.hasOwnProperty.call(source.config, "recursion_limit");
+  const storedLimit = hasStoredLimit ? agentRuntimeLimitValue(source.config) : null;
+  const unsupportedLimit = hasStoredLimit && storedLimit === null;
+  const lockedLimit = storedLimit !== null && !Number.isSafeInteger(storedLimit);
+  if (source && ((!agentPlainObject(source.config) && source.config != null) || unsupportedLimit || lockedLimit)) {
+    $("inp-agent-limit").disabled = true;
+    $("inp-agent-limit").title = lockedLimit
+      ? "The server applies this stored limit, but it is outside the browser-safe editing range and will be preserved exactly."
+      : unsupportedLimit
+      ? "This manifest has a non-runtime recursion_limit value that will be preserved exactly."
+      : "This manifest uses a non-object config that will be preserved exactly.";
+  }
+  if (source && !agentPlainObject(source.metadata) && source.metadata != null) {
+    for (const id of ["inp-agent-description", "inp-agent-tags"]) {
+      $(id).disabled = true;
+      $(id).title = "This manifest uses non-object metadata that will be preserved exactly.";
+    }
+  } else if (source && agentPlainObject(source.metadata)) {
+    if (!agentMetadataFieldEditable(source.metadata, "description")) {
+      $("inp-agent-description").disabled = true;
+      $("inp-agent-description").title = "This manifest has a non-text description that will be preserved exactly.";
+    }
+    if (!agentMetadataFieldEditable(source.metadata, "tags")) {
+      $("inp-agent-tags").disabled = true;
+      $("inp-agent-tags").title = "This manifest has non-text tags that will be preserved exactly.";
+    }
+  }
+}
+
+function agentApplyDraftValidation(validation, announce) {
+  const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit" };
+  for (const [key, id] of Object.entries(fields)) {
+    if (validation && validation.errors[key]) $(id).setAttribute("aria-invalid", "true");
+    else $(id).removeAttribute("aria-invalid");
+  }
+  const message = validation && validation.first ? validation.errors[validation.first] : "";
+  $("agent-form-error").textContent = announce ? message : "";
+  if (announce && message) {
+    const id = fields[validation.first];
+    if (id) {
+      const field = $(id);
+      const disclosure = field && typeof field.closest === "function" ? field.closest("details") : null;
+      if (disclosure) disclosure.open = true;
+      field.focus();
+    }
+  }
+  return !message;
+}
+
+function agentManifestActionError(dirty) {
+  return dirty ? "Apply the edited JSON, or refresh it from the guided fields, before continuing." : "";
+}
+
+function agentRequireAppliedManifest() {
+  const message = agentManifestActionError(store.agentManifestDirty);
+  const editor = $("inp-agent-manifest");
+  if (!message) {
+    if (editor) editor.removeAttribute("aria-invalid");
+    return true;
+  }
+  const disclosure = editor && typeof editor.closest === "function" ? editor.closest("details") : null;
+  if (disclosure) disclosure.open = true;
+  if (editor) editor.setAttribute("aria-invalid", "true");
+  $("agent-form-error").textContent = message;
+  agentSetManifestStatus("JSON edits are pending · apply or refresh before continuing");
+  toast(message, "err");
+  const apply = $("btn-agent-manifest-apply");
+  if (apply) apply.focus();
+  return false;
+}
+
+function agentDraftRecord() {
+  return agentBuildCreatePayload(agentFormFields(), store.agentManifestSource);
+}
+
+function agentRefreshContract() {
+  let record;
+  try { record = agentDraftRecord(); }
+  catch { record = { name: $("inp-agent-name").value, graph: $("sel-agent-graph").value }; }
+  $("agent-contract-preview").innerHTML = agentConfigurationEvidenceHtml(record, agentGraphNames(), "agent-contract-title");
+}
+
+function agentSetManifestStatus(message) {
+  const status = $("agent-manifest-status");
+  const text = String(message || "");
+  if (status && status.textContent !== text) status.textContent = text;
+}
+
+function agentRefreshManifestEditor() {
+  try {
+    const manifest = agentPortableManifest(agentDraftRecord());
+    const raw = agentManifestText(manifest, false);
+    if (agentUtf8Length(raw) > AGENT_MANIFEST_TEXT_LIMIT) throw new Error(`Manifest is larger than ${Math.round(AGENT_MANIFEST_TEXT_LIMIT / 1024)} KiB.`);
+    $("inp-agent-manifest").value = raw;
+    $("inp-agent-manifest").removeAttribute("aria-invalid");
+    store.agentManifestDirty = false;
+    const secrets = agentManifestScan(manifest).sensitivePaths.length;
+    agentSetManifestStatus(secrets
+      ? `${secrets} secret-looking path${secrets === 1 ? "" : "s"} · exact values appear only in the editor and export`
+      : `${AGENT_MANIFEST_FORMAT} · draft synchronized`);
+    return manifest;
+  } catch (error) {
+    agentSetManifestStatus(error.message);
+    return null;
+  }
+}
+
+function agentApplyManifest(manifest, label, imported) {
+  store.agentManifestSource = agentCopyableValue(manifest);
+  store.agentManifestDirty = false;
+  if (imported) store.agentCopySource = null;
+  agentPopulateDraft(agentManifestDraft(manifest));
+  agentSetShortcutLocks(manifest);
+  if (imported) {
+    $("agent-create-title").textContent = "Review imported agent";
+    $("agent-create-note").textContent = "Nothing has changed on the server. Review the runtime boundary, identity, and exact fields before creating this agent.";
+    $("btn-agent-create").textContent = "Create imported agent";
+    $("agent-copy-context").innerHTML = agentImportContextHtml(manifest, label);
+    $("agent-copy-context").hidden = false;
+  }
+  agentApplyDraftValidation(agentValidateDraft(agentFormFields(), agentGraphNames()), false);
+  agentRefreshManifestEditor();
+  agentRefreshContract();
+}
+
+function agentApplyManifestText(text, label, imported) {
+  try {
+    const manifest = agentParseManifestText(text, agentGraphNames());
+    agentApplyManifest(manifest, label, imported);
+    agentSetManifestStatus(`${label || "Manifest"} applied · review before creating`);
+    return true;
+  } catch (error) {
+    agentSetManifestStatus(error.message);
+    $("agent-form-error").textContent = error.message;
+    toast(error.message, "err");
+    return false;
+  }
+}
+
+async function agentReadManifestFile(file) {
+  if (!file) return null;
+  if (Number(file.size) > AGENT_MANIFEST_TEXT_LIMIT) {
+    throw new Error(`Manifest is larger than ${Math.round(AGENT_MANIFEST_TEXT_LIMIT / 1024)} KiB.`);
+  }
+  const text = String(await file.text());
+  if (agentUtf8Length(text) > AGENT_MANIFEST_TEXT_LIMIT) {
+    throw new Error(`Manifest is larger than ${Math.round(AGENT_MANIFEST_TEXT_LIMIT / 1024)} KiB.`);
+  }
+  return text;
+}
+
+async function agentImportFile(file) {
+  if (!file) return false;
+  try {
+    const text = await agentReadManifestFile(file);
+    const applied = agentApplyManifestText(text, file.name || "Imported manifest", true);
+    if (applied) $("inp-agent-name").focus({ preventScroll: true });
+    return applied;
+  } catch (error) {
+    const message = String(error.message || "").startsWith("Manifest is larger")
+      ? error.message : `Could not read manifest: ${error.message}`;
+    agentSetManifestStatus(message);
+    toast(message, "err");
+    return false;
+  }
+}
+
+function agentDownloadManifest(record) {
+  const manifest = agentPortableManifest(record);
+  const raw = agentManifestText(manifest, false);
+  if (agentUtf8Length(raw) > AGENT_MANIFEST_TEXT_LIMIT) throw new Error(`Manifest is larger than ${Math.round(AGENT_MANIFEST_TEXT_LIMIT / 1024)} KiB.`);
+  const sensitive = agentManifestScan(manifest).sensitivePaths;
+  if (sensitive.length && !confirm(`This manifest contains ${sensitive.length} secret-looking path${sensitive.length === 1 ? "" : "s"}. Export the exact values?`)) {
+    return false;
+  }
+  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = agentManifestFilename(manifest.name);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
+}
+
+function agentExportDraft() {
+  if (!agentRequireAppliedManifest()) return false;
+  const validation = agentValidateDraft(agentFormFields(), agentGraphNames());
+  if (!agentApplyDraftValidation(validation, true)) {
+    toast(validation.errors[validation.first], "err");
+    return false;
+  }
+  try {
+    const exported = agentDownloadManifest(agentDraftRecord());
+    if (exported) agentSetManifestStatus(`${agentManifestFilename($("inp-agent-name").value)} exported`);
+    return exported;
+  } catch (error) {
+    agentSetManifestStatus(error.message);
+    toast(error.message, "err");
+    return false;
+  }
+}
+
+function agentResetCreateForm() {
+  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
+  store.agentManifestSource = null;
+  store.agentManifestDirty = false;
+  agentSetShortcutLocks(null);
+  agentApplyDraftValidation({ errors: Object.create(null), first: "" }, false);
+  $("agent-create-title").textContent = "Configure an agent";
+  $("agent-create-note").textContent = "Shape the durable configuration Rusty stores, then review exactly what the runtime will honor.";
   $("btn-agent-create").textContent = "Create and continue";
+  agentSetManifestStatus(AGENT_MANIFEST_FORMAT);
   $("agent-copy-context").hidden = true;
   $("agent-copy-context").innerHTML = "";
 }
 
 function agentOpenCreate(source) {
+  if (source && (!agentStoredNumbersRoundTrip(source.config) || !agentStoredNumbersRoundTrip(source.metadata))) {
+    toast("This agent cannot be copied without changing a stored JSON number token.", "err");
+    return false;
+  }
   agentResetCreateForm();
   store.agentCreateOpen = true;
-  store.agentCopySource = source ? JSON.parse(JSON.stringify(source)) : null;
+  store.agentCopySource = agentCopySourceSnapshot(source);
+  store.agentManifestSource = store.agentCopySource;
   const select = $("sel-agent-graph");
-  select.innerHTML = (((store.info && store.info.graphs) || []).map((g) =>
-    `<option value="${escapeHtml(g.name)}">${escapeHtml(agentGraphLabel(g.name))} · ${escapeHtml(g.name)}</option>`).join(""));
+  select.innerHTML = agentGraphNames().map((name) =>
+    `<option value="${escapeHtml(name)}">${escapeHtml(agentGraphLabel(name))} · ${escapeHtml(name)}</option>`).join("");
   if (store.agentCopySource) {
-    const draft = agentCopyDraft(store.agentCopySource);
-    $("agent-create-title").textContent = "Copy agent";
-    $("agent-create-note").textContent = "Review the carried configuration, then give this copy its own identity.";
+    $("agent-create-title").textContent = "Configure a copy";
+    $("agent-create-note").textContent = "Review what will execute and what will only be carried, then give the copy its own identity.";
     $("btn-agent-create").textContent = "Create copy";
     $("agent-copy-context").innerHTML = agentCopyContextHtml(store.agentCopySource);
     $("agent-copy-context").hidden = false;
-    $("inp-agent-name").value = draft.name;
-    $("sel-agent-graph").value = draft.graph;
-    $("inp-agent-limit").value = draft.recursionLimit;
-    $("inp-agent-description").value = draft.description;
-    $("inp-agent-tags").value = draft.tags;
-    if (!agentPlainObject(store.agentCopySource.config) && store.agentCopySource.config != null) {
-      $("inp-agent-limit").disabled = true;
-      $("inp-agent-limit").title = "This source uses a non-object config that will be copied exactly.";
-    }
-    if (!agentPlainObject(store.agentCopySource.metadata) && store.agentCopySource.metadata != null) {
-      for (const id of ["inp-agent-description", "inp-agent-tags"]) {
-        $(id).disabled = true;
-        $(id).title = "This source uses non-object metadata that will be copied exactly.";
-      }
-    }
+    agentPopulateDraft(agentCopyDraft(store.agentCopySource));
+    agentSetShortcutLocks(store.agentCopySource);
   }
+  agentRefreshManifestEditor();
+  agentRefreshContract();
   $("agent-create-panel").style.display = "block";
   $("agent-journey").innerHTML = agentJourneyHtml(null, null, true);
   $("agent-create-panel").scrollIntoView({ block: "start" });
   $("inp-agent-name").focus({ preventScroll: true });
   if (store.agentCopySource) $("inp-agent-name").select();
+  return true;
 }
 
 function agentCloseCreate(returnFocus) {
   const sourceId = store.agentCopySource && store.agentCopySource.assistant_id;
   store.agentCreateOpen = false;
   store.agentCopySource = null;
+  store.agentManifestSource = null;
+  store.agentManifestDirty = false;
   $("agent-create-panel").style.display = "none";
   agentResetCreateForm();
   agentsRender();
@@ -2968,17 +3744,19 @@ function agentCloseCreate(returnFocus) {
 }
 
 async function agentCreate() {
+  if (!agentRequireAppliedManifest()) return;
   const source = store.agentCopySource;
-  const payload = agentBuildCreatePayload({
-    name: $("inp-agent-name").value,
-    graph: $("sel-agent-graph").value,
-    assistantId: $("inp-agent-id").value,
-    recursionLimit: $("inp-agent-limit").value,
-    description: $("inp-agent-description").value,
-    tags: $("inp-agent-tags").value,
-  }, source);
-  if (!payload.name) { toast("Enter an agent name.", "err"); return; }
-  if (!payload.graph) { toast("Choose a registered graph.", "err"); return; }
+  const imported = Boolean(store.agentManifestSource && !source);
+  const validation = agentValidateDraft(agentFormFields(), agentGraphNames());
+  if (!agentApplyDraftValidation(validation, true)) { toast(validation.errors[validation.first], "err"); return; }
+  let payload;
+  try { payload = agentDraftRecord(); }
+  catch (error) {
+    const message = error && error.message ? error.message : "This configuration cannot be created safely.";
+    $("agent-form-error").textContent = message;
+    toast(message, "err");
+    return;
+  }
   if (agentCopyIdentityConflict(source, payload)) {
     toast("Use a new agent ID for the copy. The source agent stays unchanged.", "err");
     $("inp-agent-id").focus();
@@ -2998,6 +3776,7 @@ async function agentCreate() {
     if (firstTask) firstTask.focus();
     toast(sourceName
       ? `${created.name} is ready. ${sourceName} is unchanged.`
+      : imported ? `${created.name} is ready from the reviewed manifest.`
       : `${created.name} is ready for a first run`, "ok");
   } catch (e) { toast(e.message, "err"); }
   finally { $("btn-agent-create").disabled = false; }
@@ -4039,6 +4818,44 @@ function init() {
   $("inp-agent-search").addEventListener("input", agentsRender);
   $("btn-agent-create-open").onclick = () => agentOpenCreate();
   $("btn-agent-create-cancel").onclick = () => agentCloseCreate();
+  $("agent-create-form").addEventListener("input", (event) => {
+    if (event.target === $("inp-agent-import")) return;
+    $("agent-form-error").textContent = "";
+    if (event.target === $("inp-agent-manifest")) {
+      store.agentManifestDirty = true;
+      $("inp-agent-manifest").setAttribute("aria-invalid", "true");
+      agentSetManifestStatus("JSON edited · apply or refresh before creating or exporting");
+      return;
+    }
+    agentSetManifestStatus(store.agentManifestDirty
+      ? "JSON edits are pending · apply or refresh before continuing"
+      : "Guided fields changed · refresh JSON before editing it");
+    agentRefreshContract();
+  });
+  $("agent-create-form").addEventListener("change", (event) => {
+    if (event.target === $("inp-agent-import") || event.target === $("inp-agent-manifest")) return;
+    agentSetManifestStatus(store.agentManifestDirty
+      ? "JSON edits are pending · apply or refresh before continuing"
+      : "Guided fields changed · refresh JSON before editing it");
+    agentRefreshContract();
+  });
+  $("btn-agent-import").onclick = () => $("inp-agent-import").click();
+  $("inp-agent-import").addEventListener("change", async () => {
+    const input = $("inp-agent-import");
+    await agentImportFile(input.files && input.files[0]);
+    input.value = "";
+  });
+  $("btn-agent-export-draft").onclick = agentExportDraft;
+  $("btn-agent-manifest-refresh").onclick = () => {
+    if (store.agentManifestDirty && !confirm("Discard unapplied JSON edits and rebuild the manifest from the guided fields?")) return;
+    agentRefreshManifestEditor();
+    $("inp-agent-manifest").focus({ preventScroll: true });
+  };
+  $("btn-agent-manifest-apply").onclick = () => {
+    if (agentApplyManifestText($("inp-agent-manifest").value, "Edited manifest", false)) {
+      $("inp-agent-manifest").focus({ preventScroll: true });
+    }
+  };
   $("agent-create-form").addEventListener("submit", (e) => {
     e.preventDefault();
     agentCreate();
@@ -4063,6 +4880,16 @@ function init() {
     agentsRender();
   });
   $("agent-detail").addEventListener("click", (e) => {
+    const exportButton = e.target.closest("[data-agent-export]");
+    if (exportButton && store.agents) {
+      const record = store.agents.list.find((item) => item.assistant_id === exportButton.getAttribute("data-agent-export"));
+      if (record) {
+        try {
+          if (agentDownloadManifest(record)) toast(`${agentManifestFilename(record.name)} exported`, "ok");
+        } catch (error) { toast(error.message, "err"); }
+      }
+      return;
+    }
     const copy = e.target.closest("[data-agent-copy]");
     if (copy && !copy.disabled && store.agents) {
       const source = store.agents.list.find((item) => item.assistant_id === copy.getAttribute("data-agent-copy"));
