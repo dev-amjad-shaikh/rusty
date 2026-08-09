@@ -41,6 +41,23 @@ pub enum EvalError {
         supported: u64,
     },
 
+    /// Malformed release-gate policy or decision evidence.
+    #[error("gate error: {0}")]
+    Gate(String),
+
+    /// A gate policy or decision uses an unsupported format version.
+    #[error(
+        "unsupported gate {artifact} format version: found {found}, this build supports {supported}"
+    )]
+    UnsupportedGateVersion {
+        /// Policy or decision.
+        artifact: &'static str,
+        /// Version declared by the artifact.
+        found: u64,
+        /// Version supported by this build.
+        supported: u64,
+    },
+
     /// The agent factory failed to build a graph for a case, or the initial
     /// state derived from the case input is not a JSON object.
     #[error("agent build error: {0}")]

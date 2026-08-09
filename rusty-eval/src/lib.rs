@@ -33,6 +33,9 @@
 //!   queues with reviewer leases, rubric validation, consensus resolution,
 //!   disagreement adjudication, corrections, and promotion into versioned
 //!   evaluation cases.
+//! - **Release gates** ([`gate`]) — versioned policies turn candidate reports
+//!   and baseline comparisons into deterministic allow/block decisions with
+//!   machine-readable evidence for every configured check.
 //!
 //! ## Quick sketch
 //!
@@ -67,6 +70,7 @@ pub mod error;
 pub mod evidence;
 pub mod experiment;
 pub mod feedback;
+pub mod gate;
 pub mod judge;
 
 pub use assertion::{Assertion, AssertionResult};
@@ -87,5 +91,9 @@ pub use feedback::{
     AnnotationQueue, AnnotationStatus, AnnotationTask, ResolutionAuthority, ReviewCandidate,
     ReviewDecision, ReviewLease, ReviewResolution, ReviewRubric, ReviewSubmission, RubricCriterion,
     StoredReview, TraceRef, FEEDBACK_FORMAT_VERSION,
+};
+pub use gate::{
+    evaluate_gate, GateCheck, GateDecision, GateMetric, GateOutcome, GatePolicy,
+    GATE_DECISION_FORMAT_VERSION, GATE_POLICY_FORMAT_VERSION,
 };
 pub use judge::{JudgeModel, JudgeRequest, JudgeVerdict, RuleBasedJudge};
