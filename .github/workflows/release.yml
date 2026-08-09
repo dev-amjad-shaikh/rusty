@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:-dry-run-placeholder}"
-          for crate in rusty-server rusty-worker rusty-otel; do
+          for crate in rusty-eval rusty-server rusty-worker rusty-otel; do
             echo "== cargo publish --dry-run: $crate =="
             (cd "$crate" && cargo publish --dry-run --allow-dirty)
           done
@@ -121,14 +121,16 @@ jobs:
       # Each cargo publish packages and verifies the crate before uploading,
       # which doubles as the dependents' preflight. Retries absorb the lag
       # while the crates.io index picks up the freshly published
-      # rusty-agent-runtime.
-      - name: Publish rusty-server, rusty-worker, rusty-otel
+      # rusty-agent-runtime. rusty-eval publishes before rusty-server: the
+      # server's `rusty-eval = { version = "0.1" }` dependency must resolve
+      # from the registry.
+      - name: Publish rusty-eval, rusty-server, rusty-worker, rusty-otel
         if: needs.config.outputs.dry_run == 'false'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
-          for crate in rusty-server rusty-worker rusty-otel; do
+          for crate in rusty-eval rusty-server rusty-worker rusty-otel; do
             echo "== cargo publish: $crate =="
             cd "$crate"
             attempt=1
