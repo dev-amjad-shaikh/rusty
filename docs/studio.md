@@ -76,6 +76,13 @@ studio/
   serving pointers remain distinct, rollback is offered only for the exact candidate currently serving,
   lifecycle conflicts force a settled-state reread, and ambiguous network outcomes remain explicitly
   uncertain until candidate and serving-pointer evidence can both be refreshed rather than blind-retried.
+  A guided proposal foundry creates prompt, supported executor-policy, and tool-permission candidates
+  through `POST /learn/candidates`. A finalized Flight Recorder journal can hand its run directly to
+  the foundry as both the creation journal and observed evidence. The Studio validates every named run
+  as finalized, shows the exact Rust-compatible content serialization and SHA-256 identity before the
+  mutation, requires review acknowledgement, and reconciles malformed or uncertain receipts through
+  the exact candidate route. Reusing the same content address opens the original lifecycle and
+  attribution rather than forging a duplicate.
   Candidate, version, evidence, text, and raw-record views are bounded and hostile future wire shapes
   fail closed before actions become available.
 - **Threads panel (local-only)** — the server API (as of v0.4) has **no list-threads endpoint**, so threads you create or
@@ -261,15 +268,18 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   counts. Large content and raw-record views are visibly truncated to keep inspection responsive.
   Server-side pagination remains the proper next step for very large tenants. Semantic similarity
   search is not exposed by the current HTTP contract.
-- **The learning control room governs existing candidates; it does not create or distill them.** The
-  connected server must have a candidate evaluator and dataset source configured for evaluation. The
-  current API does not disclose its deployment envelope before a promotion attempt, so Studio asks the
+- **The learning control room creates bounded hand-authored proposals; it is not an automatic distiller.**
+  The foundry creates prompt, retry/timeout/concurrency-policy, and tool-permission candidates whose
+  current server contracts can be preserved exactly. Memory-set candidates continue through governed
+  corrections because they require complete attributed memory records; the Studio does not synthesize
+  those records from free text. The connected server must have a candidate evaluator and dataset source
+  configured for evaluation. The current API does not disclose its deployment envelope before a promotion attempt, so Studio asks the
   gate first and only then requests the exact candidate-scoped approval named by the server. Approval
   attribution is currently free text because the platform does not yet expose human/service principals,
   assigned reviewer identities, or signed approval tokens. Candidate search is a bounded client-side
   audit snapshot because the list endpoint is unpaginated. Drift monitoring, automated canary analysis,
-  candidate generation, and before/after case comparison remain future workflows. Policy proposals can
-  be reviewed through the shared candidate contract; runtime policy activation requires the connected
+  automatic/correction-driven distillation, and before/after case comparison remain future workflows.
+  Policy proposals can be reviewed through the shared candidate contract; runtime policy activation requires the connected
   server's policy-plane implementation and must not be inferred from a promotion receipt alone.
 - **The team observatory is an evidence surface, not a team editor.** `team_id` is currently a label on
   durable agent registrations, not a separately versioned team resource. The registry endpoint is
@@ -328,19 +338,23 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
   route compatibility, and explicit render bounds.
-- `node studio/test-learn.mjs` — 107 assertions over immutable candidate and version-pointer
+- `node studio/test-learn.mjs` — 138 assertions over immutable candidate and version-pointer
   normalization, prompt/policy/memory/tool proposal rendering, bounded search and filters, provenance,
   evaluation verdicts, active/canary/mismatch/unknown serving states, real replay-fixture preflight,
   exact evaluation/promotion/rollback payloads, candidate-scoped approval extraction, lifecycle action
   gating, uncertain-outcome reconciliation, hostile wire escaping, keyboard/focus behavior, responsive
-  layout, and accessible evidence-state semantics.
-- Live against `cargo run -p rusty-server --example server_demo`: a completed pipeline run was used to
-  register real prompt, policy, and tool-permission candidates. Studio loaded the tenant candidate inbox,
+  layout, accessible evidence-state semantics, canonical candidate hashing, typed proposal composition,
+  finalized-evidence creation preflight, duplicate reconciliation, and focus continuity.
+- Live against `cargo run -p rusty-server --example server_demo`: a completed pipeline journal handed
+  off directly from Flight Recorder into the foundry, which created real prompt and retry-policy
+  candidates and reconciled a duplicate prompt to its original author and lifecycle. The browser's
+  displayed prompt SHA-256 matched the identity accepted and returned by Rusty. Studio loaded the tenant candidate inbox,
   resolved the exact run fixture and finalized run-events evidence before evaluation, preserved the
   server's confirmed missing-evaluator `409` without claiming an ambiguous receipt, translated that
   capability gap into an operator action,
-  navigated candidates with roving keyboard focus, filtered by kind, and rendered at 390 px without
-  horizontal overflow. `cargo test -p rusty-server --test learn_gate` independently passed all 9 real
+  navigated candidates with roving keyboard focus, preserved focus through asynchronous proposal loads
+  and contract switches, filtered by kind, and rendered at 390 px without horizontal overflow.
+  `cargo test -p rusty-server --test learn_gate` independently passed all 9 real
   server lifecycle cases, including scoped approval, canary binding, byte-exact rollback, restart
   durability, tenant isolation, and causal lifecycle journaling.
 - `node studio/test-fabric.mjs` — 110 assertions over bounded durable-agent normalization, deterministic
@@ -353,7 +367,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   preflight, compensatable effects, stable retry/deduplication identity, bounded task/context input and
   preview, durable-work acknowledgement, submission generation guards, and composer accessibility.
 - `node --check` on the extracted `<script>` block — syntax OK.
-- `node studio/test-recorder.mjs` — 107 unit tests over the Flight Recorder timeline helpers (extracted
+- `node studio/test-recorder.mjs` — 111 unit tests over the Flight Recorder timeline helpers (extracted
   from the same `<script>` block, run under `vm`): `seq` ordering with missing-field fallbacks,
   super-step grouping, lane derivation, causal-chain walking (including a parent-cycle guard), marker
   and detail-panel HTML (effect badges, parent jump links, token/cost formatting), payload rendering
@@ -363,7 +377,8 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   evidence links, and hostile evidence escaping; plus the replay banner states (verified / mismatch with
   divergence jump link / partial response), the 404 / 409 / 422 / route-missing error mapping, and
   fork-compare alignment (dimmed prefix, divergence marking, added/removed classes, presence-derived
-  fallback for partial diffs, per-branch totals, HTML escaping). 107 passed, 0 failed.
+  fallback for partial diffs, per-branch totals, HTML escaping), plus finalized-journal-only proposal
+  handoff into governed learning. 111 passed, 0 failed.
 - `node studio/test-tasks.mjs` — 39 unit tests over the durable-tasks view helpers (same extraction
   harness): badge tone per status with the unknown-status fallback, terminality mirroring the server's
   `TaskRecord::is_terminal` (including the failed-with-retry-scheduled nuance), the list path builder,

@@ -793,6 +793,51 @@
   .learn-head h1 { margin-bottom: 4px; }
   .learn-head p { margin: 0; max-width: 760px; color: var(--text-dim); font-size: 12px; }
   .learn-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+  .learn-foundry { margin: 14px 0; border: 1px solid #66513c; border-radius: 9px; overflow: hidden; background: #1d1a17; box-shadow: 0 14px 36px rgba(0, 0, 0, .18); }
+  .learn-foundry[hidden] { display: none; }
+  .learn-foundry-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 14px 16px; border-bottom: 1px solid #514536; background: linear-gradient(100deg, #2b2119, #1d1a17 68%); }
+  .learn-foundry-head h2 { margin: 0 0 3px; font-size: 16px; }
+  .learn-foundry-head p { margin: 0; max-width: 720px; color: var(--text-dim); font-size: 11px; }
+  .learn-foundry-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; border-bottom: 1px solid var(--border); list-style: none; }
+  .learn-foundry-steps li { padding: 9px 12px; border-right: 1px solid var(--border); color: var(--text-dim); font-size: 10px; }
+  .learn-foundry-steps li:last-child { border-right: 0; }
+  .learn-foundry-steps b { display: block; color: var(--text); font: 600 11px var(--mono); }
+  .learn-foundry-steps li::before { content: "◇"; margin-right: 6px; color: #94704f; }
+  .learn-foundry-steps li.ready::before { content: "◆"; color: #8ea471; }
+  .learn-foundry-body { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr); }
+  .learn-foundry-form { min-width: 0; padding: 15px 16px; border-right: 1px solid var(--border); }
+  .learn-foundry-form fieldset { min-width: 0; margin: 0 0 15px; padding: 0; border: 0; }
+  .learn-foundry-form legend { margin-bottom: 7px; color: var(--text); font: 600 11.5px var(--mono); }
+  .learn-foundry-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .learn-kind-choice { position: relative; display: block; min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); cursor: pointer; }
+  .learn-kind-choice:has(input:checked) { border-color: #b17848; background: #2a211a; box-shadow: inset 0 -2px #b17848; }
+  .learn-kind-choice:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .learn-kind-choice input { position: absolute; opacity: 0; pointer-events: none; }
+  .learn-kind-choice b, .learn-kind-choice span { display: block; }
+  .learn-kind-choice b { font-size: 11px; }
+  .learn-kind-choice span { margin-top: 2px; color: var(--text-dim); font-size: 9.5px; }
+  .learn-foundry-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .learn-foundry-grid .wide { grid-column: 1 / -1; }
+  .learn-foundry-form label { color: var(--text-dim); font-size: 10.5px; }
+  .learn-foundry-form input, .learn-foundry-form select, .learn-foundry-form textarea { width: 100%; margin-top: 3px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset); color: var(--text); font: 11px var(--mono); }
+  .learn-foundry-form textarea { min-height: 82px; resize: vertical; line-height: 1.45; }
+  .learn-foundry-form textarea.tall { min-height: 150px; }
+  .learn-foundry-form :is(input, select, textarea)[aria-invalid="true"] { border-color: var(--err); }
+  .learn-foundry-help { display: block; margin-top: 4px; color: var(--text-faint); font-size: 9.5px; line-height: 1.4; }
+  .learn-foundry-error { display: block; margin-top: 3px; color: #e1978c; font-size: 9.5px; }
+  .learn-foundry-seal { min-width: 0; padding: 16px; background: #171512; }
+  .learn-seal-plate { position: sticky; top: 12px; padding: 14px; border: 1px solid #5c4936; border-radius: 8px; background: #211c17; }
+  .learn-seal-kicker { color: #b78a61; font: 700 9.5px var(--mono); letter-spacing: 1.1px; text-transform: uppercase; }
+  .learn-seal-id { margin: 8px 0 10px; padding: 9px; border: 1px dashed #70583f; background: #181512; color: #dbc19f; font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .learn-seal-id.pending { color: var(--text-faint); }
+  .learn-seal-surface { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 5px 9px; margin-bottom: 10px; font-size: 10px; }
+  .learn-seal-surface span:nth-child(odd) { color: var(--text-dim); text-transform: uppercase; letter-spacing: .4px; }
+  .learn-seal-surface span:nth-child(even) { font-family: var(--mono); overflow-wrap: anywhere; }
+  .learn-seal-plate pre { max-height: 230px; overflow: auto; }
+  .learn-foundry-actions { display: grid; gap: 9px; margin-top: 12px; }
+  .learn-foundry-actions button { width: 100%; }
+  .learn-foundry-confirm { display: flex; align-items: flex-start; gap: 7px; color: var(--text-dim); font-size: 10.5px; }
+  .learn-foundry-confirm input { width: auto; margin: 1px 0 0; }
   .learn-principle { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: center; margin: 14px 0; padding: 12px 14px; border: 1px solid #514a3c; border-radius: 8px; background: linear-gradient(100deg, #211d19, var(--bg-panel) 70%); }
   .learn-principle div { min-width: 0; }
   .learn-principle b, .learn-principle span { display: block; }
@@ -897,6 +942,9 @@
     .learn-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .learn-toolbar label:first-child { grid-column: 1 / -1; }
     .learn-action-choices { grid-template-columns: 1fr; }
+    .learn-foundry-body { grid-template-columns: 1fr; }
+    .learn-foundry-form { border-right: 0; border-bottom: 1px solid var(--border); }
+    .learn-seal-plate { position: static; }
   }
   @media (max-width: 680px) {
     #body { display: block; overflow-y: auto; }
@@ -949,6 +997,12 @@
     .fabric-compose-meta, .fabric-assignment-grid, .fabric-assignment-task, .fabric-compose-options { grid-template-columns: 1fr; }
     .learn-head { flex-direction: column; }
     .learn-head-actions { justify-content: flex-start; }
+    .learn-foundry-head { flex-direction: column; }
+    .learn-foundry-kinds, .learn-foundry-grid { grid-template-columns: 1fr; }
+    .learn-foundry-grid .wide { grid-column: auto; }
+    .learn-foundry-steps { grid-template-columns: 1fr; }
+    .learn-foundry-steps li { border-right: 0; border-bottom: 1px solid var(--border); }
+    .learn-foundry-steps li:last-child { border-bottom: 0; }
     .learn-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .learn-toolbar, .learn-dossier, .learn-action-grid { grid-template-columns: 1fr; }
     .learn-toolbar label:first-child, .learn-panel.wide, .learn-action .wide { grid-column: auto; }
@@ -1229,9 +1283,12 @@
           </div>
           <div class="learn-head-actions">
             <span class="muted tiny" id="learn-statusline" role="status" aria-live="polite"></span>
+            <button class="small primary" id="btn-learn-create" aria-expanded="false" aria-controls="learn-foundry">Create proposal</button>
             <button class="small" id="btn-learn-refresh">Refresh evidence</button>
           </div>
         </div>
+
+        <section class="learn-foundry" id="learn-foundry" aria-labelledby="learn-foundry-title" hidden></section>
 
         <div class="learn-principle" role="note" aria-label="Governed learning lifecycle">
           <div><b>Immutable proposal</b><span>A content-addressed candidate; changing it creates a new identity.</span></div>
@@ -1449,6 +1506,8 @@ const LEARN_TEXT_LIMIT = 4096;
 const LEARN_PREVIEW_LIMIT = 32768;
 const LEARN_REPLAY_LIMIT = 8;
 const LEARN_REPLAY_TEXT_LIMIT = 2048;
+const LEARN_CANDIDATE_CONTENT_LIMIT = 32768;
+const LEARN_EVIDENCE_LIMIT = 8;
 const AGENT_RESERVED_IDS = new Set([
   "agent_leases", "agents", "assistants", "coordinations", "crons", "journals", "learn", "memory",
   "memory_artifacts", "outbox", "store", "tasks", "threads", "trigger_events", "triggers", "latest",
@@ -1492,6 +1551,7 @@ const store = {
   learnUnsupported: false, // server build has no governed-learning routes
   learnRequest: 0,     // generation guard for candidate/version reads and lifecycle actions
   learnSearchTimer: null,
+  learnFoundry: null,  // connection-scoped immutable-proposal draft and content-address seal
 };
 
 /* ---------------- persistence ---------------- */
@@ -1775,6 +1835,7 @@ async function connect() {
     store.learnSearchTimer = null;
     store.learn = null;
     store.learnUnsupported = false;
+    store.learnFoundry = null;
     $("agent-create-panel").style.display = "none";
     $("sel-agent-graph").innerHTML = "";
     for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
@@ -2637,12 +2698,20 @@ function recStoryStepHtml(css, label, title, detail, ev) {
     `<b>${escapeHtml(title)}</b><small>${escapeHtml(detail)}</small></${tag}>`;
 }
 
+function recFinalized(value) {
+  return value === true;
+}
+
 function recInvestigationHtml(events, complete) {
   const story = recInvestigation(events, complete);
   const related = story.relatedError && story.relatedError.id
     ? `<div class="rec-story-related"><span>Related evidence · an error-status event was recorded separately.</span>` +
       `<button type="button" class="small" data-story-eid="${escapeHtml(story.relatedError.id)}">` +
       `View error event · seq ${escapeHtml(String(story.relatedError.seq ?? "?"))}</button></div>`
+    : "";
+  const propose = recFinalized(complete)
+    ? `<div class="rec-story-related"><span>Use this finalized journal as attributable evidence for a proposed improvement.</span>` +
+      `<button type="button" class="small" data-propose-run>Propose change from this run</button></div>`
     : "";
   return `<section class="rec-investigation story-${story.state}" aria-labelledby="rec-story-title">` +
     `<div class="rec-story-head"><div><span class="rec-story-kicker">Run story</span>` +
@@ -2653,7 +2722,7 @@ function recInvestigationHtml(events, complete) {
     recStoryStepHtml("is-cause", story.issueLabel, story.causeTitle, story.causeDetail, story.issue) +
     recStoryStepHtml("is-recovery", story.recoveryLabel, story.recoveryTitle, story.recoveryDetail, story.recovery) +
     recStoryStepHtml("is-risk", "Effect risk", story.riskTitle, story.riskDetail, story.highestRisk) +
-    `</div>${related}</section>`;
+    `</div>${related}${propose}</section>`;
 }
 
 /* PayloadRef is adjacently tagged: {kind:"inline", value} renders the value;
@@ -2732,7 +2801,7 @@ async function recLoad(runId, quiet) {
     store.recorder = {
       runId: res.run_id || runId,
       events: recSortEvents(res.events),
-      complete: res.complete !== false,
+      complete: recFinalized(res.complete),
       selected: null,
       error: null,
     };
@@ -7192,6 +7261,543 @@ function learnVersionSnapshot(payload) {
   return { versions, total: body.versions.length, error: null };
 }
 
+/* Candidate foundry: the creation route accepts a complete Candidate and
+ * verifies candidate_id against the canonical CandidateContent bytes. Studio
+ * therefore builds only guided, lossless shapes and shows the exact digest
+ * before POST /learn/candidates. Memory-set creation stays with the correction
+ * workflow because that kind carries complete attributed MemoryRecord values. */
+
+function learnFoundryDefault(runId) {
+  const evidenceRun = String(runId || "").trim();
+  return {
+    open: false, kind: "prompt", promptName: "system", promptText: "",
+    policyFamily: "retry", retryBase: "1000", retryMax: "300000", retryAttempts: "3",
+    timeoutDefault: "", timeoutMax: "", concurrencyMax: "",
+    toolName: "", toolDirection: "narrow", authorType: "human", authorId: "",
+    runId: evidenceRun, parent: "", evidenceRuns: evidenceRun,
+    evidenceCorrections: "", evidenceMemories: "", acknowledge: false,
+    createdAt: new Date().toISOString(), sealId: "", sealText: "", sealing: false,
+    sealGeneration: 0, submitGeneration: 0, submitting: false, error: "", receipt: null,
+    restoreFocus: false,
+  };
+}
+
+function learnFoundryIdList(value, label) {
+  const raw = String(value || "");
+  if (agentUtf8Length(raw) > LEARN_REPLAY_TEXT_LIMIT) {
+    return { ids: [], error: `${label} are larger than 2 KiB.` };
+  }
+  const ids = [], seen = new Set();
+  for (const item of raw.split(/[\n,]/)) {
+    const id = item.trim();
+    if (!id || seen.has(id)) continue;
+    if (!learnValidWireText(id, LEARN_ID_LIMIT)) {
+      return { ids: [], error: `${label} must use non-empty identifiers of at most 256 UTF-8 bytes without control characters.` };
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+  if (ids.length > LEARN_EVIDENCE_LIMIT) {
+    return { ids: [], error: `${label} may name at most ${LEARN_EVIDENCE_LIMIT} records in one proposal.` };
+  }
+  return { ids, error: "" };
+}
+
+function learnCanonicalJsonValue(value) {
+  if (Array.isArray(value)) return value.map(learnCanonicalJsonValue);
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const key of Object.keys(value).sort()) out[key] = learnCanonicalJsonValue(value[key]);
+  return out;
+}
+
+function learnCandidateContentText(content) {
+  const value = learnObject(content);
+  if (value.kind === "prompt") return JSON.stringify({ kind: "prompt", name: value.name, prompt: value.prompt });
+  if (value.kind === "policy") return JSON.stringify({ kind: "policy", family: value.family,
+    parameters: learnCanonicalJsonValue(value.parameters) });
+  if (value.kind === "tool_permission") return JSON.stringify({ kind: "tool_permission", tool: value.tool, direction: value.direction });
+  return "";
+}
+
+async function learnCandidateContentDigest(content, cryptography = globalThis.crypto) {
+  const text = learnCandidateContentText(content);
+  if (!text || !cryptography || !cryptography.subtle) throw new Error("This browser cannot create SHA-256 content addresses.");
+  const digest = await cryptography.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function learnFoundryWholeNumber(value, label, options = {}) {
+  const raw = String(value == null ? "" : value).trim();
+  if (!raw && options.optional) return { value: null, error: "" };
+  if (!/^\d+$/.test(raw)) return { value: null, error: `${label} must be a non-negative whole number.` };
+  const number = Number(raw);
+  const maximum = Number.isSafeInteger(options.maximum) ? options.maximum : Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(number) || number > maximum) {
+    return { value: null, error: `${label} is outside Studio’s exact integer range.` };
+  }
+  return { value: number, error: "" };
+}
+
+function learnFoundryPolicy(draft, errors) {
+  const family = String(draft.policyFamily || "");
+  if (!['retry', 'timeout', 'concurrency'].includes(family)) {
+    errors.policyFamily = "Choose a policy family this server can activate.";
+    return null;
+  }
+  if (family === "retry") {
+    const base = learnFoundryWholeNumber(draft.retryBase, "Base delay");
+    const maximum = learnFoundryWholeNumber(draft.retryMax, "Maximum delay");
+    const attempts = learnFoundryWholeNumber(draft.retryAttempts, "Attempt budget", { maximum: 4294967295 });
+    if (base.error) errors.retryBase = base.error;
+    if (maximum.error) errors.retryMax = maximum.error;
+    if (attempts.error) errors.retryAttempts = attempts.error;
+    if (!base.error && !maximum.error && maximum.value < base.value) errors.retryMax = "Maximum delay must be at least the base delay.";
+    if (Object.keys(errors).some((key) => ["retryBase", "retryMax", "retryAttempts"].includes(key))) return null;
+    return { base_delay_ms: base.value, max_attempts: attempts.value, max_delay_ms: maximum.value };
+  }
+  if (family === "timeout") {
+    const fallback = learnFoundryWholeNumber(draft.timeoutDefault, "Default timeout", { optional: true });
+    const maximum = learnFoundryWholeNumber(draft.timeoutMax, "Maximum timeout", { optional: true });
+    if (fallback.error) errors.timeoutDefault = fallback.error;
+    if (maximum.error) errors.timeoutMax = maximum.error;
+    if (!fallback.error && !maximum.error && fallback.value != null && maximum.value != null && fallback.value > maximum.value) {
+      errors.timeoutDefault = "Default timeout cannot exceed the maximum timeout.";
+    }
+    if (errors.timeoutDefault || errors.timeoutMax) return null;
+    const parameters = {};
+    if (fallback.value != null) parameters.default_millis = fallback.value;
+    if (maximum.value != null) parameters.max_millis = maximum.value;
+    return parameters;
+  }
+  const parallel = learnFoundryWholeNumber(draft.concurrencyMax, "Parallel limit", { optional: true, maximum: 4294967295 });
+  if (parallel.error) { errors.concurrencyMax = parallel.error; return null; }
+  return parallel.value == null ? {} : { max_parallel: parallel.value };
+}
+
+function learnFoundryPlan(draftValue) {
+  const draft = learnObject(draftValue);
+  const errors = Object.create(null);
+  let content = null;
+  if (draft.kind === "prompt") {
+    if (!learnValidWireText(draft.promptName, LEARN_ID_LIMIT)) errors.promptName = "Name the prompt surface using at most 256 UTF-8 bytes without control characters.";
+    const prompt = String(draft.promptText || "");
+    if (!prompt.trim()) errors.promptText = "Write the proposed prompt.";
+    else if (agentUtf8Length(prompt) > LEARN_CANDIDATE_CONTENT_LIMIT) errors.promptText = "Prompt text must be 32 KiB or smaller.";
+    else if (prompt.includes("\u0000")) errors.promptText = "Prompt text cannot contain a null character.";
+    if (!errors.promptName && !errors.promptText) content = { kind: "prompt", name: String(draft.promptName), prompt };
+  } else if (draft.kind === "policy") {
+    const parameters = learnFoundryPolicy(draft, errors);
+    if (parameters) content = { kind: "policy", family: String(draft.policyFamily), parameters };
+  } else if (draft.kind === "tool_permission") {
+    if (!learnValidWireText(draft.toolName, LEARN_ID_LIMIT)) errors.toolName = "Name the tool using at most 256 UTF-8 bytes without control characters.";
+    if (!['narrow', 'widen'].includes(draft.toolDirection)) errors.toolDirection = "Choose whether the grant narrows or widens.";
+    if (!errors.toolName && !errors.toolDirection) content = { kind: "tool_permission", tool: String(draft.toolName), direction: draft.toolDirection };
+  } else {
+    errors.kind = "Choose a supported proposal type.";
+  }
+  const contentText = content ? learnCandidateContentText(content) : "";
+  if (contentText && agentUtf8Length(contentText) > LEARN_CANDIDATE_CONTENT_LIMIT) {
+    errors.kind = "The canonical proposal is larger than 32 KiB.";
+    content = null;
+  }
+
+  const runId = String(draft.runId || "").trim();
+  if (!learnValidWireText(runId, LEARN_ID_LIMIT)) errors.runId = "Choose the finalized run whose journal will record creation.";
+  const parent = String(draft.parent || "").trim();
+  if (parent && !learnValidWireText(parent, LEARN_ID_LIMIT)) errors.parent = "Causal parent must be at most 256 UTF-8 bytes without control characters.";
+  const evidenceRuns = learnFoundryIdList(draft.evidenceRuns, "Evidence runs");
+  const evidenceCorrections = learnFoundryIdList(draft.evidenceCorrections, "Correction evidence");
+  const evidenceMemories = learnFoundryIdList(draft.evidenceMemories, "Memory evidence");
+  if (evidenceRuns.error) errors.evidenceRuns = evidenceRuns.error;
+  if (evidenceCorrections.error) errors.evidenceCorrections = evidenceCorrections.error;
+  if (evidenceMemories.error) errors.evidenceMemories = evidenceMemories.error;
+  if (!['human', 'distiller'].includes(draft.authorType)) errors.authorType = "Choose human or distiller attribution.";
+  if (!learnValidWireText(draft.authorId, LEARN_ID_LIMIT)) errors.authorId = "Name the declared proposer using at most 256 UTF-8 bytes.";
+  const author = !errors.authorType && !errors.authorId
+    ? draft.authorType === "human" ? { type: "human", human_id: String(draft.authorId) }
+      : { type: "distiller", name: String(draft.authorId) }
+    : null;
+  const evidence = {};
+  if (!evidenceRuns.error && evidenceRuns.ids.length) evidence.run_ids = evidenceRuns.ids;
+  if (!evidenceCorrections.error && evidenceCorrections.ids.length) evidence.correction_ids = evidenceCorrections.ids;
+  if (!evidenceMemories.error && evidenceMemories.ids.length) evidence.memory_ids = evidenceMemories.ids;
+  const createdAt = String(draft.createdAt || "");
+  if (!Number.isFinite(Date.parse(createdAt))) errors.createdAt = "Proposal timestamp is invalid; discard and start again.";
+  const order = ["kind", "promptName", "promptText", "policyFamily", "retryBase", "retryMax", "retryAttempts",
+    "timeoutDefault", "timeoutMax", "concurrencyMax", "toolName", "toolDirection", "runId", "parent",
+    "evidenceRuns", "evidenceCorrections", "evidenceMemories", "authorType", "authorId", "createdAt"];
+  const first = order.find((key) => errors[key]) || "";
+  return { valid: !first, errors, first, content, contentText, runId, parent, evidence, author, createdAt };
+}
+
+function learnFoundrySurface(content) {
+  const value = learnObject(content);
+  if (value.kind === "prompt") return `prompt:${value.name}`;
+  if (value.kind === "policy") return `policy:${value.family}`;
+  if (value.kind === "tool_permission") return `tool:${value.tool}`;
+  return "not sealed";
+}
+
+function learnFoundryCandidate(plan, candidateId) {
+  if (!plan || !plan.valid || !/^[a-f0-9]{64}$/.test(String(candidateId || ""))) return null;
+  const candidate = { candidate_id: candidateId, content: plan.content, distilled_by: plan.author };
+  if (Object.keys(plan.evidence).length) candidate.evidence = plan.evidence;
+  candidate.created_at = plan.createdAt;
+  return candidate;
+}
+
+function learnFoundryStoredRecord(value, candidateId, contentText) {
+  const record = learnNormalizeRecord(value);
+  if (!record || learnCandidateId(record) !== candidateId || learnCandidateContentText(record.candidate.content) !== contentText) {
+    return { record: null, error: "Rusty returned a candidate that does not match the sealed proposal." };
+  }
+  return { record, error: "" };
+}
+
+function learnFoundryExactCandidate(actualValue, expectedValue) {
+  const actual = learnObject(actualValue), expected = learnObject(expectedValue);
+  const actualTime = Date.parse(String(actual.created_at || ""));
+  const expectedTime = Date.parse(String(expected.created_at || ""));
+  if (!Number.isFinite(actualTime) || !Number.isFinite(expectedTime)) return false;
+  const normalizedActual = { ...actual, created_at: new Date(actualTime).toISOString() };
+  const normalizedExpected = { ...expected, created_at: new Date(expectedTime).toISOString() };
+  return JSON.stringify(learnCanonicalJsonValue(normalizedActual)) === JSON.stringify(learnCanonicalJsonValue(normalizedExpected));
+}
+
+function learnFoundryReceipt(value, candidate) {
+  const body = learnObject(value);
+  const candidateId = String(candidate && candidate.candidate_id || "");
+  if (String(body.candidate_id || "") !== candidateId || typeof body.created !== "boolean") {
+    return { record: null, created: false, error: "Rusty returned a malformed candidate-creation receipt." };
+  }
+  const checked = learnFoundryStoredRecord(body.record, candidateId, learnCandidateContentText(candidate.content));
+  if (checked.error) return { record: null, created: body.created, error: checked.error };
+  if (body.created && !learnFoundryExactCandidate(checked.record.candidate, candidate)) {
+    return { record: null, created: true, error: "A new-candidate receipt did not echo the exact submitted candidate." };
+  }
+  if (body.created && checked.record.status !== "created") {
+    return { record: null, created: true, error: "A new-candidate receipt reported an impossible lifecycle state." };
+  }
+  return { record: checked.record, created: body.created, error: "" };
+}
+
+function learnFoundryCreationMessage(created) {
+  if (created === true) return "Rusty journaled and stored the proposal. It is not active; evaluation is the next gate.";
+  if (created === false) return "That content address already existed. Rusty preserved the original attribution and lifecycle instead of creating a duplicate.";
+  return "Rusty has the sealed proposal, but Studio could not determine whether this request created it or found it already. The authoritative stored attribution and lifecycle are shown.";
+}
+
+function learnFoundryFieldError(plan, field) {
+  return escapeHtml(plan && plan.errors && plan.errors[field] || "");
+}
+
+function learnFoundryPolicyHtml(draft, plan) {
+  const family = String(draft.policyFamily || "retry");
+  const select = `<label class="wide">Policy family<select data-foundry-field="policyFamily" aria-invalid="${Boolean(plan.errors.policyFamily)}">` +
+    `<option value="retry"${family === "retry" ? " selected" : ""}>Retry · active decision contract</option>` +
+    `<option value="timeout"${family === "timeout" ? " selected" : ""}>Timeout · pinned contract</option>` +
+    `<option value="concurrency"${family === "concurrency" ? " selected" : ""}>Concurrency · pinned contract</option></select>` +
+    `<span class="learn-foundry-help">Only families the current policy registry can validate and activate are offered.</span>` +
+    `<span class="learn-foundry-error" data-foundry-error="policyFamily">${learnFoundryFieldError(plan, "policyFamily")}</span></label>`;
+  if (family === "retry") return select +
+    `<label>Base delay · ms<input data-foundry-field="retryBase" inputmode="numeric" value="${escapeHtml(draft.retryBase)}" aria-invalid="${Boolean(plan.errors.retryBase)}"><span class="learn-foundry-error" data-foundry-error="retryBase">${learnFoundryFieldError(plan, "retryBase")}</span></label>` +
+    `<label>Maximum delay · ms<input data-foundry-field="retryMax" inputmode="numeric" value="${escapeHtml(draft.retryMax)}" aria-invalid="${Boolean(plan.errors.retryMax)}"><span class="learn-foundry-error" data-foundry-error="retryMax">${learnFoundryFieldError(plan, "retryMax")}</span></label>` +
+    `<label>Attempt budget<input data-foundry-field="retryAttempts" inputmode="numeric" value="${escapeHtml(draft.retryAttempts)}" aria-invalid="${Boolean(plan.errors.retryAttempts)}"><span class="learn-foundry-help">Counts the initial attempt; 0 disables retries.</span><span class="learn-foundry-error" data-foundry-error="retryAttempts">${learnFoundryFieldError(plan, "retryAttempts")}</span></label>`;
+  if (family === "timeout") return select +
+    `<label>Default timeout · ms<input data-foundry-field="timeoutDefault" inputmode="numeric" value="${escapeHtml(draft.timeoutDefault)}" aria-invalid="${Boolean(plan.errors.timeoutDefault)}" placeholder="uncapped"><span class="learn-foundry-error" data-foundry-error="timeoutDefault">${learnFoundryFieldError(plan, "timeoutDefault")}</span></label>` +
+    `<label>Maximum timeout · ms<input data-foundry-field="timeoutMax" inputmode="numeric" value="${escapeHtml(draft.timeoutMax)}" aria-invalid="${Boolean(plan.errors.timeoutMax)}" placeholder="uncapped"><span class="learn-foundry-error" data-foundry-error="timeoutMax">${learnFoundryFieldError(plan, "timeoutMax")}</span></label>`;
+  return select + `<label>Parallel limit<input data-foundry-field="concurrencyMax" inputmode="numeric" value="${escapeHtml(draft.concurrencyMax)}" aria-invalid="${Boolean(plan.errors.concurrencyMax)}" placeholder="unlimited"><span class="learn-foundry-error" data-foundry-error="concurrencyMax">${learnFoundryFieldError(plan, "concurrencyMax")}</span></label>`;
+}
+
+function learnFoundryChangeHtml(draft, plan) {
+  if (draft.kind === "prompt") return `<div class="learn-foundry-grid">` +
+    `<label>Prompt surface<input data-foundry-field="promptName" value="${escapeHtml(draft.promptName)}" aria-invalid="${Boolean(plan.errors.promptName)}"><span class="learn-foundry-help">The manifest prompt key, for example system or reviewer.</span><span class="learn-foundry-error" data-foundry-error="promptName">${learnFoundryFieldError(plan, "promptName")}</span></label>` +
+    `<label class="wide">Proposed prompt<textarea class="tall" data-foundry-field="promptText" aria-invalid="${Boolean(plan.errors.promptText)}">${escapeHtml(draft.promptText)}</textarea><span class="learn-foundry-error" data-foundry-error="promptText">${learnFoundryFieldError(plan, "promptText")}</span></label></div>`;
+  if (draft.kind === "policy") return `<div class="learn-foundry-grid">${learnFoundryPolicyHtml(draft, plan)}</div>`;
+  return `<div class="learn-foundry-grid"><label>Tool name<input data-foundry-field="toolName" value="${escapeHtml(draft.toolName)}" aria-invalid="${Boolean(plan.errors.toolName)}" placeholder="billing"><span class="learn-foundry-error" data-foundry-error="toolName">${learnFoundryFieldError(plan, "toolName")}</span></label>` +
+    `<label>Grant direction<select data-foundry-field="toolDirection" aria-invalid="${Boolean(plan.errors.toolDirection)}"><option value="narrow"${draft.toolDirection === "narrow" ? " selected" : ""}>Narrow access</option><option value="widen"${draft.toolDirection === "widen" ? " selected" : ""}>Widen access</option></select><span class="learn-foundry-help">Every tool grant change still requires human approval at promotion.</span><span class="learn-foundry-error" data-foundry-error="toolDirection">${learnFoundryFieldError(plan, "toolDirection")}</span></label></div>`;
+}
+
+function learnFoundryStepsHtml(plan, draft) {
+  const changeReady = Boolean(plan.content);
+  const evidenceReady = plan.valid;
+  const sealReady = evidenceReady && Boolean(draft.sealId) && !draft.sealing;
+  const current = !changeReady ? 0 : !evidenceReady ? 1 : 2;
+  return [["Change", "typed proposal", changeReady], ["Evidence", "finalized journals", evidenceReady], ["Seal", "content address", sealReady]].map(([label, hint, ready], index) =>
+    `<li class="${ready ? "ready" : ""}"${index === current ? ' aria-current="step"' : ""}><b>${label}</b>${hint}</li>`).join("");
+}
+
+function learnFoundrySealHtml(draft, plan) {
+  const candidate = draft.sealId ? learnFoundryCandidate(plan, draft.sealId) : null;
+  const ready = Boolean(candidate && draft.acknowledge && !draft.submitting && !draft.sealing);
+  const seal = draft.sealing ? "Minting exact SHA-256 identity…" : draft.sealId || "Complete the change and evidence fields to mint an identity.";
+  const receiptTitle = draft.receipt && draft.receipt.created === true ? "Proposal created."
+    : draft.receipt && draft.receipt.created === false ? "Existing proposal opened." : "Stored proposal confirmed.";
+  const receipt = draft.receipt
+    ? `<div class="note fabric-compose-receipt" role="status"><b>${receiptTitle}</b> ${escapeHtml(draft.receipt.message)}</div>` : "";
+  return `<div class="learn-seal-plate"><span class="learn-seal-kicker">Immutable content seal</span>` +
+    `<div class="learn-seal-id${draft.sealId ? "" : " pending"}" aria-live="polite">${escapeHtml(seal)}</div>` +
+    `<div class="learn-seal-surface"><span>Surface</span><span>${escapeHtml(plan.content ? learnFoundrySurface(plan.content) : "not sealed")}</span>` +
+      `<span>Attribution</span><span>${escapeHtml(plan.author ? memoryAuthorLabel(plan.author) : "incomplete")}</span>` +
+      `<span>Journal</span><span>${escapeHtml(plan.runId || "not bound")}</span>` +
+      `<span>Evidence</span><span>${Object.values(plan.evidence || {}).reduce((sum, ids) => sum + ids.length, 0)} linked records</span></div>` +
+    `<details class="learn-raw"${candidate ? "" : " hidden"}><summary>Inspect exact immutable candidate</summary><pre class="json">${escapeHtml(candidate ? memoryJsonText(candidate, LEARN_PREVIEW_LIMIT) : "")}</pre></details>` +
+    receipt + `<div class="learn-foundry-actions">` +
+      `<label class="learn-foundry-confirm"><input type="checkbox" data-foundry-field="acknowledge"${draft.acknowledge ? " checked" : ""}${draft.submitting ? " disabled" : ""}>` +
+      `<span>I reviewed the exact surface, attribution, evidence span, and content address. Creating this proposal does not activate it.</span></label>` +
+      `<button class="primary" type="submit"${ready ? "" : " disabled"}>${draft.submitting ? "Creating immutable proposal…" : "Create immutable proposal"}</button>` +
+      `<button class="small" type="button" data-foundry-discard${draft.submitting ? " disabled" : ""}>Discard draft</button></div></div>`;
+}
+
+function learnFoundryHtml(draft, plan) {
+  const errors = Object.values(plan.errors);
+  const summary = draft.error || (errors.length ? `${errors.length} field${errors.length === 1 ? "" : "s"} need attention before sealing.` : "");
+  const summaryAttrs = summary ? ` class="note learn-action-error"${draft.error ? ' role="alert" tabindex="-1"' : ""}` : "";
+  return `<div class="learn-foundry-head"><div><h2 id="learn-foundry-title" tabindex="-1">Create immutable proposal</h2>` +
+    `<p>Shape one bounded change, bind the observations that justify it, then verify the identity Rusty will store.</p></div>` +
+    `<button class="small" type="button" data-foundry-close${draft.submitting ? " disabled" : ""}>Close foundry</button></div>` +
+    `<ol class="learn-foundry-steps" id="learn-foundry-steps" aria-label="Proposal creation stages">${learnFoundryStepsHtml(plan, draft)}</ol>` +
+    `<form id="learn-foundry-form" class="learn-foundry-body" novalidate>` +
+    `<div class="learn-foundry-form"><div id="learn-foundry-errors"${summaryAttrs}>${escapeHtml(summary)}</div>` +
+    `<fieldset${draft.submitting ? " disabled" : ""}><legend>1 · What should change?</legend><div class="learn-foundry-kinds">` +
+      [["prompt", "Prompt", "Instruction text"], ["policy", "Policy", "Executor bounds"], ["tool_permission", "Tool permission", "Capability direction"]].map(([value, label, hint]) =>
+        `<label class="learn-kind-choice"><input type="radio" name="learn-foundry-kind" data-foundry-field="kind" value="${value}"${draft.kind === value ? " checked" : ""}><b>${label}</b><span>${hint}</span></label>`).join("") +
+    `</div><span class="learn-foundry-help">Memory-set proposals start from governed corrections so their complete attributed memory records travel with the candidate.</span><span class="learn-foundry-error" data-foundry-error="kind">${learnFoundryFieldError(plan, "kind")}</span></fieldset>` +
+    `<fieldset${draft.submitting ? " disabled" : ""}><legend>Change contract</legend><div id="learn-foundry-change">${learnFoundryChangeHtml(draft, plan)}</div></fieldset>` +
+    `<fieldset${draft.submitting ? " disabled" : ""}><legend>2 · What observation supports it?</legend><div class="learn-foundry-grid">` +
+      `<label>Creation journal run<input data-foundry-field="runId" value="${escapeHtml(draft.runId)}" aria-invalid="${Boolean(plan.errors.runId)}" placeholder="completed run id"><span class="learn-foundry-help">Rusty appends candidate_created to this finalized journal.</span><span class="learn-foundry-error" data-foundry-error="runId">${learnFoundryFieldError(plan, "runId")}</span></label>` +
+      `<label>Causal parent · optional<input data-foundry-field="parent" value="${escapeHtml(draft.parent)}" aria-invalid="${Boolean(plan.errors.parent)}" placeholder="journal event id"><span class="learn-foundry-error" data-foundry-error="parent">${learnFoundryFieldError(plan, "parent")}</span></label>` +
+      `<label class="wide">Observed run IDs<textarea data-foundry-field="evidenceRuns" aria-invalid="${Boolean(plan.errors.evidenceRuns)}" placeholder="comma or line separated">${escapeHtml(draft.evidenceRuns)}</textarea><span class="learn-foundry-help">Every named run must be finalized before Studio creates the proposal.</span><span class="learn-foundry-error" data-foundry-error="evidenceRuns">${learnFoundryFieldError(plan, "evidenceRuns")}</span></label>` +
+      `<label>Correction IDs · optional<textarea data-foundry-field="evidenceCorrections" aria-invalid="${Boolean(plan.errors.evidenceCorrections)}">${escapeHtml(draft.evidenceCorrections)}</textarea><span class="learn-foundry-error" data-foundry-error="evidenceCorrections">${learnFoundryFieldError(plan, "evidenceCorrections")}</span></label>` +
+      `<label>Memory IDs · optional<textarea data-foundry-field="evidenceMemories" aria-invalid="${Boolean(plan.errors.evidenceMemories)}">${escapeHtml(draft.evidenceMemories)}</textarea><span class="learn-foundry-error" data-foundry-error="evidenceMemories">${learnFoundryFieldError(plan, "evidenceMemories")}</span></label>` +
+      `<label>Declared source<select data-foundry-field="authorType" aria-invalid="${Boolean(plan.errors.authorType)}"><option value="human"${draft.authorType === "human" ? " selected" : ""}>Human</option><option value="distiller"${draft.authorType === "distiller" ? " selected" : ""}>Application distiller</option></select><span class="learn-foundry-error" data-foundry-error="authorType">${learnFoundryFieldError(plan, "authorType")}</span></label>` +
+      `<label>Proposer identity<input data-foundry-field="authorId" value="${escapeHtml(draft.authorId)}" aria-invalid="${Boolean(plan.errors.authorId)}" placeholder="team:name or distiller name"><span class="learn-foundry-help">Declared attribution is journaled, but this API-key session does not authenticate the named person.</span><span class="learn-foundry-error" data-foundry-error="authorId">${learnFoundryFieldError(plan, "authorId")}</span></label>` +
+    `</div></fieldset></div><aside class="learn-foundry-seal" id="learn-foundry-seal" tabindex="-1">${learnFoundrySealHtml(draft, plan)}</aside></form>`;
+}
+
+function learnFoundryCurrent(draft, generation, connection) {
+  return store.learnFoundry === draft && draft.submitGeneration === generation && connection && store.conn &&
+    connection.baseUrl === store.conn.baseUrl && connection.apiKey === store.conn.apiKey;
+}
+
+function learnFoundryRenderSeal() {
+  const draft = store.learnFoundry;
+  const target = $("learn-foundry-seal");
+  if (!draft || !target) return;
+  const plan = learnFoundryPlan(draft);
+  target.innerHTML = learnFoundrySealHtml(draft, plan);
+  const steps = $("learn-foundry-steps");
+  if (steps) steps.innerHTML = learnFoundryStepsHtml(plan, draft);
+}
+
+function learnFoundryRefreshFields() {
+  const draft = store.learnFoundry;
+  const root = $("learn-foundry");
+  if (!draft || !root) return;
+  const plan = learnFoundryPlan(draft);
+  for (const control of root.querySelectorAll("[data-foundry-field]")) {
+    const field = control.dataset.foundryField;
+    if (field !== "acknowledge") control.setAttribute("aria-invalid", String(Boolean(plan.errors[field])));
+  }
+  for (const error of root.querySelectorAll("[data-foundry-error]")) {
+    error.textContent = plan.errors[error.dataset.foundryError] || "";
+  }
+  const summary = $("learn-foundry-errors");
+  const errors = Object.values(plan.errors);
+  if (summary) {
+    summary.textContent = draft.error || (errors.length ? `${errors.length} field${errors.length === 1 ? "" : "s"} need attention before sealing.` : "");
+    summary.className = summary.textContent ? "note learn-action-error" : "";
+    if (draft.error) { summary.setAttribute("role", "alert"); summary.setAttribute("tabindex", "-1"); }
+    else { summary.removeAttribute("role"); summary.removeAttribute("tabindex"); }
+  }
+  learnFoundryRenderSeal();
+}
+
+async function learnFoundryRefreshSeal() {
+  const draft = store.learnFoundry;
+  if (!draft || !draft.open || draft.submitting) return;
+  const plan = learnFoundryPlan(draft);
+  const generation = ++draft.sealGeneration;
+  if (!plan.valid) {
+    draft.sealId = ""; draft.sealText = ""; draft.sealing = false;
+    learnFoundryRefreshFields();
+    return;
+  }
+  if (draft.sealId && draft.sealText === plan.contentText) {
+    draft.sealing = false;
+    learnFoundryRefreshFields();
+    return;
+  }
+  draft.sealId = ""; draft.sealText = plan.contentText; draft.sealing = true;
+  learnFoundryRefreshFields();
+  try {
+    const candidateId = await learnCandidateContentDigest(plan.content);
+    if (store.learnFoundry !== draft || draft.sealGeneration !== generation || learnFoundryPlan(draft).contentText !== plan.contentText) return;
+    draft.sealId = candidateId; draft.sealing = false; draft.error = "";
+  } catch (error) {
+    if (store.learnFoundry !== draft || draft.sealGeneration !== generation) return;
+    draft.sealId = ""; draft.sealing = false; draft.error = error.message || "Candidate identity could not be computed.";
+  }
+  learnFoundryRefreshFields();
+}
+
+function learnFoundryRender() {
+  const draft = store.learnFoundry;
+  const panel = $("learn-foundry"), button = $("btn-learn-create");
+  const open = Boolean(draft && draft.open);
+  panel.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  button.textContent = open ? "Proposal foundry open" : "Create proposal";
+  button.disabled = Boolean((store.learn && store.learn.action) || (draft && draft.submitting));
+  if (!open) { panel.innerHTML = ""; return; }
+  const plan = learnFoundryPlan(draft);
+  panel.innerHTML = learnFoundryHtml(draft, plan);
+  learnFoundryRefreshSeal();
+  if (draft.restoreFocus && !(store.learn && store.learn.loading)) {
+    draft.restoreFocus = false;
+    $("learn-foundry-title")?.focus({ preventScroll: true });
+  }
+}
+
+function learnFoundryOpen(runId) {
+  const evidenceRun = String(runId || "").trim();
+  if (!store.learnFoundry) store.learnFoundry = learnFoundryDefault(evidenceRun);
+  const draft = store.learnFoundry;
+  if (evidenceRun) {
+    draft.runId = evidenceRun;
+    const ids = learnFoundryIdList(draft.evidenceRuns, "Evidence runs").ids;
+    if (!ids.includes(evidenceRun)) draft.evidenceRuns = [evidenceRun, ...ids].slice(0, LEARN_EVIDENCE_LIMIT).join("\n");
+  }
+  draft.open = true; draft.error = ""; draft.receipt = null; draft.restoreFocus = true;
+  store.view = "learn";
+  renderMain();
+  $("main").scrollTop = 0;
+}
+
+function learnFoundryClose() {
+  const draft = store.learnFoundry;
+  if (!draft || draft.submitting) return;
+  draft.open = false;
+  learnFoundryRender();
+  $("btn-learn-create").focus({ preventScroll: true });
+}
+
+function learnFoundryDiscard() {
+  const draft = store.learnFoundry;
+  if (draft && draft.submitting) return;
+  store.learnFoundry = learnFoundryDefault("");
+  store.learnFoundry.open = true;
+  store.learnFoundry.restoreFocus = true;
+  learnFoundryRender();
+}
+
+function learnFoundryHandleEdit(event) {
+  const draft = store.learnFoundry;
+  const field = event.target && event.target.dataset.foundryField;
+  if (!draft || !field || draft.submitting) return;
+  draft[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+  draft.error = ""; draft.receipt = null;
+  if (field !== "acknowledge") draft.acknowledge = false;
+  if (field === "kind" || field === "policyFamily") {
+    learnFoundryRender();
+    const selector = field === "kind"
+      ? `[data-foundry-field="kind"][value="${draft.kind}"]`
+      : '[data-foundry-field="policyFamily"]';
+    $("learn-foundry").querySelector(selector)?.focus({ preventScroll: true });
+    return;
+  }
+  learnFoundryRefreshFields();
+  if (field !== "acknowledge") learnFoundryRefreshSeal();
+}
+
+async function learnFoundrySubmit() {
+  const draft = store.learnFoundry;
+  const plan = learnFoundryPlan(draft);
+  if (!draft || draft.submitting || !plan.valid || !draft.acknowledge || !/^[a-f0-9]{64}$/.test(draft.sealId) || draft.sealText !== plan.contentText) {
+    learnFoundryRefreshFields();
+    const first = plan.first && $("learn-foundry").querySelector(`[data-foundry-field="${plan.first}"]`);
+    (first || $("learn-foundry-errors"))?.focus({ preventScroll: true });
+    $("learn-announcer").textContent = "Proposal creation is blocked until the change, evidence, and immutable seal are complete.";
+    return;
+  }
+  // Candidate.created_at is the learning instant, not the time an empty
+  // browser form happened to open. Freeze it at the acknowledged attempt.
+  draft.createdAt = new Date().toISOString();
+  const candidatePlan = { ...plan, createdAt: draft.createdAt };
+  const candidate = learnFoundryCandidate(candidatePlan, draft.sealId);
+  const candidateId = candidate.candidate_id;
+  const connection = store.conn && { ...store.conn };
+  const generation = ++draft.submitGeneration;
+  draft.submitting = true; draft.error = ""; draft.receipt = null;
+  learnFoundryRender();
+  $("learn-announcer").textContent = "Verifying finalized evidence before creating the immutable proposal.";
+  try {
+    const runs = Array.from(new Set([plan.runId, ...(plan.evidence.run_ids || [])]));
+    const feeds = await Promise.all(runs.map((runId) => apiForConnection(connection, "GET", `/runs/${encodeURIComponent(runId)}/events`)));
+    if (!learnFoundryCurrent(draft, generation, connection)) return;
+    for (let index = 0; index < runs.length; index++) {
+      const finalized = learnFinalizedRunEvidence(feeds[index], runs[index]);
+      if (finalized.error) throw new ApiError(409, { error: "active_evidence", message: finalized.error });
+    }
+    const freshPlan = learnFoundryPlan(draft);
+    const freshId = await learnCandidateContentDigest(freshPlan.content);
+    if (!learnFoundryCurrent(draft, generation, connection)) return;
+    if (!freshPlan.valid || freshId !== candidateId || freshPlan.contentText !== plan.contentText) {
+      throw new ApiError(409, { error: "draft_changed", message: "The proposal changed during evidence verification. Review the new seal before creating it." });
+    }
+    const payload = { candidate, run_id: plan.runId };
+    if (plan.parent) payload.parent = plan.parent;
+    let receipt;
+    try {
+      const response = await apiForConnection(connection, "POST", "/learn/candidates", payload);
+      receipt = learnFoundryReceipt(response, candidate);
+      if (receipt.error) {
+        const stored = await apiForConnection(connection, "GET", `/learn/candidates/${encodeURIComponent(candidateId)}`);
+        const checked = learnFoundryStoredRecord(stored, candidateId, plan.contentText);
+        if (checked.error) throw new ApiError(0, { error: "uncertain_receipt", message: receipt.error });
+        receipt = { record: checked.record, created: null, error: "" };
+      }
+    } catch (error) {
+      if ([400, 403, 404, 409, 422].includes(Number(error.status))) throw error;
+      try {
+        const stored = await apiForConnection(connection, "GET", `/learn/candidates/${encodeURIComponent(candidateId)}`);
+        const checked = learnFoundryStoredRecord(stored, candidateId, plan.contentText);
+        if (checked.error) throw error;
+        receipt = { record: checked.record, created: null, error: "" };
+      } catch {
+        throw new ApiError(0, { error: "uncertain_receipt", message: "Studio could not confirm whether Rusty stored this proposal. Keep the seal and refresh before retrying." });
+      }
+    }
+    if (!learnFoundryCurrent(draft, generation, connection)) return;
+    draft.submitting = false; draft.acknowledge = false;
+    const refresh = await learnLoad(true);
+    if (!connection || !store.conn || connection.baseUrl !== store.conn.baseUrl || connection.apiKey !== store.conn.apiKey) return;
+    const found = store.learn && store.learn.records.some((record) => learnCandidateId(record) === candidateId);
+    const message = learnFoundryCreationMessage(receipt.created);
+    if (found) {
+      store.learn.selected = candidateId;
+      store.learn.notice = message;
+      store.learnFoundry = null;
+      learnRender();
+      $("learn-detail-title")?.focus({ preventScroll: true });
+    } else {
+      draft.receipt = { created: receipt.created, message: `${message} Candidate ${candidateId} is outside the bounded inbox snapshot.` };
+      draft.error = refresh.candidates ? "" : "The proposal was confirmed, but the candidate inbox could not be refreshed.";
+      learnFoundryRender();
+      $("learn-foundry-seal")?.focus?.({ preventScroll: true });
+    }
+    $("learn-announcer").textContent = message;
+  } catch (error) {
+    if (!learnFoundryCurrent(draft, generation, connection)) return;
+    draft.submitting = false; draft.acknowledge = false;
+    draft.error = learnRefusalMessage(error);
+    learnFoundryRender();
+    $("learn-foundry-errors")?.focus({ preventScroll: true });
+    $("learn-announcer").textContent = `Proposal was not confirmed. ${draft.error}`;
+  }
+}
+
 async function learnLoad(quiet) {
   if (store.learn && store.learn.loading) return { candidates: false, versions: false, skipped: true };
   const previous = store.learn || {};
@@ -7264,6 +7870,7 @@ function learnFilters() {
 function learnRender() {
   const state = store.learn;
   const list = $("learn-list"), detail = $("learn-detail");
+  learnFoundryRender();
   if (!state || state.loading) {
     $("learn-summary").innerHTML = "";
     $("learn-statusline").textContent = "loading learning evidence…";
@@ -7272,7 +7879,8 @@ function learnRender() {
     detail.innerHTML = `<div class="empty">Waiting for governed evidence.</div>`;
     return;
   }
-  $("btn-learn-refresh").disabled = Boolean(state.action);
+  const busy = Boolean(state.action || (store.learnFoundry && store.learnFoundry.submitting));
+  $("btn-learn-refresh").disabled = busy;
   if (state.error) {
     $("learn-summary").innerHTML = "";
     $("learn-statusline").textContent = "unavailable";
@@ -7296,7 +7904,7 @@ function learnRender() {
   if (!shown.some((record) => learnCandidateId(record) === state.selected)) state.selected = learnCandidateId(shown[0]);
   list.innerHTML = shown.map((record) => {
     const id = learnCandidateId(record), selected = id === state.selected;
-    return `<button class="learn-item" type="button" role="option" data-learn-id="${escapeHtml(id)}" aria-selected="${selected}" tabindex="${selected ? "0" : "-1"}"${state.action ? " disabled" : ""} aria-label="Inspect ${escapeHtml(learnCandidateTitle(record))}, ${escapeHtml(learnStatusLabel(record.status))}">${learnCandidateRowHtml(record)}</button>`;
+    return `<button class="learn-item" type="button" role="option" data-learn-id="${escapeHtml(id)}" aria-selected="${selected}" tabindex="${selected ? "0" : "-1"}"${busy ? " disabled" : ""} aria-label="Inspect ${escapeHtml(learnCandidateTitle(record))}, ${escapeHtml(learnStatusLabel(record.status))}">${learnCandidateRowHtml(record)}</button>`;
   }).join("");
   const selected = state.records.find((record) => learnCandidateId(record) === state.selected);
   detail.innerHTML = learnDetailHtml(state, selected);
@@ -7304,7 +7912,8 @@ function learnRender() {
 
 function learnSelect(candidateId, focusDetail) {
   const state = store.learn;
-  if (!state || state.action || !state.records.some((record) => learnCandidateId(record) === candidateId)) return false;
+  if (!state || state.action || (store.learnFoundry && store.learnFoundry.submitting) ||
+      !state.records.some((record) => learnCandidateId(record) === candidateId)) return false;
   state.selected = candidateId;
   state.notice = null;
   learnRender();
@@ -7798,6 +8407,11 @@ function init() {
     if (ev && ev.id && ev.id !== r.selected) recSelect(ev.id, true);
   });
   const recClick = (e) => {
+    if (e.target.closest("[data-propose-run]")) {
+      const runId = store.recorder && store.recorder.complete ? store.recorder.runId : "";
+      if (runId) learnFoundryOpen(runId);
+      return;
+    }
     const storyTarget = e.target.closest("[data-story-eid]");
     if (storyTarget) {
       recSelect(storyTarget.getAttribute("data-story-eid"), false, true);
@@ -8031,6 +8645,10 @@ function init() {
   // evaluation, promotion, and rollback decision. Selection is roving and
   // lifecycle actions reconcile the authoritative server state afterward.
   $("btn-learn-open").onclick = openLearn;
+  $("btn-learn-create").onclick = () => {
+    if (store.learnFoundry && store.learnFoundry.open) learnFoundryClose();
+    else learnFoundryOpen("");
+  };
   $("btn-learn-refresh").onclick = () => learnLoad(false);
   $("btn-learn-clear").onclick = learnClearFilters;
   $("inp-learn-search").addEventListener("input", () => {
@@ -8066,6 +8684,16 @@ function init() {
     if (!form) return;
     event.preventDefault();
     learnSubmitAction(form);
+  });
+  $("learn-foundry").addEventListener("input", learnFoundryHandleEdit);
+  $("learn-foundry").addEventListener("click", (event) => {
+    if (event.target.closest("[data-foundry-close]")) { learnFoundryClose(); return; }
+    if (event.target.closest("[data-foundry-discard]")) learnFoundryDiscard();
+  });
+  $("learn-foundry").addEventListener("submit", (event) => {
+    if (event.target.id !== "learn-foundry-form") return;
+    event.preventDefault();
+    learnFoundrySubmit();
   });
 
   // Durable tasks: open the tenant-wide queue view, filter, refresh, and

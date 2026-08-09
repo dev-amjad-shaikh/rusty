@@ -120,9 +120,10 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Memory records and structural conflicts have a human-readable audit workspace; correction,
   resolution, approval, consolidation, and forgetting workflows remain.
 - Learning candidates, replay-backed evaluation, scoped promotion approval, active/canary version
-  pointers, and rollback receipts now have a governed control room. Candidate creation/distillation,
-  before/after case analysis, envelope discovery, assigned or signed approval identities, drift/canary
-  monitoring, and complete runtime activation proof remain.
+  pointers, rollback receipts, and guided prompt/policy/tool-permission creation now have a governed
+  control room. Memory-set and automatic/correction-driven distillation, before/after case analysis,
+  envelope discovery, assigned or signed approval identities, drift/canary monitoring, and complete
+  runtime activation proof remain.
 - Triggers, crons, credentials, artifacts, deployments, and fleet operations are not unified.
 - Authentication identifies a tenant API key, not an attributed human or service principal with scoped roles and auditable authority.
 - The current connection flow persists the API key in browser storage and needs the safer session model defined below.
@@ -270,9 +271,12 @@ Exit criteria:
 Status: **partially delivered**. The immutable candidate inbox, proposal and provenance dossier,
 finalized replay-fixture evaluation preflight, evaluation verdict, deployment-envelope gate, exact
 candidate-scoped approval handoff, active/canary serving pointers, promotion and rollback receipts, and
-byte-exact rollback action are available. Candidate creation, durable review assignment, before/after
-case comparison, drift monitoring, automatic canary decisions, and complete memory mutation/forgetting
-remain. Policy candidates depend on the connected server's runtime policy plane for activation proof.
+byte-exact rollback action are available. The proposal foundry now composes exact prompt, supported
+executor-policy, and tool-permission candidates; binds finalized evidence; exposes the content-address
+before creation; and accepts a direct completed-run handoff from Flight Recorder. Memory-set and
+automatic/correction-driven distillation, durable review assignment, before/after case comparison,
+drift monitoring, automatic canary decisions, and complete memory mutation/forgetting remain. Policy
+candidates depend on the connected server's runtime policy plane for activation proof.
 
 Scope:
 
@@ -341,7 +345,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 10 | Race, quorum, supervision, recovery, and team preflight | Not started | Completes safe multi-agent construction |
 | 11 | Evaluation experiment workspace and comparison report | Platform API needed | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |
-| 13 | Learning candidate inbox, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, finalized replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; candidate creation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
+| 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
 | 14 | Environment, deployment, and fleet surfaces | Not started | Builds operations on stable identity, version, quality, and audit concepts |
 
 If a required server contract is actively changing, work proceeds on the highest-value independent Studio slice rather than inventing a temporary API or blocking visible progress.

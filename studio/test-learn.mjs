@@ -5,6 +5,8 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { webcrypto } from "node:crypto";
+import { TextEncoder } from "node:util";
 import path from "node:path";
 import vm from "node:vm";
 
@@ -15,13 +17,13 @@ if (!match) { console.error("FAIL: no <script> block found in index.html"); proc
 const src = match[1].replace(/\ninit\(\);\s*$/, "\n");
 if (/\ninit\(\);/.test(src)) { console.error("FAIL: bootstrap init() was not stripped cleanly"); process.exit(1); }
 
-const sandbox = {};
+const sandbox = { crypto: webcrypto, TextEncoder };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__learn = {
   LEARN_SNAPSHOT_LIMIT, LEARN_RENDER_LIMIT, LEARN_VERSION_LIMIT, LEARN_ID_LIMIT, LEARN_SURFACE_LIMIT,
   LEARN_TEXT_LIMIT, LEARN_PREVIEW_LIMIT,
-  LEARN_REPLAY_LIMIT, LEARN_REPLAY_TEXT_LIMIT,
+  LEARN_REPLAY_LIMIT, LEARN_REPLAY_TEXT_LIMIT, LEARN_CANDIDATE_CONTENT_LIMIT, LEARN_EVIDENCE_LIMIT,
   learnObject, learnText, learnNormalizeRecord, learnNormalizePointer,
   learnKind, learnKindLabel, learnStatusLabel, learnScopeAddressKey, learnScopeAddress, learnSurfaceKey, learnSurface,
   learnCandidateTitle, learnCandidateId, learnSearchText, learnBuildSearchIndex,
@@ -34,6 +36,11 @@ globalThis.__learn = {
   learnErrorHtml, learnPromotionRequiredEffect, learnActionPath,
   learnRefusalMessage, learnCandidateSnapshot, learnVersionSnapshot,
   learnConflictNeedsRefresh, learnFinalizedRunEvidence, learnReplayEvidenceJournal, learnTransitionMessage,
+  learnFoundryDefault, learnFoundryIdList, learnCanonicalJsonValue, learnCandidateContentText,
+  learnCandidateContentDigest, learnFoundryWholeNumber, learnFoundryPolicy, learnFoundryPlan,
+  learnFoundrySurface, learnFoundryCandidate, learnFoundryStoredRecord, learnFoundryExactCandidate, learnFoundryReceipt,
+  learnFoundryCreationMessage,
+  learnFoundryStepsHtml, learnFoundrySealHtml, learnFoundryHtml,
 };`, sandbox, { filename: "index.html<script>" });
 
 const L = sandbox.__learn;
@@ -103,7 +110,101 @@ function eq(name, got, want) {
 check("bounds: learning snapshots, rendering, pointers, identifiers, text, and previews are explicit",
   L.LEARN_SNAPSHOT_LIMIT === 200 && L.LEARN_RENDER_LIMIT === 100 && L.LEARN_VERSION_LIMIT === 200 &&
   L.LEARN_ID_LIMIT === 256 && L.LEARN_SURFACE_LIMIT === 4096 && L.LEARN_TEXT_LIMIT === 4096 && L.LEARN_PREVIEW_LIMIT === 32768 &&
-  L.LEARN_REPLAY_LIMIT === 8 && L.LEARN_REPLAY_TEXT_LIMIT === 2048);
+  L.LEARN_REPLAY_LIMIT === 8 && L.LEARN_REPLAY_TEXT_LIMIT === 2048 &&
+  L.LEARN_CANDIDATE_CONTENT_LIMIT === 32768 && L.LEARN_EVIDENCE_LIMIT === 8);
+
+const foundryDraft = {
+  ...L.learnFoundryDefault("run-abc"),
+  promptText: "You are a careful support agent. Answer tersely.",
+  authorId: "amjad",
+  acknowledge: true,
+};
+const foundryPlan = L.learnFoundryPlan(foundryDraft);
+const foundryId = await L.learnCandidateContentDigest(foundryPlan.content, webcrypto);
+const foundryCandidate = L.learnFoundryCandidate(foundryPlan, foundryId);
+check("foundry identity: exact Rust prompt bytes reproduce the frozen candidate address",
+  foundryPlan.contentText === '{"kind":"prompt","name":"system","prompt":"You are a careful support agent. Answer tersely."}' &&
+  foundryId === "4859edea224c5cbe1fb1eab37fbee365f0c64b183839f51a3e5331f58574362f");
+check("foundry defaults: a source run binds both the creation journal and observed evidence",
+  foundryDraft.runId === "run-abc" && foundryDraft.evidenceRuns === "run-abc" && foundryPlan.evidence.run_ids[0] === "run-abc" &&
+  foundryDraft.restoreFocus === false);
+eq("foundry evidence: identifiers are trimmed, deduplicated, and ordered",
+  L.learnFoundryIdList(" run-a, run-b\nrun-a ", "Evidence runs").ids, ["run-a", "run-b"]);
+check("foundry evidence: item, byte, and control-character bounds fail closed",
+  Boolean(L.learnFoundryIdList(Array.from({ length: 9 }, (_, i) => `run-${i}`).join(","), "Evidence runs").error) &&
+  Boolean(L.learnFoundryIdList("x".repeat(2049), "Evidence runs").error) &&
+  Boolean(L.learnFoundryIdList("run\u0001bad", "Evidence runs").error));
+check("foundry prompt: empty content, invalid surfaces, and oversized text cannot mint a plan",
+  !L.learnFoundryPlan({ ...foundryDraft, promptText: " " }).valid &&
+  !L.learnFoundryPlan({ ...foundryDraft, promptName: "bad\nname" }).valid &&
+  !L.learnFoundryPlan({ ...foundryDraft, promptText: "x".repeat(32769) }).valid);
+
+const retryDraft = { ...foundryDraft, kind: "policy", policyFamily: "retry" };
+const retryPlan = L.learnFoundryPlan(retryDraft);
+eq("foundry policy: retry uses the exact live policy contract", retryPlan.content.parameters,
+  { base_delay_ms: 1000, max_attempts: 3, max_delay_ms: 300000 });
+check("foundry policy: canonical parameter keys ignore browser insertion order",
+  L.learnCandidateContentText({ kind: "policy", family: "retry", parameters: { max_delay_ms: 3, base_delay_ms: 1, max_attempts: 2 } }) ===
+  '{"kind":"policy","family":"retry","parameters":{"base_delay_ms":1,"max_attempts":2,"max_delay_ms":3}}');
+check("foundry policy: impossible retry ranges and unsafe integers fail before hashing",
+  !L.learnFoundryPlan({ ...retryDraft, retryBase: "2000", retryMax: "1000" }).valid &&
+  !L.learnFoundryPlan({ ...retryDraft, retryAttempts: "4294967296" }).valid &&
+  !L.learnFoundryPlan({ ...retryDraft, retryBase: "1.5" }).valid);
+eq("foundry policy: optional timeout bounds retain only explicit values",
+  L.learnFoundryPlan({ ...retryDraft, policyFamily: "timeout", timeoutDefault: "5000", timeoutMax: "" }).content.parameters,
+  { default_millis: 5000 });
+eq("foundry policy: blank concurrency means the real unlimited contract",
+  L.learnFoundryPlan({ ...retryDraft, policyFamily: "concurrency", concurrencyMax: "" }).content.parameters, {});
+check("foundry policy: unsupported executor families are absent rather than false affordances",
+  !L.learnFoundryPlan({ ...retryDraft, policyFamily: "worker_placement" }).valid &&
+  !L.learnFoundryPlan({ ...retryDraft, policyFamily: "checkpoint_placement" }).valid);
+
+const toolDraft = { ...foundryDraft, kind: "tool_permission", toolName: "billing", toolDirection: "widen" };
+const toolPlan = L.learnFoundryPlan(toolDraft);
+eq("foundry tool permission: guided direction maps to the frozen wire shape", toolPlan.content,
+  { kind: "tool_permission", tool: "billing", direction: "widen" });
+check("foundry candidate: attribution, evidence, timestamp, content, and seal travel together",
+  foundryCandidate.candidate_id === foundryId && foundryCandidate.distilled_by.human_id === "amjad" &&
+  foundryCandidate.evidence.run_ids[0] === "run-abc" && foundryCandidate.created_at === foundryDraft.createdAt);
+check("foundry candidate: sparse evidence is omitted instead of forged",
+  !Object.prototype.hasOwnProperty.call(L.learnFoundryCandidate(L.learnFoundryPlan({ ...foundryDraft, evidenceRuns: "" }), foundryId), "evidence"));
+
+const createdRecord = { candidate: foundryCandidate, status: "created" };
+check("foundry receipt: a new exact immutable record is accepted",
+  L.learnFoundryReceipt({ candidate_id: foundryId, created: true, record: createdRecord }, foundryCandidate).record.status === "created");
+check("foundry receipt: malformed identity, mismatched content, and impossible new lifecycle fail closed",
+  Boolean(L.learnFoundryReceipt({ candidate_id: "f".repeat(64), created: true, record: createdRecord }, foundryCandidate).error) &&
+  Boolean(L.learnFoundryReceipt({ candidate_id: foundryId, created: true, record: { ...createdRecord, candidate: { ...foundryCandidate, content: { ...foundryCandidate.content, prompt: "changed" } } } }, foundryCandidate).error) &&
+  Boolean(L.learnFoundryReceipt({ candidate_id: foundryId, created: true, record: { candidate: foundryCandidate, status: "evaluated", evaluation: { ...evaluation, candidate_id: foundryId } } }, foundryCandidate).error));
+check("foundry receipt: a new record must echo attribution, evidence, and learning instant exactly",
+  Boolean(L.learnFoundryReceipt({ candidate_id: foundryId, created: true, record: { ...createdRecord, candidate: { ...foundryCandidate, distilled_by: { type: "human", human_id: "other" } } } }, foundryCandidate).error) &&
+  Boolean(L.learnFoundryReceipt({ candidate_id: foundryId, created: true, record: { ...createdRecord, candidate: { ...foundryCandidate, evidence: { run_ids: ["other-run"] } } } }, foundryCandidate).error) &&
+  Boolean(L.learnFoundryReceipt({ candidate_id: foundryId, created: true, record: { ...createdRecord, candidate: { ...foundryCandidate, created_at: "2026-08-09T12:00:00.000Z" } } }, foundryCandidate).error));
+check("foundry receipt: equivalent RFC 3339 timestamp spellings survive server normalization",
+  L.learnFoundryExactCandidate({ ...foundryCandidate, created_at: "2026-08-09T12:00:00Z" },
+    { ...foundryCandidate, created_at: "2026-08-09T12:00:00.000Z" }) &&
+  L.learnFoundryExactCandidate({ ...foundryCandidate, created_at: "2026-08-09T05:00:00-07:00" },
+    { ...foundryCandidate, created_at: "2026-08-09T12:00:00.000Z" }));
+const priorCandidate = { ...foundryCandidate, distilled_by: { type: "human", human_id: "original" },
+  evidence: { run_ids: ["original-run"] }, created_at: "2026-08-08T12:00:00.000Z" };
+check("foundry receipt: an existing content address preserves its original envelope and later lifecycle",
+  L.learnFoundryReceipt({ candidate_id: foundryId, created: false, record: { candidate: priorCandidate, status: "evaluated", evaluation: { ...evaluation, candidate_id: foundryId } } }, foundryCandidate).record.candidate.distilled_by.human_id === "original");
+eq("foundry receipt: confirmed, duplicate, and unknowable creation states remain distinct",
+  [true, false, null].map(L.learnFoundryCreationMessage), [
+    "Rusty journaled and stored the proposal. It is not active; evaluation is the next gate.",
+    "That content address already existed. Rusty preserved the original attribution and lifecycle instead of creating a duplicate.",
+    "Rusty has the sealed proposal, but Studio could not determine whether this request created it or found it already. The authoritative stored attribution and lifecycle are shown.",
+  ]);
+check("foundry accessibility: exactly one creation step is current and the sealed action needs acknowledgement",
+  (L.learnFoundryStepsHtml(foundryPlan, { ...foundryDraft, sealId: foundryId, sealing: false }).match(/aria-current="step"/g) || []).length === 1 &&
+  L.learnFoundrySealHtml({ ...foundryDraft, sealId: foundryId, sealText: foundryPlan.contentText, acknowledge: false }, foundryPlan).includes(" disabled"));
+check("foundry rendering: untrusted proposal text is escaped and memory-set routing is explained",
+  !L.learnFoundryHtml({ ...foundryDraft, promptText: "<script>unsafe</script>" }, L.learnFoundryPlan({ ...foundryDraft, promptText: "<script>unsafe</script>" })).includes("<script>") &&
+  L.learnFoundryHtml(foundryDraft, foundryPlan).includes("Memory-set proposals start from governed corrections") &&
+  L.learnFoundryHtml(foundryDraft, foundryPlan).includes('id="learn-foundry-seal" tabindex="-1"'));
+check("foundry accessibility: incomplete drafts stay visible without firing assertive alerts while typing",
+  !L.learnFoundryHtml({ ...foundryDraft, promptText: "", authorId: "" }, L.learnFoundryPlan({ ...foundryDraft, promptText: "", authorId: "" })).includes('role="alert"') &&
+  L.learnFoundryHtml({ ...foundryDraft, error: "Server refused the proposal." }, foundryPlan).includes('role="alert" tabindex="-1"'));
 check("normalization: valid immutable records retain their lifecycle", L.learnNormalizeRecord(prompt).status === "created");
 check("normalization: source candidate records are not mutated", L.learnNormalizeRecord(prompt) !== prompt && prompt.candidate.content.prompt.includes("<always>"));
 check("normalization: records without bounded identity fail closed", !L.learnNormalizeRecord({ ...prompt, candidate: { ...prompt.candidate, candidate_id: "x".repeat(257) } }));
@@ -242,7 +343,7 @@ check("markup: Learning is a first-class sidebar workspace with a labelled headi
 check("markup: the evidence rail names the real governance path", html.includes("Immutable proposal") && html.includes("Journaled evidence gate") && html.includes("Reversible serving pointer"));
 check("accessibility: candidate list is a labelled listbox with a dedicated action announcer", html.includes('id="learn-list" role="listbox"') && html.includes('id="learn-announcer" role="status" aria-live="polite"'));
 check("interaction: search is debounced and candidate selection is keyboard operable", html.includes("store.learnSearchTimer = setTimeout") && html.includes('["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"]'));
-check("interaction: candidate switching locks while a governed action is in flight", html.includes('${state.action ? " disabled" : ""} aria-label="Inspect'));
+check("interaction: candidate switching locks while any governed mutation is in flight", html.includes('${busy ? " disabled" : ""} aria-label="Inspect'));
 check("lifecycle: server and tenant changes invalidate candidate reads and actions", html.includes("store.learnRequest += 1;") && html.includes("learnRequestCurrent(request, connection)"));
 check("lifecycle: refreshed receipts cannot attach to a replaced connection or stale load", html.includes("connection.baseUrl !== store.conn.baseUrl") && html.includes("learnObject(refresh).stale"));
 check("lifecycle: uncertain receipts force an authoritative reread", html.includes("The transition receipt was not confirmed") && html.includes("await learnLoad(true);"));
@@ -251,7 +352,28 @@ const eventRead = html.indexOf('const eventFeed = await apiForConnection(connect
 const fixtureRead = html.indexOf('const fixture = await apiForConnection(connection, "GET", `/runs/${encodeURIComponent(runId)}/fixture`)');
 check("lifecycle: finalized status is read before the exact fixture and before posting journals", eventRead >= 0 && fixtureRead > eventRead && html.includes("learnReplayEvidenceJournal(fixture, eventFeed, runId)") && html.includes("result.payload.request.replay_evidence = evidence"));
 check("lifecycle: malformed pointer evidence blocks unsafe promotion and rollback", html.includes("learnVersionSnapshot") && html.includes("pointer-changing actions are blocked"));
+check("foundry lifecycle: connection changes discard proposal drafts before a new tenant can see them", html.includes("store.learnFoundry = null;"));
+const foundryEvidenceRead = html.indexOf('const feeds = await Promise.all(runs.map((runId) => apiForConnection(connection, "GET", `/runs/${encodeURIComponent(runId)}/events`)))');
+const foundryCreatePost = html.indexOf('apiForConnection(connection, "POST", "/learn/candidates", payload)');
+check("foundry lifecycle: every exact run is finalized before candidate creation", foundryEvidenceRead >= 0 && foundryCreatePost > foundryEvidenceRead && html.includes("learnFinalizedRunEvidence(feeds[index], runs[index])"));
+check("foundry lifecycle: uncertain or malformed receipts reconcile through the exact candidate route",
+  html.includes('`/learn/candidates/${encodeURIComponent(candidateId)}`') && html.includes("learnFoundryStoredRecord(stored, candidateId, plan.contentText)") &&
+  (html.match(/created: null/g) || []).length === 2);
+check("foundry lifecycle: submit freezes all editable fieldsets and stale connection receipts fail their generation guard",
+  html.includes('<fieldset${draft.submitting ? " disabled" : ""}') && html.includes("learnFoundryCurrent(draft, generation, connection)") &&
+  html.indexOf("draft.createdAt = new Date().toISOString()") < html.indexOf("const candidatePlan = { ...plan, createdAt: draft.createdAt }") &&
+  html.indexOf("const candidatePlan = { ...plan, createdAt: draft.createdAt }") < html.indexOf("const candidate = learnFoundryCandidate(candidatePlan, draft.sealId)"));
+check("foundry focus: asynchronous inbox refresh and contract switches restore a useful keyboard target",
+  html.includes("draft.restoreFocus && !(store.learn && store.learn.loading)") &&
+  html.includes('`[data-foundry-field="kind"][value="${draft.kind}"]`') &&
+  html.includes("querySelector(selector)?.focus({ preventScroll: true })"));
+check("foundry markup: Learn exposes an expandable proposal workspace with typed change, evidence, and seal stages",
+  html.includes('id="btn-learn-create"') && html.includes('id="learn-foundry"') && html.includes("Immutable content seal") && html.includes("Creation journal run"));
+check("foundry copy: declared attribution never masquerades as authenticated identity",
+  html.includes("Declared attribution is journaled, but this API-key session does not authenticate the named person."));
 check("responsive: learning layout, toolbar, dossier, and action forms collapse intentionally", html.includes(".learn-layout { grid-template-columns: 1fr; }") && html.includes(".learn-toolbar, .learn-dossier, .learn-action-grid { grid-template-columns: 1fr; }"));
+check("responsive: the foundry stacks its form, seal, type choices, and fields at narrow widths",
+  html.includes(".learn-foundry-body { grid-template-columns: 1fr; }") && html.includes(".learn-foundry-kinds, .learn-foundry-grid { grid-template-columns: 1fr; }"));
 check("design: candidate lifecycle uses text and shape, not color alone", html.includes('.learn-status::before') && html.includes("learnStatusLabel(status)"));
 
 if (failed) {

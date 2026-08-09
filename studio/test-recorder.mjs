@@ -27,7 +27,7 @@ globalThis.__rec = {
   recKindColor, recKindShort, recPayloadHtml, recDetailHtml, recMarkerHtml,
   recEffectHtml, recFormatUsd, recFormatTokens, REC_KIND_COLORS, REC_EFFECT_INFO,
   recInlineValue, recIssueMessage, recIsSuspensionCheckpoint, recInvestigation,
-  recStoryStepHtml, recInvestigationHtml,
+  recStoryStepHtml, recFinalized, recInvestigationHtml,
   recReplayBannerHtml, recApiErrorBannerHtml, recTotalsHtml,
   recCompareRows, recCmpEventHtml, recCompareHtml,
 };`, sandbox, { filename: "index.html<script>" });
@@ -223,6 +223,13 @@ eq("recFormatTokens missing", R.recFormatTokens(null), "—");
     storyHtml.includes(`data-story-eid="${RUN}:9"`));
   check("investigation html: buttons have descriptive accessible names",
     storyHtml.includes('aria-label="First error event: checkpoint_written · seq 13. View evidence"'));
+  check("investigation html: a finalized journal can become proposal evidence",
+    storyHtml.includes("Use this finalized journal as attributable evidence") && storyHtml.includes("data-propose-run"));
+  check("investigation html: an in-flight journal cannot become proposal evidence",
+    !R.recInvestigationHtml(errorJournal, false).includes("data-propose-run"));
+  check("investigation html: only literal finalized evidence exposes proposal handoff",
+    R.recFinalized(true) && !R.recFinalized() && !R.recFinalized(null) && !R.recFinalized("true") &&
+    !R.recInvestigationHtml(errorJournal, "true").includes("data-propose-run"));
 }
 
 {
@@ -351,6 +358,11 @@ check("investigation markup: updates are announced politely",
 check("investigation interaction: evidence buttons share delegated selection",
   html.includes('$("rec-investigation").addEventListener("click", recClick)') &&
   html.includes('e.target.closest("[data-story-eid]")'));
+check("investigation interaction: proposal handoff carries only the exact completed recorder run",
+  html.includes('e.target.closest("[data-propose-run]")') &&
+  html.includes("complete: recFinalized(res.complete)") &&
+  html.includes("store.recorder && store.recorder.complete ? store.recorder.runId") &&
+  html.includes("learnFoundryOpen(runId)"));
 check("investigation responsive: story and evidence panel stack before phone width",
   html.includes('.rec-story-spine { grid-template-columns: repeat(2, minmax(0, 1fr)); }') &&
   html.includes('.rec-split { flex-direction: column; }') &&
