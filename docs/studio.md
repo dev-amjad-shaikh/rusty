@@ -52,7 +52,15 @@ studio/
   and initial member window. Network-ambiguous attempts remain locked to the exact approved
   contract for convergent retry. If Rusty reuses an existing retry key, Studio discards the requested
   preview and loads the actual durable contract. Successful submissions open directly in the coordination
-  investigation. A **Team Run Desk** remembers sanitized coordination metadata for runs started or
+  investigation. A **Team Blueprint** shelf saves reusable structure for the current server/tenant
+  connection: declared team label, bound roles, manifest pins, accepted message kinds, effect classes,
+  context shape, outcome recipient, and fan-out or quorum policy. Its topology score shows how roles
+  converge before the blueprint is reopened in the composer. Every reopen reconciles the saved roles
+  against the live registry: missing roles, removed message contracts, widened context, or an unavailable
+  outcome recipient block loading; changed manifest pins require visible review and use the live pins.
+  Blueprint JSON import rejects unknown fields, and export is a bounded `rusty.team-blueprint/v1`
+  structural manifest. Task instructions, deadlines, coordination ids, causal parents, results,
+  acknowledgements, and receipts never enter a blueprint. A **Team Run Desk** remembers sanitized coordination metadata for runs started or
   attached in the current browser and server/tenant connection scope; task inputs, outputs, results, member
   identities, and API keys are never written into that ledger. Search and lifecycle filters find recent
   work, the pulse rail shows only settlement Rusty has actually reported, and a bounded three-request
@@ -306,7 +314,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   automatic/correction-driven distillation, and before/after case comparison remain future workflows.
   Policy proposals can be reviewed through the shared candidate contract; runtime policy activation requires the connected
   server's policy-plane implementation and must not be inferred from a promotion receipt alone.
-- **The team observatory is an evidence surface, not a team editor.** `team_id` is currently a label on
+- **The team observatory does not create durable team resources.** `team_id` is currently a label on
   durable agent registrations, not a separately versioned team resource. The registry endpoint is
   unpaginated; Studio retains the first 500 valid identities for rendering and reports omissions. It
   requests live status for at most 30 members of the selected label (always including the selected
@@ -326,7 +334,12 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   explicit warning if the evidence still differs. Composition currently targets at most the first 20
   identities in the selected registry group, supports bounded inline task inputs and up to 64 bounded
   context channels, and exposes the shipped delegate, fan-out, race, and quorum contracts. It does not
-  create a durable team definition. The view intentionally
+  create a durable team definition. Reusable blueprints are connection-scoped browser artifacts, not
+  server-side definitions and not shared across browsers or machines. They retain at most 20 structural
+  manifests in the current scope, 8 scopes and 80 manifests globally, under a hard 128 KiB storage
+  ceiling; an unavailable or partially retained browser store is reported as session-only. Their 64 KiB
+  import format rejects unknown fields so task/run content cannot be silently accepted and discarded.
+  The view intentionally
   offers no coordination restart, operator cancellation, team editing, coordination discovery, or replay controls.
   Those actions need their own runtime and safety contracts before they become honest affordances.
 - **Thread list is local-only.** The server (as of v0.4) has no `GET /threads`; the Studio's thread list lives in
@@ -386,7 +399,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   `cargo test -p rusty-server --test learn_gate` independently passed all 9 real
   server lifecycle cases, including scoped approval, canary binding, byte-exact rollback, restart
   durability, tenant isolation, and causal lifecycle journaling.
-- `node studio/test-fabric.mjs` — 164 assertions over bounded durable-agent normalization, deterministic
+- `node studio/test-fabric.mjs` — 198 assertions over bounded durable-agent normalization, deterministic
   declared-team grouping, assistant-versus-runtime identity language, mailbox health precedence,
   activation and supervision evidence, independent endpoint failures, tenant/request isolation,
   keyboard navigation and focus continuity, responsive semantics, bounded coordination dispositions,
@@ -396,6 +409,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   admission, quorum threshold/resolver semantics, exact sparse receipt validation, cancellation/waste
   preflight, compensatable effects, stable retry/deduplication identity, bounded task/context input and
   preview, durable-work acknowledgement, submission generation guards, composer accessibility,
+  strict and byte-preserving team-blueprint import/export, topology policy accessibility, distinct
+  per-blueprint action names, live role/kind/scope/manifest drift gates, fresh task-free composer hydration,
+  bounded connection-scoped blueprint persistence,
   privacy-minimized and tenant-isolated Team Run Desk persistence, hard scope/history/storage bounds,
   blocked-storage containment, search and lifecycle filters, authoritative terminal and dead-letter
   dispositions, accessible pulse-rail progress and button descriptions, refresh-safe keyboard focus,
@@ -409,6 +425,12 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   unavailable** without erasing its last observation; restarting the same durable store and refreshing
   restored **Completed**. At a 390 × 844 viewport the run status, observation age, pulse rail, and
   inspection action remained visible with no horizontal overflow.
+- Live against `cargo run -p rusty-server --example server_demo`: shaped and saved a three-role fan-out
+  blueprint, reloaded Studio, and recovered the same browser-scoped structure. Reopening it cleared
+  one-off task text and deadlines before review. Removing a live role blocked use; restoring the roster
+  with a changed manifest pin required visible drift review and hydrated the current pin. A separately
+  imported two-role quorum blueprint rendered its exact threshold and resolver. At a 390 × 844 viewport
+  the shelf, topology score, readiness, and all actions remained visible with no horizontal overflow.
 - `node --check` on the extracted `<script>` block — syntax OK.
 - `node studio/test-recorder.mjs` — 111 unit tests over the Flight Recorder timeline helpers (extracted
   from the same `<script>` block, run under `vm`): `seq` ordering with missing-field fallbacks,

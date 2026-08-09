@@ -95,6 +95,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   discarded-work, threshold, resolver, tie, and compensation risk, requires an explicit durable-work
   acknowledgement, reconciles deduplicated keys to the actual durable contract, and opens the created
   coordination directly in its evidence view.
+- Save, import, export, and reopen connection-scoped structural team blueprints. Their topology score
+  keeps roles and convergence readable; live-registry reconciliation blocks missing roles, removed
+  contracts, widened scope, and missing recipients while making manifest-pin drift reviewable. Prompts,
+  task inputs, deadlines, run identities, results, acknowledgements, and receipts are excluded by contract.
 - Return to recently started or attached team coordinations through a browser-scoped Team Run Desk.
   Search and lifecycle filters, an accessible settlement pulse rail, bounded manual reconciliation,
   visibility-aware live following, and explicit stale-evidence recovery make current team work usable
@@ -118,8 +122,9 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Assistant configuration and durable identity are explained together, but there is no lifecycle link
   that binds an assistant version to a registered durable identity.
 - The Team Observatory provides inventory, all four typed coordination launches, read-only coordination
-  evidence, and browser-scoped run recall with a selected-run live settlement overlay. Persistent visual
-  topology, durable team definitions, creation/editing lifecycle, server-side coordination discovery,
+  evidence, browser-scoped run recall with a selected-run live settlement overlay, and portable structural
+  blueprints with a visual topology score and live-roster drift preflight. Server-persisted visual topology,
+  durable team definitions, creation/editing lifecycle, server-side coordination discovery,
   supervisor and recovery controls, richer active-member evidence, and coordinated replay remain.
 - The general-purpose dataset and evaluation experiment workspace remains library-only; governed
   learning-candidate evaluation is now server-backed in Studio.
@@ -223,13 +228,15 @@ Exit criteria:
 
 **Outcome:** design, test, and recover a durable agent team visually.
 
-Status: **usable coordination and run-monitoring foundation delivered**. Delegate, fan-out, race, and
+Status: **usable coordination, reusable-structure, and run-monitoring foundation delivered**. Delegate, fan-out, race, and
 quorum can be composed without raw payloads, with pinned manifests, pattern-specific safety preflight,
 stable retry, exact receipt checks, and direct TeamTrace investigation. The Team Run Desk adds
 privacy-minimized browser recall, bounded reconciliation, trustworthy terminal settlement progress,
-visibility-aware live following, and last-evidence preservation during outages. Persistent team topology
+visibility-aware live following, and last-evidence preservation during outages. Connection-scoped
+`rusty.team-blueprint/v1` manifests add a readable topology score, safe import/export, exact role and
+policy preservation, and live-registry drift gates without retaining task or run content. Server-persisted team topology
 and lifecycle, durable server-side discovery, richer active-member execution evidence, supervision
-control, recovery actions, templates, and coordinated replay remain.
+control, recovery actions, shared/versioned template lifecycle, and coordinated replay remain.
 
 Scope:
 
@@ -361,7 +368,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, conflict review, and selected-memory correction delivered; conflict decisions, candidate approval, consolidation, expiration, and forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
-| 9 | Visual team creation for delegate and fan-out | Usable launch foundation delivered — selected-group roster, per-role pinned contract, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; persistent team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
+| 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
 | 11 | Evaluation experiment workspace and comparison report | Platform API needed | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |

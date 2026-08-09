@@ -44,6 +44,8 @@ globalThis.__fabric = {
   FABRIC_COMPOSER_QUORUM_RESOLVERS,
   FABRIC_RUN_HISTORY_LIMIT, FABRIC_RUN_SCOPE_LIMIT, FABRIC_RUN_GLOBAL_LIMIT, FABRIC_RUN_STORAGE_LIMIT,
   FABRIC_RUN_REFRESH_LIMIT, FABRIC_RUN_REFRESH_CONCURRENCY, FABRIC_FOLLOW_INTERVAL, FABRIC_FOLLOW_MAX_INTERVAL,
+  FABRIC_BLUEPRINT_FORMAT, FABRIC_BLUEPRINT_LIMIT, FABRIC_BLUEPRINT_SCOPE_LIMIT,
+  FABRIC_BLUEPRINT_GLOBAL_LIMIT, FABRIC_BLUEPRINT_STORAGE_LIMIT, FABRIC_BLUEPRINT_TEXT_LIMIT,
   LS, store, connectionRunScope,
   agentParseJsonWithNumberKinds, fabricObject, fabricRequestCurrent, fabricNormalizeAgents, fabricGroupKey, fabricGroupLabel,
   fabricGroups, fabricNavigationTarget, fabricFocusData, fabricFocusIdentity, fabricRestoreFocus,
@@ -59,6 +61,11 @@ globalThis.__fabric = {
   fabricComposerErrorFor, fabricComposerPatternLabel, fabricComposerDecisionBraidHtml,
   fabricComposerHtml, fabricComposerResetApproval, fabricComposerValidateReceipt,
   fabricComposerReviewHtml, fabricComposerSubmitError,
+  fabricBlueprintGeneratedId, fabricNormalizeBlueprint, fabricBlueprintFromComposer,
+  fabricBlueprintCompatibility, fabricBlueprintApply, fabricEmptyBlueprintEnvelope,
+  fabricParseBlueprintEnvelope, fabricPruneBlueprintEnvelope, loadFabricBlueprints,
+  saveFabricBlueprints, fabricRememberBlueprint, fabricBlueprintScoreHtml,
+  fabricBlueprintDomId, fabricBlueprintCardHtml, fabricBlueprintListHtml, fabricBlueprintFilename, fabricParseBlueprintText,
   fabricRunSafeId, fabricRunTimestamp, fabricRunCount, fabricNormalizeRunRecord,
   fabricRunFromRecord, fabricRunFromPayload, fabricMergeRunHistory, fabricEmptyRunEnvelope,
   fabricParseRunEnvelope, fabricPruneRunEnvelope, loadFabricRunHistory, saveFabricRunHistory,
@@ -834,6 +841,230 @@ const connectedTrace = {
     F.fabricComposerSubmitError({ status: 409, body: { message: "already exists differently" } }).includes("already exists differently"));
 }
 
+const blueprintFixture = {
+  format: "rusty.team-blueprint/v1",
+  blueprint_id: "bp-insight-review-01",
+  name: "Insight review cell",
+  team_label: "insight-team",
+  created_at: "2026-08-09T06:00:00.000Z",
+  updated_at: "2026-08-09T06:00:00.000Z",
+  pattern: "fan_out",
+  roles: [
+    { agent_id: "researcher-1", member: "research", manifest_version: "researcher/1.4.0", kind: "research", effect: "read_only" },
+    { agent_id: "writer-1", member: "draft", manifest_version: "writer/2.0.0", kind: "draft", effect: "idempotent" },
+  ],
+  delegator: "lead-1",
+  fan_out: { max_in_flight: 2, on_member_failure: "partial" },
+};
+
+{
+  const draft = F.fabricComposerInitial();
+  draft.pattern = "fan_out";
+  draft.initialized = true;
+  draft.selectedIds = ["researcher-1", "writer-1"];
+  draft.assignments = {
+    "researcher-1": { member: "research", kind: "research", input: "classified customer prompt", effect: "read_only", deadline: "2099-01-01T00:00:00Z" },
+    "writer-1": { member: "draft", kind: "draft", input: "secret result", effect: "idempotent", deadline: "2099-01-02T00:00:00Z" },
+  };
+  draft.coordinationId = "live-run-should-not-persist";
+  draft.parent = "journal-parent-should-not-persist";
+  draft.delegator = "lead-1";
+  draft.maxInFlight = "2";
+  draft.failurePolicy = "partial";
+  draft.acknowledge = true;
+  draft.receipt = { submitted: [{ task_id: "secret-task" }] };
+  const made = F.fabricBlueprintFromComposer("Insight review cell", draft,
+    { teamId: "insight-team", members: [research, writer] }, [research, writer, lead],
+    Date.parse("2026-08-09T06:00:00Z"), () => "insight-review-01");
+  const raw = JSON.stringify(made.value);
+  check("blueprints: composer capture keeps exact reusable role and convergence structure",
+    !made.error && made.value.blueprint_id === "bp-insight-review-01" &&
+    made.value.roles[0].manifest_version === "researcher/1.4.0" && made.value.fan_out.max_in_flight === 2);
+  check("blueprints: task inputs, deadlines, coordination identity, causal parent, approval, and receipts never enter storage",
+    !raw.includes("classified") && !raw.includes("secret") && !raw.includes("deadline") &&
+    !raw.includes("live-run") && !raw.includes("journal-parent") && !raw.includes("acknowledge") && !raw.includes("receipt"));
+}
+
+{
+  const normalized = F.fabricNormalizeBlueprint(blueprintFixture);
+  check("blueprints: versioned structural manifests normalize without semantic loss",
+    !normalized.error && JSON.stringify(normalized.value) === JSON.stringify(blueprintFixture));
+  const roleLeak = structuredClone(blueprintFixture);
+  roleLeak.roles[0].input = "must not be ignored";
+  const runLeak = { ...structuredClone(blueprintFixture), coordination_id: "run-1" };
+  check("blueprints: unknown task or run fields fail closed instead of being silently dropped",
+    F.fabricNormalizeBlueprint(roleLeak).error.includes("unsupported field") &&
+    F.fabricNormalizeBlueprint(runLeak).error.includes("unsupported field"));
+  check("blueprints: unsupported formats, unsafe race effects, and impossible quorum thresholds fail closed",
+    Boolean(F.fabricNormalizeBlueprint({ ...structuredClone(blueprintFixture), format: "rusty.team-blueprint/v2" }).error) &&
+    Boolean(F.fabricNormalizeBlueprint({ ...structuredClone(blueprintFixture), pattern: "race", fan_out: undefined,
+      roles: [{ ...blueprintFixture.roles[0], effect: "non_idempotent" }] }).error) &&
+    Boolean(F.fabricNormalizeBlueprint({ ...structuredClone(blueprintFixture), pattern: "quorum", fan_out: undefined,
+      quorum: { threshold: 3, resolver: "majority_equal" } }).error));
+  const stringMaximum = structuredClone(blueprintFixture);
+  stringMaximum.fan_out.max_in_flight = "2";
+  const stringThreshold = { ...structuredClone(blueprintFixture), pattern: "quorum", fan_out: undefined,
+    quorum: { threshold: "2", resolver: "majority_equal" } };
+  const numericCreated = { ...structuredClone(blueprintFixture), created_at: Date.parse(blueprintFixture.created_at) };
+  const numericUpdated = { ...structuredClone(blueprintFixture), updated_at: Date.parse(blueprintFixture.updated_at) };
+  const numericDelegator = { ...structuredClone(blueprintFixture), delegator: 42 };
+  const numericRole = structuredClone(blueprintFixture);
+  numericRole.roles[0].agent_id = 7;
+  const arrayEffect = structuredClone(blueprintFixture);
+  arrayEffect.roles[0].effect = ["read_only"];
+  const invalidScopes = { ...structuredClone(blueprintFixture), pattern: "delegate", roles: [structuredClone(blueprintFixture.roles[0])],
+    context: { scopes: 0, channels: [] }, fan_out: undefined };
+  const nullScopes = structuredClone(invalidScopes);
+  nullScopes.context.scopes = null;
+  const invalidChannels = structuredClone(invalidScopes);
+  invalidChannels.context.scopes = [];
+  invalidChannels.context.channels = false;
+  check("blueprints: strict v1 imports reject coercible policy integers, timestamps, and durable identities",
+    Boolean(F.fabricNormalizeBlueprint(stringMaximum).error) && Boolean(F.fabricNormalizeBlueprint(stringThreshold).error) &&
+    Boolean(F.fabricNormalizeBlueprint(numericCreated).error) && Boolean(F.fabricNormalizeBlueprint(numericUpdated).error) &&
+    Boolean(F.fabricNormalizeBlueprint(numericDelegator).error) && Boolean(F.fabricNormalizeBlueprint(numericRole).error));
+  check("blueprints: strict v1 imports reject coercible effect and explicit non-array context fields",
+    Boolean(F.fabricNormalizeBlueprint(arrayEffect).error) && Boolean(F.fabricNormalizeBlueprint(invalidScopes).error) &&
+    Boolean(F.fabricNormalizeBlueprint(nullScopes).error) && Boolean(F.fabricNormalizeBlueprint(invalidChannels).error));
+  const parsed = F.fabricParseBlueprintText(JSON.stringify(blueprintFixture));
+  check("blueprints: portable JSON round-trips the exact canonical structure",
+    JSON.stringify(parsed) === JSON.stringify(blueprintFixture) && F.fabricBlueprintFilename(parsed.name) === "insight-review-cell.rusty-team.json");
+  const exactWire = structuredClone(blueprintFixture);
+  exactWire.roles[0].manifest_version = " researcher/1.4.0 ";
+  exactWire.roles[0].kind = " research ";
+  const exactWireNormalized = F.fabricNormalizeBlueprint(exactWire);
+  check("blueprints: manifest pins and accepted-kind keys preserve exact legal wire bytes",
+    exactWireNormalized.value.roles[0].manifest_version === " researcher/1.4.0 " &&
+    exactWireNormalized.value.roles[0].kind === " research ");
+}
+
+{
+  const ready = F.fabricBlueprintCompatibility(blueprintFixture, [research, writer, lead]);
+  const driftedResearch = { ...research, manifest: { ...research.manifest, manifest_version: "researcher/2.0.0" } };
+  const drift = F.fabricBlueprintCompatibility(blueprintFixture, [driftedResearch, writer, lead]);
+  const kindRemoved = { ...writer, manifest: { ...writer.manifest, accepts: { critique: {} } } };
+  const incompatible = F.fabricBlueprintCompatibility(blueprintFixture, [research, kindRemoved, lead]);
+  const missing = F.fabricBlueprintCompatibility(blueprintFixture, [research, lead]);
+  const unpinnedResearch = { ...research, manifest: { ...research.manifest, manifest_version: "" } };
+  const unpinned = F.fabricBlueprintCompatibility(blueprintFixture, [unpinnedResearch, writer, lead]);
+  check("blueprints: exact live roster and manifest pins are ready without invented drift",
+    ready.loadable && ready.tone === "ready" && ready.changed.length === 0);
+  check("blueprints: changed manifest pins remain reviewable but never look exact",
+    drift.loadable && drift.tone === "changed" && drift.changed.length === 1 && drift.message.includes("changed"));
+  check("blueprints: missing roles and removed message contracts block composer hydration",
+    !missing.loadable && missing.label === "Roles missing" && !incompatible.loadable && incompatible.label === "Contract changed");
+  check("blueprints: a live role without a manifest pin cannot become a runnable saved contract",
+    !unpinned.loadable && unpinned.label === "Manifest unavailable");
+  const scopedDelegate = { ...structuredClone(blueprintFixture), pattern: "delegate", roles: [structuredClone(blueprintFixture.roles[0])],
+    context: { scopes: ["team"], channels: [] }, fan_out: undefined };
+  const scopedReady = F.fabricBlueprintCompatibility(scopedDelegate, [research, writer, lead]);
+  const narrowedResearch = { ...research, manifest: { ...research.manifest, scopes: ["private"] } };
+  const scopedBlocked = F.fabricBlueprintCompatibility(scopedDelegate, [narrowedResearch, writer, lead]);
+  check("blueprints: a live scope-only registry change immediately moves a saved delegate from ready to blocked",
+    scopedReady.loadable && scopedReady.tone === "ready" && !scopedBlocked.loadable && scopedBlocked.label === "Scope changed");
+  const applied = F.fabricBlueprintApply(blueprintFixture, { list: [driftedResearch, writer, lead] });
+  check("blueprints: hydration starts a fresh unapproved coordination with empty task and deadline fields",
+    !applied.error && applied.draft.coordinationId === "" && applied.draft.parent === "" && !applied.draft.acknowledge &&
+    applied.draft.assignments["researcher-1"].input === "" && applied.draft.assignments["researcher-1"].deadline === "" &&
+    applied.draft.notice.includes("changed manifest pin"));
+}
+
+{
+  fakeLocalStorage.clear();
+  fakeLocalStorage.failReads = 0;
+  fakeLocalStorage.failWrites = 0;
+  F.store.conn = { baseUrl: "http://blueprints.test", apiKey: "tenant-a" };
+  F.store.fabricBlueprints = [structuredClone(blueprintFixture)];
+  check("blueprints: a bounded current-scope structure persists", F.saveFabricBlueprints());
+  F.store.fabricBlueprints = [];
+  F.loadFabricBlueprints();
+  check("blueprints: reload restores the exact current connection scope", F.store.fabricBlueprints.length === 1 && F.store.fabricBlueprints[0].blueprint_id === blueprintFixture.blueprint_id);
+  F.store.conn = { baseUrl: "http://blueprints.test", apiKey: "tenant-b" };
+  F.loadFabricBlueprints();
+  check("blueprints: another tenant never inherits saved role bindings", F.store.fabricBlueprints.length === 0);
+  F.store.fabricBlueprints = [structuredClone(blueprintFixture)];
+  fakeLocalStorage.failWrites = 2;
+  check("blueprints: repeated quota failure remains session-only without losing the live structure", !F.saveFabricBlueprints() && F.store.fabricBlueprints.length === 1);
+  fakeLocalStorage.failReads = 1;
+  F.loadFabricBlueprints();
+  check("blueprints: blocked storage reads fail closed with a visible persistence warning", F.store.fabricBlueprints.length === 0 && F.store.fabricBlueprintPersistenceWarning);
+  fakeLocalStorage.failReads = 0;
+  fakeLocalStorage.failWrites = 0;
+}
+
+{
+  F.store.conn = { baseUrl: "http://blueprints.test", apiKey: "tenant-limit" };
+  F.store.fabricBlueprintPersistenceWarning = false;
+  F.store.fabricBlueprints = Array.from({ length: F.FABRIC_BLUEPRINT_LIMIT }, (_, index) => ({
+    ...structuredClone(blueprintFixture), blueprint_id: `bp-retained-${String(index).padStart(3, "0")}`,
+    name: `Retained ${index}`,
+  }));
+  const beforeIds = F.store.fabricBlueprints.map((item) => item.blueprint_id);
+  const overflow = F.fabricRememberBlueprint({ ...structuredClone(blueprintFixture), blueprint_id: "bp-overflow-001", name: "Overflow" });
+  check("blueprints: the authored-item limit refuses a new save instead of silently evicting an older blueprint",
+    !overflow.ok && overflow.error.includes("Delete one") &&
+    JSON.stringify(F.store.fabricBlueprints.map((item) => item.blueprint_id)) === JSON.stringify(beforeIds));
+}
+
+{
+  const many = Array.from({ length: F.FABRIC_BLUEPRINT_LIMIT + 5 }, (_, index) => ({
+    ...structuredClone(blueprintFixture), blueprint_id: `bp-bounded-${String(index).padStart(3, "0")}`,
+    name: `Bounded ${index}`,
+  }));
+  const envelope = F.fabricEmptyBlueprintEnvelope();
+  for (let scope = 0; scope < F.FABRIC_BLUEPRINT_SCOPE_LIMIT + 3; scope++) {
+    envelope.scopes[`scope-${scope}`] = { touched_at: scope, blueprints: many };
+  }
+  const bounded = F.fabricPruneBlueprintEnvelope(envelope, "scope-0", 8192);
+  const total = Object.values(bounded.scopes).reduce((count, entry) => count + entry.blueprints.length, 0);
+  check("blueprints: scope, per-scope, global, and UTF-8 byte ceilings remain hard bounds",
+    Object.keys(bounded.scopes).length <= F.FABRIC_BLUEPRINT_SCOPE_LIMIT &&
+    Object.values(bounded.scopes).every((entry) => entry.blueprints.length <= F.FABRIC_BLUEPRINT_LIMIT) &&
+    total <= F.FABRIC_BLUEPRINT_GLOBAL_LIMIT && Buffer.byteLength(JSON.stringify(bounded), "utf8") <= 8192);
+  const card = F.fabricBlueprintCardHtml(blueprintFixture, [research, writer, lead]);
+  const otherCard = F.fabricBlueprintCardHtml({ ...structuredClone(blueprintFixture), blueprint_id: "bp-second-cell-01", name: "Second cell" },
+    [research, writer, lead]);
+  const spacedIdCard = F.fabricBlueprintCardHtml({ ...structuredClone(blueprintFixture), blueprint_id: "bp-insight review-01" },
+    [research, writer, lead]);
+  const loneSurrogateId = "bp-\ud800abcd";
+  const loneSurrogateCard = F.fabricBlueprintCardHtml({ ...structuredClone(blueprintFixture), blueprint_id: loneSurrogateId },
+    [research, writer, lead]);
+  const fixtureTitleId = F.fabricBlueprintDomId(blueprintFixture.blueprint_id);
+  check("blueprints: the topology score is standalone accessible evidence with separate native actions",
+    card.includes('role="img"') && card.includes('aria-label="Insight review cell: 2 roles') &&
+    card.includes("Use blueprint") && card.includes("Export") && card.includes("Delete") &&
+    !card.match(/<button[^>]*>[\s\S]*role="img"[\s\S]*<\/button>/));
+  check("blueprints: each card and repeated action names expose the blueprint they operate on",
+    card.includes(`aria-labelledby="${fixtureTitleId}"`) && card.includes(`id="${fixtureTitleId}"`) &&
+    card.includes('aria-label="Use blueprint Insight review cell"') &&
+    card.includes('aria-label="Export Insight review cell"') && card.includes('aria-label="Delete Insight review cell"') &&
+    otherCard.includes('aria-label="Use blueprint Second cell"') && !otherCard.includes('aria-label="Use blueprint Insight review cell"'));
+  check("blueprints: opaque whitespace in a legal blueprint ID cannot split the card accessible-name reference",
+    spacedIdCard.includes(`aria-labelledby="${F.fabricBlueprintDomId("bp-insight review-01")}"`) &&
+    spacedIdCard.includes(`id="${F.fabricBlueprintDomId("bp-insight review-01")}"`));
+  check("blueprints: a lone-surrogate ID uses a total DOM encoder and cannot break persistent shelf rendering",
+    loneSurrogateCard.includes(`aria-labelledby="${F.fabricBlueprintDomId(loneSurrogateId)}"`) &&
+    loneSurrogateCard.includes(`id="${F.fabricBlueprintDomId(loneSurrogateId)}"`));
+  const failFast = structuredClone(blueprintFixture);
+  failFast.fan_out.on_member_failure = "fail_fast";
+  const quorumMajority = { ...structuredClone(blueprintFixture), pattern: "quorum", fan_out: undefined,
+    quorum: { threshold: 2, resolver: "majority_equal" } };
+  const quorumFirst = structuredClone(quorumMajority);
+  quorumFirst.quorum.resolver = "first_k";
+  const sixRoleScore = { ...structuredClone(blueprintFixture), roles: Array.from({ length: 6 }, (_, index) => ({
+    agent_id: `agent-${index}`, member: `member-${index}`, manifest_version: `agent/${index}`, kind: `kind-${index}`, effect: "read_only",
+  })) };
+  check("blueprints: topology accessible names distinguish every fan-out and quorum convergence policy",
+    F.fabricBlueprintScoreHtml(blueprintFixture).includes("failure policy partial") &&
+    F.fabricBlueprintScoreHtml(failFast).includes("failure policy fail fast") &&
+    F.fabricBlueprintScoreHtml(quorumMajority).includes("resolver majority equal") &&
+    F.fabricBlueprintScoreHtml(quorumFirst).includes("resolver first k"));
+  check("blueprints: topology accessible names identify bounded role bindings and disclose omitted roles",
+    F.fabricBlueprintScoreHtml(blueprintFixture).includes("research bound to researcher-1; draft bound to writer-1") &&
+    F.fabricBlueprintScoreHtml(sixRoleScore).includes("member-4 bound to agent-4; and 1 more roles") &&
+    !F.fabricBlueprintScoreHtml(sixRoleScore).includes("member-5 bound to agent-5"));
+}
+
 {
   const observedAt = Date.parse("2026-08-09T08:00:00Z");
   const activeRecord = {
@@ -1120,6 +1351,30 @@ check("run desk accessibility: search, lifecycle, follow, refresh, list, and qui
   html.includes('$("fabric-run-desk").setAttribute("aria-busy"') &&
   html.includes('id="fabric-run-list"') && !html.includes('id="fabric-run-list" aria-live=') &&
   html.includes('id="fabric-run-announcer" role="status" aria-live="polite"'));
+check("blueprint markup: reusable topology is a labelled Studio surface with explicit privacy boundaries",
+  html.includes('class="card fabric-blueprints" aria-labelledby="fabric-blueprints-title"') &&
+  html.includes('id="fabric-blueprints-title">Team blueprints</h2>') &&
+  html.includes("Task instructions, deadlines, coordination IDs, parents, results, and receipts are never saved") &&
+  html.includes('id="fabric-blueprints-status" role="status" aria-live="polite"') &&
+  html.includes('id="fabric-blueprints-announcer" role="status" aria-live="polite"'));
+check("blueprint lifecycle: save, import, export, delete, and exact composer hydration use native controls",
+  html.includes('$("btn-fabric-blueprint-save").onclick = fabricSaveCurrentBlueprint;') &&
+  html.includes('$("btn-fabric-blueprint-import").onclick') &&
+  html.includes('$("inp-fabric-blueprint-import").addEventListener("change"') &&
+  html.includes('$("fabric-blueprints-list").addEventListener("click"') &&
+  html.includes("fabricUseBlueprint(load.getAttribute") && html.includes("fabricExportBlueprint(exportButton.getAttribute") &&
+  html.includes("fabricDeleteBlueprint(remove.getAttribute") &&
+  html.includes("draft.submitting || draft.completed || draft.errorAmbiguous"));
+check("blueprint isolation: connection changes clear old bindings before loading the new opaque scope",
+  html.includes("store.fabricBlueprints = [];") && html.includes("store.fabricBlueprintRenderKey = \"\";") &&
+  html.includes("loadFabricBlueprints();") && html.includes("connectionRunScope(store.conn)"));
+check("blueprint focus: list replacement restores the exact action or falls back to the stable name field",
+  html.includes('element.getAttribute("data-fabric-blueprint-focus")') &&
+  html.includes('blueprint ? "fabric-blueprints-list"') &&
+  html.includes('if (blueprint && (!restored || restored.disabled)) $("inp-fabric-blueprint-name")'));
+check("blueprint drift rendering: manifest versions, accepted kinds, team membership, and scopes invalidate the card snapshot",
+  html.includes("fabricAcceptedKinds(agent),") &&
+  html.includes("Array.isArray(fabricObject(agent.manifest).scopes) ? agent.manifest.scopes.map(String) : []"));
 check("accessibility: team rerenders stay quiet while concise selected-state changes use a dedicated announcer",
   html.includes('id="fabric-team-announcer" role="status" aria-live="polite"') &&
   html.includes('<section class="card fabric-team-card" id="fabric-team">') &&
@@ -1178,6 +1433,11 @@ check("run desk responsive: toolbar, rows, and the pulse rail collapse without h
   html.includes(".fabric-run-pulse { grid-column: 1 / -1;") &&
   html.includes(".fabric-run-state { display: grid;") &&
   !html.includes(".fabric-run-state { display: none;"));
+check("blueprint responsive: toolbar, topology cards, and actions stack without hiding readiness",
+  html.includes(".fabric-blueprints-toolbar { grid-template-columns: 1fr;") &&
+  html.includes(".fabric-blueprint-card { grid-template-columns: 1fr;") &&
+  html.includes(".fabric-blueprint-score { grid-template-columns:") &&
+  html.includes(".fabric-blueprint-card-actions { grid-column: auto;"));
 check("accessibility: essential TeamTrace sequence and depth use the AA text token",
   html.includes(".fabric-trace-event small { color: var(--text-dim);") &&
   !html.includes(".fabric-trace-event small { color: var(--text-faint);"));

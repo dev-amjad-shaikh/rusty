@@ -828,6 +828,41 @@
   .fabric-trace-event small { color: var(--text-dim); font: 10px var(--mono); white-space: nowrap; }
   .fabric-raw summary { color: var(--text-dim); cursor: pointer; font-size: 11px; }
   .fabric-error { border-left-color: var(--err); }
+  .fabric-blueprints { margin-top: 14px; padding: 0; overflow: hidden; }
+  .fabric-blueprints-head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 14px 16px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(112deg, #29231d, var(--bg-panel) 62%); }
+  .fabric-blueprints-head h2 { margin: 0; font-size: 16px; }
+  .fabric-blueprints-head p { max-width: 760px; margin: 4px 0 0; color: var(--text-dim); font-size: 11.5px; }
+  .fabric-blueprints-mark { flex: 0 0 auto; color: #d19a71; font: 700 10px var(--mono); letter-spacing: .85px; text-transform: uppercase; white-space: nowrap; }
+  .fabric-blueprints-toolbar { display: grid; grid-template-columns: minmax(210px, 1fr) auto; gap: 10px; align-items: end; padding: 11px 16px; border-bottom: 1px solid var(--border); background: var(--bg-inset); }
+  .fabric-blueprints-toolbar label { color: var(--text-dim); font-size: 10px; letter-spacing: .45px; text-transform: uppercase; }
+  .fabric-blueprints-toolbar input[type="text"] { display: block; width: 100%; margin-top: 3px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); color: var(--text); font: 11px var(--mono); }
+  .fabric-blueprints-actions { display: flex; gap: 7px; }
+  .fabric-blueprints-status { min-height: 19px; padding: 7px 16px 0; color: var(--text-dim); font: 10.5px var(--mono); }
+  .fabric-blueprints-list { display: grid; gap: 8px; padding: 8px 12px 13px; }
+  .fabric-blueprint-card { display: grid; grid-template-columns: minmax(175px, .8fr) minmax(250px, 1.25fr) minmax(155px, .65fr) auto; gap: 12px; align-items: center; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); }
+  .fabric-blueprint-identity { min-width: 0; }
+  .fabric-blueprint-identity b, .fabric-blueprint-identity span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fabric-blueprint-identity b { font-size: 12px; }
+  .fabric-blueprint-identity span { margin-top: 3px; color: var(--text-dim); font: 10px var(--mono); }
+  .fabric-blueprint-score { display: grid; grid-template-columns: minmax(0, 1fr) 22px minmax(90px, .7fr); gap: 0; align-items: center; min-width: 0; }
+  .fabric-blueprint-roles { display: grid; gap: 4px; min-width: 0; }
+  .fabric-blueprint-role { position: relative; overflow: hidden; padding: 4px 7px; border: 1px solid #4e5142; border-radius: 4px; background: #1d211b; color: #d7d0b8; font: 9.5px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+  .fabric-blueprint-role::after { content: ""; position: absolute; right: -12px; top: 50%; width: 11px; height: 1px; background: #856d50; }
+  .fabric-blueprint-joint { color: #c68860; font: 700 17px var(--mono); text-align: center; }
+  .fabric-blueprint-outcome { min-width: 0; padding: 6px 7px; border: 1px solid #68533f; border-radius: 5px; background: #2b241d; }
+  .fabric-blueprint-outcome b, .fabric-blueprint-outcome span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fabric-blueprint-outcome b { color: #e0c39f; font-size: 10px; }
+  .fabric-blueprint-outcome span { margin-top: 2px; color: var(--text-dim); font-size: 9px; }
+  .fabric-blueprint-readiness { min-width: 0; }
+  .fabric-blueprint-readiness b, .fabric-blueprint-readiness span { display: block; }
+  .fabric-blueprint-readiness b { font-size: 10.5px; text-transform: uppercase; letter-spacing: .45px; }
+  .fabric-blueprint-readiness b.ready { color: #a9c797; }
+  .fabric-blueprint-readiness b.changed { color: #ddbd72; }
+  .fabric-blueprint-readiness b.blocked { color: #e19a84; }
+  .fabric-blueprint-readiness span { margin-top: 3px; color: var(--text-dim); font-size: 9.5px; line-height: 1.35; }
+  .fabric-blueprint-card-actions { display: grid; grid-template-columns: repeat(2, auto); gap: 5px; justify-content: end; }
+  .fabric-blueprint-card-actions [data-blueprint-load] { grid-column: 1 / -1; }
+  .fabric-blueprint-card-actions .danger { border-color: #70443a; color: #e2a895; }
   .fabric-compose { margin-top: 14px; padding: 0; overflow: hidden; }
   .fabric-compose-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(105deg, #1c2828, var(--bg-panel) 58%); }
   .fabric-compose-head h2 { margin: 0; font-size: 16px; }
@@ -1038,6 +1073,9 @@
     .fabric-run-toolbar { grid-template-columns: minmax(0, 1fr) minmax(150px, .5fr); }
     .fabric-run-toolbar-actions { grid-column: 1 / -1; }
     .fabric-run-row { grid-template-columns: minmax(130px, .85fr) minmax(130px, 1.1fr) minmax(90px, .55fr) auto; }
+    .fabric-blueprint-card { grid-template-columns: minmax(160px, .75fr) minmax(220px, 1fr) minmax(145px, .65fr); }
+    .fabric-blueprint-card-actions { grid-column: 1 / -1; display: flex; justify-content: flex-start; }
+    .fabric-blueprint-card-actions [data-blueprint-load] { grid-column: auto; }
     .fabric-compose-head { flex-direction: column; }
     .fabric-patterns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .learn-principle { grid-template-columns: 1fr; }
@@ -1116,6 +1154,12 @@
     .fabric-run-state { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; grid-column: 1 / -1; grid-row: 3; align-items: baseline; }
     .fabric-run-state span { margin-top: 0; text-align: right; }
     .fabric-run-open { grid-column: 2; grid-row: 1; }
+    .fabric-blueprints-head { flex-direction: column; }
+    .fabric-blueprints-toolbar { grid-template-columns: 1fr; }
+    .fabric-blueprints-actions { flex-wrap: wrap; }
+    .fabric-blueprint-card { grid-template-columns: 1fr; }
+    .fabric-blueprint-score { grid-template-columns: minmax(0, 1fr) 20px minmax(85px, .6fr); }
+    .fabric-blueprint-card-actions { grid-column: auto; }
     .fabric-trace-event { grid-template-columns: 1fr; gap: 2px; }
     .fabric-compose-meta, .fabric-assignment-grid, .fabric-assignment-task, .fabric-compose-options { grid-template-columns: 1fr; }
     .learn-head { flex-direction: column; }
@@ -1316,6 +1360,29 @@
           <section class="card fabric-team-card" id="fabric-team"><div class="empty">Connect to inspect durable team members.</div></section>
           <span class="sr-only" id="fabric-team-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
         </div>
+
+        <section class="card fabric-blueprints" aria-labelledby="fabric-blueprints-title">
+          <div class="fabric-blueprints-head">
+            <div>
+              <h2 id="fabric-blueprints-title">Team blueprints</h2>
+              <p>Keep a reusable topology for this connection, then reopen it against the live durable-agent registry. Task instructions, deadlines, coordination IDs, parents, results, and receipts are never saved.</p>
+            </div>
+            <span class="fabric-blueprints-mark">structure only</span>
+          </div>
+          <div class="fabric-blueprints-toolbar">
+            <label>Blueprint name
+              <input id="inp-fabric-blueprint-name" type="text" maxlength="80" autocomplete="off" placeholder="Research review cell">
+            </label>
+            <div class="fabric-blueprints-actions">
+              <button class="small primary" id="btn-fabric-blueprint-save" type="button">Save current structure</button>
+              <button class="small" id="btn-fabric-blueprint-import" type="button">Import blueprint</button>
+              <input id="inp-fabric-blueprint-import" type="file" accept="application/json,.json" hidden>
+            </div>
+          </div>
+          <div class="fabric-blueprints-status" id="fabric-blueprints-status" role="status" aria-live="polite"></div>
+          <div class="fabric-blueprints-list" id="fabric-blueprints-list"><div class="empty">No team blueprints are saved for this connection.</div></div>
+          <span class="sr-only" id="fabric-blueprints-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+        </section>
 
         <section class="card fabric-compose" aria-labelledby="fabric-compose-title">
           <div class="fabric-compose-head">
@@ -1641,6 +1708,7 @@ const LS = {
   sel:     "ags:selected",  // { [baseUrl]: threadId }
   agentRuns: "ags:agentRuns", // bounded v1 envelope of connection-scoped, sanitized run metadata
   fabricRuns: "ags:fabricRuns", // bounded v1 envelope of connection-scoped coordination metadata
+  fabricBlueprints: "ags:fabricBlueprints", // bounded v1 envelope of connection-scoped structural team blueprints
 };
 
 const AGENT_RUN_HISTORY_LIMIT = 12;
@@ -1658,6 +1726,13 @@ const FABRIC_FOLLOW_INTERVAL = 2000;
 const FABRIC_FOLLOW_MAX_INTERVAL = 16000;
 const FABRIC_RUN_STATUSES = new Set(["in_progress", "completed", "failed", "cancelled", "unreachable", "unknown"]);
 const FABRIC_RUN_FILTERS = new Set(["all", "active", "settled", "attention"]);
+const FABRIC_BLUEPRINT_FORMAT = "rusty.team-blueprint/v1";
+const FABRIC_BLUEPRINT_LIMIT = 20;
+const FABRIC_BLUEPRINT_SCOPE_LIMIT = 8;
+const FABRIC_BLUEPRINT_GLOBAL_LIMIT = 80;
+const FABRIC_BLUEPRINT_STORAGE_LIMIT = 131072;
+const FABRIC_BLUEPRINT_TEXT_LIMIT = 65536;
+const FABRIC_BLUEPRINT_NAME_LIMIT = 80;
 const AGENT_MANIFEST_FORMAT = "rusty.assistant/v1";
 const AGENT_MANIFEST_TEXT_LIMIT = 65536;
 const AGENT_MANIFEST_DEPTH_LIMIT = 16;
@@ -1714,6 +1789,9 @@ const store = {
   fabricRunRefreshing: false,
   fabricRunRequest: 0,
   fabricRunPersistenceWarning: false,
+  fabricBlueprints: [], // reusable structure only; work inputs, results, deadlines, and receipts are excluded
+  fabricBlueprintPersistenceWarning: false,
+  fabricBlueprintRenderKey: "",
   fabricFollowEnabled: true,
   fabricFollowTimer: null,
   fabricFollowFailures: 0,
@@ -2247,6 +2325,9 @@ async function connect() {
     store.fabricRunFilter = "all";
     store.fabricRunRefreshing = false;
     store.fabricRunPersistenceWarning = false;
+    store.fabricBlueprints = [];
+    store.fabricBlueprintPersistenceWarning = false;
+    store.fabricBlueprintRenderKey = "";
     store.memory = null;
     store.memoryUnsupported = false;
     store.memoryCorrection = null;
@@ -2263,6 +2344,7 @@ async function connect() {
   loadThreads();
   loadAgentRunHistory();
   loadFabricRunHistory();
+  loadFabricBlueprints();
   $("conn-status").innerHTML =
     `connected — <b>${escapeHtml(store.info.service)}</b> v${escapeHtml(store.info.version)} · ` +
     `${store.info.graphs.length} graph(s) · checkpointer: ${escapeHtml(store.info.checkpointer)}`;
@@ -5101,6 +5183,8 @@ function fabricFocusIdentity(element) {
   if (agent) return { kind: "agent", value: agent };
   const run = element.getAttribute("data-fabric-run");
   if (run) return { kind: "run", value: run };
+  const blueprint = element.getAttribute("data-fabric-blueprint-focus");
+  if (blueprint) return { kind: "blueprint", value: blueprint };
   const control = element.getAttribute("data-fabric-focus");
   return control ? { kind: "control", value: control } : null;
 }
@@ -5110,9 +5194,12 @@ function fabricRestoreFocus(identity) {
   const group = identity.kind === "group";
   const agent = identity.kind === "agent";
   const run = identity.kind === "run";
-  const restored = fabricFocusData($(group ? "fabric-groups" : agent ? "fabric-team" : run ? "fabric-run-list" : "fabric-view"),
-    group ? "data-fabric-group" : agent ? "data-fabric-agent" : run ? "data-fabric-run" : "data-fabric-focus", identity.value);
+  const blueprint = identity.kind === "blueprint";
+  const restored = fabricFocusData($(group ? "fabric-groups" : agent ? "fabric-team" : run ? "fabric-run-list" :
+    blueprint ? "fabric-blueprints-list" : "fabric-view"), group ? "data-fabric-group" : agent ? "data-fabric-agent" :
+    run ? "data-fabric-run" : blueprint ? "data-fabric-blueprint-focus" : "data-fabric-focus", identity.value);
   if (run && !restored) $("inp-fabric-run-search")?.focus({ preventScroll: true });
+  if (blueprint && (!restored || restored.disabled)) $("inp-fabric-blueprint-name")?.focus({ preventScroll: true });
 }
 
 function fabricDisclosureState(container) {
@@ -5525,6 +5612,450 @@ function fabricComposerPayload(draft, group, allAgents, now = Date.now()) {
     payload.quorum = { members: delegations, threshold: Number(draft.threshold), resolver: { resolver: draft.resolver } };
   }
   return { validation, payload };
+}
+
+function fabricBlueprintGeneratedId(randomUuid, now = Date.now(), entropy = Math.random()) {
+  let token = "";
+  if (typeof randomUuid === "function") token = String(randomUuid());
+  else if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") token = globalThis.crypto.randomUUID();
+  if (!/^[A-Za-z0-9._-]{8,128}$/.test(token)) {
+    const time = Math.max(0, Number(now) || 0).toString(36);
+    const random = Math.floor(Math.max(0, Math.min(.999999999999, Number(entropy) || 0)) * 0x1000000000000).toString(36);
+    token = `${time}-${random.padStart(9, "0")}`;
+  }
+  return `bp-${token}`;
+}
+
+function fabricBlueprintUnexpected(value, allowed, label) {
+  if (!agentPlainObject(value)) throw new Error(`${label} must be an object.`);
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length) throw new Error(`${label} has unsupported field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}. Nothing was imported.`);
+}
+
+function fabricBlueprintString(value, label, limit, options = {}) {
+  if (typeof value !== "string") throw new Error(`${label} must be a string.`);
+  const text = options.trim === false ? value : value.trim();
+  if (!text && options.required !== false) throw new Error(`${label} is required.`);
+  if (agentUtf8Length(text) > limit || /[\u0000-\u001f\u007f]/.test(text)) {
+    throw new Error(`${label} must be at most ${limit} UTF-8 bytes and contain no control characters.`);
+  }
+  return text;
+}
+
+function fabricBlueprintStringList(value, label, limit = FABRIC_COMPOSER_CHANNEL_LIMIT) {
+  if (!Array.isArray(value) || value.length > limit) throw new Error(`${label} must contain at most ${limit} strings.`);
+  const items = value.map((item) => fabricBlueprintString(item, label, FABRIC_COMPOSER_CHANNEL_NAME_LIMIT));
+  if (new Set(items).size !== items.length) throw new Error(`${label} cannot contain duplicates.`);
+  return items;
+}
+
+function fabricNormalizeBlueprint(value) {
+  try {
+    fabricBlueprintUnexpected(value, ["format", "blueprint_id", "name", "team_label", "created_at", "updated_at",
+      "pattern", "roles", "delegator", "context", "handoff", "fan_out", "quorum"], "Blueprint");
+    if (value.format !== FABRIC_BLUEPRINT_FORMAT) throw new Error(`Blueprint format must be \`${FABRIC_BLUEPRINT_FORMAT}\`.`);
+    if (typeof value.blueprint_id !== "string") throw new Error("Blueprint ID must be a string.");
+    const blueprintId = fabricRunSafeId(value.blueprint_id);
+    if (!blueprintId || !blueprintId.startsWith("bp-")) throw new Error("Blueprint ID must be a safe `bp-` identifier.");
+    const name = fabricBlueprintString(value.name, "Blueprint name", FABRIC_BLUEPRINT_NAME_LIMIT);
+    const teamLabel = fabricBlueprintString(value.team_label, "Team label", 256);
+    if (typeof value.created_at !== "string" || typeof value.updated_at !== "string") {
+      throw new Error("Blueprint timestamps must be strings.");
+    }
+    const createdAt = fabricRunTimestamp(value.created_at);
+    const updatedAt = fabricRunTimestamp(value.updated_at);
+    if (!createdAt || !updatedAt || Date.parse(updatedAt) < Date.parse(createdAt)) {
+      throw new Error("Blueprint timestamps must be valid ISO-8601 values and updated_at cannot precede created_at.");
+    }
+    if (typeof value.pattern !== "string") throw new Error("Blueprint pattern must be a string.");
+    const pattern = value.pattern;
+    if (!FABRIC_COMPOSER_PATTERNS.includes(pattern)) throw new Error("Blueprint pattern is not supported by this Studio.");
+    if (!Array.isArray(value.roles) || !value.roles.length || value.roles.length > FABRIC_COMPOSER_MEMBER_LIMIT) {
+      throw new Error(`Blueprint roles must contain 1–${FABRIC_COMPOSER_MEMBER_LIMIT} entries.`);
+    }
+    const agentIds = new Set();
+    const memberNames = new Set();
+    const roles = value.roles.map((role, index) => {
+      fabricBlueprintUnexpected(role, ["agent_id", "member", "manifest_version", "kind", "effect"], `Role ${index + 1}`);
+      if (typeof role.agent_id !== "string") throw new Error(`Role ${index + 1} durable identity must be a string.`);
+      const agentId = fabricRunSafeId(role.agent_id);
+      if (!agentId) throw new Error(`Role ${index + 1} has an unsafe durable identity.`);
+      const member = fabricBlueprintString(role.member, `Role ${index + 1} name`, 128);
+      if (!/^[A-Za-z0-9._-]{1,128}$/.test(member) || ["outcome", "race-dlq"].includes(member)) {
+        throw new Error(`Role ${index + 1} name is not a supported coordination member name.`);
+      }
+      const manifestVersion = fabricBlueprintString(role.manifest_version, `Role ${index + 1} manifest version`, 256, { trim: false });
+      const kind = fabricBlueprintString(role.kind, `Role ${index + 1} message kind`, 256, { trim: false });
+      if (typeof role.effect !== "string") throw new Error(`Role ${index + 1} effect class must be a string.`);
+      const effect = role.effect;
+      if (!FABRIC_COMPOSER_EFFECTS.includes(effect)) throw new Error(`Role ${index + 1} effect class is not supported.`);
+      if (pattern === "race" && !FABRIC_COMPOSER_RACE_EFFECTS.has(effect)) {
+        throw new Error(`Role ${index + 1} uses an effect class that is unsafe for a race.`);
+      }
+      if (agentIds.has(agentId) || memberNames.has(member)) throw new Error("Blueprint role identities and names must be unique.");
+      agentIds.add(agentId);
+      memberNames.add(member);
+      return { agent_id: agentId, member, manifest_version: manifestVersion, kind, effect };
+    });
+    if (pattern === "delegate" && roles.length !== 1) throw new Error("A delegate blueprint must contain exactly one role.");
+    const normalized = {
+      format: FABRIC_BLUEPRINT_FORMAT, blueprint_id: blueprintId, name, team_label: teamLabel,
+      created_at: createdAt, updated_at: updatedAt, pattern, roles,
+    };
+    if (value.delegator !== undefined) {
+      if (typeof value.delegator !== "string") throw new Error("Blueprint outcome recipient must be a string.");
+      const delegator = fabricRunSafeId(value.delegator);
+      if (!delegator) throw new Error("Blueprint outcome recipient is not a safe durable identity.");
+      normalized.delegator = delegator;
+    }
+    if (pattern === "delegate") {
+      if (value.context !== undefined) {
+        fabricBlueprintUnexpected(value.context, ["scopes", "channels"], "Blueprint context");
+        const scopes = fabricBlueprintStringList(value.context.scopes === undefined ? [] : value.context.scopes, "Context scopes");
+        const channels = fabricBlueprintStringList(value.context.channels === undefined ? [] : value.context.channels, "Context channels");
+        if (scopes.length || channels.length) normalized.context = { scopes, channels };
+      }
+      if (value.handoff !== undefined && typeof value.handoff !== "boolean") throw new Error("Blueprint handoff must be boolean.");
+      if (value.handoff === true) {
+        if (!normalized.delegator) throw new Error("A handoff blueprint needs an outcome recipient.");
+        normalized.handoff = true;
+      }
+    } else if (value.context !== undefined || value.handoff !== undefined) {
+      throw new Error("Only delegate blueprints can contain context or handoff settings.");
+    }
+    if (pattern === "fan_out") {
+      fabricBlueprintUnexpected(value.fan_out, ["max_in_flight", "on_member_failure"], "Fan-out policy");
+      const maximum = value.fan_out.max_in_flight;
+      if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 4294967295) {
+        throw new Error("Fan-out max_in_flight must be an integer from 1 to 4,294,967,295.");
+      }
+      if (!["partial", "fail_fast"].includes(value.fan_out.on_member_failure)) throw new Error("Fan-out failure policy is not supported.");
+      normalized.fan_out = { max_in_flight: maximum, on_member_failure: value.fan_out.on_member_failure };
+    } else if (value.fan_out !== undefined) throw new Error("Only fan-out blueprints can contain a fan_out policy.");
+    if (pattern === "quorum") {
+      fabricBlueprintUnexpected(value.quorum, ["threshold", "resolver"], "Quorum policy");
+      const threshold = value.quorum.threshold;
+      if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > roles.length) {
+        throw new Error(`Quorum threshold must be a whole number from 1 to ${roles.length}.`);
+      }
+      if (!FABRIC_COMPOSER_QUORUM_RESOLVERS.includes(value.quorum.resolver)) throw new Error("Quorum resolver is not supported.");
+      normalized.quorum = { threshold, resolver: value.quorum.resolver };
+    } else if (value.quorum !== undefined) throw new Error("Only quorum blueprints can contain a quorum policy.");
+    return { value: normalized, error: null };
+  } catch (error) {
+    return { value: null, error: error.message || "Blueprint is invalid." };
+  }
+}
+
+function fabricBlueprintFromComposer(name, draft, group, allAgents, now = Date.now(), idFactory) {
+  try {
+    const teamLabel = group && group.teamId ? group.teamId : "";
+    if (!teamLabel) throw new Error("Choose a declared team label before saving a blueprint.");
+    const blueprintName = fabricBlueprintString(name, "Blueprint name", FABRIC_BLUEPRINT_NAME_LIMIT);
+    const members = group.members.slice(0, FABRIC_COMPOSER_MEMBER_LIMIT);
+    const available = new Map(members.map((agent) => [agent.agent_id, agent]));
+    const selected = (Array.isArray(draft.selectedIds) ? draft.selectedIds : []).filter((id) => available.has(id));
+    if (!selected.length) throw new Error("Choose at least one durable identity before saving a blueprint.");
+    if (draft.pattern === "delegate" && selected.length !== 1) throw new Error("A delegate blueprint needs exactly one role.");
+    const roles = selected.map((id, index) => {
+      const agent = available.get(id);
+      const assignment = fabricObject(fabricObject(draft.assignments)[id]);
+      return {
+        agent_id: id,
+        member: String(assignment.member || fabricComposerMemberSlug(id, `member-${index + 1}`)).trim(),
+        manifest_version: String(fabricObject(agent.manifest).manifest_version || ""),
+        kind: String(assignment.kind || ""),
+        effect: String(assignment.effect || ""),
+      };
+    });
+    const time = new Date(now).toISOString();
+    const blueprint = {
+      format: FABRIC_BLUEPRINT_FORMAT,
+      blueprint_id: fabricBlueprintGeneratedId(idFactory, now),
+      name: blueprintName,
+      team_label: teamLabel,
+      created_at: time,
+      updated_at: time,
+      pattern: draft.pattern,
+      roles,
+    };
+    const delegator = String(draft.delegator || "").trim();
+    if (delegator) blueprint.delegator = delegator;
+    if (draft.pattern === "delegate") {
+      const channels = fabricComposerChannels(draft.channels);
+      if (channels.error) throw new Error(channels.error);
+      const scopes = Array.isArray(draft.contextScopes) ? draft.contextScopes.map(String) : [];
+      if (scopes.length || channels.value.length) blueprint.context = { scopes, channels: channels.value };
+      if (draft.handoff) blueprint.handoff = true;
+    } else if (draft.pattern === "fan_out") {
+      blueprint.fan_out = { max_in_flight: Number(draft.maxInFlight), on_member_failure: draft.failurePolicy };
+    } else if (draft.pattern === "quorum") {
+      blueprint.quorum = { threshold: Number(draft.threshold), resolver: draft.resolver };
+    }
+    const normalized = fabricNormalizeBlueprint(blueprint);
+    if (normalized.error) throw new Error(normalized.error);
+    const recipient = normalized.value.delegator && (Array.isArray(allAgents) ? allAgents : [])
+      .find((agent) => agent.agent_id === normalized.value.delegator);
+    if (normalized.value.delegator && (!recipient || !fabricAcceptedKinds(recipient).includes("coordination_result"))) {
+      throw new Error("The blueprint outcome recipient must be a registered identity that accepts coordination_result.");
+    }
+    for (const role of normalized.value.roles) {
+      const agent = available.get(role.agent_id);
+      if (!fabricAcceptedKinds(agent).includes(role.kind)) throw new Error(`${role.agent_id} no longer accepts ${role.kind}.`);
+    }
+    return normalized;
+  } catch (error) {
+    return { value: null, error: error.message || "Blueprint could not be created." };
+  }
+}
+
+function fabricBlueprintCompatibility(blueprint, allAgents) {
+  const normalized = fabricNormalizeBlueprint(blueprint);
+  if (normalized.error) return { loadable: false, tone: "blocked", label: "Invalid", message: normalized.error };
+  const value = normalized.value;
+  const agents = Array.isArray(allAgents) ? allAgents : [];
+  const group = fabricGroups(agents).find((item) => item.teamId === value.team_label);
+  if (!group) return { loadable: false, tone: "blocked", label: "Team unavailable", message: `No live registry group declares ${value.team_label}.` };
+  const available = new Map(group.members.map((agent) => [agent.agent_id, agent]));
+  const missing = value.roles.filter((role) => !available.has(role.agent_id));
+  if (missing.length) return { loadable: false, tone: "blocked", label: "Roles missing",
+    message: `${missing.length} of ${value.roles.length} bound role${missing.length === 1 ? " is" : "s are"} absent from the live team label.` };
+  const incompatible = value.roles.filter((role) => !fabricAcceptedKinds(available.get(role.agent_id)).includes(role.kind));
+  if (incompatible.length) return { loadable: false, tone: "blocked", label: "Contract changed",
+    message: `${incompatible.length} role${incompatible.length === 1 ? " no longer accepts" : "s no longer accept"} the saved message kind.` };
+  const unpinned = value.roles.filter((role) => !String(fabricObject(available.get(role.agent_id).manifest).manifest_version || ""));
+  if (unpinned.length) return { loadable: false, tone: "blocked", label: "Manifest unavailable",
+    message: `${unpinned.length} live role${unpinned.length === 1 ? " has" : "s have"} no manifest version to pin.` };
+  if (value.context && value.context.scopes.length) {
+    const first = available.get(value.roles[0].agent_id);
+    const declared = new Set(Array.isArray(fabricObject(first.manifest).scopes) ? first.manifest.scopes.map(String) : []);
+    const widened = value.context.scopes.filter((scope) => !declared.has(scope));
+    if (widened.length) return { loadable: false, tone: "blocked", label: "Scope changed",
+      message: `${widened.length} saved context scope${widened.length === 1 ? " is" : "s are"} no longer declared by the delegated role.` };
+  }
+  if (value.delegator) {
+    const recipient = agents.find((agent) => agent.agent_id === value.delegator);
+    if (!recipient || !fabricAcceptedKinds(recipient).includes("coordination_result")) {
+      return { loadable: false, tone: "blocked", label: "Recipient missing", message: "The saved outcome recipient is unavailable or no longer accepts coordination_result." };
+    }
+  }
+  const changed = value.roles.filter((role) => String(fabricObject(available.get(role.agent_id).manifest).manifest_version || "") !== role.manifest_version);
+  return changed.length
+    ? { loadable: true, tone: "changed", label: "Review drift", message: `${changed.length} manifest pin${changed.length === 1 ? " has" : "s have"} changed; Studio will use live pins after review.`, group, changed }
+    : { loadable: true, tone: "ready", label: "Ready", message: "Every role, message kind, scope, and manifest pin matches the live registry.", group, changed: [] };
+}
+
+function fabricBlueprintApply(blueprint, state) {
+  const normalized = fabricNormalizeBlueprint(blueprint);
+  if (normalized.error) return { error: normalized.error };
+  const compatibility = fabricBlueprintCompatibility(normalized.value, state && state.list);
+  if (!compatibility.loadable) return { error: compatibility.message, compatibility };
+  const value = normalized.value;
+  const draft = fabricComposerInitial();
+  draft.pattern = value.pattern;
+  draft.selectedIds = value.roles.map((role) => role.agent_id);
+  draft.assignments = Object.create(null);
+  const live = new Map(compatibility.group.members.map((agent) => [agent.agent_id, agent]));
+  value.roles.forEach((role) => {
+    draft.assignments[role.agent_id] = {
+      member: role.member, kind: role.kind, input: "", effect: role.effect, deadline: "",
+    };
+    const currentPin = String(fabricObject(live.get(role.agent_id).manifest).manifest_version || "");
+    if (!currentPin) draft.assignments[role.agent_id].kind = "";
+  });
+  draft.delegator = value.delegator || "";
+  draft.contextScopes = value.context ? [...value.context.scopes] : [];
+  draft.channels = value.context ? value.context.channels.join("\n") : "";
+  draft.handoff = value.handoff === true;
+  if (value.fan_out) {
+    draft.maxInFlight = String(value.fan_out.max_in_flight);
+    draft.failurePolicy = value.fan_out.on_member_failure;
+  }
+  if (value.quorum) {
+    draft.threshold = String(value.quorum.threshold);
+    draft.resolver = value.quorum.resolver;
+  }
+  draft.initialized = true;
+  draft.notice = compatibility.changed.length
+    ? `${value.name} loaded with ${compatibility.changed.length} changed manifest pin${compatibility.changed.length === 1 ? "" : "s"}. Live pins will be used; add task instructions and review the exact contract before launch.`
+    : `${value.name} loaded from reusable structure. Add task instructions and review the exact contract before launch.`;
+  fabricComposerEnsure(draft, compatibility.group);
+  return { draft, group: compatibility.group, compatibility, error: null };
+}
+
+function fabricEmptyBlueprintEnvelope() {
+  return { version: 1, scopes: Object.create(null) };
+}
+
+function fabricParseBlueprintEnvelope(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return fabricEmptyBlueprintEnvelope(); }
+  if (!agentPlainObject(parsed) || parsed.version !== 1 || !agentPlainObject(parsed.scopes)) return fabricEmptyBlueprintEnvelope();
+  const envelope = fabricEmptyBlueprintEnvelope();
+  for (const [scope, entry] of Object.entries(parsed.scopes).slice(0, FABRIC_BLUEPRINT_SCOPE_LIMIT * 4)) {
+    if (!scope || !agentPlainObject(entry) || !Array.isArray(entry.blueprints)) continue;
+    const seen = new Set();
+    const blueprints = [];
+    for (const candidate of entry.blueprints) {
+      const normalized = fabricNormalizeBlueprint(candidate);
+      if (normalized.error || seen.has(normalized.value.blueprint_id)) continue;
+      seen.add(normalized.value.blueprint_id);
+      blueprints.push(normalized.value);
+      if (blueprints.length >= FABRIC_BLUEPRINT_LIMIT) break;
+    }
+    if (blueprints.length) envelope.scopes[scope] = {
+      touched_at: Number.isFinite(Number(entry.touched_at)) ? Number(entry.touched_at) : 0,
+      blueprints,
+    };
+  }
+  return envelope;
+}
+
+function fabricPruneBlueprintEnvelope(value, currentScope, maxSize = FABRIC_BLUEPRINT_STORAGE_LIMIT) {
+  const envelope = fabricParseBlueprintEnvelope(JSON.stringify(value));
+  const orderedScopes = () => Object.keys(envelope.scopes).sort((left, right) => {
+    if (left === currentScope) return -1;
+    if (right === currentScope) return 1;
+    return envelope.scopes[right].touched_at - envelope.scopes[left].touched_at || left.localeCompare(right);
+  });
+  for (const scope of orderedScopes().slice(FABRIC_BLUEPRINT_SCOPE_LIMIT)) delete envelope.scopes[scope];
+  const total = () => Object.values(envelope.scopes).reduce((count, entry) => count + entry.blueprints.length, 0);
+  while (total() > FABRIC_BLUEPRINT_GLOBAL_LIMIT) {
+    const scope = orderedScopes().reverse().find((item) => item !== currentScope && envelope.scopes[item].blueprints.length) || currentScope;
+    if (!scope || !envelope.scopes[scope] || !envelope.scopes[scope].blueprints.length) break;
+    envelope.scopes[scope].blueprints.pop();
+    if (!envelope.scopes[scope].blueprints.length) delete envelope.scopes[scope];
+  }
+  const budget = Math.max(1024, Number(maxSize) || FABRIC_BLUEPRINT_STORAGE_LIMIT);
+  while (agentUtf8Length(JSON.stringify(envelope)) > budget) {
+    const oldScope = orderedScopes().reverse().find((scope) => scope !== currentScope);
+    if (oldScope) { delete envelope.scopes[oldScope]; continue; }
+    const current = envelope.scopes[currentScope];
+    if (!current) break;
+    current.blueprints.pop();
+    if (!current.blueprints.length) delete envelope.scopes[currentScope];
+  }
+  return envelope;
+}
+
+function loadFabricBlueprints() {
+  store.fabricBlueprints = [];
+  store.fabricBlueprintPersistenceWarning = false;
+  const scope = connectionRunScope(store.conn);
+  if (!scope) return;
+  let raw;
+  try { raw = localStorage.getItem(LS.fabricBlueprints); }
+  catch { store.fabricBlueprintPersistenceWarning = true; return; }
+  const envelope = fabricParseBlueprintEnvelope(raw);
+  store.fabricBlueprints = envelope.scopes[scope]?.blueprints || [];
+}
+
+function saveFabricBlueprints() {
+  const scope = connectionRunScope(store.conn);
+  if (!scope) return false;
+  let envelope;
+  try { envelope = fabricParseBlueprintEnvelope(localStorage.getItem(LS.fabricBlueprints)); }
+  catch { return false; }
+  const intended = store.fabricBlueprints.map((item) => item.blueprint_id);
+  envelope.scopes[scope] = { touched_at: Date.now(), blueprints: store.fabricBlueprints };
+  const attempt = (budget) => {
+    const bounded = fabricPruneBlueprintEnvelope(envelope, scope, budget);
+    const retained = bounded.scopes[scope]?.blueprints.map((item) => item.blueprint_id) || [];
+    try { localStorage.setItem(LS.fabricBlueprints, JSON.stringify(bounded)); }
+    catch { return false; }
+    return retained.length === intended.length && retained.every((id, index) => id === intended[index]);
+  };
+  return attempt(FABRIC_BLUEPRINT_STORAGE_LIMIT) || attempt(Math.floor(FABRIC_BLUEPRINT_STORAGE_LIMIT / 2));
+}
+
+function fabricRememberBlueprint(blueprint) {
+  const normalized = fabricNormalizeBlueprint(blueprint);
+  if (normalized.error) return { ok: false, error: normalized.error };
+  const value = normalized.value;
+  const prior = store.fabricBlueprints.find((item) => item.blueprint_id === value.blueprint_id);
+  if (prior) {
+    if (JSON.stringify(prior) === JSON.stringify(value)) return { ok: true, deduplicated: true, persisted: !store.fabricBlueprintPersistenceWarning, value: prior };
+    return { ok: false, error: "A different saved blueprint already uses this blueprint ID. Nothing was overwritten." };
+  }
+  if (store.fabricBlueprints.some((item) => item.name.toLowerCase() === value.name.toLowerCase())) {
+    return { ok: false, error: "A blueprint with this name already exists for this connection." };
+  }
+  if (store.fabricBlueprints.length >= FABRIC_BLUEPRINT_LIMIT) {
+    return { ok: false, error: `This connection already has ${FABRIC_BLUEPRINT_LIMIT} blueprints. Delete one before saving or importing another.` };
+  }
+  store.fabricBlueprints = [value, ...store.fabricBlueprints];
+  const persisted = saveFabricBlueprints();
+  store.fabricBlueprintPersistenceWarning = !persisted;
+  return { ok: true, deduplicated: false, persisted, value };
+}
+
+function fabricBlueprintScoreHtml(blueprint) {
+  const value = fabricNormalizeBlueprint(blueprint).value;
+  if (!value) return "";
+  const visible = value.roles.slice(0, 5);
+  const roles = visible.map((role) => `<span class="fabric-blueprint-role">${escapeHtml(role.member)} · ${escapeHtml(role.agent_id)}</span>`).join("") +
+    (value.roles.length > visible.length ? `<span class="fabric-blueprint-role">+${value.roles.length - visible.length} more roles</span>` : "");
+  const outcome = value.pattern === "delegate" ? "One owner" : value.pattern === "fan_out" ? `Window ${value.fan_out.max_in_flight}` :
+    value.pattern === "race" ? "First safe" : `${value.quorum.threshold} accepted`;
+  const detail = value.pattern === "fan_out" ? value.fan_out.on_member_failure.replace("_", " ") :
+    value.pattern === "quorum" ? value.quorum.resolver.replace("_", " ") : value.pattern.replace("_", " ");
+  const accessibleDetail = value.pattern === "fan_out" ? `failure policy ${detail}` :
+    value.pattern === "quorum" ? `resolver ${detail}` : `policy ${detail}`;
+  const roleSummary = visible.map((role) => `${role.member} bound to ${role.agent_id}`).join("; ") +
+    (value.roles.length > visible.length ? `; and ${value.roles.length - visible.length} more roles` : "");
+  const label = `${value.name}: ${value.roles.length} roles (${roleSummary}) use ${fabricComposerPatternLabel(value.pattern)} and converge on ${outcome}; ${accessibleDetail}.`;
+  return `<div class="fabric-blueprint-score" role="img" aria-label="${escapeHtml(label)}"><div class="fabric-blueprint-roles" aria-hidden="true">${roles}</div>` +
+    `<div class="fabric-blueprint-joint" aria-hidden="true">⇢</div><div class="fabric-blueprint-outcome" aria-hidden="true"><b>${escapeHtml(outcome)}</b><span>${escapeHtml(detail)}</span></div></div>`;
+}
+
+function fabricBlueprintDomId(blueprintId) {
+  const units = [];
+  for (let index = 0; index < blueprintId.length; index++) {
+    units.push(blueprintId.charCodeAt(index).toString(16).padStart(4, "0"));
+  }
+  return `fabric-blueprint-title-${units.join("-")}`;
+}
+
+function fabricBlueprintCardHtml(blueprint, allAgents) {
+  const value = fabricNormalizeBlueprint(blueprint).value;
+  if (!value) return "";
+  const readiness = fabricBlueprintCompatibility(value, allAgents);
+  const id = escapeHtml(value.blueprint_id);
+  const name = escapeHtml(value.name);
+  const titleId = fabricBlueprintDomId(value.blueprint_id);
+  const loadLabel = readiness.tone === "changed" ? "Review in composer" : "Use blueprint";
+  return `<article class="fabric-blueprint-card" data-blueprint-card="${id}" aria-labelledby="${titleId}"><div class="fabric-blueprint-identity"><b id="${titleId}">${name}</b>` +
+    `<span>${escapeHtml(value.team_label)} · ${value.roles.length} role${value.roles.length === 1 ? "" : "s"} · ${escapeHtml(fabricComposerPatternLabel(value.pattern))}</span></div>` +
+    fabricBlueprintScoreHtml(value) +
+    `<div class="fabric-blueprint-readiness"><b class="${readiness.tone}">${escapeHtml(readiness.label)}</b><span>${escapeHtml(readiness.message)}</span></div>` +
+    `<div class="fabric-blueprint-card-actions"><button class="small primary" type="button" aria-label="${escapeHtml(`${loadLabel} ${value.name}`)}" data-blueprint-load="${id}" data-fabric-blueprint-focus="${id}:load"${readiness.loadable ? "" : " disabled"}>${loadLabel}</button>` +
+    `<button class="small" type="button" aria-label="${escapeHtml(`Export ${value.name}`)}" data-blueprint-export="${id}" data-fabric-blueprint-focus="${id}:export">Export</button>` +
+    `<button class="small danger" type="button" aria-label="${escapeHtml(`Delete ${value.name}`)}" data-blueprint-delete="${id}" data-fabric-blueprint-focus="${id}:delete">Delete</button></div></article>`;
+}
+
+function fabricBlueprintListHtml(blueprints, allAgents) {
+  const source = Array.isArray(blueprints) ? blueprints : [];
+  return source.length ? source.map((item) => fabricBlueprintCardHtml(item, allAgents)).join("") :
+    `<div class="empty">No reusable structures yet. Shape roles in the composer, name the blueprint, then save it here.</div>`;
+}
+
+function fabricBlueprintFilename(name) {
+  const stem = String(name || "team-blueprint").trim().toLowerCase().normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "team-blueprint";
+  return `${stem}.rusty-team.json`;
+}
+
+function fabricParseBlueprintText(text) {
+  const raw = String(text || "");
+  if (agentUtf8Length(raw) > FABRIC_BLUEPRINT_TEXT_LIMIT) throw new Error(`Blueprint is larger than ${Math.round(FABRIC_BLUEPRINT_TEXT_LIMIT / 1024)} KiB.`);
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch { throw new Error("Blueprint must be valid JSON."); }
+  agentValidateManifestNumbers(raw);
+  agentManifestScan(parsed);
+  const normalized = fabricNormalizeBlueprint(parsed);
+  if (normalized.error) throw new Error(normalized.error);
+  return normalized.value;
 }
 
 function fabricComposerRecordPayload(record) {
@@ -6142,6 +6673,146 @@ function fabricComposerContext() {
   return { state, group, draft: state && state.composer };
 }
 
+function fabricRenderBlueprints(force = false) {
+  const list = $("fabric-blueprints-list");
+  const status = $("fabric-blueprints-status");
+  const save = $("btn-fabric-blueprint-save");
+  if (!list || !status || !save) return;
+  const { state, group, draft } = fabricComposerContext();
+  save.disabled = !store.conn || !state || !group || !group.teamId || !draft || draft.submitting || draft.completed || draft.errorAmbiguous;
+  const agents = state && Array.isArray(state.list) ? state.list : [];
+  const registryPins = agents.map((agent) => [agent.agent_id, agent.team_id,
+    String(fabricObject(agent.manifest).manifest_version || ""), fabricAcceptedKinds(agent),
+    Array.isArray(fabricObject(agent.manifest).scopes) ? agent.manifest.scopes.map(String) : []]);
+  const renderKey = JSON.stringify([store.fabricBlueprints, registryPins]);
+  if (force || renderKey !== store.fabricBlueprintRenderKey) {
+    const focusIdentity = fabricFocusIdentity(document.activeElement);
+    list.innerHTML = fabricBlueprintListHtml(store.fabricBlueprints, agents);
+    store.fabricBlueprintRenderKey = renderKey;
+    fabricRestoreFocus(focusIdentity);
+  }
+  const persistence = store.fabricBlueprintPersistenceWarning ? " · session only: browser storage is unavailable or could not retain every blueprint" : " · browser scoped";
+  const team = group && group.teamId ? ` · composing ${group.teamId}` : " · choose a declared team label to save";
+  status.textContent = `${store.fabricBlueprints.length} saved structure${store.fabricBlueprints.length === 1 ? "" : "s"}${persistence}${team}`;
+}
+
+function fabricSaveCurrentBlueprint() {
+  const { state, group, draft } = fabricComposerContext();
+  const input = $("inp-fabric-blueprint-name");
+  if (!state || !group || !draft || !input || draft.submitting || draft.completed || draft.errorAmbiguous) return;
+  const created = fabricBlueprintFromComposer(input.value, draft, group, state.list);
+  if (created.error) {
+    input.setAttribute("aria-invalid", "true");
+    $("fabric-blueprints-status").textContent = created.error;
+    $("fabric-blueprints-announcer").textContent = `Blueprint was not saved. ${created.error}`;
+    input.focus({ preventScroll: true });
+    return;
+  }
+  const remembered = fabricRememberBlueprint(created.value);
+  if (!remembered.ok) {
+    input.setAttribute("aria-invalid", "true");
+    $("fabric-blueprints-status").textContent = remembered.error;
+    $("fabric-blueprints-announcer").textContent = `Blueprint was not saved. ${remembered.error}`;
+    input.focus({ preventScroll: true });
+    return;
+  }
+  input.removeAttribute("aria-invalid");
+  input.value = "";
+  fabricRenderBlueprints(true);
+  const storage = remembered.persisted ? "Saved for this browser connection." : "Available for this session; browser storage could not retain it.";
+  $("fabric-blueprints-announcer").textContent = `${created.value.name} blueprint saved. ${storage}`;
+}
+
+function fabricUseBlueprint(blueprintId) {
+  const state = store.fabric;
+  const blueprint = store.fabricBlueprints.find((item) => item.blueprint_id === blueprintId);
+  if (!state || !blueprint) return;
+  if (state.composer && (state.composer.submitting || state.composer.errorAmbiguous)) {
+    $("fabric-blueprints-announcer").textContent = state.composer.submitting
+      ? "Wait for the coordination receipt before loading a blueprint."
+      : "Resolve the uncertain coordination receipt before loading a blueprint.";
+    return;
+  }
+  const applied = fabricBlueprintApply(blueprint, state);
+  if (applied.error) {
+    $("fabric-blueprints-status").textContent = applied.error;
+    $("fabric-blueprints-announcer").textContent = `Blueprint was not loaded. ${applied.error}`;
+    fabricRenderBlueprints(true);
+    return;
+  }
+  const groupChanged = state.selectedGroup !== applied.group.key;
+  state.selectedGroup = applied.group.key;
+  state.selectedAgent = applied.draft.selectedIds[0] || applied.group.members[0]?.agent_id || null;
+  state.composer = applied.draft;
+  if (groupChanged) {
+    state.statusRequest += 1;
+    state.evidenceRequest += 1;
+    state.statuses = Object.create(null);
+    state.statusErrors = Object.create(null);
+    state.evidence = null;
+  }
+  fabricRender();
+  if (groupChanged) {
+    fabricLoadGroupStatuses(applied.group.key);
+    if (state.selectedAgent) fabricLoadMemberEvidence(state.selectedAgent);
+  }
+  $("fabric-compose-title").focus({ preventScroll: true });
+  $("fabric-compose-title").scrollIntoView({ block: "start", behavior: "smooth" });
+  $("fabric-compose-announcer").textContent = `${blueprint.name} structure loaded. Add task instructions and review the exact live contract before launch.`;
+}
+
+function fabricExportBlueprint(blueprintId) {
+  const blueprint = store.fabricBlueprints.find((item) => item.blueprint_id === blueprintId);
+  const normalized = fabricNormalizeBlueprint(blueprint);
+  if (normalized.error) throw new Error(normalized.error);
+  const raw = JSON.stringify(normalized.value, null, 2) + "\n";
+  if (agentUtf8Length(raw) > FABRIC_BLUEPRINT_TEXT_LIMIT) throw new Error(`Blueprint is larger than ${Math.round(FABRIC_BLUEPRINT_TEXT_LIMIT / 1024)} KiB.`);
+  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fabricBlueprintFilename(normalized.value.name);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return normalized.value;
+}
+
+async function fabricImportBlueprint(file) {
+  if (!file) return false;
+  try {
+    if (Number(file.size) > FABRIC_BLUEPRINT_TEXT_LIMIT) throw new Error(`Blueprint is larger than ${Math.round(FABRIC_BLUEPRINT_TEXT_LIMIT / 1024)} KiB.`);
+    const blueprint = fabricParseBlueprintText(String(await file.text()));
+    const remembered = fabricRememberBlueprint(blueprint);
+    if (!remembered.ok) throw new Error(remembered.error);
+    fabricRenderBlueprints(true);
+    const message = remembered.deduplicated ? `${blueprint.name} is already saved with this exact blueprint ID.` :
+      `${blueprint.name} imported.${remembered.persisted ? "" : " Browser storage could not retain it, so it is session-only."}`;
+    $("fabric-blueprints-announcer").textContent = message;
+    $("fabric-blueprints-status").textContent = message;
+    return true;
+  } catch (error) {
+    const message = error.message || "Blueprint could not be imported.";
+    $("fabric-blueprints-status").textContent = message;
+    $("fabric-blueprints-announcer").textContent = `Blueprint was not imported. ${message}`;
+    toast(message, "err");
+    return false;
+  }
+}
+
+function fabricDeleteBlueprint(blueprintId) {
+  const blueprint = store.fabricBlueprints.find((item) => item.blueprint_id === blueprintId);
+  if (!blueprint || !confirm(`Delete the local blueprint “${blueprint.name}”? This does not change durable agents or coordinations.`)) return false;
+  store.fabricBlueprints = store.fabricBlueprints.filter((item) => item.blueprint_id !== blueprintId);
+  const persisted = saveFabricBlueprints();
+  store.fabricBlueprintPersistenceWarning = !persisted;
+  store.fabricBlueprintRenderKey = "";
+  fabricRenderBlueprints(true);
+  $("inp-fabric-blueprint-name").focus({ preventScroll: true });
+  $("fabric-blueprints-announcer").textContent = `${blueprint.name} deleted from ${persisted ? "browser storage" : "this session; browser storage could not confirm the change"}.`;
+  return true;
+}
+
 function fabricRenderComposer(force) {
   const { state, group, draft } = fabricComposerContext();
   if (!state || !draft || (!force && !draft.needsRender)) return;
@@ -6485,6 +7156,7 @@ function fabricRender() {
       `<div class="fabric-members"><div class="fabric-member-list" role="listbox" aria-label="Durable team members">${list}</div>` +
       `<div class="fabric-evidence">${fabricMemberEvidenceHtml(selected, state.evidence)}</div></div>`;
   }
+  fabricRenderBlueprints();
   fabricRenderComposer(false);
   fabricRenderRunDesk();
   if (state.coordination.loading) {
@@ -9881,6 +10553,30 @@ function init() {
     if (event.target.id !== "fabric-compose-form") return;
     event.preventDefault();
     fabricSubmitComposer();
+  });
+  $("btn-fabric-blueprint-save").onclick = fabricSaveCurrentBlueprint;
+  $("inp-fabric-blueprint-name").addEventListener("input", (event) => {
+    event.target.removeAttribute("aria-invalid");
+  });
+  $("btn-fabric-blueprint-import").onclick = () => $("inp-fabric-blueprint-import").click();
+  $("inp-fabric-blueprint-import").addEventListener("change", async () => {
+    const input = $("inp-fabric-blueprint-import");
+    await fabricImportBlueprint(input.files && input.files[0]);
+    input.value = "";
+  });
+  $("fabric-blueprints-list").addEventListener("click", (event) => {
+    const load = event.target.closest("[data-blueprint-load]");
+    if (load && !load.disabled) { fabricUseBlueprint(load.getAttribute("data-blueprint-load")); return; }
+    const exportButton = event.target.closest("[data-blueprint-export]");
+    if (exportButton) {
+      try {
+        const blueprint = fabricExportBlueprint(exportButton.getAttribute("data-blueprint-export"));
+        $("fabric-blueprints-announcer").textContent = `${blueprint.name} exported without task or run content.`;
+      } catch (error) { toast(error.message, "err"); }
+      return;
+    }
+    const remove = event.target.closest("[data-blueprint-delete]");
+    if (remove) fabricDeleteBlueprint(remove.getAttribute("data-blueprint-delete"));
   });
   $("fabric-coordination-form").addEventListener("submit", (event) => {
     event.preventDefault();
