@@ -25,10 +25,9 @@
 //!   report against a baseline: per-assertion deltas, per-case regressions
 //!   and improvements, and threshold-based regression flags (pass-rate drop,
 //!   p95 latency growth).
-//! - **Judges** ([`judge`]) — the [`judge::JudgeModel`] trait is the seam
-//!   for future LLM-as-judge evaluators, mirroring the runtime's `ChatModel`
-//!   style; [`judge::RuleBasedJudge`] is the deterministic implementation,
-//!   scoring runs by the fraction of expectations met.
+//! - **Judges** ([`judge`]) — [`judge::RuleBasedJudge`] scores deterministic
+//!   expectations, while [`judge::ModelJudge`] adapts any runtime `ChatModel`
+//!   into a strict structured evaluator with local threshold enforcement.
 //! - **Human feedback** ([`feedback`]) — deterministic pairwise annotation
 //!   queues with reviewer leases, rubric validation, consensus resolution,
 //!   disagreement adjudication, corrections, and promotion into versioned
@@ -96,4 +95,8 @@ pub use gate::{
     evaluate_gate, GateCheck, GateDecision, GateMetric, GateOutcome, GatePolicy,
     GATE_DECISION_FORMAT_VERSION, GATE_POLICY_FORMAT_VERSION,
 };
-pub use judge::{JudgeModel, JudgeRequest, JudgeVerdict, RuleBasedJudge};
+pub use judge::{
+    JudgeModel, JudgeRequest, JudgeVerdict, ModelJudge, RuleBasedJudge,
+    DEFAULT_MODEL_JUDGE_MAX_REQUEST_BYTES, DEFAULT_MODEL_JUDGE_MAX_RESPONSE_BYTES,
+    DEFAULT_MODEL_JUDGE_PASS_SCORE, MAX_MODEL_JUDGE_RATIONALE_BYTES,
+};

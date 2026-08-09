@@ -62,13 +62,17 @@ the report shows *why* a run failed, not just that it did.
 ## Judges
 
 `JudgeModel` (one async `judge` method, mirroring the runtime's `ChatModel`)
-is the seam for LLM-as-judge evaluators. `RuleBasedJudge` ships now: score =
-fraction of the case's expectations met, zeroed for incomplete runs —
-deterministic and testable without a live model.
+is the evaluator seam. `RuleBasedJudge` scores the fraction of expectations
+met without a live model. `ModelJudge` adapts any runtime `ChatModel` into a
+structured LLM judge: the trusted rubric stays in the system instruction,
+evidence travels as untrusted JSON, output is accepted only as one
+schema-constrained tool call or strict JSON fallback, scores and rationale
+sizes are bounded before parsing, response roles are verified, and pass/fail
+is derived locally.
 
 ## Status
 
 Foundation release (v0.1.0): library only, no CLI. Deliberately absent for
-now: LLM-backed judge implementations, dataset/report storage backends
-beyond JSON files, parallel experiment execution, assertion kinds beyond the
-deterministic set above.
+now: provider-specific judge clients (use the runtime's `ChatModel` adapters),
+dataset/report storage backends beyond JSON files, parallel experiment
+execution, and assertion kinds beyond the deterministic set above.
