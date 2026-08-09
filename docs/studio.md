@@ -31,14 +31,22 @@ studio/
   stay hidden in the evidence preview. A bounded, connection-scoped browser ledger preserves only safe
   run metadata (identity, status, timing, and stable error category); prompts and result payloads are
   deliberately not stored.
-- **Team observatory** — a read-only Agent Fabric workspace that explains the boundary between a
+- **Team observatory** — an Agent Fabric workspace that explains the boundary between a
   runnable assistant configuration and a mailbox-addressed durable agent identity. It groups registry
   records by their declared `team_id` label (with an explicit **Ungrouped** bucket), shows pinned
   capability manifests, and loads bounded operational health for the selected team: activation lease,
   queued / in-flight / dead-letter mailbox counts, and lazily loaded supervision policy, attempts,
   escalation, and deadline evidence for the selected member. Lease timestamps are interpreted against
   the browser clock, expire visibly without a manual refresh, and are never presented as active when
-  missing or malformed. A coordination investigation accepts a
+  missing or malformed. A typed launch rail can delegate work to one identity or fan it out across
+  several identities in the selected declared-team group. It pins each member's manifest version and
+  accepted message kind, generates a stable retry key before review, makes effect and retry risk
+  (including compensatable work) visible, supports narrowed delegate context or a bounded fan-out
+  window, validates and bounds the contract before submission, and requires explicit confirmation
+  before durable mailbox work starts. Network-ambiguous attempts remain locked to the exact approved
+  contract for convergent retry. If Rusty reuses an existing retry key, Studio discards the requested
+  preview and loads the actual durable contract. Successful submissions open directly in the coordination
+  investigation, which also accepts a
   known coordination id, joins its typed contract and member dispositions with `TeamTrace`, and renders
   a depth-aligned causal braid reordered from journal serialization into bounded parent-to-child
   traversal, with journal and parent identity on every row. A trace is called connected only when the server says it is connected,
@@ -251,9 +259,12 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   coordination-list endpoint, so investigations start from an id the operator already knows. TeamTrace
   and the durable coordination record are separate reconcile-on-read endpoints with no shared revision;
   Studio observes trace first, record second, retries one inconsistent observation pair, and leaves an
-  explicit warning if the evidence still differs. The view intentionally offers no restart, cancellation, coordination submission, team
-  editing, or replay controls. Team creation, durable discovery, and coordinated replay need their own
-  runtime and safety contracts before those actions become honest affordances.
+  explicit warning if the evidence still differs. Composition currently targets at most the first 20
+  identities in the selected registry group, supports bounded inline task inputs and up to 64 bounded
+  context channels, and exposes only the shipped delegate and fan-out contracts. It does not create a
+  durable team definition. The view intentionally
+  offers no restart, cancellation, race, quorum, team editing, coordination discovery, or replay controls.
+  Those actions need their own runtime and safety contracts before they become honest affordances.
 - **Thread list is local-only.** The server (as of v0.4) has no `GET /threads`; the Studio's thread list lives in
   `localStorage`, keyed by server base URL, and is not shared across browsers or machines. Server restarts
   drop the in-memory thread registry — **Attach** re-creates a thread with the same id to re-attach to its
@@ -292,13 +303,15 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
   route compatibility, and explicit render bounds.
-- `node studio/test-fabric.mjs` — 68 assertions over bounded durable-agent normalization, deterministic
+- `node studio/test-fabric.mjs` — 110 assertions over bounded durable-agent normalization, deterministic
   declared-team grouping, assistant-versus-runtime identity language, mailbox health precedence,
   activation and supervision evidence, independent endpoint failures, tenant/request isolation,
   keyboard navigation and focus continuity, responsive semantics, bounded coordination dispositions,
   connected and incomplete causal TeamTrace ordering, deep stack-safe traversal, hostile future-wire
   escaping, preserved Rust integer wire tokens, ordered evidence-reconciliation failures, and bounded
-  raw-evidence excerpts.
+  raw-evidence excerpts, typed delegate and fan-out payloads, manifest/context narrowing, effect-risk
+  preflight, compensatable effects, stable retry/deduplication identity, bounded task/context input and
+  preview, durable-work acknowledgement, submission generation guards, and composer accessibility.
 - `node --check` on the extracted `<script>` block — syntax OK.
 - `node studio/test-recorder.mjs` — 107 unit tests over the Flight Recorder timeline helpers (extracted
   from the same `<script>` block, run under `vm`): `seq` ordering with missing-field fallbacks,

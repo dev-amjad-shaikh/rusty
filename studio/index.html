@@ -688,7 +688,7 @@
   .fabric-members { display: grid; grid-template-columns: minmax(190px, .78fr) minmax(0, 1.35fr); min-height: 315px; }
   .fabric-member-list { padding: 10px; border-right: 1px solid var(--border); background: var(--bg-inset); }
   .fabric-member {
-    width: 100%; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+    width: 100%; display: grid; grid-template-columns: 9px minmax(0, 1fr); align-items: center; gap: 4px 8px;
     padding: 8px 9px; margin-bottom: 6px; text-align: left; background: var(--bg-raised); border-color: var(--border);
   }
   .fabric-member[aria-current="true"] { border-color: #637b54; background: #222b1f; }
@@ -698,9 +698,11 @@
   .fabric-health-dot.waiting { background: var(--warn); }
   .fabric-health-dot.idle { background: #687a60; }
   .fabric-health-dot.unknown { background: var(--text-faint); }
-  .fabric-member b { display: block; font: 600 11.5px var(--mono); overflow-wrap: anywhere; }
-  .fabric-member small { display: block; color: var(--text-dim); overflow-wrap: anywhere; }
-  .fabric-member .fabric-mailbox-mini { color: var(--text-dim); font: 10px var(--mono); white-space: nowrap; }
+  .fabric-member > span:nth-child(2) { min-width: 0; }
+  .fabric-member b, .fabric-member small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fabric-member b { font: 600 11.5px var(--mono); }
+  .fabric-member small { color: var(--text-dim); }
+  .fabric-member .fabric-mailbox-mini { grid-column: 2; color: var(--text-dim); font: 10px var(--mono); white-space: nowrap; }
   .fabric-evidence { min-width: 0; padding: 13px 14px; }
   .fabric-evidence-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   .fabric-evidence-top h2 { overflow-wrap: anywhere; }
@@ -745,6 +747,48 @@
   .fabric-trace-event small { color: var(--text-dim); font: 10px var(--mono); white-space: nowrap; }
   .fabric-raw summary { color: var(--text-dim); cursor: pointer; font-size: 11px; }
   .fabric-error { border-left-color: var(--err); }
+  .fabric-compose { margin-top: 14px; padding: 0; overflow: hidden; }
+  .fabric-compose-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(105deg, #1c2828, var(--bg-panel) 58%); }
+  .fabric-compose-head h2 { margin: 0; font-size: 16px; }
+  .fabric-compose-head p { margin: 4px 0 0; max-width: 720px; color: var(--text-dim); font-size: 11.5px; }
+  .fabric-compose-mark { color: #8eb5ae; font: 700 10px var(--mono); letter-spacing: .9px; text-transform: uppercase; white-space: nowrap; }
+  .fabric-compose-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(270px, .8fr); min-height: 420px; }
+  .fabric-compose-form { min-width: 0; padding: 14px 16px 16px; border-right: 1px solid var(--border); }
+  .fabric-compose-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+  .fabric-compose-review { min-width: 0; padding: 14px; background: var(--bg-inset); }
+  .fabric-patterns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 13px; }
+  .fabric-pattern { padding: 10px 11px; text-align: left; border-color: var(--border); background: var(--bg-raised); }
+  .fabric-pattern[aria-pressed="true"] { border-color: #6b9b91; background: #1c302d; }
+  .fabric-pattern b, .fabric-pattern span { display: block; }
+  .fabric-pattern b { font-size: 12px; }
+  .fabric-pattern span { margin-top: 2px; color: var(--text-dim); font-size: 10.5px; }
+  .fabric-compose-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-bottom: 13px; }
+  .fabric-compose label { color: var(--text-dim); font-size: 10.5px; }
+  .fabric-compose input, .fabric-compose select, .fabric-compose textarea { width: 100%; margin-top: 3px; background: var(--bg-inset); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 8px; font: 11px var(--mono); }
+  .fabric-compose textarea { min-height: 70px; resize: vertical; line-height: 1.45; }
+  .fabric-compose input[aria-invalid="true"], .fabric-compose select[aria-invalid="true"], .fabric-compose textarea[aria-invalid="true"] { border-color: var(--err); }
+  .fabric-roster { display: flex; flex-wrap: wrap; gap: 6px; margin: 7px 0 12px; }
+  .fabric-roster button { padding: 5px 8px; border-color: var(--border); background: var(--bg-raised); font: 10.5px var(--mono); }
+  .fabric-roster button[aria-pressed="true"] { border-color: #738b60; background: #253021; }
+  .fabric-assignment { margin-top: 9px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); }
+  .fabric-assignment-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+  .fabric-assignment-head b { font: 600 12px var(--mono); overflow-wrap: anywhere; }
+  .fabric-assignment-head span { color: var(--text-dim); font-size: 10px; }
+  .fabric-assignment-grid { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(150px, 1fr) minmax(130px, .75fr); gap: 8px; }
+  .fabric-assignment-task { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .55fr); gap: 8px; margin-top: 8px; }
+  .fabric-compose-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border); }
+  .fabric-check { display: flex; align-items: flex-start; gap: 7px; color: var(--text-dim); font-size: 10.5px; }
+  .fabric-check input { width: auto; margin: 1px 0 0; }
+  .fabric-scopes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
+  .fabric-compose-review h3 { margin: 0 0 8px; font-size: 13px; }
+  .fabric-preflight { display: grid; gap: 6px; margin-bottom: 10px; }
+  .fabric-preflight div { padding: 7px 8px; border-left: 2px solid #607d75; background: var(--bg-raised); font-size: 10.5px; }
+  .fabric-preflight div.risk { border-left-color: var(--warn); }
+  .fabric-preflight div.error { border-left-color: var(--err); }
+  .fabric-compose-review pre { max-height: 250px; overflow: auto; }
+  .fabric-compose-actions { display: grid; gap: 9px; margin-top: 12px; }
+  .fabric-compose-actions button { width: 100%; }
+  .fabric-compose-receipt { margin-top: 10px; border-left-color: var(--ok); }
   @media (max-width: 1120px) {
     .agent-workshop { grid-template-columns: 1fr; }
     .agent-contract-panel { position: static; }
@@ -754,6 +798,8 @@
     .fabric-layout { grid-template-columns: 1fr; }
     .fabric-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
     .fabric-group { margin: 0; }
+    .fabric-compose-grid { grid-template-columns: 1fr; }
+    .fabric-compose-form { border-right: 0; border-bottom: 1px solid var(--border); }
   }
   @media (max-width: 900px) {
     aside { width: 250px; flex-basis: 250px; }
@@ -767,6 +813,7 @@
     .fabric-identity-note { grid-template-columns: 1fr; }
     .fabric-identity-note .bridge { transform: rotate(90deg); }
     .fabric-coordination-head { flex-direction: column; }
+    .fabric-compose-head { flex-direction: column; }
   }
   @media (max-width: 680px) {
     #body { display: block; overflow-y: auto; }
@@ -816,6 +863,7 @@
     .fabric-coordination-load input { width: 100%; }
     .fabric-coordination-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .fabric-trace-event { grid-template-columns: 1fr; gap: 2px; }
+    .fabric-compose-meta, .fabric-assignment-grid, .fabric-assignment-task, .fabric-compose-options { grid-template-columns: 1fr; }
     .rec-story-head { flex-direction: column; gap: 8px; }
     .rec-story-spine { grid-template-columns: 1fr; }
     .rec-story-step { padding-top: 10px; padding-left: 27px; }
@@ -993,6 +1041,16 @@
           <section class="card fabric-team-card" id="fabric-team"><div class="empty">Connect to inspect durable team members.</div></section>
           <span class="sr-only" id="fabric-team-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
         </div>
+
+        <section class="card fabric-compose" aria-labelledby="fabric-compose-title">
+          <div class="fabric-compose-head">
+            <div><h2 id="fabric-compose-title">Coordinate this team</h2>
+              <p>Choose real durable identities, pin their accepted work, review the safety contract, then start one mailbox-backed coordination.</p></div>
+            <span class="fabric-compose-mark">typed launch rail</span>
+          </div>
+          <div id="fabric-compose-body"><div class="empty">Connect to compose durable team work.</div></div>
+          <span class="sr-only" id="fabric-compose-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+        </section>
 
         <section class="card fabric-coordination" aria-labelledby="fabric-coordination-title">
           <div class="fabric-coordination-head">
@@ -4296,6 +4354,14 @@ const FABRIC_STATUS_CONCURRENCY = 4;
 const FABRIC_TRACE_LIMIT = 500;
 const FABRIC_ATTEMPT_LIMIT = 5;
 const FABRIC_MEMBER_RENDER_LIMIT = 200;
+const FABRIC_COMPOSER_MEMBER_LIMIT = 20;
+const FABRIC_COMPOSER_INPUT_LIMIT = 16384;
+const FABRIC_COMPOSER_TOTAL_INPUT_LIMIT = 131072;
+const FABRIC_COMPOSER_PREVIEW_LIMIT = 32768;
+const FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT = 8192;
+const FABRIC_COMPOSER_CHANNEL_LIMIT = 64;
+const FABRIC_COMPOSER_CHANNEL_NAME_LIMIT = 256;
+const FABRIC_COMPOSER_EFFECTS = ["pure", "read_only", "idempotent", "compensatable", "non_idempotent"];
 
 function fabricObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -4532,6 +4598,358 @@ function fabricAcceptedKinds(agent) {
   return Object.keys(fabricObject(fabricObject(agent).manifest).accepts || {}).sort();
 }
 
+function fabricComposerInitial() {
+  return {
+    pattern: "delegate", coordinationId: "", delegator: "", parent: "",
+    selectedIds: [], assignments: Object.create(null), contextScopes: [], channels: "",
+    handoff: false, maxInFlight: 2, failurePolicy: "partial", acknowledge: false,
+    initialized: false, submitting: false, completed: false, request: 0, lastAttemptedId: "",
+    error: null, errorAmbiguous: false,
+    receipt: null, notice: null,
+    attemptedPayload: null, attemptedValidation: null, attemptedAgents: [],
+    launchedPayload: null, launchedValidation: null, launchedAgents: [], needsRender: true,
+  };
+}
+
+function fabricCarryComposer(value) {
+  const previous = value && typeof value === "object" ? value : fabricComposerInitial();
+  const draft = { ...fabricComposerInitial(), ...previous,
+    selectedIds: Array.isArray(previous.selectedIds) ? [...previous.selectedIds] : [],
+    assignments: Object.assign(Object.create(null), fabricObject(previous.assignments)),
+    contextScopes: Array.isArray(previous.contextScopes) ? [...previous.contextScopes] : [],
+    attemptedAgents: Array.isArray(previous.attemptedAgents) ? [...previous.attemptedAgents] : [],
+    launchedAgents: Array.isArray(previous.launchedAgents) ? [...previous.launchedAgents] : [],
+    acknowledge: Boolean(previous.errorAmbiguous && previous.attemptedPayload), needsRender: true };
+  if (previous.submitting) {
+    draft.submitting = false;
+    draft.acknowledge = Boolean(previous.attemptedPayload);
+    const id = String(previous.coordinationId || "").trim();
+    draft.errorAmbiguous = true;
+    draft.notice = id
+      ? `Studio detached from the in-flight response. Rusty may still have accepted the work; inspect ${id} before deciding whether to start again.`
+      : "Studio detached from an in-flight response without a stable coordination ID. Rusty may have accepted the work; do not retry blindly.";
+  }
+  return draft;
+}
+
+function fabricComposerGeneratedId(randomUuid, now = Date.now(), entropy = Math.random()) {
+  let token = "";
+  if (typeof randomUuid === "function") token = String(randomUuid());
+  else if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") token = globalThis.crypto.randomUUID();
+  if (!/^[A-Za-z0-9._-]{8,128}$/.test(token)) {
+    const time = Math.max(0, Number(now) || 0).toString(36);
+    const random = Math.floor(Math.max(0, Math.min(.999999999999, Number(entropy) || 0)) * 0x1000000000000).toString(36);
+    token = `${time}-${random.padStart(9, "0")}`;
+  }
+  return `studio-${token}`;
+}
+
+function fabricComposerMemberSlug(value, fallback) {
+  const slug = String(value || "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 128);
+  return slug || fallback;
+}
+
+function fabricComposerAssignment(agent, index) {
+  const kinds = fabricAcceptedKinds(agent);
+  return {
+    member: fabricComposerMemberSlug(agent.agent_id, `member-${index + 1}`),
+    kind: kinds[0] || "", input: "", effect: "non_idempotent", deadline: "",
+  };
+}
+
+function fabricComposerEnsure(draft, group) {
+  const members = group && Array.isArray(group.members) ? group.members.slice(0, FABRIC_COMPOSER_MEMBER_LIMIT) : [];
+  const available = new Map(members.map((agent) => [agent.agent_id, agent]));
+  draft.pattern = draft.pattern === "fan_out" ? "fan_out" : "delegate";
+  draft.selectedIds = (Array.isArray(draft.selectedIds) ? draft.selectedIds : []).filter((id) => available.has(id));
+  if (!draft.initialized && !draft.selectedIds.length && members.length) {
+    draft.selectedIds = members.slice(0, draft.pattern === "fan_out" ? Math.min(2, members.length) : 1).map((agent) => agent.agent_id);
+  }
+  draft.initialized = true;
+  if (draft.pattern === "delegate" && draft.selectedIds.length > 1) draft.selectedIds = draft.selectedIds.slice(0, 1);
+  draft.assignments = Object.assign(Object.create(null), fabricObject(draft.assignments));
+  draft.selectedIds.forEach((id, index) => {
+    const agent = available.get(id);
+    const prior = fabricObject(draft.assignments[id]);
+    const hadAssignment = Object.keys(prior).length > 0;
+    const current = { ...fabricComposerAssignment(agent, index), ...prior };
+    const kinds = fabricAcceptedKinds(agent);
+    if (!kinds.includes(current.kind)) current.kind = hadAssignment ? "" : kinds[0] || "";
+    if (!FABRIC_COMPOSER_EFFECTS.includes(current.effect)) current.effect = "non_idempotent";
+    draft.assignments[id] = current;
+  });
+  const selectedAgent = available.get(draft.selectedIds[0]);
+  const declaredScopes = new Set(Array.isArray(fabricObject(selectedAgent && selectedAgent.manifest).scopes)
+    ? selectedAgent.manifest.scopes.map(String) : []);
+  draft.contextScopes = (Array.isArray(draft.contextScopes) ? draft.contextScopes : []).filter((scope) => declaredScopes.has(scope));
+  draft.maxInFlight = String(draft.maxInFlight ?? "2");
+  return draft;
+}
+
+function fabricComposerInput(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { error: "Describe the work this member should receive." };
+  if (agentUtf8Length(text) > FABRIC_COMPOSER_INPUT_LIMIT) {
+    return { error: `Work input must be ${Math.round(FABRIC_COMPOSER_INPUT_LIMIT / 1024)} KiB or smaller.` };
+  }
+  let value;
+  try { value = JSON.parse(text); }
+  catch {
+    if (/^[{[]/.test(text)) return { error: "Structured work must be valid JSON, or use plain text." };
+    return { value: text };
+  }
+  try { agentValidateManifestNumbers(text); }
+  catch (error) { return { error: error.message.replaceAll("Manifest", "Input") }; }
+  try { agentManifestScan(value); }
+  catch (error) { return { error: error.message.replaceAll("Manifest", "Input") }; }
+  return { value };
+}
+
+function fabricComposerChannels(raw) {
+  const text = String(raw || "");
+  if (agentUtf8Length(text) > FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT) {
+    return { error: `Context channels must be ${Math.round(FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT / 1024)} KiB or smaller.` };
+  }
+  const value = text.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+  if (value.length > FABRIC_COMPOSER_CHANNEL_LIMIT) {
+    return { error: `Use at most ${FABRIC_COMPOSER_CHANNEL_LIMIT} context channels.` };
+  }
+  if (value.some((item) => agentUtf8Length(item) > FABRIC_COMPOSER_CHANNEL_NAME_LIMIT)) {
+    return { error: `Each context channel must be ${FABRIC_COMPOSER_CHANNEL_NAME_LIMIT} UTF-8 bytes or fewer.` };
+  }
+  return { value };
+}
+
+function fabricComposerValidation(draft, group, allAgents, now = Date.now()) {
+  const members = group && Array.isArray(group.members) ? group.members.slice(0, FABRIC_COMPOSER_MEMBER_LIMIT) : [];
+  const available = new Map(members.map((agent) => [agent.agent_id, agent]));
+  const errors = [];
+  const warnings = [];
+  const selected = (Array.isArray(draft.selectedIds) ? draft.selectedIds : []).filter((id) => available.has(id));
+  if (!selected.length) errors.push({ field: "roster", message: "Choose at least one durable identity." });
+  if (draft.pattern === "delegate" && selected.length !== 1) errors.push({ field: "roster", message: "Delegate uses exactly one member." });
+  if (draft.pattern === "fan_out" && selected.length === 1) warnings.push("A one-member fan-out is valid, but it has no parallel work to merge.");
+  const coordinationId = String(draft.coordinationId || "").trim();
+  if (coordinationId && (agentUtf8Length(coordinationId) > 256 || coordinationId.includes("/") || coordinationId.includes("\\") || /^\.+$/.test(coordinationId) || AGENT_RESERVED_IDS.has(coordinationId))) {
+    errors.push({ field: "coordinationId", message: "The coordination ID must be at most 256 UTF-8 bytes, contain no path separators, and not be reserved." });
+  }
+  const parent = String(draft.parent || "").trim();
+  if (agentUtf8Length(parent) > 512) errors.push({ field: "parent", message: "The causal parent ID must be at most 512 UTF-8 bytes." });
+  const labels = new Set();
+  let nonIdempotent = 0;
+  let compensatable = 0;
+  let totalInputBytes = 0;
+  for (const id of selected) {
+    const agent = available.get(id);
+    const assignment = fabricObject(fabricObject(draft.assignments)[id]);
+    const prefix = `assignment:${id}:`;
+    const member = String(assignment.member || "").trim();
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(member) || ["outcome", "race-dlq"].includes(member)) {
+      errors.push({ field: `${prefix}member`, message: `${id}: role name must use 1–128 letters, numbers, dots, underscores, or hyphens and cannot be reserved.` });
+    } else if (labels.has(member)) errors.push({ field: `${prefix}member`, message: `${id}: role name must be unique within this coordination.` });
+    labels.add(member);
+    const kind = String(assignment.kind || "");
+    if (!fabricAcceptedKinds(agent).includes(kind)) errors.push({ field: `${prefix}kind`, message: `${id}: choose a message kind declared by its pinned manifest.` });
+    const input = fabricComposerInput(assignment.input);
+    totalInputBytes += agentUtf8Length(assignment.input);
+    if (input.error) errors.push({ field: `${prefix}input`, message: `${id}: ${input.error}` });
+    if (!FABRIC_COMPOSER_EFFECTS.includes(assignment.effect)) errors.push({ field: `${prefix}effect`, message: `${id}: choose a supported effect class.` });
+    if (assignment.effect === "non_idempotent") nonIdempotent++;
+    if (assignment.effect === "compensatable") compensatable++;
+    if (assignment.deadline) {
+      const deadline = Date.parse(assignment.deadline);
+      if (!Number.isFinite(deadline) || deadline <= now) errors.push({ field: `${prefix}deadline`, message: `${id}: deadline must be a valid future time.` });
+    }
+  }
+  if (totalInputBytes > FABRIC_COMPOSER_TOTAL_INPUT_LIMIT) {
+    errors.push({ field: "roster", message: `Combined work inputs must be ${Math.round(FABRIC_COMPOSER_TOTAL_INPUT_LIMIT / 1024)} KiB or smaller.` });
+  }
+  if (draft.pattern === "fan_out") {
+    const window = Number(draft.maxInFlight);
+    if (!Number.isSafeInteger(window) || window < 1 || window > 4294967295) {
+      errors.push({ field: "maxInFlight", message: "Parallel window must be an integer from 1 to 4,294,967,295." });
+    }
+    if (!['partial', 'fail_fast'].includes(draft.failurePolicy)) errors.push({ field: "failurePolicy", message: "Choose how a terminal member failure settles the fan-out." });
+  }
+  const delegator = String(draft.delegator || "").trim();
+  if (delegator) {
+    const agent = (Array.isArray(allAgents) ? allAgents : []).find((item) => item.agent_id === delegator);
+    if (!agent || !fabricAcceptedKinds(agent).includes("coordination_result")) {
+      errors.push({ field: "delegator", message: "Outcome delivery requires a registered identity that accepts coordination_result." });
+    }
+  }
+  if (draft.pattern === "delegate" && draft.handoff && !delegator) {
+    errors.push({ field: "handoff", message: "A handoff record requires an outcome recipient that can receive it." });
+  }
+  if (draft.pattern === "delegate") {
+    const selectedAgent = available.get(selected[0]);
+    const declared = new Set(Array.isArray(fabricObject(selectedAgent && selectedAgent.manifest).scopes)
+      ? selectedAgent.manifest.scopes.map(String) : []);
+    for (const scope of Array.isArray(draft.contextScopes) ? draft.contextScopes : []) {
+      if (!declared.has(scope)) errors.push({ field: "contextScopes", message: `Context scope ${scope} would widen the selected member's manifest.` });
+    }
+    const channels = fabricComposerChannels(draft.channels);
+    if (channels.error) errors.push({ field: "channels", message: channels.error });
+  }
+  if (nonIdempotent) warnings.push(`${nonIdempotent} member assignment${nonIdempotent === 1 ? " declares" : "s declare"} non-idempotent work; retries are not assumed safe.`);
+  if (compensatable) warnings.push(`${compensatable} member assignment${compensatable === 1 ? " requires" : "s require"} its declared compensation path before retry.`);
+  return { errors, warnings, selected, nonIdempotent, compensatable, totalInputBytes };
+}
+
+function fabricComposerPayload(draft, group, allAgents, now = Date.now()) {
+  if (draft.completed && draft.launchedPayload && draft.launchedValidation) {
+    return { validation: draft.launchedValidation, payload: draft.launchedPayload };
+  }
+  if (draft.errorAmbiguous && draft.attemptedPayload && draft.attemptedValidation) {
+    return { validation: draft.attemptedValidation, payload: draft.attemptedPayload };
+  }
+  const validation = fabricComposerValidation(draft, group, allAgents, now);
+  if (validation.errors.length) return { validation, payload: null };
+  const available = new Map(group.members.slice(0, FABRIC_COMPOSER_MEMBER_LIMIT).map((agent) => [agent.agent_id, agent]));
+  const delegations = validation.selected.map((id) => {
+    const agent = available.get(id);
+    const assignment = fabricObject(draft.assignments[id]);
+    const input = fabricComposerInput(assignment.input);
+    const delegation = {
+      member: String(assignment.member).trim(), agent_id: id,
+      manifest_version: String(fabricObject(agent.manifest).manifest_version || ""),
+      kind: assignment.kind, input: { kind: "inline", value: input.value }, effect: assignment.effect,
+    };
+    if (assignment.deadline) delegation.deadline = new Date(assignment.deadline).toISOString();
+    return delegation;
+  });
+  const payload = {};
+  if (String(draft.coordinationId || "").trim()) payload.coordination_id = String(draft.coordinationId).trim();
+  if (String(draft.delegator || "").trim()) payload.delegator = String(draft.delegator).trim();
+  if (String(draft.parent || "").trim()) payload.parent = String(draft.parent).trim();
+  if (draft.pattern === "delegate") {
+    const contract = { delegate: delegations[0] };
+    const scopes = Array.isArray(draft.contextScopes) ? draft.contextScopes : [];
+    const channels = fabricComposerChannels(draft.channels).value || [];
+    if (scopes.length || channels.length) contract.context = { scopes, channels };
+    if (draft.handoff) contract.handoff = true;
+    payload.delegate = contract;
+  } else {
+    payload.fan_out = { members: delegations, max_in_flight: Number(draft.maxInFlight), on_member_failure: draft.failurePolicy };
+  }
+  return { validation, payload };
+}
+
+function fabricComposerRecordPayload(record) {
+  const row = fabricObject(record);
+  const contract = fabricObject(row.contract);
+  const pattern = String(contract.pattern || "");
+  const payload = { coordination_id: String(row.coordination_id || "") };
+  if (row.delegator) payload.delegator = String(row.delegator);
+  if (row.parent) payload.parent = String(row.parent);
+  if (["delegate", "fan_out"].includes(pattern)) {
+    const body = {};
+    for (const [key, value] of Object.entries(contract)) if (key !== "pattern") body[key] = value;
+    payload[pattern] = body;
+  } else {
+    payload.existing_contract = contract;
+  }
+  return payload;
+}
+
+function fabricComposerErrorFor(validation, field) {
+  return validation.errors.some((error) => error.field === field);
+}
+
+function fabricComposerAssignmentHtml(agent, assignment, validation) {
+  const id = agent.agent_id;
+  const prefix = `assignment:${id}:`;
+  const kinds = fabricAcceptedKinds(agent);
+  return `<article class="fabric-assignment"><div class="fabric-assignment-head"><b>${escapeHtml(id)}</b>` +
+    `<span>${escapeHtml(fabricObject(agent.manifest).manifest_version || "unversioned")} · pinned</span></div>` +
+    `<div class="fabric-assignment-grid"><label>Role name<input data-compose-agent="${escapeHtml(id)}" data-compose-field="member" data-fabric-focus="compose-${escapeHtml(id)}-member" maxlength="128" value="${escapeHtml(assignment.member || "")}" aria-invalid="${fabricComposerErrorFor(validation, `${prefix}member`)}"></label>` +
+    `<label>Accepted work<select data-compose-agent="${escapeHtml(id)}" data-compose-field="kind" data-fabric-focus="compose-${escapeHtml(id)}-kind" aria-invalid="${fabricComposerErrorFor(validation, `${prefix}kind`)}">${assignment.kind ? "" : `<option value="" selected>Choose accepted work</option>`}${kinds.map((kind) => `<option value="${escapeHtml(kind)}"${kind === assignment.kind ? " selected" : ""}>${escapeHtml(kind)}</option>`).join("")}</select></label>` +
+    `<label>Effect<select data-compose-agent="${escapeHtml(id)}" data-compose-field="effect" data-fabric-focus="compose-${escapeHtml(id)}-effect" aria-invalid="${fabricComposerErrorFor(validation, `${prefix}effect`)}">${FABRIC_COMPOSER_EFFECTS.map((effect) => `<option value="${effect}"${effect === assignment.effect ? " selected" : ""}>${escapeHtml(effect.replaceAll("_", " "))}</option>`).join("")}</select></label></div>` +
+    `<div class="fabric-assignment-task"><label>Work to deliver<textarea data-compose-agent="${escapeHtml(id)}" data-compose-field="input" data-fabric-focus="compose-${escapeHtml(id)}-input" maxlength="${FABRIC_COMPOSER_INPUT_LIMIT}" aria-invalid="${fabricComposerErrorFor(validation, `${prefix}input`)}" placeholder="Plain text, or structured JSON">${escapeHtml(assignment.input || "")}</textarea><span class="tiny">Up to ${Math.round(FABRIC_COMPOSER_INPUT_LIMIT / 1024)} KiB; structured input is bounded to ${AGENT_MANIFEST_DEPTH_LIMIT} levels.</span></label>` +
+    `<label>Deadline · optional<input type="datetime-local" data-compose-agent="${escapeHtml(id)}" data-compose-field="deadline" data-fabric-focus="compose-${escapeHtml(id)}-deadline" value="${escapeHtml(assignment.deadline || "")}" aria-invalid="${fabricComposerErrorFor(validation, `${prefix}deadline`)}"><span class="tiny">Uses your local time.</span></label></div></article>`;
+}
+
+function fabricComposerReviewHtml(draft, group, allAgents) {
+  const result = fabricComposerPayload(draft, group, allAgents);
+  const validation = result.validation;
+  const taskCount = validation.selected.length;
+  const window = draft.pattern === "fan_out" ? Math.min(Number(draft.maxInFlight) || 0, taskCount) : taskCount;
+  const deduplicated = Boolean(draft.completed && fabricObject(draft.receipt).deduplicated);
+  const actualPattern = result.payload && result.payload.delegate ? "delegate" :
+    result.payload && result.payload.fan_out ? "fan out" : "existing durable";
+  const actualVerified = Boolean(result.payload) && typeof result.payload.existing_contract !== "string";
+  const baseFacts = deduplicated
+    ? [
+        `<div><b>${actualVerified ? `${escapeHtml(actualPattern)} coordination` : "Existing coordination not verified"}</b><br>${actualVerified ? "Loaded from Rusty's durable record by retry key." : "Use the investigation error before taking further action."}</div>`,
+        `<div><b>${taskCount} recorded member${taskCount === 1 ? "" : "s"}</b><br>The rejected draft was not applied or used for this summary.</div>`,
+      ]
+    : [
+        `<div><b>${taskCount} durable task${taskCount === 1 ? "" : "s"}</b><br>Manifest versions and accepted kinds are pinned before submission.</div>`,
+        `<div><b>${draft.pattern === "fan_out" ? `${window} initially in flight` : "One delegated handoff"}</b><br>${draft.pattern === "fan_out" ? "The declared window provides mailbox backpressure." : "The member result settles the coordination."}</div>`,
+      ];
+  const facts = [
+    ...baseFacts,
+    ...validation.warnings.map((warning) => `<div class="risk"><b>Review effect</b><br>${escapeHtml(warning)}</div>`),
+    ...validation.errors.map((error) => `<div class="error"><b>Fix before starting</b><br>${escapeHtml(error.message)}</div>`),
+  ].join("");
+  const preview = result.payload ? fabricJsonText(result.payload, FABRIC_COMPOSER_PREVIEW_LIMIT) : "The typed contract preview appears when required fields are valid.";
+  const receipt = draft.receipt ? `<div class="note fabric-compose-receipt"><b>${draft.receipt.deduplicated ? "Existing coordination reused." : "Coordination started."}</b> ${escapeHtml(draft.receipt.coordination_id || "")}${Array.isArray(draft.receipt.submitted) ? ` · ${draft.receipt.submitted.length} member task${draft.receipt.submitted.length === 1 ? "" : "s"} submitted` : ""}</div>` : "";
+  const failure = draft.error ? `<div class="note fabric-error"><b>${draft.errorAmbiguous ? "Receipt was not confirmed." : "Coordination was not started."}</b> ${escapeHtml(draft.error)}</div>` : "";
+  const notice = draft.notice ? `<div class="note">${escapeHtml(draft.notice)}</div>` : "";
+  const actions = draft.completed
+    ? `<div class="fabric-compose-actions"><button type="button" data-compose-new data-fabric-focus="compose-new">Compose another coordination</button></div>`
+    : draft.errorAmbiguous
+      ? `<div class="fabric-compose-actions"><label class="fabric-check"><input type="checkbox" checked disabled>Previously approved contract locked to retry key ${escapeHtml(draft.coordinationId)}.</label>` +
+        `<button class="primary" type="submit" form="fabric-compose-form" data-fabric-focus="compose-submit"${!result.payload || draft.submitting ? " disabled" : ""}>${draft.submitting ? "Retrying coordination…" : "Retry same stable contract"}</button></div>`
+    : `<div class="fabric-compose-actions"><label class="fabric-check"><input type="checkbox" data-compose-field="acknowledge" data-fabric-focus="compose-ack"${draft.acknowledge ? " checked" : ""}${result.payload && !draft.submitting ? "" : " disabled"}>I understand this starts durable mailbox work using the reviewed effect declarations.</label>` +
+      `<button class="primary" type="submit" form="fabric-compose-form" data-fabric-focus="compose-submit"${!result.payload || !draft.acknowledge || draft.submitting ? " disabled" : ""}>${draft.submitting ? "Starting coordination…" : `Start ${draft.pattern === "fan_out" ? "fan-out" : "delegation"}`}</button></div>`;
+  return `<h3>Launch preflight</h3><div class="fabric-preflight">${facts}</div>${failure}${notice}` +
+    `<details class="fabric-raw" data-fabric-disclosure="compose-contract"><summary data-fabric-focus="compose-contract">Review typed coordination contract</summary><pre class="json">${escapeHtml(preview)}</pre></details>` +
+    `${actions}${receipt}`;
+}
+
+function fabricComposerHtml(draft, group, allAgents) {
+  if (!group || !group.members.length) return `<div class="empty">Choose a declared team with at least one durable identity.</div>`;
+  if (!String(draft.coordinationId || "").trim()) draft.coordinationId = fabricComposerGeneratedId();
+  if (draft.completed && fabricObject(draft.receipt).deduplicated) {
+    const verified = Boolean(draft.launchedPayload) && typeof draft.launchedPayload.existing_contract !== "string";
+    return `<div class="fabric-compose-grid"><div class="fabric-compose-form"><div class="note"><b>The submitted draft was not applied.</b> ${verified ? "Rusty reused this retry key; its actual durable contract is shown in the preflight and investigation." : "Rusty reused this retry key, but Studio could not verify its durable contract. Use the investigation error before taking further action."}</div></div>` +
+      `<section class="fabric-compose-review" id="fabric-compose-review" aria-label="Launch preflight">${fabricComposerReviewHtml(draft, group, allAgents)}</section></div>`;
+  }
+  const frozenAgents = draft.completed ? draft.launchedAgents : draft.errorAmbiguous ? draft.attemptedAgents : [];
+  const displayGroup = frozenAgents.length
+    ? { ...group, members: frozenAgents }
+    : group;
+  if (!draft.completed && !draft.errorAmbiguous) fabricComposerEnsure(draft, displayGroup);
+  const result = fabricComposerPayload(draft, displayGroup, allAgents);
+  const validation = result.validation;
+  const visibleMembers = displayGroup.members.slice(0, FABRIC_COMPOSER_MEMBER_LIMIT);
+  const delegators = (Array.isArray(allAgents) ? allAgents : []).filter((agent) => fabricAcceptedKinds(agent).includes("coordination_result"));
+  const selected = new Set(draft.selectedIds);
+  const roster = visibleMembers.map((agent) => `<button type="button" data-compose-agent-toggle="${escapeHtml(agent.agent_id)}" data-fabric-focus="compose-roster-${escapeHtml(agent.agent_id)}" aria-pressed="${selected.has(agent.agent_id)}">${escapeHtml(agent.agent_id)}</button>`).join("");
+  const assignments = draft.selectedIds.map((id) => {
+    const agent = visibleMembers.find((item) => item.agent_id === id);
+    return agent ? fabricComposerAssignmentHtml(agent, fabricObject(draft.assignments[id]), validation) : "";
+  }).join("");
+  const selectedAgent = visibleMembers.find((agent) => agent.agent_id === draft.selectedIds[0]);
+  const scopes = Array.isArray(fabricObject(selectedAgent && selectedAgent.manifest).scopes) ? selectedAgent.manifest.scopes.map(String) : [];
+  const options = draft.pattern === "delegate"
+    ? `<div><label>Context scopes</label><div class="fabric-scopes">${scopes.map((scope) => `<label class="fabric-check"><input type="checkbox" data-compose-scope="${escapeHtml(scope)}"${draft.contextScopes.includes(scope) ? " checked" : ""}>${escapeHtml(scope)}</label>`).join("") || `<span class="muted tiny">No scopes declared by this manifest.</span>`}</div></div>` +
+      `<label>Context channels · optional<input data-compose-field="channels" data-fabric-focus="compose-channels" maxlength="${FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT}" value="${escapeHtml(draft.channels)}" aria-invalid="${fabricComposerErrorFor(validation, "channels")}" placeholder="thread:team-7, kv:briefs"><span class="tiny">Comma or line separated · up to ${FABRIC_COMPOSER_CHANNEL_LIMIT} channels.</span></label>` +
+      `<label class="fabric-check"><input type="checkbox" data-compose-field="handoff" data-fabric-focus="compose-handoff" aria-invalid="${fabricComposerErrorFor(validation, "handoff")}"${draft.handoff ? " checked" : ""}${draft.delegator ? "" : " disabled"}>${draft.delegator ? "Treat the member result as the delegator’s handoff record." : "Select an outcome recipient to enable a handoff record."}</label>`
+    : `<label>Parallel window<input type="number" min="1" max="4294967295" step="1" data-compose-field="maxInFlight" data-fabric-focus="compose-window" value="${escapeHtml(draft.maxInFlight)}" aria-invalid="${fabricComposerErrorFor(validation, "maxInFlight")}"></label>` +
+      `<label>When one member fails<select data-compose-field="failurePolicy" data-fabric-focus="compose-failure" aria-invalid="${fabricComposerErrorFor(validation, "failurePolicy")}"><option value="partial"${draft.failurePolicy === "partial" ? " selected" : ""}>Keep completed results</option><option value="fail_fast"${draft.failurePolicy === "fail_fast" ? " selected" : ""}>Fail and cancel remaining</option></select></label>`;
+  return `<div class="fabric-compose-grid"><form class="fabric-compose-form" id="fabric-compose-form"><fieldset class="fabric-compose-fields"${draft.submitting || draft.completed || draft.errorAmbiguous ? " disabled" : ""}><div class="fabric-patterns" role="group" aria-label="Coordination pattern">` +
+    `<button class="fabric-pattern" type="button" data-compose-pattern="delegate" data-fabric-focus="compose-pattern-delegate" aria-pressed="${draft.pattern === "delegate"}"><b>Delegate</b><span>One role owns the result; optional handoff context.</span></button>` +
+    `<button class="fabric-pattern" type="button" data-compose-pattern="fan_out" data-fabric-focus="compose-pattern-fan-out" aria-pressed="${draft.pattern === "fan_out"}"><b>Fan out</b><span>Several roles run under a bounded parallel window.</span></button></div>` +
+    `<div class="fabric-compose-meta"><label>Coordination ID · retry key<input data-compose-field="coordinationId" data-fabric-focus="compose-id" maxlength="256" value="${escapeHtml(draft.coordinationId)}" aria-invalid="${fabricComposerErrorFor(validation, "coordinationId")}" placeholder="Generated in this browser"></label>` +
+    `<label>Deliver outcome to · optional<select data-compose-field="delegator" data-fabric-focus="compose-delegator" aria-invalid="${fabricComposerErrorFor(validation, "delegator")}"><option value="">Studio only · inspect by ID</option>${delegators.map((agent) => `<option value="${escapeHtml(agent.agent_id)}"${draft.delegator === agent.agent_id ? " selected" : ""}>${escapeHtml(agent.agent_id)}</option>`).join("")}</select></label></div>` +
+    `<label>Members from ${escapeHtml(fabricGroupLabel(displayGroup))}</label><div class="fabric-roster" role="group" aria-label="Coordination members">${roster}</div>` +
+    (displayGroup.members.length > visibleMembers.length ? `<div class="note tiny">${displayGroup.members.length - visibleMembers.length} additional identities are not available in this bounded composer.</div>` : "") + assignments +
+    `<div class="fabric-compose-options">${options}<label>Causal parent event · advanced<input data-compose-field="parent" data-fabric-focus="compose-parent" maxlength="512" value="${escapeHtml(draft.parent)}" aria-invalid="${fabricComposerErrorFor(validation, "parent")}" placeholder="Leave blank for control-plane launch"></label></div></fieldset></form>` +
+    `<section class="fabric-compose-review" id="fabric-compose-review" aria-label="Launch preflight">${fabricComposerReviewHtml(draft, displayGroup, allAgents)}</section></div>`;
+}
+
 function fabricSummaryHtml(agents) {
   const list = Array.isArray(agents) ? agents : [];
   const groups = fabricGroups(list);
@@ -4566,7 +4984,7 @@ function fabricMemberButtonHtml(agent, selected, status, error) {
     `tabindex="${selected ? "0" : "-1"}" aria-selected="${selected ? "true" : "false"}"${selected ? ` aria-current="true"` : ""} ` +
     `aria-label="${escapeHtml(`${agent.agent_id}, ${manifest.agent_kind || "unknown kind"}, ${health.label}`)}">` +
     `<span class="fabric-health-dot ${escapeHtml(health.tone)}" aria-hidden="true"></span>` +
-    `<span><b>${escapeHtml(agent.agent_id)}</b><small>${escapeHtml(manifest.agent_kind || "unknown kind")} · ${escapeHtml(manifest.manifest_version || "unversioned")}</small></span>` +
+    `<span><b title="${escapeHtml(agent.agent_id)}">${escapeHtml(agent.agent_id)}</b><small>${escapeHtml(manifest.agent_kind || "unknown kind")} · ${escapeHtml(manifest.manifest_version || "unversioned")}</small></span>` +
     `<span class="fabric-mailbox-mini">${escapeHtml(fabricMailboxLabel(status))}</span></button>`;
 }
 
@@ -4857,13 +5275,247 @@ function fabricUpdateSidebar() {
   el.textContent = `${count} durable identit${count === 1 ? "y" : "ies"} · ${teams} team label${teams === 1 ? "" : "s"}`;
 }
 
+function fabricComposerContext() {
+  const state = store.fabric;
+  const group = state && fabricGroups(state.list).find((item) => item.key === state.selectedGroup);
+  return { state, group, draft: state && state.composer };
+}
+
+function fabricRenderComposer(force) {
+  const { state, group, draft } = fabricComposerContext();
+  if (!state || !draft || (!force && !draft.needsRender)) return;
+  const refresh = $("btn-fabric-refresh");
+  if (refresh) refresh.disabled = Boolean(state.loading || draft.submitting);
+  const focusIdentity = fabricFocusIdentity(document.activeElement);
+  const disclosures = fabricDisclosureState($("fabric-compose-body"));
+  $("fabric-compose-body").innerHTML = state.error
+    ? `<div class="empty">Team composition needs a loaded durable-agent registry.</div>`
+    : fabricComposerHtml(draft, group, state.list);
+  draft.needsRender = false;
+  fabricRestoreDisclosures($("fabric-compose-body"), disclosures);
+  fabricRestoreFocus(focusIdentity);
+}
+
+function fabricRenderComposerReview() {
+  const { state, group, draft } = fabricComposerContext();
+  const review = $("fabric-compose-review");
+  if (!state || !group || !draft || !review) return;
+  const focusIdentity = fabricFocusIdentity(document.activeElement);
+  const disclosures = fabricDisclosureState(review);
+  review.innerHTML = fabricComposerReviewHtml(draft, group, state.list);
+  fabricRestoreDisclosures(review, disclosures);
+  fabricRestoreFocus(focusIdentity);
+}
+
+function fabricComposerResetApproval(draft, preserveCoordinationId = false) {
+  const currentId = String(draft.coordinationId || "").trim();
+  if (!preserveCoordinationId && draft.lastAttemptedId && currentId === draft.lastAttemptedId &&
+      !draft.submitting && !draft.completed && !draft.errorAmbiguous) {
+    draft.coordinationId = fabricComposerGeneratedId();
+    draft.lastAttemptedId = "";
+  } else if (preserveCoordinationId && currentId !== draft.lastAttemptedId) {
+    draft.lastAttemptedId = "";
+  }
+  draft.acknowledge = false;
+  draft.error = null;
+  draft.errorAmbiguous = false;
+  draft.receipt = null;
+  draft.notice = null;
+  draft.attemptedPayload = null;
+  draft.attemptedValidation = null;
+  draft.attemptedAgents = [];
+}
+
+function fabricComposerHandleClick(event) {
+  const { state, group, draft } = fabricComposerContext();
+  if (!group || !draft) return;
+  const another = event.target.closest("[data-compose-new]");
+  if (another) {
+    state.composer = fabricComposerInitial();
+    fabricRenderComposer(true);
+    fabricFocusData($("fabric-compose-body"), "data-fabric-focus", "compose-id");
+    $("fabric-compose-announcer").textContent = "New coordination draft ready with a fresh retry key.";
+    return;
+  }
+  const pattern = event.target.closest("[data-compose-pattern]");
+  if (pattern) {
+    const nextPattern = pattern.dataset.composePattern;
+    if (draft.pattern === nextPattern) return;
+    draft.pattern = nextPattern;
+    if (draft.pattern === "fan_out" && draft.selectedIds.length === 1 && group.members.length > 1) {
+      const next = group.members.slice(0, FABRIC_COMPOSER_MEMBER_LIMIT)
+        .find((agent) => !draft.selectedIds.includes(agent.agent_id));
+      if (next) draft.selectedIds.push(next.agent_id);
+    }
+    fabricComposerResetApproval(draft);
+    fabricComposerEnsure(draft, group);
+    draft.needsRender = true;
+    fabricRenderComposer(true);
+    $("fabric-compose-announcer").textContent = `${draft.pattern === "fan_out" ? "Fan-out" : "Delegate"} pattern selected.`;
+    return;
+  }
+  const toggle = event.target.closest("[data-compose-agent-toggle]");
+  if (!toggle) return;
+  const id = toggle.dataset.composeAgentToggle;
+  if (draft.pattern === "delegate") draft.selectedIds = [id];
+  else if (draft.selectedIds.includes(id)) draft.selectedIds = draft.selectedIds.filter((item) => item !== id);
+  else draft.selectedIds.push(id);
+  fabricComposerResetApproval(draft);
+  fabricComposerEnsure(draft, group);
+  draft.needsRender = true;
+  fabricRenderComposer(true);
+}
+
+function fabricComposerHandleEdit(event) {
+  const target = event.target;
+  const { group, draft } = fabricComposerContext();
+  if (!group || !draft || !target) return;
+  if (event.type === "input" && (target.type === "checkbox" || target.tagName === "SELECT")) return;
+  const scope = target.dataset.composeScope;
+  if (scope) {
+    if (target.checked && !draft.contextScopes.includes(scope)) draft.contextScopes.push(scope);
+    else if (!target.checked) draft.contextScopes = draft.contextScopes.filter((item) => item !== scope);
+    fabricComposerResetApproval(draft);
+    fabricRenderComposerReview();
+    return;
+  }
+  const field = target.dataset.composeField;
+  if (!field) return;
+  const agentId = target.dataset.composeAgent;
+  const value = target.type === "checkbox" ? target.checked : target.value;
+  if (agentId) {
+    if (!draft.assignments[agentId]) draft.assignments[agentId] = {};
+    draft.assignments[agentId][field] = value;
+  } else {
+    draft[field] = value;
+  }
+  if (field !== "acknowledge") fabricComposerResetApproval(draft, field === "coordinationId");
+  if (field === "delegator") {
+    if (!value) draft.handoff = false;
+    draft.needsRender = true;
+    fabricRenderComposer(true);
+    return;
+  }
+  const errorField = agentId ? `assignment:${agentId}:${field}` : field;
+  target.setAttribute("aria-invalid", String(fabricComposerErrorFor(
+    fabricComposerValidation(draft, group, store.fabric.list), errorField)));
+  fabricRenderComposerReview();
+}
+
+function fabricComposerSubmitError(error) {
+  if (error.status === 404 && (!error.body || error.body.raw !== undefined)) {
+    return "This server does not expose typed coordination submission. Upgrade Rusty before starting team work.";
+  }
+  if (error.status === 400) return error.body && (error.body.message || error.body.error) || "The server rejected the coordination contract.";
+  if (error.status === 409) return error.body && (error.body.message || error.body.error) || "The coordination conflicts with existing durable state.";
+  return error.message || "The coordination request failed.";
+}
+
+async function fabricSubmitComposer() {
+  const { state, group, draft } = fabricComposerContext();
+  if (!state || !group || !draft || draft.submitting || draft.completed || !store.conn) return;
+  if (!String(draft.coordinationId || "").trim()) {
+    draft.coordinationId = fabricComposerGeneratedId();
+    fabricComposerResetApproval(draft, true);
+    draft.needsRender = true;
+    fabricRenderComposer(true);
+    $("fabric-compose-announcer").textContent = "A stable coordination retry key was generated. Review and acknowledge the updated contract.";
+    return;
+  }
+  const result = fabricComposerPayload(draft, group, state.list);
+  if (!result.payload || !draft.acknowledge) {
+    $("fabric-compose-announcer").textContent = result.validation.errors.length
+      ? `Coordination has ${result.validation.errors.length} validation issue${result.validation.errors.length === 1 ? "" : "s"}.`
+      : "Review and acknowledge the durable work before starting.";
+    fabricRenderComposerReview();
+    return;
+  }
+  const request = ++draft.request;
+  const generation = state.generation;
+  const selectedGroup = state.selectedGroup;
+  const connection = { ...store.conn };
+  const pattern = draft.pattern;
+  draft.lastAttemptedId = String(draft.coordinationId);
+  const selected = new Set(result.validation.selected);
+  draft.attemptedPayload = result.payload;
+  draft.attemptedValidation = result.validation;
+  draft.attemptedAgents = group.members.filter((agent) => selected.has(agent.agent_id));
+  draft.submitting = true;
+  draft.error = null;
+  draft.receipt = null;
+  draft.notice = null;
+  fabricRenderComposer(true);
+  $("fabric-compose-announcer").textContent = `Starting ${pattern === "fan_out" ? "fan-out" : "delegation"}.`;
+  const current = () => Boolean(store.fabric && store.fabric.composer === draft && draft.request === request &&
+    store.fabric.selectedGroup === selectedGroup &&
+    fabricRequestCurrent(generation, connection, store.fabricRequest, store.conn));
+  try {
+    const receipt = await apiForConnection(connection, "POST", `/coordination/${pattern}`, result.payload);
+    if (!current()) return;
+    const receiptId = String(fabricObject(receipt).coordination_id || "").trim();
+    if (!receiptId || agentUtf8Length(receiptId) > 256 || receiptId.includes("/") || receiptId.includes("\\") ||
+        /^\.+$/.test(receiptId) || AGENT_RESERVED_IDS.has(receiptId)) {
+      throw new Error("Rusty returned a coordination receipt without a safe identifier.");
+    }
+    const deduplicated = Boolean(fabricObject(receipt).deduplicated);
+    draft.submitting = false;
+    draft.errorAmbiguous = false;
+    draft.launchedPayload = deduplicated
+      ? { coordination_id: receiptId, existing_contract: "Loading the durable record…" }
+      : result.payload;
+    draft.launchedValidation = deduplicated
+      ? { errors: [], warnings: [], selected: [] }
+      : result.validation;
+    draft.launchedAgents = deduplicated ? [] : [...draft.attemptedAgents];
+    draft.completed = true;
+    draft.acknowledge = false;
+    draft.receipt = { ...fabricObject(receipt), coordination_id: receiptId, deduplicated };
+    draft.coordinationId = receiptId;
+    draft.needsRender = true;
+    fabricRenderComposer(true);
+    $("fabric-compose-announcer").textContent = deduplicated
+      ? `Existing coordination ${draft.coordinationId} reused. Loading its evidence.`
+      : `Coordination ${draft.coordinationId} started. Loading its evidence.`;
+    $("inp-fabric-coordination").value = draft.coordinationId;
+    await fabricLoadCoordination(draft.coordinationId);
+    if (!current()) return;
+    if (deduplicated) {
+      const existing = fabricObject(store.fabric.coordination).record;
+      if (existing) {
+        const members = Array.isArray(existing.members) ? existing.members.map((member) => String(fabricObject(member).agent_id || "")).filter(Boolean) : [];
+        draft.launchedPayload = fabricComposerRecordPayload(existing);
+        draft.launchedValidation = { errors: [], warnings: [], selected: members };
+        draft.notice = "Rusty reused an existing coordination by retry key. The submitted draft was not applied; the actual durable contract is shown here.";
+      } else {
+        draft.notice = "Rusty reused this retry key, but Studio could not verify the existing durable contract. Use the investigation error before taking further action.";
+      }
+      draft.needsRender = true;
+      fabricRenderComposer(true);
+    }
+    $("fabric-coordination-title").focus({ preventScroll: true });
+    $("fabric-coordination-title").scrollIntoView({ block: "start", behavior: "smooth" });
+  } catch (error) {
+    if (!current()) return;
+    draft.submitting = false;
+    draft.error = fabricComposerSubmitError(error);
+    draft.errorAmbiguous = ![400, 404, 409, 422].includes(Number(error.status));
+    draft.notice = draft.errorAmbiguous
+      ? `Rusty may have accepted this work. Inspect ${draft.coordinationId} before retrying the same stable contract.`
+      : null;
+    fabricRenderComposer(true);
+    $("fabric-compose-announcer").textContent = draft.errorAmbiguous
+      ? `The coordination receipt was not confirmed. Inspect ${draft.coordinationId} before retrying.`
+      : `Coordination was not started. ${draft.error}`;
+  }
+}
+
 function fabricRender() {
   if (!store.fabric) return;
   const focusIdentity = fabricFocusIdentity(document.activeElement);
   const disclosures = fabricDisclosureState($("fabric-view"));
   const state = store.fabric;
   const groups = fabricGroups(state.list);
-  $("btn-fabric-refresh").disabled = Boolean(state.loading);
+  $("btn-fabric-refresh").disabled = Boolean(state.loading || (state.composer && state.composer.submitting));
   $("fabric-coordination-body").setAttribute("aria-busy", state.coordination.loading ? "true" : "false");
   $("btn-fabric-coordination").disabled = Boolean(state.coordination.loading);
   $("fabric-summary").innerHTML = fabricSummaryHtml(state.list);
@@ -4893,6 +5545,7 @@ function fabricRender() {
       `<div class="fabric-members"><div class="fabric-member-list" role="listbox" aria-label="Durable team members">${list}</div>` +
       `<div class="fabric-evidence">${fabricMemberEvidenceHtml(selected, state.evidence)}</div></div>`;
   }
+  fabricRenderComposer(false);
   if (state.coordination.loading) {
     $("fabric-coordination-body").innerHTML = `<div class="empty">Reconciling coordination and assembling TeamTrace…</div>`;
   } else if (state.coordination.error) {
@@ -4980,21 +5633,31 @@ async function fabricLoadMemberEvidence(agentId) {
 function fabricSelectGroup(key, focus) {
   const state = store.fabric;
   const group = state && fabricGroups(state.list).find((item) => item.key === key);
-  if (!group) return;
+  if (!group) return false;
+  if (state.composer && (state.composer.submitting || state.composer.errorAmbiguous)) {
+    $("fabric-compose-announcer").textContent = state.composer.submitting
+      ? "Wait for the coordination receipt before changing teams."
+      : "Resolve the uncertain coordination receipt before changing teams.";
+    fabricFocusData($("fabric-groups"), "data-fabric-group", state.selectedGroup);
+    return false;
+  }
   if (state.selectedGroup === group.key) {
     if (focus && state.selectedAgent) fabricFocusData($("fabric-team"), "data-fabric-agent", state.selectedAgent);
-    return;
+    return true;
   }
+  if (state.composer && state.composer.completed) state.composer = fabricComposerInitial();
   state.selectedGroup = group.key;
   state.selectedAgent = group.members[0] ? group.members[0].agent_id : null;
   state.statusRequest += 1;
   state.evidenceRequest += 1;
   state.evidence = null;
+  if (state.composer) state.composer.needsRender = true;
   fabricRender();
   $("fabric-team-announcer").textContent = `${fabricGroupLabel(group)} selected, ${group.members.length} member${group.members.length === 1 ? "" : "s"}.`;
   fabricLoadGroupStatuses(group.key);
   if (state.selectedAgent) fabricLoadMemberEvidence(state.selectedAgent);
   if (focus) $("fabric-team").querySelector("[data-fabric-agent]")?.focus({ preventScroll: true });
+  return true;
 }
 
 function fabricSelectAgent(agentId, focus) {
@@ -5028,16 +5691,19 @@ async function fabricLoad(quiet, force) {
   const request = ++store.fabricRequest;
   const connection = { ...store.conn };
   const coordination = fabricCarryCoordination(previous.coordination);
+  const composer = fabricCarryComposer(previous.composer);
   store.fabric = {
     list: previous.list || [], total: previous.total || 0, omitted: previous.omitted || 0,
     selectedGroup: previous.selectedGroup || null, selectedAgent: previous.selectedAgent || null,
     statuses: Object.create(null), statusErrors: Object.create(null), evidence: null,
     coordination,
+    composer,
     statusRequest: 0, evidenceRequest: 0, coordinationRequest: previous.coordinationRequest || 0,
     generation: request, loading: true, error: null,
   };
   if (store.view === "fabric") fabricRender();
   if (coordination.notice) $("fabric-announcer").textContent = coordination.notice;
+  if (composer.notice) $("fabric-compose-announcer").textContent = composer.notice;
   try {
     const value = await apiForConnection(connection, "GET", "/agents");
     if (!fabricRequestCurrent(request, connection, store.fabricRequest, store.conn)) return;
@@ -5054,6 +5720,7 @@ async function fabricLoad(quiet, force) {
     if (!group || !group.members.some((agent) => agent.agent_id === store.fabric.selectedAgent)) {
       store.fabric.selectedAgent = group && group.members[0] ? group.members[0].agent_id : null;
     }
+    store.fabric.composer.needsRender = true;
   } catch (error) {
     if (!fabricRequestCurrent(request, connection, store.fabricRequest, store.conn)) return;
     store.fabric.loading = false;
@@ -5061,6 +5728,7 @@ async function fabricLoad(quiet, force) {
     store.fabricUnsupported = error.status === 404 && (!error.body || error.body.raw !== undefined);
     if (!quiet) toast(error.message, "err");
   }
+  store.fabric.composer.needsRender = true;
   fabricUpdateSidebar();
   if (store.view === "fabric") fabricRender();
   if (!store.fabric.error && store.fabric.selectedGroup) fabricLoadGroupStatuses(store.fabric.selectedGroup);
@@ -6154,8 +6822,7 @@ function init() {
       const ids = Array.from($("fabric-groups").querySelectorAll("[data-fabric-group]"),
         (row) => row.getAttribute("data-fabric-group"));
       const next = fabricNavigationTarget(ids, id, event.key);
-      fabricSelectGroup(next, false);
-      fabricFocusData($("fabric-groups"), "data-fabric-group", next);
+      if (fabricSelectGroup(next, false)) fabricFocusData($("fabric-groups"), "data-fabric-group", next);
       return;
     }
     if (!["Enter", " "].includes(event.key)) return;
@@ -6184,6 +6851,16 @@ function init() {
   };
   $("fabric-team").addEventListener("click", fabricMemberActivate);
   $("fabric-team").addEventListener("keydown", fabricMemberActivate);
+  $("fabric-compose-body").addEventListener("click", fabricComposerHandleClick);
+  $("fabric-compose-body").addEventListener("input", fabricComposerHandleEdit);
+  $("fabric-compose-body").addEventListener("change", (event) => {
+    if (event.target.type === "checkbox" || event.target.tagName === "SELECT") fabricComposerHandleEdit(event);
+  });
+  $("fabric-compose-body").addEventListener("submit", (event) => {
+    if (event.target.id !== "fabric-compose-form") return;
+    event.preventDefault();
+    fabricSubmitComposer();
+  });
   $("fabric-coordination-form").addEventListener("submit", (event) => {
     event.preventDefault();
     fabricLoadCoordination($("inp-fabric-coordination").value);

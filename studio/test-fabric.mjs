@@ -20,7 +20,10 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__fabric = {
   FABRIC_AGENT_LIMIT, FABRIC_STATUS_LIMIT, FABRIC_STATUS_CONCURRENCY, FABRIC_TRACE_LIMIT,
-  FABRIC_ATTEMPT_LIMIT, FABRIC_MEMBER_RENDER_LIMIT,
+  FABRIC_ATTEMPT_LIMIT, FABRIC_MEMBER_RENDER_LIMIT, FABRIC_COMPOSER_MEMBER_LIMIT,
+  FABRIC_COMPOSER_INPUT_LIMIT, FABRIC_COMPOSER_TOTAL_INPUT_LIMIT, FABRIC_COMPOSER_PREVIEW_LIMIT,
+  FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT, FABRIC_COMPOSER_CHANNEL_LIMIT, FABRIC_COMPOSER_CHANNEL_NAME_LIMIT,
+  FABRIC_COMPOSER_EFFECTS,
   agentParseJsonWithNumberKinds, fabricObject, fabricRequestCurrent, fabricNormalizeAgents, fabricGroupKey, fabricGroupLabel,
   fabricGroups, fabricNavigationTarget, fabricFocusData, fabricFocusIdentity,
   fabricDisclosureState, fabricRestoreDisclosures, fabricCreateScheduler,
@@ -29,7 +32,11 @@ globalThis.__fabric = {
   fabricSummaryHtml, fabricGroupButtonHtml, fabricMailboxLabel, fabricMemberButtonHtml,
   fabricRestartLabel, fabricJsonText, fabricSupervisionHtml, fabricMemberEvidenceHtml,
   fabricTraceModel, fabricTraceHtml, fabricCoordinationConsistency, fabricCarryCoordination, fabricReadCoordinationEvidence,
-  fabricCoordinationHtml, fabricErrorHtml,
+  fabricCoordinationHtml, fabricErrorHtml, fabricComposerInitial, fabricCarryComposer, fabricComposerGeneratedId,
+  fabricComposerMemberSlug, fabricComposerAssignment, fabricComposerEnsure, fabricComposerInput,
+  fabricComposerChannels, fabricComposerValidation, fabricComposerPayload, fabricComposerRecordPayload,
+  fabricComposerErrorFor, fabricComposerHtml, fabricComposerResetApproval,
+  fabricComposerReviewHtml, fabricComposerSubmitError,
 };`, sandbox, { filename: "index.html<script>" });
 
 const F = sandbox.__fabric;
@@ -55,6 +62,16 @@ const writer = {
 const solo = {
   agent_id: "solo-1",
   manifest: { agent_kind: "reviewer", manifest_version: "reviewer/1.0.0", accepts: {} },
+};
+const lead = {
+  agent_id: "lead-1",
+  team_id: "insight-team",
+  manifest: {
+    agent_kind: "lead",
+    manifest_version: "lead/1.0.0",
+    accepts: { coordination_result: {} },
+    scopes: ["team"],
+  },
 };
 
 let passed = 0, failed = 0;
@@ -404,6 +421,285 @@ const connectedTrace = {
 }
 
 {
+  const group = { key: "team:insight-team", teamId: "insight-team", members: [research, writer] };
+  const allAgents = [research, writer, lead];
+  const draft = F.fabricComposerInitial();
+  F.fabricComposerEnsure(draft, group);
+  check("composer defaults: delegate begins with one pinned team member and explicit non-idempotent effect",
+    draft.pattern === "delegate" && draft.selectedIds.length === 1 && draft.selectedIds[0] === research.agent_id &&
+    draft.assignments[research.agent_id].kind === "critique" &&
+    draft.assignments[research.agent_id].effect === "non_idempotent");
+  const freshFanout = F.fabricComposerInitial();
+  freshFanout.pattern = "fan_out";
+  F.fabricComposerEnsure(freshFanout, group);
+  check("composer defaults: a fresh fan-out suggests two members while respecting the render bound",
+    freshFanout.selectedIds.length === 2 && F.FABRIC_COMPOSER_MEMBER_LIMIT === 20);
+  freshFanout.selectedIds = [research.agent_id];
+  F.fabricComposerEnsure(freshFanout, group);
+  check("composer roster: a deliberate one-member fan-out remains valid and visibly warned",
+    freshFanout.selectedIds.length === 1 &&
+    F.fabricComposerValidation(freshFanout, group, allAgents).warnings.some((warning) => warning.includes("one-member fan-out")));
+  freshFanout.selectedIds = [];
+  F.fabricComposerEnsure(freshFanout, group);
+  check("composer roster: removing the last fan-out member leaves an actionable empty-roster error",
+    freshFanout.selectedIds.length === 0 &&
+    F.fabricComposerValidation(freshFanout, group, allAgents).errors.some((error) => error.field === "roster"));
+
+  const cancelled = F.fabricCarryComposer({ ...freshFanout, submitting: true, request: 7,
+    coordinationId: "launch-7", acknowledge: true, assignments: freshFanout.assignments });
+  check("composer refresh: an in-flight response is detached honestly without losing its stable retry key",
+    !cancelled.submitting && cancelled.coordinationId === "launch-7" && cancelled.request === 7 &&
+    cancelled.notice.includes("may still have accepted") && cancelled.notice.includes("launch-7") &&
+    !cancelled.acknowledge && cancelled.needsRender);
+  const ambiguous = F.fabricComposerInitial();
+  ambiguous.coordinationId = "launch-ambiguous-1";
+  ambiguous.errorAmbiguous = true;
+  ambiguous.acknowledge = true;
+  ambiguous.attemptedPayload = { coordination_id: "launch-ambiguous-1", delegate: { delegate: {} } };
+  ambiguous.attemptedValidation = { errors: [], warnings: [], selected: [research.agent_id] };
+  const carriedAmbiguous = F.fabricCarryComposer(ambiguous);
+  check("composer refresh: an ambiguous exact-retry contract stays acknowledged and immutable",
+    carriedAmbiguous.errorAmbiguous && carriedAmbiguous.acknowledge &&
+    carriedAmbiguous.attemptedPayload === ambiguous.attemptedPayload && carriedAmbiguous.needsRender);
+  check("composer identity: browser-generated retry keys are stable server-safe identifiers",
+    F.fabricComposerGeneratedId(() => "123e4567-e89b-12d3-a456-426614174000") ===
+      "studio-123e4567-e89b-12d3-a456-426614174000" &&
+    /^studio-[A-Za-z0-9._-]+$/.test(F.fabricComposerGeneratedId(null, 12345, .25)));
+
+  eq("composer input: plain text stays plain text", F.fabricComposerInput("Summarize the evidence"),
+    { value: "Summarize the evidence" });
+  eq("composer input: valid JSON becomes typed inline data", F.fabricComposerInput('{"topic":"leases","limit":3}'),
+    { value: { topic: "leases", limit: 3 } });
+  check("composer input: malformed structured data never silently becomes a string",
+    F.fabricComposerInput('{"topic":').error.includes("valid JSON"));
+  check("composer input: integers Rust can distinguish but JavaScript cannot represent fail closed",
+    Boolean(F.fabricComposerInput('{"limit":9007199254740993}').error));
+  check("composer input: UTF-8 byte size and structural depth are bounded before preview or POST",
+    F.fabricComposerInput("é".repeat(F.FABRIC_COMPOSER_INPUT_LIMIT)).error.includes("KiB") &&
+    F.fabricComposerInput(JSON.stringify({ a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: 1 } } } } } } } } } } } } } } } } })).error.includes("nesting"));
+
+  const hostile = { ...research, agent_id: "__proto__" };
+  const hostileDraft = F.fabricComposerInitial();
+  hostileDraft.selectedIds = [hostile.agent_id];
+  F.fabricComposerEnsure(hostileDraft, { members: [hostile] });
+  check("composer state: hostile legal identity keys stay own properties on a null-prototype assignment map",
+    Object.getPrototypeOf(hostileDraft.assignments) === null &&
+    Object.prototype.hasOwnProperty.call(hostileDraft.assignments, "__proto__") &&
+    hostileDraft.assignments.__proto__.kind === "critique");
+
+  const changedKind = F.fabricComposerInitial();
+  changedKind.selectedIds = [research.agent_id];
+  F.fabricComposerEnsure(changedKind, group);
+  const narrowedResearch = { ...research, manifest: { ...research.manifest, accepts: { research: {} } } };
+  F.fabricComposerEnsure(changedKind, { ...group, members: [narrowedResearch, writer] });
+  check("composer registry refresh: a removed accepted kind fails closed instead of silently changing work semantics",
+    changedKind.assignments[research.agent_id].kind === "" &&
+    F.fabricComposerValidation(changedKind, { ...group, members: [narrowedResearch, writer] }, allAgents)
+      .errors.some((error) => error.field === "assignment:researcher-1:kind"));
+
+  const manyMembers = Array.from({ length: F.FABRIC_COMPOSER_MEMBER_LIMIT }, (_, index) => ({
+    ...writer, agent_id: `bounded-${index}`, manifest: { ...writer.manifest },
+  }));
+  const oversizedCombined = F.fabricComposerInitial();
+  oversizedCombined.pattern = "fan_out";
+  oversizedCombined.selectedIds = manyMembers.map((agent) => agent.agent_id);
+  F.fabricComposerEnsure(oversizedCombined, { members: manyMembers });
+  for (const id of oversizedCombined.selectedIds) oversizedCombined.assignments[id].input = "x".repeat(7000);
+  check("composer input: combined multi-member work is bounded independently of each valid assignment",
+    F.fabricComposerValidation(oversizedCombined, { members: manyMembers }, manyMembers)
+      .errors.some((error) => error.message.includes("Combined work inputs")));
+
+  const delegate = F.fabricComposerInitial();
+  delegate.coordinationId = "launch-delegate-1";
+  delegate.delegator = lead.agent_id;
+  delegate.parent = "event:brief-ready";
+  delegate.selectedIds = [research.agent_id];
+  F.fabricComposerEnsure(delegate, group);
+  Object.assign(delegate.assignments[research.agent_id], {
+    member: "research-role", kind: "research", input: '{"question":"What changed?"}',
+    effect: "read_only", deadline: "2026-08-10T12:00:00Z",
+  });
+  delegate.contextScopes = ["team"];
+  delegate.channels = "thread:team-7, kv:briefs\nartifact:source";
+  delegate.handoff = true;
+  const delegateResult = F.fabricComposerPayload(delegate, group, allAgents, Date.parse("2026-08-09T00:00:00Z"));
+  eq("composer contract: delegation pins identity, manifest, accepted kind, effect, input, context, and causality",
+    delegateResult.payload, {
+      coordination_id: "launch-delegate-1", delegator: "lead-1", parent: "event:brief-ready",
+      delegate: {
+        delegate: {
+          member: "research-role", agent_id: "researcher-1", manifest_version: "researcher/1.4.0",
+          kind: "research", input: { kind: "inline", value: { question: "What changed?" } },
+          effect: "read_only", deadline: "2026-08-10T12:00:00.000Z",
+        },
+        context: { scopes: ["team"], channels: ["thread:team-7", "kv:briefs", "artifact:source"] },
+        handoff: true,
+      },
+    });
+  delegate.assignments[research.agent_id].effect = "compensatable";
+  check("composer effects: compensatable work is selectable and requires its declared rollback path in preflight",
+    F.FABRIC_COMPOSER_EFFECTS.includes("compensatable") &&
+    F.fabricComposerValidation(delegate, group, allAgents, Date.parse("2026-08-09T00:00:00Z"))
+      .warnings.some((warning) => warning.includes("compensation path")));
+  delegate.assignments[research.agent_id].effect = "read_only";
+
+  const utf8Bounds = F.fabricComposerInitial();
+  utf8Bounds.coordinationId = "é".repeat(129);
+  utf8Bounds.parent = "😀".repeat(129);
+  utf8Bounds.selectedIds = [research.agent_id];
+  F.fabricComposerEnsure(utf8Bounds, group);
+  utf8Bounds.assignments[research.agent_id].input = "work";
+  const utf8Fields = new Set(F.fabricComposerValidation(utf8Bounds, group, allAgents).errors.map((error) => error.field));
+  check("composer identifiers: preflight mirrors Rust UTF-8 byte limits for coordination and causal IDs",
+    utf8Fields.has("coordinationId") && utf8Fields.has("parent"));
+
+  const falseHandoff = F.fabricComposerInitial();
+  falseHandoff.selectedIds = [research.agent_id];
+  F.fabricComposerEnsure(falseHandoff, group);
+  falseHandoff.assignments[research.agent_id].input = "work";
+  falseHandoff.handoff = true;
+  check("composer handoff: a control-plane-only launch cannot promise a delegator handoff record",
+    F.fabricComposerValidation(falseHandoff, group, allAgents).errors.some((error) => error.field === "handoff"));
+  eq("composer context: bounded comma and line-separated channels preserve explicit order",
+    F.fabricComposerChannels("thread:one, kv:briefs\nartifact:source"),
+    { value: ["thread:one", "kv:briefs", "artifact:source"] });
+  check("composer context: total bytes, item count, and each channel name are independently bounded",
+    F.fabricComposerChannels("é".repeat(F.FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT)).error.includes("KiB") &&
+    F.fabricComposerChannels(Array.from({ length: F.FABRIC_COMPOSER_CHANNEL_LIMIT + 1 }, (_, index) => `c${index}`).join(",")).error.includes("at most") &&
+    F.fabricComposerChannels("x".repeat(F.FABRIC_COMPOSER_CHANNEL_NAME_LIMIT + 1)).error.includes("Each context channel"));
+
+  const attemptedEdit = F.fabricComposerInitial();
+  attemptedEdit.coordinationId = "attempted-key";
+  attemptedEdit.lastAttemptedId = "attempted-key";
+  F.fabricComposerResetApproval(attemptedEdit);
+  check("composer retry identity: a semantic edit after an attempt mints a fresh key",
+    attemptedEdit.coordinationId.startsWith("studio-") && attemptedEdit.coordinationId !== "attempted-key" && !attemptedEdit.lastAttemptedId);
+  attemptedEdit.coordinationId = "operator-key";
+  attemptedEdit.lastAttemptedId = "attempted-key";
+  F.fabricComposerResetApproval(attemptedEdit, true);
+  check("composer retry identity: an explicit operator key edit is preserved",
+    attemptedEdit.coordinationId === "operator-key" && !attemptedEdit.lastAttemptedId);
+
+  const fanout = F.fabricComposerInitial();
+  fanout.pattern = "fan_out";
+  fanout.coordinationId = "launch-fanout-1";
+  fanout.selectedIds = [research.agent_id, writer.agent_id];
+  fanout.maxInFlight = "1";
+  fanout.failurePolicy = "fail_fast";
+  F.fabricComposerEnsure(fanout, group);
+  Object.assign(fanout.assignments[research.agent_id],
+    { member: "research", kind: "research", input: "Find sources", effect: "read_only" });
+  Object.assign(fanout.assignments[writer.agent_id],
+    { member: "writer", kind: "draft", input: "Draft answer", effect: "idempotent" });
+  const fanoutResult = F.fabricComposerPayload(fanout, group, allAgents, Date.parse("2026-08-09T00:00:00Z"));
+  check("composer contract: fan-out emits a bounded window, failure policy, and one typed delegation per role",
+    fanoutResult.payload.fan_out.members.length === 2 && fanoutResult.payload.fan_out.max_in_flight === 1 &&
+    fanoutResult.payload.fan_out.on_member_failure === "fail_fast" &&
+    fanoutResult.payload.fan_out.members[1].manifest_version === "writer/2.0.0" &&
+    fanoutResult.payload.fan_out.members[1].input.value === "Draft answer");
+  fanout.assignments[research.agent_id].input = "x".repeat(F.FABRIC_COMPOSER_INPUT_LIMIT - 4);
+  fanout.assignments[writer.agent_id].input = "y".repeat(F.FABRIC_COMPOSER_INPUT_LIMIT - 4);
+  check("composer preview: a valid large multi-member contract renders a visibly bounded excerpt",
+    F.fabricComposerReviewHtml(fanout, group, allAgents).includes("inspection view truncated"));
+
+  const invalid = F.fabricComposerInitial();
+  invalid.pattern = "fan_out";
+  invalid.coordinationId = "../reserved";
+  invalid.delegator = "writer-1";
+  invalid.parent = "x".repeat(513);
+  invalid.selectedIds = [research.agent_id, writer.agent_id];
+  invalid.maxInFlight = "0";
+  invalid.failurePolicy = "unknown";
+  F.fabricComposerEnsure(invalid, group);
+  Object.assign(invalid.assignments[research.agent_id],
+    { member: "outcome", kind: "missing", input: "", effect: "unknown", deadline: "2020-01-01T00:00:00Z" });
+  Object.assign(invalid.assignments[writer.agent_id],
+    { member: "outcome", kind: "draft", input: "work", effect: "pure" });
+  const errors = F.fabricComposerValidation(invalid, group, allAgents, Date.parse("2026-08-09T00:00:00Z")).errors;
+  const fields = new Set(errors.map((error) => error.field));
+  check("composer validation: unsafe ids, parents, roles, kinds, inputs, effects, deadlines, windows, policies, and recipients fail before POST",
+    fields.has("coordinationId") && fields.has("parent") && fields.has("delegator") &&
+    fields.has("maxInFlight") && fields.has("failurePolicy") &&
+    fields.has("assignment:researcher-1:member") && fields.has("assignment:researcher-1:kind") &&
+    fields.has("assignment:researcher-1:input") && fields.has("assignment:researcher-1:effect") &&
+    fields.has("assignment:researcher-1:deadline") && errors.length >= 10);
+
+  const widened = F.fabricComposerInitial();
+  widened.selectedIds = [writer.agent_id];
+  F.fabricComposerEnsure(widened, group);
+  widened.assignments[writer.agent_id].input = "write";
+  widened.contextScopes = ["private"];
+  check("composer validation: delegated context cannot widen the pinned member manifest",
+    F.fabricComposerValidation(widened, group, allAgents).errors.some((error) => error.field === "contextScopes"));
+
+  delegate.acknowledge = false;
+  const composerHtml = F.fabricComposerHtml(delegate, group, allAgents);
+  check("composer markup: coordination patterns, roster, semantic form, typed preview, and explicit approval are present",
+    composerHtml.includes('id="fabric-compose-form"') && composerHtml.includes('data-compose-pattern="delegate"') &&
+    composerHtml.includes('data-compose-pattern="fan_out"') && composerHtml.includes('aria-pressed="true"') &&
+    composerHtml.includes('data-compose-agent-toggle="researcher-1"') &&
+    composerHtml.includes("Review typed coordination contract") && composerHtml.includes("durable mailbox work") &&
+    composerHtml.includes('form="fabric-compose-form"') && composerHtml.includes("Start delegation") &&
+    composerHtml.includes("disabled"));
+  check("composer responsive semantics: launch review is isolated from the application sidebar element",
+    composerHtml.includes('<section class="fabric-compose-review"') &&
+    !composerHtml.includes('<aside class="fabric-compose-review"'));
+  delegate.acknowledge = true;
+  check("composer approval: a valid acknowledged contract enables launch without hiding declared effects",
+    !F.fabricComposerReviewHtml(delegate, group, allAgents).match(/type="submit"[^>]*disabled/) &&
+    F.fabricComposerReviewHtml(delegate, group, allAgents).includes("read_only"));
+  delegate.completed = true;
+  delegate.receipt = { coordination_id: "launch-delegate-1", submitted: ["task-1"], deduplicated: false };
+  delegate.launchedPayload = delegateResult.payload;
+  delegate.launchedValidation = delegateResult.validation;
+  delegate.launchedAgents = [research];
+  const changedRegistry = { ...group, members: [{ ...research,
+    manifest: { ...research.manifest, manifest_version: "researcher/9.0.0", accepts: { future: {} } } }, writer] };
+  const completedHtml = F.fabricComposerHtml(delegate, changedRegistry, allAgents);
+  check("composer completion: a receipt freezes the launched contract and manifest until Compose another",
+    completedHtml.includes("researcher/1.4.0") && !completedHtml.includes("researcher/9.0.0") &&
+    completedHtml.includes("launch-delegate-1") && completedHtml.includes("Compose another coordination") &&
+    completedHtml.includes('class="fabric-compose-fields" disabled'));
+  const existingRecord = {
+    coordination_id: "launch-delegate-1", delegator: "lead-1", parent: "event:old",
+    contract: { pattern: "delegate", delegate: { member: "old-role", agent_id: "writer-1",
+      manifest_version: "writer/2.0.0", kind: "draft", input: { kind: "inline", value: "old work" }, effect: "pure" } },
+  };
+  eq("composer deduplication: durable records reconstruct the actual request-shaped contract",
+    F.fabricComposerRecordPayload(existingRecord), {
+      coordination_id: "launch-delegate-1", delegator: "lead-1", parent: "event:old",
+      delegate: { delegate: { member: "old-role", agent_id: "writer-1", manifest_version: "writer/2.0.0",
+        kind: "draft", input: { kind: "inline", value: "old work" }, effect: "pure" } },
+    });
+  delegate.receipt.deduplicated = true;
+  delegate.launchedPayload = F.fabricComposerRecordPayload(existingRecord);
+  delegate.launchedValidation = { errors: [], warnings: [], selected: ["writer-1"] };
+  const deduplicatedHtml = F.fabricComposerHtml(delegate, group, allAgents);
+  check("composer deduplication: a reused key invalidates the requested form and shows only actual durable evidence",
+    deduplicatedHtml.includes("submitted draft was not applied") && deduplicatedHtml.includes("old work") &&
+    !deduplicatedHtml.includes("What changed?"));
+  const crossPattern = { ...delegate,
+    launchedPayload: { coordination_id: "launch-delegate-1", fan_out: { members: [{ agent_id: research.agent_id }] } },
+    launchedValidation: { errors: [], warnings: [], selected: [research.agent_id] } };
+  const crossPatternReview = F.fabricComposerReviewHtml(crossPattern, group, allAgents);
+  check("composer deduplication: summaries describe the actual durable pattern, never the rejected draft pattern",
+    crossPatternReview.includes("fan out coordination") && !crossPatternReview.includes("One delegated handoff"));
+  const unverified = { ...delegate,
+    launchedPayload: { coordination_id: "launch-delegate-1", existing_contract: "Loading the durable record…" },
+    launchedValidation: { errors: [], warnings: [], selected: [] } };
+  check("composer deduplication: missing durable evidence is labelled unverified instead of claiming an actual contract",
+    F.fabricComposerReviewHtml(unverified, group, allAgents).includes("Existing coordination not verified") &&
+    F.fabricComposerHtml(unverified, group, allAgents).includes("could not verify"));
+  const freshDraft = F.fabricComposerInitial();
+  const freshHtml = F.fabricComposerHtml(freshDraft, group, allAgents);
+  check("composer identity: every visible draft starts with a persisted browser retry key before acknowledgement",
+    freshDraft.coordinationId.startsWith("studio-") && freshHtml.includes(freshDraft.coordinationId));
+  check("composer errors: older servers and conflicts have distinct recovery copy",
+    F.fabricComposerSubmitError({ status: 404, body: { raw: "not found" } }).includes("does not expose typed coordination") &&
+    F.fabricComposerSubmitError({ status: 409, body: { message: "already exists differently" } }).includes("already exists differently"));
+}
+
+{
   check("compatibility: route-less older server is explained as a capability gap",
     F.fabricErrorHtml(404, { raw: "not found" }, "Durable inventory").includes("needs an Agent Fabric server"));
   check("errors: unknown coordination and invalid identifiers have distinct recovery copy",
@@ -479,12 +775,38 @@ check("accessibility: team rerenders stay quiet while concise selected-state cha
   html.includes('id="fabric-team-announcer" role="status" aria-live="polite"') &&
   html.includes('<section class="card fabric-team-card" id="fabric-team">') &&
   !html.includes('id="fabric-team" aria-live='));
-check("markup: read-only observatory never offers restart, cancel, or coordination submission actions",
-  !html.match(/id="fabric-[^"]*"[^>]*>[^<]*(restart|cancel|delegate|fan.?out|race|quorum)/i));
+check("markup: the observatory adds only the supported delegate and fan-out submission patterns",
+  html.includes('id="fabric-compose-title">Coordinate this team') &&
+  html.includes('data-compose-pattern="delegate"') && html.includes('data-compose-pattern="fan_out"') &&
+  !html.includes('data-compose-pattern="race"') && !html.includes('data-compose-pattern="quorum"') &&
+  !html.match(/id="fabric-[^"]*"[^>]*>[^<]*(restart|cancel)/i));
+check("composer lifecycle: delegated event wiring, generation guards, edit invalidation, and result investigation are explicit",
+  html.includes('$("fabric-compose-body").addEventListener("submit"') &&
+  html.includes('fabricRequestCurrent(generation, connection, store.fabricRequest, store.conn)') &&
+  html.includes('if (field !== "acknowledge") fabricComposerResetApproval(draft, field === "coordinationId");') &&
+  html.includes('await fabricLoadCoordination(draft.coordinationId);'));
+check("composer lifecycle: launch and ambiguous failure fully rerender to lock every editor and refresh control",
+  html.includes('if (refresh) refresh.disabled = Boolean(state.loading || draft.submitting);') &&
+  html.includes('draft.submitting = true;') &&
+  html.includes('draft.notice = null;\n  fabricRenderComposer(true);') &&
+  html.includes('draft.errorAmbiguous = ![400, 404, 409, 422].includes(Number(error.status));') &&
+  html.includes(': null;\n    fabricRenderComposer(true);'));
+check("composer lifecycle: registry refresh preserves only exact ambiguous approval and rerenders all evidence",
+  html.includes("acknowledge: Boolean(previous.errorAmbiguous && previous.attemptedPayload), needsRender: true") &&
+  html.includes("store.fabric.composer.needsRender = true;") &&
+  html.includes("Team composition needs a loaded durable-agent registry."));
+check("composer focus: blocked team navigation and Compose another return focus to the retained or new draft",
+  html.includes('fabricFocusData($("fabric-groups"), "data-fabric-group", state.selectedGroup);') &&
+  html.includes('fabricFocusData($("fabric-compose-body"), "data-fabric-focus", "compose-id");') &&
+  html.includes('if (fabricSelectGroup(next, false)) fabricFocusData'));
+check("composer accessibility: frequent preflight changes stay quiet while submissions use one dedicated announcer",
+  html.includes('id="fabric-compose-announcer" role="status" aria-live="polite"') &&
+  html.includes('id="fabric-compose-review"') && !html.includes('id="fabric-compose-review" aria-live='));
 check("responsive: team layout and causal evidence stack at narrow widths",
   html.includes(".fabric-members { grid-template-columns: 1fr; }") &&
   html.includes(".fabric-coordination-head { flex-direction: column; }") &&
-  html.includes(".fabric-trace-event { grid-template-columns: 1fr;"));
+  html.includes(".fabric-trace-event { grid-template-columns: 1fr;") &&
+  html.includes(".fabric-compose-grid { grid-template-columns: 1fr;"));
 check("accessibility: essential TeamTrace sequence and depth use the AA text token",
   html.includes(".fabric-trace-event small { color: var(--text-dim);") &&
   !html.includes(".fabric-trace-event small { color: var(--text-faint);"));

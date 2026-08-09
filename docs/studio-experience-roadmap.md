@@ -89,6 +89,11 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Distinguish runnable assistant configurations from mailbox-addressed durable identities, browse
   identities by declared team label, inspect activation / mailbox / supervision evidence, and
   investigate a known coordination through its typed member state and read-only TeamTrace.
+- Compose typed delegate and bounded fan-out work from a selected team label without hand-editing a
+  coordination payload. Studio pins member manifests and accepted kinds, generates a stable retry key,
+  validates and bounds narrowed context, exposes effect and compensation risk, requires an explicit
+  durable-work acknowledgement, reconciles deduplicated keys to the actual durable contract, and opens
+  the created coordination directly in its evidence view.
 - Follow a guided Create → Run → Inspect first-run path.
 - Run in background, blocking, or streaming modes.
 - Inspect state, checkpoint history, interrupts, and resumes.
@@ -107,8 +112,9 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
 - Assistant configuration and durable identity are explained together, but there is no lifecycle link
   that binds an assistant version to a registered durable identity.
-- The Team Observatory provides inventory and read-only coordination evidence, but visual topology,
-  team definitions, creation, editing, execution controls, discovery, and coordinated replay remain.
+- The Team Observatory provides inventory, typed delegate/fan-out launch, and read-only coordination
+  evidence. Persistent visual topology, durable team definitions, creation/editing lifecycle, race,
+  quorum, recovery controls, coordination discovery, and coordinated replay remain.
 - Evaluation capabilities exist as a Rust library but not as a server-backed Studio workflow.
 - Memory records and structural conflicts have a human-readable audit workspace; correction,
   resolution, approval, consolidation, and forgetting workflows remain.
@@ -320,7 +326,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, and conflict review delivered; governed mutations pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, coordination-by-id, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
-| 9 | Visual team creation for delegate and fan-out | Not started | Delivers the most common multi-agent patterns first |
+| 9 | Visual team creation for delegate and fan-out | Usable launch foundation delivered — selected-group roster, per-role pinned contract, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; persistent team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Not started | Completes safe multi-agent construction |
 | 11 | Evaluation experiment workspace and comparison report | Platform API needed | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |
