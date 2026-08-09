@@ -89,7 +89,8 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Follow a guided Create → Run → Inspect first-run path.
 - Run in background, blocking, or streaming modes.
 - Inspect state, checkpoint history, interrupts, and resumes.
-- Inspect Flight Recorder events and causal parentage.
+- Investigate Flight Recorder evidence through a causal run story: journal finding, recorded error event
+  or unresolved pause, recovery boundary, effect risk, and direct links into the technical timeline.
 - Exact-replay eligible deterministic journals and compare forked branches. Journals containing model, tool, remote, WASM, or resume effects are not yet accepted by exact replay.
 - Inspect and cancel durable tasks.
 - Use the core flow on desktop and mobile with keyboard support.
@@ -309,7 +310,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 2 | Assistant edit and duplicate, with a readable configuration summary | Partial — safe duplicate and summary delivered; edit/version endpoints pending | Establishes lifecycle management as soon as the server route surface is free to extend |
 | 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract and manifest portability delivered; typed model/tool/memory controls pending | Replaces the current create-only form and raw configuration gap |
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
-| 5 | Flight Recorder investigation layout and manifest/effect context | Partial — technical recorder delivered; investigation redesign pending | Makes Rusty's strongest runtime advantage understandable |
+| 5 | Flight Recorder investigation layout and manifest/effect context | Partial — causal run story, recovery boundary, and effect-risk guidance delivered; immutable configuration-manifest resolution still pending | Makes Rusty's strongest runtime advantage understandable |
 | 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, and conflict review delivered; governed mutations pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Not started | Exposes the already-shipped Agent Fabric before adding editing complexity |

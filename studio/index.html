@@ -251,6 +251,71 @@
   .badge.eff-compensatable  { color: #efdfae; background: #3a3325; border-color: var(--accent-dim); }
   .badge.eff-non_idempotent { color: #eac5c0; background: #341f1c; border-color: #5a322c; }
 
+  /* The investigation spine turns a journal into four operator questions:
+   * outcome, cause, recovery, and repeat risk. The technical timeline stays
+   * directly below it as the evidence source for every claim. */
+  .rec-investigation {
+    position: relative; margin: 12px 0 14px; padding: 14px;
+    border: 1px solid var(--border-hi); border-radius: 9px;
+    background: linear-gradient(145deg, #29251f 0%, #1b1916 72%);
+    overflow: hidden;
+  }
+  .rec-investigation::after {
+    content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
+    background: var(--story-tone, var(--accent));
+  }
+  .rec-investigation.story-error { --story-tone: #d8796f; }
+  .rec-investigation.story-paused { --story-tone: #d58b66; }
+  .rec-investigation.story-complete { --story-tone: #aaa08f; }
+  .rec-investigation.story-running { --story-tone: var(--accent); }
+  .rec-story-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .rec-story-kicker {
+    color: var(--story-tone); font: 700 10px var(--mono);
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .rec-story-head h3 { margin: 3px 0 2px; font-size: 18px; line-height: 1.25; }
+  .rec-story-head p { margin: 0; color: var(--text-dim); font-size: 12.5px; }
+  .rec-story-state {
+    flex: 0 0 auto; border: 1px solid var(--story-tone); border-radius: 999px;
+    padding: 3px 8px; color: var(--story-tone); font: 700 10px var(--mono);
+    text-transform: uppercase; letter-spacing: .7px;
+  }
+  .rec-story-spine {
+    position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px; margin-top: 14px;
+  }
+  .rec-story-spine::before {
+    content: ""; position: absolute; top: 10px; left: 12.5%; right: 12.5%; height: 1px;
+    background: linear-gradient(90deg, var(--story-tone), var(--border-hi) 38%, var(--border-hi) 68%, var(--accent-dim));
+  }
+  .rec-story-step {
+    position: relative; min-width: 0; padding: 24px 9px 9px; text-align: left;
+    border: 1px solid var(--border); border-radius: 7px; background: rgba(19,17,16,.82);
+    color: var(--text); cursor: default;
+  }
+  button.rec-story-step { width: 100%; font-family: var(--sans); cursor: pointer; }
+  button.rec-story-step:hover { border-color: var(--accent-dim); }
+  .rec-story-step::before {
+    content: ""; position: absolute; top: 6px; left: calc(50% - 5px); width: 8px; height: 8px;
+    border: 2px solid var(--story-dot, var(--border-hi)); border-radius: 50%; background: var(--bg-inset);
+  }
+  .rec-story-step.is-outcome { --story-dot: var(--story-tone); }
+  .rec-story-step.is-cause { --story-dot: var(--err); }
+  .rec-story-step.is-recovery { --story-dot: var(--ok); }
+  .rec-story-step.is-risk { --story-dot: var(--accent); }
+  .rec-story-label {
+    display: block; color: var(--text-dim); font: 700 9.5px var(--mono);
+    text-transform: uppercase; letter-spacing: .7px;
+  }
+  .rec-story-step b { display: block; margin-top: 3px; font-size: 12px; line-height: 1.35; }
+  .rec-story-step small { display: block; margin-top: 4px; color: var(--text-dim); font-size: 10.5px; line-height: 1.4; }
+  button.rec-story-step small::after { content: "  · view evidence"; color: var(--accent); font-family: var(--mono); }
+  .rec-story-related {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 9px;
+    padding-top: 9px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 11px;
+  }
+  #rec-detail:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
   /* ---------- durable tasks ---------- */
   .rec-controls select {
     background: var(--bg-inset); color: var(--text); border: 1px solid var(--border);
@@ -595,6 +660,11 @@
     aside { width: 250px; flex-basis: 250px; }
     .agent-layout { grid-template-columns: 1fr; }
     .workbench-head { flex-direction: column; }
+    .rec-story-spine { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rec-story-spine::before { display: none; }
+    .rec-split { flex-direction: column; }
+    #rec-body, #rec-detail { width: 100%; }
+    #rec-detail { flex-basis: auto; }
   }
   @media (max-width: 680px) {
     #body { display: block; overflow-y: auto; }
@@ -630,6 +700,11 @@
     .memory-kv { grid-template-columns: 1fr; gap: 2px; }
     .memory-kv .v { margin-bottom: 7px; }
     .memory-review-banner { align-items: flex-start; flex-direction: column; }
+    .rec-story-head { flex-direction: column; gap: 8px; }
+    .rec-story-spine { grid-template-columns: 1fr; }
+    .rec-story-step { padding-top: 10px; padding-left: 27px; }
+    .rec-story-step::before { top: 13px; left: 10px; }
+    .rec-controls input, .rec-compare-controls input { min-width: 100%; }
   }
 
   :is(button, input, select, textarea, summary):focus-visible {
@@ -893,6 +968,7 @@
             </label>
             <span class="muted tiny" id="rec-statusline"></span>
           </div>
+          <div id="rec-investigation" aria-live="polite"></div>
           <div class="rec-scrub" id="rec-scrub" style="display:none">
             <input type="range" id="rec-scrubber" min="0" max="0" value="0">
             <span class="muted tiny" id="rec-scrub-label"></span>
@@ -2042,6 +2118,136 @@ function recFormatTokens(t) {
   return `${p} prompt + ${c} completion = ${tot} total`;
 }
 
+function recInlineValue(ref) {
+  return ref && ref.kind === "inline" ? ref.value : null;
+}
+
+function recIssueMessage(ev) {
+  if (!ev) return "No causal issue is recorded.";
+  for (const value of [recInlineValue(ev.output), recInlineValue(ev.input)]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (value && typeof value === "object") {
+      for (const key of ["error", "message", "reason"]) {
+        if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
+      }
+    }
+  }
+  if (ev.status === "interrupted" || ev.kind === "interrupt") return "Execution paused for a decision or new input.";
+  return `The journal marks ${ev.kind || "this event"} as ${ev.status || "not successful"}.`;
+}
+
+function recIsSuspensionCheckpoint(ev) {
+  const value = recInlineValue(ev && ev.output);
+  return !!(ev && ev.kind === "checkpoint_written" && ev.status === "ok" &&
+    value && typeof value === "object" && value.suspension === true);
+}
+
+/* A defensive, plain-data investigation model. It deliberately separates
+ * journal evidence from run outcome: first error event or unresolved pause,
+ * persisted/resume boundaries, and repeat-risk classifications. */
+function recInvestigation(events, complete) {
+  const ordered = recSortEvents(events).filter(Boolean);
+  const failure = ordered.find((ev) => ev.status === "error") || null;
+  const lastInterruptIndex = ordered.reduce((found, ev, index) =>
+    (ev.status === "interrupted" || ev.kind === "interrupt") ? index : found, -1);
+  const lastResumeIndex = ordered.reduce((found, ev, index) => ev.kind === "resume" ? index : found, -1);
+  const interruption = lastInterruptIndex > lastResumeIndex ? ordered[lastInterruptIndex] : null;
+  // An unresolved pause is the current actionable state even when an earlier
+  // model/tool error was contained. Keep that error as related evidence.
+  const issue = interruption || failure;
+  const relatedError = interruption ? failure : null;
+  const issueIndex = issue ? ordered.indexOf(issue) : ordered.length;
+  const prior = ordered.slice(0, issueIndex);
+  const checkpoints = prior.filter((ev) => ev.kind === "checkpoint_written" && ev.status === "ok");
+  const suspension = interruption
+    ? ordered.slice(issueIndex + 1).find(recIsSuspensionCheckpoint) || null
+    : null;
+  const recovery = interruption ? suspension : failure && checkpoints.length ? checkpoints[checkpoints.length - 1] : null;
+  const knownEffects = new Set(["pure", "read_only", "idempotent", "compensatable", "non_idempotent"]);
+  const risky = ordered.filter((ev) => ev.effect === "non_idempotent" || ev.effect === "compensatable");
+  const nonIdempotent = risky.filter((ev) => ev.effect === "non_idempotent");
+  const compensatable = risky.filter((ev) => ev.effect === "compensatable");
+  const unclassified = ordered.filter((ev) => !knownEffects.has(ev.effect));
+  const highestRisk = nonIdempotent[0] || risky[0] || unclassified[0] || null;
+
+  let state, stateLabel, title, summary;
+  if (interruption) {
+    state = "paused"; stateLabel = "unresolved pause"; title = "Pause evidence recorded";
+    summary = recovery
+      ? `The last interrupt at seq ${interruption.seq ?? "?"} has no later resume event. A suspension checkpoint records a resume boundary.`
+      : `The last interrupt at seq ${interruption.seq ?? "?"} has no later resume event or suspension checkpoint. Do not assume it can resume.`;
+    if (relatedError) summary += ` Error-status evidence also appears at seq ${relatedError.seq ?? "?"}.`;
+  } else if (failure) {
+    state = "error"; stateLabel = "recorded error"; title = "Error evidence recorded";
+    summary = `The first error-status event is at seq ${failure.seq ?? "?"}. The journal endpoint does not prove the run's terminal outcome.`;
+  } else if (!complete) {
+    state = "running"; stateLabel = "partial journal"; title = "Journal is still in flight";
+    summary = "Evidence is still arriving. Findings may change until the journal is complete.";
+  } else {
+    state = "complete"; stateLabel = "terminal journal"; title = "No issue recorded";
+    summary = "The terminal journal contains no recorded error or unresolved interruption. That is not proof of run success.";
+  }
+
+  return {
+    state, stateLabel, title, summary, issue, recovery, highestRisk, unclassified, relatedError,
+    issueLabel: interruption ? "Unresolved pause" : failure ? "First error event" : "Recorded issue",
+    causeTitle: issue
+      ? `${issue.kind || "event"}${issue.node_id ? ` · ${issue.node_id}` : ""} · seq ${issue.seq ?? "?"}`
+      : "No recorded issue",
+    causeDetail: issue ? recIssueMessage(issue) : "No error or interruption appears in the available journal.",
+    recoveryLabel: interruption ? "Resume boundary" : failure ? "Prior checkpoint" : "Recovery boundary",
+    recoveryTitle: recovery
+      ? `${interruption ? "Suspension checkpoint" : "Persisted checkpoint"} · seq ${recovery.seq ?? "?"}`
+      : interruption ? "No suspension checkpoint" : "No prior checkpoint",
+    recoveryDetail: recovery
+      ? interruption
+        ? "Successful suspension boundary written after the pause for an explicit resume."
+        : "Last successful persisted boundary before the error event; replay safety still depends on effect evidence."
+      : interruption ? "The journal does not prove a resumable boundary for this pause."
+        : issue ? "The journal has no successful checkpoint before this error event; restart or recovery needs operator judgment."
+        : "No recovery boundary is identified because no recorded error or unresolved pause is being summarized.",
+    riskTitle: [
+      nonIdempotent.length ? `${nonIdempotent.length} non-idempotent` : "",
+      compensatable.length ? `${compensatable.length} compensatable` : "",
+      unclassified.length ? `${unclassified.length} unclassified` : "",
+    ].filter(Boolean).join(" · ") || "No repeat-sensitive events",
+    riskDetail: [
+      nonIdempotent.length ? "Non-idempotent events must never be repeated silently." : "",
+      compensatable.length ? "Compensatable events require the declared compensation path." : "",
+      unclassified.length ? "Do not infer safety for unclassified events." : "",
+    ].filter(Boolean).join(" ") || "Every event is classified pure, read-only, or idempotent.",
+  };
+}
+
+function recStoryStepHtml(css, label, title, detail, ev) {
+  const tag = ev && ev.id ? "button" : "div";
+  const attrs = ev && ev.id
+    ? ` type="button" data-story-eid="${escapeHtml(ev.id)}" aria-label="${escapeHtml(`${label}: ${title}. View evidence`)}"`
+    : "";
+  return `<${tag} class="rec-story-step ${css}"${attrs}>` +
+    `<span class="rec-story-label">${escapeHtml(label)}</span>` +
+    `<b>${escapeHtml(title)}</b><small>${escapeHtml(detail)}</small></${tag}>`;
+}
+
+function recInvestigationHtml(events, complete) {
+  const story = recInvestigation(events, complete);
+  const related = story.relatedError && story.relatedError.id
+    ? `<div class="rec-story-related"><span>Related evidence · an error-status event was recorded separately.</span>` +
+      `<button type="button" class="small" data-story-eid="${escapeHtml(story.relatedError.id)}">` +
+      `View error event · seq ${escapeHtml(String(story.relatedError.seq ?? "?"))}</button></div>`
+    : "";
+  return `<section class="rec-investigation story-${story.state}" aria-labelledby="rec-story-title">` +
+    `<div class="rec-story-head"><div><span class="rec-story-kicker">Run story</span>` +
+    `<h3 id="rec-story-title">${escapeHtml(story.title)}</h3><p>${escapeHtml(story.summary)}</p></div>` +
+    `<span class="rec-story-state">${escapeHtml(story.stateLabel)}</span></div>` +
+    `<div class="rec-story-spine" aria-label="Causal investigation summary">` +
+    recStoryStepHtml("is-outcome", "Journal finding", story.title, story.summary, story.issue) +
+    recStoryStepHtml("is-cause", story.issueLabel, story.causeTitle, story.causeDetail, story.issue) +
+    recStoryStepHtml("is-recovery", story.recoveryLabel, story.recoveryTitle, story.recoveryDetail, story.recovery) +
+    recStoryStepHtml("is-risk", "Effect risk", story.riskTitle, story.riskDetail, story.highestRisk) +
+    `</div>${related}</section>`;
+}
+
 /* PayloadRef is adjacently tagged: {kind:"inline", value} renders the value;
  * {kind:"artifact", value:{sha256,bytes}} renders the content reference — the
  * bytes live in the journal snapshot's artifact map, not on the wire here. */
@@ -2160,9 +2366,11 @@ function recAutoLoad(runId) {
 
 function recRender() {
   const body = $("rec-body"), detail = $("rec-detail"), scrub = $("rec-scrub");
+  const investigation = $("rec-investigation");
   const r = store.recorder;
   detail.style.display = "none";
   detail.innerHTML = "";
+  investigation.innerHTML = "";
   if (!r) {
     $("rec-statusline").textContent = "";
     scrub.style.display = "none";
@@ -2183,6 +2391,7 @@ function recRender() {
   }
 
   const events = r.events;
+  investigation.innerHTML = recInvestigationHtml(events, r.complete);
   $("rec-statusline").textContent =
     `${events.length} event(s) · ${r.complete ? "complete journal" : "partial — run may still be in flight"}`;
 
@@ -2223,7 +2432,7 @@ function recApplyCausal() {
   });
 }
 
-function recSelect(id, scroll) {
+function recSelect(id, scroll, focusDetail) {
   const r = store.recorder;
   if (!r || !r.events.length) return;
   const ev = r.events.find((e) => e && e.id === id);
@@ -2239,9 +2448,16 @@ function recSelect(id, scroll) {
   const detail = $("rec-detail");
   detail.style.display = "block";
   detail.innerHTML = recDetailHtml(ev);
+  detail.setAttribute("tabindex", "-1");
+  detail.setAttribute("role", "region");
+  detail.setAttribute("aria-label", `Evidence for ${ev.kind || "event"} at seq ${ev.seq ?? "?"}`);
   if (scroll) {
     const marker = $("rec-body").querySelector(`[data-eid="${CSS.escape(id)}"]`);
     if (marker) marker.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  if (focusDetail) {
+    detail.focus({ preventScroll: true });
+    detail.scrollIntoView({ block: "nearest", behavior: "auto" });
   }
 }
 
@@ -4788,11 +5004,17 @@ function init() {
     if (ev && ev.id && ev.id !== r.selected) recSelect(ev.id, true);
   });
   const recClick = (e) => {
+    const storyTarget = e.target.closest("[data-story-eid]");
+    if (storyTarget) {
+      recSelect(storyTarget.getAttribute("data-story-eid"), false, true);
+      return;
+    }
     const target = e.target.closest("[data-eid]");
     if (target) recSelect(target.getAttribute("data-eid"), true);
   };
   $("rec-body").addEventListener("click", recClick);
   $("rec-detail").addEventListener("click", recClick);
+  $("rec-investigation").addEventListener("click", recClick);
 
   // Replay & fork compare. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).

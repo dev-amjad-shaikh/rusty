@@ -26,6 +26,8 @@ globalThis.__rec = {
   recSortEvents, recGroups, recLanes, recLaneOf, recCausalChain,
   recKindColor, recKindShort, recPayloadHtml, recDetailHtml, recMarkerHtml,
   recEffectHtml, recFormatUsd, recFormatTokens, REC_KIND_COLORS, REC_EFFECT_INFO,
+  recInlineValue, recIssueMessage, recIsSuspensionCheckpoint, recInvestigation,
+  recStoryStepHtml, recInvestigationHtml,
   recReplayBannerHtml, recApiErrorBannerHtml, recTotalsHtml,
   recCompareRows, recCmpEventHtml, recCompareHtml,
 };`, sandbox, { filename: "index.html<script>" });
@@ -196,6 +198,170 @@ eq("recFormatUsd micro-cost", R.recFormatUsd(0.00042), "$0.00042");
 eq("recFormatUsd larger cost", R.recFormatUsd(1.5), "$1.5000");
 eq("recFormatUsd missing", R.recFormatUsd(null), "—");
 eq("recFormatTokens missing", R.recFormatTokens(null), "—");
+
+/* -- causal investigation story -------------------------------------------- */
+
+{
+  const errorJournal = journal.slice(0, -1);
+  const story = R.recInvestigation(errorJournal, true);
+  eq("investigation: error evidence is not promoted to run outcome", story.state, "error");
+  eq("investigation: first error event is the causal issue", story.issue.seq, 13);
+  eq("investigation: last successful checkpoint precedes the issue", story.recovery.seq, 5);
+  eq("investigation: highest repeat risk prefers non-idempotent", story.highestRisk.seq, 9);
+  check("investigation: error payload becomes the human cause",
+    story.causeDetail === "disk full");
+  check("investigation: effect count and warning are explicit",
+    story.riskTitle === "2 non-idempotent" && story.riskDetail.includes("must never be repeated silently"));
+
+  const storyHtml = R.recInvestigationHtml(errorJournal, true);
+  check("investigation html: accessible labelled story region",
+    storyHtml.includes('aria-labelledby="rec-story-title"') &&
+    storyHtml.includes('aria-label="Causal investigation summary"'));
+  check("investigation html: issue, recovery, and risk link to evidence",
+    storyHtml.includes(`data-story-eid="${RUN}:13"`) &&
+    storyHtml.includes(`data-story-eid="${RUN}:5"`) &&
+    storyHtml.includes(`data-story-eid="${RUN}:9"`));
+  check("investigation html: buttons have descriptive accessible names",
+    storyHtml.includes('aria-label="First error event: checkpoint_written · seq 13. View evidence"'));
+}
+
+{
+  const clean = journal.slice(0, 13);
+  const story = R.recInvestigation(clean, true);
+  eq("investigation: terminal journal without issue stays outcome-neutral", story.state, "complete");
+  check("investigation: clean journal has no causal issue or recovery claim",
+    story.issue === null && story.recovery === null && story.causeTitle === "No recorded issue" &&
+    story.title === "No issue recorded" && story.summary.includes("not proof of run success"));
+  check("investigation: repeat-sensitive effects remain visible on success",
+    story.highestRisk.seq === 9 && story.riskTitle === "2 non-idempotent");
+}
+
+{
+  const partial = R.recInvestigation(journal.slice(0, 7), false);
+  eq("investigation: incomplete healthy journal is in flight", partial.state, "running");
+  check("investigation: partial copy does not imply a final outcome",
+    partial.summary.includes("still arriving") && partial.issue === null && partial.recovery === null);
+
+  const pausedEvents = journal.slice(0, 13).concat([
+    { id: "pause:13", seq: 13, kind: "interrupt", status: "interrupted", effect: "pure" },
+    ev(14, "checkpoint_written", {
+      output: { kind: "inline", value: { checkpoint_id: "cp-suspend", step: 2, suspension: true } },
+    }),
+  ]);
+  const paused = R.recInvestigation(pausedEvents, true);
+  eq("investigation: interrupt is distinguished from failure", paused.state, "paused");
+  eq("investigation: paused run uses subsequent suspension checkpoint", paused.recovery.seq, 14);
+  check("investigation: interruption explains the next operator decision",
+    paused.causeDetail.includes("paused for a decision") && paused.summary.includes("resume boundary"));
+  check("investigation: only explicit suspension checkpoints prove resume",
+    R.recIsSuspensionCheckpoint(pausedEvents[pausedEvents.length - 1]) &&
+    !R.recIsSuspensionCheckpoint(journal[5]));
+
+  const unresolvedWithoutCheckpoint = R.recInvestigation([
+    ev(0, "interrupt", { status: "interrupted" }),
+  ], true);
+  check("investigation: pause without suspension evidence does not claim resumability",
+    unresolvedWithoutCheckpoint.recovery === null &&
+    unresolvedWithoutCheckpoint.recoveryTitle === "No suspension checkpoint" &&
+    unresolvedWithoutCheckpoint.summary.includes("Do not assume it can resume"));
+
+  const resumed = R.recInvestigation([
+    ev(0, "interrupt", { status: "interrupted" }),
+    ev(1, "checkpoint_written", {
+      output: { kind: "inline", value: { checkpoint_id: "cp-suspend", suspension: true } },
+    }),
+    ev(2, "resume"),
+  ], true);
+  check("investigation: a later resume resolves an earlier interruption",
+    resumed.state === "complete" && resumed.issue === null && resumed.recovery === null);
+
+  const containedErrorThenPause = R.recInvestigation([
+    ev(0, "tool_call", { status: "error", effect: "idempotent" }),
+    ev(1, "interrupt", { status: "interrupted" }),
+    ev(2, "checkpoint_written", {
+      output: { kind: "inline", value: { checkpoint_id: "cp-after-error", suspension: true } },
+    }),
+  ], true);
+  check("investigation: unresolved pause takes priority over contained error evidence",
+    containedErrorThenPause.state === "paused" && containedErrorThenPause.issue.seq === 1 &&
+    containedErrorThenPause.recovery.seq === 2 && containedErrorThenPause.relatedError.seq === 0);
+  const mixedHtml = R.recInvestigationHtml([
+    ev(0, "tool_call", { status: "error", effect: "idempotent" }),
+    ev(1, "interrupt", { status: "interrupted" }),
+    ev(2, "checkpoint_written", {
+      output: { kind: "inline", value: { checkpoint_id: "cp-after-error", suspension: true } },
+    }),
+  ], true);
+  check("investigation: contained error remains separately linked from pause story",
+    mixedHtml.includes("Related evidence") && mixedHtml.includes(`data-story-eid="${RUN}:0"`));
+}
+
+{
+  const failedWithoutCheckpoint = [ev(0, "tool_call", {
+    status: "error", effect: "idempotent",
+    output: { kind: "inline", value: { message: "provider unavailable" } },
+  })];
+  const story = R.recInvestigation(failedWithoutCheckpoint, true);
+  check("investigation: missing recovery evidence is honest",
+    story.recovery === null && story.recoveryTitle === "No prior checkpoint" &&
+    story.recoveryDetail.includes("operator judgment"));
+  eq("investigation: safe effects do not become repeat risk", story.riskTitle, "No repeat-sensitive events");
+
+  const unknownCheckpoint = [
+    ev(0, "checkpoint_written", { status: undefined }),
+    ev(1, "node_output", { status: "error" }),
+  ];
+  check("investigation: unknown checkpoint status is not called safe",
+    R.recInvestigation(unknownCheckpoint, true).recovery === null);
+
+  const futureEffect = R.recInvestigation([ev(0, "remote_call", { effect: "future_write" })], true);
+  check("investigation: future effect classes remain unknown, never safe",
+    futureEffect.unclassified.length === 1 && futureEffect.highestRisk.seq === 0 &&
+    futureEffect.riskTitle === "1 unclassified" && futureEffect.riskDetail.includes("Do not infer"));
+  const missingEffect = R.recInvestigation([{ id: "partial:0", seq: 0, kind: "tool_call", status: "ok" }], true);
+  check("investigation: missing effect classes remain unknown, never safe",
+    missingEffect.unclassified.length === 1 && missingEffect.riskTitle === "1 unclassified");
+
+  const mixedRisk = R.recInvestigation([
+    ev(0, "tool_call", { effect: "non_idempotent" }),
+    ev(1, "remote_call", { effect: "compensatable" }),
+    ev(2, "wasm_call", { effect: "future_write" }),
+  ], true);
+  check("investigation: mixed risk summary discloses every classification",
+    mixedRisk.riskTitle === "1 non-idempotent · 1 compensatable · 1 unclassified" &&
+    mixedRisk.riskDetail.includes("never be repeated silently") &&
+    mixedRisk.riskDetail.includes("declared compensation path") && mixedRisk.riskDetail.includes("Do not infer safety"));
+}
+
+{
+  const hostile = [ev(0, "tool_call", {
+    status: "error", node_id: "<img src=x>",
+    output: { kind: "inline", value: { error: "<script>alert(1)</script>" } },
+  })];
+  const html = R.recInvestigationHtml(hostile, true);
+  check("investigation html: journal evidence is escaped",
+    html.includes("&lt;img src=x&gt;") && html.includes("&lt;script&gt;alert(1)&lt;/script&gt;") &&
+    !html.includes("<img src=x>") && !html.includes("<script>alert(1)</script>"));
+  check("investigation helpers tolerate empty input",
+    R.recInvestigation(null, false).state === "running" && R.recInvestigation([], true).state === "complete");
+}
+
+check("investigation markup: updates are announced politely",
+  html.includes('<div id="rec-investigation" aria-live="polite"></div>'));
+check("investigation interaction: evidence buttons share delegated selection",
+  html.includes('$("rec-investigation").addEventListener("click", recClick)') &&
+  html.includes('e.target.closest("[data-story-eid]")'));
+check("investigation responsive: story and evidence panel stack before phone width",
+  html.includes('.rec-story-spine { grid-template-columns: repeat(2, minmax(0, 1fr)); }') &&
+  html.includes('.rec-split { flex-direction: column; }') &&
+  html.includes('.rec-story-spine { grid-template-columns: 1fr; }'));
+check("investigation accessibility: small labels use the higher-contrast dim token",
+  /\.rec-story-label\s*\{[\s\S]*?color: var\(--text-dim\)/.test(html));
+check("investigation accessibility: story navigation focuses a labelled evidence region",
+  html.includes('detail.setAttribute("role", "region")') &&
+  html.includes('detail.setAttribute("aria-label"') && html.includes('detail.focus({ preventScroll: true })'));
+check("investigation accessibility: stacked evidence is scrolled into view",
+  html.includes('detail.scrollIntoView({ block: "nearest", behavior: "auto" })'));
 
 /* -- replay banner (POST /runs/replay) --------------------------------------
  * Response shape: {run_id, verified, expected_events, actual_events,

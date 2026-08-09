@@ -73,7 +73,11 @@ studio/
   - **Flight Recorder timeline** — `GET /runs/{run_id}/events` (R0.5) rendered as a scrubbable timeline of
     the run's journaled evidence: one lane per node (plus a run-wide lane for super-step boundaries,
     routing decisions, and checkpoint writes), event chips colored by `kind`, and super-step grouping
-    header rows. The run id auto-fills from any run you start (background, wait, or stream) and the
+    header rows. Above the timeline, a **Run story** turns that evidence into a causal investigation:
+    journal finding, recorded error event or unresolved pause, evidence-backed recovery boundary, and
+    repeat-sensitive or unclassified event risk. Each supported finding links back to the exact journal event, while missing checkpoints,
+    partial journals, terminal journals without recorded issues, and interruptions are stated without inventing recovery evidence.
+    The run id auto-fills from any run you start (background, wait, or stream) and the
     timeline auto-loads when the run reaches a terminal state; you can also paste any run id and
     **Load events**. Click an event for the detail panel: effect classification badge with its retry/replay
     meaning, status, causal parent (click to jump), latency, token usage, cost, timestamps, and the
@@ -257,15 +261,17 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
   route compatibility, and explicit render bounds.
 - `node --check` on the extracted `<script>` block — syntax OK.
-- `node studio/test-recorder.mjs` — 71 unit tests over the Flight Recorder timeline helpers (extracted
+- `node studio/test-recorder.mjs` — 107 unit tests over the Flight Recorder timeline helpers (extracted
   from the same `<script>` block, run under `vm`): `seq` ordering with missing-field fallbacks,
   super-step grouping, lane derivation, causal-chain walking (including a parent-cycle guard), marker
   and detail-panel HTML (effect badges, parent jump links, token/cost formatting), payload rendering
   (inline escaping, artifact `sha256` + bytes, unknown future tags), and coverage of all 12 frozen
-  `RunEventKind`s and all 5 `Effect` classes; plus the replay banner states (verified / mismatch with
+  `RunEventKind`s and all 5 `Effect` classes; causal-investigation outcomes, first-issue detection,
+  persisted and suspension recovery boundaries, outcome-neutral repeat-risk summaries, partial/paused/terminal journals, accessible
+  evidence links, and hostile evidence escaping; plus the replay banner states (verified / mismatch with
   divergence jump link / partial response), the 404 / 409 / 422 / route-missing error mapping, and
   fork-compare alignment (dimmed prefix, divergence marking, added/removed classes, presence-derived
-  fallback for partial diffs, per-branch totals, HTML escaping). 71 passed, 0 failed.
+  fallback for partial diffs, per-branch totals, HTML escaping). 107 passed, 0 failed.
 - `node studio/test-tasks.mjs` — 39 unit tests over the durable-tasks view helpers (same extraction
   harness): badge tone per status with the unknown-status fallback, terminality mirroring the server's
   `TaskRecord::is_terminal` (including the failed-with-retry-scheduled nuance), the list path builder,
