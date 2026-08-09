@@ -39,12 +39,17 @@ studio/
   queued / in-flight / dead-letter mailbox counts, and lazily loaded supervision policy, attempts,
   escalation, and deadline evidence for the selected member. Lease timestamps are interpreted against
   the browser clock, expire visibly without a manual refresh, and are never presented as active when
-  missing or malformed. A typed launch rail can delegate work to one identity or fan it out across
-  several identities in the selected declared-team group. It pins each member's manifest version and
+  missing or malformed. A typed decision braid can delegate work to one identity, fan it out across
+  several identities, race freely repeatable candidates, or gather a declared quorum in the selected
+  declared-team group. It pins each member's manifest version and
   accepted message kind, generates a stable retry key before review, makes effect and retry risk
   (including compensatable work) visible, supports narrowed delegate context or a bounded fan-out
-  window, validates and bounds the contract before submission, and requires explicit confirmation
-  before durable mailbox work starts. Network-ambiguous attempts remain locked to the exact approved
+  window, enforces the race effect gate, and exposes an exact quorum threshold with either strict
+  structural JSON majority or deterministic first-k resolution. The preflight explains loser cancellation,
+  discarded-work accounting, unreachable thresholds, ties, and effects that may already have happened.
+  It validates and bounds the contract before submission and requires explicit confirmation before
+  durable mailbox work starts. New and deduplicated receipts are checked against the reviewed identity
+  and initial member window. Network-ambiguous attempts remain locked to the exact approved
   contract for convergent retry. If Rusty reuses an existing retry key, Studio discards the requested
   preview and loads the actual durable contract. Successful submissions open directly in the coordination
   investigation, which also accepts a
@@ -308,9 +313,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   Studio observes trace first, record second, retries one inconsistent observation pair, and leaves an
   explicit warning if the evidence still differs. Composition currently targets at most the first 20
   identities in the selected registry group, supports bounded inline task inputs and up to 64 bounded
-  context channels, and exposes only the shipped delegate and fan-out contracts. It does not create a
-  durable team definition. The view intentionally
-  offers no restart, cancellation, race, quorum, team editing, coordination discovery, or replay controls.
+  context channels, and exposes the shipped delegate, fan-out, race, and quorum contracts. It does not
+  create a durable team definition. The view intentionally
+  offers no coordination restart, operator cancellation, team editing, coordination discovery, or replay controls.
   Those actions need their own runtime and safety contracts before they become honest affordances.
 - **Thread list is local-only.** The server (as of v0.4) has no `GET /threads`; the Studio's thread list lives in
   `localStorage`, keyed by server base URL, and is not shared across browsers or machines. Server restarts
@@ -369,13 +374,14 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   `cargo test -p rusty-server --test learn_gate` independently passed all 9 real
   server lifecycle cases, including scoped approval, canary binding, byte-exact rollback, restart
   durability, tenant isolation, and causal lifecycle journaling.
-- `node studio/test-fabric.mjs` — 110 assertions over bounded durable-agent normalization, deterministic
+- `node studio/test-fabric.mjs` — 126 assertions over bounded durable-agent normalization, deterministic
   declared-team grouping, assistant-versus-runtime identity language, mailbox health precedence,
   activation and supervision evidence, independent endpoint failures, tenant/request isolation,
   keyboard navigation and focus continuity, responsive semantics, bounded coordination dispositions,
   connected and incomplete causal TeamTrace ordering, deep stack-safe traversal, hostile future-wire
   escaping, preserved Rust integer wire tokens, ordered evidence-reconciliation failures, and bounded
-  raw-evidence excerpts, typed delegate and fan-out payloads, manifest/context narrowing, effect-risk
+  raw-evidence excerpts, all four typed coordination payloads, manifest/context narrowing, race effect
+  admission, quorum threshold/resolver semantics, exact sparse receipt validation, cancellation/waste
   preflight, compensatable effects, stable retry/deduplication identity, bounded task/context input and
   preview, durable-work acknowledgement, submission generation guards, and composer accessibility.
 - `node --check` on the extracted `<script>` block — syntax OK.

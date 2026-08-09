@@ -23,7 +23,8 @@ globalThis.__fabric = {
   FABRIC_ATTEMPT_LIMIT, FABRIC_MEMBER_RENDER_LIMIT, FABRIC_COMPOSER_MEMBER_LIMIT,
   FABRIC_COMPOSER_INPUT_LIMIT, FABRIC_COMPOSER_TOTAL_INPUT_LIMIT, FABRIC_COMPOSER_PREVIEW_LIMIT,
   FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT, FABRIC_COMPOSER_CHANNEL_LIMIT, FABRIC_COMPOSER_CHANNEL_NAME_LIMIT,
-  FABRIC_COMPOSER_EFFECTS,
+  FABRIC_COMPOSER_EFFECTS, FABRIC_COMPOSER_PATTERNS, FABRIC_COMPOSER_RACE_EFFECTS,
+  FABRIC_COMPOSER_QUORUM_RESOLVERS,
   agentParseJsonWithNumberKinds, fabricObject, fabricRequestCurrent, fabricNormalizeAgents, fabricGroupKey, fabricGroupLabel,
   fabricGroups, fabricNavigationTarget, fabricFocusData, fabricFocusIdentity,
   fabricDisclosureState, fabricRestoreDisclosures, fabricCreateScheduler,
@@ -35,7 +36,8 @@ globalThis.__fabric = {
   fabricCoordinationHtml, fabricErrorHtml, fabricComposerInitial, fabricCarryComposer, fabricComposerGeneratedId,
   fabricComposerMemberSlug, fabricComposerAssignment, fabricComposerEnsure, fabricComposerInput,
   fabricComposerChannels, fabricComposerValidation, fabricComposerPayload, fabricComposerRecordPayload,
-  fabricComposerErrorFor, fabricComposerHtml, fabricComposerResetApproval,
+  fabricComposerErrorFor, fabricComposerPatternLabel, fabricComposerDecisionBraidHtml,
+  fabricComposerHtml, fabricComposerResetApproval, fabricComposerValidateReceipt,
   fabricComposerReviewHtml, fabricComposerSubmitError,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -602,6 +604,112 @@ const connectedTrace = {
   check("composer preview: a valid large multi-member contract renders a visibly bounded excerpt",
     F.fabricComposerReviewHtml(fanout, group, allAgents).includes("inspection view truncated"));
 
+  const race = F.fabricComposerInitial();
+  race.pattern = "race";
+  race.coordinationId = "launch-race-1";
+  race.selectedIds = [research.agent_id, writer.agent_id];
+  F.fabricComposerEnsure(race, group);
+  Object.assign(race.assignments[research.agent_id],
+    { member: "research", kind: "research", input: "Find the answer", effect: "read_only" });
+  Object.assign(race.assignments[writer.agent_id],
+    { member: "writer", kind: "draft", input: "Produce the answer", effect: "idempotent" });
+  const raceResult = F.fabricComposerPayload(race, group, allAgents);
+  check("composer race: every candidate is pinned and only the first safe completion becomes the contract outcome",
+    raceResult.payload.race.candidates.length === 2 &&
+    raceResult.payload.race.candidates[0].manifest_version === "researcher/1.4.0" &&
+    raceResult.payload.race.candidates[1].effect === "idempotent" &&
+    !Object.hasOwn(raceResult.payload.race, "members"));
+  race.assignments[writer.agent_id].effect = "compensatable";
+  check("composer race: compensatable and non-idempotent candidates fail closed before POST",
+    F.fabricComposerValidation(race, group, allAgents).errors.some((error) =>
+      error.field === "assignment:writer-1:effect" && error.message.includes("loser can be cancelled")));
+  race.assignments[writer.agent_id].effect = "idempotent";
+  const raceBraid = F.fabricComposerDecisionBraidHtml(race, [research, { ...writer, agent_id: "<writer>" }]);
+  check("composer race: decision braid explains convergence and escapes member identities",
+    raceBraid.includes("First safe completion") && raceBraid.includes("2 race candidates") &&
+    raceBraid.includes("Losing work is cancel-signalled and must be freely repeatable") &&
+    raceBraid.includes("&lt;writer&gt;") && !raceBraid.includes("<writer>"));
+  check("composer race: launch preflight names cancellation and discarded-work accounting",
+    F.fabricComposerReviewHtml(race, group, allAgents).includes("cancel-signalled") &&
+    F.fabricComposerReviewHtml(race, group, allAgents).includes("accounted as waste"));
+
+  const raceReceipt = {
+    coordination_id: "launch-race-1", start_event: "coordination:default:launch-race-1:0",
+    submitted: [
+      { member: "research", task_id: "default--launch-race-1--research" },
+      { member: "writer", task_id: "default--launch-race-1--writer" },
+    ],
+  };
+  check("composer receipt: new race binds the exact identity, initial member set, tasks, and start event",
+    F.fabricComposerValidateReceipt(raceReceipt, raceResult.payload).ok);
+  check("composer receipt: mismatched identities and malformed member-task evidence fail closed",
+    !F.fabricComposerValidateReceipt({ ...raceReceipt, coordination_id: "other" }, raceResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ ...raceReceipt, start_event: null }, raceResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ ...raceReceipt, start_event: "coordination:other:launch-race-1:0" }, raceResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ ...raceReceipt, submitted: [
+      raceReceipt.submitted[0], { member: "writer", task_id: "default--stale-race--writer" }] }, raceResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ ...raceReceipt, submitted: [raceReceipt.submitted[0], raceReceipt.submitted[0]] }, raceResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ ...raceReceipt, submitted: [{ member: "research", task_id: {} }, raceReceipt.submitted[1]] }, raceResult.payload).ok);
+  check("composer identity: control characters fail before they can create unverifiable receipt evidence",
+    F.fabricComposerValidation({ ...race, coordinationId: "launch\trace-1" }, group, allAgents).errors
+      .some((error) => error.field === "coordinationId" && error.message.includes("control characters")));
+  check("composer receipt: deduplication has one exact sparse shape",
+    F.fabricComposerValidateReceipt({ coordination_id: "launch-race-1", deduplicated: true }, raceResult.payload).deduplicated &&
+    !F.fabricComposerValidateReceipt({ coordination_id: "launch-race-1", deduplicated: false }, raceResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ coordination_id: "launch-race-1", deduplicated: true, submitted: [] }, raceResult.payload).ok);
+  check("composer receipt: fan-out receipt matches only its reviewed initial window",
+    F.fabricComposerValidateReceipt({ coordination_id: "launch-fanout-1", start_event: "coordination:acme:launch-fanout-1:0",
+      submitted: [{ member: "research", task_id: "acme--launch-fanout-1--research" }] }, fanoutResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ coordination_id: "launch-fanout-1", start_event: "coordination:acme:launch-fanout-1:0",
+      submitted: [{ member: "writer", task_id: "acme--launch-fanout-1--writer" }] }, fanoutResult.payload).ok &&
+    !F.fabricComposerValidateReceipt({ coordination_id: "launch-fanout-1", start_event: "coordination:acme:launch-fanout-1:0",
+      submitted: [{ member: "research", task_id: "acme--launch-fanout-1--research" }, { member: "writer", task_id: "acme--launch-fanout-1--writer" }] }, fanoutResult.payload).ok);
+
+  const quorum = F.fabricComposerInitial();
+  quorum.pattern = "quorum";
+  quorum.coordinationId = "launch-quorum-1";
+  quorum.selectedIds = [research.agent_id, writer.agent_id];
+  quorum.threshold = "2";
+  quorum.resolver = "majority_equal";
+  F.fabricComposerEnsure(quorum, group);
+  Object.assign(quorum.assignments[research.agent_id],
+    { member: "research", kind: "research", input: "Judge the case", effect: "read_only" });
+  Object.assign(quorum.assignments[writer.agent_id],
+    { member: "writer", kind: "draft", input: "Judge the case", effect: "non_idempotent" });
+  const quorumResult = F.fabricComposerPayload(quorum, group, allAgents);
+  check("composer quorum: threshold and deterministic resolver use the exact Rust wire shape",
+    quorumResult.payload.quorum.members.length === 2 && quorumResult.payload.quorum.threshold === 2 &&
+    quorumResult.payload.quorum.resolver.resolver === "majority_equal");
+  check("composer quorum: majority guidance matches Rust's structural JSON equality",
+    F.fabricComposerDecisionBraidHtml(quorum, [research, writer]).includes("structural JSON majority") &&
+    F.fabricComposerReviewHtml(quorum, group, allAgents).includes("object key order does not split a vote"));
+  check("composer quorum: even majority thresholds disclose tie evidence without blocking a valid contract",
+    quorumResult.validation.warnings.some((warning) => warning.includes("can tie")) &&
+    quorumResult.validation.warnings.some((warning) => warning.includes("non-idempotent")));
+  quorum.threshold = "3";
+  quorum.resolver = "custom";
+  const invalidQuorum = F.fabricComposerValidation(quorum, group, allAgents);
+  check("composer quorum: out-of-range thresholds and unsupported resolvers fail before POST",
+    invalidQuorum.errors.some((error) => error.field === "threshold") &&
+    invalidQuorum.errors.some((error) => error.field === "resolver"));
+  quorum.threshold = "1";
+  quorum.resolver = "first_k";
+  const firstK = F.fabricComposerPayload(quorum, group, allAgents);
+  check("composer quorum: first-k preserves the threshold and warns that unfinished effects may exist",
+    firstK.payload.quorum.resolver.resolver === "first_k" && firstK.payload.quorum.threshold === 1 &&
+    firstK.validation.warnings.some((warning) => warning.includes("declared effects may already have happened")));
+  check("composer quorum: decision braid exposes the declared acceptance rule",
+    F.fabricComposerDecisionBraidHtml(quorum, [research, writer]).includes("1 of 2 accepted") &&
+    F.fabricComposerDecisionBraidHtml(quorum, [research, writer]).includes("when 1 result is accepted") &&
+    F.fabricComposerDecisionBraidHtml(quorum, [research, writer]).includes("accepted. Return the accepted results in deterministic order") &&
+    F.fabricComposerDecisionBraidHtml(quorum, [research, writer]).includes("deterministic order"));
+
+  const existingRace = { coordination_id: "race-existing", contract: { pattern: "race", candidates: raceResult.payload.race.candidates } };
+  const existingQuorum = { coordination_id: "quorum-existing", contract: { pattern: "quorum", ...firstK.payload.quorum } };
+  check("composer deduplication: durable race and quorum records reconstruct request-shaped contracts",
+    F.fabricComposerRecordPayload(existingRace).race.candidates.length === 2 &&
+    F.fabricComposerRecordPayload(existingQuorum).quorum.resolver.resolver === "first_k");
+
   const invalid = F.fabricComposerInitial();
   invalid.pattern = "fan_out";
   invalid.coordinationId = "../reserved";
@@ -636,9 +744,10 @@ const connectedTrace = {
   const composerHtml = F.fabricComposerHtml(delegate, group, allAgents);
   check("composer markup: coordination patterns, roster, semantic form, typed preview, and explicit approval are present",
     composerHtml.includes('id="fabric-compose-form"') && composerHtml.includes('data-compose-pattern="delegate"') &&
-    composerHtml.includes('data-compose-pattern="fan_out"') && composerHtml.includes('aria-pressed="true"') &&
+    composerHtml.includes('data-compose-pattern="fan_out"') && composerHtml.includes('data-compose-pattern="race"') &&
+    composerHtml.includes('data-compose-pattern="quorum"') && composerHtml.includes('aria-pressed="true"') &&
     composerHtml.includes('data-compose-agent-toggle="researcher-1"') &&
-    composerHtml.includes("Review typed coordination contract") && composerHtml.includes("durable mailbox work") &&
+    composerHtml.includes("Review typed coordination contract") && composerHtml.includes("which declared effects") &&
     composerHtml.includes('form="fabric-compose-form"') && composerHtml.includes("Start delegation") &&
     composerHtml.includes("disabled"));
   check("composer responsive semantics: launch review is isolated from the application sidebar element",
@@ -683,7 +792,7 @@ const connectedTrace = {
     launchedValidation: { errors: [], warnings: [], selected: [research.agent_id] } };
   const crossPatternReview = F.fabricComposerReviewHtml(crossPattern, group, allAgents);
   check("composer deduplication: summaries describe the actual durable pattern, never the rejected draft pattern",
-    crossPatternReview.includes("fan out coordination") && !crossPatternReview.includes("One delegated handoff"));
+    crossPatternReview.includes("fan-out coordination") && !crossPatternReview.includes("One delegated handoff"));
   const unverified = { ...delegate,
     launchedPayload: { coordination_id: "launch-delegate-1", existing_contract: "Loading the durable record…" },
     launchedValidation: { errors: [], warnings: [], selected: [] } };
@@ -775,10 +884,10 @@ check("accessibility: team rerenders stay quiet while concise selected-state cha
   html.includes('id="fabric-team-announcer" role="status" aria-live="polite"') &&
   html.includes('<section class="card fabric-team-card" id="fabric-team">') &&
   !html.includes('id="fabric-team" aria-live='));
-check("markup: the observatory adds only the supported delegate and fan-out submission patterns",
-  html.includes('id="fabric-compose-title">Coordinate this team') &&
+check("markup: the observatory exposes all four runtime-backed coordination patterns",
+  html.includes('id="fabric-compose-title" tabindex="-1">Coordinate this team') &&
   html.includes('data-compose-pattern="delegate"') && html.includes('data-compose-pattern="fan_out"') &&
-  !html.includes('data-compose-pattern="race"') && !html.includes('data-compose-pattern="quorum"') &&
+  html.includes('data-compose-pattern="race"') && html.includes('data-compose-pattern="quorum"') &&
   !html.match(/id="fabric-[^"]*"[^>]*>[^<]*(restart|cancel)/i));
 check("composer lifecycle: delegated event wiring, generation guards, edit invalidation, and result investigation are explicit",
   html.includes('$("fabric-compose-body").addEventListener("submit"') &&
@@ -801,12 +910,15 @@ check("composer focus: blocked team navigation and Compose another return focus 
   html.includes('if (fabricSelectGroup(next, false)) fabricFocusData'));
 check("composer accessibility: frequent preflight changes stay quiet while submissions use one dedicated announcer",
   html.includes('id="fabric-compose-announcer" role="status" aria-live="polite"') &&
-  html.includes('id="fabric-compose-review"') && !html.includes('id="fabric-compose-review" aria-live='));
+  html.includes('id="fabric-compose-review"') && !html.includes('id="fabric-compose-review" aria-live=') &&
+  html.includes('id="fabric-compose-error" role="alert" tabindex="-1"') &&
+  html.includes('$("fabric-compose-title")?.focus({ preventScroll: true })'));
 check("responsive: team layout and causal evidence stack at narrow widths",
   html.includes(".fabric-members { grid-template-columns: 1fr; }") &&
   html.includes(".fabric-coordination-head { flex-direction: column; }") &&
   html.includes(".fabric-trace-event { grid-template-columns: 1fr;") &&
-  html.includes(".fabric-compose-grid { grid-template-columns: 1fr;"));
+  html.includes(".fabric-compose-grid { grid-template-columns: 1fr;") &&
+  html.includes(".fabric-decision-braid { grid-template-columns: 1fr;"));
 check("accessibility: essential TeamTrace sequence and depth use the AA text token",
   html.includes(".fabric-trace-event small { color: var(--text-dim);") &&
   !html.includes(".fabric-trace-event small { color: var(--text-faint);"));
