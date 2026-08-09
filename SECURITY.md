@@ -7,7 +7,7 @@ Rusty is pre-1.0. Only the latest minor release line receives security fixes; ol
 | Component | Package | Supported line |
 |---|---|---|
 | `rusty-core/` | `rusty-agent-runtime` (crates.io) | latest `0.x` minor only |
-| `rusty-server/` | `rusty-server` | latest `0.x` minor only |
+| `rusty-server/` | `rusty-agent-server` | latest `0.x` minor only |
 | `rusty-worker/` | `rusty-worker` | latest `0.x` minor only |
 | `rusty-otel/` | `rusty-otel` | latest `0.x` minor only |
 | `sdks/python/` | `rusty-agent-runtime` (PyPI) | latest `0.x` minor only |
@@ -40,8 +40,8 @@ If a report is declined, you will receive an explanation. This is a small volunt
 
 The following are known limitations, not vulnerabilities — reports about these will be closed as known issues:
 
-- **Multi-tenant auth is implemented but not yet audited.** `rusty-server` v0.4 shipped key-to-tenant mapping with per-tenant namespacing of threads, runs, assistants, crons, and KV (cross-tenant access answers 404). It has not received an independent security audit; treat multi-tenant deployments as hardening-in-progress.
-- **Dev mode has no auth.** With no API key configured (the default), `rusty-server` accepts all requests. This is intentional for local development and is not a vulnerability.
+- **Multi-tenant auth is implemented but not yet audited.** `rusty-agent-server` v0.4 shipped key-to-tenant mapping with per-tenant namespacing of threads, runs, assistants, crons, and KV (cross-tenant access answers 404). It has not received an independent security audit; treat multi-tenant deployments as hardening-in-progress.
+- **Dev mode has no auth.** With no API key configured (the default), `rusty-agent-server` accepts all requests. This is intentional for local development and is not a vulnerability.
 - **Permissive CORS by default.** `router()` layers `CorsLayer::permissive()` so browser clients work out of the box. Restrict origins in your own binary or at a reverse proxy for production.
 - **Bind address.** The default bind address is `0.0.0.0:8080`, which exposes the server on all interfaces. For local work, bind to `127.0.0.1`; for anything beyond that, place the server behind a reverse proxy with TLS and configure an API key.
 - **Do not run as root.** Run the server and workers as an unprivileged OS user. The runtime executes user-defined graphs, tools, and WASM nodes; OS-level isolation (least-privilege user, filesystem restrictions, network policy) is the deployer's responsibility.

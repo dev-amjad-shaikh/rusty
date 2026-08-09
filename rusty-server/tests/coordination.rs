@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

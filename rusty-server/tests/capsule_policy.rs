@@ -23,7 +23,7 @@ use rusty_agent_runtime::capsule::{
 #[cfg(feature = "capsules")]
 use rusty_agent_runtime::capsule::{CapsuleOverlay, FilesystemMode};
 use rusty_agent_runtime::record::{sha256_hex, Effect};
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -256,7 +256,7 @@ mod with_feature {
     use rusty_agent_runtime::capsule_host::{CapsuleHost, CapsuleInvocation};
     use rusty_agent_runtime::journal::{Clock, Journal};
     use rusty_agent_runtime::record::{PayloadRef, RunEventKind};
-    use rusty_server::capsule_policy::CapsulePolicyPlane;
+    use rusty_agent_server::capsule_policy::CapsulePolicyPlane;
     use std::sync::Arc;
 
     /// The permissive policy: admit everything, permit every use and

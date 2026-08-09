@@ -1,4 +1,4 @@
-//! # rusty-server
+//! # rusty-agent-server
 //!
 //! The network face of [`rusty_agent_runtime`]: an axum-based HTTP + SSE server
 //! implementing a pragmatic Agent-Protocol subset (see
@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! use rusty_agent_runtime::prelude::*;
-//! use rusty_server::{serve, GraphRegistry, ServerConfig};
+//! use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
 //!
 //! # async fn demo(graph: Graph, spec: StateSpec) -> std::io::Result<()> {
 //! let mut registry = GraphRegistry::new();
@@ -726,7 +726,7 @@ impl ServerConfig {
 }
 
 /// Build the axum [`Router`] for a registry and config. Use this to embed the
-/// rusty-server routes into a larger application, or to drive the API in tests
+/// rusty-agent-server routes into a larger application, or to drive the API in tests
 /// via `tower::ServiceExt::oneshot`.
 ///
 /// The router's drain control is internal and never fires (embedders who

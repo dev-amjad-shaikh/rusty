@@ -1,12 +1,12 @@
 [package]
-name = "rusty-server"
+name = "rusty-agent-server"
 version = "0.9.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation = "https://docs.rs/rusty-server"
+documentation = "https://docs.rs/rusty-agent-server"
 readme = "README.md"
 description = "The durable agent runtime built in Rust — HTTP/SSE server: an Agent-Protocol subset with threads, background runs, checkpoints, and resumable streaming."
 keywords = ["agent", "graph", "llm", "server", "langgraph"]

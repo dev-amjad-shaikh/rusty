@@ -10,7 +10,7 @@ body:
       description: Which part of Rusty would this affect?
       options:
         - rusty-core (rusty-agent-runtime)
-        - rusty-server
+        - rusty-server (rusty-agent-server)
         - rusty-worker
         - rusty-otel
         - studio

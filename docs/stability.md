@@ -74,10 +74,10 @@ deprecation window is implied unless the entry says one.
 
 - **The Rust API surface of all four crates** — public types, traits,
   function signatures, feature flags, and module layout of
-  `rusty-agent-runtime`, `rusty-server`, `rusty-worker`, and
+  `rusty-agent-runtime`, `rusty-agent-server`, `rusty-worker`, and
   `rusty-otel`. Pin an exact version (`=0.x.y`) if rebuilds must not
   break.
-- **HTTP request/response JSON fields** on the `rusty-server` API. Route
+- **HTTP request/response JSON fields** on the `rusty-agent-server` API. Route
   paths have been additive historically, but field-level additions,
   renames, and removals may occur at a minor bump.
 - **SSE event families and their payload fields.** The stream currently

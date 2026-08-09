@@ -349,10 +349,10 @@ admitted is the receipt's job; making the receipt says "policy version P
 permitted this" is what closes the loop for audit.
 
 **Dependency call, made and justified.** `cedar-policy` joins
-`rusty-server` (not core): authorization is a server concern — the core
+`rusty-agent-server` (not core): authorization is a server concern — the core
 crate's contracts stay engine-free, the way `CandidateEvaluator` is a
 trait core owns and the server implements. It lands behind a
-`rusty-server` cargo feature `capsules` (which also enables
+`rusty-agent-server` cargo feature `capsules` (which also enables
 `rusty-agent-runtime/wasm`), and a server built without the feature
 **refuses capsule workloads at admission** — fail closed, not silent
 skip. The build-cost honesty: wasmtime with cranelift is the heavy

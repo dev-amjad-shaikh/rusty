@@ -1,6 +1,6 @@
 # Rusty Studio
 
-A **zero-build, single-file debug UI** for [`rusty-server`](../rusty-server). One HTML file, vanilla
+A **zero-build, single-file debug UI** for [`rusty-agent-server`](../rusty-server). One HTML file, vanilla
 JS + CSS, no npm, no framework, no bundler — open it and point it at a running server.
 
 ```
@@ -150,7 +150,7 @@ studio/
   - **Replay & run from a checkpoint** — starts a background run whose payload carries
     `"checkpoint": {"checkpoint_id": …}`; the executor replays the thread from that checkpoint (its state
     and next-node set) instead of the latest, appending fresh history on top. Prefer replaying on a fork.
-  - **Older-server fallback** — if a fork call 404s with a non-JSON body (an `rusty-server` older
+  - **Older-server fallback** — if a fork call 404s with a non-JSON body (an `rusty-agent-server` older
     than v0.3 has no `/fork` route), the Studio falls back to its original client-side composition
     (new thread + `POST /threads/{new}/state`) and says so in the toast.
   - **Interrupt / resume helper** — when any run ends `interrupted`, the interrupt payload is shown with a
@@ -227,7 +227,7 @@ Open `http://127.0.0.1:8000/` and connect with base URL **`/api`** (the proxy fo
 cd studio && python3 -m http.server 8000     # → http://localhost:8000/index.html
 ```
 
-Then connect to `http://127.0.0.1:8100`. Since `rusty-server` (v0.3 and later) sends permissive CORS headers
+Then connect to `http://127.0.0.1:8100`. Since `rusty-agent-server` (v0.3 and later) sends permissive CORS headers
 (see below), plain cross-origin calls from any static host just work.
 
 ### Option C — double-click `index.html` (file://)
@@ -237,7 +237,7 @@ those cross-origin calls as well.
 
 ## CORS
 
-`rusty-server` v0.3+ layers `tower_http::cors::CorsLayer::permissive()` in `router()` as the
+`rusty-agent-server` v0.3+ layers `tower_http::cors::CorsLayer::permissive()` in `router()` as the
 outermost middleware: every response carries `access-control-allow-origin: *`, and OPTIONS preflights are
 answered before the API-key middleware runs. Any page — `file://`, `localhost:8000`, a LAN hostname — can
 call the API directly. **Production deployments should restrict this** (the permissive layer is a dev
@@ -450,17 +450,17 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   migration and damaged-secret cleanup warnings, blocked-storage containment, tenant-scoped recall,
   read-only compatibility classification, recorder/stream request ownership, concurrent-request isolation,
   failed-switch rollback, informed storage consent, responsive layout, and complete interaction wiring.
-- Live against `cargo run -p rusty-server --example server_demo`: created and reused a local profile,
+- Live against `cargo run -p rusty-agent-server --example server_demo`: created and reused a local profile,
   verified `rusty-server v0.8.0` with two registered behaviors, and confirmed all six feature families.
   Switching to an incompatible `/missing` endpoint produced a recovery-focused identity error while the
   original workspace remained active. Stopping the server and reloading proved that a saved profile remains
   an unverified candidate—not a connected workspace—until the server answers again; restarting it and
   reconnecting restored the complete handshake.
-- Live against `cargo run -p rusty-server --example server_demo`: Home moved from a disconnected local-first
+- Live against `cargo run -p rusty-agent-server --example server_demo`: Home moved from a disconnected local-first
   state to a confirmed server with two registered behaviors, then updated its agent/team/learning signals
   from asynchronous server reads. Its primary action opened the real first-agent form. At 390 × 844 the
   hero, five-stage evidence rail, signals, and action remained readable with no horizontal overflow.
-- Live against `cargo run -p rusty-server --example server_demo`: wrote two contradictory same-key user
+- Live against `cargo run -p rusty-agent-server --example server_demo`: wrote two contradictory same-key user
   memories, detected the real conflict, and submitted their reviewed source set to
   `POST /memory/consolidate`. Rusty returned a new `memory_consolidation` task; `GET /tasks/{task_id}`
   proved the same sorted source ids, scope, distiller, key, tags, priority, pool, and enqueue timestamp.
@@ -473,7 +473,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   gating, uncertain-outcome reconciliation, hostile wire escaping, keyboard/focus behavior, responsive
   layout, accessible evidence-state semantics, canonical candidate hashing, typed proposal composition,
   finalized-evidence creation preflight, duplicate reconciliation, and focus continuity.
-- Live against `cargo run -p rusty-server --example server_demo`: a completed pipeline journal handed
+- Live against `cargo run -p rusty-agent-server --example server_demo`: a completed pipeline journal handed
   off directly from Flight Recorder into the foundry, which created real prompt and retry-policy
   candidates and reconciled a duplicate prompt to its original author and lifecycle. The browser's
   displayed prompt SHA-256 matched the identity accepted and returned by Rusty. Studio loaded the tenant candidate inbox,
@@ -482,7 +482,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   capability gap into an operator action,
   navigated candidates with roving keyboard focus, preserved focus through asynchronous proposal loads
   and contract switches, filtered by kind, and rendered at 390 px without horizontal overflow.
-  `cargo test -p rusty-server --test learn_gate` independently passed all 9 real
+  `cargo test -p rusty-agent-server --test learn_gate` independently passed all 9 real
   server lifecycle cases, including scoped approval, canary binding, byte-exact rollback, restart
   durability, tenant isolation, and causal lifecycle journaling.
 - `node studio/test-fabric.mjs` — 198 assertions over bounded durable-agent normalization, deterministic
@@ -503,7 +503,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   dispositions, accessible pulse-rail progress and button descriptions, refresh-safe keyboard focus,
   visibility-aware live following, bounded exponential backoff, stale evidence retention, responsive
   layout, and complete operator-control wiring.
-- Live against `cargo run -p rusty-server --example server_demo`: registered a three-member declared
+- Live against `cargo run -p rusty-agent-server --example server_demo`: registered a three-member declared
   team, launched a real delegated task through Studio, observed it enter the Team Run Desk immediately,
   and saw the selected investigation advance from submitted work to the exact completed member
   disposition and four-event TeamTrace without a manual reload. The sanitized run survived a Studio
@@ -511,7 +511,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   unavailable** without erasing its last observation; restarting the same durable store and refreshing
   restored **Completed**. At a 390 × 844 viewport the run status, observation age, pulse rail, and
   inspection action remained visible with no horizontal overflow.
-- Live against `cargo run -p rusty-server --example server_demo`: shaped and saved a three-role fan-out
+- Live against `cargo run -p rusty-agent-server --example server_demo`: shaped and saved a three-role fan-out
   blueprint, reloaded Studio, and recovered the same browser-scoped structure. Reopening it cleared
   one-off task text and deadlines before review. Removing a live role blocked use; restoring the roster
   with a changed manifest pin required visible drift review and hydrated the current pin. A separately
@@ -542,7 +542,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   `BranchDiff` serde shape in `rusty-core/src/replay.rs`): the replay/diff server endpoints had not
   landed in this workspace and no server was reachable, so live verification against `server_demo` is
   still outstanding and should happen once the server wave lands.
-- Live against `cargo run -p rusty-server --example server_demo`: real journaled runs of both demo
+- Live against `cargo run -p rusty-agent-server --example server_demo`: real journaled runs of both demo
   graphs (`pipeline`, `react_agent`) fetched through `GET /runs/{run_id}/events` and fed through the
   extracted render helpers — correct super-step grouping (2 and 3 steps), node lanes, zero dangling
   `parent` links, every marker and detail panel rendered, causal chains reaching a super-step start.

@@ -22,11 +22,11 @@ The workspace grows from one crate to three, phased:
 ```
 rusty-core/      # core engine — UNCHANGED. No HTTP, no axum, no server deps.
 rusty-server/    # NEW (Phase A). axum + tokio. Depends on rusty-agent-runtime.
-                 #   Ships as a LIBRARY: users call rusty_server::serve().
+                 #   Ships as a LIBRARY: users call rusty_agent_server::serve().
 rusty-proto/     # FUTURE (Phase B). protobuf/tonic contract for remote workers.
 ```
 
-Dependency direction is strictly `user's binary → rusty-server → rusty-agent-runtime`.
+Dependency direction is strictly `user's binary → rusty-agent-server → rusty-agent-runtime`.
 The core crate never learns that a server exists; `rusty-proto` is optional and only
 needed by deployments that run out-of-process workers.
 
@@ -34,10 +34,10 @@ needed by deployments that run out-of-process workers.
 ┌────────────────────────────── user binary (main.rs) ──────────────────────────────┐
 │  build graphs ──► GraphRegistry {"support": (Graph, StateSpec), "research": (...)} │
 │                                   │                                                │
-│                    rusty_server::serve(registry, ServerConfig)                     │
+│                    rusty_agent_server::serve(registry, ServerConfig)               │
 └───────────────────────────────────────┬────────────────────────────────────────────┘
                                         ▼
-┌───────────────────────────── rusty-server ────────────────────────────────────────┐
+┌───────────────────────────── rusty-agent-server ──────────────────────────────────┐
 │  axum router: /graphs /threads /threads/{id}/runs{,/stream} /state /history        │
 │  auth middleware (API key) │ run scheduler (per-thread multitask strategy)         │
 │  SSE fan-out: tokio broadcast per run │ metrics                                    │
@@ -72,7 +72,7 @@ A realistic user `main.rs`, grounded in the real crate API
 ```rust
 use std::sync::Arc;
 use rusty_agent_runtime::prelude::*;
-use rusty_server::{serve, GraphRegistry, ServerConfig};
+use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
 
 mod graphs; // user code: build_support_graph(), build_research_graph()
 
@@ -139,9 +139,9 @@ The result is a single-binary image with no interpreter, no pip layer, no system
 self-hosted LangGraph standalone deployment needs **three moving parts**: the API
 container, Postgres (threads/runs/checkpoints/task-queue), and Redis (pub/sub fan-out for
 background-run streaming), plus a queue-worker topology for exactly-once background runs.
-rusty-server collapses this:
+rusty-agent-server collapses this:
 
-| Concern | LangGraph Platform | rusty-server v0.2 |
+| Concern | LangGraph Platform | rusty-agent-server v0.2 |
 |---|---|---|
 | User-code loading | `langgraph.json` + pip install at image build | `Cargo.toml` + `main.rs`, static link |
 | Deployment unit | API image + Postgres + Redis (compose) | one static binary |
@@ -306,7 +306,7 @@ container-native, and honest about the fact that graph definitions live in code.
 
 ## 7. Phased build plan
 
-**Phase A — the server crate (v0.2).** `rusty-server`: `GraphRegistry`, axum router
+**Phase A — the server crate (v0.2).** `rusty-agent-server`: `GraphRegistry`, axum router
 with the §3 endpoint set, per-thread run queue with `multitask_strategy`
 (enqueue/reject/rollback), SSE with the §4 mode filters + EventLog + `Last-Event-ID`
 resume, API-key middleware, `ServerConfig::from_env()`, `JsonFileCheckpointer` wiring.
@@ -358,7 +358,7 @@ Postgres checkpointer selected.
 
 ## Status (2026-08-05)
 
-**Phase A is implemented** as `rusty-server` v0.1.0 (library crate; `GraphRegistry`,
+**Phase A is implemented** as `rusty-agent-server` v0.1.0 (library crate; `GraphRegistry`,
 `ServerConfig`, `serve()` / `router()`), alongside core `rusty-agent-runtime` v0.2.0 (Postgres
 checkpointer behind the `postgres` feature, token streaming via `ChatModel::chat_stream`
 + `GraphEvent::Token`). Implemented endpoint inventory:
@@ -395,7 +395,7 @@ in-memory in v0.1 (checkpoints are durable on disk). SSE resume replays the per-
 in-memory event log; durable cross-restart stream reconstruction from the checkpoint
 log remains roadmap.
 
-**R0.5 addendum (2026-08-07).** rusty-server v0.5.0 adds the Flight Recorder
+**R0.5 addendum (2026-08-07).** rusty-agent-server v0.5.0 adds the Flight Recorder
 surface: every run is journaled by the executor (core R0.5 kernel), the server
 persists the journal's `JournalSnapshot` at every checkpoint boundary and at run
 completion (one JSON file per run under `{store_path}/journals/`, or the

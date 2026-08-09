@@ -28,7 +28,7 @@ use rusty_agent_runtime::memory::ProvenanceAuthor;
 use rusty_agent_runtime::record::{
     derive_policy_version, DecisionFamily, ExecutorPolicy, PolicyVersion,
 };
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

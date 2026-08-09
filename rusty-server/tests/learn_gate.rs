@@ -33,7 +33,7 @@ use rusty_agent_runtime::memory::{
     MemoryKind, MemoryProvenance, MemoryRecord, MemoryScope, ProvenanceAuthor, ScopeAddress,
     ValidityWindow,
 };
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

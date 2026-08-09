@@ -2,7 +2,7 @@
 
 In this tutorial you will:
 
-1. Create a new Rust binary project and depend on `rusty-agent-runtime` + `rusty-server` (path deps).
+1. Create a new Rust binary project and depend on `rusty-agent-runtime` + `rusty-agent-server` (path deps).
 2. Define a two-node graph — `draft → approve` — with a human-in-the-loop interrupt.
 3. Serve it over HTTP + SSE with `GraphRegistry` and `serve()`.
 4. Drive it with `curl`: create a thread, run to the interrupt, inspect state, stream the resume over SSE, and list checkpoint history.
@@ -24,7 +24,7 @@ Add the dependencies to `Cargo.toml`:
 ```toml
 [dependencies]
 rusty-agent-runtime = { path = "../rusty-core" }
-rusty-server = { path = "../rusty-server" }
+rusty-agent-server = { path = "../rusty-server" }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 ```
@@ -37,7 +37,7 @@ Replace `src/main.rs` with:
 
 ```rust
 use rusty_agent_runtime::prelude::*;
-use rusty_server::{serve, GraphRegistry, ServerConfig};
+use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 
 #[tokio::main]

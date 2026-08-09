@@ -76,7 +76,7 @@ channel.
 
 `ActivityWorker` is the pull-based counterpart to `serve`: instead of
 answering one-shot `/execute` calls, it claims leased tasks from the
-rusty-server task queue, executes the `Activity` registered for the task's
+rusty-agent-server task queue, executes the `Activity` registered for the task's
 `kind` while a background heartbeat renews the lease, and settles the task
 with a complete or fail call. The server re-queues tasks whose lease
 expires, so a crashed worker never strands work — the promise is

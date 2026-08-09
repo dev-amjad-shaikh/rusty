@@ -1,5 +1,5 @@
 //! Durable activities (R0.6): [`ActivityWorker`], the leased-task execution
-//! loop against the rusty-server task queue.
+//! loop against the rusty-agent-server task queue.
 //!
 //! Where [`crate::serve`] answers one-shot `/execute` calls pushed by a
 //! [`RemoteNode`](rusty_agent_runtime::remote::RemoteNode), an
@@ -154,7 +154,7 @@ pub const DEFAULT_CLAIM_BACKOFF_MAX: Duration = Duration::from_secs(5);
 pub const DEFAULT_DRAIN_GRACE: Duration = Duration::from_secs(25);
 
 // The server's accepted `lease_ms` range (`tasks::MIN_LEASE_MS..=MAX_LEASE_MS`
-// in rusty-server): below 100 ms a lease is an instant expiry, above one
+// in rusty-agent-server): below 100 ms a lease is an instant expiry, above one
 // hour a lost worker strands its task for too long. `with_lease` clamps to
 // this range so a misconfigured worker gets a sane lease instead of a 400
 // on every claim.
@@ -490,7 +490,7 @@ async fn sleep_until_deadline(until: Option<Duration>) {
     }
 }
 
-/// A durable worker that claims leased tasks from the rusty-server task
+/// A durable worker that claims leased tasks from the rusty-agent-server task
 /// queue and executes them behind heartbeats.
 ///
 /// This is the pull-based counterpart to [`crate::serve`]: instead of
@@ -525,7 +525,7 @@ pub struct ActivityWorker {
 }
 
 impl ActivityWorker {
-    /// A worker claiming tasks from the rusty-server at `base_url` (e.g.
+    /// A worker claiming tasks from the rusty-agent-server at `base_url` (e.g.
     /// `"http://127.0.0.1:8080"`).
     ///
     /// Register at least one [`Activity`] with [`ActivityWorker::register`]

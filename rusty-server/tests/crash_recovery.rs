@@ -70,7 +70,7 @@ fn temp_root() -> PathBuf {
 /// `<target>/<profile>/deps/crash_recovery-<hash>`; cargo builds examples
 /// alongside at `<target>/<profile>/examples/<name>`. Note the binaries are
 /// whatever cargo last built: `cargo test --workspace` rebuilds them, but a
-/// package-scoped `cargo test -p rusty-server` after editing `rusty-worker`
+/// package-scoped `cargo test -p rusty-agent-server` after editing `rusty-worker`
 /// leaves its example stale — rebuild with
 /// `cargo build --workspace --examples`.
 fn example_binary(name: &str) -> PathBuf {

@@ -132,7 +132,7 @@ work.
 
 ## The lease / visibility-timeout model (wave 1)
 
-The queue is a Postgres table in `rusty-server` (same store family as
+The queue is a Postgres table in `rusty-agent-server` (same store family as
 `server_journals`; advisory-locked auto-migrations as established). Rows
 carry the envelope, status, attempt count, lease owner, and lease expiry.
 

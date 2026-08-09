@@ -25,7 +25,7 @@ version number.
 `PROTOCOL_VERSION` (`rusty-core/src/remote.rs`) is a single `u32`
 constant, currently **`1`**. It governs the remote-execution protocol
 between a `RemoteNode` (embedded in any process using
-`rusty-agent-runtime`, including `rusty-server`) and a `rusty-worker`
+`rusty-agent-runtime`, including `rusty-agent-server`) and a `rusty-worker`
 (`POST /execute`, `NodeTask` / `TaskResult`). Evolution within protocol v1
 is additive-only: workers must reject tasks whose `protocol_version` they
 do not support, and responses are accepted regardless of their version
@@ -33,13 +33,13 @@ field so newer workers can serve older clients. A non-additive change
 requires bumping `PROTOCOL_VERSION` to 2.
 
 **Server↔SDK compatibility is not yet versioned by a constant.** The
-Python and TypeScript SDKs speak to `rusty-server`'s HTTP/SSE API (an
+Python and TypeScript SDKs speak to `rusty-agent-server`'s HTTP/SSE API (an
 Agent-Protocol subset; see `rusty-server/src/routes.rs`). That surface has
 no numeric protocol version today — there is no `protocol_version` field
 on HTTP requests and the `/info` endpoint does not report a server
 version. Until one exists, the compatibility rule is:
 
-- An SDK at version `0.x.y` is tested against the `rusty-server` release
+- An SDK at version `0.x.y` is tested against the `rusty-agent-server` release
   from the same cycle (see the matrix below). That pairing is the
   supported configuration.
 - Newer SDK minor versions against older servers (and vice versa) may
@@ -54,7 +54,7 @@ As of 2026-08-07:
 | Package | Registry | Source | Version |
 |---|---|---|---|
 | `rusty-agent-runtime` | crates.io | `rusty-core/` | 0.5.0 |
-| `rusty-server` | crates.io | `rusty-server/` | 0.5.0 |
+| `rusty-agent-server` | crates.io | `rusty-server/` | 0.5.0 |
 | `rusty-worker` | crates.io | `rusty-worker/` | 0.1.0 |
 | `rusty-otel` | crates.io | `rusty-otel/` | 0.1.0 |
 | `@rusty-runtime/client` | npm | `sdks/typescript/` | 0.1.0 |
@@ -65,7 +65,7 @@ are both published as `rusty-agent-runtime` (crates.io and PyPI
 respectively). They are different packages with independent version
 numbers; the Python SDK is imported as `rusty_client`.
 
-R0.5 — Flight Recorder bumped `rusty-agent-runtime` and `rusty-server`
+R0.5 — Flight Recorder bumped `rusty-agent-runtime` and `rusty-agent-server`
 to 0.5.0. Both SDK clients stayed at 0.1.0: their Flight Recorder
 methods (`run_events` / `replay_run` / `diff_runs` / `get_fixture`) are
 additive to the same package versions.
@@ -80,9 +80,9 @@ Which package pairs must agree, and on what:
 | Producer | Consumer | Governing version | Rule |
 |---|---|---|---|
 | `rusty-agent-runtime` (RemoteNode) | `rusty-worker` | `PROTOCOL_VERSION` = 1 | Worker rejects tasks with an unsupported `protocol_version`. Both sides currently speak v1. Keep worker and runtime on compatible protocol majors. |
-| `rusty-server` | `@rusty-runtime/client`, `rusty_client` (PyPI) | same-cycle pairing (no constant yet) | SDK 0.1.x ↔ server 0.5.x is the tested pairing. Cross-cycle use is unvalidated. |
-| `rusty-agent-runtime` | `rusty-server`, `rusty-worker`, `rusty-otel` | crate versions | All three are path-dependents built in lockstep from this monorepo; a published crate pair must satisfy SemVer on the Rust API, which is unstable at 0.x (see [stability.md](stability.md)). |
-| `rusty-server` | Rusty Studio (`studio/`) | same-cycle pairing | Studio is a zero-build UI distributed in-repo; it calls the same-cycle server API and notes fallbacks for older servers in-line. |
+| `rusty-agent-server` | `@rusty-runtime/client`, `rusty_client` (PyPI) | same-cycle pairing (no constant yet) | SDK 0.1.x ↔ server 0.5.x is the tested pairing. Cross-cycle use is unvalidated. |
+| `rusty-agent-runtime` | `rusty-agent-server`, `rusty-worker`, `rusty-otel` | crate versions | All three are path-dependents built in lockstep from this monorepo; a published crate pair must satisfy SemVer on the Rust API, which is unstable at 0.x (see [stability.md](stability.md)). |
+| `rusty-agent-server` | Rusty Studio (`studio/`) | same-cycle pairing | Studio is a zero-build UI distributed in-repo; it calls the same-cycle server API and notes fallbacks for older servers in-line. |
 | checkpoint writers (`JsonFileCheckpointer`, `PostgresCheckpointer`) | checkpoint readers | `rusty-agent-runtime` minor version | Checkpoints written by one `0.x.*` line are guaranteed readable by that same minor line only. See [stability.md](stability.md). |
 
 ## MSRV

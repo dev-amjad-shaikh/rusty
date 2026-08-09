@@ -29,7 +29,7 @@ cp -r sdks/python/rusty_client /your/project/
 Start the demo server (scripted model — no network, no API keys):
 
 ```bash
-cargo run -p rusty-server --example server_demo
+cargo run -p rusty-agent-server --example server_demo
 # rusty-server demo on http://127.0.0.1:8100  (graphs: pipeline, react_agent)
 ```
 

@@ -62,7 +62,7 @@
 //! ## Durable activities (R0.6)
 //!
 //! [`ActivityWorker`] is the pull-based counterpart to [`serve`]: it claims
-//! leased tasks (`kind` + JSON `payload`) from the rusty-server task queue
+//! leased tasks (`kind` + JSON `payload`) from the rusty-agent-server task queue
 //! (`POST /tasks/claim`), executes the [`activity::Activity`] registered for
 //! the task's kind while a background heartbeat renews the lease every
 //! `lease / 3`, and settles with `complete` or a classified `fail`. Lease

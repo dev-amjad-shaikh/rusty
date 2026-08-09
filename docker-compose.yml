@@ -42,7 +42,7 @@ services:
         # and target dir across rebuilds (and across interrupted builds).
         RUN --mount=type=cache,target=/usr/local/cargo/registry \
             --mount=type=cache,target=/app/target \
-            cargo build -p rusty-server --example server_demo \
+            cargo build -p rusty-agent-server --example server_demo \
             && cp target/debug/examples/server_demo /usr/local/bin/server_demo
         CMD ["server_demo"]
     ports:

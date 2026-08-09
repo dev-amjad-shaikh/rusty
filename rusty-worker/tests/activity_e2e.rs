@@ -1,4 +1,4 @@
-//! ActivityWorker lifecycle tests against a mock rusty-server task queue.
+//! ActivityWorker lifecycle tests against a mock rusty-agent-server task queue.
 //!
 //! The mock implements the R0.6 lease contract exactly (the shapes the
 //! server implements in `rusty-server/src/routes.rs` + `tasks.rs`):

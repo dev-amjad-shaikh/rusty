@@ -7,7 +7,7 @@
 <!-- Check every component this PR modifies. -->
 
 - [ ] `rusty-core` (`rusty-agent-runtime`)
-- [ ] `rusty-server`
+- [ ] `rusty-server` (`rusty-agent-server`)
 - [ ] `rusty-worker`
 - [ ] `rusty-otel`
 - [ ] `studio/`

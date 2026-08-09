@@ -10,7 +10,7 @@ body:
       description: Which part of Rusty is affected?
       options:
         - rusty-core (rusty-agent-runtime)
-        - rusty-server
+        - rusty-server (rusty-agent-server)
         - rusty-worker
         - rusty-otel
         - studio
@@ -23,7 +23,7 @@ body:
     attributes:
       label: Version
       description: Package version and, for Rust components, the output of `rustc --version`
-      placeholder: "rusty-server 0.4.0, rustc 1.8x stable"
+      placeholder: "rusty-agent-server 0.9.0, rustc 1.8x stable"
     validations:
       required: true
   - type: textarea

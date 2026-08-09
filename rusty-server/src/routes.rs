@@ -156,7 +156,7 @@ fn build_backends(config: &ServerConfig) -> (Arc<dyn Checkpointer>, Arc<dyn Serv
     assert!(
         config.database_url.is_none(),
         "`ServerConfig::database_url` requires the `postgres` feature \
-         (rebuild rusty-server with `--features postgres`)"
+         (rebuild rusty-agent-server with `--features postgres`)"
     );
     let server_store: Arc<dyn ServerStore> = Arc::new(JsonFileStore::load(&config.store_path));
     let checkpointer = policy::PolicyBindingCheckpointer::new(

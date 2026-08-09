@@ -11,7 +11,7 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
 use rusty_agent_runtime::prelude::*;
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::json;
 use tower::ServiceExt;
 

@@ -825,7 +825,7 @@ mod engine {
     ///
     /// This is the public seam embedders compose with: the server has no
     /// capsule-invocation route (invocation is core's host), so a
-    /// deployment embedding `rusty-server` builds its own
+    /// deployment embedding `rusty-agent-server` builds its own
     /// `CapsuleHost`s and plugs [`CapsulePolicyPlane::rechecker`] into
     /// them — admission's verdict and the capsule's per-call rechecks
     /// then run against the same parsed engine.
@@ -1469,7 +1469,7 @@ pub(crate) fn plane_unavailable() -> crate::ApiError {
     crate::ApiError::new(
         axum::http::StatusCode::SERVICE_UNAVAILABLE,
         "capsule_policy_unavailable",
-        "the capsule policy plane requires the `capsules` feature — rebuild rusty-server \
+        "the capsule policy plane requires the `capsules` feature — rebuild rusty-agent-server \
          with `--features capsules`; capsule workloads fail closed rather than running \
          ungoverned"
             .into(),

@@ -12,7 +12,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use hmac::{Hmac, Mac};
 use rusty_agent_runtime::prelude::*;
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;

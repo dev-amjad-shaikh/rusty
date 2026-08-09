@@ -9,7 +9,7 @@
 //! every denied attempt is journaled, budgeted, and attributable to the
 //! exact manifest grant that allowed or refused it.** This module is the
 //! declaration half; the capability host (`capsule_host`, feature `wasm`)
-//! is the enforcement half; the registry (`rusty-server`) is the
+//! is the enforcement half; the registry (`rusty-agent-server`) is the
 //! resolution half.
 //!
 //! - [`CapsuleManifest`] — the serde-versioned, golden-pinned declaration:

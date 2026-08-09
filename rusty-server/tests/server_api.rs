@@ -1,4 +1,4 @@
-//! Integration tests for the rusty-server HTTP API, driven in-process
+//! Integration tests for the rusty-agent-server HTTP API, driven in-process
 //! via `tower::ServiceExt::oneshot` (no sockets).
 
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use rusty_agent_runtime::prelude::*;
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

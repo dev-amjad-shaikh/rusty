@@ -39,7 +39,7 @@ flowchart LR
 | Crate | Version | Role in the anatomy |
 |---|---|---|
 | [`rusty-agent-runtime`](../rusty-core/) | 0.4.0 | The engine: state channels + reducers, graph builder with validation when you call `GraphBuilder::compile()`, the Pregel/BSP super-step executor, versioned checkpoints (memory / JSON-file / Postgres), interrupts & resume, `Send` fan-out, `ChatModel` + parallel tool execution, the prebuilt ReAct agent, MCP client, remote nodes, sandboxed `WasmNode` (feature `wasm`). |
-| [`rusty-server`](../rusty-server/) | 0.4.0 | The network face: an axum library crate implementing an Agent-Protocol subset — threads, background/blocking/SSE runs, checkpoint history, fork + replay time travel, assistants, crons, KV store, API-key auth with multi-tenancy. You call `rusty_server::serve(registry, config)` from your own `main.rs` and deploy the result as one static binary. |
+| [`rusty-agent-server`](../rusty-server/) | 0.4.0 | The network face: an axum library crate implementing an Agent-Protocol subset — threads, background/blocking/SSE runs, checkpoint history, fork + replay time travel, assistants, crons, KV store, API-key auth with multi-tenancy. You call `rusty_agent_server::serve(registry, config)` from your own `main.rs` and deploy the result as one static binary. |
 | [`rusty-worker`](../rusty-worker/) | 0.1.0 | The worker SDK: serves your node handlers over HTTP so the core's `RemoteNode` can execute graph nodes on remote services. HITL interrupts cross the wire. |
 | [`rusty-otel`](../rusty-otel/) | 0.1.0 | One-call `tracing` subscriber setup for Rusty Core executors, with optional OTLP span export (OpenTelemetry 0.32, HTTP/protobuf). |
 
@@ -310,7 +310,7 @@ impl Default for SandboxLimits {
 
 ## 5. The server around the engine
 
-`rusty-server` adds nothing to the execution semantics; it exposes them. A run request authenticates, schedules against a per-thread slot, and drives the same `Executor` over the same checkpointer, translating `GraphEvent`s into SSE frames as it goes.
+`rusty-agent-server` adds nothing to the execution semantics; it exposes them. A run request authenticates, schedules against a per-thread slot, and drives the same `Executor` over the same checkpointer, translating `GraphEvent`s into SSE frames as it goes.
 
 ```mermaid
 sequenceDiagram
@@ -461,9 +461,9 @@ Release branding maps onto the platform versions as follows. R0.1–R0.4 are imp
 | Release | Name | Maps to | Status |
 |---|---|---|---|
 | R0.1 | Ignition | v0.1 — the core kernel: channels, executor, checkpoints, HITL, `Send`, ReAct (`rusty-agent-runtime` 0.1.0) | Implemented 2026-07-31 |
-| R0.2 | Persistence | v0.2 — Postgres checkpointer, token streaming, Rusty Server Phase A (`rusty-agent-runtime` 0.2.0, `rusty-server` 0.1.0) | Implemented 2026-08-05 |
-| R0.3 | Interop | v0.3 — MCP client, remote nodes + `rusty-worker`, server API completion, executor tracing (`rusty-agent-runtime` 0.3.0, `rusty-server` 0.2.0, `rusty-worker` 0.1.0) | Implemented 2026-08-05 |
-| R0.4 | Time Travel | v0.4 — fork + replay time travel end to end, WASM nodes, Postgres server store, `rusty-otel`, Rusty Studio (`rusty-agent-runtime` 0.4.0, `rusty-server` 0.3.0, `rusty-otel` 0.1.0) | Implemented 2026-08-05 |
+| R0.2 | Persistence | v0.2 — Postgres checkpointer, token streaming, Rusty Server Phase A (`rusty-agent-runtime` 0.2.0, `rusty-agent-server` 0.1.0) | Implemented 2026-08-05 |
+| R0.3 | Interop | v0.3 — MCP client, remote nodes + `rusty-worker`, server API completion, executor tracing (`rusty-agent-runtime` 0.3.0, `rusty-agent-server` 0.2.0, `rusty-worker` 0.1.0) | Implemented 2026-08-05 |
+| R0.4 | Time Travel | v0.4 — fork + replay time travel end to end, WASM nodes, Postgres server store, `rusty-otel`, Rusty Studio (`rusty-agent-runtime` 0.4.0, `rusty-agent-server` 0.3.0, `rusty-otel` 0.1.0) | Implemented 2026-08-05 |
 | R1.0 | Unleashed | v1.0 — hosted multi-tenant control plane, graphs on a WASM target (browser/edge), registry publishing to crates.io / npm / PyPI | Upcoming |
 
 - **v0.1–v0.5 (implemented).** The core kernel (channels, executor, checkpoints, HITL, `Send`, ReAct) — v0.1 (R0.1 — Ignition); Postgres checkpointer, token streaming, server Phase A — v0.2 (R0.2 — Persistence); MCP client, remote nodes + worker SDK, server API completion, executor tracing — v0.3 (R0.3 — Interop); WASM nodes, time travel end-to-end, Postgres server store, `rusty-otel`, Rusty Studio, CORS — v0.4 (R0.4 — Time Travel); Python + TypeScript SDKs, multi-tenant auth, live-LLM validation of the ReAct example against real Ollama models — v0.5 (pre-1.0; the tenant-isolation brick of R1.0). A final quality pass hardened docs, examples, and test coverage across the workspace.

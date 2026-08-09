@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - { dir: rusty-core, pkg: rusty-agent-runtime }
-          - { dir: rusty-server, pkg: rusty-server }
+          - { dir: rusty-server, pkg: rusty-agent-server }
           - { dir: rusty-worker, pkg: rusty-worker }
           - { dir: rusty-otel, pkg: rusty-otel }
           - { dir: rusty-eval, pkg: rusty-eval }
@@ -48,11 +48,11 @@ jobs:
           cargo clippy -p ${{ matrix.pkg }} --all-targets -- -D warnings
           cargo clippy -p ${{ matrix.pkg }} --all-targets --all-features -- -D warnings
 
-      # rusty-server's crash-recovery proof spawns the demo server and
+      # rusty-agent-server's crash-recovery proof spawns the demo server and
       # worker as real processes; a package-scoped `cargo test` does not
       # build cross-package example binaries, so build them first.
       - name: Build examples (crash-recovery proof)
-        if: matrix.pkg == 'rusty-server'
+        if: matrix.pkg == 'rusty-agent-server'
         run: cargo build --workspace --examples
 
       - name: Test
@@ -106,7 +106,7 @@ jobs:
 
       - name: Server Postgres tests
         run: >-
-          cargo test -p rusty-server --features postgres --lib --tests
+          cargo test -p rusty-agent-server --features postgres --lib --tests
           -- --ignored --test-threads=1
 
   # MSRV: resolve each crate's effective `rust-version` at runtime via
@@ -121,7 +121,7 @@ jobs:
       matrix:
         include:
           - { dir: rusty-core, pkg: rusty-agent-runtime }
-          - { dir: rusty-server, pkg: rusty-server }
+          - { dir: rusty-server, pkg: rusty-agent-server }
           - { dir: rusty-worker, pkg: rusty-worker }
           - { dir: rusty-otel, pkg: rusty-otel }
           - { dir: rusty-eval, pkg: rusty-eval }
@@ -171,7 +171,7 @@ jobs:
       - name: cargo audit
         run: cargo audit --deny warnings
 
-  # Python SDK e2e. The suite launches the real rusty-server demo binary
+  # Python SDK e2e. The suite launches the real rusty-agent-server demo binary
   # (127.0.0.1:8100); it is prebuilt here so the test run does not spend its
   # time compiling, and so a missing binary surfaces as a build failure in CI
   # rather than a skipped test.
@@ -188,10 +188,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rusty-workspace
-          key: rusty-server
+          key: rusty-agent-server
 
       - name: Build server demo binary
-        run: cargo build -p rusty-server --example server_demo
+        run: cargo build -p rusty-agent-server --example server_demo
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -219,10 +219,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rusty-workspace
-          key: rusty-server
+          key: rusty-agent-server
 
       - name: Build server demo binary
-        run: cargo build -p rusty-server --example server_demo
+        run: cargo build -p rusty-agent-server --example server_demo
 
       - name: Set up Node
         uses: actions/setup-node@v7

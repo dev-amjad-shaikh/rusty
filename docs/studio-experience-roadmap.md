@@ -413,7 +413,7 @@ The current zero-build Studio proved the contracts quickly. The next stage shoul
 
 Target architecture:
 
-- Static, self-hostable application served by `rusty-server` or the existing local proxy.
+- Static, self-hostable application served by `rusty-agent-server` or the existing local proxy.
 - Framework choice made only after a short migration spike; no runtime dependency is added merely for styling.
 - Feature modules aligned to workspace surfaces, with a shared API client, state model, router, design tokens, and test utilities.
 - A versioned capabilities document exposed by `GET /info`, covering supported routes, feature-contract versions, optional evaluators, authentication mode, and service limits. The current information response is insufficient for reliable negotiation and must be extended before Studio relies on it.

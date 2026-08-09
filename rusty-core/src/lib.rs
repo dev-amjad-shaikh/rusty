@@ -48,7 +48,7 @@
 //!   effectively-once distributed activities — the [`durable::ErrorClass`]
 //!   retry taxonomy, the [`durable::RetryDecision`] policy mapping, and the
 //!   serde-versioned [`durable::TaskEnvelope`]. Queue, leases, and workers
-//!   live in `rusty-server` / `rusty-worker`; these are the pure contracts
+//!   live in `rusty-agent-server` / `rusty-worker`; these are the pure contracts
 //!   both sides agree on.
 //! - **Agent fabric** ([`agents`], R0.7): the durable-agent
 //!   contracts — stable [`agents::AgentId`] identity with its
@@ -60,7 +60,7 @@
 //!   [`agents::CoordinationContract`] — delegate / fan-out / race /
 //!   quorum — with their outcomes and violation vocabulary).
 //!   The registry, activation leases, turn-serialized mailbox, and the
-//!   pattern runtime live in `rusty-server`; these are the pure contracts
+//!   pattern runtime live in `rusty-agent-server`; these are the pure contracts
 //!   both sides agree on. [`team_trace`] is the read-side half: it
 //!   stitches verified journal snapshots back into one cross-journal
 //!   causal tree.
@@ -83,7 +83,7 @@
 //!   served byte-identically by exact replay), writes are
 //!   [`record::RunEventKind::MemoryWrite`] ([`record::Effect::Idempotent`]
 //!   under a derived key). The store backends and endpoints live in
-//!   `rusty-server`; these are the pure contracts both sides agree on.
+//!   `rusty-agent-server`; these are the pure contracts both sides agree on.
 //! - **Learning candidates** ([`learn`], R0.8 wave 3): the candidate
 //!   pipeline — content-addressed [`learn::Candidate`]s (identity is
 //!   integrity), the evaluation composition seam ([`learn::CandidateEvaluator`]
@@ -106,7 +106,7 @@
 //!   (`capsule_host`, feature `wasm`) instantiates components against the
 //!   declared world with imports linked only where granted — deny by
 //!   default, structurally — and the registry resolving `RunManifest`
-//!   capsule pins to content addresses lives in `rusty-server`; these are
+//!   capsule pins to content addresses lives in `rusty-agent-server`; these are
 //!   the pure contracts both sides agree on.
 //! - **Signed run receipts** ([`receipt`], R0.9 wave 3): the Ed25519-signed
 //!   [`receipt::RunReceipt`] over the journal head, the run manifest
@@ -116,7 +116,7 @@
 //!   [`receipt::VerifiedRun`] or a [`receipt::ReceiptRejection`] naming the
 //!   mismatched component. The key lifecycle (first-boot generation,
 //!   journaled rotation, the key history old receipts verify against)
-//!   lives in `rusty-server`; these are the pure contracts both sides
+//!   lives in `rusty-agent-server`; these are the pure contracts both sides
 //!   agree on.
 //!
 //! ## Quick sketch

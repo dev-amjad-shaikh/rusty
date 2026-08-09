@@ -31,7 +31,7 @@ use rusty_agent_runtime::capsule::{
 };
 use rusty_agent_runtime::capsule_host::{FetchRequest, FetchResponse, NetworkConnector};
 use rusty_agent_runtime::record::{sha256_hex, Effect};
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

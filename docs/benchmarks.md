@@ -243,7 +243,7 @@ snapshot, so cloning is on the hot path. Measured: a 1 MB state clones in
 - **Server load-testing is not covered yet.** No concurrent threads/sessions,
   no SSE streaming throughput, no Postgres checkpointer contention, no
   multi-tenant executor sharing. These are tracked as follow-up work
-  (server-level load suite against `rusty-server`, including
+  (server-level load suite against `rusty-agent-server`, including
   `PostgresCheckpointer` under concurrent writers).
 - No cross-machine or cross-OS comparison; no regression history (this is the
   baseline run); no memory-usage or allocation profiling; no comparison

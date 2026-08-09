@@ -27,7 +27,7 @@
 //! The A2A `messageId` is the delegation's idempotency handle: derived as
 //! `a2a-{thread_id}-{step}-{node_name}`, it is stable across executor-level
 //! re-execution of the same super-step, so a server that dedupes on
-//! `messageId` (rusty-server's bridge does, mapping it onto the durable
+//! `messageId` (rusty-agent-server's bridge does, mapping it onto the durable
 //! task queue's idempotency key) turns a resubmission into the same task
 //! rather than a second one. The assigned task id then names the remote
 //! work for polling and cancellation.
@@ -109,7 +109,7 @@ pub struct A2aNode {
     poll_interval: Duration,
     /// The state channel the terminal outcome is written to.
     channel: String,
-    /// Optional `X-Api-Key` credential (rusty-server's tenant auth).
+    /// Optional `X-Api-Key` credential (rusty-agent-server's tenant auth).
     api_key: Option<String>,
     /// The run's journal; attached per run the way
     /// [`crate::replay::RecordingTool`] attaches.
@@ -200,7 +200,7 @@ impl A2aNode {
     }
 
     /// Present `key` as the `X-Api-Key` header on every request
-    /// (rusty-server's tenant authentication; other agents ignore or map
+    /// (rusty-agent-server's tenant authentication; other agents ignore or map
     /// it per their own auth model).
     pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
         self.api_key = Some(key.into());

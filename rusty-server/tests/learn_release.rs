@@ -52,12 +52,12 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use rusty_agent_runtime::prelude::*;
-use rusty_eval::dataset::{Dataset, EvalCase, Expectation, StatePredicate};
-use rusty_eval::experiment::PreparedRun;
-use rusty_server::{
+use rusty_agent_server::{
     router, DirectoryDatasetSource, EvalCandidateEvaluator, EvaluationAgent, GraphRegistry,
     ServerConfig,
 };
+use rusty_eval::dataset::{Dataset, EvalCase, Expectation, StatePredicate};
+use rusty_eval::experiment::PreparedRun;
 
 // --------------------------------------------------------------------- //
 // Harness (the corrections.rs / learn_gate.rs conventions)

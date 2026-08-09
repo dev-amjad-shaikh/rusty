@@ -2,15 +2,15 @@
 
 **The network face of [`rusty-agent-runtime`](../rusty-core)** — serve your agent graphs over HTTP + SSE from a single static binary. No interpreter, no Postgres, no Redis. Dual-licensed under MIT OR Apache-2.0.
 
-> **Status: v0.5, under active development.** The crate ships as a *library*: you call `rusty_server::serve()` from your own `main.rs`. The endpoint set, streaming semantics, and config surface follow the architecture document in [`docs/rusty-server-design.md`](../docs/rusty-server-design.md). The core `rusty-agent-runtime` crate is untouched — it has no HTTP, no axum, no server dependencies, and never learns that a server exists.
+> **Status: v0.5, under active development.** The crate ships as a *library*: you call `rusty_agent_server::serve()` from your own `main.rs`. The endpoint set, streaming semantics, and config surface follow the architecture document in [`docs/rusty-server-design.md`](../docs/rusty-server-design.md). The core `rusty-agent-runtime` crate is untouched — it has no HTTP, no axum, no server dependencies, and never learns that a server exists.
 
 > **New in v0.5 — the Flight Recorder surface.** Every run is journaled (core R0.5 kernel): the server attaches a journal to the executor at run start, persists its snapshot at every checkpoint boundary and at run completion (`{store_path}/journals/{run_id}.json`, or the auto-migrated `server_journals` table on Postgres), and serves it read-only via `GET /runs/{run_id}/events` — fetchable by run id even after the run's in-memory record is evicted or the process restarts. On top of that: `GET /runs/{run_id}/fixture` (portable CI replay bundle), `POST /runs/replay` (server-side exact replay with evidence verification), and `GET /runs/diff` (branch diff of two runs' journals). Fully additive — no breaking changes in this version.
 
 ## Why one binary instead of three containers
 
-A self-hosted LangGraph Platform standalone deployment needs **three moving parts**: the API container, Postgres (threads / runs / checkpoints / task queue), and Redis (pub/sub fan-out for background-run streaming) — plus a queue-worker topology for exactly-once background runs. `rusty-server` collapses that into a single static binary, because the primitives LangGraph rents from infrastructure fall out of `rusty-agent-runtime`'s execution model for free:
+A self-hosted LangGraph Platform standalone deployment needs **three moving parts**: the API container, Postgres (threads / runs / checkpoints / task queue), and Redis (pub/sub fan-out for background-run streaming) — plus a queue-worker topology for exactly-once background runs. `rusty-agent-server` collapses that into a single static binary, because the primitives LangGraph rents from infrastructure fall out of `rusty-agent-runtime`'s execution model for free:
 
-| Concern | LangGraph Platform | rusty-server |
+| Concern | LangGraph Platform | rusty-agent-server |
 |---|---|---|
 | User-code loading | `langgraph.json` + pip install at image build | `Cargo.toml` + `main.rs`, static link |
 | Deployment unit | API image + Postgres + Redis (compose) | one static binary |
@@ -29,7 +29,7 @@ LangGraph's `langgraph.json` exists because Python can import user modules at ru
 ```toml
 [dependencies]
 rusty-agent-runtime = "0.4"
-rusty-server = "0.5"
+rusty-agent-server = "0.5"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 tracing-subscriber = "0.3"
@@ -40,7 +40,7 @@ A realistic `main.rs` — register a graph under a name, hand the registry to `s
 ```rust
 use std::sync::Arc;
 use rusty_agent_runtime::prelude::*;
-use rusty_server::{serve, GraphRegistry, ServerConfig};
+use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
 
 mod graphs; // your code: build_support_graph(), etc.
 
@@ -82,7 +82,7 @@ A `GraphRegistry` entry is a name plus the two things the executor needs — a `
 
 **Dev loop.** No `langgraph dev` equivalent is needed. `cargo watch -x run` (or `bacon run`) recompiles and restarts on save; incremental rebuilds of a single-graph binary take seconds. During development, point `ServerConfig::new`'s `store_path` at a scratch directory you can delete between runs.
 
-**Embedding.** `serve(registry, config)` binds and blocks; if you want the routes inside a larger axum application (or want to drive the API in tests via `tower::ServiceExt::oneshot`), call `rusty_server::router(registry, config)` instead and merge the returned `Router` yourself.
+**Embedding.** `serve(registry, config)` binds and blocks; if you want the routes inside a larger axum application (or want to drive the API in tests via `tower::ServiceExt::oneshot`), call `rusty_agent_server::router(registry, config)` instead and merge the returned `Router` yourself.
 
 **Graceful shutdown (R0.6 wave 2c).** `serve` drains on SIGINT/SIGTERM: axum stops accepting connections and waits for in-flight requests; a shared token cooperatively cancels in-flight runs at their next super-step boundary — where a checkpoint was just persisted, so re-running the thread resumes the work — and ends them terminal-`cancelled`; new run submissions answer `503 shutting_down`; the outbox relay finishes its current pass and stops (pending rows publish on the next process's first pass); the cron scheduler stops firing. The whole drain is bounded by `ServerConfig::with_shutdown_grace` (default 25 s, under Kubernetes' 30 s pod-termination grace); past it the server stops anyway, which is the crash case the checkpoint log and lease expiry already cover. Embedders get the same pieces: `serve_with_shutdown(registry, config, future)` takes any shutdown future, `shutdown_signal()` is the SIGINT/SIGTERM default, and `router_with_shutdown(registry, config, token)` wires the cooperative drain into a self-hosted `Router`.
 
@@ -268,7 +268,7 @@ The default deployment needs no infrastructure — checkpoints, assistants, cron
 
 ```toml
 [dependencies]
-rusty-server = { version = "0.5", features = ["postgres"] }
+rusty-agent-server = { version = "0.5", features = ["postgres"] }
 ```
 
 ```rust

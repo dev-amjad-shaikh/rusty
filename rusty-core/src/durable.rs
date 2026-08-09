@@ -1,7 +1,7 @@
 //! Durable Work contracts (R0.6): the shared retry taxonomy and task envelope.
 //!
 //! This module freezes the wire shapes that the R0.6 durable-activity system
-//! builds on — the Postgres task queue in `rusty-server`, the worker SDK in
+//! builds on — the Postgres task queue in `rusty-agent-server`, the worker SDK in
 //! `rusty-worker`, and the scheduler between them. Nothing here performs I/O
 //! or scheduling; these are pure data contracts plus the one policy function
 //! both sides must agree on ([`classify_retry`]).

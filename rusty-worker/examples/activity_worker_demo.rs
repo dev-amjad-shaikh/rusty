@@ -1,4 +1,4 @@
-//! Demo activity worker: claims durable tasks from a rusty-server task
+//! Demo activity worker: claims durable tasks from a rusty-agent-server task
 //! queue and executes them — with production-shaped lifecycle wiring.
 //!
 //! The point of the example is the shutdown half: `ActivityWorker` is a
@@ -11,7 +11,7 @@
 //! pod's `terminationGracePeriodSeconds` (30 s by default) should outlive
 //! the drain grace (25 s by default) so the worker exits before SIGKILL.
 //!
-//! Run a server first (`cargo run -p rusty-server --example server_demo`),
+//! Run a server first (`cargo run -p rusty-agent-server --example server_demo`),
 //! then:
 //!
 //! ```sh

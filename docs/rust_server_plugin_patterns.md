@@ -1,15 +1,15 @@
-# Rust Server Plugin Patterns — Precedent Research for `rusty-server`
+# Rust Server Plugin Patterns — Precedent Research for `rusty-agent-server`
 
 **Author role:** Rust_Server_Patterns_Researcher
 **Date:** 2026-08-04
 **Workspace:** `/Users/amjad.shaikh/claude-work/claude-white-papers/05 - RUST`
-**Question:** In a compiled language, how does USER code (agent graphs/nodes) get into a server? Python's `langgraph.json` just imports modules at runtime — Rust cannot. This document surveys the six viable patterns, their real-world precedents, and ranks them for `rusty-server` (crate: `rusty-core/`, a LangGraph-style engine with schema-declared state channels and per-key reducers, Pregel/BSP super-step execution, checkpoints, interrupts, and streaming).
+**Question:** In a compiled language, how does USER code (agent graphs/nodes) get into a server? Python's `langgraph.json` just imports modules at runtime — Rust cannot. This document surveys the six viable patterns, their real-world precedents, and ranks them for `rusty-agent-server` (crate: `rusty-core/`, a LangGraph-style engine with schema-declared state channels and per-key reducers, Pregel/BSP super-step execution, checkpoints, interrupts, and streaming).
 
 ---
 
 ## Pattern 1 — Library-Embedded Server ("server as a crate")
 
-**Mechanism.** The server ships as a library crate (`rusty-server`), not a binary. Users write their own `main.rs`, build their graphs with the `rusty-agent-runtime` crate, register them into a `GraphRegistry`, and call `rusty_server::serve(registry).await`. Compilation statically links user code and server code into one binary. Deployment = "ship the user's binary."
+**Mechanism.** The server ships as a library crate (`rusty-agent-server`), not a binary. Users write their own `main.rs`, build their graphs with the `rusty-agent-runtime` crate, register them into a `GraphRegistry`, and call `rusty_agent_server::serve(registry).await`. Compilation statically links user code and server code into one binary. Deployment = "ship the user's binary."
 
 ```rust
 #[tokio::main]
@@ -17,7 +17,7 @@ async fn main() {
     let mut registry = GraphRegistry::new();
     registry.register("support_agent", build_support_graph());
     registry.register("research_agent", build_research_graph());
-    rusty_server::serve(registry, "0.0.0.0:8080").await.unwrap();
+    rusty_agent_server::serve(registry, "0.0.0.0:8080").await.unwrap();
 }
 ```
 
@@ -46,7 +46,7 @@ async fn main() {
 
 ## Pattern 2 — Worker / Delegate Model (server is pure infra; user code runs out-of-process)
 
-**Mechanism.** `rusty-server` becomes a durable execution + state + routing service. User graphs/nodes run in separate worker processes (any language) that long-poll the server for node-execution tasks over gRPC/HTTP, execute them, and post results back. The server owns checkpoints, super-step scheduling, interrupts, and stream fan-out; workers own user code.
+**Mechanism.** `rusty-agent-server` becomes a durable execution + state + routing service. User graphs/nodes run in separate worker processes (any language) that long-poll the server for node-execution tasks over gRPC/HTTP, execute them, and post results back. The server owns checkpoints, super-step scheduling, interrupts, and stream fan-out; workers own user code.
 
 **Precedent — how Temporal's split works exactly** (sources: [Temporal architecture overview](https://www.mintlify.com/temporalio/temporal/architecture/overview), [Temporal durable agents](https://www.mdjawad.com/posts/temporal-durable-agents/), [n8n vs Temporal — ZenML](https://www.zenml.io/blog/n8n-vs-temporal), [Temporal worker architecture](https://levelup.gitconnected.com/temporal-worker-architecture-and-scaling-af0c670ce6c1)):
 - The **server** is four services: *Frontend* (stateless gRPC gateway; all client and worker traffic flows through it), *History* (persists every workflow event; replay drives execution; sharded for throughput), *Matching* (hosts **task queues** and dispatches work), plus persistence. Usually deployed as one binary for simplicity.
@@ -62,7 +62,7 @@ async fn main() {
 - Two artifacts to deploy; worker/server protocol versioning becomes a permanent maintenance surface.
 - Distributed checkpoint semantics (who owns reducer application?) must be designed carefully — Temporal's answer (server owns history, workers are dumb executors) is the right template.
 
-**Verdict:** The strongest **second** pattern, and arguably the long-term platform play. It converts `rusty-server` from "a Rust library" into "an agent execution platform," and LLM latency makes the network hop a non-issue. Recommend as the **v1.5/v2 extension**, with the wire protocol designed early enough that Pattern 1 nodes and Pattern 2 workers share one `Node` trait abstraction.
+**Verdict:** The strongest **second** pattern, and arguably the long-term platform play. It converts `rusty-agent-server` from "a Rust library" into "an agent execution platform," and LLM latency makes the network hop a non-issue. Recommend as the **v1.5/v2 extension**, with the wire protocol designed early enough that Pattern 1 nodes and Pattern 2 workers share one `Node` trait abstraction.
 
 ---
 
@@ -145,7 +145,7 @@ async fn main() {
 
 Regardless of pattern, the serving layer norms are settled (sources: [axum SSE discussion #1670](https://github.com/tokio-rs/axum/discussions/1670), [MCP rust-sdk transports](https://github.com/modelcontextprotocol/rust-sdk), [SSE streaming engineering guide](https://ethosbytes.com.au/streaming-llm-responses-with-sse-the-2025-engineering-guide-for-australian-enterprises/)):
 - **axum + `Sse::new(stream)`** over a `tokio::sync::broadcast`/mpsc-backed `Stream` is the canonical SSE pattern; `axum::response::sse::Event` with keep-alive.
-- The **MCP Rust SDK (`rmcp`)** is the important 2026 precedent: Streamable HTTP responses are *either* a single JSON body *or* a `text/event-stream` SSE stream, handled transparently — this "one endpoint, two response modes" is now the expected shape for agent APIs. `rusty-server` should mirror it: `POST /graphs/{id}/runs` returning either a completed run or an SSE stream of super-step/token events.
+- The **MCP Rust SDK (`rmcp`)** is the important 2026 precedent: Streamable HTTP responses are *either* a single JSON body *or* a `text/event-stream` SSE stream, handled transparently — this "one endpoint, two response modes" is now the expected shape for agent APIs. `rusty-agent-server` should mirror it: `POST /graphs/{id}/runs` returning either a completed run or an SSE stream of super-step/token events.
 - Production gotchas to bake into docs: reverse proxies (NGINX/Cloudflare/ALB) buffer SSE by default — ship guidance on `X-Accel-Buffering: no`, chunked encoding, flush-per-event; corporate proxies kill long connections — support SSE `retry:` and `Last-Event-ID` resume (which `rusty-agent-runtime`'s checkpoint model makes natural: resume from checkpoint on reconnect — a genuine differentiator vs. naive LLM streaming).
 
 ---
@@ -167,16 +167,16 @@ Regardless of pattern, the serving layer norms are settled (sources: [axum SSE d
 
 ---
 
-## Ranked Recommendation for `rusty-server`
+## Ranked Recommendation for `rusty-agent-server`
 
-1. **Pattern 1 — Library-embedded server (primary, ship first).** It is the idiomatic Rust answer, matches every comparable precedent (axum, DataFusion, rig, graph-flow), preserves `rusty-agent-runtime`'s compile-time-checked graph wiring and node signatures, and gives the best SSE streaming path. Deliverable: `rusty-server` crate exposing `GraphRegistry` + `serve()` over axum, with an rmcp-style "JSON or SSE" run endpoint and checkpoint-resumable streams.
+1. **Pattern 1 — Library-embedded server (primary, ship first).** It is the idiomatic Rust answer, matches every comparable precedent (axum, DataFusion, rig, graph-flow), preserves `rusty-agent-runtime`'s compile-time-checked graph wiring and node signatures, and gives the best SSE streaming path. Deliverable: `rusty-agent-server` crate exposing `GraphRegistry` + `serve()` over axum, with an rmcp-style "JSON or SSE" run endpoint and checkpoint-resumable streams.
 2. **Pattern 2 — Worker/delegate (design for it now, build second).** Define the `Node` execution contract and wire protocol (gRPC + versioned JSON/protobuf state) so the same `Node` trait has both an in-process and a remote implementation. LLM latency makes the hop free; Temporal/Inngest/Hatchet prove the shape; it's the only route to polyglot workers and a hosted platform. The key architectural rule: **the server owns checkpoints and scheduling; workers are stateless executors** — copied directly from Temporal's History/Worker split.
 3. **Pattern 4 — WASM (scoped adoption).** Add a `WasmNode` behind the same `Node` trait when (and only when) untrusted/community nodes or a node marketplace become a goal. wasmtime/Extism are production-ready in 2026; MCP-component distribution (Wassette model) is the emerging norm.
 4. **Pattern 6 — Rhai scripting (cheap DX garnish).** For routing predicates and prompt assembly inside otherwise-compiled graphs. Sandboxed by default, trivial to embed.
 5. **Pattern 5 — Declarative graph format (later, for templates/visualization).** `rusty.yaml` as a *compiler target* for the 80% boilerplate graphs and a Studio-style UI — never the sole extension door.
 6. **Pattern 3 — cdylib dynamic loading (rejected).** No stable Rust ABI, no async across FFI, no fault isolation. Document the rejection in the white paper to preempt the question.
 
-**The one-sentence architecture:** `rusty-server` is a *crate you call* (Pattern 1) built on a *protocol you can also speak* (Pattern 2), with WASM and scripting as capability-scoped escape hatches — "`Cargo.toml` is the new `langgraph.json`, and the worker protocol is the new `pip install`."
+**The one-sentence architecture:** `rusty-agent-server` is a *crate you call* (Pattern 1) built on a *protocol you can also speak* (Pattern 2), with WASM and scripting as capability-scoped escape hatches — "`Cargo.toml` is the new `langgraph.json`, and the worker protocol is the new `pip install`."
 
 ---
 

@@ -19,7 +19,7 @@ command -v cargo >/dev/null 2>&1 || { echo "error: cargo not found (install a Ru
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found" >&2; exit 1; }
 
 echo "Building Rusty Server (rusty-server/examples/server_demo.rs) ..."
-cargo build -p rusty-server --example server_demo
+cargo build -p rusty-agent-server --example server_demo
 
 # Run the built binary directly (not via `cargo run`) so its PID is the
 # process to kill on exit. Workspace builds place examples in the root

@@ -21,7 +21,7 @@ use rusty_agent_runtime::capsule::{
     CapabilityGrant, CapsuleIdentity, CapsuleInterface, CapsuleManifest, ResourceBudget, WORLD_V1,
 };
 use rusty_agent_runtime::record::{sha256_hex, Effect};
-use rusty_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

@@ -27,7 +27,7 @@ use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use rusty_agent_runtime::prelude::*;
-use rusty_server::{router_with_shutdown, serve_with_shutdown, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router_with_shutdown, serve_with_shutdown, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;

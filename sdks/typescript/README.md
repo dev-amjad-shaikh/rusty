@@ -130,7 +130,7 @@ await client.runWait(forkId, { checkpoint: { checkpoint_id: earliest } }); // re
 ```bash
 # Build the demo server (once, from the repo root) and run the e2e suite against it:
 export PATH="$HOME/.cargo/bin:$PATH"
-cargo build -p rusty-server --example server_demo
+cargo build -p rusty-agent-server --example server_demo
 node --test test/
 ```
 
