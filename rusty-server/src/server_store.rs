@@ -4548,7 +4548,7 @@ mod postgres {
             // `key` is quoted like `server_kv`'s (a reserved word).
             assert!(CREATE_MEMORY_SQL.contains("server_memory"));
             assert!(CREATE_MEMORY_SQL.contains("\"key\""));
-            assert!(CREATE_MEMORY_SQL.contains("confidence DOUBLE PRECISION"));
+            assert!(CREATE_MEMORY_SQL.contains("confidence  DOUBLE PRECISION"));
             assert!(CREATE_MEMORY_SQL.contains("valid_until TIMESTAMPTZ"));
             assert!(CREATE_MEMORY_SQL.contains("payload     JSONB"));
             assert!(CREATE_MEMORY_QUERY_INDEX_SQL.contains("(tenant, scope, scope_id, kind)"));
