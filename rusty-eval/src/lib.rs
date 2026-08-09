@@ -71,6 +71,7 @@ pub mod experiment;
 pub mod feedback;
 pub mod gate;
 pub mod judge;
+pub mod statistics;
 
 pub use assertion::{Assertion, AssertionResult};
 pub use compare::{
@@ -99,4 +100,8 @@ pub use judge::{
     JudgeModel, JudgeRequest, JudgeVerdict, ModelJudge, RuleBasedJudge,
     DEFAULT_MODEL_JUDGE_MAX_REQUEST_BYTES, DEFAULT_MODEL_JUDGE_MAX_RESPONSE_BYTES,
     DEFAULT_MODEL_JUDGE_PASS_SCORE, MAX_MODEL_JUDGE_RATIONALE_BYTES,
+};
+pub use statistics::{
+    detect_pass_rate_regression, StatisticalDecision, StatisticalRegressionConfig,
+    StatisticalRegressionReport, STATISTICAL_REGRESSION_FORMAT_VERSION,
 };

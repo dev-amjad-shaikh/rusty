@@ -26,6 +26,9 @@ ExperimentReport ── per-case detail, pass rate per assertion, p50/p95 latenc
       ▼
 compare(baseline, candidate) ── per-assertion deltas, per-case regressions,
                                 threshold-flagged release verdict
+      │
+      ▼
+detect_pass_rate_regression ── paired exact significance + practical effect
 ```
 
 ## Dataset format
@@ -58,6 +61,15 @@ Deterministic checks only — no model in the loop:
 
 Every verdict returns `{ assertion, passed, expected, observed, detail }` —
 the report shows *why* a run failed, not just that it did.
+
+## Statistical regression detection
+
+`detect_pass_rate_regression` pairs baseline and candidate outcomes by case id
+and repetition, then applies a one-sided exact McNemar test. It fails closed
+when datasets, repetitions, or run keys do not match. A regression is reported
+only when the configured sample size, minimum pass-rate drop, and significance
+level are all satisfied; underpowered comparisons are explicitly
+`insufficient_evidence`, never silently treated as safe.
 
 ## Judges
 

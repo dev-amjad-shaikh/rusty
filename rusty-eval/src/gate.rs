@@ -656,7 +656,7 @@ fn require_policy_fields(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_report(report: &ExperimentReport) -> Result<()> {
+pub(crate) fn validate_report(report: &ExperimentReport) -> Result<()> {
     if report.format_version != REPORT_FORMAT_VERSION {
         return Err(EvalError::UnsupportedVersion {
             found: report.format_version,
