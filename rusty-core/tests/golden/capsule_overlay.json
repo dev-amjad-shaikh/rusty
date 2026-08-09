@@ -1,0 +1,24 @@
+{
+  "name": "research-ceiling",
+  "targets": [
+    "researcher"
+  ],
+  "capabilities": [
+    {
+      "kind": "network",
+      "hosts": [
+        "api.example"
+      ],
+      "protocols": [
+        "https"
+      ],
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "kind": "clock"
+    }
+  ],
+  "note": "egress narrowed to the research API"
+}

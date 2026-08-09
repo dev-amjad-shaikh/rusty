@@ -70,6 +70,24 @@
 //! "every use is journaled" half), and every denial
 //! ([`RunEventKind::CapsuleDenied`]). Capability events chain causally
 //! from the run event the caller passes as `parent`.
+//!
+//! # Revocation at the next use (R0.9 wave 2)
+//!
+//! Admission-time authorization (the server's Cedar plane) evaluates
+//! static policy; it cannot retroactively un-admit a capsule already
+//! running under yesterday's grants. The wave-2 answer is the
+//! [`GrantRecheck`] seam: each granted import implementation — `fetch`,
+//! `now-millis`, the wave-1 world — re-authorizes the exact scope it is
+//! about to exercise *after* the wave-1 scope match and *before*
+//! anything executes. A grant revoked since admission refuses in-band
+//! and journals a [`CapsuleDenial`] pinned to the **live** policy
+//! version — the new verdict, not the version the capsule was admitted
+//! under. In-flight invocations keep their fuel and wall-time budgets
+//! regardless: a revocation that cannot interrupt a running capsule
+//! still bounds how long it can run. Core owns the trait and the
+//! enforcement; the server owns the implementation (the
+//! [`NetworkConnector`] boundary, drawn for the same reason — the core
+//! crate stays engine-free).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -155,6 +173,41 @@ pub trait NetworkConnector: std::fmt::Debug + Send + Sync {
     fn fetch(&self, request: &FetchRequest) -> std::result::Result<FetchResponse, String>;
 }
 
+/// A revoked grant's refusal (R0.9 wave 2): the live policy verdict that
+/// now forbids a use the capsule was admitted with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecheckDenial {
+    /// The policy version the refusal is journaled against — the *new*
+    /// version whose verdict revoked the grant, so the journaled denial
+    /// attributes the refusal to the verdict that made it.
+    pub policy_version: String,
+
+    /// Human-facing context: which grant stopped holding, and why.
+    pub detail: String,
+}
+
+/// The revocation seam (R0.9 wave 2): a per-call re-authorization of a
+/// granted capability against the *live* policy, plugged into the host
+/// like [`NetworkConnector`] and owned by the server.
+///
+/// Why this exists: admission-time policy evaluation is static — a
+/// capsule admitted an hour ago still holds the grants it was admitted
+/// with, and a policy change since then is invisible to the wave-1 scope
+/// match. Revocation takes effect at the *next capability use*: the
+/// granted import implementations consult this seam after the scope
+/// match and before anything executes, and a refusal is journaled as a
+/// [`CapsuleDenial`] pinned to the live policy version. Without a
+/// recheck plugged in the host behaves exactly as wave 1 — the seam is
+/// the server's to provide, and a host built for a deployment without
+/// the policy plane has nothing to consult.
+pub trait GrantRecheck: std::fmt::Debug + Send + Sync {
+    /// Re-authorize one capability use. `grant` is the exact scope the
+    /// guest is about to exercise (the wave-1 scope match has already
+    /// passed). `None` permits the call; `Some(denial)` refuses it,
+    /// journaled against `denial.policy_version`.
+    fn recheck(&self, capsule_id: &CapsuleId, grant: &CapabilityGrant) -> Option<RecheckDenial>;
+}
+
 /// The memory-growth cap, store-local (the `wasm_node` pattern).
 struct StoreLimits {
     max_memory_bytes: Option<usize>,
@@ -194,6 +247,7 @@ struct StoreData {
     capsule_id: CapsuleId,
     connector: Option<Arc<dyn NetworkConnector>>,
     clock: Arc<dyn Fn() -> u64 + Send + Sync>,
+    recheck: Option<Arc<dyn GrantRecheck>>,
     journal: Option<Journal>,
     parent: Option<String>,
     uses: Vec<CapsuleUse>,
@@ -219,6 +273,40 @@ impl StoreData {
             }
             self.parent = Some(journal.record(draft));
         }
+    }
+
+    /// The wave-2 revocation seam: re-authorize the exact scope `grant`
+    /// the guest is about to exercise against the live policy. A refusal
+    /// is journaled as a [`CapsuleDenial`] pinned to the live policy
+    /// version and surfaces in-band, exactly like a wave-1 scope denial.
+    fn policy_recheck(&mut self, grant: CapabilityGrant) -> std::result::Result<(), String> {
+        let Some(recheck) = &self.recheck else {
+            return Ok(());
+        };
+        let Some(revocation) = recheck.recheck(&self.capsule_id, &grant) else {
+            return Ok(());
+        };
+        let denial = CapsuleDenial::scoped(
+            self.capsule_id.clone(),
+            grant,
+            format!(
+                "the grant was admitted but policy version `{}` no longer permits it — \
+                 revocation takes effect at the next capability use: {}",
+                revocation.policy_version, revocation.detail
+            ),
+        )
+        .with_policy_version(revocation.policy_version);
+        self.denials.push(denial.clone());
+        let detail = denial.detail.clone();
+        if let Ok(output) = serde_json::to_value(&denial) {
+            self.journal_event(
+                RunEventKind::CapsuleDenied,
+                Effect::Pure,
+                output,
+                EventStatus::Ok,
+            );
+        }
+        Err(format!("denied: {detail}"))
     }
 }
 
@@ -300,6 +388,7 @@ struct HostInner {
     capsule_id: CapsuleId,
     connector: Option<Arc<dyn NetworkConnector>>,
     clock: Arc<dyn Fn() -> u64 + Send + Sync>,
+    recheck: Option<Arc<dyn GrantRecheck>>,
     /// Set once the epoch ticker starts; the ticker holds this flag and
     /// exits when it clears (host dropped), so hosts do not leak threads.
     ticker_alive: Arc<AtomicBool>,
@@ -390,6 +479,7 @@ impl CapsuleHost {
                 capsule_id,
                 connector: None,
                 clock: Arc::new(default_clock),
+                recheck: None,
                 ticker_alive: Arc::new(AtomicBool::new(true)),
                 ticker_started: AtomicBool::new(false),
             }),
@@ -402,6 +492,18 @@ impl CapsuleHost {
         Arc::get_mut(&mut self.inner)
             .expect("with_connector before the host is shared")
             .connector = Some(connector);
+        self
+    }
+
+    /// Plug the revocation seam (R0.9 wave 2; see [`GrantRecheck`]):
+    /// every granted capability use is re-authorized against the live
+    /// policy before it executes, and a revoked grant refuses at its
+    /// next use with the denial journaled against the new policy
+    /// version. Without one the host behaves exactly as wave 1.
+    pub fn with_grant_recheck(mut self, recheck: Arc<dyn GrantRecheck>) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("with_grant_recheck before the host is shared")
+            .recheck = Some(recheck);
         self
     }
 
@@ -518,6 +620,7 @@ fn run_invocation(inner: &HostInner, invocation: CapsuleInvocation) -> Result<Ca
             capsule_id: inner.capsule_id.clone(),
             connector: inner.connector.clone(),
             clock: Arc::clone(&inner.clock),
+            recheck: inner.recheck.clone(),
             journal: journal.clone(),
             parent: parent.clone(),
             uses: Vec::new(),
@@ -567,8 +670,10 @@ fn run_invocation(inner: &HostInner, invocation: CapsuleInvocation) -> Result<Ca
             .map_err(|e| host_err(format!("failed to define `{CLOCK_INSTANCE}`: {e}")))?
             .func_wrap(
                 "now-millis",
-                |mut ctx: wasmtime::StoreContextMut<'_, StoreData>, (): ()| {
-                    Ok((now_millis_impl(&mut ctx),))
+                |mut ctx: wasmtime::StoreContextMut<'_, StoreData>,
+                 (): ()|
+                 -> std::result::Result<(u64,), wasmtime::Error> {
+                    Ok((now_millis_impl(&mut ctx).map_err(wasmtime::Error::msg)?,))
                 },
             )
             .map_err(|e| host_err(format!("failed to link `now-millis`: {e}")))?;
@@ -757,6 +862,16 @@ fn fetch_impl(
         return Err(format!("denied: {detail}"));
     }
 
+    // The revocation seam (wave 2): the scope match proves the grant was
+    // admitted; the recheck proves it still is. A revoked grant refuses
+    // here, journaled against the live policy version, before any socket
+    // opens.
+    data.policy_recheck(CapabilityGrant::Network {
+        hosts: vec![host.clone()],
+        protocols: vec![protocol.clone()],
+        methods: vec![method.clone()],
+    })?;
+
     let request = FetchRequest {
         protocol: protocol.clone(),
         host: host.clone(),
@@ -806,9 +921,16 @@ fn fetch_impl(
     guest_result
 }
 
-/// The `now-millis` import: read the host clock, journal the use.
-fn now_millis_impl(ctx: &mut wasmtime::StoreContextMut<'_, StoreData>) -> u64 {
+/// The `now-millis` import: read the host clock, journal the use. The
+/// revocation seam runs first (wave 2): a clock grant revoked since
+/// admission traps the call — the import's guest-visible signature has
+/// no error channel, so a denial arrives as a trap (journaled like
+/// every other) rather than a silent wrong answer.
+fn now_millis_impl(
+    ctx: &mut wasmtime::StoreContextMut<'_, StoreData>,
+) -> std::result::Result<u64, String> {
     let data = ctx.data_mut();
+    data.policy_recheck(CapabilityGrant::Clock)?;
     let millis = (data.clock)();
     let use_record = CapsuleUse {
         capsule_id: data.capsule_id.clone(),
@@ -826,7 +948,7 @@ fn now_millis_impl(ctx: &mut wasmtime::StoreContextMut<'_, StoreData>) -> u64 {
             EventStatus::Ok,
         );
     }
-    millis
+    Ok(millis)
 }
 
 /// Journal one capability event outside a store (the structural gate runs

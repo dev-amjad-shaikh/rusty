@@ -37,6 +37,14 @@
 //!   variants `CapsuleResolved` / `CapsuleCall` / `CapsuleDenied` — the
 //!   same evolution rule every variant since R0.6's `EffectReceipt`
 //!   followed; old journals keep deserializing.
+//! - [`CapsuleOverlay`] / [`intersect_grants`] / [`grants_beyond`] (R0.9
+//!   wave 2) — the tenant-overlay contract: a grant ceiling whose
+//!   application is structural intersection (no code path computes
+//!   union), plus the advisory widening signal the server's Cedar
+//!   overlay decision consumes. Wave 2 also extended the journaled
+//!   payloads additively: resolutions pin the deciding policy version,
+//!   the applied overlays, the effective grants, and the clamped budget;
+//!   denials pin the policy version whose verdict refused the attempt.
 //!
 //! Golden-file tests under `tests/golden/` pin every wire shape in this
 //! module; any accidental contract drift fails CI.
@@ -47,7 +55,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Result, RustyError};
-use crate::record::{sha256_hex, CapsuleVersion, Effect};
+use crate::record::{canonicalize_value, sha256_hex, CapsuleVersion, Effect};
 
 fn invalid(message: impl Into<String>) -> RustyError {
     // Manifest validation is a contract check at a state boundary; the
@@ -327,6 +335,301 @@ pub fn any_grant_of_kind<'a>(
         .any(|grant| grant.capability_kind() == kind)
 }
 
+// --------------------------------------------------------------------- //
+// Tenant overlays (R0.9 wave 2)
+// --------------------------------------------------------------------- //
+
+/// A tenant overlay (R0.9 wave 2): the grant ceiling an operator attaches
+/// to a tenant, further restricting what capsules in that tenant may do.
+/// The contract half of the overlay plane lives here (golden-pinned, like
+/// every wire shape); the authorization half — *who may author* an
+/// overlay, against which capsules — is the server's Cedar decision
+/// (`rusty-server/src/capsule_policy.rs`, feature `capsules`).
+///
+/// The narrowing rule is enforced twice, and the structural half comes
+/// first: applying an overlay is [`intersect_grants`], a set intersection
+/// that mechanically cannot add a grant; Cedar then decides the overlay's
+/// legality. Policy decides legality; arithmetic decides narrowing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapsuleOverlay {
+    /// The overlay's name — its registry key within the tenant.
+    pub name: String,
+
+    /// The capsule identity names the overlay applies to. `None` (the
+    /// sparse wire shape) means every capsule in the tenant; an empty list
+    /// is refused at validation for the same reason an empty grant scope
+    /// is — an overlay applying to nothing carries no meaning worth
+    /// storing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub targets: Option<Vec<String>>,
+
+    /// The grant ceiling. The effective capability set of a manifest
+    /// under this overlay is `intersect_grants(manifest, ceiling)` —
+    /// never the manifest's grants alone and never the ceiling's alone.
+    pub capabilities: BTreeSet<CapabilityGrant>,
+
+    /// Human-facing context (why the ceiling exists). Metadata, read by
+    /// no enforcement point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl CapsuleOverlay {
+    /// Contract validation, run at every attach boundary: the name and
+    /// any targets are in the identifier grammar, and every ceiling grant
+    /// passes the manifest's per-grant rule.
+    pub fn validate(&self) -> Result<()> {
+        validate_token("overlay name", &self.name)?;
+        if let Some(targets) = &self.targets {
+            if targets.is_empty() {
+                return Err(invalid(
+                    "overlay targets: the list is empty — an overlay applying to no capsule \
+                     carries no meaning (omit the field to target every capsule)",
+                ));
+            }
+            for target in targets {
+                validate_token("overlay target", target)?;
+            }
+        }
+        for grant in &self.capabilities {
+            validate_grant(grant)?;
+        }
+        Ok(())
+    }
+
+    /// `true` when this overlay governs the capsule named `capsule_name`
+    /// (its identity name, the `RunManifest` pin key).
+    pub fn applies_to(&self, capsule_name: &str) -> bool {
+        self.targets
+            .as_ref()
+            .is_none_or(|targets| targets.iter().any(|target| target == capsule_name))
+    }
+
+    /// The effective grant set of `manifest_grants` under this overlay —
+    /// [`intersect_grants`], the only composition this wave defines.
+    pub fn effective_grants(
+        &self,
+        manifest_grants: &BTreeSet<CapabilityGrant>,
+    ) -> BTreeSet<CapabilityGrant> {
+        intersect_grants(manifest_grants, &self.capabilities)
+    }
+}
+
+/// The overlay narrowing rule, reduced to one function (R0.9 wave 2):
+/// the effective capability set of a manifest under an overlay is the
+/// **intersection** of the two grant sets — every grant in the result is
+/// a narrowing of one grant from *each* side, computed field-wise per
+/// capability kind.
+///
+/// This is the only composition of two grant sets anywhere in the wave,
+/// and it is deliberately written so union is unrepresentable: a reviewer
+/// verifying "overlays cannot widen" reads this function and nothing
+/// else. Grants of different kinds never meet (a network grant and a
+/// clock grant share no member), and a same-kind pair whose scopes share
+/// nothing contributes nothing — an overlay naming only hosts the
+/// manifest never granted *removes* the capability rather than adding
+/// the hosts. A grant whose intersection empties one scope list drops
+/// out entirely: a `network` grant with no common hosts permits no call,
+/// so carrying it would be the empty-scope lie manifests refuse at
+/// validation.
+pub fn intersect_grants(
+    manifest_grants: &BTreeSet<CapabilityGrant>,
+    overlay_grants: &BTreeSet<CapabilityGrant>,
+) -> BTreeSet<CapabilityGrant> {
+    /// The shared scope items of two lists, sorted and deduplicated — the
+    /// canonical form the manifest contract already pins.
+    fn common(a: &[String], b: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = a.iter().filter(|item| b.contains(item)).cloned().collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+    let mut out = BTreeSet::new();
+    for manifest_grant in manifest_grants {
+        for overlay_grant in overlay_grants {
+            let shared = match (manifest_grant, overlay_grant) {
+                (
+                    CapabilityGrant::Filesystem {
+                        paths: manifest_paths,
+                        mode: manifest_mode,
+                    },
+                    CapabilityGrant::Filesystem {
+                        paths: overlay_paths,
+                        mode: overlay_mode,
+                    },
+                ) => {
+                    let paths = common(manifest_paths, overlay_paths);
+                    // Read is the narrower mode (declaration order), so
+                    // `min` can only keep or tighten access.
+                    (!paths.is_empty()).then(|| CapabilityGrant::Filesystem {
+                        paths,
+                        mode: (*manifest_mode).min(*overlay_mode),
+                    })
+                }
+                (
+                    CapabilityGrant::Network {
+                        hosts: manifest_hosts,
+                        protocols: manifest_protocols,
+                        methods: manifest_methods,
+                    },
+                    CapabilityGrant::Network {
+                        hosts: overlay_hosts,
+                        protocols: overlay_protocols,
+                        methods: overlay_methods,
+                    },
+                ) => {
+                    let hosts = common(manifest_hosts, overlay_hosts);
+                    let protocols = common(manifest_protocols, overlay_protocols);
+                    let methods = common(manifest_methods, overlay_methods);
+                    (!hosts.is_empty() && !protocols.is_empty() && !methods.is_empty()).then_some(
+                        CapabilityGrant::Network {
+                            hosts,
+                            protocols,
+                            methods,
+                        },
+                    )
+                }
+                (
+                    CapabilityGrant::Secret {
+                        handles: manifest_handles,
+                    },
+                    CapabilityGrant::Secret {
+                        handles: overlay_handles,
+                    },
+                ) => {
+                    let handles = common(manifest_handles, overlay_handles);
+                    (!handles.is_empty()).then_some(CapabilityGrant::Secret { handles })
+                }
+                (
+                    CapabilityGrant::Tool {
+                        tools: manifest_tools,
+                    },
+                    CapabilityGrant::Tool {
+                        tools: overlay_tools,
+                    },
+                ) => {
+                    let tools = common(manifest_tools, overlay_tools);
+                    (!tools.is_empty()).then_some(CapabilityGrant::Tool { tools })
+                }
+                (
+                    CapabilityGrant::Model {
+                        models: manifest_models,
+                    },
+                    CapabilityGrant::Model {
+                        models: overlay_models,
+                    },
+                ) => {
+                    let models = common(manifest_models, overlay_models);
+                    (!models.is_empty()).then_some(CapabilityGrant::Model { models })
+                }
+                (CapabilityGrant::Clock, CapabilityGrant::Clock) => Some(CapabilityGrant::Clock),
+                _ => None,
+            };
+            if let Some(grant) = shared {
+                out.insert(grant);
+            }
+        }
+    }
+    out
+}
+
+/// The overlay grants asking for reach no manifest grant declares (R0.9
+/// wave 2) — the advisory widening signal the server's Cedar overlay
+/// decision consumes. Coverage is decided per capability kind against
+/// the union of the manifest's scope items of that kind: a manifest
+/// granting host A in one grant and host B in another covers an overlay
+/// grant naming both, and a kind the manifest never granted leaves every
+/// overlay grant of that kind beyond.
+///
+/// This is a *signal*, never an enforcement — it exists so an operator's
+/// Cedar policy can refuse overlays that ask for more than a manifest
+/// declared. The enforcement is [`intersect_grants`], exact and pairwise,
+/// and it needs no signal: hand-crafting an overlay past the policy
+/// plane still cannot widen the effective set.
+pub fn grants_beyond(
+    overlay_grants: &BTreeSet<CapabilityGrant>,
+    manifest_grants: &BTreeSet<CapabilityGrant>,
+) -> BTreeSet<CapabilityGrant> {
+    /// `true` when every item of `needed` appears in some same-kind
+    /// manifest grant's corresponding scope list.
+    fn covered<'a>(
+        needed: &[String],
+        offered: impl Iterator<Item = &'a Vec<String>> + Clone,
+    ) -> bool {
+        needed
+            .iter()
+            .all(|item| offered.clone().any(|list| list.contains(item)))
+    }
+    overlay_grants
+        .iter()
+        .filter(|overlay_grant| {
+            let same_kind = manifest_grants
+                .iter()
+                .filter(|m| m.capability_kind() == overlay_grant.capability_kind());
+            let covered = match overlay_grant {
+                CapabilityGrant::Filesystem { paths, mode } => {
+                    let mode_covered = same_kind.clone().any(|m| match m {
+                        CapabilityGrant::Filesystem {
+                            mode: manifest_mode,
+                            ..
+                        } => manifest_mode >= mode,
+                        _ => false,
+                    });
+                    mode_covered
+                        && covered(
+                            paths,
+                            same_kind.filter_map(|m| match m {
+                                CapabilityGrant::Filesystem { paths, .. } => Some(paths),
+                                _ => None,
+                            }),
+                        )
+                }
+                CapabilityGrant::Network {
+                    hosts,
+                    protocols,
+                    methods,
+                } => {
+                    let networks = same_kind.filter_map(|m| match m {
+                        CapabilityGrant::Network {
+                            hosts,
+                            protocols,
+                            methods,
+                        } => Some((hosts, protocols, methods)),
+                        _ => None,
+                    });
+                    covered(hosts, networks.clone().map(|(h, _, _)| h))
+                        && covered(protocols, networks.clone().map(|(_, p, _)| p))
+                        && covered(methods, networks.map(|(_, _, m)| m))
+                }
+                CapabilityGrant::Secret { handles } => covered(
+                    handles,
+                    same_kind.filter_map(|m| match m {
+                        CapabilityGrant::Secret { handles } => Some(handles),
+                        _ => None,
+                    }),
+                ),
+                CapabilityGrant::Tool { tools } => covered(
+                    tools,
+                    same_kind.filter_map(|m| match m {
+                        CapabilityGrant::Tool { tools } => Some(tools),
+                        _ => None,
+                    }),
+                ),
+                CapabilityGrant::Model { models } => covered(
+                    models,
+                    same_kind.filter_map(|m| match m {
+                        CapabilityGrant::Model { models } => Some(models),
+                        _ => None,
+                    }),
+                ),
+                CapabilityGrant::Clock => same_kind.count() > 0,
+            };
+            !covered
+        })
+        .cloned()
+        .collect()
+}
+
 /// The resource budget a capsule invocation may consume. Every field is
 /// optional on the wire; `None` means the enclosing run's own budget
 /// bounds apply — never an invented default, per the `AgentBudget`
@@ -466,8 +769,8 @@ impl ResourceBudget {
 /// serialization of its content — the one hashing primitive shared with
 /// artifact references, journal heads, and candidate ids, over the
 /// canonical `serde_json` serialization
-/// [`crate::record::PayloadRef::content_hash`] also relies on (object keys
-/// sort deterministically).
+/// [`crate::record::PayloadRef::content_hash`] also relies on (payload maps
+/// are key-sorted before hashing; see `canonicalize_value`).
 pub fn derive_capsule_id(manifest: &CapsuleManifest) -> Result<CapsuleId> {
     let canonical = manifest.canonicalized();
     Ok(CapsuleId(sha256_hex(&serde_json::to_vec(&canonical)?)))
@@ -480,13 +783,24 @@ impl CapsuleManifest {
     }
 
     /// The canonical form the content address covers: every scope list
-    /// sorted and deduplicated, so list order carries no identity.
+    /// sorted and deduplicated, so list order carries no identity, and the
+    /// interface schemas key-sorted ([`canonicalize_value`]), so the map
+    /// backend a build ends up with carries no identity either.
     fn canonicalized(&self) -> CapsuleManifest {
         fn sorted(mut list: Vec<String>) -> Vec<String> {
             list.sort();
             list.dedup();
             list
         }
+        let interface = CapsuleInterface {
+            world: self.interface.world.clone(),
+            input_schema: self.interface.input_schema.as_ref().map(canonicalize_value),
+            output_schema: self
+                .interface
+                .output_schema
+                .as_ref()
+                .map(canonicalize_value),
+        };
         let capabilities = self
             .capabilities
             .iter()
@@ -520,7 +834,7 @@ impl CapsuleManifest {
             identity: self.identity.clone(),
             version: self.version.clone(),
             build_digest: self.build_digest.clone(),
-            interface: self.interface.clone(),
+            interface,
             effects: self.effects.clone(),
             capabilities,
             budget: self.budget.clone(),
@@ -681,7 +995,13 @@ fn validate_grant(grant: &CapabilityGrant) -> Result<()> {
 /// event at admission. This is the link that lets a checkpoint's version
 /// *string* pin reach the content *address*: header pin → journaled
 /// resolution → receipt.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Wave 2 (Cedar, overlays, budget composition) extended the payload
+/// additively: the four optional fields are absent — on the wire and in
+/// old journals — whenever the admission ran without the policy plane
+/// (a build without the feature, a tenant with no active policy, no
+/// overlays, no budget bounds), which is exactly the wave-1 shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapsuleResolution {
     /// The pin's name (the `RunManifest::capsules` key — the capsule's
     /// identity name).
@@ -696,6 +1016,32 @@ pub struct CapsuleResolution {
     /// The build digest the resolved manifest declares — what the host
     /// will recompute against the artifact bytes before instantiating.
     pub build_digest: String,
+
+    /// The Cedar policy version this admission was decided under (R0.9
+    /// wave 2): the tenant's active policy version at resolve time,
+    /// pinned so a later audit can answer "which policy permitted this"
+    /// without reconstructing history. `None` when no policy was active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_version: Option<String>,
+
+    /// The tenant overlays applied at admission (R0.9 wave 2), sorted by
+    /// name. `None` when none applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlays: Option<Vec<String>>,
+
+    /// The effective grant set after overlay intersection (R0.9 wave 2)
+    /// — what the host may actually link, always a subset of the
+    /// manifest's declared grants ([`intersect_grants`]). Present exactly
+    /// when an overlay applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_grants: Option<BTreeSet<CapabilityGrant>>,
+
+    /// The budget after clamping against the enclosing run's bounds and
+    /// the deployment's tenant ceiling (R0.9 wave 2), present exactly
+    /// when the clamp changed the declared budget — the journaled
+    /// evidence of the wave's budget composition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamped_budget: Option<ResourceBudget>,
 }
 
 /// A journaled capability use (R0.9 wave 1): one granted import call,
@@ -759,6 +1105,16 @@ pub struct CapsuleDenial {
     /// Human-facing context: what was attempted, against which granted
     /// scope.
     pub detail: String,
+
+    /// The Cedar policy version whose verdict refused this attempt (R0.9
+    /// wave 2). Present on authorization refusals — an admission refused
+    /// by policy and a revoked grant denied at its next use (the
+    /// revocation edge: the denial is journaled against the *new* policy
+    /// version, not the version the capsule was admitted under). Absent
+    /// on wave-1 scope denials, which are the manifest's own verdict and
+    /// carry no policy context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_version: Option<String>,
 }
 
 impl CapsuleDenial {
@@ -791,6 +1147,7 @@ impl CapsuleDenial {
             capability,
             absent_grant,
             detail: detail.into(),
+            policy_version: None,
         }
     }
 
@@ -807,7 +1164,15 @@ impl CapsuleDenial {
             capability: absent_grant.capability_kind(),
             absent_grant,
             detail: detail.into(),
+            policy_version: None,
         }
+    }
+
+    /// Pin the Cedar policy version whose verdict produced this denial
+    /// (R0.9 wave 2 — see the field docs).
+    pub fn with_policy_version(mut self, version: impl Into<String>) -> Self {
+        self.policy_version = Some(version.into());
+        self
     }
 }
 
@@ -954,5 +1319,160 @@ mod tests {
         assert_eq!(scoped.capability, CapabilityKind::Network);
         let value = serde_json::to_value(&scoped).unwrap();
         assert_eq!(value["absent_grant"]["hosts"], json!(["evil.example"]));
+        // Wave-1 scope denials carry no policy context; the field is
+        // absent from the wire (additive wave-2 evolution).
+        assert!(value.get("policy_version").is_none());
+        let pinned = scoped.with_policy_version("cedar-0123456789ab");
+        let value = serde_json::to_value(&pinned).unwrap();
+        assert_eq!(
+            value["policy_version"],
+            json!("cedar-0123456789ab"),
+            "authorization refusals pin the deciding policy version"
+        );
+    }
+
+    #[test]
+    fn intersection_is_pairwise_and_cannot_widen() {
+        let net = |hosts: &[&str]| CapabilityGrant::Network {
+            hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            protocols: vec!["https".into()],
+            methods: vec!["GET".into()],
+        };
+        let manifest = BTreeSet::from([net(&["a.example", "b.example"]), CapabilityGrant::Clock]);
+        // An overlay hand-crafted to *widen*: it names a host the
+        // manifest never granted and drops the clock.
+        let overlay = BTreeSet::from([net(&["b.example", "evil.example"])]);
+        let effective = intersect_grants(&manifest, &overlay);
+        // The only survivor is the shared host; the ungranted host adds
+        // nothing and the uncovered clock grant vanishes.
+        assert_eq!(effective, BTreeSet::from([net(&["b.example"])]));
+        // Every returned grant is a narrowing of a grant on each side —
+        // the property the whole wave rests on, stated as an assertion.
+        for grant in &effective {
+            match grant {
+                CapabilityGrant::Network {
+                    hosts,
+                    protocols,
+                    methods,
+                } => {
+                    assert!(hosts.iter().all(|h| ["b.example"].contains(&h.as_str())));
+                    assert_eq!(protocols, &vec!["https".to_string()]);
+                    assert_eq!(methods, &vec!["GET".to_string()]);
+                }
+                other => panic!("unexpected grant survived: {other:?}"),
+            }
+        }
+        // Disjoint scopes remove the capability entirely rather than
+        // carrying an empty-scope grant.
+        let disjoint = BTreeSet::from([net(&["c.example"])]);
+        assert!(intersect_grants(&manifest, &disjoint).is_empty());
+        // Kinds never mix: a clock ceiling does not revive an ungranted
+        // network capability, and vice versa.
+        assert!(intersect_grants(
+            &BTreeSet::from([CapabilityGrant::Clock]),
+            &BTreeSet::from([net(&["a.example"])]),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn intersection_combines_scope_fields_and_modes() {
+        // Filesystem modes narrow to the stricter of the two; scope lists
+        // intersect item-wise.
+        let manifest = BTreeSet::from([CapabilityGrant::Filesystem {
+            paths: vec!["/data".into(), "/tmp".into()],
+            mode: FilesystemMode::ReadWrite,
+        }]);
+        let overlay = BTreeSet::from([CapabilityGrant::Filesystem {
+            paths: vec!["/data".into()],
+            mode: FilesystemMode::Read,
+        }]);
+        let effective = intersect_grants(&manifest, &overlay);
+        assert_eq!(
+            effective,
+            BTreeSet::from([CapabilityGrant::Filesystem {
+                paths: vec!["/data".into()],
+                mode: FilesystemMode::Read,
+            }])
+        );
+        // Network scoping is conjunctive across fields: sharing hosts but
+        // not methods yields no grant.
+        let manifest = BTreeSet::from([CapabilityGrant::Network {
+            hosts: vec!["a.example".into()],
+            protocols: vec!["https".into()],
+            methods: vec!["POST".into()],
+        }]);
+        let overlay = BTreeSet::from([CapabilityGrant::Network {
+            hosts: vec!["a.example".into()],
+            protocols: vec!["https".into()],
+            methods: vec!["GET".into()],
+        }]);
+        assert!(intersect_grants(&manifest, &overlay).is_empty());
+    }
+
+    #[test]
+    fn grants_beyond_flags_only_uncovered_reach() {
+        let net = |hosts: &[&str], methods: &[&str]| CapabilityGrant::Network {
+            hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            protocols: vec!["https".into()],
+            methods: methods.iter().map(|m| m.to_string()).collect(),
+        };
+        let manifest = BTreeSet::from([net(&["a.example"], &["GET"]), CapabilityGrant::Clock]);
+        // Coverage is the union of same-kind scope items: two manifest
+        // grants together cover an overlay naming both hosts.
+        let manifest = manifest
+            .into_iter()
+            .chain([net(&["b.example"], &["GET"])])
+            .collect();
+        let within = BTreeSet::from([net(&["a.example", "b.example"], &["GET"])]);
+        assert!(grants_beyond(&within, &manifest).is_empty());
+        // A new host, a new method, and a kind the manifest never granted
+        // are all beyond.
+        let beyond = BTreeSet::from([
+            net(&["a.example", "evil.example"], &["GET"]),
+            net(&["a.example"], &["POST"]),
+            CapabilityGrant::Secret {
+                handles: vec!["api-key".into()],
+            },
+        ]);
+        let flagged = grants_beyond(&beyond, &manifest);
+        assert_eq!(flagged.len(), 3);
+        // But the clock and the in-scope network grant are covered.
+        let covered = BTreeSet::from([CapabilityGrant::Clock, net(&["a.example"], &["GET"])]);
+        assert!(grants_beyond(&covered, &manifest).is_empty());
+    }
+
+    #[test]
+    fn overlay_validation_and_targeting() {
+        let overlay = CapsuleOverlay {
+            name: "narrow-research".into(),
+            targets: Some(vec!["researcher".into()]),
+            capabilities: BTreeSet::from([CapabilityGrant::Clock]),
+            note: None,
+        };
+        overlay.validate().unwrap();
+        assert!(overlay.applies_to("researcher"));
+        assert!(!overlay.applies_to("planner"));
+        let tenant_wide = CapsuleOverlay {
+            name: "tenant-wide".into(),
+            targets: None,
+            capabilities: BTreeSet::from([CapabilityGrant::Clock]),
+            note: None,
+        };
+        tenant_wide.validate().unwrap();
+        assert!(tenant_wide.applies_to("anything"));
+        // An empty target list is refused (meaningless), as is an empty
+        // grant scope.
+        let mut bad = tenant_wide.clone();
+        bad.targets = Some(Vec::new());
+        assert!(bad.validate().is_err());
+        let mut bad = tenant_wide.clone();
+        bad.capabilities = BTreeSet::from([CapabilityGrant::Secret {
+            handles: Vec::new(),
+        }]);
+        assert!(bad.validate().is_err());
+        let mut bad = tenant_wide;
+        bad.name = "has/slash".into();
+        assert!(bad.validate().is_err());
     }
 }

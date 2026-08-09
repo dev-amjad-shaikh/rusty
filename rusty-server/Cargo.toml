@@ -17,6 +17,12 @@ categories = ["asynchronous", "network-programming"]
 # both the run checkpointer (core's `PostgresCheckpointer`) and the server
 # store (assistants / crons / KV) to Postgres.
 postgres = ["dep:sqlx", "rusty-agent-runtime/postgres"]
+# R0.9 Rusty Capsules wave 2: the Cedar authorization plane
+# (`capsule_policy.rs`) — admission and grant checks, tenant overlays, and
+# the revocation-at-next-use recheck — plus the capability host it
+# authorizes (core's `wasm` feature). A server built without it refuses
+# the capsule policy surface with a typed error (fail closed).
+capsules = ["dep:cedar-policy", "rusty-agent-runtime/wasm"]
 
 [dependencies]
 rusty-agent-runtime = { path = "../rusty-core", version = "0.8" }
@@ -51,6 +57,10 @@ sqlx = { version = "0.8", default-features = false, features = [
     "json",
     "chrono",
 ], optional = true }
+# Cedar policy evaluation for the capsule authorization plane (R0.9 wave 2).
+# Server-only by design — the core crate's contracts stay engine-free — and
+# pure Rust with no native deps. The major is pinned like the rest.
+cedar-policy = { version = "4", optional = true }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

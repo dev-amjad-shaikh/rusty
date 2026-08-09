@@ -31,6 +31,14 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, "conflict", message)
     }
 
+    /// 403 — authorization refused the request (R0.9 wave 2: the Cedar
+    /// plane forbade an admission, a grant, or an overlay). Distinct from
+    /// 422: the payload is well-formed and the state is not conflicting —
+    /// the tenant's standing policy simply does not permit this.
+    pub fn forbidden(message: String) -> Self {
+        Self::new(StatusCode::FORBIDDEN, "forbidden", message)
+    }
+
     /// 429 — a tenant quota rejected the submission (R0.6 wave 3). 429, not
     /// 409 or 503: the request is well-formed and the state is not
     /// conflicting — the tenant is simply over its allowance, and standard

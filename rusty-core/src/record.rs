@@ -217,12 +217,12 @@ impl PayloadRef {
     /// The content hash of the payload, whether inline or referenced.
     ///
     /// Hashing is over the canonical `serde_json` serialization (object keys
-    /// sort deterministically), so equal payloads hash equal regardless of
-    /// which representation carried them.
+    /// sort deterministically — see `canonicalize_value`), so equal
+    /// payloads hash equal regardless of which representation carried them.
     pub fn content_hash(&self) -> Result<String, serde_json::Error> {
         match self {
             PayloadRef::Inline(value) => {
-                let bytes = serde_json::to_vec(value)?;
+                let bytes = serde_json::to_vec(&canonicalize_value(value))?;
                 Ok(sha256_hex(&bytes))
             }
             PayloadRef::Artifact(reference) => Ok(reference.sha256.clone()),
@@ -1048,13 +1048,46 @@ impl RunManifest {
     }
 }
 
+/// The value with every object map rebuilt in sorted key order,
+/// recursively — the canonical form every content hash in this crate
+/// covers.
+///
+/// `serde_json`'s default map is BTreeMap-backed, so serializing a `Value`
+/// already emits object keys sorted; under the default backend this
+/// transform is an identity and every pre-existing hash is preserved
+/// byte-for-byte. The hazard is serde_json's `preserve_order` feature,
+/// which `cedar-policy-core` (R0.9's Cedar engine, behind the server's
+/// `capsules` feature) enables unconditionally: feature unification then
+/// swaps the workspace-wide map for an insertion-ordered IndexMap, and
+/// the same logical payload serializes — and hashes — differently
+/// depending on the order its keys happened to be inserted. Routing every
+/// hash through this canonical form keeps content addresses stable across
+/// both map backends and across builds with and without the feature.
+pub(crate) fn canonicalize_value(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+            entries.sort_by_key(|(key, _)| *key);
+            Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, item)| (key.clone(), canonicalize_value(item)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonicalize_value).collect()),
+        scalar => scalar.clone(),
+    }
+}
+
 /// SHA-256 of the canonical `serde_json` serialization of `value` — the
 /// digest convention shared by every manifest pin over JSON content.
 fn canonical_json_digest(value: &Value) -> String {
     // Serializing a `Value` is infallible in practice (its maps always have
     // string keys); `PayloadRef::content_hash` documents why the result is
     // canonical.
-    let bytes = serde_json::to_vec(value).expect("a serde_json::Value always serializes");
+    let bytes = serde_json::to_vec(&canonicalize_value(value))
+        .expect("a serde_json::Value always serializes");
     sha256_hex(&bytes)
 }
 

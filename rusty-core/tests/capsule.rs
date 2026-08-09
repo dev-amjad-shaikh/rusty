@@ -4,9 +4,11 @@
 //!
 //! - **Golden files** — the serialized shapes of `CapsuleManifest` (a
 //!   full specimen: every grant kind, the full budget, both schemas),
-//!   `CapsuleDenial` (scoped), and `CapsuleResolution` are pinned against
-//!   checked-in JSON under `tests/golden/`. The wave's three new
-//!   `RunEventKind` wire names are pinned in `capsule_event_kinds.json`
+//!   `CapsuleDenial` (scoped), `CapsuleResolution` (with the wave-2
+//!   additive fields at `None`), and `CapsuleOverlay` (wave 2) are
+//!   pinned against checked-in JSON under `tests/golden/`. The wave's
+//!   three new `RunEventKind` wire names are pinned in
+//!   `capsule_event_kinds.json`
 //!   (the `learn_event_kinds.json` pattern; the exhaustive
 //!   `run_event_kind.json` list is owned by `tests/agents.rs`, outside
 //!   this wave's file scope). To bless an intentional contract change,
@@ -31,7 +33,8 @@ use serde_json::json;
 
 use rusty_agent_runtime::capsule::{
     derive_capsule_id, CapabilityGrant, CapsuleDenial, CapsuleId, CapsuleIdentity,
-    CapsuleInterface, CapsuleManifest, CapsuleResolution, FilesystemMode, ResourceBudget, WORLD_V1,
+    CapsuleInterface, CapsuleManifest, CapsuleOverlay, CapsuleResolution, FilesystemMode,
+    ResourceBudget, WORLD_V1,
 };
 use rusty_agent_runtime::record::{sha256_hex, CapsuleVersion, Effect, RunEventKind};
 
@@ -163,13 +166,39 @@ fn golden_capsule_denial_shape() {
 
 #[test]
 fn golden_capsule_resolution_shape() {
+    // The wave-2 additive fields ride along as `None` (serde skips them)
+    // — the wire shape a wave-1 journal entry already carries.
     let resolution = CapsuleResolution {
         name: "researcher".into(),
         version: CapsuleVersion::new("1.4.0"),
         capsule_id: CapsuleId::from("cd".repeat(32)),
         build_digest: "ef".repeat(32),
+        policy_version: None,
+        overlays: None,
+        effective_grants: None,
+        clamped_budget: None,
     };
     assert_golden("capsule_resolution.json", &resolution);
+}
+
+#[test]
+fn golden_capsule_overlay_shape() {
+    // The tenant overlay (R0.9 wave 2): a named ceiling over one capsule
+    // name, with the operator's note.
+    let overlay = CapsuleOverlay {
+        name: "research-ceiling".into(),
+        targets: Some(vec!["researcher".into()]),
+        capabilities: BTreeSet::from([
+            CapabilityGrant::Network {
+                hosts: vec!["api.example".into()],
+                protocols: vec!["https".into()],
+                methods: vec!["GET".into()],
+            },
+            CapabilityGrant::Clock,
+        ]),
+        note: Some("egress narrowed to the research API".into()),
+    };
+    assert_golden("capsule_overlay.json", &overlay);
 }
 
 // ---------- contract behavior ----------

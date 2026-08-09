@@ -59,8 +59,8 @@ use serde_json::Value;
 
 use crate::llm::Usage;
 use crate::record::{
-    sha256_hex, ArtifactRef, Effect, EffectReceipt, EventStatus, PayloadRef, RunEvent,
-    RunEventKind, INLINE_PAYLOAD_MAX_BYTES,
+    canonicalize_value, sha256_hex, ArtifactRef, Effect, EffectReceipt, EventStatus, PayloadRef,
+    RunEvent, RunEventKind, INLINE_PAYLOAD_MAX_BYTES,
 };
 
 /// The `NodeConfig::extra` key under which the executor passes the
@@ -446,13 +446,15 @@ impl Journal {
             recorded_at,
         };
 
-        // Hash chaining over the canonical serialization: serde_json's map
-        // order is deterministic (BTreeMap-backed), so the hash is stable
-        // for identical event content. Serialization of a just-constructed
-        // event cannot realistically fail; if it somehow does, the event is
-        // still recorded — evidence must not be lost to a hashing defect —
-        // and the head chains over a fixed marker instead.
-        match serde_json::to_vec(&event) {
+        // Hash chaining over the canonical serialization: payload maps are
+        // key-sorted before hashing (see `canonicalized_for_hash`), so the
+        // hash is stable for identical event content regardless of the
+        // serde_json map backend a build ends up with. Serialization of a
+        // just-constructed event cannot realistically fail; if it somehow
+        // does, the event is still recorded — evidence must not be lost to
+        // a hashing defect — and the head chains over a fixed marker
+        // instead.
+        match serde_json::to_vec(&canonicalized_for_hash(&event)) {
             Ok(bytes) => {
                 inner.head_hash = sha256_hex(&[inner.head_hash.as_bytes(), &bytes].concat());
             }
@@ -646,8 +648,35 @@ fn store_payload(artifacts: &mut BTreeMap<String, Value>, value: Value) -> Paylo
 /// `sha256(prev || canonical_json(event))` — the head-hash chain step,
 /// shared by [`Journal::record`] and [`Journal::from_snapshot`].
 fn chained_hash(prev: &str, event: &RunEvent) -> crate::error::Result<String> {
-    let bytes = serde_json::to_vec(event)?;
+    let bytes = serde_json::to_vec(&canonicalized_for_hash(event))?;
     Ok(sha256_hex(&[prev.as_bytes(), &bytes].concat()))
+}
+
+/// The event as the head-hash chain covers it: identical except that every
+/// inline payload value is key-sorted recursively.
+///
+/// The chain's contract is "same content, same hash" — a replay that
+/// reproduces every event exactly must reproduce the head. That held
+/// trivially while serde_json's map was BTreeMap-backed everywhere; the
+/// `preserve_order` feature (pulled in transitively by `cedar-policy-core`
+/// when the server's `capsules` feature is enabled — see
+/// [`canonicalize_value`]) makes `Value` serialization order-sensitive, so
+/// a payload rebuilt in a different key-insertion order would hash
+/// differently while comparing equal. Canonicalizing only the payload
+/// values — struct fields keep their declaration order — preserves every
+/// hash a BTreeMap build ever produced byte-for-byte while making the
+/// chain backend-independent.
+fn canonicalized_for_hash(event: &RunEvent) -> RunEvent {
+    fn canonicalized_payload(payload: &Option<PayloadRef>) -> Option<PayloadRef> {
+        match payload {
+            Some(PayloadRef::Inline(value)) => Some(PayloadRef::Inline(canonicalize_value(value))),
+            other => other.clone(),
+        }
+    }
+    let mut canonical = event.clone();
+    canonical.input = canonicalized_payload(&event.input);
+    canonical.output = canonicalized_payload(&event.output);
+    canonical
 }
 
 /// A content-addressed blob store for journal artifacts (R0.7 wave 4).
@@ -941,6 +970,48 @@ mod tests {
         let mut tampered = j.snapshot();
         tampered.events[0].status = EventStatus::Error;
         assert!(Journal::from_snapshot(tampered, Clock::System).is_err());
+    }
+
+    #[test]
+    fn head_hash_is_stable_across_payload_key_order() {
+        // The two payloads are the same logical value parsed from text with
+        // different key orders. Value equality is order-insensitive under
+        // either serde_json map backend, but serialization order is not:
+        // under `preserve_order` (cedar-policy-core's transitive demand)
+        // the parses keep their insertion orders, so chaining hashes over
+        // the raw event would produce different heads for equal content —
+        // the exact failure mode `canonicalized_for_hash` exists to close.
+        let forward: Value =
+            serde_json::from_str(r#"{"alpha": 1, "beta": {"x": 1, "y": 2}, "gamma": [3]}"#)
+                .unwrap();
+        let reverse: Value =
+            serde_json::from_str(r#"{"gamma": [3], "beta": {"y": 2, "x": 1}, "alpha": 1}"#)
+                .unwrap();
+        assert_eq!(forward, reverse);
+
+        let journal_a = Journal::new("run-1", "thread-1", Clock::logical(1_000_000, 5));
+        let journal_b = Journal::new("run-1", "thread-1", Clock::logical(1_000_000, 5));
+        journal_a.record(
+            EventDraft::new(RunEventKind::NodeInput, Effect::Pure)
+                .node("n")
+                .input(forward.clone())
+                .output(reverse.clone()),
+        );
+        journal_b.record(
+            EventDraft::new(RunEventKind::NodeInput, Effect::Pure)
+                .node("n")
+                .input(reverse)
+                .output(forward),
+        );
+        assert_eq!(journal_a.events(), journal_b.events());
+        assert_eq!(journal_a.head_hash(), journal_b.head_hash());
+
+        // The from_snapshot path re-chains through `chained_hash`; a
+        // roundtrip through the wire must reproduce the same head.
+        let snapshot: JournalSnapshot =
+            serde_json::from_str(&serde_json::to_string(&journal_a.snapshot()).unwrap()).unwrap();
+        let rebuilt = Journal::from_snapshot(snapshot, Clock::System).unwrap();
+        assert_eq!(rebuilt.head_hash(), journal_a.head_hash());
     }
 
     #[test]

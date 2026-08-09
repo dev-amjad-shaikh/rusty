@@ -42,6 +42,10 @@ use crate::agents::{
     MailboxClaimScope,
 };
 use crate::assistants::{self, AssistantRecord};
+#[cfg(feature = "capsules")]
+use crate::capsule_policy::{
+    self, CapsuleOverlayRecord, CapsulePolicyActivation, CapsulePolicyRecord, CapsulePolicyWrite,
+};
 use crate::capsules::{self, CapsuleRecord, CapsuleWrite};
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
@@ -621,6 +625,80 @@ pub(crate) trait ServerStore: Send + Sync {
         name: &str,
         version: &str,
     ) -> StoreResult<Option<CapsuleRecord>>;
+
+    // -- The capsule authorization plane (R0.9 Rusty Capsules, wave 2) -- //
+
+    #[cfg(feature = "capsules")]
+    /// Register one immutable Cedar policy body under its tenant-scoped
+    /// version. [`CapsulePolicyWrite::Created`] when the version is new;
+    /// [`CapsulePolicyWrite::Converged`] when it already names exactly
+    /// this text (the idempotent create); [`CapsulePolicyWrite::Conflict`]
+    /// when it names different text — registry immutability refuses the
+    /// overwrite, so a version string stays a commitment to one exact
+    /// policy set.
+    async fn put_capsule_policy(
+        &self,
+        tenant: &str,
+        record: &CapsulePolicyRecord,
+    ) -> StoreResult<CapsulePolicyWrite>;
+    /// Fetch one policy body by version, tenant-scoped (`None` for unknown
+    /// or cross-tenant versions — the two are indistinguishable by
+    /// design).
+    #[cfg(feature = "capsules")]
+    async fn get_capsule_policy(
+        &self,
+        tenant: &str,
+        version: &str,
+    ) -> StoreResult<Option<CapsulePolicyRecord>>;
+    /// The tenant's registered policy bodies (order unspecified; routes
+    /// sort).
+    #[cfg(feature = "capsules")]
+    async fn list_capsule_policies(&self, tenant: &str) -> StoreResult<Vec<CapsulePolicyRecord>>;
+    #[cfg(feature = "capsules")]
+    /// Move the tenant's active-version pointer to `activation.version`.
+    /// Atomic on both backends (temp-write-then-rename; a two-statement
+    /// transaction on Postgres). `Err` when the version is not registered
+    /// — only registered bodies serve, so a mistyped activation can never
+    /// silently un-arm the plane.
+    async fn activate_capsule_policy(
+        &self,
+        tenant: &str,
+        activation: &CapsulePolicyActivation,
+    ) -> StoreResult<()>;
+    #[cfg(feature = "capsules")]
+    /// The tenant's active policy body (`None` when the pointer never
+    /// moved — the unconfigured posture). `Err` when the pointer names an
+    /// unregistered version — a corrupt store the serving path refuses
+    /// to guess around.
+    async fn active_capsule_policy(&self, tenant: &str)
+        -> StoreResult<Option<CapsulePolicyRecord>>;
+    #[cfg(feature = "capsules")]
+    /// Every tenant's active policy body, as `(tenant, record)` pairs —
+    /// the startup preload's scan. Postgres answers it from the `active`
+    /// column directly; the JSON backend folds the pointer files.
+    async fn list_active_capsule_policies(&self)
+        -> StoreResult<Vec<(String, CapsulePolicyRecord)>>;
+    #[cfg(feature = "capsules")]
+    /// Attach (or replace) one tenant overlay, keyed by tenant-scoped
+    /// overlay name. `true` when the name is new; `false` when the
+    /// ceiling was replaced — overlays are operator configuration, not
+    /// immutable registry entries (see [`CapsuleOverlayRecord`]).
+    async fn put_capsule_overlay(
+        &self,
+        tenant: &str,
+        record: &CapsuleOverlayRecord,
+    ) -> StoreResult<bool>;
+    #[cfg(feature = "capsules")]
+    /// Fetch one overlay by name, tenant-scoped (`None` for unknown or
+    /// cross-tenant names).
+    async fn get_capsule_overlay(
+        &self,
+        tenant: &str,
+        name: &str,
+    ) -> StoreResult<Option<CapsuleOverlayRecord>>;
+    #[cfg(feature = "capsules")]
+    /// The tenant's attached overlays (order unspecified; routes sort).
+    async fn list_capsule_overlays(&self, tenant: &str) -> StoreResult<Vec<CapsuleOverlayRecord>>;
 }
 
 /// The outcome of a candidate lifecycle transition
@@ -703,6 +781,20 @@ pub(crate) struct JsonFileStore {
     /// tenant-scoped content address, one file per record under
     /// `{store_path}/capsules/manifests/`.
     capsules: Mutex<HashMap<String, CapsuleRecord>>,
+    /// The capsule authorization plane (R0.9 wave 2, feature `capsules`):
+    /// Cedar policy bodies keyed by tenant-scoped version, one file per
+    /// record under `{store_path}/capsule_policies/versions/`.
+    #[cfg(feature = "capsules")]
+    capsule_policies: Mutex<HashMap<String, CapsulePolicyRecord>>,
+    /// The active-version pointer keyed by tenant-scoped fixed name
+    /// (`active` / `{tenant}/active`), one file per tenant under
+    /// `{store_path}/capsule_policies/active/`.
+    #[cfg(feature = "capsules")]
+    capsule_policy_active: Mutex<HashMap<String, CapsulePolicyActivation>>,
+    /// Tenant overlays keyed by tenant-scoped overlay name, one file per
+    /// record under `{store_path}/capsule_policies/overlays/`.
+    #[cfg(feature = "capsules")]
+    capsule_overlays: Mutex<HashMap<String, CapsuleOverlayRecord>>,
 }
 
 impl JsonFileStore {
@@ -730,6 +822,14 @@ impl JsonFileStore {
             activations: Mutex::new(policy::load_activations(root)),
             bindings: Mutex::new(policy::load_bindings(root)),
             capsules: Mutex::new(capsules::load_capsules(root)),
+            #[cfg(feature = "capsules")]
+            capsule_policies: Mutex::new(capsule_policy::load_capsule_policies(root)),
+            #[cfg(feature = "capsules")]
+            capsule_policy_active: Mutex::new(capsule_policy::load_capsule_policy_activations(
+                root,
+            )),
+            #[cfg(feature = "capsules")]
+            capsule_overlays: Mutex::new(capsule_policy::load_capsule_overlays(root)),
         }
     }
 }
@@ -1996,6 +2096,179 @@ impl ServerStore for JsonFileStore {
             })
             .cloned())
     }
+
+    #[cfg(feature = "capsules")]
+    async fn put_capsule_policy(
+        &self,
+        tenant: &str,
+        record: &CapsulePolicyRecord,
+    ) -> StoreResult<CapsulePolicyWrite> {
+        let scoped = crate::auth::scope_id(tenant, &record.version);
+        let mut map = self.capsule_policies.lock().await;
+        if let Some(existing) = map.get(&scoped) {
+            // Immutability: the same version naming the same text
+            // converges; naming different text conflicts (the
+            // registration instant is excluded from the comparison — a
+            // converged re-post carries a fresh one, and the stored
+            // instant wins).
+            if existing.version == record.version && existing.policy_text == record.policy_text {
+                return Ok(CapsulePolicyWrite::Converged);
+            }
+            return Ok(CapsulePolicyWrite::Conflict);
+        }
+        // Hold the lock across the file write (the assistants convention).
+        capsule_policy::persist_capsule_policy(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist capsule policy"))?;
+        map.insert(scoped, record.clone());
+        Ok(CapsulePolicyWrite::Created)
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn get_capsule_policy(
+        &self,
+        tenant: &str,
+        version: &str,
+    ) -> StoreResult<Option<CapsulePolicyRecord>> {
+        let scoped = crate::auth::scope_id(tenant, version);
+        Ok(self.capsule_policies.lock().await.get(&scoped).cloned())
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn list_capsule_policies(&self, tenant: &str) -> StoreResult<Vec<CapsulePolicyRecord>> {
+        let map = self.capsule_policies.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn activate_capsule_policy(
+        &self,
+        tenant: &str,
+        activation: &CapsulePolicyActivation,
+    ) -> StoreResult<()> {
+        let scoped_version = crate::auth::scope_id(tenant, &activation.version);
+        // The version must be registered before it can serve — check
+        // under the policies lock, then swap the pointer, so a mistyped
+        // activation can never silently un-arm the plane.
+        if !self
+            .capsule_policies
+            .lock()
+            .await
+            .contains_key(&scoped_version)
+        {
+            return Err(format!(
+                "capsule policy version `{}` is not registered for tenant `{tenant}`",
+                activation.version
+            ));
+        }
+        capsule_policy::persist_capsule_policy_activation(&self.root, tenant, activation)
+            .await
+            .map_err(io_err("persist capsule policy activation"))?;
+        self.capsule_policy_active.lock().await.insert(
+            capsule_policy::activation_scoped_name(tenant),
+            activation.clone(),
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn active_capsule_policy(
+        &self,
+        tenant: &str,
+    ) -> StoreResult<Option<CapsulePolicyRecord>> {
+        let pointer = self
+            .capsule_policy_active
+            .lock()
+            .await
+            .get(&capsule_policy::activation_scoped_name(tenant))
+            .cloned();
+        let Some(pointer) = pointer else {
+            return Ok(None);
+        };
+        let scoped_version = crate::auth::scope_id(tenant, &pointer.version);
+        self.capsule_policies
+            .lock()
+            .await
+            .get(&scoped_version)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| {
+                format!(
+                    "active capsule policy version `{}` is not registered for tenant \
+                     `{tenant}` — the store is corrupt",
+                    pointer.version
+                )
+            })
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn list_active_capsule_policies(
+        &self,
+    ) -> StoreResult<Vec<(String, CapsulePolicyRecord)>> {
+        let pointers = self.capsule_policy_active.lock().await;
+        let policies = self.capsule_policies.lock().await;
+        let mut out = Vec::new();
+        for (scoped_name, pointer) in pointers.iter() {
+            // The pointer's tenant comes from where its file lives —
+            // the path-keyed tenancy rule (`active` is the default
+            // tenant, `{tenant}/active` a named one).
+            let tenant = match scoped_name.strip_suffix("/active") {
+                Some(prefix) => prefix.to_string(),
+                None => crate::auth::DEFAULT_TENANT.to_string(),
+            };
+            let scoped_version = crate::auth::scope_id(&tenant, &pointer.version);
+            let record = policies.get(&scoped_version).cloned().ok_or_else(|| {
+                format!(
+                    "active capsule policy version `{}` is not registered for tenant \
+                     `{tenant}` — the store is corrupt",
+                    pointer.version
+                )
+            })?;
+            out.push((tenant, record));
+        }
+        Ok(out)
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn put_capsule_overlay(
+        &self,
+        tenant: &str,
+        record: &CapsuleOverlayRecord,
+    ) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, &record.overlay.name);
+        let mut map = self.capsule_overlays.lock().await;
+        let created = !map.contains_key(&scoped);
+        // Hold the lock across the file write (the assistants convention).
+        capsule_policy::persist_capsule_overlay(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist capsule overlay"))?;
+        map.insert(scoped, record.clone());
+        Ok(created)
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn get_capsule_overlay(
+        &self,
+        tenant: &str,
+        name: &str,
+    ) -> StoreResult<Option<CapsuleOverlayRecord>> {
+        let scoped = crate::auth::scope_id(tenant, name);
+        Ok(self.capsule_overlays.lock().await.get(&scoped).cloned())
+    }
+
+    #[cfg(feature = "capsules")]
+    async fn list_capsule_overlays(&self, tenant: &str) -> StoreResult<Vec<CapsuleOverlayRecord>> {
+        let map = self.capsule_overlays.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
 }
 
 impl JsonFileStore {
@@ -2108,6 +2381,10 @@ mod postgres {
         MailboxClaimScope,
     };
     use crate::assistants::AssistantRecord;
+    #[cfg(feature = "capsules")]
+    use crate::capsule_policy::{
+        CapsuleOverlayRecord, CapsulePolicyActivation, CapsulePolicyRecord, CapsulePolicyWrite,
+    };
     use crate::capsules::{CapsuleRecord, CapsuleWrite};
     use crate::coordination::CoordinationRecord;
     use crate::crons::CronRecord;
@@ -2517,6 +2794,55 @@ mod postgres {
         CREATE UNIQUE INDEX IF NOT EXISTS server_capsules_version_pin
             ON server_capsules (tenant, identity, version)";
 
+    /// The capsule authorization plane (R0.9 wave 2): one row per
+    /// immutable Cedar policy body, keyed by tenant-scoped version.
+    /// Immutability is the insert's `ON CONFLICT DO NOTHING` plus a
+    /// payload comparison in Rust (the file backend's rule). The active
+    /// pointer is the `active` column — the active-version lookup and
+    /// the startup preload read it directly, and activation flips it
+    /// inside one transaction (clear the tenant's rows, then set the
+    /// new one), so the pointer never splits.
+    pub(crate) const CREATE_CAPSULE_POLICIES_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_capsule_policies (
+            policy_id     TEXT PRIMARY KEY,
+            tenant        TEXT NOT NULL,
+            version       TEXT NOT NULL,
+            active        BOOLEAN NOT NULL DEFAULT FALSE,
+            payload       JSONB NOT NULL,
+            registered_at TIMESTAMPTZ NOT NULL
+        )"#;
+
+    /// The registry listing's leading column: every policy query is
+    /// tenant-scoped.
+    pub(crate) const CREATE_CAPSULE_POLICIES_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_capsule_policies_listing
+            ON server_capsule_policies (tenant, version)";
+
+    /// The active-version lookups (one per admission, plus the startup
+    /// preload's full scan): the column-mapped half of the pointer.
+    pub(crate) const CREATE_CAPSULE_POLICIES_ACTIVE_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_capsule_policies_active
+            ON server_capsule_policies (tenant, active)";
+
+    /// Tenant overlays (R0.9 wave 2): one row per attached overlay,
+    /// keyed by tenant-scoped overlay name. Overlays are operator
+    /// configuration — the upsert replaces the ceiling in place (the
+    /// file backend's replace-in-index rule).
+    pub(crate) const CREATE_CAPSULE_OVERLAYS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_capsule_overlays (
+            overlay_id  TEXT PRIMARY KEY,
+            tenant      TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            payload     JSONB NOT NULL,
+            attached_at TIMESTAMPTZ NOT NULL
+        )"#;
+
+    /// The overlay listing's leading column: every overlay query is
+    /// tenant-scoped.
+    pub(crate) const CREATE_CAPSULE_OVERLAYS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_capsule_overlays_listing
+            ON server_capsule_overlays (tenant, name)";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -2556,6 +2882,11 @@ mod postgres {
         CREATE_POLICY_BINDINGS_INDEX_SQL,
         CREATE_CAPSULES_SQL,
         CREATE_CAPSULES_PIN_INDEX_SQL,
+        CREATE_CAPSULE_POLICIES_SQL,
+        CREATE_CAPSULE_POLICIES_INDEX_SQL,
+        CREATE_CAPSULE_POLICIES_ACTIVE_INDEX_SQL,
+        CREATE_CAPSULE_OVERLAYS_SQL,
+        CREATE_CAPSULE_OVERLAYS_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -3178,6 +3509,64 @@ mod postgres {
     pub(crate) const SELECT_CAPSULE_BY_VERSION_SQL: &str = r#"
         SELECT payload FROM server_capsules
         WHERE tenant = $1 AND identity = $2 AND version = $3"#;
+
+    #[cfg(feature = "capsules")]
+    /// Capsule policy statements (R0.9 wave 2). Registration is
+    /// insert-only on the tenant-scoped version address (immutability: a
+    /// conflict on the address returns no row, and the caller's payload
+    /// comparison decides converge vs conflict). Activation is a
+    /// transaction: clear the tenant's active rows, then set the new one
+    /// — the pointer never splits.
+    pub(crate) const INSERT_CAPSULE_POLICY_SQL: &str = r#"
+        INSERT INTO server_capsule_policies (policy_id, tenant, version, active, payload, registered_at)
+        VALUES ($1, $2, $3, FALSE, $4, $5)
+        ON CONFLICT (policy_id) DO NOTHING
+        RETURNING policy_id"#;
+
+    #[cfg(feature = "capsules")]
+    pub(crate) const SELECT_CAPSULE_POLICY_SQL: &str =
+        "SELECT payload FROM server_capsule_policies WHERE tenant = $1 AND version = $2";
+
+    #[cfg(feature = "capsules")]
+    pub(crate) const LIST_CAPSULE_POLICIES_SQL: &str =
+        "SELECT payload FROM server_capsule_policies WHERE tenant = $1 ORDER BY registered_at";
+
+    #[cfg(feature = "capsules")]
+    pub(crate) const DEACTIVATE_CAPSULE_POLICIES_SQL: &str = r#"
+        UPDATE server_capsule_policies SET active = FALSE
+        WHERE tenant = $1 AND active"#;
+
+    #[cfg(feature = "capsules")]
+    pub(crate) const ACTIVATE_CAPSULE_POLICY_SQL: &str = r#"
+        UPDATE server_capsule_policies SET active = TRUE
+        WHERE tenant = $1 AND version = $2"#;
+
+    #[cfg(feature = "capsules")]
+    pub(crate) const SELECT_ACTIVE_CAPSULE_POLICY_SQL: &str = r#"
+        SELECT payload FROM server_capsule_policies
+        WHERE tenant = $1 AND active"#;
+
+    #[cfg(feature = "capsules")]
+    /// The startup preload's full scan: every tenant's active pointer.
+    pub(crate) const LIST_ACTIVE_CAPSULE_POLICIES_SQL: &str = r#"
+        SELECT tenant, payload FROM server_capsule_policies
+        WHERE active"#;
+
+    #[cfg(feature = "capsules")]
+    /// Overlay statements: operator configuration, so the upsert replaces
+    /// the ceiling in place (the file backend's replace-in-index rule).
+    pub(crate) const UPSERT_CAPSULE_OVERLAY_SQL: &str = r#"
+        INSERT INTO server_capsule_overlays (overlay_id, tenant, name, payload, attached_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (overlay_id) DO UPDATE SET payload = $4, attached_at = $5"#;
+
+    #[cfg(feature = "capsules")]
+    pub(crate) const SELECT_CAPSULE_OVERLAY_SQL: &str =
+        "SELECT payload FROM server_capsule_overlays WHERE tenant = $1 AND name = $2";
+
+    #[cfg(feature = "capsules")]
+    pub(crate) const LIST_CAPSULE_OVERLAYS_SQL: &str =
+        "SELECT payload FROM server_capsule_overlays WHERE tenant = $1 ORDER BY attached_at";
 
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
@@ -5405,6 +5794,216 @@ mod postgres {
             row.map(|row| record_from_payload("capsule", row.get::<Value, _>("payload")))
                 .transpose()
         }
+
+        #[cfg(feature = "capsules")]
+        async fn put_capsule_policy(
+            &self,
+            tenant: &str,
+            record: &CapsulePolicyRecord,
+        ) -> StoreResult<CapsulePolicyWrite> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, &record.version);
+            let inserted = sqlx::query(INSERT_CAPSULE_POLICY_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind(&record.version)
+                .bind(record_to_payload(record)?)
+                .bind(record.registered_at)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("insert capsule policy"))?;
+            if inserted.is_some() {
+                return Ok(CapsulePolicyWrite::Created);
+            }
+            // The address is taken: same text converges, different text
+            // conflicts — the file backend's immutability rule, exact
+            // here (the registration instant is excluded from the
+            // comparison; the stored one wins).
+            let existing = sqlx::query(SELECT_CAPSULE_POLICY_SQL)
+                .bind(tenant)
+                .bind(&record.version)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("select capsule policy"))?
+                .ok_or_else(|| {
+                    "capsule policy insert conflicted but the row is gone".to_string()
+                })?;
+            let existing: CapsulePolicyRecord =
+                record_from_payload("capsule policy", existing.get::<Value, _>("payload"))?;
+            Ok(
+                if existing.version == record.version && existing.policy_text == record.policy_text
+                {
+                    CapsulePolicyWrite::Converged
+                } else {
+                    CapsulePolicyWrite::Conflict
+                },
+            )
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn get_capsule_policy(
+            &self,
+            tenant: &str,
+            version: &str,
+        ) -> StoreResult<Option<CapsulePolicyRecord>> {
+            let row = sqlx::query(SELECT_CAPSULE_POLICY_SQL)
+                .bind(tenant)
+                .bind(version)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select capsule policy"))?;
+            row.map(|row| record_from_payload("capsule policy", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn list_capsule_policies(
+            &self,
+            tenant: &str,
+        ) -> StoreResult<Vec<CapsulePolicyRecord>> {
+            let rows = sqlx::query(LIST_CAPSULE_POLICIES_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list capsule policies"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("capsule policy", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn activate_capsule_policy(
+            &self,
+            tenant: &str,
+            activation: &CapsulePolicyActivation,
+        ) -> StoreResult<()> {
+            // The pointer move, atomic: clear the tenant's active rows,
+            // then set the new one. The activation instant lives on the
+            // pointer file in the JSON backend; here the column flip is
+            // the move, and the evidence requirement (which version
+            // decided each admission) is pinned on the admission events
+            // themselves.
+            let mut transaction = self
+                .pool()
+                .await?
+                .begin()
+                .await
+                .map_err(db_err("begin activation"))?;
+            sqlx::query(DEACTIVATE_CAPSULE_POLICIES_SQL)
+                .bind(tenant)
+                .execute(&mut *transaction)
+                .await
+                .map_err(db_err("deactivate capsule policies"))?;
+            let updated = sqlx::query(ACTIVATE_CAPSULE_POLICY_SQL)
+                .bind(tenant)
+                .bind(&activation.version)
+                .execute(&mut *transaction)
+                .await
+                .map_err(db_err("activate capsule policy"))?;
+            if updated.rows_affected() == 0 {
+                return Err(format!(
+                    "capsule policy version `{}` is not registered for tenant `{tenant}`",
+                    activation.version
+                ));
+            }
+            transaction
+                .commit()
+                .await
+                .map_err(db_err("commit activation"))?;
+            Ok(())
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn active_capsule_policy(
+            &self,
+            tenant: &str,
+        ) -> StoreResult<Option<CapsulePolicyRecord>> {
+            let row = sqlx::query(SELECT_ACTIVE_CAPSULE_POLICY_SQL)
+                .bind(tenant)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select active capsule policy"))?;
+            row.map(|row| record_from_payload("capsule policy", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn list_active_capsule_policies(
+            &self,
+        ) -> StoreResult<Vec<(String, CapsulePolicyRecord)>> {
+            let rows = sqlx::query(LIST_ACTIVE_CAPSULE_POLICIES_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list active capsule policies"))?;
+            rows.into_iter()
+                .map(|row| {
+                    let record =
+                        record_from_payload("capsule policy", row.get::<Value, _>("payload"))?;
+                    Ok((row.get::<String, _>("tenant"), record))
+                })
+                .collect()
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn put_capsule_overlay(
+            &self,
+            tenant: &str,
+            record: &CapsuleOverlayRecord,
+        ) -> StoreResult<bool> {
+            let pool = self.pool().await?;
+            let name = &record.overlay.name;
+            // The probe decides created-vs-replaced (the upsert itself
+            // reports neither); the file backend's `contains_key` check,
+            // one round trip earlier.
+            let created = sqlx::query(SELECT_CAPSULE_OVERLAY_SQL)
+                .bind(tenant)
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("select capsule overlay"))?
+                .is_none();
+            sqlx::query(UPSERT_CAPSULE_OVERLAY_SQL)
+                .bind(crate::auth::scope_id(tenant, name))
+                .bind(tenant)
+                .bind(name)
+                .bind(record_to_payload(record)?)
+                .bind(record.attached_at)
+                .execute(pool)
+                .await
+                .map_err(db_err("upsert capsule overlay"))?;
+            Ok(created)
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn get_capsule_overlay(
+            &self,
+            tenant: &str,
+            name: &str,
+        ) -> StoreResult<Option<CapsuleOverlayRecord>> {
+            let row = sqlx::query(SELECT_CAPSULE_OVERLAY_SQL)
+                .bind(tenant)
+                .bind(name)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select capsule overlay"))?;
+            row.map(|row| record_from_payload("capsule overlay", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        #[cfg(feature = "capsules")]
+        async fn list_capsule_overlays(
+            &self,
+            tenant: &str,
+        ) -> StoreResult<Vec<CapsuleOverlayRecord>> {
+            let rows = sqlx::query(LIST_CAPSULE_OVERLAYS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list capsule overlays"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("capsule overlay", row.get::<Value, _>("payload")))
+                .collect()
+        }
     }
 
     impl PostgresStore {
@@ -5550,7 +6149,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 37);
+            assert_eq!(MIGRATION_SQL.len(), 42);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -5654,6 +6253,28 @@ mod postgres {
             assert!(CREATE_CAPSULES_SQL.contains("payload      JSONB"));
             assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("CREATE UNIQUE INDEX"));
             assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("(tenant, identity, version)"));
+        }
+
+        #[test]
+        fn capsule_policy_schema_has_active_column_and_scoped_listings() {
+            // The authorization plane (R0.9 wave 2): immutable bodies
+            // keyed by tenant-scoped version, the active pointer as a
+            // column-mapped BOOLEAN, overlays keyed by tenant-scoped name.
+            assert!(CREATE_CAPSULE_POLICIES_SQL.contains("server_capsule_policies"));
+            assert!(CREATE_CAPSULE_POLICIES_SQL.contains("policy_id     TEXT PRIMARY KEY"));
+            assert!(CREATE_CAPSULE_POLICIES_SQL.contains("active        BOOLEAN NOT NULL"));
+            assert!(CREATE_CAPSULE_POLICIES_SQL.contains("payload       JSONB"));
+            assert!(CREATE_CAPSULE_POLICIES_INDEX_SQL.contains("(tenant, version)"));
+            assert!(CREATE_CAPSULE_POLICIES_ACTIVE_INDEX_SQL.contains("(tenant, active)"));
+            assert!(CREATE_CAPSULE_OVERLAYS_SQL.contains("server_capsule_overlays"));
+            assert!(CREATE_CAPSULE_OVERLAYS_SQL.contains("overlay_id  TEXT PRIMARY KEY"));
+            assert!(CREATE_CAPSULE_OVERLAYS_SQL.contains("payload     JSONB"));
+            assert!(CREATE_CAPSULE_OVERLAYS_INDEX_SQL.contains("(tenant, name)"));
+            // Activation is the two-statement transaction: clear, then set.
+            #[cfg(feature = "capsules")]
+            assert!(DEACTIVATE_CAPSULE_POLICIES_SQL.contains("SET active = FALSE"));
+            #[cfg(feature = "capsules")]
+            assert!(ACTIVATE_CAPSULE_POLICY_SQL.contains("SET active = TRUE"));
         }
 
         #[test]

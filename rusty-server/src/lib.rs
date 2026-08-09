@@ -98,7 +98,10 @@
 //! | `GET /policy/epochs` | R0.8 (wave 4): the epoch history — each activation's reign window plus the admission bindings recorded inside it (and the implicit floor epoch covering pre-activation bindings) |
 //! | `POST /capsules` | R0.9 Rusty Capsules (wave 1): register an immutable capsule manifest `{manifest}` → `201 {capsule_id, record}` (`200` converged when the content address already names exactly this manifest; `409` when the `(name, version)` pin is claimed by a different address — registry immutability; `422` when the manifest fails validation). The manifest's content address is derived; callers never mint ids |
 //! | `GET /capsules` / `GET /capsules/{id}` | R0.9 (wave 1): the tenant's registered capsule manifests (sorted by content address) / fetch one (`404` unknown/cross-tenant) |
-//! | `POST /capsules/resolve` | R0.9 (wave 1): resolve a run's capsule pins `{pins: {name: version}, run_id, parent?}` → `200 {resolutions}` — each pin's stored manifest re-derives its content address before answering (a tampered record fails closed, `422`; an unknown pin is `404`), and one `capsule_resolved` event per pin is journaled into `run_id`'s journal (hard-fail: an unresolvable run is `404`) |
+//! | `POST /capsules/resolve` | R0.9 (wave 1): resolve a run's capsule pins `{pins: {name: version}, run_id, parent?}` → `200 {resolutions}` — each pin's stored manifest re-derives its content address before answering (a tampered record fails closed, `422`; an unknown pin is `404`), and one `capsule_resolved` event per pin is journaled into `run_id`'s journal (hard-fail: an unresolvable run is `404`). R0.9 wave 2 adds the optional `budget` field and, with the `capsules` feature, the admission composition: Cedar decides the admission and each declared grant (`403` on refusal, one journaled `capsule_denied` per forbidden grant), overlays intersect the effective grants, and budgets compose (`422` on a token/cost overspend) |
+//! | `POST /capsule_policies/versions` / `GET /capsule_policies/versions` / `GET /capsule_policies/versions/{version}` | R0.9 (wave 2, feature `capsules`): register an immutable Cedar policy body `{policy_text, version?}` → `201 {version, record}` (`200` converged; `409` when the version names a different body; `422` unparseable) / list the tenant's bodies (sorted by version) / fetch one (`404` unknown/cross-tenant). Without the feature: `503 capsule_policy_unavailable` |
+//! | `GET /capsule_policies/active` / `POST /capsule_policies/active` | R0.9 (wave 2, feature `capsules`): the tenant's active policy body (`404` in the unconfigured posture) / move the active-version pointer `{version}` → `200 {active}` (`422` unregistered version); the move eagerly refreshes the revocation cache. Without the feature: `503 capsule_policy_unavailable` |
+//! | `POST /capsules/overlays` / `GET /capsules/overlays` / `GET /capsules/overlays/{name}` | R0.9 (wave 2, feature `capsules`): attach (or replace) a tenant overlay `{overlay}` → `201` new / `200` replaced (`403` when the active policy refuses a widening attach; `422` invalid) / list the tenant's overlays (sorted by name) / fetch one (`404` unknown/cross-tenant). Without the feature: `503 capsule_policy_unavailable` |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -109,6 +112,7 @@
 mod agents;
 mod assistants;
 mod auth;
+pub mod capsule_policy;
 mod capsules;
 mod coordination;
 mod crons;
@@ -135,6 +139,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
+use rusty_agent_runtime::capsule::ResourceBudget;
 use rusty_agent_runtime::graph::Graph;
 use rusty_agent_runtime::learn::{CandidateEvaluator, PromotionEnvelope};
 use rusty_agent_runtime::state::StateSpec;
@@ -159,10 +164,10 @@ pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::fro
 
 /// Names the JSON-file layout already owns at the store root
 /// (`agent_leases/`, `agents/`, `assistants/`, `capsules/`,
-/// `coordinations/`, `crons/`, `journals/`, `learn/`, `memory/`,
-/// `memory_artifacts/`, `outbox/`, `policy/`, `store/`, `tasks/`,
-/// `threads/`, `trigger_events/`, `triggers/`, plus the `latest`
-/// pointer file inside each thread's checkpoint dir).
+/// `capsule_policies/`, `coordinations/`, `crons/`, `journals/`, `learn/`,
+/// `memory/`, `memory_artifacts/`, `outbox/`, `policy/`, `store/`,
+/// `tasks/`, `threads/`, `trigger_events/`, `triggers/`, plus the
+/// `latest` pointer file inside each thread's checkpoint dir).
 /// Client-chosen ids and tenant ids claiming one of these would write
 /// checkpoints into platform directories (or platform records into
 /// checkpoint dirs), so both `validate_client_id` and
@@ -172,6 +177,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "agents",
     "assistants",
     "capsules",
+    "capsule_policies",
     "coordinations",
     "crons",
     "journals",
@@ -406,6 +412,25 @@ pub struct ServerConfig {
     /// evidence, and evidence requires an evaluator. See
     /// [`ServerConfig::with_candidate_evaluator`].
     pub candidate_evaluator: Option<Arc<dyn CandidateEvaluator>>,
+
+    /// Operator-authored Cedar policy files (R0.9 Rusty Capsules, wave
+    /// 2), loaded for the `default` tenant at startup — the deployment's
+    /// standing authorization, the way static API keys are its standing
+    /// authentication. Requires the `capsules` feature; each file is
+    /// registered under its content-derived version
+    /// (`cedar-{sha256[..12]}`), never activated — activation is an
+    /// explicit operator move through `POST /capsule_policies/active`. See
+    /// [`ServerConfig::with_capsule_policy_file`].
+    pub capsule_policy_files: Vec<PathBuf>,
+
+    /// The tenant-wide budget ceiling (R0.9 wave 2): the outermost bound
+    /// every capsule budget composes under. Fuel, memory, wall time, and
+    /// output bytes clamp down to it; a run declaring more `max_tokens`
+    /// or `max_cost_usd` than the ceiling (or than the run's own budget)
+    /// is refused `422` — token and cost bounds cannot be retrofitted
+    /// mid-run the way fuel can, so admission refuses the overspend. See
+    /// [`ServerConfig::with_capsule_budget_ceiling`].
+    pub capsule_budget_ceiling: Option<ResourceBudget>,
 }
 
 impl Default for ServerConfig {
@@ -425,6 +450,8 @@ impl Default for ServerConfig {
             tenant_task_quotas: HashMap::new(),
             promotion_envelope: PromotionEnvelope::r08_default(),
             candidate_evaluator: None,
+            capsule_policy_files: Vec::new(),
+            capsule_budget_ceiling: None,
         }
     }
 }
@@ -632,6 +659,27 @@ impl ServerConfig {
     /// on evidence, and evidence requires an evaluator.
     pub fn with_candidate_evaluator(mut self, evaluator: Arc<dyn CandidateEvaluator>) -> Self {
         self.candidate_evaluator = Some(evaluator);
+        self
+    }
+
+    /// Builder-style: add one operator-authored Cedar policy file (R0.9
+    /// Rusty Capsules, wave 2), loaded for the `default` tenant at
+    /// startup. Files are *registered*, never activated — moving a
+    /// tenant's active pointer is an explicit operator move through
+    /// `POST /capsule_policies/active`, so a restart can never silently
+    /// change what serves. Without the `capsules` feature the files are
+    /// ignored (the plane's routes answer `503` either way).
+    pub fn with_capsule_policy_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.capsule_policy_files.push(path.into());
+        self
+    }
+
+    /// Builder-style: set the tenant-wide capsule budget ceiling (R0.9
+    /// wave 2) — the outermost bound every capsule budget composes
+    /// under. `None` (the default) leaves budgets bounded only by the
+    /// run's own declaration and each capsule's manifest.
+    pub fn with_capsule_budget_ceiling(mut self, ceiling: ResourceBudget) -> Self {
+        self.capsule_budget_ceiling = Some(ceiling);
         self
     }
 }

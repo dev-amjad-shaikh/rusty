@@ -18,6 +18,8 @@ use rusty_agent_runtime::agents::{
     QuorumContract, RaceContract, StateScope, COORDINATION_RESULT_KIND,
 };
 use rusty_agent_runtime::capsule::{derive_capsule_id, CapsuleManifest, CapsuleResolution};
+#[cfg(feature = "capsules")]
+use rusty_agent_runtime::capsule::{CapsuleDenial, CapsuleOverlay, ResourceBudget};
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
@@ -93,6 +95,14 @@ pub(crate) struct AppState {
     /// trigger's `debounce_ms` window accumulate here and coalesce into one
     /// action carrying the array of payloads. Keyed by internal trigger id.
     pub trigger_debounce: Mutex<HashMap<String, crate::triggers::DebounceBuffer>>,
+    /// The capsule authorization plane (R0.9 wave 2, feature `capsules`):
+    /// the per-tenant revocation cache holding each tenant's active Cedar
+    /// engine. Policy mutations refresh it eagerly; admission installs the
+    /// version it decided under; embedders building capsule hosts take a
+    /// rechecker from it ([`crate::capsule_policy::CapsulePolicyPlane::rechecker`])
+    /// so a revoked grant fails at its next use.
+    #[cfg(feature = "capsules")]
+    pub capsule_plane: Arc<crate::capsule_policy::CapsulePolicyPlane>,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -151,6 +161,8 @@ pub(crate) fn router_with_shutdown(
         shutdown: shutdown.clone(),
     };
     let outbox_relay_interval = config.outbox_relay_interval;
+    #[cfg(feature = "capsules")]
+    let capsule_plane = Arc::new(crate::capsule_policy::CapsulePolicyPlane::new());
     let state = Arc::new(AppState {
         registry,
         config,
@@ -160,8 +172,29 @@ pub(crate) fn router_with_shutdown(
         state_locks: Mutex::new(HashMap::new()),
         shutdown,
         trigger_debounce: Mutex::new(HashMap::new()),
+        #[cfg(feature = "capsules")]
+        capsule_plane,
     });
     crons::spawn_scheduler(Arc::clone(&state));
+    // Warm the capsule authorization plane (R0.9 wave 2): register any
+    // operator config-file policies (default tenant; registered, never
+    // activated), then preload every tenant's active engine into the
+    // revocation cache so a restarted process re-arms the recheck seam
+    // without waiting for the next mutation or admission. Best effort,
+    // and never blocking startup.
+    #[cfg(feature = "capsules")]
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        if !state.config.capsule_policy_files.is_empty() {
+            handle.spawn(crate::capsule_policy::load_config_policies(
+                Arc::clone(&state.server_store),
+                state.config.capsule_policy_files.clone(),
+            ));
+        }
+        handle.spawn(crate::capsule_policy::preload_active_policies(
+            Arc::clone(&state.server_store),
+            Arc::clone(&state.capsule_plane),
+        ));
+    }
     // The outbox relay: publishes pending outbox rows into the task queue
     // (R0.6 wave 2b). Also the crash-recovery path — rows pending at
     // startup publish on its first tick.
@@ -276,6 +309,28 @@ pub(crate) fn router_with_shutdown(
         .route("/capsules", post(register_capsule).get(list_capsules))
         .route("/capsules/{id}", get(get_capsule))
         .route("/capsules/resolve", post(resolve_capsules))
+        // The capsule authorization plane (R0.9 wave 2): immutable Cedar
+        // policy bodies, the active-version pointer, and tenant overlay
+        // attach. Without the `capsules` feature every handler answers
+        // the typed `503 capsule_policy_unavailable` — the surface fails
+        // closed and says so.
+        .route(
+            "/capsule_policies/versions",
+            post(register_capsule_policy).get(list_capsule_policies),
+        )
+        .route(
+            "/capsule_policies/versions/{version}",
+            get(get_capsule_policy),
+        )
+        .route(
+            "/capsule_policies/active",
+            get(get_active_capsule_policy).post(activate_capsule_policy),
+        )
+        .route(
+            "/capsules/overlays",
+            post(attach_capsule_overlay).get(list_capsule_overlays),
+        )
+        .route("/capsules/overlays/{name}", get(get_capsule_overlay))
         .route("/coordination/delegate", post(submit_delegate))
         .route("/coordination/fan_out", post(submit_fan_out))
         .route("/coordination/race", post(submit_race))
@@ -4586,6 +4641,19 @@ async fn register_capsule(
         .validate()
         .map_err(|e| ApiError::unprocessable(format!("invalid capsule manifest: {e}")))?;
     let capsule_id = derive_capsule_id(&payload.manifest).map_err(internal_err)?;
+    // The authorization gate (R0.9 wave 2, feature `capsules`): under an
+    // active policy, a manifest Cedar refuses — by identity or by
+    // declared grant — never reaches the registry (`403`; registration
+    // has no run context, so the refusal journals nothing).
+    #[cfg(feature = "capsules")]
+    crate::capsule_policy::authorize_registration(
+        &state.server_store,
+        &state.capsule_plane,
+        tenant.tenant(),
+        &crate::capsule_policy::prospective_record(capsule_id.clone(), &payload.manifest),
+    )
+    .await
+    .map_err(admission_refusal_error)?;
     let record = CapsuleRecord {
         capsule_id,
         manifest: payload.manifest,
@@ -4661,6 +4729,13 @@ struct ResolveCapsulesPayload {
     /// current head, the receipt precedent).
     #[serde(default)]
     parent: Option<String>,
+    /// The run's own budget (R0.9 wave 2, feature `capsules`): one of
+    /// the enclosing layers every capsule's declared budget composes
+    /// under. Absent on wave-1 payloads — the field is additive, and old
+    /// callers resolve exactly as before.
+    #[cfg(feature = "capsules")]
+    #[serde(default)]
+    budget: Option<ResourceBudget>,
 }
 
 /// `POST /capsules/resolve` — resolve a run's capsule pins against the
@@ -4673,13 +4748,25 @@ struct ResolveCapsulesPayload {
 /// `run_id`'s journal (read-only evidence: resolution decides nothing
 /// about what will run) — hard-fail, the candidate-lifecycle discipline:
 /// an unresolvable run stops the request (`404`).
+///
+/// With the `capsules` feature (R0.9 wave 2) resolution is also the
+/// admission composition: Cedar decides the admission and each declared
+/// grant under the tenant's active policy (`403` on refusal, with one
+/// journaled `capsule_denied` per forbidden grant pinned to the deciding
+/// version), applicable overlays intersect the effective grants, and the
+/// declared budget composes under the run's budget and the tenant
+/// ceiling (clamped fields journal their clamp; a token or cost
+/// overspend refuses `422`).
 async fn resolve_capsules(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<ResolveCapsulesPayload>,
 ) -> Result<Json<Value>, ApiError> {
     // Validate every pin before journaling any: a failed resolution
-    // leaves no partial evidence.
+    // leaves no partial evidence. The records themselves are kept only
+    // for the wave-2 admission composition (feature `capsules`).
+    #[cfg(feature = "capsules")]
+    let mut records = Vec::with_capacity(payload.pins.len());
     let mut resolutions = Vec::with_capacity(payload.pins.len());
     for (name, version) in &payload.pins {
         let record = state
@@ -4706,7 +4793,71 @@ async fn resolve_capsules(
             version: CapsuleVersion::new(version.clone()),
             capsule_id: record.capsule_id.clone(),
             build_digest: record.manifest.build_digest.clone(),
+            policy_version: None,
+            overlays: None,
+            effective_grants: None,
+            clamped_budget: None,
         });
+        #[cfg(feature = "capsules")]
+        records.push(record);
+    }
+    // The admission composition (R0.9 wave 2, feature `capsules`),
+    // before any resolution journals: a refused admission stops the
+    // request with its evidence journaled and nothing admitted.
+    #[cfg(feature = "capsules")]
+    for (record, resolution) in records.iter().zip(resolutions.iter_mut()) {
+        match crate::capsule_policy::compose_admission(
+            &state.server_store,
+            &state.capsule_plane,
+            tenant.tenant(),
+            record,
+            payload.budget.as_ref(),
+            state.config.capsule_budget_ceiling.as_ref(),
+        )
+        .await
+        {
+            Ok(outcome) => {
+                resolution.policy_version = outcome.policy_version;
+                resolution.overlays = outcome.overlays;
+                resolution.effective_grants = outcome.effective_grants;
+                resolution.clamped_budget = outcome.clamped_budget;
+            }
+            Err(crate::capsule_policy::AdmissionRefusal::Policy {
+                version,
+                forbidden,
+                detail,
+            }) => {
+                // Evidence for the refusal: one journaled denial per
+                // forbidden grant, pinned to the deciding version —
+                // hard-fail like the resolutions themselves. A pure
+                // decision-1 refusal is not capability-shaped; its
+                // detail alone answers the `403`.
+                for grant in &forbidden {
+                    let denial = CapsuleDenial {
+                        capsule_id: record.capsule_id.clone(),
+                        capability: grant.capability_kind(),
+                        absent_grant: grant.clone(),
+                        detail: detail.clone(),
+                        policy_version: Some(version.clone()),
+                    };
+                    let draft = EventDraft::new(RunEventKind::CapsuleDenied, Effect::Pure).output(
+                        serde_json::to_value(&denial)
+                            .map_err(|e| ApiError::internal(format!("serialize denial: {e}")))?,
+                    );
+                    try_journal_memory_event(
+                        &state,
+                        &tenant,
+                        &payload.run_id,
+                        payload.parent.clone(),
+                        draft,
+                    )
+                    .await
+                    .map_err(journal_gate_error)?;
+                }
+                return Err(ApiError::forbidden(detail));
+            }
+            Err(refusal) => return Err(admission_refusal_error(refusal)),
+        }
     }
     for resolution in &resolutions {
         let draft = EventDraft::new(RunEventKind::CapsuleResolved, Effect::ReadOnly).output(
@@ -4724,6 +4875,332 @@ async fn resolve_capsules(
         .map_err(journal_gate_error)?;
     }
     Ok(Json(json!({ "resolutions": resolutions })))
+}
+
+// --------------------------------------------------------------------- //
+// The capsule authorization plane (R0.9 Rusty Capsules, wave 2)
+//
+// Immutable Cedar policy bodies, the per-tenant active-version pointer,
+// and tenant overlay attach. Every handler has two shapes: with the
+// `capsules` feature the real handler; without it, the typed
+// `503 capsule_policy_unavailable` — a server without the feature is a
+// complete server with a smaller surface, and the missing half says so
+// honestly.
+// --------------------------------------------------------------------- //
+
+/// Map an admission refusal to its wire status: a policy refusal is
+/// `403` (authorization, not syntax), a budget overspend `422` (the
+/// declaration and its enclosing bounds disagree about money), an
+/// internal failure `500`.
+#[cfg(feature = "capsules")]
+fn admission_refusal_error(refusal: crate::capsule_policy::AdmissionRefusal) -> ApiError {
+    match refusal {
+        crate::capsule_policy::AdmissionRefusal::Policy { detail, .. } => {
+            ApiError::forbidden(detail)
+        }
+        crate::capsule_policy::AdmissionRefusal::Budget {
+            field,
+            declared,
+            bound,
+        } => ApiError::unprocessable(format!(
+            "capsule budget field `{field}` declares {declared}, exceeding the tightest \
+             enclosing bound {bound} — token and cost bounds cannot be retrofitted mid-run; \
+             declare within the bound or raise it"
+        )),
+        crate::capsule_policy::AdmissionRefusal::Internal(detail) => ApiError::internal(detail),
+    }
+}
+
+#[cfg(feature = "capsules")]
+#[derive(Debug, Deserialize)]
+struct RegisterCapsulePolicyPayload {
+    /// The Cedar source text. Parse-checked before anything persists
+    /// (`422`) — the registry holds only bodies the engine can read.
+    policy_text: String,
+    /// The operator-chosen version to register under (default: the
+    /// content-derived `cedar-{sha256[..12]}`). Path-safe, validated —
+    /// a version becomes a store file name.
+    #[serde(default)]
+    version: Option<String>,
+}
+
+/// `POST /capsule_policies/versions` — register an immutable Cedar
+/// policy body → `201 {version, record}`; `200` when the version already
+/// names exactly this text (the idempotent create); `409` when it names
+/// different text (registry immutability); `422` when the text does not
+/// parse or the version is not path-safe. Registration never activates —
+/// moving the pointer is the explicit `POST /capsule_policies/active`.
+#[cfg(feature = "capsules")]
+async fn register_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterCapsulePolicyPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    crate::capsule_policy::CedarEngine::parse(&payload.policy_text)
+        .map_err(|e| ApiError::unprocessable(format!("capsule policy does not parse: {e}")))?;
+    let version = match &payload.version {
+        Some(version) => {
+            crate::capsule_policy::validate_capsule_policy_version(version)
+                .map_err(|e| ApiError::unprocessable(format!("invalid policy version: {e}")))?;
+            version.clone()
+        }
+        None => crate::capsule_policy::derive_capsule_policy_version(&payload.policy_text),
+    };
+    let record = crate::capsule_policy::CapsulePolicyRecord {
+        version: version.clone(),
+        policy_text: payload.policy_text,
+        registered_at: Utc::now(),
+    };
+    match state
+        .server_store
+        .put_capsule_policy(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?
+    {
+        crate::capsule_policy::CapsulePolicyWrite::Created => Ok((
+            StatusCode::CREATED,
+            Json(json!({ "version": version, "record": record })),
+        )),
+        crate::capsule_policy::CapsulePolicyWrite::Converged => Ok((
+            StatusCode::OK,
+            Json(json!({ "version": version, "record": record })),
+        )),
+        crate::capsule_policy::CapsulePolicyWrite::Conflict => Err(ApiError::conflict(format!(
+            "capsule policy version `{version}` is already registered under a different body — \
+             versions are immutable; register the changed policy under a new version"
+        ))),
+    }
+}
+
+/// `POST /capsule_policies/versions` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn register_capsule_policy() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsule_policies/versions` — the tenant's registered policy
+/// bodies, sorted by version for a deterministic listing.
+#[cfg(feature = "capsules")]
+async fn list_capsule_policies(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut policies = state
+        .server_store
+        .list_capsule_policies(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    policies.sort_by(|a, b| a.version.cmp(&b.version));
+    Ok(Json(json!({ "policies": policies })))
+}
+
+/// `GET /capsule_policies/versions` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn list_capsule_policies() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsule_policies/versions/{version}` — fetch one registered
+/// policy body (`404` unknown/cross-tenant).
+#[cfg(feature = "capsules")]
+async fn get_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(version): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_capsule_policy(tenant.tenant(), &version)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule policy `{version}` not found")))?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+/// `GET /capsule_policies/versions/{version}` without the feature.
+#[cfg(not(feature = "capsules"))]
+async fn get_capsule_policy(Path(_version): Path<String>) -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsule_policies/active` — the tenant's active policy body
+/// (`404` when the pointer never moved: the unconfigured posture, where
+/// admission runs the wave-1 way and says so).
+#[cfg(feature = "capsules")]
+async fn get_active_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .active_capsule_policy(tenant.tenant())
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "tenant `{}` has no active capsule policy — admission is unenforced until the \
+                 first activation",
+                tenant.tenant()
+            ))
+        })?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+/// `GET /capsule_policies/active` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn get_active_capsule_policy() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+#[cfg(feature = "capsules")]
+#[derive(Debug, Deserialize)]
+struct ActivateCapsulePolicyPayload {
+    /// The registered version to move the tenant's pointer to.
+    version: String,
+}
+
+/// `POST /capsule_policies/active` — move the tenant's active-version
+/// pointer → `200 {active}`; `422` when the version is not registered
+/// (only registered bodies serve, so a mistyped activation can never
+/// silently un-arm the plane). The move refreshes the revocation cache
+/// eagerly: from the response on, rechecks serve the new version.
+#[cfg(feature = "capsules")]
+async fn activate_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ActivateCapsulePolicyPayload>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .activate_capsule_policy(
+            tenant.tenant(),
+            &crate::capsule_policy::activation(&payload.version),
+        )
+        .await
+        .map_err(|e| {
+            if e.contains("not registered") {
+                ApiError::unprocessable(e)
+            } else {
+                internal_err(e)
+            }
+        })?;
+    state
+        .capsule_plane
+        .refresh(&state.server_store, tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({ "active": payload.version })))
+}
+
+/// `POST /capsule_policies/active` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn activate_capsule_policy() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+#[cfg(feature = "capsules")]
+#[derive(Debug, Deserialize)]
+struct AttachCapsuleOverlayPayload {
+    /// The overlay to attach (name, optional targets, grant ceiling).
+    /// Validated on the way in (`422`), and Cedar-checked against every
+    /// capsule it would narrow when a policy is active (`403` on a
+    /// widening attach).
+    overlay: CapsuleOverlay,
+}
+
+/// `POST /capsules/overlays` — attach (or replace) a tenant overlay →
+/// `201 {overlay}` when the name is new, `200` when the ceiling was
+/// replaced (overlays are operator configuration, not immutable registry
+/// entries); `403` when the active policy refuses the attach; `422` when
+/// the overlay fails validation. The intersection arithmetic applies
+/// regardless: an overlay can only ever narrow a capsule's effective
+/// grants.
+#[cfg(feature = "capsules")]
+async fn attach_capsule_overlay(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<AttachCapsuleOverlayPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    payload
+        .overlay
+        .validate()
+        .map_err(|e| ApiError::unprocessable(format!("invalid capsule overlay: {e}")))?;
+    crate::capsule_policy::authorize_overlay_attach(
+        &state.server_store,
+        tenant.tenant(),
+        &payload.overlay,
+    )
+    .await
+    .map_err(admission_refusal_error)?;
+    let record = crate::capsule_policy::CapsuleOverlayRecord {
+        overlay: payload.overlay,
+        // Server-side provenance: the authenticated tenant authored this
+        // attach; a crafted body cannot claim another tenant's authorship.
+        author: tenant.tenant().to_string(),
+        attached_at: Utc::now(),
+    };
+    let created = state
+        .server_store
+        .put_capsule_overlay(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(json!({ "overlay": record }))))
+}
+
+/// `POST /capsules/overlays` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn attach_capsule_overlay() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsules/overlays` — the tenant's attached overlays, sorted by
+/// name for a deterministic listing.
+#[cfg(feature = "capsules")]
+async fn list_capsule_overlays(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut overlays = state
+        .server_store
+        .list_capsule_overlays(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    overlays.sort_by(|a, b| a.overlay.name.cmp(&b.overlay.name));
+    Ok(Json(json!({ "overlays": overlays })))
+}
+
+/// `GET /capsules/overlays` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn list_capsule_overlays() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsules/overlays/{name}` — fetch one attached overlay by name
+/// (`404` unknown/cross-tenant).
+#[cfg(feature = "capsules")]
+async fn get_capsule_overlay(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_capsule_overlay(tenant.tenant(), &name)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule overlay `{name}` not found")))?;
+    Ok(Json(json!({ "overlay": record })))
+}
+
+/// `GET /capsules/overlays/{name}` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn get_capsule_overlay(Path(_name): Path<String>) -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
 }
 
 /// The wave-4 promotion hook: a full-traffic policy promotion overlays

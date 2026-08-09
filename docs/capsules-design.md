@@ -641,6 +641,54 @@ the capsule's next capability use with the denial journaled against the
 new policy version; a capsule whose declared budget exceeds the run's
 budget is clamped or refused at admission and the clamp is journaled.
 
+> **Wave 2 status: implemented.** The plane landed as written:
+> `cedar-policy` behind the server's `capsules` feature (which also
+> enables core's `wasm` host), the three decisions evaluated as typed
+> Cedar requests (`AdmitCapsule`, `UseCapability` — one per declared
+> grant, `AttachOverlay` — with the computed `widens` signal in
+> context), policy versioning on both store backends (`POST
+> /capsule_policies/versions[{/version}]`, `GET/POST
+> /capsule_policies/active`), tenant overlays (`POST/GET
+> /capsules/overlays[{/name}]`) narrowing every resolution's effective
+> grants by structural intersection whether or not Cedar spoke, budget
+> composition against the run's budget and the tenant ceiling
+> (`ServerConfig::with_capsule_budget_ceiling`), and revocation at the
+> next use through core's `GrantRecheck` seam served by the server's
+> `CapsulePolicyPlane` (public — the server has no invocation route, so
+> embedders building `CapsuleHost`s plug `plane.rechecker(tenant)` into
+> them). Refinements worth naming. **`cedar-policy` is pinned to v4**
+> (resolved 4.12.0): it requires rustc ≥ 1.89 while the workspace
+> declares 1.86, so the `capsules` feature raises the effective floor
+> for feature-enabled builds only — default builds are untouched. **No
+> Cedar schema**: every request is built by typed constructors from
+> per-request JSON entities, so schema checking has no untrusted input
+> to bite on; the operator's policy text is the only free-form input,
+> parse-checked at registration. **The unconfigured posture is
+> deliberate**: a tenant with no active policy admits capsules the
+> wave-1 way (upgraded registries must not brick); enforcement begins
+> per tenant at the first activation. A build without the feature is the
+> opposite posture — every wave-2 route refuses with the typed `503
+> capsule_policy_unavailable`. **The budget split is clamp-vs-refuse**:
+> fuel, memory, wall time, and output bytes clamp (enforcement-local
+> resources the host bounds regardless) and the clamp is journaled on
+> the resolution; declared `max_tokens` / `max_cost_usd` exceeding the
+> tightest enclosing bound refuse `422` — accounting axes cannot be
+> retrofitted mid-run. **The active pointer keeps no history** (unlike
+> the executor plane's append-only activation log): one pointer file per
+> tenant on the JSON backend, a two-statement transaction flipping an
+> `active` column on Postgres — which version decided each admission is
+> pinned on the admission events themselves. **The revocation cache
+> epoch is honest**: in-process, a revocation is effective as soon as
+> the activating request completes (mutations refresh eagerly, admission
+> installs what it decided under); across processes sharing one store it
+> lands at the next restart, with a best-effort startup preload. Two
+> contract notes: `CapsuleResolution` gained four additive optional
+> fields (`policy_version`, `overlays`, `effective_grants`,
+> `clamped_budget` — serde-skipped when absent, so wave-1 goldens and
+> journals are unchanged), and `CapsuleDenial` gained an optional
+> `policy_version`, present on authorization refusals and absent on
+> wave-1 scope denials.
+
 **Wave 3 — signed receipts.** `rusty-core/src/receipt.rs`
 (`RunReceipt`, `verify_receipt`) with goldens; Ed25519 key lifecycle
 (generate, rotate, journal); server endpoints; receipt coverage of
