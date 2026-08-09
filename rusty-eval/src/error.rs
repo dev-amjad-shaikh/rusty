@@ -73,6 +73,10 @@ pub enum EvalError {
     #[error("statistics error: {0}")]
     Statistics(String),
 
+    /// Invalid source evidence or a forged failure-cluster artifact.
+    #[error("failure clustering error: {0}")]
+    Clustering(String),
+
     /// A run-level failure from the core runtime that escaped the evidence
     /// path (factory-side graph compilation, journal setup).
     #[error("runtime error: {0}")]

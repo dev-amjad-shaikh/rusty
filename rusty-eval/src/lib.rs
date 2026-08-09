@@ -1,7 +1,7 @@
 //! # Rusty Eval
 //!
 //! Rusty Eval is the foundation of Rusty's Agent TestOps plane: it turns the
-//! Flight Recorder's run evidence into release decisions. Five pieces, each
+//! Flight Recorder's run evidence into release decisions. Composable pieces,
 //! usable on its own:
 //!
 //! - **Datasets** ([`dataset`]) — versioned JSONL datasets: a header
@@ -25,6 +25,9 @@
 //!   report against a baseline: per-assertion deltas, per-case regressions
 //!   and improvements, and threshold-based regression flags (pass-rate drop,
 //!   p95 latency growth).
+//! - **Failure clustering** ([`clustering`]) — deterministic signatures group
+//!   failed runs by termination, assertions, and judge outcome, preserving
+//!   source evidence under stable cluster ids.
 //! - **Judges** ([`judge`]) — [`judge::RuleBasedJudge`] scores deterministic
 //!   expectations, while [`judge::ModelJudge`] adapts any runtime `ChatModel`
 //!   into a strict structured evaluator with local threshold enforcement.
@@ -63,6 +66,7 @@
 //! ```
 
 pub mod assertion;
+pub mod clustering;
 pub mod compare;
 pub mod dataset;
 pub mod error;
@@ -74,6 +78,11 @@ pub mod judge;
 pub mod statistics;
 
 pub use assertion::{Assertion, AssertionResult};
+pub use clustering::{
+    cluster_failures, AssertionFailureKey, ExecutionFailureCategory, FailureCause, FailureCluster,
+    FailureClusterReport, FailureEvidenceRef, FailureOccurrence, FailureSignature,
+    FailureTermination, FAILURE_CLUSTER_REPORT_FORMAT_VERSION,
+};
 pub use compare::{
     compare, AssertionDelta, CaseChange, CaseDelta, CompareThresholds, ComparisonReport,
     LatencyDelta, Regression,

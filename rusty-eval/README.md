@@ -29,6 +29,9 @@ compare(baseline, candidate) ── per-assertion deltas, per-case regressions,
       │
       ▼
 detect_pass_rate_regression ── paired exact significance + practical effect
+      │
+      ▼
+cluster_failures ── stable failure signatures, ranked clusters, evidence links
 ```
 
 ## Dataset format
@@ -70,6 +73,17 @@ when datasets, repetitions, or run keys do not match. A regression is reported
 only when the configured sample size, minimum pass-rate drop, and significance
 level are all satisfied; underpowered comparisons are explicitly
 `insufficient_evidence`, never silently treated as safe.
+
+## Failure clustering
+
+`cluster_failures` turns a validated experiment report into deterministic
+failure groups keyed by termination mode, failed assertions, and judge
+outcome. Normalized categories and fingerprints distinguish root causes while
+removing volatile ids. Clusters are ranked by frequency and retain safe source
+references, never raw errors, observations, or judge rationales. Stable
+content-derived ids track the same failure shape across experiments. The
+versioned JSON artifact is recomputed against its source report when loaded,
+so supplied counts, members, signatures, or shares cannot survive tampering.
 
 ## Judges
 
