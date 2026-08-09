@@ -1,6 +1,6 @@
 [package]
 name = "rusty-server"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -25,7 +25,7 @@ postgres = ["dep:sqlx", "rusty-agent-runtime/postgres"]
 capsules = ["dep:cedar-policy", "rusty-agent-runtime/wasm"]
 
 [dependencies]
-rusty-agent-runtime = { path = "../rusty-core", version = "0.8" }
+rusty-agent-runtime = { path = "../rusty-core", version = "0.9" }
 # Wave 4: the server-side candidate evaluator composes `rusty-eval`'s
 # experiment runner over live graph preparation plus a versioned dataset
 # source; `promote → evaluate` calls it through the learning gate.
