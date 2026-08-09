@@ -676,6 +676,58 @@
   .memory-head h1 { margin: 0; font-size: 24px; letter-spacing: -.4px; }
   .memory-head p { margin: 4px 0 0; max-width: 700px; color: var(--text-dim); }
   .memory-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .memory-assembly {
+    margin: 0 0 14px; padding: 0; overflow: hidden; border-color: #6b5335;
+    background: linear-gradient(120deg, #211b16, var(--bg-panel) 46%);
+  }
+  .memory-assembly[hidden] { display: none; }
+  .memory-assembly-head {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    padding: 14px 16px 12px; border-bottom: 1px solid #56422c;
+  }
+  .memory-assembly-head h2 { margin: 0; font-size: 17px; }
+  .memory-assembly-head p { margin: 4px 0 0; max-width: 780px; color: var(--text-dim); font-size: 11.5px; }
+  .memory-assembly-boundary {
+    display: inline-flex; gap: 6px; align-items: center; margin-top: 7px; color: #cdbf8c; font: 10px var(--mono);
+  }
+  .memory-assembly-boundary::before { content: ""; width: 7px; height: 7px; border: 1px solid #c6a65e; border-radius: 50%; }
+  .memory-assembly-body { display: grid; grid-template-columns: minmax(310px, .86fr) minmax(0, 1.35fr); }
+  .memory-assembly-form { min-width: 0; padding: 14px 16px 16px; border-right: 1px solid #56422c; }
+  .memory-assembly-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; border: 0; }
+  .memory-assembly-fields .wide { grid-column: 1 / -1; }
+  .memory-assembly label { color: var(--text-dim); font-size: 10.5px; }
+  .memory-assembly input:not([type="checkbox"]), .memory-assembly select {
+    display: block; width: 100%; min-width: 0; margin-top: 3px; padding: 7px 8px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset); color: var(--text); font: 11px var(--mono);
+  }
+  .memory-assembly input[aria-invalid="true"], .memory-assembly select[aria-invalid="true"] { border-color: var(--err); }
+  .memory-assembly-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; margin-top: 10px; }
+  .memory-assembly-checks label { display: flex; gap: 7px; align-items: flex-start; }
+  .memory-assembly-checks input { flex: 0 0 auto; margin: 1px 0 0; }
+  .memory-assembly-actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .memory-assembly-result { min-width: 0; padding: 14px 16px 16px; background: rgba(14, 17, 13, .42); }
+  .memory-assembly-result h3 { margin: 0 0 4px; font-size: 14px; }
+  .memory-budget-rail { margin: 12px 0; padding: 12px; border: 1px solid #594a2f; border-radius: 8px; background: #191713; }
+  .memory-budget-label { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .memory-budget-label b { color: #e1cf93; font: 700 15px var(--mono); }
+  .memory-budget-label span { color: var(--text-dim); font: 10px var(--mono); }
+  .memory-budget-track { position: relative; height: 14px; margin: 9px 0 7px; overflow: hidden; border: 1px solid #5b4b2d; border-radius: 999px; background: #292218; }
+  .memory-budget-used { display: block; height: 100%; background: linear-gradient(90deg, #65825a, #c1a552); }
+  .memory-budget-stop { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #f0d786; box-shadow: 0 0 8px #c39b45; }
+  .memory-budget-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .memory-budget-facts div { padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset); }
+  .memory-budget-facts b { display: block; color: #d9c681; font: 700 13px var(--mono); }
+  .memory-budget-facts span { color: var(--text-dim); font-size: 9.5px; }
+  .memory-assembly-sequence { display: flex; flex-direction: column; gap: 7px; margin-top: 11px; }
+  .memory-assembly-record { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 9px 10px; border: 1px solid #42503c; border-radius: 7px; background: #171d17; }
+  .memory-assembly-record.omitted { border-color: #6a4c30; background: #251b16; }
+  .memory-assembly-rank { color: #b8cba9; font: 700 11px var(--mono); }
+  .memory-assembly-record.omitted .memory-assembly-rank { color: #d3a37f; }
+  .memory-assembly-record strong { display: block; overflow-wrap: anywhere; }
+  .memory-assembly-record p { margin: 3px 0 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.4; overflow-wrap: anywhere; }
+  .memory-assembly-record code { display: block; margin-top: 4px; color: var(--text-faint); font-size: 9px; overflow-wrap: anywhere; }
+  .memory-assembly-note { margin-top: 10px; border-left-color: #a27c3a; }
+  .memory-assembly-error { margin: 10px 0 0; border-left-color: var(--err); }
   .memory-summary { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 8px; margin-bottom: 12px; }
   .memory-summary > div { border: 1px solid var(--border); background: var(--bg-inset); border-radius: 7px; padding: 9px 11px; }
   .memory-summary b { display: block; color: #b7cba9; font: 700 17px var(--mono); }
@@ -1304,6 +1356,8 @@
     .memory-correction-form { border-right: 0; border-bottom: 1px solid #544824; }
     .memory-governance-body { grid-template-columns: 1fr; }
     .memory-governance-form { border-right: 0; border-bottom: 1px solid #56422c; }
+    .memory-assembly-body { grid-template-columns: 1fr; }
+    .memory-assembly-form { border-right: 0; border-bottom: 1px solid #56422c; }
     .memory-follow-head { flex-direction: column; }
   }
   @media (max-width: 680px) {
@@ -1376,6 +1430,12 @@
     .memory-governance-fields .wide { grid-column: auto; }
     .memory-governance-review dl { grid-template-columns: 1fr; gap: 2px; }
     .memory-governance-review dd { margin-bottom: 6px; }
+    .memory-assembly-head { flex-direction: column; }
+    .memory-assembly-fields, .memory-assembly-checks { grid-template-columns: 1fr; }
+    .memory-assembly-fields .wide { grid-column: auto; }
+    .memory-budget-facts { grid-template-columns: 1fr; }
+    .memory-assembly-record { grid-template-columns: 28px minmax(0, 1fr); }
+    .memory-assembly-record button { grid-column: 2; justify-self: start; }
     .memory-follow-path { grid-template-columns: 1fr; }
     .memory-follow-joint { transform: rotate(90deg); }
     .memory-follow-summary dl { grid-template-columns: 1fr; gap: 2px; }
@@ -1748,10 +1808,12 @@
           </div>
           <div class="memory-head-actions">
             <span class="muted tiny" id="memory-statusline" role="status" aria-live="polite"></span>
+            <button class="small primary" id="btn-memory-assemble" aria-expanded="false" aria-controls="memory-assembly">Assemble context</button>
             <button class="small" id="btn-memory-refresh">Refresh</button>
           </div>
         </div>
 
+        <section class="card memory-assembly" id="memory-assembly" aria-labelledby="memory-assembly-title" hidden></section>
         <section class="card memory-follow" id="memory-follow" aria-labelledby="memory-follow-title" hidden></section>
         <section class="card memory-governance" id="memory-governance" aria-labelledby="memory-governance-title" hidden></section>
         <section class="card memory-correction" id="memory-correction" aria-labelledby="memory-correction-title" hidden></section>
@@ -2131,6 +2193,8 @@ const store = {
   memoryFollow: null, // connection-scoped durable consolidation task and governed-summary evidence
   memoryFollowRequest: 0,
   memoryFollowTimer: null,
+  memoryAssembly: null, // session-only exact query, ranked evidence, and token accounting preview
+  memoryAssemblyRequest: 0,
   learn: null,         // bounded candidate/version evidence, filters, selection, and action drafts
   learnUnsupported: false, // server build has no governed-learning routes
   learnRequest: 0,     // generation guard for candidate/version reads and lifecycle actions
@@ -2934,7 +2998,44 @@ class ApiError extends Error {
   }
 }
 
-async function apiForConnection(connection, method, path, body) {
+function apiResponseTooLarge(maxBytes) {
+  return new ApiError(0, { error: "response_too_large",
+    message: `Rusty returned more than ${Math.floor(maxBytes / (1024 * 1024))} MiB for this bounded Studio inspection. Narrow the query before retrying.` });
+}
+
+async function apiResponseText(res, maxBytes = 0) {
+  if (!Number.isInteger(maxBytes) || maxBytes <= 0) return res.text();
+  const declared = res.headers && typeof res.headers.get === "function" ? res.headers.get("content-length") : null;
+  if (declared && /^(?:0|[1-9][0-9]*)$/.test(declared) && Number(declared) > maxBytes) {
+    try { await res.body?.cancel(); } catch {}
+    throw apiResponseTooLarge(maxBytes);
+  }
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const text = await res.text();
+    if (agentUtf8Length(text) > maxBytes) throw apiResponseTooLarge(maxBytes);
+    return text;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "", received = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      received += chunk.value.byteLength;
+      if (received > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        throw apiResponseTooLarge(maxBytes);
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
+async function apiForConnection(connection, method, path, body, maxResponseBytes = 0) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (connection && connection.apiKey) headers["X-Api-Key"] = connection.apiKey;
@@ -2948,7 +3049,7 @@ async function apiForConnection(connection, method, path, body) {
       `${e.message} — network/CORS failure. rusty-server v0.3+ sends permissive CORS ` +
       `headers, so this usually means the server is unreachable or older; see docs/studio.md (“CORS”).` });
   }
-  const text = await res.text();
+  const text = await apiResponseText(res, maxResponseBytes);
   let json = null;
   try { json = text ? agentParseJsonWithNumberKinds(text) : null; } catch { json = { raw: text }; }
   if (!res.ok) throw new ApiError(res.status, json);
@@ -3599,6 +3700,8 @@ function connectionResetWorkspace() {
   store.memoryUnsupported = false;
   store.memoryCorrection = null;
   store.memoryGovernance = null;
+  store.memoryAssemblyRequest += 1;
+  store.memoryAssembly = null;
   store.memoryFollowRequest += 1;
   clearTimeout(store.memoryFollowTimer);
   store.memoryFollowTimer = null;
@@ -8993,9 +9096,358 @@ const MEMORY_CORRECTION_SCOPES = new Set(["run", "agent", "team", "user", "tenan
 const MEMORY_GOVERNANCE_TAG_LIMIT = 32;
 const MEMORY_CONSOLIDATION_SOURCE_LIMIT = 50;
 const MEMORY_GOVERNANCE_RECEIPT_LIMIT = 2000;
+const MEMORY_ASSEMBLY_RESULT_LIMIT = 2000;
+const MEMORY_ASSEMBLY_RENDER_LIMIT = 100;
+const MEMORY_ASSEMBLY_U32_MAX = 4294967295;
+const MEMORY_ASSEMBLY_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 function memoryRequestCurrent(requestId, requestConnection, currentRequestId, currentConnection) {
   return requestId === currentRequestId && !connectionIdentityChanged(requestConnection, currentConnection);
+}
+
+function memoryAssemblyDraft(record, returnFocus = null) {
+  const source = record && typeof record === "object" ? record : {};
+  const scope = source.scope && typeof source.scope === "object" ? source.scope : {};
+  return {
+    open: true,
+    scopeType: MEMORY_CORRECTION_SCOPES.has(String(scope.scope)) ? String(scope.scope) : "tenant",
+    scopeId: typeof scope.id === "string" ? scope.id : "",
+    kind: ["fact", "preference", "example", "summary"].includes(String(source.kind)) ? String(source.kind) : "",
+    key: typeof source.key === "string" ? source.key : "",
+    tagsText: "",
+    minConfidence: "",
+    authorType: "",
+    authorId: "",
+    validAt: "",
+    asOf: "",
+    candidatesOnly: false,
+    includeExpired: false,
+    includeSuperseded: false,
+    maxTokens: "4096",
+    marginPercent: "20",
+    overflow: "truncate",
+    submitting: false,
+    fieldErrors: Object.create(null),
+    error: "",
+    result: null,
+    returnFocus: returnFocus || { type: "launcher" },
+  };
+}
+
+function memoryAssemblyUnsigned(value, minimum, maximum) {
+  const raw = String(value == null ? "" : value);
+  if (!/^(0|[1-9][0-9]*)$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : null;
+}
+
+function memoryAssemblyTimestamp(value) {
+  const raw = String(value == null ? "" : value);
+  if (!raw) return { value: null, error: "" };
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(raw);
+  const values = match ? match.slice(1).map(Number) : [];
+  const [year, month, day, hour, minute, second, offsetHour = 0, offsetMinute = 0] = values;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (agentUtf8Length(raw) > 64 || /[\u0000-\u001f\u007f]/.test(raw) || !match || month < 1 || month > 12 ||
+      day < 1 || day > monthDays[month - 1] || hour > 23 || minute > 59 || second > 59 ||
+      offsetHour > 23 || offsetMinute > 59 || !Number.isFinite(Date.parse(raw))) {
+    return { value: null, error: "Use an RFC 3339 instant, for example 2026-08-09T06:00:00Z." };
+  }
+  return { value: raw, error: "" };
+}
+
+function memoryAssemblyTags(raw) {
+  const text = String(raw == null ? "" : raw);
+  if (agentUtf8Length(text) > 8192) return { tags: [], error: "The tag list must be 8 KiB or smaller." };
+  const tags = Array.from(new Set(text.split(",").map((tag) => tag.trim()).filter(Boolean)));
+  if (tags.length > MEMORY_GOVERNANCE_TAG_LIMIT) return { tags: [], error: `Use at most ${MEMORY_GOVERNANCE_TAG_LIMIT} tags.` };
+  if (tags.some((tag) => !memoryCorrectionWireText(tag))) {
+    return { tags: [], error: "Every tag must be at most 256 UTF-8 bytes and contain no control characters." };
+  }
+  return { tags, error: "" };
+}
+
+function memoryAssemblyValidateDraft(draft) {
+  const d = draft || {};
+  const errors = Object.create(null);
+  const scopeType = String(d.scopeType || "");
+  const scopeId = String(d.scopeId == null ? "" : d.scopeId);
+  const kind = String(d.kind || "");
+  const key = String(d.key == null ? "" : d.key);
+  const authorType = String(d.authorType || "");
+  const authorId = String(d.authorId == null ? "" : d.authorId);
+  const tags = memoryAssemblyTags(d.tagsText);
+  const validAt = memoryAssemblyTimestamp(d.validAt);
+  const asOf = memoryAssemblyTimestamp(d.asOf);
+  const maxTokens = memoryAssemblyUnsigned(d.maxTokens, 1, MEMORY_ASSEMBLY_U32_MAX);
+  const marginPercent = memoryAssemblyUnsigned(d.marginPercent, 0, MEMORY_ASSEMBLY_U32_MAX);
+  let minConfidence = null;
+  if (String(d.minConfidence == null ? "" : d.minConfidence) !== "") {
+    const raw = String(d.minConfidence);
+    minConfidence = Number(raw);
+    if (!/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(raw) || !Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) {
+      errors.minConfidence = "Use a confidence from 0 through 1.";
+    }
+  }
+  if (!MEMORY_CORRECTION_SCOPES.has(scopeType)) errors.scopeType = "Choose one supported memory scope.";
+  if (!memoryCorrectionWireText(scopeId)) errors.scopeId = "Enter the exact scope identity (1–256 UTF-8 bytes, no control characters).";
+  if (kind && !["fact", "preference", "example", "summary"].includes(kind)) errors.kind = "Choose a supported memory kind.";
+  if (key && !memoryCorrectionWireText(key)) errors.key = "The exact key must be at most 256 UTF-8 bytes and contain no control characters.";
+  if (tags.error) errors.tagsText = tags.error;
+  if (validAt.error) errors.validAt = validAt.error;
+  if (asOf.error) errors.asOf = asOf.error;
+  if (!["", "system", "human", "agent", "distiller"].includes(authorType)) errors.authorType = "Choose a supported author type.";
+  if (authorType && authorType !== "system" && !memoryCorrectionWireText(authorId)) {
+    errors.authorId = "Enter the exact author identity (1–256 UTF-8 bytes, no control characters).";
+  }
+  if (maxTokens == null) errors.maxTokens = `Use a whole-token budget from 1 through ${MEMORY_ASSEMBLY_U32_MAX}.`;
+  if (marginPercent == null) errors.marginPercent = `Use a whole-number margin from 0 through ${MEMORY_ASSEMBLY_U32_MAX}.`;
+  if (!["truncate", "fail"].includes(String(d.overflow))) errors.overflow = "Choose truncate or hard fail.";
+  const order = ["scopeType", "scopeId", "kind", "key", "tagsText", "minConfidence", "authorType", "authorId", "validAt", "asOf", "maxTokens", "marginPercent", "overflow"];
+  const first = order.find((field) => errors[field]) || "";
+  let authoredBy = null;
+  if (authorType === "system") authoredBy = { type: "system" };
+  if (authorType === "human") authoredBy = { type: "human", human_id: authorId };
+  if (authorType === "agent") authoredBy = { type: "agent", agent_id: authorId };
+  if (authorType === "distiller") authoredBy = { type: "distiller", name: authorId };
+  const query = {
+    scope: { scope: scopeType, id: scopeId },
+    ...(kind ? { kinds: [kind] } : {}),
+    ...(key ? { key } : {}),
+    ...(tags.tags.length ? { tags: tags.tags } : {}),
+    ...(validAt.value ? { valid_at: validAt.value } : {}),
+    ...(minConfidence != null && !errors.minConfidence ? { min_confidence: minConfidence } : {}),
+    ...(d.includeExpired ? { include_expired: true } : {}),
+    ...(d.includeSuperseded ? { include_superseded: true } : {}),
+    ...(authoredBy ? { authored_by: authoredBy } : {}),
+    ...(d.candidatesOnly ? { candidates_only: true } : {}),
+    ...(asOf.value ? { as_of: asOf.value } : {}),
+  };
+  return {
+    valid: !first, errors, first,
+    query: first ? null : query,
+    budget: first ? null : { max_tokens: maxTokens, margin_percent: marginPercent, overflow: String(d.overflow) },
+  };
+}
+
+function memoryAssemblyRecords(value) {
+  if (!Array.isArray(value) || value.length > MEMORY_ASSEMBLY_RESULT_LIMIT) return null;
+  const seen = new Set();
+  const records = [];
+  for (const record of value) {
+    if (!record || typeof record !== "object" || Array.isArray(record) || !memoryCorrectionMemoryId(record.memory_id) ||
+        seen.has(record.memory_id) || memoryAssemblyPriority(record) == null || typeof record.confidence !== "number" ||
+        !Number.isFinite(record.confidence) || record.confidence <= 0 || record.confidence > 1 ||
+        !memoryAssemblyRecordContract(record)) return null;
+    seen.add(record.memory_id);
+    records.push(record);
+  }
+  return records;
+}
+
+function memoryAssemblyAuthorContract(author) {
+  if (!author || typeof author !== "object" || Array.isArray(author)) return false;
+  if (author.type === "system") return true;
+  if (author.type === "human") return memoryCorrectionWireText(author.human_id);
+  if (author.type === "agent") return memoryCorrectionWireText(author.agent_id);
+  if (author.type === "distiller") return memoryCorrectionWireText(author.name);
+  return false;
+}
+
+function memoryAssemblyInstantNanos(value) {
+  const raw = typeof value === "string" ? value : "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(raw);
+  if (!match || memoryAssemblyTimestamp(raw).error) return null;
+  const [, year, month, day, hour, minute, second, fraction = "", zone, sign = "+", offsetHour = "00", offsetMinute = "00"] = match;
+  const utcMilliseconds = Date.parse(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+  if (!Number.isFinite(utcMilliseconds) || !Number.isInteger(utcMilliseconds)) return null;
+  const fractionNanos = BigInt(fraction.padEnd(9, "0") || "0");
+  const offsetSeconds = (Number(offsetHour) * 60 + Number(offsetMinute)) * 60;
+  const signedOffset = zone === "Z" ? 0 : (sign === "+" ? offsetSeconds : -offsetSeconds);
+  return BigInt(utcMilliseconds) * 1000000n + fractionNanos - BigInt(signedOffset) * 1000000000n;
+}
+
+function memoryAssemblyRequiredTimestamp(value) {
+  return memoryAssemblyInstantNanos(value) != null;
+}
+
+function memoryAssemblyRecordContract(record) {
+  const scope = record.scope, provenance = record.provenance, validity = record.validity, content = record.content;
+  const tags = record.tags === undefined ? [] : record.tags;
+  if (!["fact", "preference", "example", "summary"].includes(record.kind) ||
+      !scope || typeof scope !== "object" || Array.isArray(scope) || !MEMORY_CORRECTION_SCOPES.has(scope.scope) ||
+      !memoryCorrectionWireText(scope.id) || (record.key !== undefined && typeof record.key !== "string") ||
+      !Array.isArray(tags) || tags.length > 256 || tags.some((tag) => typeof tag !== "string" || !memoryCorrectionWireText(tag)) ||
+      !provenance || typeof provenance !== "object" || Array.isArray(provenance) || !memoryAssemblyAuthorContract(provenance.author) ||
+      !memoryAssemblyRequiredTimestamp(provenance.written_at) || !memoryAssemblyRequiredTimestamp(record.created_at) ||
+      !validity || typeof validity !== "object" || Array.isArray(validity) || !memoryAssemblyRequiredTimestamp(validity.valid_from) ||
+      (validity.valid_until !== undefined && !memoryAssemblyRequiredTimestamp(validity.valid_until)) ||
+      (record.expires_at !== undefined && !memoryAssemblyRequiredTimestamp(record.expires_at)) ||
+      (record.supersedes !== undefined && !memoryCorrectionMemoryId(record.supersedes)) ||
+      (record.candidacy !== undefined && record.candidacy !== "pending") ||
+      !content || typeof content !== "object" || Array.isArray(content) || !["inline", "artifact"].includes(content.kind)) return false;
+  const bytes = memoryAssemblyContentBytes(record);
+  if (bytes == null) return false;
+  if (content.kind === "artifact") {
+    const reference = content.value && typeof content.value === "object" && !Array.isArray(content.value) ? content.value : null;
+    if (!reference || !memoryCorrectionMemoryId(reference.sha256)) return false;
+  }
+  return true;
+}
+
+function memoryAssemblyPriority(record) {
+  if (!record || record.priority === undefined) return 0n;
+  const token = record[AGENT_NUMBER_TOKENS] && record[AGENT_NUMBER_TOKENS].priority;
+  const raw = typeof token === "string" ? token : String(record.priority);
+  if (!/^-?(?:0|[1-9][0-9]*)$/.test(raw)) return null;
+  try {
+    const value = BigInt(raw);
+    return value >= -9223372036854775808n && value <= 9223372036854775807n ? value : null;
+  } catch { return null; }
+}
+
+function memoryAssemblyRankComparator(left, right) {
+  const a = memoryAssemblyPriority(left), b = memoryAssemblyPriority(right);
+  if (a == null || b == null) return null;
+  if (a !== b) return a > b ? -1 : 1;
+  if (left.confidence !== right.confidence) return left.confidence > right.confidence ? -1 : 1;
+  const aTime = memoryAssemblyInstantNanos(left.created_at), bTime = memoryAssemblyInstantNanos(right.created_at);
+  if (aTime == null || bTime == null) return null;
+  if (aTime !== bTime) return aTime > bTime ? -1 : 1;
+  return left.memory_id < right.memory_id ? -1 : left.memory_id > right.memory_id ? 1 : 0;
+}
+
+function memoryAssemblyRanked(records) {
+  const list = Array.isArray(records) ? records : [];
+  for (let index = 1; index < list.length; index++) {
+    const order = memoryAssemblyRankComparator(list[index - 1], list[index]);
+    if (order == null || order > 0) return false;
+  }
+  return true;
+}
+
+function memoryAssemblyCompactJson(value, parent = null, key = "", seen = new Set()) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    const token = parent && parent[AGENT_NUMBER_TOKENS] && parent[AGENT_NUMBER_TOKENS][key];
+    if (typeof token === "string") return token;
+    if (!Number.isFinite(value) || Object.is(value, -0) || (Number.isInteger(value) && !Number.isSafeInteger(value))) return null;
+    return JSON.stringify(value);
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return null;
+  seen.add(value);
+  let text;
+  if (Array.isArray(value)) {
+    const parts = value.map((item, index) => memoryAssemblyCompactJson(item, value, String(index), seen));
+    text = parts.some((item) => item == null) ? null : `[${parts.join(",")}]`;
+  } else {
+    const parts = [];
+    for (const [childKey, item] of Object.entries(value)) {
+      const rendered = memoryAssemblyCompactJson(item, value, childKey, seen);
+      if (rendered == null) { text = null; break; }
+      parts.push(`${JSON.stringify(childKey)}:${rendered}`);
+    }
+    if (text !== null) text = `{${parts.join(",")}}`;
+  }
+  seen.delete(value);
+  return text;
+}
+
+function memoryAssemblyContentBytes(record) {
+  const content = record && record.content;
+  if (!content || typeof content !== "object") return null;
+  if (content.kind === "inline") {
+    const serialized = memoryAssemblyCompactJson(content.value);
+    return serialized == null ? null : BigInt(agentUtf8Length(serialized));
+  }
+  if (content.kind === "artifact") {
+    const reference = content.value && typeof content.value === "object" ? content.value : content;
+    const token = reference[AGENT_NUMBER_TOKENS] && reference[AGENT_NUMBER_TOKENS].bytes;
+    const raw = typeof token === "string" ? token : String(reference.bytes);
+    if (!/^(?:0|[1-9][0-9]*)$/.test(raw)) return null;
+    try {
+      const bytes = BigInt(raw);
+      return bytes <= 18446744073709551615n ? bytes : null;
+    } catch { return null; }
+  }
+  return null;
+}
+
+function memoryAssemblyEstimatedTokens(record, marginPercent) {
+  const bytes = memoryAssemblyContentBytes(record);
+  if (bytes == null || !Number.isInteger(marginPercent) || marginPercent < 0) return null;
+  const base = (bytes + 3n) / 4n;
+  const scaled = base * (100n + BigInt(marginPercent)) / 100n;
+  return Number(scaled > 4294967295n ? 4294967295n : scaled);
+}
+
+function memoryAssemblyUsedTokens(records, marginPercent) {
+  let used = 0;
+  for (const record of Array.isArray(records) ? records : []) {
+    const cost = memoryAssemblyEstimatedTokens(record, marginPercent);
+    if (cost == null) return null;
+    used = Math.min(MEMORY_ASSEMBLY_U32_MAX, used + cost);
+  }
+  return used;
+}
+
+function memoryAssemblySameRecord(left, right) {
+  const a = memoryAssemblyCompactJson(left), b = memoryAssemblyCompactJson(right);
+  return a != null && b != null && a === b;
+}
+
+function memoryAssemblyValidateResult(assemblyBody, rankedBody, expectedBudget) {
+  const assembly = assemblyBody && typeof assemblyBody === "object" && !Array.isArray(assemblyBody) ? assemblyBody : {};
+  const accounting = assembly.token_accounting && typeof assembly.token_accounting === "object" && !Array.isArray(assembly.token_accounting)
+    ? assembly.token_accounting : {};
+  const packed = memoryAssemblyRecords(assembly.records);
+  const ranked = memoryAssemblyRecords(rankedBody && rankedBody.records);
+  const comparison = ranked && memoryAssemblyRanked(ranked) ? ranked : null;
+  const ids = Array.isArray(assembly.memory_ids) ? assembly.memory_ids : null;
+  const exactIds = packed && ids && ids.length === packed.length && ids.every((id, index) =>
+    memoryCorrectionMemoryId(id) && id === packed[index].memory_id);
+  const prefix = packed && comparison && packed.length <= comparison.length && packed.every((record, index) => memoryAssemblySameRecord(record, comparison[index]));
+  const integers = [accounting.bytes_per_token, accounting.margin_percent, accounting.budget_tokens, accounting.used_tokens]
+    .every((value) => Number.isInteger(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER);
+  const budget = expectedBudget || {};
+  const computedUsed = packed ? memoryAssemblyUsedTokens(packed, accounting.margin_percent) : null;
+  if (!packed || !exactIds || typeof assembly.truncated !== "boolean" || !integers ||
+      !memoryAssemblyRanked(packed) || accounting.bytes_per_token !== 4 || accounting.budget_tokens !== budget.max_tokens ||
+      accounting.margin_percent !== budget.margin_percent || accounting.used_tokens > accounting.budget_tokens ||
+      computedUsed == null || accounting.used_tokens !== computedUsed) {
+    return { ok: false, error: "Rusty returned context evidence that does not match its deterministic rank and exact token-accounting contract." };
+  }
+  const comparisonCorroborated = Boolean(comparison && prefix && (assembly.truncated ? comparison.length > packed.length : comparison.length === packed.length));
+  return {
+    ok: true,
+    result: {
+      records: packed,
+      ranked: comparison || [],
+      accounting: { ...accounting },
+      truncated: assembly.truncated,
+      comparisonState: !comparison ? "unavailable" : (comparisonCorroborated ? "corroborated" : "changed"),
+      comparisonFirst: comparisonCorroborated && assembly.truncated ? comparison[packed.length] || null : null,
+      comparisonOmittedCount: comparisonCorroborated && assembly.truncated ? Math.max(0, comparison.length - packed.length) : 0,
+      hardFailure: false,
+    },
+  };
+}
+
+function memoryAssemblyErrorText(error) {
+  const status = Number(error && error.status);
+  const body = error && error.body || {};
+  if (status === 404 && Object.prototype.hasOwnProperty.call(body, "raw")) {
+    return "This server build does not expose the governed context-assembly route.";
+  }
+  if (status === 422) return String(body.message || "The filtered memory set exceeds the declared hard token budget.");
+  return String(body.message || error && error.message || "Context could not be assembled.");
+}
+
+function memoryAssemblyHardOverflow(error) {
+  const body = error && error.body || {};
+  return Number(error && error.status) === 422 && body.error === "unprocessable" &&
+    typeof body.message === "string" && body.message.startsWith("invalid state update: memory assembly exceeds the context budget:");
 }
 
 function memoryScopeEqual(left, right) {
@@ -9531,7 +9983,8 @@ function memoryContentValue(record) {
   const content = record && record.content;
   if (content && typeof content === "object" && content.kind === "inline") return content.value;
   if (content && typeof content === "object" && content.kind === "artifact") {
-    return { artifact: content.sha256 || "unresolved", bytes: content.bytes ?? null };
+    const reference = content.value && typeof content.value === "object" ? content.value : content;
+    return { artifact: reference.sha256 || "unresolved", bytes: reference.bytes ?? null };
   }
   return content === undefined ? null : content;
 }
@@ -9843,6 +10296,7 @@ function memoryDetailHtml(record, context) {
     `<div class="muted tiny">Immutable record · learned ${escapeHtml(r.created_at || provenance.written_at || "time unavailable")}</div>` +
     (memoryCorrectionMemoryId(r.memory_id)
       ? `<div class="memory-detail-actions"><button class="small memory-correct-button" type="button" data-memory-correct="${escapeHtml(String(r.memory_id))}">Correct this memory</button>` +
+        `<button class="small" type="button" data-memory-assemble-record="${escapeHtml(String(r.memory_id))}">Preview this scope in context</button>` +
         (consolidationAvailable ? `<button class="small" type="button" data-memory-consolidate-record="${escapeHtml(String(r.memory_id))}">Plan consolidation</button>` : "") +
         `</div>`
       : `<div class="muted tiny memory-correct-button">Correction unavailable: invalid immutable identity.</div>`) + `</div>` +
@@ -9867,6 +10321,278 @@ function memoryDetailHtml(record, context) {
   html += `<details class="memory-manifest"><summary>Raw immutable record</summary>` +
     `<pre class="json">${escapeHtml(memoryJsonText(r, 20000))}</pre></details>`;
   return html;
+}
+
+function memoryAssemblyFieldError(draft, field) {
+  const message = draft && draft.fieldErrors && draft.fieldErrors[field];
+  return message ? `<span class="field-error" id="memory-assembly-error-${field}">${escapeHtml(message)}</span>` : "";
+}
+
+function memoryAssemblyInvalid(draft, field) {
+  return draft && draft.fieldErrors && draft.fieldErrors[field]
+    ? ` aria-invalid="true" aria-describedby="memory-assembly-error-${field}"` : "";
+}
+
+function memoryAssemblyRecordHtml(record, rank, comparison) {
+  const r = record || {};
+  const title = r.key || `${r.kind || "Memory"} record`;
+  const identity = String(r.memory_id || "unknown");
+  const priority = memoryAssemblyPriority(r);
+  return `<article class="memory-assembly-record${comparison ? " omitted" : ""}" aria-label="${comparison ? "Observed after the exact assembly" : "Included"} rank ${rank}, ${escapeHtml(title)}, record ${escapeHtml(shortId(identity))}">` +
+    `<span class="memory-assembly-rank">#${rank}</span><div><strong>${escapeHtml(title)}</strong>` +
+    `<p>${escapeHtml(memoryPlainPreview(memoryContentValue(r), 220))}</p>` +
+    `<code>priority ${escapeHtml(priority == null ? "invalid" : priority.toString())} · confidence ${escapeHtml(String(r.confidence))} · ${escapeHtml(r.created_at || "time unavailable")}</code></div>` +
+    `<button class="small" type="button" data-memory-assembly-inspect="${escapeHtml(identity)}" aria-label="Inspect ${escapeHtml(title)} record ${escapeHtml(shortId(identity))} in the memory ledger">Inspect</button></article>`;
+}
+
+function memoryAssemblyResultHtml(draft) {
+  const result = draft && draft.result;
+  if (draft && draft.submitting) {
+    return `<div class="empty"><h3>Assembling context…</h3><p>Rusty is returning one exact budgeted assembly and one separate live rank comparison.</p></div>`;
+  }
+  if (!result) {
+    return `<div class="empty"><h3>Context chamber</h3><p>Run the preview to see the exact ranked prefix Rusty would place inside this budget. No run or journal event is created.</p></div>`;
+  }
+  if (result.hardFailure) {
+    return `<h3>Hard budget held</h3><div class="note memory-assembly-note" role="status">${escapeHtml(result.message)}</div>` +
+      `<p class="muted tiny">Rusty returned no partial assembly because overflow is set to hard fail. ${result.comparisonState === "unavailable" ?
+        "The separate live comparison was unavailable or exceeded Studio's inspection ceiling; the exact 422 still proves that the filtered set did not fit, but it does not identify which record crossed the budget." :
+        `A separate live comparison found ${result.ranked.length} matching record${result.ranked.length === 1 ? "" : "s"}, but the 422 response does not identify which record crossed the budget.`}</p>`;
+  }
+  const accounting = result.accounting || {};
+  const budget = Math.max(1, Number(accounting.budget_tokens) || 1);
+  const used = Math.max(0, Number(accounting.used_tokens) || 0);
+  const reserve = Math.max(0, budget - used);
+  const percent = Math.max(0, Math.min(100, used / budget * 100));
+  const shown = result.records.slice(0, MEMORY_ASSEMBLY_RENDER_LIMIT);
+  return `<h3>${result.records.length ? "Assembled context" : "No matching context"}</h3>` +
+    `<p class="muted tiny">Server-ranked evidence from the live namespace or its active governed memory-set overlay. Expiry was pinned at ${escapeHtml(result.asOf || "the submission instant")}; this preview does not reveal which backing lens served.</p>` +
+    `<div class="memory-budget-rail"><div class="memory-budget-label"><b>${used.toLocaleString()} / ${budget.toLocaleString()} estimated tokens</b>` +
+      `<span>${escapeHtml(String(accounting.bytes_per_token))} content bytes/token · ${escapeHtml(String(accounting.margin_percent))}% safety margin</span></div>` +
+      `<div class="memory-budget-track" role="meter" aria-label="Context token budget" aria-valuemin="0" aria-valuemax="${budget}" aria-valuenow="${used}" aria-valuetext="${used} of ${budget} estimated tokens used; ${reserve} remain">` +
+        `<span class="memory-budget-used" style="width:${percent.toFixed(2)}%"></span><span class="memory-budget-stop" style="left:${Math.min(99.5, percent).toFixed(2)}%" aria-hidden="true"></span></div>` +
+      `<div class="memory-budget-facts"><div><b>${result.records.length}</b><span>included in exact rank order</span></div>` +
+        `<div><b>${reserve.toLocaleString()}</b><span>estimated tokens remain</span></div><div><b>${result.truncated ? "yes" : "no"}</b><span>server reported truncation</span></div></div></div>` +
+    (shown.length ? `<div class="memory-assembly-sequence" aria-label="Included context in rank order"><h3>Included evidence</h3>` +
+      shown.map((record, index) => memoryAssemblyRecordHtml(record, index + 1, false)).join("") + `</div>` : `<div class="empty">No governed memory matched this exact query.</div>`) +
+    (result.records.length > shown.length ? `<div class="note memory-assembly-note">Showing the first ${shown.length} of ${result.records.length} included records. The complete ordered identity list was validated but is not rendered to keep Studio responsive.</div>` : "") +
+    (result.comparisonFirst ? `<div class="memory-assembly-sequence" aria-label="Separate live rank comparison"><h3>Observed after the stop</h3>` +
+      memoryAssemblyRecordHtml(result.comparisonFirst, result.records.length + 1, true) +
+      `<div class="note memory-assembly-note">A separate immediate read observed this as the next-ranked record, with ${Math.max(0, result.comparisonOmittedCount - 1)} lower-ranked match${result.comparisonOmittedCount - 1 === 1 ? "" : "es"}. It corroborates the stop but is not an atomic omission receipt; memory or an active overlay can change between reads.</div></div>` :
+      (result.comparisonState === "changed" ? `<div class="note memory-assembly-note">The separate live rank comparison changed before it could corroborate this assembly. The included assembly and accounting remain exact; Studio makes no claim about the current omission boundary.</div>` :
+        (result.comparisonState === "unavailable" ? `<div class="note memory-assembly-note">The separate live rank comparison was unavailable, malformed, or exceeded Studio's ${Math.floor(MEMORY_ASSEMBLY_RESPONSE_BYTES / (1024 * 1024))} MiB inspection ceiling. The included assembly and accounting remain exact; Studio makes no current omission-boundary claim.</div>` : "")));
+}
+
+function memoryAssemblyFormHtml(draft) {
+  const d = draft || memoryAssemblyDraft(null);
+  const authorNeedsId = d.authorType && d.authorType !== "system";
+  return `<div class="memory-assembly-head"><div><h2 id="memory-assembly-title" tabindex="-1">Context assembly lab</h2>` +
+    `<p>Compose the same structural memory query an agent can use, then inspect Rusty's deterministic included order, token packing, and separately corroborated truncation evidence before a live run depends on it.</p>` +
+    `<span class="memory-assembly-boundary">Read-only preview · no run ID · no journal event · no browser persistence</span></div>` +
+    `<button class="small" type="button" data-memory-assembly-close aria-label="Close context assembly lab">Close</button></div>` +
+    `<div class="memory-assembly-body"><form class="memory-assembly-form" id="memory-assembly-form"><fieldset class="memory-assembly-fields" ${d.submitting ? "disabled" : ""}>` +
+      `<label>Scope type<select id="sel-memory-assembly-scope"${memoryAssemblyInvalid(d, "scopeType")}>` +
+        ["run", "agent", "team", "user", "tenant"].map((value) => `<option value="${value}" ${d.scopeType === value ? "selected" : ""}>${value[0].toUpperCase() + value.slice(1)}</option>`).join("") +
+        `</select>${memoryAssemblyFieldError(d, "scopeType")}</label>` +
+      `<label>Exact scope ID<input id="inp-memory-assembly-scope-id" value="${escapeHtml(d.scopeId)}" autocomplete="off"${memoryAssemblyInvalid(d, "scopeId")}>${memoryAssemblyFieldError(d, "scopeId")}</label>` +
+      `<label>Kind<select id="sel-memory-assembly-kind"${memoryAssemblyInvalid(d, "kind")}><option value="">All kinds</option>` +
+        ["fact", "preference", "example", "summary"].map((value) => `<option value="${value}" ${d.kind === value ? "selected" : ""}>${value[0].toUpperCase() + value.slice(1)}</option>`).join("") +
+        `</select>${memoryAssemblyFieldError(d, "kind")}</label>` +
+      `<label>Exact key<input id="inp-memory-assembly-key" value="${escapeHtml(d.key)}" autocomplete="off" placeholder="optional"${memoryAssemblyInvalid(d, "key")}>${memoryAssemblyFieldError(d, "key")}</label>` +
+      `<label class="wide">Required tags<input id="inp-memory-assembly-tags" value="${escapeHtml(d.tagsText)}" autocomplete="off" placeholder="comma-separated; every tag must match"${memoryAssemblyInvalid(d, "tagsText")}>${memoryAssemblyFieldError(d, "tagsText")}</label>` +
+      `<label>Minimum confidence<input id="inp-memory-assembly-confidence" inputmode="decimal" value="${escapeHtml(d.minConfidence)}" placeholder="optional, 0–1"${memoryAssemblyInvalid(d, "minConfidence")}>${memoryAssemblyFieldError(d, "minConfidence")}</label>` +
+      `<label>Author type<select id="sel-memory-assembly-author"${memoryAssemblyInvalid(d, "authorType")}><option value="">Any author</option>` +
+        ["system", "human", "agent", "distiller"].map((value) => `<option value="${value}" ${d.authorType === value ? "selected" : ""}>${value[0].toUpperCase() + value.slice(1)}</option>`).join("") +
+        `</select>${memoryAssemblyFieldError(d, "authorType")}</label>` +
+      `<label class="wide">Exact author ID<input id="inp-memory-assembly-author-id" value="${escapeHtml(d.authorId)}" autocomplete="off" placeholder="human, agent, or distiller identity" ${authorNeedsId ? "" : "disabled"}${memoryAssemblyInvalid(d, "authorId")}>${memoryAssemblyFieldError(d, "authorId")}</label>` +
+      `<label>True at<input id="inp-memory-assembly-valid-at" value="${escapeHtml(d.validAt)}" autocomplete="off" placeholder="RFC 3339, optional"${memoryAssemblyInvalid(d, "validAt")}>${memoryAssemblyFieldError(d, "validAt")}</label>` +
+      `<label>Expiry evaluated at<input id="inp-memory-assembly-as-of" value="${escapeHtml(d.asOf)}" autocomplete="off" placeholder="RFC 3339, optional"${memoryAssemblyInvalid(d, "asOf")}>${memoryAssemblyFieldError(d, "asOf")}</label>` +
+      `<label>Token budget<input id="inp-memory-assembly-tokens" inputmode="numeric" value="${escapeHtml(d.maxTokens)}"${memoryAssemblyInvalid(d, "maxTokens")}>${memoryAssemblyFieldError(d, "maxTokens")}</label>` +
+      `<label>Safety margin %<input id="inp-memory-assembly-margin" inputmode="numeric" value="${escapeHtml(d.marginPercent)}"${memoryAssemblyInvalid(d, "marginPercent")}>${memoryAssemblyFieldError(d, "marginPercent")}</label>` +
+      `<label class="wide">When the next record does not fit<select id="sel-memory-assembly-overflow"${memoryAssemblyInvalid(d, "overflow")}>` +
+        `<option value="truncate" ${d.overflow === "truncate" ? "selected" : ""}>Stop and return the ranked prefix</option>` +
+        `<option value="fail" ${d.overflow === "fail" ? "selected" : ""}>Fail without returning partial context</option></select>${memoryAssemblyFieldError(d, "overflow")}</label>` +
+    `</fieldset><div class="memory-assembly-checks">` +
+      `<label><input id="chk-memory-assembly-candidates" type="checkbox" ${d.candidatesOnly ? "checked" : ""} ${d.submitting ? "disabled" : ""}>Pending candidates only</label>` +
+      `<label><input id="chk-memory-assembly-expired" type="checkbox" ${d.includeExpired ? "checked" : ""} ${d.submitting ? "disabled" : ""}>Include expired evidence</label>` +
+      `<label><input id="chk-memory-assembly-superseded" type="checkbox" ${d.includeSuperseded ? "checked" : ""} ${d.submitting ? "disabled" : ""}>Include superseded evidence</label>` +
+    `</div>` +
+    (d.error ? `<div class="note memory-assembly-error" role="alert" tabindex="-1" id="memory-assembly-error">${escapeHtml(d.error)}</div>` : "") +
+    `<div class="memory-assembly-actions"><span class="muted tiny">Exact structural retrieval; no semantic similarity claim.</span>` +
+      `<button class="primary" id="btn-memory-assembly-run" type="submit" ${d.submitting ? "disabled" : ""}>${d.submitting ? "Assembling…" : "Preview context"}</button></div></form>` +
+    `<div class="memory-assembly-result" id="memory-assembly-result" tabindex="-1" aria-live="polite">${memoryAssemblyResultHtml(d)}</div></div>`;
+}
+
+function memoryAssemblyReadForm(draft) {
+  const d = draft;
+  d.scopeType = $("sel-memory-assembly-scope").value;
+  d.scopeId = $("inp-memory-assembly-scope-id").value;
+  d.kind = $("sel-memory-assembly-kind").value;
+  d.key = $("inp-memory-assembly-key").value;
+  d.tagsText = $("inp-memory-assembly-tags").value;
+  d.minConfidence = $("inp-memory-assembly-confidence").value;
+  d.authorType = $("sel-memory-assembly-author").value;
+  d.authorId = $("inp-memory-assembly-author-id").value;
+  d.validAt = $("inp-memory-assembly-valid-at").value;
+  d.asOf = $("inp-memory-assembly-as-of").value;
+  d.maxTokens = $("inp-memory-assembly-tokens").value;
+  d.marginPercent = $("inp-memory-assembly-margin").value;
+  d.overflow = $("sel-memory-assembly-overflow").value;
+  d.candidatesOnly = $("chk-memory-assembly-candidates").checked;
+  d.includeExpired = $("chk-memory-assembly-expired").checked;
+  d.includeSuperseded = $("chk-memory-assembly-superseded").checked;
+  return d;
+}
+
+function memoryAssemblyMarkEdited() {
+  const draft = store.memoryAssembly;
+  if (!draft || draft.submitting) return;
+  draft.result = null;
+  draft.error = "";
+  draft.fieldErrors = Object.create(null);
+  const form = $("memory-assembly-form");
+  form?.querySelectorAll('[aria-invalid="true"]').forEach((field) => {
+    field.removeAttribute("aria-invalid");
+    field.removeAttribute("aria-describedby");
+  });
+  form?.querySelectorAll(".field-error").forEach((error) => error.remove());
+  $("memory-assembly-error")?.remove();
+  const result = $("memory-assembly-result");
+  if (result) result.innerHTML = `<div class="empty"><h3>Parameters changed</h3><p>Run the preview again to replace the previous evidence with an exact assembly for these values.</p></div>`;
+}
+
+function memoryAssemblyCaptureFocus() {
+  const panel = $("memory-assembly");
+  const active = document.activeElement;
+  if (!panel || !active || !panel.contains(active)) return null;
+  return { id: active.id || null,
+    start: typeof active.selectionStart === "number" ? active.selectionStart : null,
+    end: typeof active.selectionEnd === "number" ? active.selectionEnd : null };
+}
+
+function memoryAssemblyRestoreFocus(target) {
+  if (!target) return;
+  let next = target.id ? $(target.id) : $("memory-assembly-title");
+  if (next && next.disabled) next = $("memory-assembly-result") || $("memory-assembly-title");
+  if (!next) return;
+  next.focus({ preventScroll: true });
+  if (target.start != null && typeof next.setSelectionRange === "function") {
+    const maximum = String(next.value || "").length;
+    next.setSelectionRange(Math.min(target.start, maximum), Math.min(target.end == null ? target.start : target.end, maximum));
+  }
+}
+
+function memoryAssemblyRender() {
+  const panel = $("memory-assembly");
+  const draft = store.memoryAssembly;
+  $("btn-memory-assemble").setAttribute("aria-expanded", draft && draft.open ? "true" : "false");
+  panel.hidden = !(draft && draft.open);
+  if (!draft || !draft.open) { panel.innerHTML = ""; return; }
+  const focus = memoryAssemblyCaptureFocus();
+  panel.innerHTML = memoryAssemblyFormHtml(draft);
+  memoryAssemblyRestoreFocus(focus);
+}
+
+function memoryAssemblyOpen(record, returnFocus = null) {
+  store.memoryAssemblyRequest += 1;
+  store.memoryAssembly = memoryAssemblyDraft(record, returnFocus);
+  memoryAssemblyRender();
+  $("memory-assembly-title")?.focus({ preventScroll: true });
+  $("memory-assembly")?.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function memoryAssemblyClose() {
+  const draft = store.memoryAssembly;
+  store.memoryAssemblyRequest += 1;
+  store.memoryAssembly = null;
+  memoryAssemblyRender();
+  let target = null;
+  if (draft && draft.returnFocus && draft.returnFocus.type === "record") {
+    target = Array.from($("memory-detail").querySelectorAll("[data-memory-assemble-record]"))
+      .find((button) => button.getAttribute("data-memory-assemble-record") === draft.returnFocus.memoryId);
+  }
+  (target || $("btn-memory-assemble")).focus({ preventScroll: true });
+}
+
+function memoryAssemblyFocusOutcome(draft) {
+  if (store.memoryAssembly !== draft) return;
+  const target = draft.error ? $("memory-assembly-error") : $("memory-assembly-result");
+  target?.focus({ preventScroll: true });
+}
+
+async function memoryAssemblySubmit() {
+  const draft = store.memoryAssembly;
+  if (!draft || draft.submitting) return;
+  memoryAssemblyReadForm(draft);
+  const checked = memoryAssemblyValidateDraft(draft);
+  draft.fieldErrors = checked.errors;
+  draft.error = "";
+  if (!checked.valid) {
+    memoryAssemblyRender();
+    const target = $("memory-assembly-form")?.querySelector('[aria-invalid="true"]');
+    target?.focus({ preventScroll: true });
+    return;
+  }
+  if (!store.conn) {
+    draft.error = "Connect to a Rusty server before previewing governed context.";
+    memoryAssemblyRender();
+    $("memory-assembly-error")?.focus({ preventScroll: true });
+    return;
+  }
+  const requestId = ++store.memoryAssemblyRequest;
+  const requestConnection = { ...store.conn };
+  draft.submitting = true;
+  draft.result = null;
+  memoryAssemblyRender();
+  const resolvedQuery = { ...checked.query, as_of: checked.query.as_of || new Date().toISOString() };
+  const budgetedPayload = { ...resolvedQuery, budget: checked.budget };
+  const [assemblyResult, rankedResult] = await Promise.allSettled([
+    apiForConnection(requestConnection, "POST", "/memory/query", budgetedPayload, MEMORY_ASSEMBLY_RESPONSE_BYTES),
+    apiForConnection(requestConnection, "POST", "/memory/query", resolvedQuery, MEMORY_ASSEMBLY_RESPONSE_BYTES),
+  ]);
+  if (!memoryRequestCurrent(requestId, requestConnection, store.memoryAssemblyRequest, store.conn) || store.memoryAssembly !== draft) return;
+  draft.submitting = false;
+  const rankedRecords = rankedResult.status === "fulfilled" ? memoryAssemblyRecords(rankedResult.value && rankedResult.value.records) : null;
+  const ranked = rankedRecords && memoryAssemblyRanked(rankedRecords) ? rankedRecords : null;
+  if (assemblyResult.status === "rejected") {
+    if (memoryAssemblyHardOverflow(assemblyResult.reason) && checked.budget.overflow === "fail") {
+      draft.result = { records: [], ranked: ranked || [], accounting: { budget_tokens: checked.budget.max_tokens, margin_percent: checked.budget.margin_percent },
+        truncated: true, hardFailure: true,
+        comparisonState: ranked ? "available" : "unavailable",
+        message: memoryAssemblyErrorText(assemblyResult.reason), asOf: resolvedQuery.as_of };
+    } else {
+      draft.error = memoryAssemblyErrorText(assemblyResult.reason);
+    }
+    memoryAssemblyRender();
+    memoryAssemblyFocusOutcome(draft);
+    return;
+  }
+  const proof = memoryAssemblyValidateResult(assemblyResult.value, ranked ? rankedResult.value : null, checked.budget);
+  if (!proof.ok) draft.error = proof.error;
+  else draft.result = { ...proof.result, asOf: resolvedQuery.as_of };
+  memoryAssemblyRender();
+  memoryAssemblyFocusOutcome(draft);
+}
+
+function memoryAssemblyInspect(memoryId) {
+  const draft = store.memoryAssembly;
+  const result = draft && draft.result;
+  const candidates = result ? [...(result.records || []), ...(result.comparisonFirst ? [result.comparisonFirst] : [])] : [];
+  const record = candidates.find((item) => item && item.memory_id === memoryId);
+  const state = store.memory;
+  if (!record || !state || state.loading || state.error) return;
+  const existing = state.records.some((item) => item && item.memory_id === memoryId);
+  if (!existing) {
+    state.records = [record, ...state.records.filter((item) => item && item.memory_id !== memoryId)].slice(0, MEMORY_SNAPSHOT_LIMIT);
+    state.assemblyInjected = new Set([...(state.assemblyInjected || []), memoryId]);
+    state.searchIndex = memoryBuildSearchIndex(state.records);
+    state.superseded = memoryIntersectIds(memorySupersededIds(state.records), state.records);
+  }
+  state.reviewIds = null;
+  state.selected = memoryId;
+  memoryRender();
+  $("memory-detail-title")?.focus({ preventScroll: true });
+  $("memory-detail")?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function memoryCorrectionOutcomeText(receipt) {
@@ -10779,6 +11505,11 @@ function memoryScheduleLifecycleRefresh(records, nowMs) {
 function memoryCaptureDynamicFocus() {
   const active = document.activeElement;
   if (!active || typeof active.closest !== "function") return null;
+  if ($("memory-assembly").contains(active)) {
+    return { area: "assembly", id: active.id || null,
+      start: typeof active.selectionStart === "number" ? active.selectionStart : null,
+      end: typeof active.selectionEnd === "number" ? active.selectionEnd : null };
+  }
   if ($("memory-governance").contains(active)) {
     return { area: "governance", id: active.id || null,
       start: typeof active.selectionStart === "number" ? active.selectionStart : null,
@@ -10803,7 +11534,9 @@ function memoryCaptureDynamicFocus() {
 function memoryRestoreDynamicFocus(target) {
   if (!target) return;
   let next = null;
-  if (target.area === "governance") {
+  if (target.area === "assembly") {
+    next = target.id ? $(target.id) : $("memory-assembly-title");
+  } else if (target.area === "governance") {
     next = target.id ? $(target.id) : $("memory-governance-title");
   } else if (target.area === "correction") {
     next = target.id ? $(target.id) : $("memory-correction-title");
@@ -10820,7 +11553,7 @@ function memoryRestoreDynamicFocus(target) {
   }
   if (next) {
     next.focus({ preventScroll: true });
-    if (["correction", "governance"].includes(target.area) && target.start != null && typeof next.setSelectionRange === "function") {
+    if (["assembly", "correction", "governance"].includes(target.area) && target.start != null && typeof next.setSelectionRange === "function") {
       const maximum = String(next.value || "").length;
       next.setSelectionRange(Math.min(target.start, maximum), Math.min(target.end == null ? target.start : target.end, maximum));
     }
@@ -10845,6 +11578,7 @@ function memoryRender() {
     }
   }
   $("btn-memory-refresh").disabled = correctionBusy || governanceBusy;
+  memoryAssemblyRender();
   memoryConsolidationFollowRender();
   memoryCorrectionRender();
   memoryGovernanceRender();
@@ -10882,6 +11616,7 @@ function memoryRender() {
     ? `<span>Reviewing ${state.reviewIds.length} records from one conflict. Filters still apply.</span><button class="small" type="button" data-memory-review-clear>Show all memory</button>`
     : "";
   $("memory-statusline").textContent = `${filtered.length} matching · ${state.totalRecords ?? state.records.length} retained` +
+    (state.assemblyInjected && state.assemblyInjected.size ? ` · ${state.assemblyInjected.size} context preview` : "") +
     (state.snapshotTruncated ? ` · searching ${state.records.length}-record audit snapshot` : "") +
     (filtered.length > shown.length ? ` · showing first ${shown.length}` : "");
   if (!shown.length) {
@@ -13031,6 +13766,13 @@ function init() {
   // and a conflict review path that never implies automatic resolution.
   $("btn-memory-open").onclick = openMemory;
   $("btn-memory-refresh").onclick = memoryRefreshAll;
+  $("btn-memory-assemble").onclick = () => {
+    if (store.memoryAssembly && store.memoryAssembly.open) memoryAssemblyClose();
+    else {
+      const selected = store.memory && store.memory.records.find((record) => record && record.memory_id === store.memory.selected);
+      memoryAssemblyOpen(selected || null, { type: "launcher" });
+    }
+  };
   $("btn-memory-clear").onclick = memoryClearFilters;
   $("inp-memory-search").addEventListener("input", () => {
     clearTimeout(store.memorySearchTimer);
@@ -13074,10 +13816,40 @@ function init() {
   $("memory-detail").addEventListener("click", (e) => {
     const correct = e.target.closest("[data-memory-correct]");
     if (correct) { memoryCorrectionOpen(correct.getAttribute("data-memory-correct")); return; }
+    const assemble = e.target.closest("[data-memory-assemble-record]");
+    if (assemble && store.memory) {
+      const record = store.memory.records.find((item) => item && item.memory_id === assemble.getAttribute("data-memory-assemble-record"));
+      if (record) memoryAssemblyOpen(record, { type: "record", memoryId: record.memory_id });
+      return;
+    }
     const consolidate = e.target.closest("[data-memory-consolidate-record]");
     if (consolidate) { memoryGovernanceOpenConsolidationForRecord(consolidate.getAttribute("data-memory-consolidate-record")); return; }
     const target = e.target.closest("[data-memory-select]");
     if (target) memorySelect(target.getAttribute("data-memory-select"), true);
+  });
+  $("memory-assembly").addEventListener("input", (event) => {
+    if (event.target.closest("#memory-assembly-form")) memoryAssemblyMarkEdited();
+  });
+  $("memory-assembly").addEventListener("change", (event) => {
+    const draft = store.memoryAssembly;
+    if (!draft || draft.submitting) return;
+    if (event.target.closest("#memory-assembly-form")) memoryAssemblyMarkEdited();
+    if (event.target.id === "sel-memory-assembly-author") {
+      memoryAssemblyReadForm(draft);
+      if (!draft.authorType || draft.authorType === "system") draft.authorId = "";
+      memoryAssemblyRender();
+      $("sel-memory-assembly-author")?.focus({ preventScroll: true });
+    }
+  });
+  $("memory-assembly").addEventListener("click", (event) => {
+    if (event.target.closest("[data-memory-assembly-close]")) { memoryAssemblyClose(); return; }
+    const inspect = event.target.closest("[data-memory-assembly-inspect]");
+    if (inspect) memoryAssemblyInspect(inspect.getAttribute("data-memory-assembly-inspect"));
+  });
+  $("memory-assembly").addEventListener("submit", (event) => {
+    if (event.target.id !== "memory-assembly-form") return;
+    event.preventDefault();
+    memoryAssemblySubmit();
   });
   $("memory-follow").addEventListener("change", (event) => {
     if (event.target.closest("[data-memory-follow-auto]")) memoryConsolidationFollowSetAuto(event.target.checked);

@@ -319,6 +319,33 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   while Memory is visible, stops at a terminal evidence state, preserves the last confirmed result during an
   outage, and bounds summary inspection to 2,000 records. The resulting summary can be opened directly in the
   ledger; no task or memory content is persisted by this browser handoff.
+  The **Context assembly lab** turns the read side of this contract into an inspectable prompt-input
+  preview. An operator chooses an exact scope plus the server's structural kind, key, tag, validity,
+  confidence, author, candidacy, expiry, and supersession filters, then declares a token budget, safety
+  margin, and truncate-or-fail policy. Studio pins `as_of` once and issues an immediate budgeted query plus
+  a separate unbudgeted rank query. It presents the included assembly only when its complete records follow
+  Rust's priority/confidence/recency/identity comparator and its token accounting exactly reproduces the
+  runtime's four-byte estimate and reviewed margin. The budget rail shows used and remaining estimated
+  tokens, the included order, and whether the server reported truncation. When the separate live rank read
+  still has the same complete-record prefix, Studio shows the next observed match as non-atomic
+  corroboration—not as an omission receipt. When it differs, Studio retains the exact included assembly but
+  makes no current omission-boundary claim. If that ancillary read fails, is malformed, or exceeds Studio's
+  inspection ceiling, the exact budgeted assembly remains visible with comparison evidence marked unavailable.
+  An exact structured hard-overflow response is likewise shown as a valid
+  no-partial-context outcome without inventing which record crossed the budget. The preview never sends a
+  `run_id`, creates no journal event, and persists no
+  memory or query content in browser storage; a selected result can be handed into the bounded session
+  ledger for provenance inspection.
+  Token counts remain the runtime's declared estimate (serialized content bytes divided by four, with the
+  chosen margin), not a model-provider tokenizer. A scoped read may come from the live namespace or the
+  active governed memory-set overlay; the current response does not identify which backing lens served, so
+  Studio says so. The two reads do not share a version receipt, and the endpoint is unpaginated; Studio
+  therefore bounds each result to 2,000 records and 8 MiB while streaming the response, accepts both the base
+  store's self-contained re-inlined bodies and artifact references that can remain in an active overlay,
+  rejects malformed/duplicate/misranked accounting evidence, and labels
+  cross-read drift instead of presenting it as exact. The byte ceiling is an intentional Studio inspection
+  boundary; narrow a structural query when its complete response is larger. A future atomic query receipt and pagination
+  contract should replace those limits.
   Studio does not yet capture run-event or prompt-hash corrections, approve or reject memory candidates,
   expire, or expose record/scope forgetting controls. A direct correction is attributed by the author supplied in the request;
   that label is not proof of an authenticated human principal until the platform exposes attributed

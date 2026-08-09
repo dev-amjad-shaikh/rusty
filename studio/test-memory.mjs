@@ -15,13 +15,14 @@ if (!match) { console.error("FAIL: no <script> block found in index.html"); proc
 const src = match[1].replace(/\ninit\(\);\s*$/, "\n");
 if (/\ninit\(\);/.test(src)) { console.error("FAIL: bootstrap init() was not stripped cleanly"); process.exit(1); }
 
-const sandbox = {};
+const sandbox = { TextDecoder };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__memory = {
   MEMORY_RENDER_LIMIT, MEMORY_SNAPSHOT_LIMIT, MEMORY_CONFLICT_RENDER_LIMIT,
   MEMORY_CORRECTION_TEXT_LIMIT, MEMORY_GOVERNANCE_TAG_LIMIT, MEMORY_CONSOLIDATION_SOURCE_LIMIT,
-  MEMORY_GOVERNANCE_RECEIPT_LIMIT,
+  MEMORY_GOVERNANCE_RECEIPT_LIMIT, MEMORY_ASSEMBLY_RESULT_LIMIT, MEMORY_ASSEMBLY_RENDER_LIMIT,
+  MEMORY_ASSEMBLY_RESPONSE_BYTES,
   memoryRequestCurrent, memoryContentValue, memoryAuthorLabel, memoryPlainPreview,
   memoryBoundedProjection, memoryJsonText, memoryEvidenceId, memorySupersededIds, memoryIntersectIds,
   memoryContext, memoryRecordState, memoryStateLabel, memoryStateHtml,
@@ -29,6 +30,12 @@ globalThis.__memory = {
   memoryBuildSearchIndex, memoryBoundedSnapshot, memoryRecordRowHtml,
   memoryRecordAriaLabel, memoryNavigationTarget, memoryNextLifecycleDelay,
   memoryEvidenceSummary, memoryDetailHtml,
+  memoryAssemblyDraft, memoryAssemblyUnsigned, memoryAssemblyTimestamp, memoryAssemblyTags,
+  memoryAssemblyValidateDraft, memoryAssemblyRecords, memoryAssemblyValidateResult,
+  memoryAssemblyPriority, memoryAssemblyInstantNanos, memoryAssemblyRankComparator, memoryAssemblyRanked, memoryAssemblyCompactJson,
+  memoryAssemblyContentBytes, memoryAssemblyEstimatedTokens, memoryAssemblyUsedTokens, memoryAssemblySameRecord,
+  memoryAssemblyErrorText, memoryAssemblyHardOverflow, memoryAssemblyRecordHtml, memoryAssemblyResultHtml, memoryAssemblyFormHtml,
+  apiResponseText,
   memoryCorrectionGeneratedId, memoryCorrectionWireText, memoryCorrectionMemoryId, memoryCorrectionDraft,
   memoryCorrectionParseValue, memoryCorrectionValidateDraft, memoryCorrectionSameValue,
   memoryCorrectionRecordMatch, memoryCorrectionValidateReceipt, memoryCorrectionFindReconciled,
@@ -266,6 +273,146 @@ check("evidence: direct records say that no derivation IDs exist",
   check("detail: remembered content is escaped", !detail.includes("<trusted>") && detail.includes("&lt;trusted&gt;"));
   check("detail: malformed immutable identities never expose a false correction action",
     !detail.includes(`data-memory-correct="${base.memory_id}"`) && detail.includes("Correction unavailable"));
+}
+
+{
+  const first = {
+    ...base, memory_id: "a".repeat(64), priority: 7, confidence: 0.92,
+    created_at: "2026-08-09T05:00:00Z", key: "<preferred-tone>",
+  };
+  const second = {
+    ...base, memory_id: "b".repeat(64), priority: 3, confidence: 0.8,
+    created_at: "2026-08-08T05:00:00Z", key: "fallback",
+  };
+  const draft = {
+    ...M.memoryAssemblyDraft(first), scopeType: "agent", scopeId: "researcher-7", kind: "fact",
+    key: " exact key ", tagsText: "trusted, current, trusted", minConfidence: "0.75",
+    authorType: "human", authorId: "amjad", validAt: "2026-08-09T05:00:00Z",
+    asOf: "2026-08-09T06:00:00Z", candidatesOnly: true, includeExpired: true,
+    includeSuperseded: true, maxTokens: "4096", marginPercent: "20", overflow: "truncate",
+  };
+  const checked = M.memoryAssemblyValidateDraft(draft);
+  check("assembly query: every supported structural filter maps to the exact server contract",
+    checked.valid && checked.query.scope.scope === "agent" && checked.query.scope.id === "researcher-7" &&
+    checked.query.kinds[0] === "fact" && checked.query.key === " exact key " &&
+    JSON.stringify(checked.query.tags) === JSON.stringify(["trusted", "current"]) &&
+    checked.query.min_confidence === 0.75 && checked.query.authored_by.human_id === "amjad" &&
+    checked.query.valid_at === draft.validAt && checked.query.as_of === draft.asOf &&
+    checked.query.candidates_only && checked.query.include_expired && checked.query.include_superseded &&
+    !("run_id" in checked.query));
+  eq("assembly budget: exact u32 values and overflow policy are preserved", checked.budget,
+    { max_tokens: 4096, margin_percent: 20, overflow: "truncate" });
+  check("assembly query: visible key and identity whitespace is never silently normalized",
+    checked.query.key === " exact key " && M.memoryAssemblyValidateDraft({ ...draft, scopeId: " tenant " }).query.scope.id === " tenant ");
+  check("assembly validation: tag normalization is explicit, bounded, and rejects controls",
+    JSON.stringify(M.memoryAssemblyTags("a, b, a").tags) === JSON.stringify(["a", "b"]) &&
+    Boolean(M.memoryAssemblyTags("a, bad\ttag").error));
+  check("assembly validation: strict RFC 3339 instants reject browser-ambiguous values",
+    M.memoryAssemblyTimestamp("2026-08-09T06:00:00Z").value === "2026-08-09T06:00:00Z" &&
+    Boolean(M.memoryAssemblyTimestamp("2026-08-09 06:00").error) && Boolean(M.memoryAssemblyTimestamp("1786255200").error) &&
+    Boolean(M.memoryAssemblyTimestamp("2026-02-30T06:00:00Z").error) && Boolean(M.memoryAssemblyTimestamp("2026-08-09T25:00:00Z").error));
+  const nanosNewer = { ...first, memory_id: "f".repeat(64), created_at: "2026-08-09T05:00:00.000000002Z" };
+  const nanosOlder = { ...first, memory_id: "0".repeat(64), created_at: "2026-08-09T05:00:00.000000001Z" };
+  check("assembly ranking: RFC 3339 nanoseconds retain Rust's exact recency order",
+    M.memoryAssemblyInstantNanos(nanosNewer.created_at) === M.memoryAssemblyInstantNanos(nanosOlder.created_at) + 1n &&
+    M.memoryAssemblyRankComparator(nanosNewer, nanosOlder) === -1 && M.memoryAssemblyRanked([nanosNewer, nanosOlder]) &&
+    !M.memoryAssemblyRanked([nanosOlder, nanosNewer]));
+  check("assembly validation: token accounting accepts the u32 boundary but rejects whitespace and fractions",
+    M.memoryAssemblyUnsigned("4294967295", 0, 4294967295) === 4294967295 &&
+    M.memoryAssemblyUnsigned(" 20", 0, 4294967295) === null && M.memoryAssemblyUnsigned("20.0", 0, 4294967295) === null);
+  check("assembly validation: author identity and confidence are fail-closed",
+    !M.memoryAssemblyValidateDraft({ ...draft, authorId: "bad\tid", minConfidence: "1.01" }).valid &&
+    M.memoryAssemblyValidateDraft({ ...draft, authorType: "system", authorId: "" }).valid);
+
+  const rankedBody = { records: [first, second] };
+  const exactUsed = M.memoryAssemblyUsedTokens([first], 20);
+  const assemblyBody = {
+    memory_ids: [first.memory_id], records: [first],
+    token_accounting: { bytes_per_token: 4, margin_percent: 20, budget_tokens: 100, used_tokens: exactUsed },
+    truncated: true,
+  };
+  const proof = M.memoryAssemblyValidateResult(assemblyBody, rankedBody, { max_tokens: 100, margin_percent: 20 });
+  check("assembly proof: exact records, rank comparator, accounting, and separate comparison corroborate",
+    proof.ok && proof.result.records[0] === first && proof.result.comparisonFirst === second &&
+    proof.result.comparisonOmittedCount === 1 && proof.result.comparisonState === "corroborated");
+  check("assembly proof: duplicate IDs and altered accounting fail closed while malformed comparison stays ancillary",
+    !M.memoryAssemblyValidateResult({ ...assemblyBody, memory_ids: [second.memory_id] }, rankedBody, { max_tokens: 100, margin_percent: 20 }).ok &&
+    M.memoryAssemblyValidateResult(assemblyBody, { records: [second, first] }, { max_tokens: 100, margin_percent: 20 }).result.comparisonState === "unavailable" &&
+    !M.memoryAssemblyValidateResult({ ...assemblyBody, token_accounting: { ...assemblyBody.token_accounting, margin_percent: 21 } }, rankedBody, { max_tokens: 100, margin_percent: 20 }).ok &&
+    M.memoryAssemblyRecords([first, first]) === null);
+  check("assembly proof: Rust's four-byte divisor and exact packed cost reject plausible-looking false accounting",
+    !M.memoryAssemblyValidateResult({ ...assemblyBody, token_accounting: { ...assemblyBody.token_accounting, bytes_per_token: 999 } }, rankedBody, { max_tokens: 100, margin_percent: 20 }).ok &&
+    !M.memoryAssemblyValidateResult({ ...assemblyBody, token_accounting: { ...assemblyBody.token_accounting, used_tokens: 0 } }, rankedBody, { max_tokens: 100, margin_percent: 20 }).ok);
+  const rankChanged = { ...first, priority: 6 };
+  const changedComparison = M.memoryAssemblyValidateResult(assemblyBody, { records: [rankChanged, second] }, { max_tokens: 100, margin_percent: 20 });
+  check("assembly proof: same content ID with changed rank fields is non-atomic drift, never exact omission evidence",
+    changedComparison.ok && changedComparison.result.comparisonState === "changed" && !changedComparison.result.comparisonFirst);
+  const misorderedAssembly = {
+    memory_ids: [second.memory_id, first.memory_id], records: [second, first],
+    token_accounting: { bytes_per_token: 4, margin_percent: 20, budget_tokens: 100,
+      used_tokens: M.memoryAssemblyUsedTokens([second, first], 20) }, truncated: false,
+  };
+  check("assembly proof: two consistently misordered responses cannot impersonate Rust's comparator",
+    !M.memoryAssemblyValidateResult(misorderedAssembly, { records: [second, first] }, { max_tokens: 100, margin_percent: 20 }).ok);
+  const largeResolved = { ...second, memory_id: "d".repeat(64), content: { kind: "inline", value: { blob: "x".repeat(5000) } } };
+  const overlayArtifact = { ...second, content: { kind: "artifact", value: { sha256: "c".repeat(64), bytes: 5000 } } };
+  check("assembly accounting: base re-inlining and active-overlay artifact references both follow Rust's byte rule",
+    M.memoryAssemblyContentBytes(first) === BigInt(new TextEncoder().encode(JSON.stringify(first.content.value)).length) &&
+    M.memoryAssemblyContentBytes(largeResolved) > 4096n && M.memoryAssemblyRecords([largeResolved])?.[0] === largeResolved &&
+    M.memoryAssemblyContentBytes(overlayArtifact) === 5000n && M.memoryAssemblyRecords([overlayArtifact])?.[0] === overlayArtifact);
+  check("assembly proof: unavailable ancillary comparison never hides an exact assembly",
+    M.memoryAssemblyValidateResult(assemblyBody, null, { max_tokens: 100, margin_percent: 20 }).ok &&
+    M.memoryAssemblyValidateResult(assemblyBody, null, { max_tokens: 100, margin_percent: 20 }).result.comparisonState === "unavailable");
+  check("assembly proof: a non-atomic rank change never invalidates exact included evidence or becomes an omission claim",
+    M.memoryAssemblyValidateResult({ ...assemblyBody, truncated: false }, rankedBody, { max_tokens: 100, margin_percent: 20 }).result.comparisonState === "changed");
+  const resultHtml = M.memoryAssemblyResultHtml({ result: { ...proof.result, asOf: draft.asOf } });
+  check("assembly result: accessible budget rail exposes used, reserve, inclusion, and separate comparison evidence",
+    resultHtml.includes('role="meter"') && resultHtml.includes(`aria-valuenow="${exactUsed}"`) &&
+    resultHtml.includes("Included evidence") && resultHtml.includes("Observed after the stop") &&
+    resultHtml.includes("not an atomic omission receipt"));
+  check("assembly result: hostile record labels are escaped in text and accessible names",
+    !resultHtml.includes("<preferred-tone>") && resultHtml.includes("&lt;preferred-tone&gt;") &&
+    resultHtml.includes(`data-memory-assembly-inspect="${first.memory_id}"`));
+  check("assembly result: hard overflow is a valid no-partial-context outcome even without comparison",
+    M.memoryAssemblyResultHtml({ result: { hardFailure: true, ranked: [], comparisonState: "unavailable", message: "too large" } })
+      .includes("Hard budget held") && M.memoryAssemblyResultHtml({ result: { hardFailure: true, ranked: [], comparisonState: "unavailable", message: "too large" } })
+      .includes("exact 422 still proves"));
+  check("assembly hard overflow: only the exact structured Rust error is classified as a budget hold",
+    M.memoryAssemblyHardOverflow({ status: 422, body: { error: "unprocessable", message: "invalid state update: memory assembly exceeds the context budget: record `x` costs 7 tokens" } }) &&
+    !M.memoryAssemblyHardOverflow({ status: 422, body: { error: "unprocessable", message: "memory assembly exceeds the context budget: record `x` costs 7 tokens" } }) &&
+    !M.memoryAssemblyHardOverflow({ status: 422, body: { error: "unprocessable", message: "some other validation failed" } }) &&
+    !M.memoryAssemblyHardOverflow({ status: 422, body: { raw: "unprocessable" } }));
+  const formHtml = M.memoryAssemblyFormHtml(draft);
+  check("assembly form: read-only boundary, exact filters, and plain-language overflow are visible",
+    formHtml.includes("no journal event") && formHtml.includes("Exact scope ID") && formHtml.includes("Expiry evaluated at") &&
+    formHtml.includes("Stop and return the ranked prefix") && formHtml.includes("Fail without returning partial context"));
+  check("assembly detail handoff: a valid selected record can prefill the exact scope",
+    M.memoryDetailHtml(first, M.memoryContext([first], [], now)).includes(`data-memory-assemble-record="${first.memory_id}"`));
+}
+
+{
+  const response = (parts, declared = null) => {
+    const state = { cancelled: false, released: false, index: 0 };
+    const body = {
+      cancel: async () => { state.cancelled = true; },
+      getReader: () => ({
+        read: async () => state.index < parts.length ? { done: false, value: new TextEncoder().encode(parts[state.index++]) } : { done: true },
+        cancel: async () => { state.cancelled = true; },
+        releaseLock: () => { state.released = true; },
+      }),
+    };
+    return [{ headers: { get: (name) => name === "content-length" ? declared : null }, body }, state];
+  };
+  const [small, smallState] = response(["{\"records\":", "[]}"]);
+  const [streamOverflow, streamState] = response(["1234", "5678"]);
+  const [declaredOverflow, declaredState] = response([], "9");
+  const smallText = await M.apiResponseText(small, 32);
+  let streamError = null, declaredError = null;
+  try { await M.apiResponseText(streamOverflow, 7); } catch (error) { streamError = error; }
+  try { await M.apiResponseText(declaredOverflow, 8); } catch (error) { declaredError = error; }
+  check("assembly response containment: streamed bytes stop at the ceiling before JSON parsing",
+    smallText === '{"records":[]}' && smallState.released && streamState.cancelled && streamState.released &&
+    streamError?.body?.error === "response_too_large" && declaredState.cancelled && declaredError?.body?.error === "response_too_large");
 }
 
 {
@@ -624,6 +771,39 @@ check("markup: memory has sidebar entry, labelled workspace, filters, and live s
   html.includes('id="memory-statusline" role="status" aria-live="polite"') &&
   html.includes('role="listbox" aria-label="Memory records"') &&
   html.includes("Content search reads the first 2,000 characters per record."));
+check("assembly markup: the lab is labelled, expandable, status-aware, and available from selected evidence",
+  html.includes('id="btn-memory-assemble" aria-expanded="false" aria-controls="memory-assembly"') &&
+  html.includes('id="memory-assembly" aria-labelledby="memory-assembly-title" hidden') &&
+  html.includes('id="memory-assembly-result" tabindex="-1" aria-live="polite"') &&
+  html.includes("data-memory-assemble-record"));
+check("assembly isolation: connection changes discard previews and late responses cannot cross tenants",
+  html.includes("store.memoryAssemblyRequest += 1") && html.includes("store.memoryAssembly = null") &&
+  html.includes("memoryRequestCurrent(requestId, requestConnection, store.memoryAssemblyRequest, store.conn)") &&
+  html.includes("store.memoryAssembly !== draft"));
+check("assembly retrieval: expiry is pinned and exact assembly is separated from a non-atomic live rank comparison",
+  html.includes('const resolvedQuery = { ...checked.query, as_of: checked.query.as_of || new Date().toISOString() }') &&
+  html.includes('apiForConnection(requestConnection, "POST", "/memory/query", budgetedPayload, MEMORY_ASSEMBLY_RESPONSE_BYTES)') &&
+  html.includes('apiForConnection(requestConnection, "POST", "/memory/query", resolvedQuery, MEMORY_ASSEMBLY_RESPONSE_BYTES)') &&
+  html.includes("memoryAssemblyValidateResult(assemblyResult.value, ranked ? rankedResult.value : null, checked.budget)"));
+check("assembly containment: each response is byte-bounded while an ancillary failure preserves exact evidence",
+  M.MEMORY_ASSEMBLY_RESPONSE_BYTES === 8 * 1024 * 1024 && html.includes("async function apiResponseText(res, maxBytes = 0)") &&
+  html.includes("received > maxBytes") && html.includes('comparisonState: ranked ? "available" : "unavailable"'));
+check("assembly privacy: preview requests deliberately omit run linkage and browser persistence",
+  html.includes("Read-only preview · no run ID · no journal event · no browser persistence") &&
+  !html.includes("memoryAssemblyPersistence") && !html.includes("localStorage.setItem(\"ags:memory-assembly"));
+check("assembly interaction: edited parameters invalidate old evidence and selected results hand off to the bounded ledger",
+  html.includes("function memoryAssemblyMarkEdited()") && html.includes("Parameters changed") &&
+  html.includes("state.assemblyInjected = new Set") && html.includes("slice(0, MEMORY_SNAPSHOT_LIMIT)") &&
+  html.includes("context preview"));
+check("assembly focus: submitting and terminal rerenders use a stable result target and close returns to its origin",
+  html.includes("memoryAssemblyCaptureFocus()") && html.includes("memoryAssemblyRestoreFocus(focus)") &&
+  html.includes('target.area === "assembly"') && html.includes("if (next && next.disabled)") &&
+  html.includes("memoryAssemblyFocusOutcome(draft)") && html.includes('draft.returnFocus.type === "record"'));
+check("assembly responsive: loom, controls, evidence rows, and budget facts collapse for narrow screens",
+  html.includes(".memory-assembly-body { grid-template-columns: 1fr; }") &&
+  html.includes(".memory-assembly-fields, .memory-assembly-checks { grid-template-columns: 1fr; }") &&
+  html.includes(".memory-budget-facts { grid-template-columns: 1fr; }") &&
+  html.includes(".memory-assembly-record { grid-template-columns: 28px minmax(0, 1fr); }"));
 check("interaction: rerendered memory selection restores a meaningful focus target",
   html.includes("querySelector('[aria-selected=\"true\"]')") &&
   html.includes("selected.focus({ preventScroll: true })"));
