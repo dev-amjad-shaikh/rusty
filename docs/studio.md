@@ -63,7 +63,15 @@ studio/
   supersession link, and a bounded raw-record manifest with an explicit truncation marker. A visual provenance spine connects the record to its
   human, agent, distiller, or system author and the run, correction, candidate, or journal evidence
   that produced it. Structural conflicts get a dedicated inbox: reviewing one isolates every peer
-  record and lets the operator compare evidence. The Studio never silently chooses a winner.
+  record and lets the operator compare evidence. The Studio never silently chooses a winner. From any
+  retained record, **Correct this memory** opens an immutable three-stage splice: original evidence,
+  human-attributed correction, and governed result. Plain text and exact JSON values are supported;
+  JSON numbers that the browser cannot preserve are rejected. Run-scoped corrections require a
+  finalized run journal and become active only in that run. Agent, team, user, and tenant corrections
+  enter candidacy. Successful receipts are checked against the reviewed target, value, scope,
+  attribution, candidacy, and supersession contract. If a response is malformed or the network outcome
+  is uncertain, Studio queries the exact destination for correction provenance before it permits an
+  exact identity-preserving retry.
 - **Learning control room** — a governed inbox over `GET /learn/candidates` and
   `GET /learn/versions` for prompt, policy, memory-set, and tool-permission proposals. Each immutable
   candidate dossier keeps its provenance, proposed change, evaluation verdict, replay coverage,
@@ -257,10 +265,14 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   case-insensitive authorization header tuples, are
   redacted in previews, and exporting their stored values requires deliberate confirmation. Unapplied
   JSON edits block creation and export so the guided and exact representations cannot silently diverge.
-- **The memory ledger is an audit surface, not an editor.** This first governed-memory slice is
-  intentionally read-only: correction, approval/rejection of candidates, conflict resolution, and
-  forgetting remain server-governed operations until their policy and audit contracts can be preserved
-  in the UI. The query endpoint is currently unpaginated, so after receiving its response the Studio
+- **Memory corrections append evidence; they do not edit records.** Studio supports a selected-memory
+  target through `POST /memory/corrections`. It does not yet capture run-event or prompt-hash corrections,
+  approve or reject memory candidates, resolve a structural conflict as a guided decision, consolidate,
+  expire, or forget memory. A direct correction is attributed by the author supplied in the request;
+  that label is not proof of an authenticated human principal until the platform exposes attributed
+  identities and authority. Although the correction request contract accepts a rationale, the current
+  record, receipt, and journal contracts do not retain it, so Studio does not collect a reason until it
+  can preserve that evidence durably. The query endpoint is currently unpaginated, so after receiving its response the Studio
   builds a bounded audit snapshot from the first 1,000 ranked records plus the peers needed for the
   first 50 conflicts. Search text is precomputed once for that snapshot and input is debounced; the
   content portion of the index is limited to the first 2,000 characters of each record, and the UI

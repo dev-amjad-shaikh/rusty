@@ -117,8 +117,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   quorum, recovery controls, coordination discovery, and coordinated replay remain.
 - The general-purpose dataset and evaluation experiment workspace remains library-only; governed
   learning-candidate evaluation is now server-backed in Studio.
-- Memory records and structural conflicts have a human-readable audit workspace; correction,
-  resolution, approval, consolidation, and forgetting workflows remain.
+- Memory records and structural conflicts have a human-readable audit workspace. Selected-memory
+  corrections now append attributed records through an immutable original → correction → result
+  path, with candidacy, finalized-run adoption, receipt validation, reconciliation, and exact retry.
+  Run-event/prompt correction capture, resolution, approval, consolidation, and forgetting remain.
 - Learning candidates, replay-backed evaluation, scoped promotion approval, active/canary version
   pointers, rollback receipts, and guided prompt/policy/tool-permission creation now have a governed
   control room. Memory-set and automatic/correction-driven distillation, before/after case analysis,
@@ -273,9 +275,13 @@ finalized replay-fixture evaluation preflight, evaluation verdict, deployment-en
 candidate-scoped approval handoff, active/canary serving pointers, promotion and rollback receipts, and
 byte-exact rollback action are available. The proposal foundry now composes exact prompt, supported
 executor-policy, and tool-permission candidates; binds finalized evidence; exposes the content-address
-before creation; and accepts a direct completed-run handoff from Flight Recorder. Memory-set and
-automatic/correction-driven distillation, durable review assignment, before/after case comparison,
-drift monitoring, automatic canary decisions, and complete memory mutation/forgetting remain. Policy
+before creation; and accepts a direct completed-run handoff from Flight Recorder. Selected-memory
+correction capture is also available: it preserves the original, binds human attribution and scope,
+validates the returned immutable record, routes wider scopes into candidacy, preflights finalized run
+  scope, and reconciles uncertain writes before exact retry. Run-event/prompt capture, memory-set and
+  automatic/correction-driven distillation, conflict decisions, candidate approval, durable review
+  assignment, before/after case comparison, drift monitoring, automatic canary decisions, consolidation,
+  durable correction rationale, expiration, and forgetting remain. Policy
 candidates depend on the connected server's runtime policy plane for activation proof.
 
 Scope:
@@ -338,7 +344,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract and manifest portability delivered; typed model/tool/memory controls pending | Replaces the current create-only form and raw configuration gap |
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
 | 5 | Flight Recorder investigation layout and manifest/effect context | Partial — causal run story, recovery boundary, and effect-risk guidance delivered; immutable configuration-manifest resolution still pending | Makes Rusty's strongest runtime advantage understandable |
-| 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, and conflict review delivered; governed mutations pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
+| 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, conflict review, and selected-memory correction delivered; conflict decisions, candidate approval, consolidation, expiration, and forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, coordination-by-id, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch foundation delivered — selected-group roster, per-role pinned contract, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; persistent team definitions and topology editing remain | Delivers the most common multi-agent patterns first |

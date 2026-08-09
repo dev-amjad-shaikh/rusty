@@ -649,6 +649,53 @@
   .memory-conflict-peers button { font-family: var(--mono); }
   .memory-manifest { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
   .memory-manifest summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
+  .memory-correction {
+    margin: 0 0 14px; padding: 0; overflow: hidden; border-color: #6e5c26;
+    background: linear-gradient(120deg, #292515, var(--bg-panel) 42%);
+  }
+  .memory-correction[hidden] { display: none; }
+  .memory-correction-head {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    padding: 14px 16px 12px; border-bottom: 1px solid #544824;
+  }
+  .memory-correction-head h2 { margin: 0; font-size: 17px; }
+  .memory-correction-head p { margin: 4px 0 0; max-width: 720px; color: var(--text-dim); font-size: 11.5px; }
+  .memory-splice {
+    display: grid; grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr) 32px minmax(0, 1fr);
+    align-items: stretch; gap: 5px; padding: 12px 16px 0;
+  }
+  .memory-splice-node { min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset); }
+  .memory-splice-node b { display: block; color: var(--text); font-size: 11.5px; }
+  .memory-splice-node span { display: block; margin-top: 3px; color: var(--text-dim); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .memory-splice-node.source { border-color: #496041; background: #182019; }
+  .memory-splice-node.change { border-color: #796729; background: #302918; }
+  .memory-splice-node.result { border-color: #416175; background: #17232a; }
+  .memory-splice-joint { align-self: center; color: #e3cb78; font: 700 17px var(--mono); text-align: center; }
+  .memory-correction-body { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(260px, .75fr); }
+  .memory-correction-form { min-width: 0; padding: 14px 16px 16px; border-right: 1px solid #544824; }
+  .memory-correction-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; border: 0; }
+  .memory-correction-fields .wide { grid-column: 1 / -1; }
+  .memory-correction label { color: var(--text-dim); font-size: 10.5px; }
+  .memory-correction input:not([type="checkbox"]), .memory-correction select, .memory-correction textarea {
+    display: block; width: 100%; min-width: 0; margin-top: 3px; padding: 7px 8px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset); color: var(--text); font: 11px var(--mono);
+  }
+  .memory-correction textarea { min-height: 105px; resize: vertical; line-height: 1.45; }
+  .memory-correction input[aria-invalid="true"], .memory-correction select[aria-invalid="true"], .memory-correction textarea[aria-invalid="true"] { border-color: var(--err); }
+  .memory-correction-modes { display: flex; gap: 7px; margin: 4px 0 7px; }
+  .memory-correction-modes button[aria-pressed="true"] { border-color: #8b7730; background: #382f18; color: #f2e5b5; }
+  .memory-correction-review { min-width: 0; padding: 14px; background: rgba(14, 17, 13, .42); }
+  .memory-correction-review h3 { margin: 0 0 9px; font-size: 13px; }
+  .memory-correction-review dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 9px; margin: 0; }
+  .memory-correction-review dt { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+  .memory-correction-review dd { margin: 0; font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .memory-correction-confirm { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0; color: var(--text-dim); font-size: 10.5px; }
+  .memory-correction-confirm input { flex: 0 0 auto; margin: 1px 0 0; }
+  .memory-correction-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .memory-correction-error { margin: 11px 0; border-left-color: var(--err); }
+  .memory-correction-lock { margin: 0 0 11px; border-color: #7b6428; background: #312918; }
+  .memory-correction-receipt { margin: 0 0 11px; border-color: #45623e; background: #192419; }
+  .memory-correct-button { margin-top: 8px; }
 
   /* ---------- Agent Fabric team observatory ---------- */
   .fabric-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 14px; }
@@ -945,6 +992,8 @@
     .learn-foundry-body { grid-template-columns: 1fr; }
     .learn-foundry-form { border-right: 0; border-bottom: 1px solid var(--border); }
     .learn-seal-plate { position: static; }
+    .memory-correction-body { grid-template-columns: 1fr; }
+    .memory-correction-form { border-right: 0; border-bottom: 1px solid #544824; }
   }
   @media (max-width: 680px) {
     #body { display: block; overflow-y: auto; }
@@ -980,6 +1029,13 @@
     .memory-kv { grid-template-columns: 1fr; gap: 2px; }
     .memory-kv .v { margin-bottom: 7px; }
     .memory-review-banner { align-items: flex-start; flex-direction: column; }
+    .memory-correction-head { flex-direction: column; }
+    .memory-splice { grid-template-columns: 1fr; }
+    .memory-splice-joint { transform: rotate(90deg); }
+    .memory-correction-fields { grid-template-columns: 1fr; }
+    .memory-correction-fields .wide { grid-column: auto; }
+    .memory-correction-review dl { grid-template-columns: 1fr; gap: 2px; }
+    .memory-correction-review dd { margin-bottom: 6px; }
     .fabric-head { flex-direction: column; }
     .fabric-head-actions { justify-content: flex-start; }
     .fabric-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1233,6 +1289,8 @@
             <button class="small" id="btn-memory-refresh">Refresh</button>
           </div>
         </div>
+
+        <section class="card memory-correction" id="memory-correction" aria-labelledby="memory-correction-title" hidden></section>
 
         <div class="memory-summary" id="memory-summary" aria-label="Memory summary"></div>
         <div class="memory-conflict-inbox" id="memory-conflicts"></div>
@@ -1547,6 +1605,7 @@ const store = {
   memoryRequest: 0,    // generation guard: stale server/tenant responses never cross connection boundaries
   memorySearchTimer: null,
   memoryLifecycleTimer: null,
+  memoryCorrection: null, // connection-scoped selected-record correction draft and retry receipt
   learn: null,         // bounded candidate/version evidence, filters, selection, and action drafts
   learnUnsupported: false, // server build has no governed-learning routes
   learnRequest: 0,     // generation guard for candidate/version reads and lifecycle actions
@@ -1831,6 +1890,7 @@ async function connect() {
     store.fabricLeaseTimer = null;
     store.memory = null;
     store.memoryUnsupported = false;
+    store.memoryCorrection = null;
     clearTimeout(store.learnSearchTimer);
     store.learnSearchTimer = null;
     store.learn = null;
@@ -6011,18 +6071,186 @@ function openFabric() {
 }
 
 /* ---------------- governed memory (R0.8) ----------------
- * Read-only evidence workspace over POST /memory/query and
- * POST /memory/conflicts. The server returns immutable, content-addressed
- * records; this view makes their scope, provenance, validity, candidacy,
- * supersession, and conflicts legible without changing governance state.
+ * Evidence workspace over governed reads and selected-record corrections.
+ * The server returns immutable, content-addressed records; this view makes
+ * scope, provenance, validity, candidacy, supersession, and conflicts
+ * legible, then writes corrections as new attributed records rather than
+ * editing history in place.
  * ------------------------------------------------------------------------- */
 
 const MEMORY_RENDER_LIMIT = 200;
 const MEMORY_SNAPSHOT_LIMIT = 1000;
 const MEMORY_CONFLICT_RENDER_LIMIT = 50;
+const MEMORY_CORRECTION_TEXT_LIMIT = 32768;
+const MEMORY_CORRECTION_ID_LIMIT = 256;
+const MEMORY_CORRECTION_SCOPES = new Set(["run", "agent", "team", "user", "tenant"]);
 
 function memoryRequestCurrent(requestId, requestConnection, currentRequestId, currentConnection) {
   return requestId === currentRequestId && !connectionIdentityChanged(requestConnection, currentConnection);
+}
+
+function memoryCorrectionGeneratedId(cryptography = globalThis.crypto) {
+  if (!cryptography || typeof cryptography.randomUUID !== "function") {
+    throw new Error("This browser cannot create a secure correction identity.");
+  }
+  return `correction-${cryptography.randomUUID()}`;
+}
+
+function memoryCorrectionWireText(value, maximum = MEMORY_CORRECTION_ID_LIMIT) {
+  const text = String(value == null ? "" : value);
+  return Boolean(text.trim()) && agentUtf8Length(text) <= maximum && !/[\u0000-\u001f\u007f]/.test(text);
+}
+
+function memoryCorrectionMemoryId(value) {
+  return /^[a-f0-9]{64}$/.test(String(value || ""));
+}
+
+function memoryCorrectionDraft(record, cryptography = globalThis.crypto) {
+  const source = record && typeof record === "object" ? record : {};
+  if (!memoryCorrectionMemoryId(source.memory_id)) throw new Error("This retained record has no valid immutable memory identity.");
+  const content = memoryContentValue(source);
+  const mode = typeof content === "string" ? "text" : "json";
+  const scope = source.scope && MEMORY_CORRECTION_SCOPES.has(String(source.scope.scope))
+    ? source.scope : { scope: "user", id: "" };
+  return {
+    open: true,
+    targetId: String(source.memory_id || ""),
+    targetSnapshot: source,
+    correctionId: memoryCorrectionGeneratedId(cryptography),
+    author: "",
+    scopeType: String(scope.scope || "user"),
+    scopeId: String(scope.id || ""),
+    mode,
+    correctedText: mode === "text" ? String(content) : JSON.stringify(content, null, 2),
+    acknowledged: false,
+    submitting: false,
+    generation: 0,
+    attemptedPayload: null,
+    locked: false,
+    retryAllowed: true,
+    error: "",
+    fieldErrors: Object.create(null),
+    receipt: null,
+  };
+}
+
+function memoryCorrectionJsonError(error) {
+  return String(error && error.message || "Corrected JSON is invalid.")
+    .replace(/^Manifest/, "Corrected JSON")
+    .replace(/Manifest/g, "Corrected JSON")
+    .replace(/manifest/g, "corrected JSON");
+}
+
+function memoryCorrectionParseValue(mode, raw) {
+  const text = String(raw == null ? "" : raw);
+  if (agentUtf8Length(text) > MEMORY_CORRECTION_TEXT_LIMIT) {
+    return { value: null, error: "Corrected content must be 32 KiB or smaller." };
+  }
+  if (mode === "text") {
+    return text.length ? { value: text, error: "" }
+      : { value: null, error: "Enter corrected text, or choose JSON to store an intentional empty string." };
+  }
+  if (mode !== "json") return { value: null, error: "Choose text or JSON corrected content." };
+  if (!text.trim()) return { value: null, error: "Enter corrected JSON." };
+  try { agentValidateManifestNumbers(text); }
+  catch (error) { return { value: null, error: memoryCorrectionJsonError(error) }; }
+  let value;
+  try { value = JSON.parse(text); }
+  catch (error) { return { value: null, error: `Corrected JSON is invalid: ${error.message}` }; }
+  try { agentManifestScan(value); }
+  catch (error) { return { value: null, error: memoryCorrectionJsonError(error) }; }
+  return { value, error: "" };
+}
+
+function memoryCorrectionValidateDraft(draft) {
+  const d = draft || {};
+  const errors = Object.create(null);
+  const correctionId = String(d.correctionId || "").trim();
+  const author = String(d.author || "").trim();
+  const scopeType = String(d.scopeType || "");
+  const scopeId = String(d.scopeId || "").trim();
+  const targetId = String(d.targetId || "");
+  if (!memoryCorrectionWireText(correctionId)) errors.correctionId = "Correction identity is missing or invalid.";
+  if (!memoryCorrectionWireText(author)) errors.author = "Enter a human identity of at most 256 UTF-8 bytes without control characters.";
+  if (!MEMORY_CORRECTION_SCOPES.has(scopeType)) errors.scopeType = "Choose a supported destination scope.";
+  if (!memoryCorrectionWireText(scopeId)) errors.scopeId = "Enter a scope identity of at most 256 UTF-8 bytes without control characters.";
+  if (!memoryCorrectionMemoryId(targetId)) errors.targetId = "The selected immutable memory identity is invalid.";
+  const parsed = memoryCorrectionParseValue(d.mode, d.correctedText);
+  if (parsed.error) errors.correctedText = parsed.error;
+  if (!d.acknowledged) errors.acknowledged = "Review and acknowledge the immutable correction contract.";
+  const order = ["targetId", "correctionId", "author", "scopeType", "scopeId", "correctedText", "acknowledged"];
+  const first = order.find((key) => errors[key]) || "";
+  const payload = first ? null : {
+    correction_id: correctionId,
+    author,
+    target: { type: "memory", memory_id: targetId },
+    corrected: parsed.value,
+    scope: { scope: scopeType, id: scopeId },
+    ...(scopeType === "run" ? { run_id: scopeId } : {}),
+  };
+  return { valid: !first, errors, first, payload };
+}
+
+function memoryCorrectionCanonical(value) {
+  if (Array.isArray(value)) return value.map(memoryCorrectionCanonical);
+  if (!value || typeof value !== "object") return value;
+  const out = Object.create(null);
+  for (const key of Object.keys(value).sort()) out[key] = memoryCorrectionCanonical(value[key]);
+  return out;
+}
+
+function memoryCorrectionSameValue(left, right) {
+  try { return JSON.stringify(memoryCorrectionCanonical(left)) === JSON.stringify(memoryCorrectionCanonical(right)); }
+  catch { return false; }
+}
+
+function memoryCorrectionRecordMatch(record, payload, target) {
+  const r = record && typeof record === "object" ? record : {};
+  const p = payload || {};
+  const provenance = r.provenance || {};
+  const evidence = provenance.evidence || {};
+  const author = provenance.author || {};
+  const expectedCandidate = p.scope && p.scope.scope !== "run";
+  const targetHasKey = Boolean(target && Object.prototype.hasOwnProperty.call(target, "key"));
+  const recordHasKey = Object.prototype.hasOwnProperty.call(r, "key");
+  const recordHasCandidacy = Object.prototype.hasOwnProperty.call(r, "candidacy");
+  const recordHasSupersedes = Object.prototype.hasOwnProperty.call(r, "supersedes");
+  const supersedes = r.supersedes;
+  return /^[a-f0-9]{64}$/.test(String(r.memory_id || "")) && r.kind === "fact" &&
+    memoryCorrectionSameValue(r.scope, p.scope) && memoryCorrectionSameValue(memoryContentValue(r), p.corrected) &&
+    author.type === "human" && author.human_id === p.author && evidence.correction_id === p.correction_id &&
+    r.confidence === 1 && (expectedCandidate ? r.candidacy === "pending" : !recordHasCandidacy) &&
+    targetHasKey === recordHasKey && (!targetHasKey || r.key === target.key) &&
+    (!recordHasSupersedes || memoryCorrectionMemoryId(supersedes));
+}
+
+function memoryCorrectionValidateReceipt(body, payload, target) {
+  const value = body && typeof body === "object" ? body : {};
+  const record = value.record;
+  const expectedCandidate = payload.scope.scope !== "run";
+  if (value.correction_id !== payload.correction_id) return { ok: false, error: "Receipt returned a different correction identity." };
+  if (value.attribution !== `human:${payload.author} via correction:${payload.correction_id}`) {
+    return { ok: false, error: "Receipt attribution does not match the reviewed human identity." };
+  }
+  if (value.candidate !== expectedCandidate) return { ok: false, error: "Receipt candidacy does not match the reviewed destination scope." };
+  if (typeof value.created !== "boolean") return { ok: false, error: "Receipt did not state whether the correction was newly created." };
+  if (!memoryCorrectionRecordMatch(record, payload, target)) return { ok: false, error: "Receipt record does not match the reviewed correction contract." };
+  if (value.memory_id !== record.memory_id) return { ok: false, error: "Receipt and record memory identities disagree." };
+  if (value.example_id != null) return { ok: false, error: "A selected-memory correction unexpectedly created a dataset example." };
+  const receiptSuperseded = value.superseded == null ? null : value.superseded;
+  const recordSuperseded = record.supersedes == null ? null : record.supersedes;
+  if (receiptSuperseded !== recordSuperseded) return { ok: false, error: "Receipt and record supersession evidence disagree." };
+  return { ok: true, record, created: value.created, candidate: expectedCandidate, reconciled: false };
+}
+
+function memoryCorrectionFindReconciled(records, payload, target) {
+  const matches = (Array.isArray(records) ? records : []).filter((record) =>
+    record && record.provenance && record.provenance.evidence &&
+    record.provenance.evidence.correction_id === payload.correction_id);
+  if (!matches.length) return { status: "missing", record: null };
+  const exact = matches.find((record) => memoryCorrectionRecordMatch(record, payload, target));
+  if (exact) return { status: "confirmed", record: exact };
+  return { status: "collision", record: matches[0] };
 }
 
 function memoryContentValue(record) {
@@ -6332,7 +6560,10 @@ function memoryDetailHtml(record, context) {
     ["Supersedes", r.supersedes || "—"], ["Candidacy", r.candidacy || "—"],
   ];
   let html = `<div class="memory-detail-head"><div><h2 id="memory-detail-title" tabindex="-1">${escapeHtml(r.key || `${r.kind || "Memory"} record`)}</h2>` +
-    `<div class="muted tiny">Immutable record · learned ${escapeHtml(r.created_at || provenance.written_at || "time unavailable")}</div></div>` +
+    `<div class="muted tiny">Immutable record · learned ${escapeHtml(r.created_at || provenance.written_at || "time unavailable")}</div>` +
+    (memoryCorrectionMemoryId(r.memory_id)
+      ? `<button class="small memory-correct-button" type="button" data-memory-correct="${escapeHtml(String(r.memory_id))}">Correct this memory</button>`
+      : `<div class="muted tiny memory-correct-button">Correction unavailable: invalid immutable identity.</div>`) + `</div>` +
     `<div class="memory-detail-badges">${memoryStateHtml(r, context)}` +
       (conflicts.length ? `<span class="badge running">conflict</span>` : "") + `</div></div>`;
   html += `<div class="memory-content"><div class="memory-content-label">Remembered content</div>` +
@@ -6354,6 +6585,327 @@ function memoryDetailHtml(record, context) {
   html += `<details class="memory-manifest"><summary>Raw immutable record</summary>` +
     `<pre class="json">${escapeHtml(memoryJsonText(r, 20000))}</pre></details>`;
   return html;
+}
+
+function memoryCorrectionOutcomeText(receipt) {
+  const r = receipt || {};
+  const creation = r.reconciled ? "Rusty confirmed the stored record after an uncertain response; this browser cannot prove which attempt created it."
+    : r.created ? "Rusty stored a new attributed correction."
+    : "This exact correction identity already existed; Rusty returned the same governed record.";
+  const lifecycle = r.candidate
+    ? "It is a pending memory candidate because its destination is wider than one run. The original remains immutable; candidacy prevents the new value from serving silently."
+    : "It is active in the finalized run scope. The target remains retained as evidence.";
+  const supersession = r.record && r.record.supersedes
+    ? ` Rusty linked the replaced same-scope record ${shortId(r.record.supersedes)} as superseded evidence.`
+    : " No same-scope record was replaced.";
+  return `${creation} ${lifecycle}${supersession}`;
+}
+
+function memoryCorrectionErrorText(error) {
+  const message = String(error && error.body && error.body.message || error && error.message || "Rusty refused the correction.");
+  if (Number(error && error.status) === 404) return "The selected memory or destination identity was not found in this tenant. Refresh the ledger before trying again.";
+  if (Number(error && error.status) === 409) return `Rusty refused this correction because the governed state changed: ${message}`;
+  if (Number(error && error.status) === 422) return `Rusty rejected the correction contract: ${message}`;
+  return message;
+}
+
+function memoryCorrectionRender() {
+  const panel = $("memory-correction");
+  const draft = store.memoryCorrection;
+  panel.hidden = !(draft && draft.open);
+  if (!draft || !draft.open) { panel.innerHTML = ""; return; }
+  const target = draft.targetSnapshot || {};
+  const errors = draft.fieldErrors || {};
+  const disabled = draft.submitting || draft.locked;
+  const receipt = draft.receipt;
+  const candidate = draft.scopeType !== "run";
+  const consequence = candidate
+    ? "Pending candidate · requires a later governed promotion path"
+    : "Active in one finalized run · no wider-scope promotion";
+  const fieldError = (name) => errors[name]
+    ? `<span class="field-error" id="memory-correction-${name}-error">${escapeHtml(errors[name])}</span>` : "";
+  const invalid = (name) => errors[name] ? ` aria-invalid="true" aria-describedby="memory-correction-${name}-error"` : "";
+  const resultLabel = receipt ? shortId(receipt.record.memory_id) : candidate ? "pending candidate" : "active run memory";
+  const lockNote = draft.locked && !receipt
+    ? `<div class="note memory-correction-lock" id="memory-correction-lock" role="alert" tabindex="-1"><b>Exact request identity locked.</b><br>${escapeHtml(draft.error || "The write outcome is uncertain.")} Editing this request could turn a safe retry into a different correction.</div>` : "";
+  const receiptNote = receipt
+    ? `<div class="note memory-correction-receipt" role="status"><b>Correction confirmed · ${escapeHtml(shortId(receipt.record.memory_id))}</b><br>${escapeHtml(memoryCorrectionOutcomeText(receipt))}</div>` : "";
+  const errorNote = draft.error && !draft.locked
+    ? `<div class="note memory-correction-error" id="memory-correction-error" role="alert" tabindex="-1">${escapeHtml(draft.error)}</div>` : "";
+  panel.setAttribute("aria-busy", draft.submitting ? "true" : "false");
+  panel.innerHTML = `<div class="memory-correction-head"><div>` +
+    `<h2 id="memory-correction-title" tabindex="-1">Governed memory correction</h2>` +
+    `<p>Create a new human-attributed fact. The selected record is evidence, never an editable row.</p></div>` +
+    `<button class="small" type="button" data-memory-correction-close ${draft.submitting ? "disabled" : ""}>Close</button></div>` +
+    `<div class="memory-splice" aria-label="Immutable memory correction path">` +
+      `<div class="memory-splice-node source"><b>01 · Original stays</b><span>${escapeHtml(shortId(target.memory_id || "?"))} · ${escapeHtml(memoryScopeLabel(target))}</span></div>` +
+      `<div class="memory-splice-joint" aria-hidden="true">◆</div>` +
+      `<div class="memory-splice-node change"><b>02 · Named correction</b><span id="memory-correction-splice-author">${escapeHtml(shortId(draft.correctionId))} · ${escapeHtml(draft.author.trim() || "human identity required")}</span></div>` +
+      `<div class="memory-splice-joint" aria-hidden="true">→</div>` +
+      `<div class="memory-splice-node result"><b>03 · Governed result</b><span>${escapeHtml(resultLabel)}</span></div>` +
+    `</div>${lockNote}${receiptNote}${errorNote}` +
+    `<div class="memory-correction-body"><form class="memory-correction-form" id="memory-correction-form">` +
+      `<fieldset class="memory-correction-fields" ${disabled ? "disabled" : ""}>` +
+        `<label>Human identity<input id="inp-memory-correction-author" data-memory-correction-field="author" maxlength="256" autocomplete="name" value="${escapeHtml(draft.author)}"${invalid("author")}>${fieldError("author")}</label>` +
+        `<label>Correction identity<input id="inp-memory-correction-id" value="${escapeHtml(draft.correctionId)}" readonly aria-readonly="true"${invalid("correctionId")}>${fieldError("correctionId")}</label>` +
+        `<label>Destination scope<select id="sel-memory-correction-scope" data-memory-correction-field="scopeType"${invalid("scopeType")}>` +
+          ["run", "agent", "team", "user", "tenant"].map((scope) => `<option value="${scope}"${draft.scopeType === scope ? " selected" : ""}>${scope}</option>`).join("") +
+        `</select>${fieldError("scopeType")}</label>` +
+        `<label>Scope identity<input id="inp-memory-correction-scope-id" data-memory-correction-field="scopeId" maxlength="256" spellcheck="false" value="${escapeHtml(draft.scopeId)}"${invalid("scopeId")}>${fieldError("scopeId")}</label>` +
+        `<div class="wide"><span class="tiny">Corrected content</span><div class="memory-correction-modes" role="group" aria-label="Corrected content format">` +
+          `<button class="small" type="button" data-memory-correction-mode="text" aria-pressed="${draft.mode === "text"}">Plain text</button>` +
+          `<button class="small" type="button" data-memory-correction-mode="json" aria-pressed="${draft.mode === "json"}">Structured JSON</button></div>` +
+          `<label class="sr-only" for="inp-memory-correction-content">Corrected ${draft.mode === "json" ? "JSON" : "text"}</label>` +
+          `<textarea id="inp-memory-correction-content" data-memory-correction-field="correctedText" spellcheck="false"${invalid("correctedText")}>${escapeHtml(draft.correctedText)}</textarea>${fieldError("correctedText")}` +
+        `</div>` +
+      `</fieldset>` +
+      `<label class="memory-correction-confirm"><input id="chk-memory-correction-ack" data-memory-correction-field="acknowledged" type="checkbox" ${draft.acknowledged ? "checked" : ""} ${disabled ? "disabled" : ""}>` +
+        `<span>I reviewed the target, attribution, destination, and corrected value. I understand the original remains immutable.${fieldError("acknowledged")}</span></label>` +
+      `<div class="memory-correction-actions">` +
+        (draft.locked && !receipt ? `<button class="small" type="button" data-memory-correction-new>Start a new correction</button>` +
+          (draft.retryAllowed ? `<button class="primary" type="submit" ${draft.submitting ? "disabled" : ""}>${draft.submitting ? "Reconciling…" : "Retry exact correction"}</button>` : "") :
+        receipt ? `<button class="small" type="button" data-memory-correction-new>Correct the confirmed result</button><button class="primary" type="button" data-memory-correction-close>Done</button>` :
+        `<button class="primary" type="submit" ${draft.submitting ? "disabled" : ""}>${draft.submitting ? "Writing correction…" : "Write immutable correction"}</button>`) +
+      `</div></form><aside class="memory-correction-review" aria-label="Correction consequence"><h3>Review the consequence</h3><dl>` +
+        `<dt>Target</dt><dd>${escapeHtml(shortId(target.memory_id || "?"))}</dd>` +
+        `<dt>Key</dt><dd>${escapeHtml(target.key || "unkeyed memory")}</dd>` +
+        `<dt>Destination</dt><dd id="memory-correction-review-destination">${escapeHtml(`${draft.scopeType}:${draft.scopeId || "?"}`)}</dd>` +
+        `<dt>Lifecycle</dt><dd>${escapeHtml(consequence)}</dd>` +
+        `<dt>Attribution</dt><dd id="memory-correction-review-author">${escapeHtml(draft.author.trim() ? `human:${draft.author.trim()}` : "required before write")}</dd>` +
+        `<dt>Supersession</dt><dd>If this destination has a live same-key record, Rusty links it as superseded; no record is deleted.</dd>` +
+      `</dl><div class="note tiny" style="margin-top:12px">Run scope is admitted only after Studio verifies that run's journal is finalized. Agent, team, user, and tenant destinations enter candidacy.</div></aside></div>`;
+}
+
+function memoryCorrectionOpen(memoryId) {
+  const record = store.memory && store.memory.records.find((item) => item && item.memory_id === memoryId);
+  if (!record) { toast("Select a retained memory record first.", "err"); return; }
+  try { store.memoryCorrection = memoryCorrectionDraft(record); }
+  catch (error) { toast(error.message, "err"); return; }
+  memoryCorrectionRender();
+  $("memory-correction-title")?.focus({ preventScroll: true });
+  $("memory-correction")?.scrollIntoView({ block: "nearest" });
+}
+
+function memoryCorrectionClose() {
+  if (store.memoryCorrection && store.memoryCorrection.submitting) return;
+  const targetId = store.memoryCorrection && store.memoryCorrection.targetId;
+  store.memoryCorrection = null;
+  memoryCorrectionRender();
+  const button = targetId && Array.from($("memory-detail").querySelectorAll("[data-memory-correct]"))
+    .find((item) => item.getAttribute("data-memory-correct") === targetId);
+  (button || $("memory-detail-title") || $("memory-title"))?.focus({ preventScroll: true });
+}
+
+function memoryCorrectionNew() {
+  const current = store.memoryCorrection;
+  if (!current || current.submitting) return;
+  const source = current.receipt && current.receipt.record || current.targetSnapshot;
+  try { store.memoryCorrection = memoryCorrectionDraft(source); }
+  catch (error) { current.error = error.message; memoryCorrectionRender(); return; }
+  memoryCorrectionRender();
+  $("memory-correction-title")?.focus({ preventScroll: true });
+}
+
+function memoryCorrectionHandleEdit(event) {
+  const draft = store.memoryCorrection;
+  if (!draft || draft.locked || draft.submitting) return;
+  const field = event.target && event.target.getAttribute("data-memory-correction-field");
+  if (!field) return;
+  draft[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+  draft.error = "";
+  if (draft.fieldErrors) delete draft.fieldErrors[field];
+  event.target.removeAttribute("aria-invalid");
+  event.target.removeAttribute("aria-describedby");
+  $("memory-correction")?.querySelector(".memory-correction-error")?.remove();
+  $(`memory-correction-${field}-error`)?.remove();
+  if (field === "author") {
+    const author = String(draft.author || "").trim();
+    const review = $("memory-correction-review-author");
+    const splice = $("memory-correction-splice-author");
+    if (review) review.textContent = author ? `human:${author}` : "required before write";
+    if (splice) splice.textContent = `${shortId(draft.correctionId)} · ${author || "human identity required"}`;
+  }
+  if (field === "scopeId") {
+    const destination = $("memory-correction-review-destination");
+    if (destination) destination.textContent = `${draft.scopeType}:${draft.scopeId || "?"}`;
+  }
+  if (field === "scopeType") {
+    memoryCorrectionRender();
+    $("sel-memory-correction-scope")?.focus({ preventScroll: true });
+  }
+}
+
+function memoryCorrectionSetMode(mode) {
+  const draft = store.memoryCorrection;
+  if (!draft || draft.locked || draft.submitting || !["text", "json"].includes(mode) || draft.mode === mode) return;
+  if (mode === "json" && draft.mode === "text") draft.correctedText = JSON.stringify(draft.correctedText);
+  draft.mode = mode;
+  if (draft.fieldErrors) delete draft.fieldErrors.correctedText;
+  memoryCorrectionRender();
+  $("inp-memory-correction-content")?.focus({ preventScroll: true });
+}
+
+function memoryCorrectionCurrent(draft, generation, connection) {
+  return store.memoryCorrection === draft && draft.generation === generation &&
+    !connectionIdentityChanged(connection, store.conn);
+}
+
+function memoryCorrectionIsExactRetry(draft) {
+  return Boolean(draft && draft.locked && draft.attemptedPayload);
+}
+
+function memoryCorrectionShouldUnlockFailure(exactRetry, status) {
+  const code = Number(status);
+  return !exactRetry && code >= 400 && code < 500;
+}
+
+function memoryCorrectionFailureFocusId(draft) {
+  return draft && draft.locked ? "memory-correction-lock" : "memory-correction-error";
+}
+
+function memoryCorrectionFocusFailure(draft) {
+  $(memoryCorrectionFailureFocusId(draft))?.focus({ preventScroll: true });
+}
+
+async function memoryCorrectionReconcile(draft, payload, generation, connection) {
+  try {
+    const body = await apiForConnection(connection, "POST", "/memory/query", {
+      scope: payload.scope, include_expired: true, include_superseded: true,
+    });
+    if (!memoryCorrectionCurrent(draft, generation, connection)) return { status: "stale" };
+    return memoryCorrectionFindReconciled(body && body.records, payload, draft.targetSnapshot);
+  } catch {
+    return memoryCorrectionCurrent(draft, generation, connection) ? { status: "unknown" } : { status: "stale" };
+  }
+}
+
+async function memoryCorrectionAccept(draft, receipt, generation, connection) {
+  if (!memoryCorrectionCurrent(draft, generation, connection)) return;
+  draft.submitting = false;
+  draft.locked = true;
+  draft.error = "";
+  draft.fieldErrors = Object.create(null);
+  draft.receipt = receipt;
+  memoryCorrectionRender();
+  await memoryLoad(true);
+  if (store.memoryCorrection !== draft || connectionIdentityChanged(connection, store.conn)) return;
+  if (store.memory && store.memory.records.some((record) => record && record.memory_id === receipt.record.memory_id)) {
+    store.memory.selected = receipt.record.memory_id;
+  }
+  memoryRender();
+  $("memory-correction-title")?.focus({ preventScroll: true });
+  $("memory-correction")?.scrollIntoView({ block: "nearest" });
+}
+
+async function memoryCorrectionSubmit() {
+  const draft = store.memoryCorrection;
+  if (!draft || draft.submitting || draft.receipt || !store.conn) return;
+  if (draft.locked && draft.retryAllowed !== true) return;
+  if (store.memory && store.memory.loading) {
+    draft.error = "Wait for the current memory refresh to finish before writing a correction.";
+    memoryCorrectionRender();
+    memoryCorrectionFocusFailure(draft);
+    return;
+  }
+  const exactRetry = memoryCorrectionIsExactRetry(draft);
+  let payload;
+  if (exactRetry) {
+    payload = draft.attemptedPayload;
+  } else {
+    const validation = memoryCorrectionValidateDraft(draft);
+    draft.fieldErrors = validation.errors;
+    if (!validation.valid) {
+      draft.error = "Review the highlighted correction fields before writing memory.";
+      memoryCorrectionRender();
+      const ids = { targetId: "memory-correction-title", correctionId: "inp-memory-correction-id", author: "inp-memory-correction-author",
+        scopeType: "sel-memory-correction-scope", scopeId: "inp-memory-correction-scope-id", correctedText: "inp-memory-correction-content",
+        acknowledged: "chk-memory-correction-ack" };
+      $(ids[validation.first] || "memory-correction-title")?.focus({ preventScroll: true });
+      return;
+    }
+    payload = validation.payload;
+    draft.attemptedPayload = JSON.parse(JSON.stringify(payload));
+  }
+  const connection = { ...store.conn };
+  const generation = ++draft.generation;
+  draft.submitting = true;
+  draft.error = "";
+  memoryCorrectionRender();
+  $("memory-correction-title")?.focus({ preventScroll: true });
+  if (payload.scope.scope === "run" && !exactRetry) {
+    try {
+      const feed = await apiForConnection(connection, "GET", `/runs/${encodeURIComponent(payload.scope.id)}/events`);
+      if (!memoryCorrectionCurrent(draft, generation, connection)) return;
+      if (!feed || feed.run_id !== payload.scope.id || feed.complete !== true || !Array.isArray(feed.events)) {
+        draft.submitting = false;
+        draft.locked = false;
+        draft.attemptedPayload = null;
+        draft.error = `Run ${payload.scope.id} is not a verified finalized journal. Choose a completed run or a candidacy scope.`;
+        memoryCorrectionRender();
+        memoryCorrectionFocusFailure(draft);
+        return;
+      }
+    } catch (error) {
+      if (!memoryCorrectionCurrent(draft, generation, connection)) return;
+      draft.submitting = false;
+      draft.locked = false;
+      draft.attemptedPayload = null;
+      draft.error = `Studio could not verify finalized run ${payload.scope.id}: ${memoryCorrectionErrorText(error)}`;
+      memoryCorrectionRender();
+      memoryCorrectionFocusFailure(draft);
+      return;
+    }
+  }
+  try {
+    const body = await apiForConnection(connection, "POST", "/memory/corrections", payload);
+    if (!memoryCorrectionCurrent(draft, generation, connection)) return;
+    const checked = memoryCorrectionValidateReceipt(body, payload, draft.targetSnapshot);
+    if (checked.ok) {
+      await memoryCorrectionAccept(draft, checked, generation, connection);
+      return;
+    }
+    const reconciled = await memoryCorrectionReconcile(draft, payload, generation, connection);
+    if (reconciled.status === "confirmed") {
+      await memoryCorrectionAccept(draft, { record: reconciled.record, created: undefined,
+        candidate: payload.scope.scope !== "run", reconciled: true }, generation, connection);
+      return;
+    }
+    if (!memoryCorrectionCurrent(draft, generation, connection)) return;
+    draft.submitting = false;
+    draft.locked = true;
+    draft.retryAllowed = reconciled.status !== "collision";
+    draft.error = reconciled.status === "collision"
+      ? "This correction identity belongs to a different stored record. Start a new correction identity; do not retry this one."
+      : `${checked.error} Rusty could not confirm the stored record. Retry only this exact locked correction.`;
+    memoryCorrectionRender();
+    memoryCorrectionFocusFailure(draft);
+  } catch (error) {
+    if (!memoryCorrectionCurrent(draft, generation, connection)) return;
+    if (memoryCorrectionShouldUnlockFailure(exactRetry, error && error.status)) {
+      draft.submitting = false;
+      draft.locked = false;
+      draft.attemptedPayload = null;
+      draft.error = memoryCorrectionErrorText(error);
+      memoryCorrectionRender();
+      memoryCorrectionFocusFailure(draft);
+      return;
+    }
+    const reconciled = await memoryCorrectionReconcile(draft, payload, generation, connection);
+    if (reconciled.status === "confirmed") {
+      await memoryCorrectionAccept(draft, { record: reconciled.record, created: undefined,
+        candidate: payload.scope.scope !== "run", reconciled: true }, generation, connection);
+      return;
+    }
+    if (!memoryCorrectionCurrent(draft, generation, connection)) return;
+    draft.submitting = false;
+    draft.locked = true;
+    draft.retryAllowed = reconciled.status !== "collision";
+    draft.error = reconciled.status === "collision"
+      ? "This correction identity is already attached to different content. Start a new correction."
+      : "The write outcome is uncertain and the record could not be reconciled. Retry only this exact locked correction; Rusty converges retries by correction identity.";
+    memoryCorrectionRender();
+    memoryCorrectionFocusFailure(draft);
+  }
 }
 
 function memorySummaryHtml(records, conflicts, context, metadata) {
@@ -6505,6 +7057,11 @@ function memoryScheduleLifecycleRefresh(records, nowMs) {
 function memoryCaptureDynamicFocus() {
   const active = document.activeElement;
   if (!active || typeof active.closest !== "function") return null;
+  if ($("memory-correction").contains(active)) {
+    return { area: "correction", id: active.id || null,
+      start: typeof active.selectionStart === "number" ? active.selectionStart : null,
+      end: typeof active.selectionEnd === "number" ? active.selectionEnd : null };
+  }
   const row = active.closest("[data-memory-id]");
   if (row && $("memory-list").contains(row)) {
     return { area: "list", id: row.getAttribute("data-memory-id") };
@@ -6519,7 +7076,9 @@ function memoryCaptureDynamicFocus() {
 function memoryRestoreDynamicFocus(target) {
   if (!target) return;
   let next = null;
-  if (target.area === "list") {
+  if (target.area === "correction") {
+    next = target.id ? $(target.id) : $("memory-correction-title");
+  } else if (target.area === "list") {
     next = Array.from($("memory-list").querySelectorAll("[data-memory-id]"))
       .find((row) => row.getAttribute("data-memory-id") === target.id) ||
       $("memory-list").querySelector('[aria-selected="true"]') || $("inp-memory-search");
@@ -6530,12 +7089,21 @@ function memoryRestoreDynamicFocus(target) {
   } else {
     next = $("memory-detail-title") || $("inp-memory-search");
   }
-  if (next) next.focus({ preventScroll: true });
+  if (next) {
+    next.focus({ preventScroll: true });
+    if (target.area === "correction" && target.start != null && typeof next.setSelectionRange === "function") {
+      const maximum = String(next.value || "").length;
+      next.setSelectionRange(Math.min(target.start, maximum), Math.min(target.end == null ? target.start : target.end, maximum));
+    }
+  }
 }
 
 function memoryRender() {
   const state = store.memory;
   const listEl = $("memory-list"), detailEl = $("memory-detail");
+  const correctionBusy = Boolean(store.memoryCorrection && store.memoryCorrection.submitting);
+  $("btn-memory-refresh").disabled = correctionBusy;
+  memoryCorrectionRender();
   if (!state || state.loading) {
     $("memory-summary").innerHTML = "";
     $("memory-conflicts").innerHTML = "";
@@ -8637,8 +9205,25 @@ function init() {
     $("memory-conflicts").querySelector("[data-memory-conflict]")?.focus({ preventScroll: true });
   });
   $("memory-detail").addEventListener("click", (e) => {
+    const correct = e.target.closest("[data-memory-correct]");
+    if (correct) { memoryCorrectionOpen(correct.getAttribute("data-memory-correct")); return; }
     const target = e.target.closest("[data-memory-select]");
     if (target) memorySelect(target.getAttribute("data-memory-select"), true);
+  });
+  $("memory-correction").addEventListener("input", memoryCorrectionHandleEdit);
+  $("memory-correction").addEventListener("change", memoryCorrectionHandleEdit);
+  $("memory-correction").addEventListener("click", (event) => {
+    const close = event.target.closest("[data-memory-correction-close]");
+    if (close) { memoryCorrectionClose(); return; }
+    const fresh = event.target.closest("[data-memory-correction-new]");
+    if (fresh) { memoryCorrectionNew(); return; }
+    const mode = event.target.closest("[data-memory-correction-mode]");
+    if (mode) memoryCorrectionSetMode(mode.getAttribute("data-memory-correction-mode"));
+  });
+  $("memory-correction").addEventListener("submit", (event) => {
+    if (event.target.id !== "memory-correction-form") return;
+    event.preventDefault();
+    memoryCorrectionSubmit();
   });
 
   // Governed learning: immutable candidate evidence stays beside every
