@@ -159,7 +159,8 @@ pub mod prelude {
     #[cfg(feature = "postgres")]
     pub use crate::checkpoint_postgres::PostgresCheckpointer;
     pub use crate::durable::{
-        backoff_delay_ms, classify_retry, ArtifactContract, ErrorClass, RetryDecision, TaskBudget,
+        backoff_delay_ms, classify_retry, retry_decision_event, retry_legal_actions,
+        retry_selected_action, ArtifactContract, ErrorClass, RetryDecision, TaskBudget,
         TaskEnvelope, BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS, TASK_ENVELOPE_FORMAT_VERSION,
     };
     pub use crate::effects::{
@@ -205,9 +206,11 @@ pub mod prelude {
         create_react_agent_with_recording,
     };
     pub use crate::record::{
-        ArtifactRef, CapsuleVersion, CheckpointHeader, DecisionAction, DecisionEvent,
-        DecisionFamily, DecisionOutcome, Effect, EffectReceipt, EventStatus, JournalRef,
-        PayloadRef, PolicyVersion, RunEvent, RunEventKind, RunManifest, CURRENT_FORMAT_VERSION,
+        derive_policy_version, ArtifactRef, CapsuleVersion, CheckpointHeader,
+        ConcurrencyPolicyParameters, DecisionAction, DecisionEvent, DecisionFamily,
+        DecisionOutcome, Effect, EffectReceipt, EventStatus, ExecutorPolicy, JournalRef,
+        PayloadRef, PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind, RunManifest,
+        TimeoutPolicyParameters, CURRENT_FORMAT_VERSION,
     };
     pub use crate::replay::{
         BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, LogicalClockParams,

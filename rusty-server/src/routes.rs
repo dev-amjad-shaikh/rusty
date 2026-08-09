@@ -20,21 +20,26 @@ use rusty_agent_runtime::agents::{
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
+use rusty_agent_runtime::durable::{retry_decision_event, RetryDecision};
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
     admit_promotion, candidate_effect_key, evaluation_effect_key, promotion_effect_key,
-    rollback_effect_key, Candidate, CandidateRecord, CandidateStatus, EvaluationRequest,
-    LearnError, PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer,
+    rollback_effect_key, Candidate, CandidateContent, CandidateOverlay, CandidateRecord,
+    CandidateStatus, EvaluationRequest, LearnError, PromotionReceipt, PromotionRefusal,
+    RollbackReceipt, VersionPointer,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
     assemble, detect_conflicts, memory_effect_key, memory_forget_effect_key, memory_read_request,
     plan_forget, Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason,
     MemoryEvidence, MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
-    MemoryScope, ProvenanceAuthor, ScopeAddress, ValidityWindow,
+    MemoryScope, MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
-use rusty_agent_runtime::record::{sha256_hex, Effect, EffectReceipt, PayloadRef, RunEventKind};
+use rusty_agent_runtime::record::{
+    derive_policy_version, sha256_hex, Effect, EffectReceipt, ExecutorPolicy, PayloadRef,
+    PolicyVersion, RunEventKind,
+};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
@@ -50,6 +55,8 @@ use crate::auth::TenantContext;
 use crate::coordination;
 use crate::crons::{self, CronRecord, OnRunCompleted};
 use crate::error::ApiError;
+use crate::learn::ServerMemoryStore;
+use crate::policy::{self, PolicyActivation, PolicyRecord, PolicySource, PolicyWrite};
 use crate::runs::{
     self, MultitaskStrategy, RunConfigPayload, RunDeps, RunManager, RunPayload, RunStatus,
 };
@@ -90,15 +97,24 @@ pub(crate) struct AppState {
 /// is JSON files under `store_path`; `ServerConfig::with_postgres(url)`
 /// (feature `postgres`) switches both to Postgres. Postgres connections are
 /// established lazily on first use, keeping this builder synchronous.
+///
+/// The checkpointer is always the wave-4 binding decorator
+/// ([`policy::PolicyBindingCheckpointer`]) over the concrete backend: it
+/// stamps the tenant's active policy version into every admission
+/// checkpoint's header and records the binding, so a run's policy pin is
+/// decided once, at the boundary that starts it.
 fn build_backends(config: &ServerConfig) -> (Arc<dyn Checkpointer>, Arc<dyn ServerStore>) {
     #[cfg(feature = "postgres")]
     if let Some(url) = &config.database_url {
-        return (
+        let server_store: Arc<dyn ServerStore> =
+            Arc::new(crate::server_store::PostgresStore::new(url.clone()));
+        let checkpointer = policy::PolicyBindingCheckpointer::new(
             Arc::new(crate::server_store::LazyPostgresCheckpointer::new(
                 url.clone(),
             )),
-            Arc::new(crate::server_store::PostgresStore::new(url.clone())),
+            Arc::clone(&server_store),
         );
+        return (Arc::new(checkpointer), server_store);
     }
     #[cfg(not(feature = "postgres"))]
     assert!(
@@ -106,10 +122,12 @@ fn build_backends(config: &ServerConfig) -> (Arc<dyn Checkpointer>, Arc<dyn Serv
         "`ServerConfig::database_url` requires the `postgres` feature \
          (rebuild rusty-server with `--features postgres`)"
     );
-    (
+    let server_store: Arc<dyn ServerStore> = Arc::new(JsonFileStore::load(&config.store_path));
+    let checkpointer = policy::PolicyBindingCheckpointer::new(
         Arc::new(JsonFileCheckpointer::new(config.store_path.clone())),
-        Arc::new(JsonFileStore::load(&config.store_path)),
-    )
+        Arc::clone(&server_store),
+    );
+    (Arc::new(checkpointer), server_store)
 }
 
 /// Build the full router with an explicit drain control (used by
@@ -238,6 +256,16 @@ pub(crate) fn router_with_shutdown(
             post(rollback_candidate),
         )
         .route("/learn/versions", get(list_version_pointers))
+        // The executor-policy registry (R0.8 wave 4): versioned,
+        // immutable policy bodies; the append-only activation log moving
+        // the active-version pointer; the active read; and the derived
+        // epoch history. Admission binding itself happens inside the
+        // checkpointer decorator (`PolicyBindingCheckpointer`), not here.
+        .route("/policy/versions", post(register_policy).get(list_policies))
+        .route("/policy/versions/{version}", get(get_policy))
+        .route("/policy/activations", post(activate_policy))
+        .route("/policy/active", get(get_active_policy))
+        .route("/policy/epochs", get(list_policy_epochs))
         .route("/coordination/delegate", post(submit_delegate))
         .route("/coordination/fan_out", post(submit_fan_out))
         .route("/coordination/race", post(submit_race))
@@ -366,6 +394,10 @@ fn checkpoint_ref(cp: &Checkpoint, tenant: &TenantContext) -> Value {
         "thread_id": tenant.unscope(&cp.thread_id).unwrap_or(&cp.thread_id),
         "step": cp.step,
         "created_at": cp.created_at,
+        // The policy version this checkpoint bound (R0.8 wave 4): stamped
+        // at admission, inherited across resume — the header is the
+        // authoritative record of the pin.
+        "policy_version": cp.header.policy_version,
     })
 }
 
@@ -2712,6 +2744,64 @@ struct QueryMemoryPayload {
 /// a hard budget overflows); without, the rank-ordered records — ranked
 /// through the assembly's total order, so the two read shapes agree on
 /// ordering by construction.
+/// Resolve the store a memory query reads through: the live namespace,
+/// or — when the query names a scope whose surface has an active
+/// `memory_set` candidate — the candidate's overlay over it. This is how
+/// new traffic sees a promotion without a store migration, and how a
+/// rollback restores base behavior: the pointer moved, the lens follows.
+/// Any miss (no pointer, no active candidate, a candidate record that
+/// vanished, a candidate that does not apply as an overlay) falls back to
+/// the live namespace with a warning, never an error: a read must not
+/// fail because governance state is mid-flight.
+async fn memory_read_store(
+    state: &AppState,
+    tenant: &TenantContext,
+    query: &MemoryQuery,
+) -> Result<Arc<dyn MemoryStore>, ApiError> {
+    let base: Arc<dyn MemoryStore> = Arc::new(ServerMemoryStore::new(
+        Arc::clone(&state.server_store),
+        tenant.tenant(),
+    ));
+    let Some(scope) = &query.scope else {
+        return Ok(base);
+    };
+    let surface = format!("memory:{}", scope.as_address());
+    let pointer = state
+        .server_store
+        .get_version_pointer(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?;
+    let Some(active) = pointer.and_then(|pointer| pointer.active) else {
+        return Ok(base);
+    };
+    let record = state
+        .server_store
+        .get_candidate(tenant.tenant(), active.as_str())
+        .await
+        .map_err(internal_err)?;
+    let Some(record) = record else {
+        tracing::warn!(
+            candidate = %active,
+            %surface,
+            "version pointer names a candidate that is gone; reading the live namespace"
+        );
+        return Ok(base);
+    };
+    match CandidateOverlay::new(base.clone(), &record.candidate) {
+        Ok(overlay) => Ok(Arc::new(overlay)),
+        Err(error) => {
+            tracing::warn!(
+                candidate = %active,
+                %surface,
+                %error,
+                "candidate on a memory surface does not apply as an overlay; reading the \
+                 live namespace"
+            );
+            Ok(base)
+        }
+    }
+}
+
 async fn query_memory(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
@@ -2728,11 +2818,8 @@ async fn query_memory(
                 .to_string(),
         ));
     }
-    let records = state
-        .server_store
-        .query_memory(tenant.tenant(), &query, as_of)
-        .await
-        .map_err(internal_err)?;
+    let store = memory_read_store(&state, &tenant, &query).await?;
+    let records = store.query(&query, as_of).await.map_err(internal_err)?;
     match payload.budget {
         Some(budget) => {
             let assembly =
@@ -2873,6 +2960,141 @@ async fn try_journal_memory_event(
     let journal = Journal::from_snapshot(snapshot, Clock::System)
         .map_err(|e| format!("journal failed its integrity check: {e}"))?;
     let parent = parent.or_else(|| journal.events().last().map(|event| event.id.clone()));
+    let draft = match parent {
+        Some(parent) => draft.parent(parent),
+        None => draft,
+    };
+    journal.record(draft);
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(|e| format!("persist journal: {e}"))
+}
+
+/// Journal one executor retry decision (R0.8 wave 4) into the owning
+/// run's persisted journal — best-effort, the [`journal_memory_write`]
+/// discipline: the settlement is already durable in the task record, so
+/// a journaling failure (no run linkage, a live run whose journal is not
+/// yet persisted, a cross-tenant linkage) is logged, never surfaced as a
+/// request failure. The receipt journaler's documented live-flush caveat
+/// applies unchanged: a run in flight may flush its own journal over
+/// this append, so decision evidence for in-flight runs can be lost —
+/// the durable record is the task settlement itself.
+async fn journal_policy_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    task: &TaskRecord,
+    error_class: rusty_agent_runtime::durable::ErrorClass,
+    retryable: bool,
+    decided_at: DateTime<Utc>,
+) {
+    let Some(run_id) = task.run_id.clone() else {
+        return;
+    };
+    if let Err(error) = try_journal_policy_decision(
+        state,
+        tenant,
+        &run_id,
+        task,
+        error_class,
+        retryable,
+        decided_at,
+    )
+    .await
+    {
+        tracing::warn!(
+            %run_id,
+            task_id = %task.task_id,
+            %error,
+            "retry decision is settled in the task record; journaling skipped"
+        );
+    }
+}
+
+/// The fallible body of [`journal_policy_decision`], mirroring
+/// [`try_journal_memory_event`]: ownership proof first, integrity
+/// re-check on load, append, persist. The decision is *reconstructed*
+/// from the settled record — `failed` with a scheduled next attempt →
+/// `retry` (delay = schedule − decision time), `dead` → `dead`, terminal
+/// `failed` without a schedule → `fail` — so the event is evidence of
+/// the decision that was made, never a new decision. The declared
+/// effect defaults from the worker's `retryable` flag the way the gate
+/// itself does (`retryable: true` asserts idempotency).
+async fn try_journal_policy_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    task: &TaskRecord,
+    error_class: rusty_agent_runtime::durable::ErrorClass,
+    retryable: bool,
+    decided_at: DateTime<Utc>,
+) -> Result<(), String> {
+    let decision = match (&task.status, task.next_attempt_at) {
+        (TaskStatus::Failed, Some(next)) => RetryDecision::Retry {
+            after_ms: (next - decided_at).num_milliseconds().max(0) as u64,
+        },
+        (TaskStatus::Dead, _) => RetryDecision::Dead,
+        _ => RetryDecision::Fail,
+    };
+    let effect = task.effect.unwrap_or(if retryable {
+        Effect::Idempotent
+    } else {
+        Effect::NonIdempotent
+    });
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(|e| format!("load journal: {e}"))?
+    else {
+        return Err("run has no persisted journal yet".to_string());
+    };
+    let thread_id = snapshot.thread_id.clone();
+    let internal_thread_id = tenant.scope(&thread_id);
+    let owned = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(|e| format!("resolve thread: {e}"))?
+        .is_some();
+    if !owned {
+        return Err("run does not resolve in this tenant".to_string());
+    }
+    let journal = Journal::from_snapshot(snapshot, Clock::System)
+        .map_err(|e| format!("journal failed its integrity check: {e}"))?;
+    // The version the run bound at admission — the latest checkpoint's
+    // header; a run with no checkpoint yet records the floor, matching
+    // what its first admission checkpoint will bind.
+    let policy_version = state
+        .checkpointer
+        .get_latest(&internal_thread_id)
+        .await
+        .map_err(|e| format!("load checkpoint: {e}"))?
+        .map(|checkpoint| checkpoint.header.policy_version)
+        .unwrap_or_default();
+    let seq = journal
+        .events()
+        .iter()
+        .filter(|event| event.kind == RunEventKind::PolicyDecision)
+        .count() as u64;
+    let event = retry_decision_event(
+        run_id,
+        thread_id,
+        seq,
+        effect,
+        error_class,
+        task.attempt,
+        task.max_attempts,
+        None,
+        &decision,
+        &policy_version,
+        decided_at,
+    );
+    let draft = EventDraft::new(RunEventKind::PolicyDecision, Effect::Pure).output(
+        serde_json::to_value(&event).map_err(|e| format!("serialize decision event: {e}"))?,
+    );
+    let parent = journal.events().last().map(|event| event.id.clone());
     let draft = match parent {
         Some(parent) => draft.parent(parent),
         None => draft,
@@ -3970,6 +4192,23 @@ async fn promote_candidate(
             .map_err(internal_err)?,
         &candidate_id,
     )?;
+    // Wave 4: a full-traffic policy promotion becomes an active executor
+    // policy — the pointer move alone only names the surface winner; the
+    // registry activation is what the admission decorator reads. Canary
+    // promotions register nothing (policy canary bindings do not steer
+    // admission in v1).
+    if receipt.decision.canary.is_none() {
+        if let CandidateContent::Policy { family, parameters } = &record.candidate.content {
+            activate_policy_from_candidate(
+                &state,
+                &tenant,
+                &candidate_id,
+                *family,
+                parameters.clone(),
+            )
+            .await?;
+        }
+    }
     Ok(Json(json!({
         "candidate_id": candidate_id,
         "status": status_wire(record.status),
@@ -4086,6 +4325,15 @@ async fn rollback_candidate(
             .map_err(internal_err)?,
         &candidate_id,
     )?;
+    // Wave 4: rolling back a serving policy candidate reverts the active
+    // executor policy to what the promotion displaced. Canary bindings
+    // never activated anything, so a canary rollback leaves the registry
+    // untouched.
+    if serves_active {
+        if let CandidateContent::Policy { .. } = &record.candidate.content {
+            revert_policy_from_rollback(&state, &tenant, &receipt).await?;
+        }
+    }
     Ok(Json(json!({
         "candidate_id": candidate_id,
         "status": status_wire(record.status),
@@ -4109,6 +4357,307 @@ async fn list_version_pointers(
     Ok(Json(json!({ "versions": pointers })))
 }
 
+// --------------------------------------------------------------------- //
+// The executor-policy registry (R0.8 Rusty Learn, wave 4)
+//
+// Versioned, immutable policy bodies; the append-only activation log
+// moving the active-version pointer; the derived epoch history. The
+// binding itself happens inside the checkpointer decorator
+// (`policy::PolicyBindingCheckpointer`) at run admission — these routes
+// are the registry's operator face, plus the promotion/rollback hooks
+// below that keep the registry honest when *learned* policy arrives.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct RegisterPolicyPayload {
+    /// Operator-chosen version name. `None` mints the content-derived
+    /// `policy-{hash12}` name — the same addressing the promotion hook
+    /// uses, so a hand-authored body and a learned body with identical
+    /// parameters converge on one record.
+    #[serde(default)]
+    version: Option<String>,
+    /// The parameter bundle.
+    policy: ExecutorPolicy,
+}
+
+/// `POST /policy/versions` — register an immutable policy body → `201
+/// {version, record}`; `200` when the version already names exactly this
+/// body (the idempotent create); `409` when it names a different one;
+/// `400` for an invalid version name. The reserved `static-v0` floor is
+/// never registerable — it predates the registry.
+async fn register_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterPolicyPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let version = match &payload.version {
+        Some(version) => {
+            policy::validate_policy_version(version).map_err(ApiError::bad_request)?;
+            PolicyVersion::new(version.clone())
+        }
+        None => derive_policy_version(&payload.policy).map_err(internal_err)?,
+    };
+    let record = PolicyRecord {
+        version,
+        policy: payload.policy,
+        source: PolicySource::Api,
+        registered_at: Utc::now(),
+    };
+    let write = state
+        .server_store
+        .put_policy(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    match write {
+        PolicyWrite::Created => Ok((
+            StatusCode::CREATED,
+            Json(json!({ "version": record.version, "record": record })),
+        )),
+        PolicyWrite::Converged => Ok((
+            StatusCode::OK,
+            Json(json!({ "version": record.version, "record": record })),
+        )),
+        PolicyWrite::Conflict => Err(ApiError::conflict(format!(
+            "policy version `{}` already names a different body — versions are immutable; \
+             register the changed body under a new (or its derived) version",
+            record.version.as_str()
+        ))),
+    }
+}
+
+/// `GET /policy/versions` — the tenant's registered policy bodies, sorted
+/// by version for a deterministic listing. The floor is never listed: it
+/// is not registered, it is synthesized on demand.
+async fn list_policies(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut policies = state
+        .server_store
+        .list_policies(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    policies.sort_by(|a, b| a.version.as_str().cmp(b.version.as_str()));
+    Ok(Json(json!({ "policies": policies })))
+}
+
+/// `GET /policy/versions/{version}` — fetch one registered body (`404`
+/// unknown/cross-tenant). The floor resolves as its synthetic record.
+async fn get_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(version): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if version == PolicyVersion::STATIC_V0 {
+        return Ok(Json(
+            json!({ "version": version, "record": policy::static_floor_record() }),
+        ));
+    }
+    let record = state
+        .server_store
+        .get_policy(tenant.tenant(), &version)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("policy version `{version}` not found")))?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivatePolicyPayload {
+    /// The version that becomes active for new-run admission.
+    version: String,
+}
+
+/// `POST /policy/activations` — append one move of the active-version
+/// pointer → `200 {version, active}` with the activated body; `422` when
+/// the version is not registered. Activating `static-v0` is always legal
+/// — reverting to pre-learning behavior needs no candidate.
+async fn activate_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ActivatePolicyPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let record = if payload.version == PolicyVersion::STATIC_V0 {
+        policy::static_floor_record()
+    } else {
+        state
+            .server_store
+            .get_policy(tenant.tenant(), &payload.version)
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::unprocessable(format!(
+                    "policy version `{}` is not registered — only registered bodies (and the \
+                     static floor) can be activated",
+                    payload.version
+                ))
+            })?
+    };
+    let activation = PolicyActivation {
+        version: record.version.clone(),
+        activated_at: Utc::now(),
+    };
+    state
+        .server_store
+        .append_policy_activation(tenant.tenant(), &activation)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(
+        json!({ "version": activation.version, "active": record }),
+    ))
+}
+
+/// `GET /policy/active` — the tenant's active policy: the last
+/// activation's registered body, or the floor when the registry never
+/// moved.
+async fn get_active_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let record = policy::active_policy_record(&state.server_store, tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+/// `GET /policy/epochs` — the epoch history: each activation's reign
+/// window plus the admission bindings recorded inside it, with the
+/// implicit floor epoch covering pre-activation bindings. Empty while
+/// the registry has never moved.
+async fn list_policy_epochs(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let activations = state
+        .server_store
+        .list_policy_activations(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    let bindings = state
+        .server_store
+        .list_policy_bindings(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    let epochs = policy::derive_epochs(activations, bindings);
+    Ok(Json(json!({ "epochs": epochs })))
+}
+
+/// The wave-4 promotion hook: a full-traffic policy promotion overlays
+/// the candidate's family parameters onto the currently active policy,
+/// registers the result under its derived content version (provenance:
+/// [`PolicySource::Candidate`]), and activates it — so the next admitted
+/// run binds the learned parameters. The overlay (not a wholesale
+/// adoption) is deliberate: a candidate declares one family's parameters,
+/// and the families it does not declare keep serving as they were.
+async fn activate_policy_from_candidate(
+    state: &AppState,
+    tenant: &TenantContext,
+    candidate_id: &str,
+    family: rusty_agent_runtime::record::DecisionFamily,
+    parameters: Value,
+) -> Result<(), ApiError> {
+    let base = policy::active_policy_record(&state.server_store, tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    let policy = base
+        .policy
+        .with_family_parameters(family, parameters)
+        .map_err(|e| {
+            ApiError::unprocessable(format!(
+                "policy candidate `{candidate_id}` does not apply to the active policy: {e}"
+            ))
+        })?;
+    let version = derive_policy_version(&policy).map_err(internal_err)?;
+    let record = PolicyRecord {
+        version: version.clone(),
+        policy,
+        source: PolicySource::Candidate {
+            candidate_id: candidate_id.to_string(),
+        },
+        registered_at: Utc::now(),
+    };
+    match state
+        .server_store
+        .put_policy(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?
+    {
+        PolicyWrite::Created | PolicyWrite::Converged => {}
+        PolicyWrite::Conflict => {
+            // Impossible by construction — the version is derived from
+            // this exact body — but the registry's immutability refusal
+            // is answered honestly rather than assumed away.
+            return Err(ApiError::conflict(format!(
+                "derived policy version `{}` already names a different body",
+                version.as_str()
+            )));
+        }
+    }
+    let activation = PolicyActivation {
+        version,
+        activated_at: Utc::now(),
+    };
+    state
+        .server_store
+        .append_policy_activation(tenant.tenant(), &activation)
+        .await
+        .map_err(internal_err)
+}
+
+/// The wave-4 rollback hook: a full-traffic policy rollback moves the
+/// active version back — to the displaced candidate's derived version
+/// when its record is still registered (byte-exact: the registry body is
+/// the promotion's policy, not a reconstruction), to the static floor
+/// when the promotion displaced the floor or the predecessor's record is
+/// gone (the floor is always resolvable; a missing predecessor is logged,
+/// never guessed around).
+async fn revert_policy_from_rollback(
+    state: &AppState,
+    tenant: &TenantContext,
+    receipt: &RollbackReceipt,
+) -> Result<(), ApiError> {
+    let version = match &receipt.to {
+        Some(previous_id) => {
+            let policies = state
+                .server_store
+                .list_policies(tenant.tenant())
+                .await
+                .map_err(internal_err)?;
+            let found = policies
+                .into_iter()
+                .find_map(|record| match &record.source {
+                    PolicySource::Candidate { candidate_id }
+                        if candidate_id == previous_id.as_str() =>
+                    {
+                        Some(record.version)
+                    }
+                    _ => None,
+                });
+            match found {
+                Some(version) => version,
+                None => {
+                    tracing::warn!(
+                        candidate = %previous_id,
+                        "policy rollback: the displaced candidate's policy record is gone; \
+                         reverting to the static floor"
+                    );
+                    PolicyVersion::default()
+                }
+            }
+        }
+        None => PolicyVersion::default(),
+    };
+    let activation = PolicyActivation {
+        version,
+        activated_at: Utc::now(),
+    };
+    state
+        .server_store
+        .append_policy_activation(tenant.tenant(), &activation)
+        .await
+        .map_err(internal_err)
+}
+
 /// `POST /tasks/{id}/fail` — record a failed attempt → `200 {requeued,
 /// next_attempt_at, dead}`. The decision is core's shared `classify_retry`
 /// policy: a retryable failure with attempts left requeues with exponential
@@ -4129,6 +4678,7 @@ async fn fail_task(
     let error_class =
         tasks::parse_error_class(&payload.error_class).map_err(ApiError::bad_request)?;
     tasks::validate_label("message", &payload.message, 4096).map_err(ApiError::bad_request)?;
+    let now = Utc::now();
     let outcome = state
         .server_store
         .fail_task(
@@ -4144,11 +4694,20 @@ async fn fail_task(
                     cost_usd: payload.cost_usd,
                 },
             },
-            Utc::now(),
+            now,
         )
         .await
         .map_err(internal_err)?;
     let task = lease_outcome(outcome, &task_id, &payload.worker_id)?;
+    // Policy decision evidence (R0.8 wave 4): the retry decision the
+    // settled record implies — legal set, selected action, features, and
+    // the policy version the owning run bound at admission — is journaled
+    // into that run as a `policy_decision` event (best-effort, the
+    // memory-journaler discipline). Cancellation is control flow, not a
+    // policy decision, so it journals nothing.
+    if error_class != rusty_agent_runtime::durable::ErrorClass::Cancelled {
+        journal_policy_decision(&state, &tenant, &task, error_class, payload.retryable, now).await;
+    }
     // Supervision trigger (R0.7 wave 2): a failed mailbox turn is a
     // supervision signal — the declared policy decides restart vs
     // escalate, journaled. Cancellation-class failures are control flow

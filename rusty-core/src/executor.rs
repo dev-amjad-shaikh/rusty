@@ -185,8 +185,10 @@ pub struct RunConfig {
 
     /// Flight Recorder (R0.5): the executor policy active for this run,
     /// stamped into every checkpoint header. `None` records the static
-    /// default ([`PolicyVersion::STATIC_V0`]) — the correct value for any
-    /// run before the policy plane lands (R0.8+).
+    /// default ([`PolicyVersion::STATIC_V0`]) — except on resume (R0.8 wave
+    /// 4), where the run inherits the version its checkpoint header pins so
+    /// an in-flight run is immune to mid-run promotions. An explicit pin
+    /// always wins over inheritance.
     pub policy_version: Option<PolicyVersion>,
 
     /// Flight Recorder (R0.5): the application's own graph version string,
@@ -678,7 +680,7 @@ impl Executor {
                 config.clock.clone().unwrap_or_default(),
             ),
         };
-        let recorder = Recorder {
+        let mut recorder = Recorder {
             clock: config
                 .clock
                 .clone()
@@ -746,6 +748,14 @@ impl Executor {
                         ))
                     })?,
             };
+            // Policy-binding continuity (R0.8 wave 4): a resumed run keeps
+            // the policy version its checkpoint header pins, so a mid-run
+            // promotion never changes behavior under an in-flight execution.
+            // An explicit `RunConfig::with_policy_version` pin wins over
+            // inheritance — the caller asked for that version deliberately.
+            if config.policy_version.is_none() {
+                recorder.policy_version = checkpoint.header.policy_version.clone();
+            }
             step_parent = Some(recorder.record(
                 EventDraft::new(RunEventKind::Resume, Effect::Pure).input(serde_json::json!({
                     "checkpoint_id": checkpoint.id,

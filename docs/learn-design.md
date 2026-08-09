@@ -615,6 +615,46 @@ journal.
 epoch binding at admission, `DecisionEvent` emission at `classify_retry`,
 static-floor enforcement. Exit: the release proof below.
 
+> **Wave 4 status: implemented.** The policy plane landed as scoped —
+> deliberately an *evidence* plane in v1, with two honest boundaries.
+> **What is wired**: the registry (`PUT/GET /learn/policies`,
+> `GET /learn/policies/{version}`, `POST /learn/policies/{version}/activate`,
+> `GET /learn/policies/active`, `GET /learn/policy-epochs`, on both store
+> backends), admission-time epoch binding (`PolicyBindingCheckpointer`
+> stamps every checkpoint header with the active `PolicyVersion` and the
+> floor `static-v0` when none is registered, so a resumed run keeps the
+> version it was admitted under), `policy_decision` evidence journaled on
+> the fail-task path (retry/abort decisions with the decision inputs, the
+> binding version, and the outcome — emitted for every policy version,
+> floor included, because the floor *is* the policy), promotion and
+> rollback hooks that activate/revert full-traffic policy candidates with
+> the pointer move, and the checkpoint reference surfacing
+> `policy_version`. **What is not**: no mechanism reads non-floor policy
+> parameters back into queue decisions — `tasks.rs`'s retry loop keeps its
+> envelope semantics, and v1 changes what is *recorded and bound*, not how
+> the queue decides; and canary-bound policy candidates are journaled but
+> do not steer admission (the binding at admission is the active version,
+> full stop). Both are named here rather than smoothed over; the
+> propensity-1.0 caveat of open question 1 applies unchanged. The release
+> proof itself is `rusty-server/tests/learn_release.rs::
+> the_release_proof_end_to_end`, and it owns one discipline worth
+> recording: the experiment half reads memory *unjournaled* through each
+> side's lens (baseline: the live namespace; candidate: the overlay) —
+> exact replay serves journaled reads verbatim, so journaled candidate
+> reads would hand the baseline the candidate's behavior and pin the
+> delta at 0 forever (the eval crate's "the replayed world cannot differ"
+> rule); the fixture half is wired the opposite way, journaled reads and
+> a recording tool, because *its* claim is parity — a recorded run that
+> keeps reproducing the defect after promotion rewrites the namespace.
+> One mechanical edge, documented in the test: `compare()`'s latency half
+> degenerates when the baseline measures 0 ms (any candidate time
+> breaches, whatever the threshold), so the proof's agent keeps a small
+> wall-latency floor — the gate's signal there is the pass-rate delta.
+> Registry, binding, evidence, and hook coverage is
+> `rusty-server/tests/policy.rs` (both backends, the Postgres half gated
+> on `RUSTY_TEST_DATABASE_URL`); the core contract goldens are
+> `rusty-core/tests/policy.rs`.
+
 **Release proof (the whole release).** The roadmap's sentence, automated as
 an integration test in the crash-recovery family
 (`rusty-server/tests/learn_release.rs`): *apply a correction, evaluate the

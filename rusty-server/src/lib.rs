@@ -30,7 +30,7 @@
 //! | `GET /info` | service version + registered graphs and their channels |
 //! | `POST /threads` | create a thread bound to a registered graph |
 //! | `POST /threads/{id}/fork` | time travel: copy the thread's checkpoint history (full or up to `checkpoint_id`) into a new thread |
-//! | `GET /threads/{id}/state` | latest checkpoint as `{values, next, checkpoint}` |
+//! | `GET /threads/{id}/state` | latest checkpoint as `{values, next, checkpoint}` (the checkpoint ref carries its pinned `policy_version`, R0.8 wave 4) |
 //! | `POST /threads/{id}/state` | write a new checkpoint (`update_state` analog; `as_node` is accepted for LangGraph compatibility but not recorded; optional `enqueue: [...]` submits tasks atomically with the checkpoint through the R0.6 wave-2b transactional outbox — one transaction on Postgres, outbox-first best-effort ordering on the JSON-file backend) |
 //! | `POST /threads/{id}/history` | checkpoint list, newest first, `limit`/`before` |
 //! | `POST /threads/{id}/runs` | background run: `202 + run_id` |
@@ -91,6 +91,11 @@
 //! | `POST /learn/candidates/{id}/promote` | R0.8 (wave 3): run the promotion gate `{run_id, approval?, parent?}` → `200 {candidate_id, status, receipt, pointer}`. `403` on approval failures (out-of-envelope promotion needs an `ApprovalToken` scoped to the candidate's promotion effect id — non-transferable), `422` on evidence failures, `409` when the candidate is not `evaluated`. The status flip and the version-pointer move are one store transition |
 //! | `POST /learn/candidates/{id}/rollback` | R0.8 (wave 3): re-point the surface to the displaced version `{run_id, cause, parent?}` → `200 {candidate_id, status, receipt, pointer}`; `409` when the candidate is not `promoted` or the pointer no longer serves it. Byte-exact: the pointer's `to` is the promotion's recorded `previous`, and candidates are content-addressed — the restored version is the version that served |
 //! | `GET /learn/versions` | R0.8 (wave 3): the tenant's version pointers, sorted by surface |
+//! | `POST /policy/versions` | R0.8 (wave 4): register an immutable executor policy body `{version?, policy}` → `201 {version, record}` (`200` converged when the version already names exactly this body; `409` when it names a different one — registry immutability; `400` invalid version). Without `version`, the content-derived `policy-{hash12}` name is minted. The reserved `static-v0` floor is never registerable |
+//! | `GET /policy/versions` / `GET /policy/versions/{version}` | R0.8 (wave 4): the tenant's registered policy bodies (sorted by version) / fetch one (`404` unknown/cross-tenant; the floor resolves as a synthetic record) |
+//! | `POST /policy/activations` | R0.8 (wave 4): move the active-version pointer `{version}` → `200 {version, active}`; `422` when the version is not registered (the floor is always activatable — reverting to pre-learning behavior needs no candidate) |
+//! | `GET /policy/active` | R0.8 (wave 4): the tenant's active policy — the last activation's body, or the floor when the registry never moved |
+//! | `GET /policy/epochs` | R0.8 (wave 4): the epoch history — each activation's reign window plus the admission bindings recorded inside it (and the implicit floor epoch covering pre-activation bindings) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -108,6 +113,7 @@ mod journals;
 mod learn;
 mod memory;
 mod outbox;
+mod policy;
 mod replay;
 mod routes;
 mod runs;
@@ -131,6 +137,7 @@ use rusty_agent_runtime::state::StateSpec;
 use tokio_util::sync::CancellationToken;
 
 pub use error::ApiError;
+pub use learn::{DatasetSource, DirectoryDatasetSource, EvalCandidateEvaluator, EvaluationAgent};
 pub use runs::RunStatus;
 
 /// Default bound on graceful shutdown (25 s): how long
@@ -148,8 +155,9 @@ pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::fro
 
 /// Names the JSON-file layout already owns at the store root
 /// (`agent_leases/`, `agents/`, `assistants/`, `coordinations/`, `crons/`,
-/// `journals/`, `learn/`, `memory/`, `memory_artifacts/`, `outbox/`, `store/`,
-/// `tasks/`, `threads/`, `trigger_events/`, `triggers/`, plus the `latest`
+/// `journals/`, `learn/`, `memory/`, `memory_artifacts/`, `outbox/`,
+/// `policy/`, `store/`, `tasks/`, `threads/`, `trigger_events/`,
+/// `triggers/`, plus the `latest`
 /// pointer file inside each thread's checkpoint dir).
 /// Client-chosen ids and tenant ids claiming one of these would write
 /// checkpoints into platform directories (or platform records into
@@ -166,6 +174,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "memory",
     "memory_artifacts",
     "outbox",
+    "policy",
     "store",
     "tasks",
     "threads",

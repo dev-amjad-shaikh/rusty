@@ -20,6 +20,10 @@ postgres = ["dep:sqlx", "rusty-agent-runtime/postgres"]
 
 [dependencies]
 rusty-agent-runtime = { path = "../rusty-core", version = "0.7" }
+# Wave 4: the server-side candidate evaluator composes `rusty-eval`'s
+# experiment runner over live graph preparation plus a versioned dataset
+# source; `promote → evaluate` calls it through the learning gate.
+rusty-eval = { path = "../rusty-eval" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 # Graceful shutdown (R0.6 wave 2c): one `CancellationToken` drains the run

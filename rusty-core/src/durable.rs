@@ -28,8 +28,12 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
-use crate::record::{Effect, PayloadRef};
+use crate::record::{
+    DecisionAction, DecisionEvent, DecisionFamily, DecisionOutcome, Effect, PayloadRef,
+    PolicyVersion,
+};
 
 /// The current wire-format version of [`TaskEnvelope`].
 ///
@@ -206,6 +210,122 @@ pub fn classify_retry(
     }
     RetryDecision::Retry {
         after_ms: backoff_delay_ms(attempt, uniform),
+    }
+}
+
+/// The closed legal-action set of a retry decision (R0.8 wave 4).
+///
+/// Mirrors [`classify_retry`]'s gates exactly: when a retry is legal
+/// (freely-repeatable effect, retryable class, attempt budget remaining) the
+/// legal set is `[Retry { attempt: attempt + 1 }, Abort]`; otherwise retrying
+/// is not a legal action and the set collapses to `[Abort]`. The set is
+/// computed from the same inputs as the decision itself, so a
+/// [`DecisionEvent`] built by [`retry_decision_event`] can never record a
+/// selected action outside its legal set.
+pub fn retry_legal_actions(
+    effect: Effect,
+    class: ErrorClass,
+    attempt: u32,
+    max_attempts: u32,
+) -> Vec<DecisionAction> {
+    if effect.is_freely_repeatable() && class.is_retryable() && attempt < max_attempts {
+        vec![
+            DecisionAction::Retry {
+                attempt: attempt + 1,
+            },
+            DecisionAction::Abort,
+        ]
+    } else {
+        vec![DecisionAction::Abort]
+    }
+}
+
+/// The [`DecisionAction`] a [`RetryDecision`] corresponds to, given the
+/// 1-based attempt ordinal that failed.
+///
+/// A `Retry` decision takes retry ordinal `attempt + 1` (the failure was
+/// attempt `attempt`; the decision schedules the next one). `Dead` and
+/// `Fail` both map to `Abort`: dead-lettering is giving up on the automatic
+/// path, and the dead-letter queue entry is the queue's own evidence, not a
+/// decision action.
+pub fn retry_selected_action(decision: &RetryDecision, attempt: u32) -> DecisionAction {
+    match decision {
+        RetryDecision::Retry { .. } => DecisionAction::Retry {
+            attempt: attempt + 1,
+        },
+        RetryDecision::Dead | RetryDecision::Fail => DecisionAction::Abort,
+    }
+}
+
+/// Build the [`DecisionEvent`] for one retry decision (R0.8 wave 4).
+///
+/// This is the emission contract between the scheduler (which owns the
+/// decision inputs) and the journal: given exactly the values
+/// [`classify_retry`] was called with plus its output, produce the evidence
+/// record. Features pin the observation vocabulary — `failure_class`,
+/// `attempt`, `max_attempts`, `effect`, and `dependency_latency_ms` when the
+/// caller measured one — so offline evaluation reads stable keys.
+///
+/// **Propensity honesty.** Every v1 policy — including the static floor —
+/// is deterministic: it assigns probability 1 to the selected action and 0
+/// to every other legal action. The event therefore records `propensity:
+/// 1.0`. That is the truthful value, but it also means v1's evidence cannot
+/// support inverse-propensity scoring (division by a zero propensity is
+/// undefined): off-policy evaluation over v1 decisions is restricted to
+/// policies that would have taken the same action. Learned stochastic
+/// policies must record their true propensity at decision time; this
+/// function's `1.0` is the deterministic-policy degenerate case, not a
+/// placeholder.
+///
+/// `outcome` is `None` for a `Retry` decision (the re-attempt has not
+/// happened yet) and `Some(DecisionOutcome::Failure)` for `Dead`/`Fail`
+/// (the operation is over and did not complete).
+#[allow(clippy::too_many_arguments)]
+pub fn retry_decision_event(
+    run_id: impl Into<String>,
+    thread_id: impl Into<String>,
+    seq: u64,
+    effect: Effect,
+    class: ErrorClass,
+    attempt: u32,
+    max_attempts: u32,
+    dependency_latency_ms: Option<u64>,
+    decision: &RetryDecision,
+    policy_version: &PolicyVersion,
+    decided_at: DateTime<Utc>,
+) -> DecisionEvent {
+    let run_id = run_id.into();
+    let mut features = Map::new();
+    features.insert(
+        "failure_class".to_owned(),
+        serde_json::to_value(class).unwrap_or(Value::Null),
+    );
+    features.insert("attempt".to_owned(), Value::from(attempt));
+    features.insert("max_attempts".to_owned(), Value::from(max_attempts));
+    features.insert(
+        "effect".to_owned(),
+        serde_json::to_value(effect).unwrap_or(Value::Null),
+    );
+    if let Some(latency) = dependency_latency_ms {
+        features.insert("dependency_latency_ms".to_owned(), Value::from(latency));
+    }
+    let outcome = match decision {
+        RetryDecision::Retry { .. } => None,
+        RetryDecision::Dead | RetryDecision::Fail => Some(DecisionOutcome::Failure),
+    };
+    DecisionEvent {
+        id: format!("{run_id}:d{seq}"),
+        run_id,
+        thread_id: thread_id.into(),
+        seq,
+        family: DecisionFamily::Retry,
+        features,
+        legal_actions: retry_legal_actions(effect, class, attempt, max_attempts),
+        selected: retry_selected_action(decision, attempt),
+        propensity: 1.0,
+        policy_version: policy_version.clone(),
+        outcome,
+        decided_at,
     }
 }
 
@@ -493,6 +613,144 @@ mod tests {
         assert_eq!(
             serde_json::to_value(RetryDecision::Fail).unwrap(),
             json!({"decision": "fail"})
+        );
+    }
+
+    #[test]
+    fn retry_legal_actions_mirror_the_classifier_gates() {
+        let repeatable = Effect::Idempotent;
+
+        // A retryable failure with budget remaining: retry or abort.
+        assert_eq!(
+            retry_legal_actions(repeatable, ErrorClass::Timeout, 1, 3),
+            vec![DecisionAction::Retry { attempt: 2 }, DecisionAction::Abort]
+        );
+        // Budget exhausted: retrying is not a legal action.
+        assert_eq!(
+            retry_legal_actions(repeatable, ErrorClass::Timeout, 3, 3),
+            vec![DecisionAction::Abort]
+        );
+        assert_eq!(
+            retry_legal_actions(repeatable, ErrorClass::Transient, 1, 0),
+            vec![DecisionAction::Abort]
+        );
+        // Non-retryable class or non-repeatable effect: abort only.
+        assert_eq!(
+            retry_legal_actions(repeatable, ErrorClass::InvalidInput, 1, 3),
+            vec![DecisionAction::Abort]
+        );
+        assert_eq!(
+            retry_legal_actions(Effect::NonIdempotent, ErrorClass::Transient, 1, 3),
+            vec![DecisionAction::Abort]
+        );
+    }
+
+    #[test]
+    fn retry_decision_event_selected_action_stays_inside_the_legal_set() {
+        // Property: for every combination the classifier can see, the event's
+        // selected action is a member of its legal set.
+        let effects = [
+            Effect::Pure,
+            Effect::ReadOnly,
+            Effect::Idempotent,
+            Effect::NonIdempotent,
+            Effect::Compensatable,
+        ];
+        let classes = [
+            ErrorClass::Transient,
+            ErrorClass::RateLimited,
+            ErrorClass::Timeout,
+            ErrorClass::InvalidInput,
+            ErrorClass::DependencyFailure,
+            ErrorClass::ResourceExhausted,
+            ErrorClass::Cancelled,
+            ErrorClass::Unknown,
+        ];
+        let decided_at = DateTime::<Utc>::from_timestamp_millis(1_760_000_000_000).unwrap();
+        for effect in effects {
+            for class in classes {
+                for (attempt, max_attempts) in [(1, 3), (3, 3), (1, 0)] {
+                    let decision = classify_retry(effect, class, attempt, max_attempts, 0.5);
+                    let event = retry_decision_event(
+                        "run-1",
+                        "thread-1",
+                        1,
+                        effect,
+                        class,
+                        attempt,
+                        max_attempts,
+                        None,
+                        &decision,
+                        &PolicyVersion::default(),
+                        decided_at,
+                    );
+                    assert!(
+                        event.legal_actions.contains(&event.selected),
+                        "selected {:?} must be inside legal set {:?} for {effect:?}/{class:?} \
+                         attempt {attempt}/{max_attempts}",
+                        event.selected,
+                        event.legal_actions,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retry_decision_event_shape_and_outcome_mapping() {
+        let decided_at = DateTime::<Utc>::from_timestamp_millis(1_760_000_000_000).unwrap();
+        let decision = classify_retry(Effect::Idempotent, ErrorClass::Timeout, 1, 3, 0.5);
+        let event = retry_decision_event(
+            "run-9",
+            "thread-2",
+            3,
+            Effect::Idempotent,
+            ErrorClass::Timeout,
+            1,
+            3,
+            Some(840),
+            &decision,
+            &PolicyVersion::new("policy-0123456789ab"),
+            decided_at,
+        );
+        assert_eq!(event.id, "run-9:d3");
+        assert_eq!(event.seq, 3);
+        assert_eq!(event.family, DecisionFamily::Retry);
+        assert_eq!(
+            event.selected,
+            DecisionAction::Retry { attempt: 2 },
+            "the failure was attempt 1; the decision schedules attempt 2"
+        );
+        // Deterministic v1 policies record the degenerate propensity, 1.0.
+        assert_eq!(event.propensity, 1.0);
+        // A retry decision has no outcome until the re-attempt completes.
+        assert!(event.outcome.is_none());
+        assert_eq!(event.features.get("failure_class"), Some(&json!("timeout")));
+        assert_eq!(event.features.get("attempt"), Some(&json!(1)));
+        assert_eq!(
+            event.features.get("dependency_latency_ms"),
+            Some(&json!(840))
+        );
+
+        // Terminal decisions record the failure outcome immediately.
+        let dead = retry_decision_event(
+            "run-9",
+            "thread-2",
+            4,
+            Effect::Idempotent,
+            ErrorClass::Timeout,
+            3,
+            3,
+            None,
+            &RetryDecision::Dead,
+            &PolicyVersion::default(),
+            decided_at,
+        );
+        assert_eq!(dead.selected, DecisionAction::Abort);
+        assert_eq!(dead.outcome, Some(DecisionOutcome::Failure));
+        assert!(
+            !dead.features.contains_key("dependency_latency_ms"),
+            "an unmeasured latency is absent from the wire, not null"
         );
     }
 

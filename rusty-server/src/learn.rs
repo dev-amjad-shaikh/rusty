@@ -1,5 +1,10 @@
-//! Learning-candidate persistence (R0.8 Rusty Learn, wave 3): the file
-//! layout behind the candidate and version-pointer store backends.
+//! Learning-candidate persistence (R0.8 Rusty Learn, wave 3) and the
+//! wave-4 evaluation composition: the file layout behind the candidate
+//! and version-pointer store backends, plus the concrete
+//! [`CandidateEvaluator`](rusty_agent_runtime::learn::CandidateEvaluator)
+//! the release proof wires in — core's seam over `rusty-eval`'s public
+//! API, with the live memory namespace adapted to a core
+//! [`MemoryStore`](rusty_agent_runtime::memory::MemoryStore).
 //!
 //! Two directories under `{store_path}/learn/` (`learn` is a reserved
 //! layout name, see [`crate::RESERVED_NAMES`]):
@@ -201,6 +206,396 @@ pub(crate) fn load_versions(root: &Path) -> HashMap<String, VersionPointer> {
         }
     }
     out
+}
+
+// --------------------------------------------------------------------- //
+// Wave 4: the live memory store adapter + the real evaluator
+// --------------------------------------------------------------------- //
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use rusty_agent_runtime::error::{Result as RuntimeResult, RustyError};
+use rusty_agent_runtime::journal::{Journal, JournalSnapshot};
+use rusty_agent_runtime::learn::{
+    Candidate, CandidateContent, CandidateEvaluation, CandidateEvaluator, CandidateOverlay,
+    EvaluationRequest, EvaluationVerdict, ReplayDivergence, ReplaySummary,
+};
+use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord, MemoryStore, ProvenanceAuthor};
+use rusty_agent_runtime::record::PayloadRef;
+use rusty_agent_runtime::replay::ExactReplay;
+use rusty_eval::{
+    compare, CompareThresholds, Dataset, EvalCase, ExperimentConfig, ExperimentReport,
+    ExperimentRunner, PreparedRun,
+};
+
+use crate::server_store::ServerStore;
+
+/// Adapter failures use core's `invalid` convention — the same error
+/// shape the learning module's own adapters produce, so callers
+/// distinguish store trouble from gate verdicts the way they already do.
+fn invalid(message: impl Into<String>) -> RustyError {
+    RustyError::InvalidUpdate(message.into())
+}
+
+/// The live memory namespace as a core [`MemoryStore`] — the read lens
+/// the wave-4 evaluation composition (and the serving-path candidate
+/// overlay in `routes.rs`) works through. Every operation is one
+/// [`ServerStore`] call under this adapter's tenant, so the overlay sees
+/// exactly what the tenant's own traffic sees.
+pub(crate) struct ServerMemoryStore {
+    store: Arc<dyn ServerStore>,
+    tenant: String,
+}
+
+// Manual: `dyn ServerStore` is not `Debug`, and the store handle carries
+// no debug-relevant state the tenant does not already identify.
+impl std::fmt::Debug for ServerMemoryStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerMemoryStore")
+            .field("tenant", &self.tenant)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ServerMemoryStore {
+    /// Adapt `store` for `tenant`'s namespace.
+    pub(crate) fn new(store: Arc<dyn ServerStore>, tenant: impl Into<String>) -> Self {
+        Self {
+            store,
+            tenant: tenant.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl MemoryStore for ServerMemoryStore {
+    async fn put(&self, record: &MemoryRecord) -> RuntimeResult<bool> {
+        // The content the address was minted from must travel with the
+        // write (the backend spills oversize bodies itself).
+        // Artifact-referenced content arrives only from the governed write
+        // path, which owns the artifact store — an adapter-level caller
+        // holding an artifact ref would be skipping that path, so fail
+        // rather than persist a dangling reference.
+        let content = match &record.content {
+            PayloadRef::Inline(value) => value.clone(),
+            PayloadRef::Artifact(_) => {
+                return Err(invalid(
+                    "artifact-referenced memory content must be written through the governed \
+                     write path",
+                ));
+            }
+        };
+        self.store
+            .put_memory(&self.tenant, record, &content)
+            .await
+            .map_err(|e| invalid(format!("memory put: {e}")))
+    }
+
+    async fn get(&self, memory_id: &str) -> RuntimeResult<Option<MemoryRecord>> {
+        self.store
+            .get_memory(&self.tenant, memory_id)
+            .await
+            .map_err(|e| invalid(format!("memory get: {e}")))
+    }
+
+    async fn all(&self) -> RuntimeResult<Vec<MemoryRecord>> {
+        // The query universe: everything, superseded and expired records
+        // included — `apply_query` and the overlay own the filtering, the
+        // scan must not silently pre-filter the evidence away.
+        let query = MemoryQuery {
+            include_superseded: true,
+            include_expired: true,
+            ..MemoryQuery::default()
+        };
+        self.store
+            .query_memory(&self.tenant, &query, Utc::now())
+            .await
+            .map_err(|e| invalid(format!("memory scan: {e}")))
+    }
+
+    async fn remove(&self, memory_id: &str) -> RuntimeResult<bool> {
+        self.store
+            .delete_memory(&self.tenant, memory_id)
+            .await
+            .map_err(|e| invalid(format!("memory delete: {e}")))
+    }
+
+    async fn query(
+        &self,
+        query: &MemoryQuery,
+        now: DateTime<Utc>,
+    ) -> RuntimeResult<Vec<MemoryRecord>> {
+        self.store
+            .query_memory(&self.tenant, query, now)
+            .await
+            .map_err(|e| invalid(format!("memory query: {e}")))
+    }
+}
+
+/// Where versioned evaluation datasets come from. A request names a
+/// version; the source resolves it; both experiment reports name that
+/// version back. Datasets are immutable per version — re-running an
+/// evaluation must mean re-reading the same evidence.
+pub trait DatasetSource: Send + Sync + std::fmt::Debug {
+    /// Load dataset version `version` (`Err` when unknown).
+    fn load(&self, version: &str) -> Result<Dataset, String>;
+}
+
+/// Datasets as JSONL files under one directory, named
+/// `{dataset_name}@{version}.jsonl` — `rusty-eval`'s canonical
+/// serialization ([`Dataset::save`]), so dataset versions diff cleanly in
+/// git and the file layout is the versioning.
+#[derive(Debug)]
+pub struct DirectoryDatasetSource {
+    root: PathBuf,
+    dataset_name: String,
+}
+
+impl DirectoryDatasetSource {
+    /// A source serving `{root}/{dataset_name}@{version}.jsonl`.
+    pub fn new(root: impl Into<PathBuf>, dataset_name: impl Into<String>) -> Self {
+        Self {
+            root: root.into(),
+            dataset_name: dataset_name.into(),
+        }
+    }
+}
+
+impl DatasetSource for DirectoryDatasetSource {
+    fn load(&self, version: &str) -> Result<Dataset, String> {
+        let path = self
+            .root
+            .join(format!("{}@{version}.jsonl", self.dataset_name));
+        Dataset::load(&path).map_err(|e| e.to_string())
+    }
+}
+
+/// The application-owned half of an evaluation: how to build the agent
+/// under test. The evaluator owns the evidence discipline (the versioned
+/// dataset, the run counts, the replay fixtures, the comparison
+/// thresholds); the agent owns what the baseline and the candidate *are*
+/// as runnable graphs — the same application/runtime split as the
+/// distiller contract (design open question 2).
+#[async_trait]
+pub trait EvaluationAgent: Send + Sync + std::fmt::Debug {
+    /// Build the prepared run for one case repetition. `journal` is the
+    /// run's Flight Recorder journal — wire it into recording graphs so
+    /// model and tool calls become assertion evidence. `memory` is the
+    /// read lens for this side of the comparison: the live namespace for
+    /// the baseline, the candidate's overlay for the candidate.
+    fn prepare(
+        &self,
+        case: &EvalCase,
+        journal: &Journal,
+        memory: Arc<dyn MemoryStore>,
+    ) -> RuntimeResult<PreparedRun>;
+
+    /// Re-drive one recorded run with `candidate` applied, returning the
+    /// replayed snapshot for divergence verification. `replay` is the
+    /// evaluator's exact-replay session over the fixture — the agent
+    /// builds its replay-wired graph from it (`fresh_journal`,
+    /// [`ExactReplay::source`], [`ExactReplay::snapshot`]) and drives it
+    /// with [`ExactReplay::run`], so the serving cursor the evaluator's
+    /// later `verify` checks for exhaustion is the same one the run
+    /// consumed. Exact replay serves journaled effects, so a correct
+    /// implementation makes zero outbound calls; `memory` is the same
+    /// read-lens split as [`EvaluationAgent::prepare`].
+    async fn redrive(
+        &self,
+        replay: &ExactReplay,
+        candidate: &Candidate,
+        memory: Arc<dyn MemoryStore>,
+    ) -> RuntimeResult<JournalSnapshot>;
+}
+
+/// Read one metric out of a report, in the vocabulary the promotion gate
+/// speaks: `run_pass_rate`, `case_pass_rate`, `case:{case_id}`,
+/// `assertion:{key}`. `None` when the report does not name it — an
+/// improvement bar cannot clear on a metric the evidence does not name.
+fn metric_value(report: &ExperimentReport, metric: &str) -> Option<f64> {
+    if metric == "run_pass_rate" {
+        return Some(report.summary.run_pass_rate);
+    }
+    if metric == "case_pass_rate" {
+        return Some(report.summary.case_pass_rate);
+    }
+    if let Some(case_id) = metric.strip_prefix("case:") {
+        return report
+            .cases
+            .iter()
+            .find(|case| case.case_id == case_id)
+            .map(|case| case.pass_rate);
+    }
+    if let Some(key) = metric.strip_prefix("assertion:") {
+        return report
+            .summary
+            .assertions
+            .iter()
+            .find(|assertion| assertion.assertion == key)
+            .map(|assertion| assertion.rate);
+    }
+    None
+}
+
+/// The wave-4 evaluation composition: core's [`CandidateEvaluator`] over
+/// `rusty-eval`'s public API, exactly the seam the trait documents —
+/// [`ExperimentRunner`] over a versioned [`Dataset`] for the report half,
+/// exact replay over the request's fixtures for the divergence half,
+/// [`fn@compare`] for the verdict. Nothing about scoring, aggregation, or
+/// regression flagging is re-implemented here.
+#[derive(Debug)]
+pub struct EvalCandidateEvaluator {
+    baseline_memory: Arc<dyn MemoryStore>,
+    datasets: Arc<dyn DatasetSource>,
+    agent: Arc<dyn EvaluationAgent>,
+    runs_per_case: usize,
+    evaluated_by: ProvenanceAuthor,
+}
+
+impl EvalCandidateEvaluator {
+    /// An evaluator reading baseline memory through `baseline_memory`,
+    /// datasets through `datasets`, building agents through `agent`,
+    /// running each case `runs_per_case` times (normalized to at least
+    /// one), and attributing every evaluation to `evaluated_by`.
+    pub fn new(
+        baseline_memory: Arc<dyn MemoryStore>,
+        datasets: Arc<dyn DatasetSource>,
+        agent: Arc<dyn EvaluationAgent>,
+        runs_per_case: usize,
+        evaluated_by: ProvenanceAuthor,
+    ) -> Self {
+        Self {
+            baseline_memory,
+            datasets,
+            agent,
+            runs_per_case: runs_per_case.max(1),
+            evaluated_by,
+        }
+    }
+}
+
+#[async_trait]
+impl CandidateEvaluator for EvalCandidateEvaluator {
+    async fn evaluate(
+        &self,
+        candidate: &Candidate,
+        request: &EvaluationRequest,
+    ) -> RuntimeResult<CandidateEvaluation> {
+        let dataset = self
+            .datasets
+            .load(&request.dataset_version)
+            .map_err(|e| invalid(format!("dataset `{}`: {e}", request.dataset_version)))?;
+
+        // The candidate as a read lens: v1 applies `memory_set`
+        // candidates as an overlay over the live namespace. Other kinds
+        // keep the baseline lens — their surfaces (prompt manifests,
+        // executor policy, tool grants) are applied by their own serving
+        // paths, and wiring those into evaluation is per-kind future
+        // work, not a generic overlay.
+        let candidate_memory: Arc<dyn MemoryStore> = match &candidate.content {
+            CandidateContent::MemorySet { .. } => Arc::new(CandidateOverlay::new(
+                self.baseline_memory.clone(),
+                candidate,
+            )?),
+            _ => self.baseline_memory.clone(),
+        };
+
+        let runner =
+            ExperimentRunner::new(ExperimentConfig::new().with_runs_per_case(self.runs_per_case));
+        let baseline_memory = self.baseline_memory.clone();
+        let baseline_agent = self.agent.clone();
+        let baseline = runner
+            .run(&dataset, |case, journal| {
+                baseline_agent.prepare(case, journal, baseline_memory.clone())
+            })
+            .await
+            .map_err(|e| invalid(format!("baseline experiment: {e}")))?;
+        let candidate_agent = self.agent.clone();
+        let overlay_memory = candidate_memory.clone();
+        let candidate_report = runner
+            .run(&dataset, move |case, journal| {
+                candidate_agent.prepare(case, journal, overlay_memory.clone())
+            })
+            .await
+            .map_err(|e| invalid(format!("candidate experiment: {e}")))?;
+
+        let comparison = compare(
+            &baseline,
+            &candidate_report,
+            &CompareThresholds {
+                max_pass_rate_drop: request.thresholds.max_pass_rate_drop,
+                max_latency_p95_ratio: request.thresholds.max_latency_p95_ratio,
+            },
+        );
+        let baseline_metric = metric_value(&baseline, &request.target_metric);
+        let candidate_metric = metric_value(&candidate_report, &request.target_metric);
+        let verdict = EvaluationVerdict {
+            regressed: comparison.regressed,
+            target_metric: request.target_metric.clone(),
+            baseline: baseline_metric,
+            candidate: candidate_metric,
+            delta: baseline_metric
+                .zip(candidate_metric)
+                .map(|(base, cand)| cand - base),
+        };
+
+        // The replay half: re-drive every recorded fixture with the
+        // candidate applied; exact replay's own divergence contract
+        // decides matched vs diverged. One session per fixture, shared
+        // between the agent's run and this loop's verification — the
+        // exhaustion check reads the same serving cursor the run
+        // consumed. A fixture that cannot even build an exact replay
+        // (e.g. a resumed-run journal) counts as a divergence — the
+        // gate's clean-replay bar must fail closed on evidence it cannot
+        // verify.
+        let mut fixture_ids = Vec::with_capacity(request.replay_evidence.len());
+        let mut matched = 0usize;
+        let mut divergences = Vec::new();
+        for fixture in &request.replay_evidence {
+            fixture_ids.push(fixture.run_id.clone());
+            let divergence = match ExactReplay::new(fixture.clone()) {
+                Ok(replay) => match self
+                    .agent
+                    .redrive(&replay, candidate, candidate_memory.clone())
+                    .await
+                {
+                    Ok(replayed) => match replay.verify(&replayed) {
+                        Ok(()) => None,
+                        Err(e) => Some(e.to_string()),
+                    },
+                    Err(e) => Some(e.to_string()),
+                },
+                Err(e) => Some(e.to_string()),
+            };
+            match divergence {
+                None => matched += 1,
+                Some(detail) => divergences.push(ReplayDivergence {
+                    fixture_id: fixture.run_id.clone(),
+                    detail,
+                }),
+            }
+        }
+        fixture_ids.sort();
+        divergences.sort_by(|a, b| a.fixture_id.cmp(&b.fixture_id));
+
+        Ok(CandidateEvaluation {
+            candidate_id: candidate.candidate_id.clone(),
+            dataset_version: dataset.version().to_owned(),
+            replay: ReplaySummary {
+                fixture_ids,
+                matched,
+                divergences,
+            },
+            baseline_report: serde_json::to_value(&baseline)?,
+            candidate_report: serde_json::to_value(&candidate_report)?,
+            verdict,
+            thresholds: request.thresholds,
+            evaluated_by: self.evaluated_by.clone(),
+            evaluated_at: Utc::now(),
+        })
+    }
 }
 
 #[cfg(test)]

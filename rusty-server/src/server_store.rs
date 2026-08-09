@@ -48,6 +48,7 @@ use crate::journals;
 use crate::learn;
 use crate::memory;
 use crate::outbox::{self, OutboxRecord};
+use crate::policy::{self, PolicyActivation, PolicyBinding, PolicyRecord, PolicyWrite};
 use crate::store::{self, StoreItem};
 use crate::tasks::{self, CancelOutcome, MutationOutcome, RunCancellation, TaskRecord, TaskStatus};
 use crate::threads::{self, ThreadRecord};
@@ -546,6 +547,44 @@ pub(crate) trait ServerStore: Send + Sync {
     ) -> StoreResult<Option<VersionPointer>>;
     /// The tenant's version pointers (order unspecified; routes sort).
     async fn list_version_pointers(&self, tenant: &str) -> StoreResult<Vec<VersionPointer>>;
+
+    // -- The executor policy registry (R0.8 Rusty Learn, wave 4) -------- //
+
+    /// Register one immutable policy body under its tenant-scoped version.
+    /// [`PolicyWrite::Created`] when the version is new;
+    /// [`PolicyWrite::Converged`] when it already names exactly this body
+    /// (the idempotent create — content addressing makes re-registration
+    /// converge the way memory writes do); [`PolicyWrite::Conflict`] when
+    /// it names a different body — registry immutability refuses the
+    /// overwrite, so a version string stays a commitment to one exact
+    /// parameter set.
+    async fn put_policy(&self, tenant: &str, record: &PolicyRecord) -> StoreResult<PolicyWrite>;
+    /// Fetch one policy body by version, tenant-scoped (`None` for unknown
+    /// or cross-tenant versions — the two are indistinguishable by
+    /// design). The static floor is not in the store (it is never
+    /// registered); callers synthesize it.
+    async fn get_policy(&self, tenant: &str, version: &str) -> StoreResult<Option<PolicyRecord>>;
+    /// The tenant's registered policy bodies (order unspecified; routes
+    /// sort).
+    async fn list_policies(&self, tenant: &str) -> StoreResult<Vec<PolicyRecord>>;
+    /// Append one activation to the tenant's log (append-only; the active
+    /// version is the latest entry). Ordering is carried by
+    /// `activated_at` in the record — and by insertion order on Postgres
+    /// (the serial key) — never by filename.
+    async fn append_policy_activation(
+        &self,
+        tenant: &str,
+        activation: &PolicyActivation,
+    ) -> StoreResult<()>;
+    /// The tenant's activation log, oldest first — the active version is
+    /// the last entry. This is the registry's epoch history.
+    async fn list_policy_activations(&self, tenant: &str) -> StoreResult<Vec<PolicyActivation>>;
+    /// Record one admission binding (`false`-free upsert on the checkpoint
+    /// id: a re-put of the same checkpoint's binding is the same fact).
+    async fn put_policy_binding(&self, tenant: &str, binding: &PolicyBinding) -> StoreResult<()>;
+    /// The tenant's recorded bindings (order unspecified; the epoch
+    /// derivation sorts).
+    async fn list_policy_bindings(&self, tenant: &str) -> StoreResult<Vec<PolicyBinding>>;
 }
 
 /// The outcome of a candidate lifecycle transition
@@ -612,6 +651,18 @@ pub(crate) struct JsonFileStore {
     /// per pointer under `{store_path}/learn/versions/` (the filename is
     /// the key's hash; the file body carries the key).
     versions: Mutex<HashMap<String, VersionPointer>>,
+    /// The executor policy registry (R0.8 wave 4): policy bodies keyed by
+    /// tenant-scoped version, one file per record under
+    /// `{store_path}/policy/versions/`.
+    policies: Mutex<HashMap<String, PolicyRecord>>,
+    /// The activation log keyed by tenant-scoped file name
+    /// (`{tenant}/{millis:013}-{version}`), one append-only file per
+    /// activation under `{store_path}/policy/activations/`. Ordering comes
+    /// from the record's `activated_at`, never the key.
+    activations: Mutex<HashMap<String, PolicyActivation>>,
+    /// Admission bindings keyed by tenant-scoped checkpoint id, one file
+    /// per binding under `{store_path}/policy/bindings/`.
+    bindings: Mutex<HashMap<String, PolicyBinding>>,
 }
 
 impl JsonFileStore {
@@ -635,6 +686,9 @@ impl JsonFileStore {
             memory_artifacts: memory::artifact_store(root),
             candidates: Mutex::new(learn::load_candidates(root)),
             versions: Mutex::new(learn::load_versions(root)),
+            policies: Mutex::new(policy::load_policies(root)),
+            activations: Mutex::new(policy::load_activations(root)),
+            bindings: Mutex::new(policy::load_bindings(root)),
         }
     }
 }
@@ -1730,6 +1784,99 @@ impl ServerStore for JsonFileStore {
             .map(|(_, pointer)| pointer.clone())
             .collect())
     }
+
+    async fn put_policy(&self, tenant: &str, record: &PolicyRecord) -> StoreResult<PolicyWrite> {
+        let scoped = crate::auth::scope_id(tenant, record.version.as_str());
+        let mut map = self.policies.lock().await;
+        if let Some(existing) = map.get(&scoped) {
+            // Immutability: the same version naming the same body converges;
+            // naming a different body conflicts. The comparison is the whole
+            // record minus its registration instant — a converged re-post
+            // carries a fresh `registered_at`, and the stored instant wins.
+            if existing.version == record.version
+                && existing.policy == record.policy
+                && existing.source == record.source
+            {
+                return Ok(PolicyWrite::Converged);
+            }
+            return Ok(PolicyWrite::Conflict);
+        }
+        // Hold the lock across the file write (the assistants convention):
+        // a concurrent create of the same version can't interleave.
+        policy::persist_policy(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist policy"))?;
+        map.insert(scoped, record.clone());
+        Ok(PolicyWrite::Created)
+    }
+
+    async fn get_policy(&self, tenant: &str, version: &str) -> StoreResult<Option<PolicyRecord>> {
+        let scoped = crate::auth::scope_id(tenant, version);
+        Ok(self.policies.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_policies(&self, tenant: &str) -> StoreResult<Vec<PolicyRecord>> {
+        let map = self.policies.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn append_policy_activation(
+        &self,
+        tenant: &str,
+        activation: &PolicyActivation,
+    ) -> StoreResult<()> {
+        let mut map = self.activations.lock().await;
+        // File before index swap (the mutate convention): a failed write
+        // never leaves state a restart would silently rewind. The append is
+        // keyed by timestamp + version, so a retried append of the same
+        // activation lands on the same file — the log converges.
+        policy::append_activation(&self.root, tenant, activation)
+            .await
+            .map_err(io_err("persist policy activation"))?;
+        let file_name = crate::auth::scope_id(tenant, &policy::activation_file_name(activation));
+        map.insert(file_name, activation.clone());
+        Ok(())
+    }
+
+    async fn list_policy_activations(&self, tenant: &str) -> StoreResult<Vec<PolicyActivation>> {
+        let map = self.activations.lock().await;
+        let mut out: Vec<PolicyActivation> = map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, activation)| activation.clone())
+            .collect();
+        // Ordering comes from the record, never the key (the layout doc):
+        // a hand-edited filename cannot reorder history.
+        out.sort_by(|a, b| {
+            a.activated_at
+                .cmp(&b.activated_at)
+                .then_with(|| a.version.as_str().cmp(b.version.as_str()))
+        });
+        Ok(out)
+    }
+
+    async fn put_policy_binding(&self, tenant: &str, binding: &PolicyBinding) -> StoreResult<()> {
+        let scoped = crate::auth::scope_id(tenant, &binding.checkpoint_id);
+        let mut map = self.bindings.lock().await;
+        policy::persist_binding(&self.root, tenant, binding)
+            .await
+            .map_err(io_err("persist policy binding"))?;
+        map.insert(scoped, binding.clone());
+        Ok(())
+    }
+
+    async fn list_policy_bindings(&self, tenant: &str) -> StoreResult<Vec<PolicyBinding>> {
+        let map = self.bindings.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, binding)| binding.clone())
+            .collect())
+    }
 }
 
 impl JsonFileStore {
@@ -1831,6 +1978,7 @@ mod postgres {
     use rusty_agent_runtime::journal::JournalSnapshot;
     use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
     use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
+    use rusty_agent_runtime::record::PolicyVersion;
     use serde_json::Value;
     use sqlx::{PgPool, Row};
     use tokio::sync::OnceCell;
@@ -1845,6 +1993,7 @@ mod postgres {
     use crate::crons::CronRecord;
     use crate::memory;
     use crate::outbox::OutboxRecord;
+    use crate::policy::{PolicyActivation, PolicyBinding, PolicyRecord, PolicyWrite};
     use crate::store::StoreItem;
     use crate::tasks::{
         self, CancelOutcome, MutationOutcome, RunCancellation, TaskLease, TaskRecord, TaskStatus,
@@ -2167,6 +2316,62 @@ mod postgres {
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )"#;
 
+    /// The executor policy registry (R0.8 wave 4): one row per immutable
+    /// policy body, keyed by tenant-scoped version. Immutability is the
+    /// insert's `ON CONFLICT DO NOTHING` plus a payload comparison in
+    /// Rust (the file backend's rule): same body converges, different
+    /// body conflicts — the table never updates.
+    pub(crate) const CREATE_POLICIES_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_policies (
+            policy_id  TEXT PRIMARY KEY,
+            tenant     TEXT NOT NULL,
+            version    TEXT NOT NULL,
+            payload    JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The registry listing's leading column: every policy query is
+    /// tenant-scoped.
+    pub(crate) const CREATE_POLICIES_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_policies_listing
+            ON server_policies (tenant, version)";
+
+    /// The activation log (R0.8 wave 4): append-only, one row per move of
+    /// the active-version pointer. The serial key is the insertion order —
+    /// the log's truth — and `activated_at` rides along as the record's
+    /// own timestamp (the epoch derivation reads it).
+    pub(crate) const CREATE_POLICY_ACTIVATIONS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_policy_activations (
+            id           BIGSERIAL PRIMARY KEY,
+            tenant       TEXT NOT NULL,
+            version      TEXT NOT NULL,
+            activated_at TIMESTAMPTZ NOT NULL
+        )"#;
+
+    /// Reading the log is always tenant-scoped and ordered.
+    pub(crate) const CREATE_POLICY_ACTIVATIONS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_policy_activations_log
+            ON server_policy_activations (tenant, id)";
+
+    /// Admission bindings (R0.8 wave 4): one row per stamped checkpoint,
+    /// keyed by tenant-scoped checkpoint id. Denormalized evidence — the
+    /// checkpoint header is authoritative — so a re-put of the same
+    /// checkpoint's binding converges (`ON CONFLICT DO NOTHING`).
+    pub(crate) const CREATE_POLICY_BINDINGS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_policy_bindings (
+            binding_id TEXT PRIMARY KEY,
+            tenant     TEXT NOT NULL,
+            thread_id  TEXT NOT NULL,
+            version    TEXT NOT NULL,
+            payload    JSONB NOT NULL,
+            bound_at   TIMESTAMPTZ NOT NULL
+        )"#;
+
+    /// The epoch derivation's scan: one tenant's bindings by bind time.
+    pub(crate) const CREATE_POLICY_BINDINGS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_policy_bindings_listing
+            ON server_policy_bindings (tenant, bound_at)";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -2198,6 +2403,12 @@ mod postgres {
         CREATE_LEARN_CANDIDATES_SQL,
         CREATE_LEARN_CANDIDATES_INDEX_SQL,
         CREATE_LEARN_VERSIONS_SQL,
+        CREATE_POLICIES_SQL,
+        CREATE_POLICIES_INDEX_SQL,
+        CREATE_POLICY_ACTIVATIONS_SQL,
+        CREATE_POLICY_ACTIVATIONS_INDEX_SQL,
+        CREATE_POLICY_BINDINGS_SQL,
+        CREATE_POLICY_BINDINGS_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -2760,6 +2971,43 @@ mod postgres {
 
     pub(crate) const LIST_LEARN_VERSIONS_SQL: &str =
         "SELECT payload FROM server_learn_versions WHERE tenant = $1";
+
+    /// Policy registry statements (R0.8 wave 4). Registration is
+    /// insert-only on the tenant-scoped version (immutability: a conflict
+    /// returns no row, and the route-level comparison decides converge
+    /// vs conflict); the table never updates.
+    pub(crate) const INSERT_POLICY_SQL: &str = r#"
+        INSERT INTO server_policies (policy_id, tenant, version, payload)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (policy_id) DO NOTHING
+        RETURNING policy_id"#;
+
+    pub(crate) const SELECT_POLICY_SQL: &str =
+        "SELECT payload FROM server_policies WHERE policy_id = $1";
+
+    pub(crate) const LIST_POLICIES_SQL: &str =
+        "SELECT payload FROM server_policies WHERE tenant = $1";
+
+    /// The activation log: plain appends; the serial key carries the
+    /// insertion order the listing reads back.
+    pub(crate) const INSERT_POLICY_ACTIVATION_SQL: &str = r#"
+        INSERT INTO server_policy_activations (tenant, version, activated_at)
+        VALUES ($1, $2, $3)"#;
+
+    pub(crate) const LIST_POLICY_ACTIVATIONS_SQL: &str = r#"
+        SELECT version, activated_at FROM server_policy_activations
+        WHERE tenant = $1
+        ORDER BY id"#;
+
+    /// Bindings converge on the checkpoint id (a re-put is the same fact).
+    pub(crate) const INSERT_POLICY_BINDING_SQL: &str = r#"
+        INSERT INTO server_policy_bindings (
+            binding_id, tenant, thread_id, version, payload, bound_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (binding_id) DO NOTHING"#;
+
+    pub(crate) const LIST_POLICY_BINDINGS_SQL: &str =
+        "SELECT payload FROM server_policy_bindings WHERE tenant = $1";
 
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
@@ -4769,6 +5017,133 @@ mod postgres {
                 .map(|row| record_from_payload("version pointer", row.get::<Value, _>("payload")))
                 .collect()
         }
+
+        async fn put_policy(
+            &self,
+            tenant: &str,
+            record: &PolicyRecord,
+        ) -> StoreResult<PolicyWrite> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, record.version.as_str());
+            let row = sqlx::query(INSERT_POLICY_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind(record.version.as_str())
+                .bind(record_to_payload(record)?)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("insert policy"))?;
+            if row.is_some() {
+                return Ok(PolicyWrite::Created);
+            }
+            // The version is taken: same body converges, different body
+            // conflicts — the file backend's immutability rule, exact here.
+            let existing = sqlx::query(SELECT_POLICY_SQL)
+                .bind(&scoped)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("select policy"))?
+                .ok_or_else(|| "policy insert conflicted but the row is gone".to_string())?;
+            let existing: PolicyRecord =
+                record_from_payload("policy", existing.get::<Value, _>("payload"))?;
+            Ok(
+                if existing.version == record.version
+                    && existing.policy == record.policy
+                    && existing.source == record.source
+                {
+                    PolicyWrite::Converged
+                } else {
+                    PolicyWrite::Conflict
+                },
+            )
+        }
+
+        async fn get_policy(
+            &self,
+            tenant: &str,
+            version: &str,
+        ) -> StoreResult<Option<PolicyRecord>> {
+            let row = sqlx::query(SELECT_POLICY_SQL)
+                .bind(crate::auth::scope_id(tenant, version))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select policy"))?;
+            row.map(|row| record_from_payload("policy", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_policies(&self, tenant: &str) -> StoreResult<Vec<PolicyRecord>> {
+            let rows = sqlx::query(LIST_POLICIES_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list policies"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("policy", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn append_policy_activation(
+            &self,
+            tenant: &str,
+            activation: &PolicyActivation,
+        ) -> StoreResult<()> {
+            sqlx::query(INSERT_POLICY_ACTIVATION_SQL)
+                .bind(tenant)
+                .bind(activation.version.as_str())
+                .bind(activation.activated_at)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("append policy activation"))?;
+            Ok(())
+        }
+
+        async fn list_policy_activations(
+            &self,
+            tenant: &str,
+        ) -> StoreResult<Vec<PolicyActivation>> {
+            let rows = sqlx::query(LIST_POLICY_ACTIVATIONS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list policy activations"))?;
+            Ok(rows
+                .into_iter()
+                .map(|row| PolicyActivation {
+                    version: PolicyVersion::new(row.get::<String, _>("version")),
+                    activated_at: row.get("activated_at"),
+                })
+                .collect())
+        }
+
+        async fn put_policy_binding(
+            &self,
+            tenant: &str,
+            binding: &PolicyBinding,
+        ) -> StoreResult<()> {
+            sqlx::query(INSERT_POLICY_BINDING_SQL)
+                .bind(crate::auth::scope_id(tenant, &binding.checkpoint_id))
+                .bind(tenant)
+                .bind(&binding.thread_id)
+                .bind(binding.version.as_str())
+                .bind(record_to_payload(binding)?)
+                .bind(binding.bound_at)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("insert policy binding"))?;
+            Ok(())
+        }
+
+        async fn list_policy_bindings(&self, tenant: &str) -> StoreResult<Vec<PolicyBinding>> {
+            let rows = sqlx::query(LIST_POLICY_BINDINGS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list policy bindings"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("policy binding", row.get::<Value, _>("payload")))
+                .collect()
+        }
     }
 
     impl PostgresStore {
@@ -4914,7 +5289,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 29);
+            assert_eq!(MIGRATION_SQL.len(), 35);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -4996,6 +5371,19 @@ mod postgres {
             assert!(CREATE_LEARN_CANDIDATES_INDEX_SQL.contains("(tenant, surface, status)"));
             assert!(CREATE_LEARN_VERSIONS_SQL.contains("server_learn_versions"));
             assert!(CREATE_LEARN_VERSIONS_SQL.contains("surface    TEXT PRIMARY KEY"));
+            // R0.8 wave 4: the policy registry — immutable bodies keyed by
+            // tenant-scoped version, an append-only activation log ordered
+            // by its serial key, and the denormalized binding index.
+            assert!(CREATE_POLICIES_SQL.contains("server_policies"));
+            assert!(CREATE_POLICIES_SQL.contains("policy_id  TEXT PRIMARY KEY"));
+            assert!(CREATE_POLICIES_SQL.contains("payload    JSONB"));
+            assert!(CREATE_POLICIES_INDEX_SQL.contains("(tenant, version)"));
+            assert!(CREATE_POLICY_ACTIVATIONS_SQL.contains("server_policy_activations"));
+            assert!(CREATE_POLICY_ACTIVATIONS_SQL.contains("BIGSERIAL PRIMARY KEY"));
+            assert!(CREATE_POLICY_ACTIVATIONS_INDEX_SQL.contains("(tenant, id)"));
+            assert!(CREATE_POLICY_BINDINGS_SQL.contains("server_policy_bindings"));
+            assert!(CREATE_POLICY_BINDINGS_SQL.contains("binding_id TEXT PRIMARY KEY"));
+            assert!(CREATE_POLICY_BINDINGS_INDEX_SQL.contains("(tenant, bound_at)"));
         }
 
         #[test]

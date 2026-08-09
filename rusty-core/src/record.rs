@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::error::RustyError;
 use crate::llm::Usage;
 
 /// The current on-disk format version of [`CheckpointHeader`].
@@ -486,6 +487,16 @@ pub enum RunEventKind {
     /// evidence. New runs bind the re-pointed version at admission;
     /// in-flight runs keep the version their checkpoint header pins.
     CandidateRolledBack,
+
+    /// An executor policy decision was made and recorded (R0.8 wave 4): the
+    /// policy plane emitted a [`DecisionEvent`] at a decision point — v1
+    /// wires the retry classifier (`crate::durable::classify_retry`). An
+    /// [`Effect::Pure`] record: the decision was already applied by the
+    /// scheduler that emitted it; this event is the *evidence* of why, not a
+    /// command to apply it again. Output carries the journaled
+    /// [`DecisionEvent`] — features, the closed legal-action set, the
+    /// selected action, the propensity, and the policy version that decided.
+    PolicyDecision,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.
@@ -638,9 +649,10 @@ pub enum DecisionOutcome {
 /// policy against the recorded one) is impossible. `outcome` is `None`
 /// until the affected operation completes.
 ///
-/// v1 freezes this contract but the executor does not yet emit decision
-/// events; the R0.5 journal already records the state/evidence decisions
-/// would be evaluated against.
+/// v1 froze this contract without emitters; R0.8 wave 4 wires the first
+/// emission point (the retry classifier, see
+/// [`crate::durable::retry_decision_event`]), journaled as
+/// [`RunEventKind::PolicyDecision`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DecisionEvent {
     /// Deterministic decision id (`{run_id}:d{n}` — a separate sequence from
@@ -685,6 +697,173 @@ pub struct DecisionEvent {
 
     /// When the decision was made, read from the run's clock.
     pub decided_at: DateTime<Utc>,
+}
+
+/// The retry family's parameters of an [`ExecutorPolicy`].
+///
+/// These are the numbers [`crate::durable::classify_retry`] decides with:
+/// the backoff schedule draws from `[0, base_delay_ms * 2^(attempt-1)]`
+/// capped at `max_delay_ms`, and a retryable failure dead-letters once
+/// `attempt >= max_attempts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetryPolicyParameters {
+    /// Base of the exponential backoff schedule, in milliseconds.
+    pub base_delay_ms: u64,
+
+    /// Cap of the backoff schedule, in milliseconds.
+    pub max_delay_ms: u64,
+
+    /// Attempt budget: the number of attempts counting the initial one.
+    /// `0` means no retries at all — every retryable failure dead-letters.
+    pub max_attempts: u32,
+}
+
+/// The timeout family's parameters of an [`ExecutorPolicy`].
+///
+/// v1 pins the shape only: no executor decision point consumes these values
+/// yet. `None` means uncapped — the honest encoding of "no timeout policy
+/// is in force", distinct from any concrete millisecond bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeoutPolicyParameters {
+    /// Default timeout applied to operations without their own bound, in
+    /// milliseconds. `None` means no default is imposed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_millis: Option<u64>,
+
+    /// Hard ceiling any operation timeout must stay under, in milliseconds.
+    /// `None` means uncapped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_millis: Option<u64>,
+}
+
+/// The concurrency family's parameters of an [`ExecutorPolicy`].
+///
+/// v1 pins the shape only: no executor decision point consumes these values
+/// yet. `None` means unlimited — the honest encoding of "no concurrency
+/// policy is in force".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConcurrencyPolicyParameters {
+    /// Maximum number of parallel executions. `None` means unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_parallel: Option<u32>,
+}
+
+/// The executor policy contract (R0.8 wave 4): one versioned bundle of the
+/// parameters the executor's mechanical decision points agree to decide
+/// with.
+///
+/// An `ExecutorPolicy` is what a [`PolicyVersion`] *names*: the registry
+/// (server side) stores immutable policy bodies under content-derived
+/// versions, runs bind the active version at admission, and every
+/// [`DecisionEvent`] records which version decided. Because the version is
+/// derived from the content ([`derive_policy_version`]), two registries that
+/// agree on a version string agree on the exact parameters — promotion and
+/// rollback move versions, never mutate bodies.
+///
+/// v1 wires versions into admission binding and decision evidence. The
+/// static floor ([`ExecutorPolicy::static_v0`]) is the behavior every
+/// pre-learning run already had: the retry constants of
+/// [`crate::durable::classify_retry`], no timeout bound, no concurrency
+/// limit. Mechanical *application* of learned (non-floor) parameters to the
+/// queue's decision points is a later wave; wave 4 makes them addressable,
+/// promotable, and evident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutorPolicy {
+    /// Retry parameters — the family v1 actually emits decisions for.
+    pub retry: RetryPolicyParameters,
+
+    /// Timeout parameters (shape pinned; unconsumed in v1).
+    pub timeout: TimeoutPolicyParameters,
+
+    /// Concurrency parameters (shape pinned; unconsumed in v1).
+    pub concurrency: ConcurrencyPolicyParameters,
+}
+
+impl ExecutorPolicy {
+    /// The static floor: the fixed behavior of every run before the policy
+    /// plane landed, named by [`PolicyVersion::STATIC_V0`].
+    ///
+    /// The retry parameters mirror the `crate::durable` backoff constants and
+    /// the server's default attempt budget (`DEFAULT_MAX_ATTEMPTS = 3`); the
+    /// timeout and concurrency families are uncapped, matching the executor's
+    /// behavior when no policy is in force.
+    pub fn static_v0() -> Self {
+        Self {
+            retry: RetryPolicyParameters {
+                base_delay_ms: crate::durable::BASE_RETRY_DELAY_MS,
+                max_delay_ms: crate::durable::MAX_RETRY_DELAY_MS,
+                max_attempts: 3,
+            },
+            timeout: TimeoutPolicyParameters {
+                default_millis: None,
+                max_millis: None,
+            },
+            concurrency: ConcurrencyPolicyParameters { max_parallel: None },
+        }
+    }
+
+    /// This policy with one family's parameters replaced by `parameters`
+    /// (parsed as that family's parameter type).
+    ///
+    /// This is how a promoted policy candidate — whose content is a family
+    /// plus a free-form parameter value — becomes a concrete
+    /// `ExecutorPolicy`: the candidate's parameters are validated against
+    /// the family's contract and overlaid onto the policy that was active
+    /// (the floor when nothing was promoted yet). Families without a v1
+    /// parameter contract ([`DecisionFamily::WorkerPlacement`],
+    /// [`DecisionFamily::CheckpointPlacement`]) are rejected.
+    pub fn with_family_parameters(
+        &self,
+        family: DecisionFamily,
+        parameters: serde_json::Value,
+    ) -> crate::error::Result<Self> {
+        let mut policy = *self;
+        match family {
+            DecisionFamily::Retry => {
+                policy.retry = serde_json::from_value(parameters).map_err(|e| {
+                    RustyError::InvalidUpdate(format!(
+                        "retry policy parameters do not match the contract: {e}"
+                    ))
+                })?;
+            }
+            DecisionFamily::Timeout => {
+                policy.timeout = serde_json::from_value(parameters).map_err(|e| {
+                    RustyError::InvalidUpdate(format!(
+                        "timeout policy parameters do not match the contract: {e}"
+                    ))
+                })?;
+            }
+            DecisionFamily::Concurrency => {
+                policy.concurrency = serde_json::from_value(parameters).map_err(|e| {
+                    RustyError::InvalidUpdate(format!(
+                        "concurrency policy parameters do not match the contract: {e}"
+                    ))
+                })?;
+            }
+            other => {
+                return Err(RustyError::InvalidUpdate(format!(
+                    "decision family `{other:?}` has no executor-policy parameter contract \
+                     in this version"
+                )));
+            }
+        }
+        Ok(policy)
+    }
+}
+
+/// Derive the content-addressed version of an [`ExecutorPolicy`]:
+/// `policy-{first 12 hex of sha256(canonical_json(policy))}`.
+///
+/// Content addressing is what makes the registry's immutability enforceable:
+/// a version string *is* a commitment to one exact parameter set, so
+/// "register a different body under an existing version" is detectable as a
+/// conflict rather than silently overwriting behavior. The static floor is
+/// exempt — it keeps its human-readable [`PolicyVersion::STATIC_V0`] name
+/// because it predates the registry and never needs registration.
+pub fn derive_policy_version(policy: &ExecutorPolicy) -> crate::error::Result<PolicyVersion> {
+    let bytes = serde_json::to_vec(policy)?;
+    let hash = sha256_hex(&bytes);
+    Ok(PolicyVersion::new(format!("policy-{}", &hash[..12])))
 }
 
 /// A capsule version pin — the R0.7 placeholder for R0.9's capsule manifest
@@ -944,6 +1123,94 @@ mod tests {
             serde_json::to_value(PolicyVersion::default()).unwrap(),
             json!("static-v0")
         );
+    }
+
+    #[test]
+    fn executor_policy_static_floor_mirrors_the_durable_constants() {
+        let floor = ExecutorPolicy::static_v0();
+        assert_eq!(
+            floor.retry.base_delay_ms,
+            crate::durable::BASE_RETRY_DELAY_MS
+        );
+        assert_eq!(floor.retry.max_delay_ms, crate::durable::MAX_RETRY_DELAY_MS);
+        // The floor pins the server's default attempt budget; timeout and
+        // concurrency are uncapped — the honest encoding of "no policy".
+        assert_eq!(floor.retry.max_attempts, 3);
+        assert!(floor.timeout.default_millis.is_none());
+        assert!(floor.timeout.max_millis.is_none());
+        assert!(floor.concurrency.max_parallel.is_none());
+        // Unset options stay absent from the wire.
+        let wire = serde_json::to_value(floor).unwrap();
+        assert_eq!(wire["timeout"], json!({}));
+        assert_eq!(wire["concurrency"], json!({}));
+    }
+
+    #[test]
+    fn derive_policy_version_is_content_addressed() {
+        let policy = ExecutorPolicy::static_v0()
+            .with_family_parameters(
+                DecisionFamily::Retry,
+                json!({"base_delay_ms": 500, "max_delay_ms": 60_000, "max_attempts": 5}),
+            )
+            .unwrap();
+        let first = derive_policy_version(&policy).unwrap();
+        let again = derive_policy_version(&policy).unwrap();
+        assert_eq!(first, again, "version derivation must be deterministic");
+        assert!(
+            first.as_str().starts_with("policy-"),
+            "derived versions carry the policy- prefix: {first}"
+        );
+        assert_eq!(first.as_str().len(), "policy-".len() + 12);
+
+        // Any parameter change is a different version — that is what makes
+        // registry immutability enforceable.
+        let changed = policy
+            .with_family_parameters(
+                DecisionFamily::Retry,
+                json!({"base_delay_ms": 500, "max_delay_ms": 60_000, "max_attempts": 6}),
+            )
+            .unwrap();
+        assert_ne!(first, derive_policy_version(&changed).unwrap());
+    }
+
+    #[test]
+    fn with_family_parameters_validates_and_overlays() {
+        let base = ExecutorPolicy::static_v0();
+
+        // Timeout and concurrency families parse their own contracts.
+        let with_timeout = base
+            .with_family_parameters(
+                DecisionFamily::Timeout,
+                json!({"default_millis": 30_000, "max_millis": 120_000}),
+            )
+            .unwrap();
+        assert_eq!(with_timeout.timeout.default_millis, Some(30_000));
+        assert_eq!(with_timeout.timeout.max_millis, Some(120_000));
+        // Untouched families keep the base values.
+        assert_eq!(with_timeout.retry, base.retry);
+
+        let with_concurrency = base
+            .with_family_parameters(DecisionFamily::Concurrency, json!({"max_parallel": 8}))
+            .unwrap();
+        assert_eq!(with_concurrency.concurrency.max_parallel, Some(8));
+
+        // A malformed body is rejected with the family named.
+        let err = base
+            .with_family_parameters(DecisionFamily::Retry, json!({"base_delay_ms": "fast"}))
+            .unwrap_err();
+        assert!(err.to_string().contains("retry policy parameters"), "{err}");
+
+        // Families without a v1 parameter contract are rejected.
+        for family in [
+            DecisionFamily::WorkerPlacement,
+            DecisionFamily::CheckpointPlacement,
+        ] {
+            let err = base.with_family_parameters(family, json!({})).unwrap_err();
+            assert!(
+                err.to_string().contains("no executor-policy parameter"),
+                "{err}"
+            );
+        }
     }
 
     #[test]
