@@ -109,6 +109,10 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Follow a guided Create → Run → Inspect first-run path.
 - Run in background, blocking, or streaming modes.
 - Inspect state, checkpoint history, interrupts, and resumes.
+- Turn a detected memory conflict into an exact, reviewed consolidation task. Studio binds the sorted
+  source set, non-run scope, distiller, summary policy, and queue pool to a corroborated durable-task
+  receipt, then hands off to Durable Work without claiming the conflict is resolved before governed
+  memory proves a summary record names those sources. Task settlement is separate evidence.
 - Investigate Flight Recorder evidence through a causal run story: journal finding, recorded error event
   or unresolved pause, recovery boundary, effect risk, and direct links into the technical timeline.
 - Exact-replay eligible deterministic journals and compare forked branches. Journals containing model, tool, remote, WASM, or resume effects are not yet accepted by exact replay.
@@ -134,7 +138,9 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Memory records and structural conflicts have a human-readable audit workspace. Selected-memory
   corrections now append attributed records through an immutable original → correction → result
   path, with candidacy, finalized-run adoption, receipt validation, reconciliation, and exact retry.
-  Run-event/prompt correction capture, resolution, approval, consolidation, and forgetting remain.
+  Conflict review now also produces a receipt-bound durable consolidation task and keeps queued work
+  explicitly separate from a governed summary record that names and supersedes its sources. Run-event/prompt correction capture, candidate approval,
+  consolidation-completion follow-through, and deliberately approval-gated forgetting remain.
 - Learning candidates, replay-backed evaluation, scoped promotion approval, active/canary version
   pointers, rollback receipts, and guided prompt/policy/tool-permission creation now have a governed
   control room. Memory-set and automatic/correction-driven distillation, before/after case analysis,
@@ -375,7 +381,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract and manifest portability delivered; typed model/tool/memory controls pending | Replaces the current create-only form and raw configuration gap |
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
 | 5 | Flight Recorder investigation layout and manifest/effect context | Partial — causal run story, recovery boundary, and effect-risk guidance delivered; immutable configuration-manifest resolution still pending | Makes Rusty's strongest runtime advantage understandable |
-| 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, conflict review, and selected-memory correction delivered; conflict decisions, candidate approval, consolidation, expiration, and forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
+| 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, conflict review, selected-memory correction, and exact durable consolidation launch delivered; worker-completion follow-through, candidate approval, expiration, and approval-gated forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |

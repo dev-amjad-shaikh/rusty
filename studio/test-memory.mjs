@@ -20,7 +20,8 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__memory = {
   MEMORY_RENDER_LIMIT, MEMORY_SNAPSHOT_LIMIT, MEMORY_CONFLICT_RENDER_LIMIT,
-  MEMORY_CORRECTION_TEXT_LIMIT,
+  MEMORY_CORRECTION_TEXT_LIMIT, MEMORY_GOVERNANCE_TAG_LIMIT, MEMORY_CONSOLIDATION_SOURCE_LIMIT,
+  MEMORY_GOVERNANCE_RECEIPT_LIMIT,
   memoryRequestCurrent, memoryContentValue, memoryAuthorLabel, memoryPlainPreview,
   memoryBoundedProjection, memoryJsonText, memoryEvidenceId, memorySupersededIds, memoryIntersectIds,
   memoryContext, memoryRecordState, memoryStateLabel, memoryStateHtml,
@@ -33,6 +34,12 @@ globalThis.__memory = {
   memoryCorrectionRecordMatch, memoryCorrectionValidateReceipt, memoryCorrectionFindReconciled,
   memoryCorrectionOutcomeText, memoryCorrectionIsExactRetry, memoryCorrectionShouldUnlockFailure,
   memoryCorrectionFailureFocusId,
+  memoryScopeEqual, memoryGovernanceTags, memoryConsolidationDraft, memoryGovernanceValidateDraft,
+  memoryGovernancePool,
+  memoryConsolidationConflictCurrent, memoryGovernanceIdList, memoryConsolidationValidateReceipt,
+  memoryConsolidationSourcesHtml, memoryGovernanceCurrent, memoryGovernanceErrorText,
+  memoryGovernanceTaskEvidence,
+  setMemoryGovernanceTestState: (draft, conn) => { store.memoryGovernance = draft; store.conn = conn; },
   memorySummaryHtml, memoryConflictsHtml, memoryErrorHtml,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -367,6 +374,115 @@ check("evidence: direct records say that no derivation IDs exist",
 }
 
 {
+  const sourceA = { ...base, memory_id: "a".repeat(64), scope: { scope: "user", id: "user-7" } };
+  const sourceB = { ...conflictPeer, memory_id: "b".repeat(64), scope: { scope: "user", id: "user-7" } };
+  const conflict = { scope: sourceA.scope, key: "response_tone", memory_ids: [sourceB.memory_id, sourceA.memory_id] };
+  const draft = M.memoryConsolidationDraft(conflict, [sourceA, sourceB]);
+  check("consolidation: conflict evidence opens as one sorted, exact-scope source set",
+    draft.kind === "consolidate" && draft.sourceIds[0] === sourceA.memory_id &&
+    draft.sourceIds[1] === sourceB.memory_id && M.memoryScopeEqual(draft.scope, sourceA.scope));
+  const evidenceHtml = M.memoryConsolidationSourcesHtml(draft);
+  check("consolidation evidence: every source shows full identity, contradictory content, provenance, and scope",
+    evidenceHtml.includes(sourceA.memory_id) && evidenceHtml.includes(sourceB.memory_id) &&
+    evidenceHtml.includes("concise &lt;trusted&gt;") && evidenceHtml.includes("detailed") &&
+    evidenceHtml.includes("human:amjad") && evidenceHtml.includes("user:user-7") &&
+    evidenceHtml.includes('aria-labelledby="memory-governance-source-title-0"'));
+  check("consolidation evidence: hostile content is escaped and each source projection is bounded",
+    !M.memoryConsolidationSourcesHtml({ sourceSnapshots: [{ ...sourceA, content: { kind: "inline", value: "<script>bad</script>" } }] }).includes("<script>") &&
+    M.memoryConsolidationSourcesHtml({ sourceSnapshots: [{ ...sourceA, content: { kind: "inline", value: "x".repeat(5000) } }] }).includes("inspection view truncated"));
+  check("consolidation drift: only the exact refreshed key, scope, and source set remains actionable",
+    M.memoryConsolidationConflictCurrent(draft, [{ ...conflict, memory_ids: [...conflict.memory_ids].reverse() }]) &&
+    !M.memoryConsolidationConflictCurrent(draft, [{ ...conflict, key: "other" }]) &&
+    !M.memoryConsolidationConflictCurrent(draft, [{ ...conflict, scope: { scope: "user", id: "other" } }]) &&
+    !M.memoryConsolidationConflictCurrent(draft, [{ ...conflict, memory_ids: [sourceA.memory_id] }]) &&
+    !M.memoryConsolidationConflictCurrent(draft, null));
+  draft.distiller = "operator-distiller";
+  draft.tagsText = "voice, reviewed, voice";
+  draft.priority = "3";
+  draft.pool = "memory-workers";
+  draft.acknowledged = true;
+  const validated = M.memoryGovernanceValidateDraft(draft);
+  check("consolidation: reviewed fields produce the exact durable task request",
+    validated.valid && validated.path === "/memory/consolidate" &&
+    validated.payload.distiller === "operator-distiller" && validated.payload.key === "response_tone" &&
+    JSON.stringify(validated.payload.memory_ids) === JSON.stringify([sourceA.memory_id, sourceB.memory_id]) &&
+    JSON.stringify(validated.payload.tags) === JSON.stringify(["voice", "reviewed"]) &&
+    validated.payload.priority === 3 && validated.payload.pool === "memory-workers");
+  check("consolidation: tags are bounded, deduplicated, and reject controls",
+    M.memoryGovernanceTags("alpha, beta, alpha").tags.length === 2 &&
+    Boolean(M.memoryGovernanceTags("safe, bad\nvalue").error) &&
+    Boolean(M.memoryGovernanceTags(Array.from({ length: M.MEMORY_GOVERNANCE_TAG_LIMIT + 1 }, (_, index) => `t${index}`).join(",")).error));
+  const task = {
+    task_id: "tenant--task-consolidation-1", kind: "memory_consolidation", status: "queued", pool: "memory-workers",
+    idempotency_key: `memory_consolidation:user:user-7:${"c".repeat(64)}`,
+    run_id: null, thread_id: null, parent: null, recipient: null, effect: null, worker_version: null,
+    payload: { scope: validated.payload.scope, memory_ids: validated.payload.memory_ids,
+      distiller: validated.payload.distiller, key: validated.payload.key, tags: validated.payload.tags,
+      priority: validated.payload.priority, written_at: "2026-08-09T08:00:00Z", run_id: null, parent: null },
+  };
+  const response = { task_id: task.task_id, kind: "memory_consolidation", deduplicated: false };
+  check("consolidation receipt: enqueue identity is corroborated against the durable task payload",
+    M.memoryConsolidationValidateReceipt(response, validated.payload, task).ok);
+  check("consolidation receipt: stale task or source evidence fails closed",
+    !M.memoryConsolidationValidateReceipt({ ...response, task_id: "other-task" }, validated.payload, task).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload,
+      { ...task, payload: { ...task.payload, memory_ids: [sourceA.memory_id] } }).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload,
+      { ...task, payload: { ...task.payload, scope: { scope: "user", id: "other" } } }).ok);
+  const collision = M.memoryConsolidationValidateReceipt(
+    { ...response, deduplicated: true }, validated.payload,
+    { ...task, pool: "existing-pool", payload: { ...task.payload, distiller: "existing-distiller" } });
+  check("consolidation receipt: source-set policy collision is definitive and preserves the existing task handoff",
+    !collision.ok && collision.collision && collision.taskId === task.task_id &&
+    collision.differences.includes("distiller") && collision.differences.includes("queue pool") &&
+    M.memoryGovernanceTaskEvidence({ collision }) === collision &&
+    M.memoryGovernanceTaskEvidence({ receipt: { taskId: "confirmed" }, collision }).taskId === "confirmed");
+  check("consolidation receipt: unsafe identities, malformed status, and unbounded source lists are rejected",
+    !M.memoryConsolidationValidateReceipt({ ...response, task_id: "bad\ntask" }, validated.payload, task).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload, { ...task, status: "mystery" }).ok &&
+    M.memoryGovernanceIdList(Array(M.MEMORY_GOVERNANCE_RECEIPT_LIMIT + 1).fill(sourceA.memory_id)) === null);
+  check("consolidation receipt: unreviewed task routing, effect, version, and idempotency linkage fail closed",
+    !M.memoryConsolidationValidateReceipt(response, validated.payload, { ...task, run_id: "run-other" }).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload, { ...task, thread_id: "thread-other" }).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload, { ...task, recipient: "worker-x" }).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload, { ...task, effect: "idempotent" }).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload, { ...task, worker_version: "v2" }).ok &&
+    !M.memoryConsolidationValidateReceipt(response, validated.payload, { ...task, idempotency_key: `memory_consolidation:user:other:${"c".repeat(64)}` }).ok);
+  check("consolidation validation: distiller and deliberate queued-not-resolved acknowledgement are mandatory",
+    !M.memoryGovernanceValidateDraft({ ...draft, distiller: "", acknowledged: false }).valid);
+  check("consolidation validation: queue pool mirrors the server's 128-byte ASCII grammar",
+    M.memoryGovernancePool("") && M.memoryGovernancePool("memory-workers.v1") &&
+    M.memoryGovernancePool("a".repeat(128)) && !M.memoryGovernancePool("a".repeat(129)) &&
+    !M.memoryGovernancePool("memory workers") && !M.memoryGovernancePool("mémory") &&
+    !M.memoryGovernanceValidateDraft({ ...draft, pool: "memory workers" }).valid);
+  const spacedLabels = M.memoryGovernanceValidateDraft({ ...draft, distiller: " operator ", key: " response_tone " });
+  check("consolidation validation: visible label whitespace is preserved exactly while pool and numeric whitespace fail closed",
+    spacedLabels.valid && spacedLabels.payload.distiller === " operator " && spacedLabels.payload.key === " response_tone " &&
+    !M.memoryGovernanceValidateDraft({ ...draft, pool: " memory-workers" }).valid &&
+    !M.memoryGovernanceValidateDraft({ ...draft, priority: " 3" }).valid &&
+    !M.memoryGovernanceValidateDraft({ ...draft, priority: "-0" }).valid);
+  check("consolidation validation: run scopes and cross-scope evidence are rejected before enqueue",
+    (() => { try { M.memoryConsolidationDraft({ ...conflict, scope: { scope: "run", id: "run-1" } }, [sourceA, sourceB]); return false; } catch { return true; } })() &&
+    (() => { try { M.memoryConsolidationDraft(conflict, [sourceA, { ...sourceB, scope: { scope: "team", id: "team-1" } }]); return false; } catch { return true; } })());
+  const manyIds = Array.from({ length: M.MEMORY_CONSOLIDATION_SOURCE_LIMIT + 1 }, (_, index) =>
+    index.toString(16).padStart(64, "0"));
+  check("consolidation validation: an exact evidence review never exceeds the bounded source dossier",
+    (() => { try {
+      M.memoryConsolidationDraft({ ...conflict, memory_ids: manyIds }, manyIds.map((memory_id) => ({ ...sourceA, memory_id })));
+      return false;
+    } catch { return true; } })());
+  check("consolidation compatibility: missing routes and missing source records stay distinct",
+    M.memoryGovernanceErrorText({ status: 404, body: { raw: "missing" } }).includes("does not expose") &&
+    M.memoryGovernanceErrorText({ status: 404, body: { error: "not_found" } }).includes("source record"));
+  draft.generation = 4;
+  M.setMemoryGovernanceTestState(draft, { baseUrl: "http://tenant-b", apiKey: "b" });
+  check("consolidation isolation: only the current draft generation and tenant can accept task evidence",
+    M.memoryGovernanceCurrent(draft, 4, { baseUrl: "http://tenant-b", apiKey: "b" }) &&
+    !M.memoryGovernanceCurrent(draft, 3, { baseUrl: "http://tenant-b", apiKey: "b" }) &&
+    !M.memoryGovernanceCurrent(draft, 4, { baseUrl: "http://tenant-a", apiKey: "a" }));
+}
+
+{
   const summary = M.memorySummaryHtml(records, conflicts, context);
   check("summary: retained, active, candidate, conflict, and scope counts are honest",
     summary.includes(">8</b><span>Retained records") && summary.includes(">4</b><span>Active now") &&
@@ -464,6 +580,57 @@ check("correction responsive: memory splice and editor collapse to one column",
   html.includes(".memory-splice { grid-template-columns: 1fr; }") &&
   html.includes(".memory-correction-body { grid-template-columns: 1fr; }") &&
   html.includes(".memory-correction-fields { grid-template-columns: 1fr; }"));
+check("consolidation capability: actions appear only with a confirmed conflict contract",
+  M.memoryDetailHtml({ ...base, memory_id: "a".repeat(64) },
+    M.memoryContext([], [{ memory_ids: ["a".repeat(64)] }], now, { operationsAvailable: true }))
+    .includes("data-memory-consolidate-record") &&
+  !M.memoryDetailHtml({ ...base, memory_id: "a".repeat(64) },
+    M.memoryContext([], [{ memory_ids: ["a".repeat(64)] }], now)).includes("data-memory-consolidate-record"));
+check("consolidation accessibility: conflict cards are labelled articles with separate evidence and planning actions",
+  M.memoryConflictsHtml(conflicts, null).includes('<article class="memory-conflict-card" aria-labelledby="memory-conflict-title-0"') &&
+  M.memoryConflictsHtml(conflicts, null).includes('data-memory-consolidate="0"') &&
+  M.memoryConflictsHtml(conflicts, null).includes('aria-label="Plan consolidation for response_tone"') &&
+  M.memoryConflictsHtml([{ ...conflicts[0], key: '&quot; <hostile>' }], null).includes('Plan consolidation for &amp;quot; &lt;hostile&gt;') &&
+  !M.memoryConflictsHtml(conflicts, null).includes('<button class="memory-conflict-card"'));
+check("consolidation bounds: oversized source sets remain reviewable but expose no false launch affordance",
+  M.memoryConflictsHtml([{ ...conflicts[0], memory_ids: Array(M.MEMORY_CONSOLIDATION_SOURCE_LIMIT + 1).fill("a".repeat(64)) }], null)
+    .includes("Review outside Studio") &&
+  M.memoryConflictsHtml([{ ...conflicts[0], memory_ids: Array(M.MEMORY_CONSOLIDATION_SOURCE_LIMIT + 1).fill("a".repeat(64)) }], null)
+    .includes("disabled title="));
+check("consolidation truth: the consequence braid and receipt never equate queued work with resolution",
+  html.includes("A queue receipt proves durable work, not a resolved memory conflict") &&
+  html.includes("Studio does not call the conflict resolved from a task receipt alone") &&
+  html.includes("the enqueue receipt alone changes no memory") &&
+  !html.includes("completed summary names these sources"));
+check("consolidation lifecycle: ambiguous enqueue evidence locks one exact deduplicated retry",
+  html.includes("draft.attemptedPayload = JSON.parse(JSON.stringify(payload))") &&
+  html.includes("Retry only this exact locked source set") && html.includes("deduplicates it by scope and sorted sources") &&
+  html.includes('apiForConnection(connection, "GET", `/tasks/${encodeURIComponent(taskId)}`)'));
+check("consolidation collision: a source set with different durable policy never enters a futile retry loop",
+  html.includes("Source set already owned") && html.includes("The reviewed policy was not accepted") &&
+  html.includes("Inspect existing task") && html.includes("draft.retryAllowed = false") &&
+  html.includes("draft.collision = checked"));
+check("consolidation drift: refresh and first submit both block stale conflict evidence while exact retry stays locked",
+  html.includes("memoryConsolidationConflictCurrent(governance, state.conflicts)") &&
+  html.includes("memoryConsolidationConflictCurrent(draft, store.memory && store.memory.conflicts)") &&
+  html.includes("The current conflict evidence no longer matches this reviewed source set") &&
+  html.includes('if (exactRetry) {\n    payload = draft.attemptedPayload;\n  } else {\n    if (!memoryConsolidationConflictCurrent'));
+check("consolidation lifecycle: connection changes clear drafts and stale task evidence is rejected",
+  html.includes("store.memoryGovernance = null") && html.includes("memoryGovernanceCurrent(draft, generation, connection)") &&
+  html.includes("connectionIdentityChanged(connection, store.conn)"));
+check("consolidation accessibility: validation, busy state, announcement, and durable task handoff are explicit",
+  html.includes('id="memory-governance" aria-labelledby="memory-governance-title" hidden') &&
+  html.includes('panel.setAttribute("aria-busy"') && html.includes('id="memory-announcer" role="status"') &&
+  html.includes('aria-label="Consolidation consequence"') && html.includes("memoryGovernanceOpenTask") &&
+  html.includes('${invalid("acknowledged")}'));
+check("consolidation evidence accessibility: the complete bounded dossier precedes acknowledgement",
+  html.includes('aria-labelledby="memory-governance-evidence-title"') &&
+  html.includes("Full identities remain visible") &&
+  html.indexOf("memoryConsolidationSourcesHtml(draft)") < html.indexOf("chk-memory-governance-ack"));
+check("consolidation responsive: consequence, form, and review collapse without hiding primary actions",
+  html.includes(".memory-consequence { grid-template-columns: 1fr; }") &&
+  html.includes(".memory-governance-body { grid-template-columns: 1fr; }") &&
+  html.includes(".memory-governance-fields { grid-template-columns: 1fr; }"));
 check("responsive shell: mobile navigation leaves the workspace in the first viewport",
   html.includes("max-height: 34vh; overflow-y: auto") && html.includes("@media (max-width: 1120px)"));
 check("accessibility: small memory metadata uses the higher-contrast dim token",

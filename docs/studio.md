@@ -298,9 +298,22 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   redacted in previews, and exporting their stored values requires deliberate confirmation. Unapplied
   JSON edits block creation and export so the guided and exact representations cannot silently diverge.
 - **Memory corrections append evidence; they do not edit records.** Studio supports a selected-memory
-  target through `POST /memory/corrections`. It does not yet capture run-event or prompt-hash corrections,
-  approve or reject memory candidates, resolve a structural conflict as a guided decision, consolidate,
-  expire, or forget memory. A direct correction is attributed by the author supplied in the request;
+  target through `POST /memory/corrections`. A conflict can now be reviewed as one exact source set and
+  queued through `POST /memory/consolidate`: Studio validates that every loaded source belongs to the
+  same non-run scope, collects the distiller, summary key, tags, priority, and optional queue pool, then
+  corroborates the enqueue receipt against `GET /tasks/{task_id}` before calling it durable. The UI does not
+  present summary priority as queue scheduling: it controls the future summary record's retrieval rank,
+  while the pool selects the durable-work destination. The pool mirrors the server's 1–128 character
+  ASCII letters/digits/dot/underscore/hyphen contract. Studio never calls the conflict resolved at enqueue.
+  The decision dossier renders every source's full identity, bounded content, provenance, scope, and
+  confidence; Studio limits this exact visual review to 50 sources and leaves larger conflicts read-only.
+  Sources remain independently live until a worker writes a
+  governed summary record that names them in `evidence.source_memory_ids`; task settlement is a separate
+  later operation and is not the supersession gate. Ambiguous responses
+  lock the exact request for a deduplicated retry, and a confirmed receipt opens directly in Durable Work.
+  Studio does not yet capture run-event or prompt-hash corrections, approve or reject memory candidates,
+  follow a consolidation from durable work into its resulting summary inside the Memory workspace, expire, or expose record/scope
+  forgetting controls. A direct correction is attributed by the author supplied in the request;
   that label is not proof of an authenticated human principal until the platform exposes attributed
   identities and authority. Although the correction request contract accepts a rationale, the current
   record, receipt, and journal contracts do not retain it, so Studio does not collect a reason until it
@@ -390,7 +403,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   memory suite covers immutable content handling, every frozen provenance-author variant, active /
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
-  route compatibility, and explicit render bounds.
+  route compatibility, explicit render bounds, exact consolidation payloads, source/scope validation,
+  durable-task corroboration, deduplicated retries, connection isolation, responsive consequence
+  rendering, and queued-versus-resolved truthfulness.
 - `node studio/test-home.mjs` — 26 assertions over disconnected onboarding, honest server-versus-browser
   evidence, privacy-minimized run summaries, deterministic recency and attention routing, bounded hostile
   history, memory-unknown semantics, next-action guidance, identifier escaping, responsive layout,
@@ -410,6 +425,12 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   state to a confirmed server with two registered behaviors, then updated its agent/team/learning signals
   from asynchronous server reads. Its primary action opened the real first-agent form. At 390 × 844 the
   hero, five-stage evidence rail, signals, and action remained readable with no horizontal overflow.
+- Live against `cargo run -p rusty-server --example server_demo`: wrote two contradictory same-key user
+  memories, detected the real conflict, and submitted their reviewed source set to
+  `POST /memory/consolidate`. Rusty returned a new `memory_consolidation` task; `GET /tasks/{task_id}`
+  proved the same sorted source ids, scope, distiller, key, tags, priority, pool, and enqueue timestamp.
+  Repeating the exact request returned `deduplicated: true` with the same task id, confirming Studio's
+  locked-retry contract without implying that a governed summary record existed.
 - `node studio/test-learn.mjs` — 138 assertions over immutable candidate and version-pointer
   normalization, prompt/policy/memory/tool proposal rendering, bounded search and filters, provenance,
   evaluation verdicts, active/canary/mismatch/unknown serving states, real replay-fixture preflight,

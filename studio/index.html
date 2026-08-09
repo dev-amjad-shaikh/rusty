@@ -708,6 +708,7 @@
   }
   .memory-conflict-card strong { display: block; color: #f0e2b1; font-size: 12.5px; }
   .memory-conflict-card span { display: block; margin-top: 4px; color: var(--text-dim); font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .memory-conflict-actions { display: flex; gap: 7px; margin-top: 9px; flex-wrap: wrap; }
   .memory-layout { display: grid; grid-template-columns: minmax(270px, 370px) minmax(420px, 1fr); gap: 14px; align-items: start; }
   .memory-list { display: flex; flex-direction: column; gap: 7px; }
   .memory-item {
@@ -812,6 +813,65 @@
   .memory-correction-lock { margin: 0 0 11px; border-color: #7b6428; background: #312918; }
   .memory-correction-receipt { margin: 0 0 11px; border-color: #45623e; background: #192419; }
   .memory-correct-button { margin-top: 8px; }
+  .memory-detail-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .memory-detail-actions .memory-correct-button { margin-top: 0; }
+  .memory-governance {
+    margin: 0 0 14px; padding: 0; overflow: hidden; border-color: #6b5335;
+    background: linear-gradient(120deg, #241e18, var(--bg-panel) 44%);
+  }
+  .memory-governance[hidden] { display: none; }
+  .memory-governance-head {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    padding: 14px 16px 12px; border-bottom: 1px solid #56422c;
+  }
+  .memory-governance-head h2 { margin: 0; font-size: 17px; }
+  .memory-governance-head p { margin: 4px 0 0; max-width: 760px; color: var(--text-dim); font-size: 11.5px; }
+  .memory-consequence {
+    display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr);
+    gap: 5px; align-items: stretch; padding: 12px 16px 0;
+  }
+  .memory-consequence-node {
+    position: relative; min-width: 0; padding: 10px 11px; overflow: hidden;
+    border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset);
+  }
+  .memory-consequence-node b { display: block; color: var(--text); font-size: 11.5px; }
+  .memory-consequence-node span { display: block; margin-top: 3px; color: var(--text-dim); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .memory-consequence-node.evidence { border-color: #506447; background: #182019; }
+  .memory-consequence-node.action { border-color: #7b632f; background: #302918; }
+  .memory-consequence-node.receipt { border-color: #456176; background: #17232a; }
+  .memory-consequence-joint { align-self: center; color: #d6b66e; font: 700 17px var(--mono); text-align: center; }
+  .memory-governance-evidence { margin: 12px 16px 0; }
+  .memory-governance-evidence > h3 { margin: 0 0 3px; font-size: 13px; }
+  .memory-governance-evidence > p { margin: 0 0 8px; color: var(--text-dim); font-size: 10.5px; }
+  .memory-governance-source-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+  .memory-governance-source { min-width: 0; padding: 9px 10px; border: 1px solid #4f583f; border-radius: 7px; background: #171d17; }
+  .memory-governance-source h4 { margin: 0 0 5px; color: #cbd8bf; font-size: 11.5px; }
+  .memory-governance-source code { display: block; color: var(--text-dim); font-size: 9px; overflow-wrap: anywhere; }
+  .memory-governance-source pre { max-height: 130px; margin: 7px 0; padding: 7px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--bg-inset); }
+  .memory-governance-source dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 3px 7px; margin: 0; }
+  .memory-governance-source dt { color: var(--text-dim); font-size: 9px; text-transform: uppercase; }
+  .memory-governance-source dd { margin: 0; font: 9.5px var(--mono); overflow-wrap: anywhere; }
+  .memory-governance-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(270px, .8fr); }
+  .memory-governance-form { min-width: 0; padding: 14px 16px 16px; border-right: 1px solid #56422c; }
+  .memory-governance-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; border: 0; }
+  .memory-governance-fields .wide { grid-column: 1 / -1; }
+  .memory-governance label { color: var(--text-dim); font-size: 10.5px; }
+  .memory-governance input:not([type="checkbox"]):not([type="radio"]), .memory-governance select {
+    display: block; width: 100%; min-width: 0; margin-top: 3px; padding: 7px 8px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset); color: var(--text); font: 11px var(--mono);
+  }
+  .memory-governance input[aria-invalid="true"], .memory-governance select[aria-invalid="true"] { border-color: var(--err); }
+  .memory-governance-confirm { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0; color: var(--text-dim); font-size: 10.5px; }
+  .memory-governance-confirm input { flex: 0 0 auto; margin: 1px 0 0; }
+  .memory-governance-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .memory-governance-review { min-width: 0; padding: 14px; background: rgba(14, 17, 13, .42); }
+  .memory-governance-review h3 { margin: 0 0 9px; font-size: 13px; }
+  .memory-governance-review dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 9px; margin: 0; }
+  .memory-governance-review dt { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+  .memory-governance-review dd { margin: 0; font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .memory-governance-error { margin: 11px 16px 0; border-left-color: var(--err); }
+  .memory-governance-lock { margin: 11px 16px 0; border-color: #7b6428; background: #312918; }
+  .memory-governance-receipt { margin: 11px 16px 0; border-color: #45623e; background: #192419; }
 
   /* ---------- Agent Fabric team observatory ---------- */
   .fabric-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 14px; }
@@ -1207,6 +1267,8 @@
     .learn-seal-plate { position: static; }
     .memory-correction-body { grid-template-columns: 1fr; }
     .memory-correction-form { border-right: 0; border-bottom: 1px solid #544824; }
+    .memory-governance-body { grid-template-columns: 1fr; }
+    .memory-governance-form { border-right: 0; border-bottom: 1px solid #56422c; }
   }
   @media (max-width: 680px) {
     header { padding: 8px 10px; }
@@ -1271,6 +1333,13 @@
     .memory-correction-fields .wide { grid-column: auto; }
     .memory-correction-review dl { grid-template-columns: 1fr; gap: 2px; }
     .memory-correction-review dd { margin-bottom: 6px; }
+    .memory-governance-head { flex-direction: column; }
+    .memory-consequence { grid-template-columns: 1fr; }
+    .memory-consequence-joint { transform: rotate(90deg); }
+    .memory-governance-fields { grid-template-columns: 1fr; }
+    .memory-governance-fields .wide { grid-column: auto; }
+    .memory-governance-review dl { grid-template-columns: 1fr; gap: 2px; }
+    .memory-governance-review dd { margin-bottom: 6px; }
     .fabric-patterns { grid-template-columns: 1fr; }
     .fabric-decision-braid { grid-template-columns: 1fr; }
     .fabric-braid-member::after { display: none; }
@@ -1643,7 +1712,9 @@
           </div>
         </div>
 
+        <section class="card memory-governance" id="memory-governance" aria-labelledby="memory-governance-title" hidden></section>
         <section class="card memory-correction" id="memory-correction" aria-labelledby="memory-correction-title" hidden></section>
+        <span class="sr-only" id="memory-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
 
         <div class="memory-summary" id="memory-summary" aria-label="Memory summary"></div>
         <div class="memory-conflict-inbox" id="memory-conflicts"></div>
@@ -2015,6 +2086,7 @@ const store = {
   memorySearchTimer: null,
   memoryLifecycleTimer: null,
   memoryCorrection: null, // connection-scoped selected-record correction draft and retry receipt
+  memoryGovernance: null, // connection-scoped consolidation decision and durable task receipt
   learn: null,         // bounded candidate/version evidence, filters, selection, and action drafts
   learnUnsupported: false, // server build has no governed-learning routes
   learnRequest: 0,     // generation guard for candidate/version reads and lifecycle actions
@@ -3482,6 +3554,7 @@ function connectionResetWorkspace() {
   store.memory = null;
   store.memoryUnsupported = false;
   store.memoryCorrection = null;
+  store.memoryGovernance = null;
   clearTimeout(store.learnSearchTimer);
   store.learnSearchTimer = null;
   store.learn = null;
@@ -8867,10 +8940,178 @@ const MEMORY_CONFLICT_RENDER_LIMIT = 50;
 const MEMORY_CORRECTION_TEXT_LIMIT = 32768;
 const MEMORY_CORRECTION_ID_LIMIT = 256;
 const MEMORY_CORRECTION_SCOPES = new Set(["run", "agent", "team", "user", "tenant"]);
+const MEMORY_GOVERNANCE_TAG_LIMIT = 32;
+const MEMORY_CONSOLIDATION_SOURCE_LIMIT = 50;
+const MEMORY_GOVERNANCE_RECEIPT_LIMIT = 2000;
 
 function memoryRequestCurrent(requestId, requestConnection, currentRequestId, currentConnection) {
   return requestId === currentRequestId && !connectionIdentityChanged(requestConnection, currentConnection);
 }
+
+function memoryScopeEqual(left, right) {
+  const a = left && typeof left === "object" ? left : {};
+  const b = right && typeof right === "object" ? right : {};
+  return a.scope === b.scope && a.id === b.id;
+}
+
+function memoryGovernanceTags(raw) {
+  const text = String(raw == null ? "" : raw);
+  if (agentUtf8Length(text) > 8192) return { tags: [], error: "The tag list must be 8 KiB or smaller." };
+  const source = text.split(",").map((tag) => tag.trim()).filter(Boolean);
+  const tags = Array.from(new Set(source));
+  if (tags.length > MEMORY_GOVERNANCE_TAG_LIMIT) {
+    return { tags: [], error: `Use at most ${MEMORY_GOVERNANCE_TAG_LIMIT} tags.` };
+  }
+  if (tags.some((tag) => !memoryCorrectionWireText(tag))) {
+    return { tags: [], error: "Every tag must be at most 256 UTF-8 bytes and contain no control characters." };
+  }
+  return { tags, error: "" };
+}
+
+function memoryGovernancePool(value) {
+  const pool = String(value == null ? "" : value);
+  return !pool || (agentUtf8Length(pool) <= 128 && /^[A-Za-z0-9._-]+$/.test(pool));
+}
+
+function memoryConsolidationDraft(conflict, records) {
+  const source = conflict && typeof conflict === "object" ? conflict : {};
+  const scope = source.scope && typeof source.scope === "object" ? source.scope : {};
+  const ids = Array.from(new Set((Array.isArray(source.memory_ids) ? source.memory_ids : []).map(String))).sort();
+  if (scope.scope === "run" || !MEMORY_CORRECTION_SCOPES.has(String(scope.scope)) || !memoryCorrectionWireText(scope.id)) {
+    throw new Error("This conflict has no supported non-run scope for consolidation.");
+  }
+  if (ids.length > MEMORY_CONSOLIDATION_SOURCE_LIMIT) {
+    throw new Error(`Studio can review at most ${MEMORY_CONSOLIDATION_SOURCE_LIMIT} conflict sources in one bounded decision.`);
+  }
+  if (!ids.length || ids.some((id) => !memoryCorrectionMemoryId(id))) {
+    throw new Error("This conflict does not name valid immutable memory identities.");
+  }
+  const byId = new Map((Array.isArray(records) ? records : []).map((record) => [String(record && record.memory_id || ""), record]));
+  const snapshots = ids.map((id) => byId.get(id));
+  if (snapshots.some((record) => !record || !memoryScopeEqual(record.scope, scope))) {
+    throw new Error("The loaded evidence does not prove every conflict source belongs to one scope.");
+  }
+  return {
+    open: true, kind: "consolidate", originConflict: source, sourceIds: ids, sourceSnapshots: snapshots,
+    scope: { scope: String(scope.scope), id: String(scope.id) }, key: String(source.key || ""),
+    distiller: "", tagsText: "", priority: "0", pool: "", acknowledged: false,
+    submitting: false, generation: 0, attemptedPayload: null, locked: false, retryAllowed: true,
+    error: "", fieldErrors: Object.create(null), receipt: null,
+  };
+}
+
+function memoryConsolidationConflictCurrent(draft, conflicts) {
+  const d = draft || {};
+  const origin = d.originConflict && typeof d.originConflict === "object" ? d.originConflict : {};
+  const expected = Array.isArray(d.sourceIds) ? Array.from(new Set(d.sourceIds.map(String))).sort() : [];
+  if (!expected.length) return false;
+  return (Array.isArray(conflicts) ? conflicts : []).some((conflict) => {
+    const value = conflict && typeof conflict === "object" ? conflict : {};
+    const ids = Array.isArray(value.memory_ids) ? Array.from(new Set(value.memory_ids.map(String))).sort() : [];
+    return memoryScopeEqual(value.scope, d.scope) && String(value.key || "") === String(origin.key || "") &&
+      memoryCorrectionSameValue(ids, expected);
+  });
+}
+
+function memoryGovernanceValidateDraft(draft) {
+  const d = draft || {};
+  const errors = Object.create(null);
+  let payload = null, path = "";
+  if (d.kind === "consolidate") {
+    const distiller = String(d.distiller || "");
+    const key = String(d.key || "");
+    const pool = String(d.pool || "");
+    const tags = memoryGovernanceTags(d.tagsText);
+    const priorityText = String(d.priority == null ? "0" : d.priority);
+    const priority = Number(priorityText);
+    if (!Array.isArray(d.sourceIds) || !d.sourceIds.length || d.sourceIds.length > MEMORY_CONSOLIDATION_SOURCE_LIMIT ||
+        d.sourceIds.some((id) => !memoryCorrectionMemoryId(id))) errors.sourceIds = "The source set is invalid.";
+    if (!d.scope || d.scope.scope === "run" || !MEMORY_CORRECTION_SCOPES.has(String(d.scope.scope)) || !memoryCorrectionWireText(d.scope.id)) errors.scope = "The consolidation scope is invalid.";
+    if (!memoryCorrectionWireText(distiller)) errors.distiller = "Enter a distiller name of at most 256 UTF-8 bytes without control characters.";
+    if (key && !memoryCorrectionWireText(key)) errors.key = "The summary key must be at most 256 UTF-8 bytes without control characters.";
+    if (!memoryGovernancePool(pool)) errors.pool = "Queue pool must be 1–128 ASCII letters, digits, dots, underscores, or hyphens.";
+    if (tags.error) errors.tagsText = tags.error;
+    if (!/^-?(0|[1-9]\d*)$/.test(priorityText) || !Number.isSafeInteger(priority) || Object.is(priority, -0)) {
+      errors.priority = "Priority must be a browser-safe whole number without negative zero.";
+    }
+    if (!d.acknowledged) errors.acknowledged = "Acknowledge that queued work is not a resolved conflict.";
+    const order = ["sourceIds", "scope", "distiller", "key", "tagsText", "priority", "pool", "acknowledged"];
+    const first = order.find((field) => errors[field]) || "";
+    if (!first) {
+      payload = { scope: { ...d.scope }, memory_ids: Array.from(new Set(d.sourceIds.map(String))).sort(), distiller,
+        ...(key ? { key } : {}), tags: tags.tags, priority, ...(pool ? { pool } : {}) };
+      path = "/memory/consolidate";
+    }
+    return { valid: !first, errors, first, payload, path };
+  }
+  errors.kind = "Choose a governed memory action.";
+  return { valid: false, errors, first: "kind", payload: null, path: "" };
+}
+
+function memoryGovernanceIdList(value) {
+  if (!Array.isArray(value) || value.length > MEMORY_GOVERNANCE_RECEIPT_LIMIT) return null;
+  const ids = value.map(String);
+  return ids.every(memoryCorrectionMemoryId) && new Set(ids).size === ids.length ? ids : null;
+}
+
+function memoryConsolidationValidateReceipt(body, payload, task) {
+  const response = body && typeof body === "object" ? body : {};
+  const durable = task && typeof task === "object" ? task : {};
+  const taskPayload = durable.payload && typeof durable.payload === "object" ? durable.payload : {};
+  if (!memoryCorrectionWireText(response.task_id) || response.kind !== "memory_consolidation" || typeof response.deduplicated !== "boolean") {
+    return { ok: false, error: "Rusty returned an invalid consolidation enqueue receipt." };
+  }
+  if (durable.task_id !== response.task_id || durable.kind !== "memory_consolidation") {
+    return { ok: false, error: "The durable task does not match the enqueue receipt." };
+  }
+  const expectedIds = Array.from(new Set(payload.memory_ids.map(String))).sort();
+  const actualIds = memoryGovernanceIdList(taskPayload.memory_ids);
+  const expectedPool = payload.pool || "default";
+  const optionalKey = Object.prototype.hasOwnProperty.call(payload, "key") ? payload.key : null;
+  const writtenText = typeof taskPayload.written_at === "string" ? taskPayload.written_at : "";
+  const written = /^\d{4}-\d{2}-\d{2}T/.test(writtenText) ? Date.parse(writtenText) : NaN;
+  const status = new Set(["queued", "leased", "failed", "completed", "dead", "cancelled"]);
+  const idempotencyPrefix = `memory_consolidation:${payload.scope.scope}:${payload.scope.id}:`;
+  const idempotencySuffix = typeof durable.idempotency_key === "string" && durable.idempotency_key.startsWith(idempotencyPrefix)
+    ? durable.idempotency_key.slice(idempotencyPrefix.length) : "";
+  const core = actualIds && memoryCorrectionSameValue(actualIds, expectedIds) && memoryScopeEqual(taskPayload.scope, payload.scope) &&
+    taskPayload.run_id == null && taskPayload.parent == null && durable.run_id == null && durable.parent == null &&
+    durable.thread_id == null && durable.recipient == null && durable.effect == null && durable.worker_version == null &&
+    /^[a-f0-9]{64}$/.test(idempotencySuffix) && status.has(durable.status) && Number.isFinite(written);
+  if (!core) return { ok: false, error: "The durable task does not bind the reviewed source set and scope." };
+  const differences = [];
+  if (taskPayload.distiller !== payload.distiller) differences.push("distiller");
+  if (taskPayload.key !== optionalKey) differences.push("summary key");
+  if (!memoryCorrectionSameValue(taskPayload.tags, payload.tags)) differences.push("tags");
+  if (taskPayload.priority !== payload.priority) differences.push("priority");
+  if (durable.pool !== expectedPool) differences.push("queue pool");
+  if (differences.length) {
+    return { ok: false, collision: true, task: durable, taskId: response.task_id,
+      deduplicated: response.deduplicated, differences,
+      error: `This exact scope and source set already belongs to durable work with different ${differences.join(", ")}.` };
+  }
+  return { ok: true, task: durable, taskId: response.task_id, deduplicated: response.deduplicated, reconciled: false };
+}
+
+function memoryConsolidationSourcesHtml(draft) {
+  const snapshots = Array.isArray(draft && draft.sourceSnapshots) ? draft.sourceSnapshots : [];
+  return `<section class="memory-governance-evidence" aria-labelledby="memory-governance-evidence-title">` +
+    `<h3 id="memory-governance-evidence-title">Contradictory source evidence</h3>` +
+    `<p>Frozen when this decision opened. Full identities remain visible; refreshed conflict drift blocks first enqueue.</p>` +
+    `<div class="memory-governance-source-list">` + snapshots.slice(0, MEMORY_CONSOLIDATION_SOURCE_LIMIT).map((record, index) => {
+      const source = record && typeof record === "object" ? record : {};
+      const titleId = `memory-governance-source-title-${index}`;
+      const provenance = source.provenance || {};
+      return `<article class="memory-governance-source" aria-labelledby="${titleId}"><h4 id="${titleId}">Evidence ${index + 1} · ${escapeHtml(source.key || "unkeyed")}</h4>` +
+        `<code>${escapeHtml(String(source.memory_id || "invalid identity"))}</code>` +
+        `<pre>${escapeHtml(memoryJsonText(memoryContentValue(source), 1200))}</pre><dl>` +
+        `<dt>Author</dt><dd>${escapeHtml(memoryAuthorLabel(provenance.author))}</dd>` +
+        `<dt>Learned</dt><dd>${escapeHtml(String(source.created_at || provenance.written_at || "unavailable"))}</dd>` +
+        `<dt>Confidence</dt><dd>${escapeHtml(memoryConfidenceLabel(source.confidence))}</dd>` +
+        `<dt>Scope</dt><dd>${escapeHtml(memoryScopeLabel(source))}</dd></dl></article>`;
+    }).join("") + `</div></section>`;
+}
+
 
 function memoryCorrectionGeneratedId(cryptography = globalThis.crypto) {
   if (!cryptography || typeof cryptography.randomUUID !== "function") {
@@ -9169,6 +9410,7 @@ function memoryContext(records, conflicts, now, options) {
   return {
     superseded, conflictMap,
     searchIndex: opts.searchIndex instanceof Map ? opts.searchIndex : null,
+    operationsAvailable: Boolean(opts.operationsAvailable),
     nowMs: Number.isFinite(parsedNow) ? parsedNow : Date.now(),
   };
 }
@@ -9334,6 +9576,11 @@ function memoryDetailHtml(record, context) {
   const validity = r.validity || {};
   const content = memoryContentValue(r);
   const tags = Array.isArray(r.tags) && r.tags.length ? r.tags.join(", ") : "—";
+  const governed = Boolean(context && context.operationsAvailable);
+  const consolidationAvailable = governed && conflicts.some((conflict) => {
+    const ids = conflict && conflict.memory_ids;
+    return Array.isArray(ids) && ids.length > 0 && ids.length <= MEMORY_CONSOLIDATION_SOURCE_LIMIT;
+  });
   const rows = [
     ["Memory ID", r.memory_id || "?"], ["Scope", memoryScopeLabel(r)],
     ["Kind", r.kind || "unknown"], ["Key", r.key || "—"],
@@ -9345,7 +9592,9 @@ function memoryDetailHtml(record, context) {
   let html = `<div class="memory-detail-head"><div><h2 id="memory-detail-title" tabindex="-1">${escapeHtml(r.key || `${r.kind || "Memory"} record`)}</h2>` +
     `<div class="muted tiny">Immutable record · learned ${escapeHtml(r.created_at || provenance.written_at || "time unavailable")}</div>` +
     (memoryCorrectionMemoryId(r.memory_id)
-      ? `<button class="small memory-correct-button" type="button" data-memory-correct="${escapeHtml(String(r.memory_id))}">Correct this memory</button>`
+      ? `<div class="memory-detail-actions"><button class="small memory-correct-button" type="button" data-memory-correct="${escapeHtml(String(r.memory_id))}">Correct this memory</button>` +
+        (consolidationAvailable ? `<button class="small" type="button" data-memory-consolidate-record="${escapeHtml(String(r.memory_id))}">Plan consolidation</button>` : "") +
+        `</div>`
       : `<div class="muted tiny memory-correct-button">Correction unavailable: invalid immutable identity.</div>`) + `</div>` +
     `<div class="memory-detail-badges">${memoryStateHtml(r, context)}` +
       (conflicts.length ? `<span class="badge running">conflict</span>` : "") + `</div></div>`;
@@ -9460,10 +9709,13 @@ function memoryCorrectionRender() {
 }
 
 function memoryCorrectionOpen(memoryId) {
+  if (store.memoryGovernance && store.memoryGovernance.submitting) return;
   const record = store.memory && store.memory.records.find((item) => item && item.memory_id === memoryId);
   if (!record) { toast("Select a retained memory record first.", "err"); return; }
   try { store.memoryCorrection = memoryCorrectionDraft(record); }
   catch (error) { toast(error.message, "err"); return; }
+  store.memoryGovernance = null;
+  memoryGovernanceRender();
   memoryCorrectionRender();
   $("memory-correction-title")?.focus({ preventScroll: true });
   $("memory-correction")?.scrollIntoView({ block: "nearest" });
@@ -9691,6 +9943,246 @@ async function memoryCorrectionSubmit() {
   }
 }
 
+function memoryGovernanceErrorText(error) {
+  const message = String(error && error.body && error.body.message || error && error.message || "Rusty refused the consolidation.");
+  if (Number(error && error.status) === 404 && (!error.body || error.body.raw !== undefined)) {
+    return "This server does not expose durable memory consolidation. Upgrade Rusty before queuing this decision.";
+  }
+  if (Number(error && error.status) === 404) return "A named source record was not found. Refresh conflicts before rebuilding this consolidation.";
+  if ([400, 403, 409, 422].includes(Number(error && error.status))) return `Rusty rejected the reviewed contract: ${message}`;
+  return message;
+}
+
+function memoryGovernanceRender() {
+  const panel = $("memory-governance");
+  const draft = store.memoryGovernance;
+  panel.hidden = !(draft && draft.open);
+  if (!draft || !draft.open) { panel.innerHTML = ""; return; }
+  const errors = draft.fieldErrors || {};
+  const disabled = draft.submitting || draft.locked || draft.drifted;
+  const fieldError = (name) => errors[name]
+    ? `<span class="field-error" id="memory-governance-${name}-error">${escapeHtml(errors[name])}</span>` : "";
+  const invalid = (name) => errors[name] ? ` aria-invalid="true" aria-describedby="memory-governance-${name}-error"` : "";
+  const lock = draft.locked && !draft.receipt
+    ? `<div class="note memory-governance-lock" id="memory-governance-lock" role="alert" tabindex="-1"><b>${draft.collision ? "Source set already owned." : "Exact request locked."}</b><br>` +
+      (draft.collision
+        ? `${escapeHtml(draft.error)} The reviewed policy was not accepted. Inspect the existing task or discard this draft.`
+        : `${escapeHtml(draft.error || "The enqueue outcome is uncertain.")} Editing could turn a safe retry into different work.`) + `</div>` : "";
+  const receipt = draft.receipt
+    ? `<div class="note memory-governance-receipt" role="status"><b>Durable consolidation task ${escapeHtml(String(draft.receipt.task.status || "queued"))} · ${escapeHtml(shortId(draft.receipt.taskId))}</b><br>` +
+      `${draft.receipt.deduplicated ? "The exact source set was already queued; Rusty returned its existing task." : "Rusty accepted a new durable task for the reviewed source set."} ` +
+      `Studio does not call the conflict resolved from a task receipt alone. Refreshed memory must prove that a governed summary record names these sources.` +
+      `<div style="margin-top:8px"><button class="small" type="button" data-memory-governance-task>Open durable task</button></div></div>` : "";
+  const error = draft.error && !draft.locked
+    ? `<div class="note memory-governance-error" id="memory-governance-error" role="alert" tabindex="-1">${escapeHtml(draft.error)}</div>` : "";
+  panel.setAttribute("aria-busy", draft.submitting ? "true" : "false");
+  panel.innerHTML = `<div class="memory-governance-head"><div><h2 id="memory-governance-title" tabindex="-1">Plan conflict consolidation</h2>` +
+    `<p>Queue one auditable distillation task. A queue receipt proves durable work, not a resolved memory conflict.</p></div>` +
+    `<button class="small" type="button" data-memory-governance-close ${draft.submitting ? "disabled" : ""}>Close</button></div>` +
+    `<div class="memory-consequence" aria-label="Memory consequence: conflicting evidence becomes durable work, and only a governed summary record can supersede the sources">` +
+      `<div class="memory-consequence-node evidence"><b>01 · Conflicting evidence</b><span>${draft.sourceIds.length} immutable source${draft.sourceIds.length === 1 ? "" : "s"} · ${escapeHtml(`${draft.scope.scope}:${draft.scope.id}`)}</span></div>` +
+      `<div class="memory-consequence-joint" aria-hidden="true">◆</div>` +
+      `<div class="memory-consequence-node action"><b>02 · Durable task</b><span>${escapeHtml(draft.distiller || "distiller required")} · exact source set</span></div>` +
+      `<div class="memory-consequence-joint" aria-hidden="true">→</div>` +
+      `<div class="memory-consequence-node receipt"><b>03 · Worker-owned outcome</b><span>${draft.receipt ? "task evidence confirmed; summary proof required" : "summary exists only after a governed worker write"}</span></div>` +
+    `</div>${memoryConsolidationSourcesHtml(draft)}${lock}${receipt}${error}<div class="memory-governance-body"><form class="memory-governance-form" id="memory-governance-form">` +
+      `<fieldset class="memory-governance-fields" ${disabled ? "disabled" : ""}>` +
+        `<label>Distiller identity<input id="inp-memory-governance-distiller" data-memory-governance-field="distiller" maxlength="256" value="${escapeHtml(draft.distiller)}"${invalid("distiller")}>${fieldError("distiller")}</label>` +
+        `<label>Summary key<input id="inp-memory-governance-key" data-memory-governance-field="key" maxlength="256" value="${escapeHtml(draft.key)}"${invalid("key")}>${fieldError("key")}</label>` +
+        `<label class="wide">Tags <span class="muted">comma separated</span><input id="inp-memory-governance-tags" data-memory-governance-field="tagsText" maxlength="8192" value="${escapeHtml(draft.tagsText)}"${invalid("tagsText")}>${fieldError("tagsText")}</label>` +
+        `<label>Summary retrieval priority <span class="muted">does not reorder queue work</span><input id="inp-memory-governance-priority" data-memory-governance-field="priority" inputmode="numeric" value="${escapeHtml(draft.priority)}"${invalid("priority")}>${fieldError("priority")}</label>` +
+        `<label>Queue pool <span class="muted">optional · letters, digits, . _ -</span><input id="inp-memory-governance-pool" data-memory-governance-field="pool" maxlength="128" value="${escapeHtml(draft.pool)}"${invalid("pool")}>${fieldError("pool")}</label>` +
+      `</fieldset><label class="memory-governance-confirm"><input id="chk-memory-governance-ack" data-memory-governance-field="acknowledged" type="checkbox" ${draft.acknowledged ? "checked" : ""} ${disabled ? "disabled" : ""}${invalid("acknowledged")}>` +
+        `<span>I reviewed the exact sources, scope, distiller, summary policy, and queue destination. I understand queued does not mean resolved.${fieldError("acknowledged")}</span></label>` +
+      `<div class="memory-governance-actions">` +
+        (draft.drifted ? `<button class="primary" type="button" data-memory-governance-close>Close and review current conflicts</button>` :
+        draft.locked && !draft.receipt ? `<button class="small" type="button" data-memory-governance-reset>Discard locked request</button>` +
+          (draft.collision ? `<button class="primary" type="button" data-memory-governance-task>Inspect existing task</button>` :
+          draft.retryAllowed ? `<button class="primary" type="submit" ${draft.submitting ? "disabled" : ""}>${draft.submitting ? "Reconciling…" : "Retry exact task"}</button>` : "") :
+        draft.receipt ? `<button class="primary" type="button" data-memory-governance-task>Inspect durable task</button>` :
+        `<button class="primary" type="submit" ${draft.submitting ? "disabled" : ""}>${draft.submitting ? "Queuing…" : "Queue consolidation"}</button>`) +
+      `</div></form><aside class="memory-governance-review" aria-label="Consolidation consequence"><h3>Review exact work</h3><dl>` +
+        `<dt>Scope</dt><dd>${escapeHtml(`${draft.scope.scope}:${draft.scope.id}`)}</dd><dt>Key</dt><dd>${escapeHtml(draft.key || "unnamed summary")}</dd>` +
+        `<dt>Sources</dt><dd>${draft.sourceIds.map((id) => escapeHtml(shortId(id))).join(" · ")}</dd>` +
+        `<dt>Serving rule</dt><dd>A source stops serving when a governed summary record names it as evidence; task settlement is separate and the enqueue receipt alone changes no memory.</dd>` +
+      `</dl></aside></div>`;
+}
+
+function memoryGovernanceOpenConsolidation(index) {
+  if (store.memoryCorrection && store.memoryCorrection.submitting || store.memoryGovernance && store.memoryGovernance.submitting) return;
+  const conflict = store.memory && Array.isArray(store.memory.conflicts) ? store.memory.conflicts[Number(index)] : null;
+  try { store.memoryGovernance = memoryConsolidationDraft(conflict, store.memory && store.memory.records); }
+  catch (error) { toast(error.message, "err"); return; }
+  store.memoryCorrection = null;
+  memoryCorrectionRender();
+  memoryGovernanceRender();
+  $("memory-governance-title")?.focus({ preventScroll: true });
+  $("memory-governance")?.scrollIntoView({ block: "nearest" });
+}
+
+function memoryGovernanceOpenConsolidationForRecord(memoryId) {
+  const index = store.memory && Array.isArray(store.memory.conflicts)
+    ? store.memory.conflicts.findIndex((conflict) => Array.isArray(conflict && conflict.memory_ids) &&
+      conflict.memory_ids.length <= MEMORY_CONSOLIDATION_SOURCE_LIMIT && conflict.memory_ids.map(String).includes(String(memoryId))) : -1;
+  if (index < 0) { toast("Refresh conflicts before planning this consolidation.", "err"); return; }
+  memoryGovernanceOpenConsolidation(index);
+}
+
+function memoryGovernanceClose() {
+  const draft = store.memoryGovernance;
+  if (draft && draft.submitting) return;
+  const conflict = draft && draft.originConflict;
+  store.memoryGovernance = null;
+  memoryGovernanceRender();
+  const index = conflict && store.memory && store.memory.conflicts ? store.memory.conflicts.indexOf(conflict) : -1;
+  ((index >= 0 && $("memory-conflicts").querySelector(`[data-memory-consolidate="${index}"]`)) || $("memory-detail-title") || $("memory-title"))?.focus({ preventScroll: true });
+}
+
+function memoryGovernanceReset() {
+  const draft = store.memoryGovernance;
+  if (!draft || draft.submitting) return;
+  try { store.memoryGovernance = memoryConsolidationDraft(draft.originConflict, store.memory && store.memory.records); }
+  catch (error) { draft.error = error.message; draft.locked = false; }
+  memoryGovernanceRender();
+  $("memory-governance-title")?.focus({ preventScroll: true });
+}
+
+function memoryGovernanceHandleEdit(event) {
+  const draft = store.memoryGovernance;
+  if (!draft || draft.locked || draft.submitting) return;
+  const field = event.target && event.target.getAttribute("data-memory-governance-field");
+  if (!field) return;
+  draft[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+  draft.error = "";
+  if (draft.fieldErrors) delete draft.fieldErrors[field];
+  event.target.removeAttribute("aria-invalid");
+  event.target.removeAttribute("aria-describedby");
+  $("memory-governance")?.querySelector(".memory-governance-error")?.remove();
+  $(`memory-governance-${field}-error`)?.remove();
+}
+
+function memoryGovernanceCurrent(draft, generation, connection) {
+  return store.memoryGovernance === draft && draft.generation === generation &&
+    !connectionIdentityChanged(connection, store.conn);
+}
+
+async function memoryGovernanceAccept(draft, receipt, generation, connection) {
+  if (!memoryGovernanceCurrent(draft, generation, connection)) return;
+  draft.submitting = false;
+  draft.locked = true;
+  draft.retryAllowed = false;
+  draft.error = "";
+  draft.fieldErrors = Object.create(null);
+  draft.receipt = receipt;
+  memoryGovernanceRender();
+  await memoryLoad(true);
+  if (store.memoryGovernance !== draft || connectionIdentityChanged(connection, store.conn)) return;
+  memoryRender();
+  $("memory-governance-title")?.focus({ preventScroll: true });
+  $("memory-governance")?.scrollIntoView({ block: "nearest" });
+  $("memory-announcer").textContent = "Durable consolidation task confirmed. Refreshed memory evidence, not the task receipt alone, determines whether the conflict is resolved.";
+}
+
+function memoryGovernanceTaskEvidence(draft) {
+  const value = draft && typeof draft === "object" ? draft : {};
+  return value.receipt || value.collision || null;
+}
+
+async function memoryGovernanceOpenTask() {
+  const evidence = memoryGovernanceTaskEvidence(store.memoryGovernance);
+  if (!evidence || !evidence.taskId) return;
+  const connection = store.conn && { ...store.conn };
+  if (!connection) return;
+  const durable = evidence.task;
+  openTasks();
+  $("sel-task-status").value = "";
+  await tasksLoad(true);
+  if (connectionIdentityChanged(connection, store.conn)) return;
+  if (store.tasks && !store.tasks.error) {
+    if (!store.tasks.list.some((task) => task && task.task_id === evidence.taskId) && durable) store.tasks.list.unshift(durable);
+    store.tasks.selected = evidence.taskId;
+    tasksRender();
+  }
+  $("tasks-title").focus({ preventScroll: true });
+}
+
+async function memoryGovernanceSubmit() {
+  const draft = store.memoryGovernance;
+  if (!draft || draft.submitting || draft.receipt || !store.conn || draft.locked && draft.retryAllowed !== true) return;
+  if (store.memory && store.memory.loading) {
+    draft.error = "Wait for the current memory refresh to finish before queuing consolidation.";
+    memoryGovernanceRender();
+    $("memory-governance-error")?.focus({ preventScroll: true });
+    return;
+  }
+  const exactRetry = Boolean(draft.locked && draft.attemptedPayload);
+  let payload;
+  if (exactRetry) {
+    payload = draft.attemptedPayload;
+  } else {
+    if (!memoryConsolidationConflictCurrent(draft, store.memory && store.memory.conflicts)) {
+      draft.drifted = true;
+      draft.acknowledged = false;
+      draft.error = "The current conflict evidence no longer matches this reviewed source set. Close this draft and review the refreshed inbox before queuing work.";
+      memoryGovernanceRender();
+      $("memory-governance-error")?.focus({ preventScroll: true });
+      return;
+    }
+    const validation = memoryGovernanceValidateDraft(draft);
+    draft.fieldErrors = validation.errors;
+    if (!validation.valid) {
+      draft.error = "Review the highlighted consequence fields before continuing.";
+      memoryGovernanceRender();
+      const ids = { distiller: "inp-memory-governance-distiller", key: "inp-memory-governance-key", tagsText: "inp-memory-governance-tags",
+        priority: "inp-memory-governance-priority", pool: "inp-memory-governance-pool", acknowledged: "chk-memory-governance-ack" };
+      $(ids[validation.first] || "memory-governance-title")?.focus({ preventScroll: true });
+      return;
+    }
+    payload = validation.payload;
+    draft.attemptedPayload = JSON.parse(JSON.stringify(payload));
+  }
+  const connection = { ...store.conn };
+  const generation = ++draft.generation;
+  draft.submitting = true;
+  draft.error = "";
+  memoryGovernanceRender();
+  $("memory-governance-title")?.focus({ preventScroll: true });
+  let accepted = false;
+  try {
+    const body = await apiForConnection(connection, "POST", "/memory/consolidate", payload);
+    if (!memoryGovernanceCurrent(draft, generation, connection)) return;
+    accepted = true;
+    const taskId = body && body.task_id;
+    if (!memoryCorrectionWireText(taskId)) throw Object.assign(new Error("Rusty returned no safe durable task identity."), { ambiguous: true });
+    const task = await apiForConnection(connection, "GET", `/tasks/${encodeURIComponent(taskId)}`);
+    if (!memoryGovernanceCurrent(draft, generation, connection)) return;
+    const checked = memoryConsolidationValidateReceipt(body, payload, task);
+    if (checked.ok) { await memoryGovernanceAccept(draft, checked, generation, connection); return; }
+    if (checked.collision) {
+      draft.submitting = false;
+      draft.locked = true;
+      draft.retryAllowed = false;
+      draft.collision = checked;
+      draft.error = checked.error;
+      memoryGovernanceRender();
+      $("memory-governance-lock")?.focus({ preventScroll: true });
+      return;
+    }
+    throw Object.assign(new Error(checked.error), { ambiguous: true });
+  } catch (error) {
+    if (!memoryGovernanceCurrent(draft, generation, connection)) return;
+    const initialClientRefusal = !accepted && !exactRetry && !error.ambiguous && Number(error.status) >= 400 && Number(error.status) < 500;
+    draft.submitting = false;
+    draft.locked = !initialClientRefusal;
+    draft.retryAllowed = true;
+    if (initialClientRefusal) draft.attemptedPayload = null;
+    draft.error = initialClientRefusal ? memoryGovernanceErrorText(error)
+      : "The enqueue outcome or durable task evidence is uncertain. Retry only this exact locked source set; Rusty deduplicates it by scope and sorted sources.";
+    memoryGovernanceRender();
+    $(draft.locked ? "memory-governance-lock" : "memory-governance-error")?.focus({ preventScroll: true });
+  }
+}
+
 function memorySummaryHtml(records, conflicts, context, metadata) {
   const list = Array.isArray(records) ? records : [];
   const meta = metadata || {};
@@ -9728,10 +10220,14 @@ function memoryConflictsHtml(conflicts, error, totalConflicts) {
     `<div class="memory-conflict-list">` + list.slice(0, MEMORY_CONFLICT_RENDER_LIMIT).map((conflict, index) => {
       const scope = conflict && conflict.scope || {};
       const count = Array.isArray(conflict && conflict.memory_ids) ? conflict.memory_ids.length : 0;
-      return `<button class="memory-conflict-card" type="button" data-memory-conflict="${index}" ` +
-        `aria-label="Review conflict for ${escapeHtml(conflict && conflict.key || "unknown key")}">` +
-        `<strong>◆ ${escapeHtml(conflict && conflict.key || "Unkeyed conflict")}</strong>` +
-        `<span>${escapeHtml(`${scope.scope || "unknown"}:${scope.id || "?"}`)} · ${count} records · review evidence</span></button>`;
+      const titleId = `memory-conflict-title-${index}`;
+      const planDisabled = count < 1 || count > MEMORY_CONSOLIDATION_SOURCE_LIMIT;
+      return `<article class="memory-conflict-card" aria-labelledby="${titleId}">` +
+        `<strong id="${titleId}">◆ ${escapeHtml(conflict && conflict.key || "Unkeyed conflict")}</strong>` +
+        `<span>${escapeHtml(`${scope.scope || "unknown"}:${scope.id || "?"}`)} · ${count} records</span>` +
+        `<div class="memory-conflict-actions"><button class="small" type="button" data-memory-conflict="${index}" aria-label="Review conflict for ${escapeHtml(conflict && conflict.key || "unknown key")}">Review evidence</button>` +
+        `<button class="small" type="button" data-memory-consolidate="${index}" aria-label="${planDisabled ? "Consolidation unavailable" : "Plan consolidation"} for ${escapeHtml(conflict && conflict.key || "unknown key")}" ${planDisabled ? `disabled title="Studio can review at most ${MEMORY_CONSOLIDATION_SOURCE_LIMIT} sources in one decision"` : ""}>` +
+        `${planDisabled ? "Review outside Studio" : "Plan consolidation"}</button></div></article>`;
     }).join("") + `</div>`;
 }
 
@@ -9843,6 +10339,11 @@ function memoryScheduleLifecycleRefresh(records, nowMs) {
 function memoryCaptureDynamicFocus() {
   const active = document.activeElement;
   if (!active || typeof active.closest !== "function") return null;
+  if ($("memory-governance").contains(active)) {
+    return { area: "governance", id: active.id || null,
+      start: typeof active.selectionStart === "number" ? active.selectionStart : null,
+      end: typeof active.selectionEnd === "number" ? active.selectionEnd : null };
+  }
   if ($("memory-correction").contains(active)) {
     return { area: "correction", id: active.id || null,
       start: typeof active.selectionStart === "number" ? active.selectionStart : null,
@@ -9862,7 +10363,9 @@ function memoryCaptureDynamicFocus() {
 function memoryRestoreDynamicFocus(target) {
   if (!target) return;
   let next = null;
-  if (target.area === "correction") {
+  if (target.area === "governance") {
+    next = target.id ? $(target.id) : $("memory-governance-title");
+  } else if (target.area === "correction") {
     next = target.id ? $(target.id) : $("memory-correction-title");
   } else if (target.area === "list") {
     next = Array.from($("memory-list").querySelectorAll("[data-memory-id]"))
@@ -9877,7 +10380,7 @@ function memoryRestoreDynamicFocus(target) {
   }
   if (next) {
     next.focus({ preventScroll: true });
-    if (target.area === "correction" && target.start != null && typeof next.setSelectionRange === "function") {
+    if (["correction", "governance"].includes(target.area) && target.start != null && typeof next.setSelectionRange === "function") {
       const maximum = String(next.value || "").length;
       next.setSelectionRange(Math.min(target.start, maximum), Math.min(target.end == null ? target.start : target.end, maximum));
     }
@@ -9888,8 +10391,22 @@ function memoryRender() {
   const state = store.memory;
   const listEl = $("memory-list"), detailEl = $("memory-detail");
   const correctionBusy = Boolean(store.memoryCorrection && store.memoryCorrection.submitting);
-  $("btn-memory-refresh").disabled = correctionBusy;
+  const governanceBusy = Boolean(store.memoryGovernance && store.memoryGovernance.submitting);
+  const governance = store.memoryGovernance;
+  if (state && !state.loading && !state.error && governance && governance.open && !governance.locked && !governance.receipt) {
+    const current = memoryConsolidationConflictCurrent(governance, state.conflicts);
+    if (!current) {
+      governance.drifted = true;
+      governance.acknowledged = false;
+      governance.error = "The current conflict evidence no longer matches this reviewed source set. Close this draft and review the refreshed inbox before queuing work.";
+    } else if (governance.drifted) {
+      governance.drifted = false;
+      governance.error = "";
+    }
+  }
+  $("btn-memory-refresh").disabled = correctionBusy || governanceBusy;
   memoryCorrectionRender();
+  memoryGovernanceRender();
   if (!state || state.loading) {
     $("memory-summary").innerHTML = "";
     $("memory-conflicts").innerHTML = "";
@@ -9907,7 +10424,7 @@ function memoryRender() {
   }
   const nowMs = Date.now();
   const context = memoryContext(state.records, state.conflicts, new Date(nowMs).toISOString(), {
-    superseded: state.superseded, searchIndex: state.searchIndex,
+    superseded: state.superseded, searchIndex: state.searchIndex, operationsAvailable: Array.isArray(state.conflicts),
   });
   memoryScheduleLifecycleRefresh(state.records, nowMs);
   $("memory-summary").innerHTML = memorySummaryHtml(state.records, state.conflicts, context, {
@@ -12092,6 +12609,8 @@ function init() {
   $("memory-list").addEventListener("click", memoryActivate);
   $("memory-list").addEventListener("keydown", memoryActivate);
   $("memory-conflicts").addEventListener("click", (e) => {
+    const consolidate = e.target.closest("[data-memory-consolidate]");
+    if (consolidate) { memoryGovernanceOpenConsolidation(consolidate.getAttribute("data-memory-consolidate")); return; }
     const target = e.target.closest("[data-memory-conflict]");
     if (target) memoryReviewConflict(target.getAttribute("data-memory-conflict"));
   });
@@ -12104,8 +12623,22 @@ function init() {
   $("memory-detail").addEventListener("click", (e) => {
     const correct = e.target.closest("[data-memory-correct]");
     if (correct) { memoryCorrectionOpen(correct.getAttribute("data-memory-correct")); return; }
+    const consolidate = e.target.closest("[data-memory-consolidate-record]");
+    if (consolidate) { memoryGovernanceOpenConsolidationForRecord(consolidate.getAttribute("data-memory-consolidate-record")); return; }
     const target = e.target.closest("[data-memory-select]");
     if (target) memorySelect(target.getAttribute("data-memory-select"), true);
+  });
+  $("memory-governance").addEventListener("input", memoryGovernanceHandleEdit);
+  $("memory-governance").addEventListener("change", memoryGovernanceHandleEdit);
+  $("memory-governance").addEventListener("click", (event) => {
+    if (event.target.closest("[data-memory-governance-close]")) { memoryGovernanceClose(); return; }
+    if (event.target.closest("[data-memory-governance-reset]")) { memoryGovernanceReset(); return; }
+    if (event.target.closest("[data-memory-governance-task]")) memoryGovernanceOpenTask();
+  });
+  $("memory-governance").addEventListener("submit", (event) => {
+    if (event.target.id !== "memory-governance-form") return;
+    event.preventDefault();
+    memoryGovernanceSubmit();
   });
   $("memory-correction").addEventListener("input", memoryCorrectionHandleEdit);
   $("memory-correction").addEventListener("change", memoryCorrectionHandleEdit);
