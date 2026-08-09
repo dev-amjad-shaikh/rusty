@@ -1,0 +1,48 @@
+{
+  "memory_id": "a5c9c40aad69b4d27132bf417dd9e559792adf5fe921da1b5e6b33b1ea924e59",
+  "kind": "fact",
+  "scope": {
+    "scope": "user",
+    "id": "user-7"
+  },
+  "key": "timezone",
+  "tags": [
+    "profile",
+    "locale"
+  ],
+  "priority": 5,
+  "provenance": {
+    "author": {
+      "type": "agent",
+      "agent_id": "researcher-7"
+    },
+    "evidence": {
+      "run_id": "run-abc",
+      "event_ids": [
+        "run-abc:3",
+        "run-abc:4"
+      ],
+      "correction_id": "correction-9",
+      "source_memory_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+    },
+    "written_at": "2025-06-15T15:06:41Z"
+  },
+  "confidence": 0.95,
+  "validity": {
+    "valid_from": "2025-06-15T15:06:40Z",
+    "valid_until": "2028-08-16T00:53:20Z"
+  },
+  "created_at": "2025-06-15T15:06:41Z",
+  "expires_at": "2030-03-17T17:46:40Z",
+  "supersedes": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "content": {
+    "kind": "inline",
+    "value": {
+      "source": "profile form",
+      "timezone": "UTC+4"
+    }
+  }
+}

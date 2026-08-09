@@ -18,6 +18,11 @@
 //!   wave-2b transactional outbox), and `server_triggers` /
 //!   `server_trigger_events` (event-driven triggers), auto-migrated on
 //!   (lazy) connect. Selected via `ServerConfig::with_postgres(url)`.
+//! - Governed memory (R0.8) lives in `{store_path}/memory/` (one JSON
+//!   file per record, artifact-referenced bodies spilled to
+//!   `{store_path}/memory_artifacts/`) on the file backend and the
+//!   column-mapped `server_memory` table on Postgres — see
+//!   [`crate::memory`] for the layout and the spill/resolve discipline.
 //!
 //! All trait errors are plain `String`s; routes map them to 500s — no store
 //! error is ever a client error (validation happens before the store call).
@@ -26,7 +31,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
-use rusty_agent_runtime::journal::JournalSnapshot;
+use rusty_agent_runtime::journal::{FileArtifactStore, JournalSnapshot};
+use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -38,6 +44,7 @@ use crate::assistants::{self, AssistantRecord};
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::journals;
+use crate::memory;
 use crate::outbox::{self, OutboxRecord};
 use crate::store::{self, StoreItem};
 use crate::tasks::{self, CancelOutcome, MutationOutcome, RunCancellation, TaskRecord, TaskStatus};
@@ -451,6 +458,39 @@ pub(crate) trait ServerStore: Send + Sync {
         lease_ms: u64,
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<MailboxClaim>;
+
+    // -- Governed memory (R0.8 Rusty Learn, wave 1) --------------------- //
+
+    /// Store a memory record under its tenant-scoped content address;
+    /// `false` (no write) when the address is already present — content
+    /// addressing makes the write idempotent by construction (the
+    /// `Effect::Idempotent` write converges). When the record's content
+    /// is artifact-referenced, `content` (the value the address was
+    /// minted from) is spilled into the backend's artifact store first;
+    /// reads re-inline it, so served records are always self-contained.
+    async fn put_memory(
+        &self,
+        tenant: &str,
+        record: &MemoryRecord,
+        content: &Value,
+    ) -> StoreResult<bool>;
+    /// Fetch one memory record by its (bare) content address,
+    /// tenant-scoped (`None` for unknown or cross-tenant addresses — the
+    /// two are indistinguishable by design). Artifact-referenced content
+    /// is resolved before returning.
+    async fn get_memory(&self, tenant: &str, memory_id: &str) -> StoreResult<Option<MemoryRecord>>;
+    /// The tenant's records matching `query`, expiry evaluated at `now`
+    /// (the route-resolved [`MemoryQuery::as_of`]). Semantics are core's
+    /// [`apply_query`](rusty_agent_runtime::memory::apply_query) exactly:
+    /// the JSON backend scans and applies it directly; Postgres
+    /// pre-filters on columns and applies the same matcher to the
+    /// reduced set, so filter semantics live in exactly one place.
+    async fn query_memory(
+        &self,
+        tenant: &str,
+        query: &MemoryQuery,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<Vec<MemoryRecord>>;
 }
 
 // --------------------------------------------------------------------- //
@@ -484,6 +524,16 @@ pub(crate) struct JsonFileStore {
     /// first (appends are chronological; status-transition upserts keep
     /// position), so pruning drops from the front.
     trigger_events: Mutex<HashMap<String, Vec<TriggerEventRecord>>>,
+    /// Governed memory (R0.8): the in-memory index keyed by
+    /// tenant-scoped content address (`{tenant}/{address}`), persisted
+    /// as one file per record under `{store_path}/memory/`. Records are
+    /// stored with artifact-referenced content; reads re-inline via
+    /// `memory_artifacts`.
+    memories: Mutex<HashMap<String, MemoryRecord>>,
+    /// The artifact store spilled memory bodies live in (a sibling of
+    /// the records dir, so the recursive record loader never picks up a
+    /// blob).
+    memory_artifacts: FileArtifactStore,
 }
 
 impl JsonFileStore {
@@ -503,6 +553,8 @@ impl JsonFileStore {
             checkpointer: JsonFileCheckpointer::new(root),
             triggers: Mutex::new(triggers::load(root)),
             trigger_events: Mutex::new(triggers::load_events(root)),
+            memories: Mutex::new(memory::load(root)),
+            memory_artifacts: memory::artifact_store(root),
         }
     }
 }
@@ -1432,6 +1484,65 @@ impl ServerStore for JsonFileStore {
         map.insert(task_id, task.clone());
         Ok(MailboxClaim::Claimed(Box::new(task)))
     }
+
+    async fn put_memory(
+        &self,
+        tenant: &str,
+        record: &MemoryRecord,
+        content: &Value,
+    ) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, &record.memory_id);
+        let mut map = self.memories.lock().await;
+        if map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        // Spill before the record write, and hold the index lock across
+        // both (the assistants convention): the blob is content-
+        // addressed, so a failed record write leaves at worst a reusable
+        // orphan — never a record pointing at missing bytes.
+        memory::spill_content(&self.memory_artifacts, record, content).await?;
+        memory::persist(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist memory"))?;
+        map.insert(scoped, record.clone());
+        Ok(true)
+    }
+
+    async fn get_memory(&self, tenant: &str, memory_id: &str) -> StoreResult<Option<MemoryRecord>> {
+        let scoped = crate::auth::scope_id(tenant, memory_id);
+        let found = self.memories.lock().await.get(&scoped).cloned();
+        let Some(mut record) = found else {
+            return Ok(None);
+        };
+        memory::resolve_content(&self.memory_artifacts, &mut record).await?;
+        Ok(Some(record))
+    }
+
+    async fn query_memory(
+        &self,
+        tenant: &str,
+        query: &MemoryQuery,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<Vec<MemoryRecord>> {
+        // The query universe is exactly the caller's tenant namespace —
+        // tenancy rides the key prefix, and core's `apply_query`
+        // supplies every filter semantic (including the superseded set,
+        // computed over the whole universe).
+        let universe: Vec<MemoryRecord> = {
+            let map = self.memories.lock().await;
+            map.iter()
+                .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+                .map(|(_, record)| record.clone())
+                .collect()
+        };
+        let mut matched = apply_query(&universe, query, now);
+        // Resolve after filtering: only served records pay the artifact
+        // read.
+        for record in &mut matched {
+            memory::resolve_content(&self.memory_artifacts, record).await?;
+        }
+        Ok(matched)
+    }
 }
 
 impl JsonFileStore {
@@ -1531,6 +1642,7 @@ mod postgres {
     use chrono::{DateTime, Utc};
     use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
     use rusty_agent_runtime::journal::JournalSnapshot;
+    use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
     use serde_json::Value;
     use sqlx::{PgPool, Row};
     use tokio::sync::OnceCell;
@@ -1543,6 +1655,7 @@ mod postgres {
     use crate::assistants::AssistantRecord;
     use crate::coordination::CoordinationRecord;
     use crate::crons::CronRecord;
+    use crate::memory;
     use crate::outbox::OutboxRecord;
     use crate::store::StoreItem;
     use crate::tasks::{
@@ -1799,6 +1912,40 @@ mod postgres {
             created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
         )";
 
+    /// `server_memory` (R0.8 Rusty Learn, wave 1): the governed memory
+    /// store. Column-mapped like `server_tasks`, not JSONB-payloaded:
+    /// retrieval filters on scope / kind / key / confidence / validity /
+    /// expiry, so those must be real columns. The record itself travels
+    /// as JSONB verbatim (artifact-referenced content form; bodies spill
+    /// into core's `rusty_artifacts` table via `PostgresArtifactStore`
+    /// and are re-inlined on read). `memory_id` is the tenant-scoped
+    /// content address; `supersedes` carries the *bare* address (records
+    /// are tenant-neutral) — the superseded set is scoped-ified in Rust,
+    /// where `MemoryQuery::matches` applies it.
+    pub(crate) const CREATE_MEMORY_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_memory (
+            memory_id   TEXT PRIMARY KEY,
+            tenant      TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            scope       TEXT NOT NULL,
+            scope_id    TEXT NOT NULL,
+            "key"       TEXT,
+            tags        JSONB NOT NULL,
+            confidence  DOUBLE PRECISION NOT NULL,
+            valid_from  TIMESTAMPTZ NOT NULL,
+            valid_until TIMESTAMPTZ,
+            expires_at  TIMESTAMPTZ,
+            supersedes  TEXT,
+            payload     JSONB NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The retrieval scan's leading columns: every memory query is
+    /// tenant-scoped, most declare a scope address and/or kinds.
+    pub(crate) const CREATE_MEMORY_QUERY_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_memory_query
+            ON server_memory (tenant, scope, scope_id, kind)";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -1825,6 +1972,8 @@ mod postgres {
         CREATE_TRIGGERS_SQL,
         CREATE_TRIGGER_EVENTS_SQL,
         CREATE_TRIGGER_EVENTS_INDEX_SQL,
+        CREATE_MEMORY_SQL,
+        CREATE_MEMORY_QUERY_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -2302,6 +2451,29 @@ mod postgres {
     pub(crate) const SELECT_COORDINATION_SQL: &str =
         "SELECT payload FROM server_coordinations WHERE coordination_id = $1";
 
+    /// Governed memory statements (R0.8 wave 1). Insert-only on the
+    /// content address (writes are idempotent by construction); the
+    /// `server_agents` conflict discipline applied to `server_memory`.
+    pub(crate) const INSERT_MEMORY_SQL: &str = r#"
+        INSERT INTO server_memory (
+            memory_id, tenant, kind, scope, scope_id, "key", tags, confidence,
+            valid_from, valid_until, expires_at, supersedes, payload
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ON CONFLICT (memory_id) DO NOTHING
+        RETURNING memory_id"#;
+
+    pub(crate) const SELECT_MEMORY_SQL: &str =
+        "SELECT payload FROM server_memory WHERE memory_id = $1";
+
+    /// The superseded set spans the tenant's whole namespace: a
+    /// superseding record may itself fall outside a query's filters, and
+    /// the record it supersedes must still drop out of default
+    /// retrieval. `supersedes` carries the bare content address (the
+    /// record's own identity), so the set applies directly to
+    /// `MemoryQuery::matches` in Rust.
+    pub(crate) const SUPERSEDED_MEMORY_SQL: &str =
+        "SELECT supersedes FROM server_memory WHERE tenant = $1 AND supersedes IS NOT NULL";
+
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
         WHERE coordination_id = $1
@@ -2604,6 +2776,18 @@ mod postgres {
         i64::try_from(fencing).map_err(|_| "fencing ordinal exceeds BIGINT".to_string())
     }
 
+    /// The wire string of a memory enum (`MemoryKind` / `MemoryScope`):
+    /// both serialize as snake_case strings, which is exactly what the
+    /// `kind` / `scope` columns store. Infallible for these enums by
+    /// construction — a non-string serialization would be a core wire
+    /// change, surfaced as a store error rather than silently stored.
+    fn memory_wire_str<T: serde::Serialize>(value: &T) -> StoreResult<String> {
+        serde_json::to_value(value)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .ok_or_else(|| "memory enum did not serialize to a string".to_string())
+    }
+
     /// Postgres-backed store: assistants / crons / KV in `server_*` tables.
     ///
     /// The connection (and idempotent auto-migration) is established lazily
@@ -2614,6 +2798,12 @@ mod postgres {
         /// Set once core's `rusty_checkpoints` table has been migrated
         /// over this store's pool (see `checkpoint_and_enqueue`).
         checkpoints_migrated: OnceCell<()>,
+        /// Set once core's `rusty_artifacts` table has been migrated
+        /// over this store's pool (see `memory_artifacts`): the artifact
+        /// store is a separate subsystem with its own lifecycle, and the
+        /// memory paths can be a deployment's first Postgres traffic —
+        /// before any checkpoint operation would have created the table.
+        artifacts_migrated: OnceCell<()>,
     }
 
     impl PostgresStore {
@@ -2623,7 +2813,30 @@ mod postgres {
                 url,
                 pool: OnceCell::new(),
                 checkpoints_migrated: OnceCell::new(),
+                artifacts_migrated: OnceCell::new(),
             }
+        }
+
+        /// The artifact store spilled memory bodies persist through,
+        /// migrating `rusty_artifacts` once per store (idempotent, the
+        /// `checkpoints_migrated` discipline applied to core's artifact
+        /// subsystem).
+        async fn memory_artifacts(
+            &self,
+        ) -> StoreResult<rusty_agent_runtime::checkpoint_postgres::PostgresArtifactStore> {
+            let pool = self.pool().await?;
+            let store = rusty_agent_runtime::checkpoint_postgres::PostgresArtifactStore::from_pool(
+                pool.clone(),
+            );
+            self.artifacts_migrated
+                .get_or_try_init(|| async {
+                    store
+                        .migrate()
+                        .await
+                        .map_err(|e| format!("migrate artifacts table: {e}"))
+                })
+                .await?;
+            Ok(store)
         }
 
         /// The connection pool, connecting + migrating on first call.
@@ -3970,6 +4183,158 @@ mod postgres {
             tx.commit().await.map_err(db_err("claim agent task"))?;
             Ok(MailboxClaim::Claimed(Box::new(task_from_row(&updated)?)))
         }
+
+        async fn put_memory(
+            &self,
+            tenant: &str,
+            record: &MemoryRecord,
+            content: &Value,
+        ) -> StoreResult<bool> {
+            let pool = self.pool().await?;
+            // Spill before the insert (the file backend's rule): the blob
+            // is content-addressed, so a failed insert leaves at worst a
+            // reusable orphan — never a record pointing at missing bytes.
+            memory::spill_content(&self.memory_artifacts().await?, record, content).await?;
+            let payload = record_to_payload(record)?;
+            let tags = serde_json::to_value(&record.tags)
+                .map_err(|e| format!("serialize memory tags: {e}"))?;
+            let row = sqlx::query(INSERT_MEMORY_SQL)
+                .bind(crate::auth::scope_id(tenant, &record.memory_id))
+                .bind(tenant)
+                .bind(memory_wire_str(&record.kind)?)
+                .bind(memory_wire_str(&record.scope.scope)?)
+                .bind(&record.scope.id)
+                .bind(&record.key)
+                .bind(tags)
+                .bind(record.confidence)
+                .bind(record.validity.valid_from)
+                .bind(record.validity.valid_until)
+                .bind(record.expires_at)
+                .bind(&record.supersedes)
+                .bind(payload)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("insert memory"))?;
+            Ok(row.is_some())
+        }
+
+        async fn get_memory(
+            &self,
+            tenant: &str,
+            memory_id: &str,
+        ) -> StoreResult<Option<MemoryRecord>> {
+            let pool = self.pool().await?;
+            let row = sqlx::query(SELECT_MEMORY_SQL)
+                .bind(crate::auth::scope_id(tenant, memory_id))
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("select memory"))?;
+            let Some(row) = row else {
+                return Ok(None);
+            };
+            let mut record: MemoryRecord =
+                record_from_payload("memory", row.get::<Value, _>("payload"))?;
+            memory::resolve_content(&self.memory_artifacts().await?, &mut record).await?;
+            Ok(Some(record))
+        }
+
+        async fn query_memory(
+            &self,
+            tenant: &str,
+            query: &MemoryQuery,
+            now: chrono::DateTime<chrono::Utc>,
+        ) -> StoreResult<Vec<MemoryRecord>> {
+            let pool = self.pool().await?;
+            let superseded_rows = sqlx::query(SUPERSEDED_MEMORY_SQL)
+                .bind(tenant)
+                .fetch_all(pool)
+                .await
+                .map_err(db_err("memory superseded scan"))?;
+            let superseded: std::collections::HashSet<String> = superseded_rows
+                .into_iter()
+                .map(|row| row.get::<String, _>("supersedes"))
+                .collect();
+
+            // SQL pre-filters on the column-mapped clauses — each clause
+            // spells exactly the `MemoryQuery::matches` semantics for its
+            // filter, and every value travels as a bind parameter. The
+            // same matcher then runs in Rust over the reduced set
+            // (covering tags and author, and harmlessly re-checking the
+            // rest), so filter semantics live in exactly one place: core.
+            let mut sql = String::from("SELECT payload FROM server_memory WHERE tenant = $1");
+            let mut binds = 1usize;
+            if query.scope.is_some() {
+                binds += 2;
+                sql.push_str(&format!(
+                    " AND scope = ${} AND scope_id = ${}",
+                    binds - 1,
+                    binds
+                ));
+            }
+            if !query.kinds.is_empty() {
+                binds += 1;
+                sql.push_str(&format!(" AND kind = ANY(${binds})"));
+            }
+            if query.key.is_some() {
+                binds += 1;
+                sql.push_str(&format!(" AND \"key\" = ${binds}"));
+            }
+            if query.valid_at.is_some() {
+                binds += 1;
+                sql.push_str(&format!(
+                    " AND valid_from <= ${0} AND (valid_until IS NULL OR valid_until > ${0})",
+                    binds
+                ));
+            }
+            if query.min_confidence.is_some() {
+                binds += 1;
+                sql.push_str(&format!(" AND confidence >= ${binds}"));
+            }
+            if !query.include_expired {
+                binds += 1;
+                sql.push_str(&format!(
+                    " AND (expires_at IS NULL OR expires_at > ${binds})"
+                ));
+            }
+            let mut stmt = sqlx::query(&sql).bind(tenant);
+            if let Some(scope) = &query.scope {
+                stmt = stmt.bind(memory_wire_str(&scope.scope)?).bind(&scope.id);
+            }
+            if !query.kinds.is_empty() {
+                let kinds = query
+                    .kinds
+                    .iter()
+                    .map(memory_wire_str)
+                    .collect::<StoreResult<Vec<String>>>()?;
+                stmt = stmt.bind(kinds);
+            }
+            if let Some(key) = &query.key {
+                stmt = stmt.bind(key);
+            }
+            if let Some(valid_at) = query.valid_at {
+                stmt = stmt.bind(valid_at);
+            }
+            if let Some(min_confidence) = query.min_confidence {
+                stmt = stmt.bind(min_confidence);
+            }
+            if !query.include_expired {
+                stmt = stmt.bind(now);
+            }
+            let rows = stmt.fetch_all(pool).await.map_err(db_err("query memory"))?;
+            let artifacts = self.memory_artifacts().await?;
+            let mut matched = Vec::with_capacity(rows.len());
+            for row in rows {
+                let mut record: MemoryRecord =
+                    record_from_payload("memory", row.get::<Value, _>("payload"))?;
+                if query.matches(&record, superseded.contains(&record.memory_id), now) {
+                    // Resolve after filtering: only served records pay
+                    // the artifact read.
+                    memory::resolve_content(&artifacts, &mut record).await?;
+                    matched.push(record);
+                }
+            }
+            Ok(matched)
+        }
     }
 
     impl PostgresStore {
@@ -4115,7 +4480,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 24);
+            assert_eq!(MIGRATION_SQL.len(), 26);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -4178,6 +4543,15 @@ mod postgres {
             assert!(CREATE_TRIGGER_EVENTS_SQL.contains("server_trigger_events"));
             assert!(CREATE_TRIGGER_EVENTS_SQL.contains("trigger_id TEXT NOT NULL"));
             assert!(CREATE_TRIGGER_EVENTS_INDEX_SQL.contains("(trigger_id, created_at, event_id)"));
+            // R0.8 wave 1: governed memory is column-mapped (retrieval
+            // filters on real columns), the record travels as JSONB, and
+            // `key` is quoted like `server_kv`'s (a reserved word).
+            assert!(CREATE_MEMORY_SQL.contains("server_memory"));
+            assert!(CREATE_MEMORY_SQL.contains("\"key\""));
+            assert!(CREATE_MEMORY_SQL.contains("confidence DOUBLE PRECISION"));
+            assert!(CREATE_MEMORY_SQL.contains("valid_until TIMESTAMPTZ"));
+            assert!(CREATE_MEMORY_SQL.contains("payload     JSONB"));
+            assert!(CREATE_MEMORY_QUERY_INDEX_SQL.contains("(tenant, scope, scope_id, kind)"));
         }
 
         #[test]

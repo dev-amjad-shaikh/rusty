@@ -11,18 +11,23 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{middleware, Extension, Json, Router};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::Stream;
 use rusty_agent_runtime::agents::{
     AgentId, CapabilityManifest, CoordinationContract, DelegateContract, FanOutContract,
-    QuorumContract, RaceContract, COORDINATION_RESULT_KIND,
+    QuorumContract, RaceContract, StateScope, COORDINATION_RESULT_KIND,
 };
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
-use rusty_agent_runtime::journal::{Clock, Journal, JournalSnapshot, RngSource};
+use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::llm::Usage;
-use rusty_agent_runtime::record::{EffectReceipt, RunEventKind};
+use rusty_agent_runtime::memory::{
+    assemble, memory_effect_key, memory_read_request, ContextBudget, MemoryEvidence, MemoryKind,
+    MemoryProvenance, MemoryQuery, MemoryRecord, MemoryScope, ProvenanceAuthor, ScopeAddress,
+    ValidityWindow,
+};
+use rusty_agent_runtime::record::{Effect, EffectReceipt, RunEventKind};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
@@ -192,6 +197,11 @@ pub(crate) fn router_with_shutdown(
         .route("/agents/{agent_id}/restart", post(restart_agent))
         .route("/agents/{agent_id}/supervision", get(get_agent_supervision))
         .route("/teams/{team_id}/cancel", post(cancel_team))
+        .route("/memory", post(write_memory))
+        // The static segment wins over `/memory/{memory_id}` — the query
+        // endpoint is not a record address.
+        .route("/memory/query", post(query_memory))
+        .route("/memory/{memory_id}", get(get_memory))
         .route("/coordination/delegate", post(submit_delegate))
         .route("/coordination/fan_out", post(submit_fan_out))
         .route("/coordination/race", post(submit_race))
@@ -2356,6 +2366,461 @@ async fn try_journal_effect_receipt(
         .map_err(|e| format!("journal failed its integrity check: {e}"))?;
     let parent = journal.events().last().map(|event| event.id.clone());
     journal.record_effect_receipt(receipt, parent);
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(|e| format!("persist journal: {e}"))
+}
+
+// --------------------------------------------------------------------- //
+// Governed memory (R0.8 Rusty Learn, wave 1)
+//
+// The write/read surface over core's memory contracts (`docs/learn-
+// design.md`, wave 1): content-addressed, immutable, scoped, attributed
+// records; structured retrieval with an optional token-bounded
+// deterministic assembly. Scope authorization is enforced here, at the
+// write gate — the store trusts what the route admitted.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct WriteMemoryPayload {
+    /// What the record is.
+    kind: MemoryKind,
+    /// Whose memory it is: `{scope, id}` (`run` scope is rejected — the
+    /// runtime writes run-scoped memory on a run's behalf).
+    scope: ScopeAddress,
+    /// The record body. Inline at or below the journal's payload
+    /// threshold; above it the body spills, content-addressed, into the
+    /// artifact store and reads re-inline it — the served record is
+    /// always self-contained.
+    content: Value,
+    /// Who writes it (`agent:{id}` / `human:{id}` / `distiller:{name}` /
+    /// `system`). Provenance is mandatory: a record that cannot name its
+    /// origin cannot be audited.
+    author: ProvenanceAuthor,
+    /// The writer-declared lookup key, when the record answers a named
+    /// question.
+    #[serde(default)]
+    key: Option<String>,
+    /// Writer-declared tags (retrieval matches by equality).
+    #[serde(default)]
+    tags: Vec<String>,
+    /// The assembly rank's first input (default 0).
+    #[serde(default)]
+    priority: i64,
+    /// What the record was derived from.
+    #[serde(default)]
+    evidence: Option<MemoryEvidence>,
+    /// The writer-declared confidence in `(0, 1]`. Optional for human
+    /// authors (defaults to 1.0 — the claim is the person's, stated
+    /// plainly); required for every other author.
+    #[serde(default)]
+    confidence: Option<f64>,
+    /// When the system learned it (default: now). Part of the content
+    /// address — provenance is identity — so an importer (or a retried
+    /// submission naming the same learning instant) converges on one
+    /// record, while two genuinely different learnings of the same
+    /// content stay distinct records.
+    #[serde(default)]
+    written_at: Option<DateTime<Utc>>,
+    /// Inclusive start of the claimed-true interval (default: now).
+    #[serde(default)]
+    valid_from: Option<DateTime<Utc>>,
+    /// Exclusive end of the claimed-true interval (default: open-ended).
+    #[serde(default)]
+    valid_until: Option<DateTime<Utc>>,
+    /// Optional TTL — expiration is a retrieval filter, not a reaper.
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+    /// The (bare) content address this record replaces, when it does.
+    #[serde(default)]
+    supersedes: Option<String>,
+    /// Journal the write into this run's Flight Recorder journal as a
+    /// `memory_write` event (best-effort — the write is durable in the
+    /// memory store either way), with `parent` as its causal parent.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id for the journaled write
+    /// (default: the journal's current head, the receipt precedent).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /memory` — write a governed memory record → `201 {memory_id,
+/// created, record}`; `200` + `created: false` when the content address
+/// is already stored (content addressing makes the write idempotent by
+/// construction — the `Effect::Idempotent` write converges).
+///
+/// The write gates (the design's scope authorization):
+/// - `run` scope → `400`: runtime-only, never client-written.
+/// - `agent` scope → the agent must be registered in this tenant (`404`)
+///   and its manifest must declare `StateScope::Private` (`403`) — agent
+///   memory is the agent's own, and the manifest is what grants it.
+/// - `tenant` scope → the scope id must be the caller's own tenant
+///   (`403`): tenant isolation is not a scope a caller can cross.
+/// - `team` / `user` scopes ride tenant namespacing unchanged.
+async fn write_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<WriteMemoryPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    tasks::validate_label("scope.id", &payload.scope.id, 256).map_err(ApiError::bad_request)?;
+    match payload.scope.scope {
+        MemoryScope::Run => {
+            return Err(ApiError::bad_request(
+                "`run`-scoped memory is runtime-only: the runtime writes it on a run's \
+                 behalf — the API accepts `agent`, `team`, `user`, and `tenant` scopes"
+                    .to_string(),
+            ));
+        }
+        MemoryScope::Agent => {
+            let scoped_agent = tenant.scope(&payload.scope.id);
+            let agent = state
+                .server_store
+                .get_agent(&scoped_agent)
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("agent `{}` not found", payload.scope.id))
+                })?;
+            if !agent.manifest.scopes.contains(&StateScope::Private) {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    format!(
+                        "agent `{}` does not declare the `private` state scope in its manifest \
+                         — agent-scoped memory is the agent's own, and the manifest is what \
+                         grants it",
+                        payload.scope.id
+                    ),
+                ));
+            }
+        }
+        MemoryScope::Tenant => {
+            if payload.scope.id != tenant.tenant() {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    format!(
+                        "tenant-scoped memory id `{}` is not the caller's tenant `{}` — \
+                         tenant isolation is not a scope a caller can cross",
+                        payload.scope.id,
+                        tenant.tenant()
+                    ),
+                ));
+            }
+        }
+        MemoryScope::Team | MemoryScope::User => {}
+    }
+    let confidence = match (payload.confidence, &payload.author) {
+        (Some(confidence), _) => confidence,
+        (None, ProvenanceAuthor::Human { .. }) => 1.0,
+        (None, _) => {
+            return Err(ApiError::bad_request(
+                "`confidence` is required for non-human authors — human-authored records \
+                 default to 1.0 (the claim is the person's); every other author must declare \
+                 its confidence explicitly"
+                    .to_string(),
+            ));
+        }
+    };
+    if let Some(key) = &payload.key {
+        tasks::validate_label("key", key, 256).map_err(ApiError::bad_request)?;
+    }
+    let now = Utc::now();
+    let written_at = payload.written_at.unwrap_or(now);
+    let provenance = MemoryProvenance {
+        author: payload.author,
+        evidence: payload.evidence.unwrap_or_default(),
+        written_at,
+    };
+    let validity = ValidityWindow {
+        valid_from: payload.valid_from.unwrap_or(now),
+        valid_until: payload.valid_until,
+    };
+    let mut record = MemoryRecord::new(
+        payload.kind,
+        payload.scope,
+        provenance,
+        confidence,
+        validity,
+        // `created_at` duplicates `provenance.written_at` deliberately
+        // (the record stays self-contained when a consumer summarizes
+        // provenance away) — so it follows an explicit `written_at`.
+        written_at,
+        payload.content.clone(),
+    )
+    .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    if let Some(key) = payload.key {
+        record = record.with_key(key);
+    }
+    if !payload.tags.is_empty() {
+        record = record.with_tags(payload.tags);
+    }
+    if payload.priority != 0 {
+        record = record.with_priority(payload.priority);
+    }
+    if let Some(expires_at) = payload.expires_at {
+        record = record.with_expires_at(expires_at);
+    }
+    if let Some(supersedes) = payload.supersedes {
+        record = record.with_supersedes(supersedes);
+    }
+
+    let created = state
+        .server_store
+        .put_memory(tenant.tenant(), &record, &payload.content)
+        .await
+        .map_err(internal_err)?;
+    if let Some(run_id) = &payload.run_id {
+        journal_memory_write(&state, &tenant, run_id, &record, payload.parent).await;
+    }
+    // Serve the *stored* record, re-read through the store: artifact-
+    // spilled bodies come back re-inlined (self-contained), and on a
+    // dedupe the caller sees the record that is actually stored — the
+    // content address covers content + provenance only, so a re-write
+    // with different tags or priority does not update them, and the
+    // response must not pretend it did.
+    let stored = state
+        .server_store
+        .get_memory(tenant.tenant(), &record.memory_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::internal("memory record missing immediately after write".to_string())
+        })?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(json!({
+            "memory_id": stored.memory_id,
+            "created": created,
+            "record": stored,
+        })),
+    ))
+}
+
+/// `GET /memory/{memory_id}` — fetch one record by content address
+/// (`404` unknown/cross-tenant — the two are indistinguishable by
+/// design). Artifact-spilled bodies are re-inlined by the store, so the
+/// served record is self-contained.
+async fn get_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(memory_id): Path<String>,
+) -> Result<Json<MemoryRecord>, ApiError> {
+    state
+        .server_store
+        .get_memory(tenant.tenant(), &memory_id)
+        .await
+        .map_err(internal_err)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("memory `{memory_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct QueryMemoryPayload {
+    /// The structured filters (all optional; an empty query matches the
+    /// whole tenant namespace, minus expired and superseded records —
+    /// the two defaults core's `MemoryQuery` declares).
+    #[serde(flatten)]
+    query: MemoryQuery,
+    /// Pack the matches into a token-bounded deterministic assembly.
+    /// Required when `run_id` is set: journaled reads are budgeted
+    /// reads — the journaled request is the resolved query plus the
+    /// budget it was assembled under (core's `memory_read_request`
+    /// shape).
+    #[serde(default)]
+    budget: Option<ContextBudget>,
+    /// Journal the read into this run's journal as a `memory_read`
+    /// event (best-effort), with `parent` as its causal parent.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's
+    /// current head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /memory/query` — structured retrieval (deliberately not
+/// semantic: R0.8 has no similarity search, so writers key and tag
+/// deliberately and absence of a hit is absence of a key, not absence
+/// of a fact). `as_of` resolves at read time when unset. With `budget`,
+/// answers the deterministic token-bounded `MemoryAssembly` (`422` when
+/// a hard budget overflows); without, the rank-ordered records — ranked
+/// through the assembly's total order, so the two read shapes agree on
+/// ordering by construction.
+async fn query_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<QueryMemoryPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut query = payload.query;
+    let as_of = query.as_of.unwrap_or_else(Utc::now);
+    query.as_of = Some(as_of);
+    if payload.run_id.is_some() && payload.budget.is_none() {
+        return Err(ApiError::bad_request(
+            "`budget` is required with `run_id`: a journaled memory read is a budgeted \
+             read — the journaled request is the resolved query plus the budget it was \
+             assembled under"
+                .to_string(),
+        ));
+    }
+    let records = state
+        .server_store
+        .query_memory(tenant.tenant(), &query, as_of)
+        .await
+        .map_err(internal_err)?;
+    match payload.budget {
+        Some(budget) => {
+            let assembly =
+                assemble(records, &budget).map_err(|e| ApiError::unprocessable(e.to_string()))?;
+            if let Some(run_id) = &payload.run_id {
+                journal_memory_read(
+                    &state,
+                    &tenant,
+                    run_id,
+                    &query,
+                    &budget,
+                    &assembly,
+                    payload.parent,
+                )
+                .await;
+            }
+            serde_json::to_value(&assembly)
+                .map(Json)
+                .map_err(internal_err)
+        }
+        None => {
+            // An unbounded budget packs everything, so `assemble` doubles
+            // as the ranking definition — the two read shapes can never
+            // drift apart on ordering.
+            let ranked = assemble(records, &ContextBudget::new(u32::MAX)).map_err(internal_err)?;
+            Ok(Json(json!({ "records": ranked.records })))
+        }
+    }
+}
+
+/// Journal a memory write into the given run's persisted Flight
+/// Recorder journal — the same best-effort discipline as
+/// [`journal_effect_receipt`]: the write is already durable in the
+/// memory store, so a journaling failure (a live run whose journal is
+/// not yet persisted, a cross-tenant run linkage, a store error) is
+/// logged, never surfaced as a request failure. The event shape mirrors
+/// core's `JournaledMemory::write` exactly, so a route-journaled write
+/// is indistinguishable from a runtime-journaled one.
+async fn journal_memory_write(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    record: &MemoryRecord,
+    parent: Option<String>,
+) {
+    let draft = EventDraft::new(RunEventKind::MemoryWrite, Effect::Idempotent).input(json!({
+        "effect_key": memory_effect_key(&record.scope, &record.memory_id),
+        "memory_id": record.memory_id,
+    }));
+    let draft = match serde_json::to_value(record) {
+        Ok(output) => draft.output(output),
+        Err(error) => {
+            tracing::warn!(%run_id, %error, "memory record failed to serialize; journaling skipped");
+            return;
+        }
+    };
+    if let Err(error) = try_journal_memory_event(state, tenant, run_id, parent, draft).await {
+        tracing::warn!(
+            %run_id,
+            memory_id = %record.memory_id,
+            %error,
+            "memory write is durable in the store; journaling skipped"
+        );
+    }
+}
+
+/// Journal a memory read into the given run's persisted journal —
+/// best-effort, the [`journal_memory_write`] discipline. The event
+/// shape mirrors core's `JournaledMemory::read`: the request is the
+/// resolved query plus budget (`memory_read_request`), the output the
+/// served assembly.
+async fn journal_memory_read(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    query: &MemoryQuery,
+    budget: &ContextBudget,
+    assembly: &rusty_agent_runtime::memory::MemoryAssembly,
+    parent: Option<String>,
+) {
+    let draft = EventDraft::new(RunEventKind::MemoryRead, Effect::ReadOnly)
+        .input(memory_read_request(query, budget));
+    let draft = match serde_json::to_value(assembly) {
+        Ok(output) => draft.output(output),
+        Err(error) => {
+            tracing::warn!(%run_id, %error, "memory assembly failed to serialize; journaling skipped");
+            return;
+        }
+    };
+    if let Err(error) = try_journal_memory_event(state, tenant, run_id, parent, draft).await {
+        tracing::warn!(
+            %run_id,
+            %error,
+            "memory read answered from the store; journaling skipped"
+        );
+    }
+}
+
+/// The fallible body shared by the memory journalers, mirroring
+/// [`try_journal_effect_receipt`]: ownership proof first (the journal's
+/// thread must resolve in this tenant — journaling into another
+/// tenant's run would leak evidence across the isolation boundary),
+/// integrity re-check on load, append, persist. `parent` defaults to
+/// the journal's current head (the receipt precedent).
+///
+/// The receipt journaler's documented gap applies unchanged, with one
+/// addition to name honestly: appending to a *completed* run's journal
+/// adds evidence the run's execution never produced, so that journal no
+/// longer exactly replays — the appended event has no issuing node.
+/// These events are post-hoc attribution evidence (the memory operation
+/// naming the run it belongs to), not execution evidence; runs whose
+/// replay must stay exact take the runtime's own journaled seam.
+async fn try_journal_memory_event(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    parent: Option<String>,
+    draft: EventDraft,
+) -> Result<(), String> {
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(|e| format!("load journal: {e}"))?
+    else {
+        return Err("run has no persisted journal yet".to_string());
+    };
+    let internal_thread_id = tenant.scope(&snapshot.thread_id);
+    let owned = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(|e| format!("resolve thread: {e}"))?
+        .is_some();
+    if !owned {
+        return Err("run does not resolve in this tenant".to_string());
+    }
+    let journal = Journal::from_snapshot(snapshot, Clock::System)
+        .map_err(|e| format!("journal failed its integrity check: {e}"))?;
+    let parent = parent.or_else(|| journal.events().last().map(|event| event.id.clone()));
+    let draft = match parent {
+        Some(parent) => draft.parent(parent),
+        None => draft,
+    };
+    journal.record(draft);
     state
         .server_store
         .put_journal(&journal.snapshot())

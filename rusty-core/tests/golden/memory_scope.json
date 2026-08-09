@@ -1,0 +1,22 @@
+[
+  {
+    "scope": "run",
+    "id": "run-abc"
+  },
+  {
+    "scope": "agent",
+    "id": "researcher-7"
+  },
+  {
+    "scope": "team",
+    "id": "team-blue"
+  },
+  {
+    "scope": "user",
+    "id": "user-7"
+  },
+  {
+    "scope": "tenant",
+    "id": "acme"
+  }
+]

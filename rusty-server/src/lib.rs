@@ -77,6 +77,9 @@
 //! | `POST /agents/{id}/cancel` | R0.7 wave 2: cancel the agent's outstanding mailbox traffic — queued/retry-scheduled messages go terminal-`cancelled`, the leased turn keeps its lease with `cancel_requested` set — and journal an `AgentExit`; idempotent (`200` with empty lists when nothing is outstanding) |
 //! | `POST /agents/{id}/restart` | R0.7 wave 2: the operator's manual restart — records a `manual_restart` supervision attempt, clears the escalation/deadline latches, and journals the event so the agent's next turn runs fresh |
 //! | `POST /teams/{team_id}/cancel` | R0.7 wave 2: cancel every agent registered with the `team_id` label, member by member with the agent-cancel semantics; `404` when no tenant agent declares the team |
+//! | `POST /memory` | R0.8 Rusty Learn (wave 1): write a governed memory record `{kind, scope, content, author, key?, tags?, priority?, confidence?, written_at?, valid_from?, valid_until?, expires_at?, supersedes?, evidence?, run_id?, parent?}` → `201 {memory_id, created, record}` (`200` + `created: false` when the content address is already stored — writes are idempotent by construction). Gates: `run` scope is runtime-only (`400`); `agent` scope requires the agent registered with `StateScope::Private` declared (`404` / `403`); `tenant` scope id must be the caller's tenant (`403`); confidence defaults to `1.0` for human authors and is required otherwise (`400`). With `run_id`, the write is journaled into that run as a `memory_write` event (best-effort) |
+//! | `GET /memory/{memory_id}` | R0.8: fetch one record by content address (`404` unknown/cross-tenant); artifact-spilled bodies are re-inlined, so the served record is self-contained |
+//! | `POST /memory/query` | R0.8: structured retrieval — the `MemoryQuery` filters plus optional `budget`, `run_id`, `parent`. `as_of` resolves at read time. With `budget`, answers the deterministic token-bounded `MemoryAssembly` (`422` when a hard budget overflows); without, the rank-ordered records. With `run_id` (budget required), the read is journaled into that run as a `memory_read` event (best-effort) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -91,6 +94,7 @@ mod coordination;
 mod crons;
 mod error;
 mod journals;
+mod memory;
 mod outbox;
 mod replay;
 mod routes;
@@ -130,9 +134,9 @@ pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::fro
 
 /// Names the JSON-file layout already owns at the store root
 /// (`agent_leases/`, `agents/`, `assistants/`, `coordinations/`, `crons/`,
-/// `journals/`, `outbox/`, `store/`, `tasks/`, `threads/`,
-/// `trigger_events/`, `triggers/`, plus the `latest` pointer
-/// file inside each thread's checkpoint dir).
+/// `journals/`, `memory/`, `memory_artifacts/`, `outbox/`, `store/`,
+/// `tasks/`, `threads/`, `trigger_events/`, `triggers/`, plus the `latest`
+/// pointer file inside each thread's checkpoint dir).
 /// Client-chosen ids and tenant ids claiming one of these would write
 /// checkpoints into platform directories (or platform records into
 /// checkpoint dirs), so both `validate_client_id` and
@@ -144,6 +148,8 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "coordinations",
     "crons",
     "journals",
+    "memory",
+    "memory_artifacts",
     "outbox",
     "store",
     "tasks",

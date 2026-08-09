@@ -402,6 +402,27 @@ pub enum RunEventKind {
     /// coordination runtime journals it exactly once, as the pattern's
     /// terminal fact.
     CoordinationEnd,
+
+    /// A governed memory retrieval was performed (R0.8 Rusty Learn, wave 1):
+    /// input is the canonical request — the resolved
+    /// [`crate::memory::MemoryQuery`] (with `as_of` stamped through the
+    /// run's clock) plus the [`crate::memory::ContextBudget`] — and output
+    /// is the journaled [`crate::memory::MemoryAssembly`]: the record ids
+    /// and their order, the packed records, and the token accounting.
+    /// Declared [`Effect::ReadOnly`]: exact replay serves the journaled
+    /// assembly instead of re-querying the store — the same
+    /// journaled-output rule model and tool calls follow, applied to the
+    /// memory seam so candidate evaluation is reproducible.
+    MemoryRead,
+
+    /// A governed memory write landed (R0.8 wave 1): an
+    /// [`Effect::Idempotent`] effect under the derived key
+    /// `memory:{scope}:{memory_id}` (see [`crate::memory::memory_effect_key`]),
+    /// so retried submissions converge. Input carries the effect key and the
+    /// memory id; output carries the stored
+    /// [`crate::memory::MemoryRecord`] with its provenance — the write's
+    /// attribution is journaled, not implied.
+    MemoryWrite,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

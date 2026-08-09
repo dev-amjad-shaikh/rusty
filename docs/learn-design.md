@@ -501,6 +501,26 @@ assembly. Exit: memory survives a server restart on both backends, and an
 exact replay of a memory-reading run serves the journaled assembly
 byte-identically.
 
+> **Wave 1 status: implemented.** The contracts and goldens landed as
+> written (`MemoryRecord` / `MemoryKind` / `MemoryScope` /
+> `MemoryProvenance` / `ValidityWindow` / `MemoryQuery` / `ContextBudget`,
+> plus the journaled seam `JournaledMemory` with `MemoryReplaySource`
+> serving exact replay), with two additive refinements: `MemoryRecord`
+> carries an explicit `priority` field (the design's rank input needed a
+> home), and only the two variants this wave wires — `memory_read` /
+> `memory_write` — joined `RunEventKind` (the remaining five land with
+> their waves). The server surface is `POST /memory` (scope-authorization
+> gates at the write: run scope runtime-only, agent scope
+> manifest-checked, tenant scope self-only), `GET /memory/{id}`, and
+> `POST /memory/query` (structured filters plus the token-bounded
+> `MemoryAssembly`), on both store backends — one JSON file per record
+> under `{store_path}/memory/` with artifact-spilled bodies re-inlined on
+> read, and the column-mapped `server_memory` table on Postgres. Both exit
+> criteria are automated tests: restart survival on both backends
+> (`rusty-server/tests/memory.rs`, JSON + gated Postgres) and the
+> byte-identical exact-replay proof
+> (`rusty-core/tests/memory.rs::exact_replay_serves_the_journaled_assembly_byte_identically`).
+
 **Wave 2 — correction loop and memory operations.** The `Correction`
 contract and endpoint, attributed candidate derivation, consolidation /
 conflict detection / forgetting as durable operations with tombstones.

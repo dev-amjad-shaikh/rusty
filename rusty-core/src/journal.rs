@@ -605,6 +605,22 @@ impl Journal {
         }
         self.record(draft)
     }
+
+    /// Bind a memory source to this journal (R0.8 Rusty Learn, wave 1): the
+    /// governed-memory seam. The returned handle journals every read as
+    /// [`RunEventKind::MemoryRead`] ([`Effect::ReadOnly`], with the resolved
+    /// query plus budget as the request and the assembly as the output) and
+    /// every write as [`RunEventKind::MemoryWrite`] ([`Effect::Idempotent`]
+    /// under the derived key), so exact replay serves the journaled assembly
+    /// instead of re-querying the store.
+    ///
+    /// Node closures capture the handle exactly the way they capture a
+    /// [`Journal`] clone for recording model and tool calls; causal
+    /// parentage comes from the invocation's node-input event id
+    /// ([`PARENT_EVENT_KEY`]).
+    pub fn memory(&self, source: crate::memory::MemorySource) -> crate::memory::JournaledMemory {
+        crate::memory::JournaledMemory::new(self, source)
+    }
 }
 
 /// Store `value` inline or — when its serialized size exceeds

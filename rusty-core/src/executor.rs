@@ -442,6 +442,12 @@ pub struct Executor {
     // invocation (and, via `NodeContext::middleware`, the tool/model calls
     // node code makes). An empty chain takes the original dispatch path.
     middleware: MiddlewareChain,
+    // R0.8 wave 1: the governed-memory source this executor's runs answer
+    // memory reads from (live store or replay cursor). The executor never
+    // touches memory itself this wave — the full run-loop integration is a
+    // later wave; this is the installation point node factories use (see
+    // `Executor::memory`), mirroring `with_token_tx`.
+    memory_source: Option<crate::memory::MemorySource>,
     // Present only when guarded tool effect admission is enabled. The run's
     // thread id and approval tokens are combined with these rollback handlers
     // into an EffectAdmissionContext for each node invocation.
@@ -525,6 +531,42 @@ impl Executor {
     /// [`GraphEvent::Token`]s from within nodes.
     pub fn token_tx(&self) -> Option<&mpsc::Sender<GraphEvent>> {
         self.token_tx.as_ref()
+    }
+
+    /// Builder-style: install the governed-memory source this executor's
+    /// runs answer memory reads from (R0.8 wave 1; see
+    /// [`crate::memory::MemorySource`]).
+    ///
+    /// The executor never reads or writes memory itself this wave — the
+    /// full run-loop integration is a later wave. This is the seam's
+    /// installation point, mirroring [`Executor::with_token_tx`]: node
+    /// factories built around an `Executor` fetch the journaled handle via
+    /// [`Executor::memory`] once the run has started and capture a clone in
+    /// each node closure. Nodes may equally bind a source to an attached
+    /// journal directly ([`crate::journal::Journal::memory`]); both paths
+    /// journal into the same run evidence.
+    pub fn with_memory_source(mut self, source: crate::memory::MemorySource) -> Self {
+        self.memory_source = Some(source);
+        self
+    }
+
+    /// The configured memory source, if one was installed via
+    /// [`Executor::with_memory_source`].
+    pub fn memory_source(&self) -> Option<&crate::memory::MemorySource> {
+        self.memory_source.as_ref()
+    }
+
+    /// The journaled memory handle for the most recent run: the run's
+    /// journal (set at run start) bound to the configured source. `None`
+    /// before the first run or when no source is installed. The same
+    /// most-recent-run caveat as [`Executor::journal`] applies: driving
+    /// several runs concurrently through one `Executor` leaves this handle
+    /// pointing at whichever run started last — bind per-run handles via
+    /// [`crate::journal::Journal::memory`] when runs overlap.
+    pub fn memory(&self) -> Option<crate::memory::JournaledMemory> {
+        let journal = self.journal()?;
+        let source = self.memory_source.clone()?;
+        Some(crate::memory::JournaledMemory::new(&journal, source))
     }
 
     /// The configured checkpointer, if any. Shared (not consumed) so one

@@ -69,6 +69,16 @@
 //!   remote, and WASM calls are served from the journal instead of executed —
 //!   plus branch diffs between journal snapshots and portable
 //!   [`replay::ReplayFixture`] bundles for CI.
+//! - **Governed memory** ([`memory`], R0.8 wave 1): the record model
+//!   ([`memory::MemoryRecord`] — content-addressed, scoped, attributed,
+//!   superseding, expiring), structured retrieval with a token-bounded
+//!   deterministic assembly ([`memory::MemoryQuery`] +
+//!   [`memory::ContextBudget`]), and the journaled seam: reads are
+//!   [`record::RunEventKind::MemoryRead`] ([`record::Effect::ReadOnly`],
+//!   served byte-identically by exact replay), writes are
+//!   [`record::RunEventKind::MemoryWrite`] ([`record::Effect::Idempotent`]
+//!   under a derived key). The store backends and endpoints live in
+//!   `rusty-server`; these are the pure contracts both sides agree on.
 //! - **WASM nodes** (`wasm_node`, feature `wasm`): sandboxed WebAssembly
 //!   modules run as graph nodes via Wasmtime.
 //!
@@ -108,6 +118,7 @@ pub mod graph;
 pub mod journal;
 pub mod llm;
 pub mod mcp;
+pub mod memory;
 pub mod middleware;
 pub mod node;
 pub mod react;
@@ -154,6 +165,14 @@ pub mod prelude {
     };
     pub use crate::llm::{
         ChatMessage, ChatModel, ChatResponse, OpenAiCompatibleClient, Role, ToolCall, Usage,
+    };
+    pub use crate::memory::{
+        apply_query, assemble, derive_memory_id, estimated_tokens, memory_effect_key,
+        memory_read_request, BudgetOverflow, ContextBudget, InMemoryMemoryStore, JournaledMemory,
+        MemoryAssembly, MemoryEvidence, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
+        MemoryReplaySource, MemoryScope, MemorySource, MemoryStore, ProvenanceAuthor, ScopeAddress,
+        TokenAccounting, ValidityWindow, DEFAULT_TOKEN_MARGIN_PERCENT, MEMORY_SCHEMA_VERSION,
+        TOKEN_BYTES_PER_ESTIMATE,
     };
     pub use crate::middleware::{
         Decision, InterceptPoint, Middleware, MiddlewareChain, MiddlewareChatModel, ModelCall,
