@@ -42,6 +42,7 @@ use crate::agents::{
     MailboxClaimScope,
 };
 use crate::assistants::{self, AssistantRecord};
+use crate::capsules::{self, CapsuleRecord, CapsuleWrite};
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::journals;
@@ -585,6 +586,41 @@ pub(crate) trait ServerStore: Send + Sync {
     /// The tenant's recorded bindings (order unspecified; the epoch
     /// derivation sorts).
     async fn list_policy_bindings(&self, tenant: &str) -> StoreResult<Vec<PolicyBinding>>;
+
+    // -- The capsule registry (R0.9 Rusty Capsules, wave 1) ------------- //
+
+    /// Register one immutable capsule manifest under its tenant-scoped
+    /// content address. [`CapsuleWrite::Created`] when the address is new;
+    /// [`CapsuleWrite::Converged`] when it already names exactly this
+    /// manifest (the idempotent create — content addressing makes
+    /// re-registration converge the way memory writes do);
+    /// [`CapsuleWrite::Conflict`] when the address names a different
+    /// manifest (a content-address collision) or the manifest's
+    /// `(identity, version)` pin is already claimed by a different
+    /// address — registry immutability refuses both, so a version pin
+    /// stays a commitment to one exact declaration.
+    async fn put_capsule(&self, tenant: &str, record: &CapsuleRecord) -> StoreResult<CapsuleWrite>;
+    /// Fetch one manifest by content address, tenant-scoped (`None` for
+    /// unknown or cross-tenant addresses — the two are indistinguishable
+    /// by design).
+    async fn get_capsule(
+        &self,
+        tenant: &str,
+        capsule_id: &str,
+    ) -> StoreResult<Option<CapsuleRecord>>;
+    /// The tenant's registered manifests (order unspecified; routes
+    /// sort).
+    async fn list_capsules(&self, tenant: &str) -> StoreResult<Vec<CapsuleRecord>>;
+    /// Resolve one `(identity, version)` pin to its registered record,
+    /// tenant-scoped (`None` when the pin was never registered). This is
+    /// the resolution path: a run pins name + version, the registry
+    /// answers the content address.
+    async fn get_capsule_by_version(
+        &self,
+        tenant: &str,
+        name: &str,
+        version: &str,
+    ) -> StoreResult<Option<CapsuleRecord>>;
 }
 
 /// The outcome of a candidate lifecycle transition
@@ -663,6 +699,10 @@ pub(crate) struct JsonFileStore {
     /// Admission bindings keyed by tenant-scoped checkpoint id, one file
     /// per binding under `{store_path}/policy/bindings/`.
     bindings: Mutex<HashMap<String, PolicyBinding>>,
+    /// The capsule registry (R0.9 wave 1): manifests keyed by
+    /// tenant-scoped content address, one file per record under
+    /// `{store_path}/capsules/manifests/`.
+    capsules: Mutex<HashMap<String, CapsuleRecord>>,
 }
 
 impl JsonFileStore {
@@ -689,6 +729,7 @@ impl JsonFileStore {
             policies: Mutex::new(policy::load_policies(root)),
             activations: Mutex::new(policy::load_activations(root)),
             bindings: Mutex::new(policy::load_bindings(root)),
+            capsules: Mutex::new(capsules::load_capsules(root)),
         }
     }
 }
@@ -1877,6 +1918,84 @@ impl ServerStore for JsonFileStore {
             .map(|(_, binding)| binding.clone())
             .collect())
     }
+
+    async fn put_capsule(&self, tenant: &str, record: &CapsuleRecord) -> StoreResult<CapsuleWrite> {
+        let scoped = crate::auth::scope_id(tenant, record.capsule_id.as_str());
+        let mut map = self.capsules.lock().await;
+        if let Some(existing) = map.get(&scoped) {
+            // Immutability: the same address naming the same manifest
+            // converges; naming a different manifest conflicts (a
+            // content-address collision — refused, never overwritten).
+            // The comparison is the whole record minus its registration
+            // instant — a converged re-post carries a fresh
+            // `registered_at`, and the stored instant wins.
+            if existing.capsule_id == record.capsule_id && existing.manifest == record.manifest {
+                return Ok(CapsuleWrite::Converged);
+            }
+            return Ok(CapsuleWrite::Conflict);
+        }
+        // A `(name, version)` pin is claimed exactly once per tenant: a
+        // different address registering under an already-claimed pin
+        // conflicts — re-registration under the same pin would silently
+        // re-point every resolution that trusted it. The linear scan is
+        // correct at the file backend's scale (it backs single-binary
+        // deployments); the Postgres backend enforces the same rule with
+        // a unique index instead.
+        let pin_taken = map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .any(|(_, existing)| {
+                existing.manifest.identity.name == record.manifest.identity.name
+                    && existing.manifest.version == record.manifest.version
+            });
+        if pin_taken {
+            return Ok(CapsuleWrite::Conflict);
+        }
+        // Hold the lock across the file write (the assistants convention):
+        // a concurrent create of the same address can't interleave.
+        capsules::persist_capsule(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist capsule"))?;
+        map.insert(scoped, record.clone());
+        Ok(CapsuleWrite::Created)
+    }
+
+    async fn get_capsule(
+        &self,
+        tenant: &str,
+        capsule_id: &str,
+    ) -> StoreResult<Option<CapsuleRecord>> {
+        let scoped = crate::auth::scope_id(tenant, capsule_id);
+        Ok(self.capsules.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_capsules(&self, tenant: &str) -> StoreResult<Vec<CapsuleRecord>> {
+        let map = self.capsules.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn get_capsule_by_version(
+        &self,
+        tenant: &str,
+        name: &str,
+        version: &str,
+    ) -> StoreResult<Option<CapsuleRecord>> {
+        let map = self.capsules.lock().await;
+        // The pin uniqueness the write path enforces makes this scan hit
+        // at most one record; same scale argument as `put_capsule`.
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record)
+            .find(|record| {
+                record.manifest.identity.name == name && record.manifest.version == version
+            })
+            .cloned())
+    }
 }
 
 impl JsonFileStore {
@@ -1989,6 +2108,7 @@ mod postgres {
         MailboxClaimScope,
     };
     use crate::assistants::AssistantRecord;
+    use crate::capsules::{CapsuleRecord, CapsuleWrite};
     use crate::coordination::CoordinationRecord;
     use crate::crons::CronRecord;
     use crate::memory;
@@ -2372,6 +2492,31 @@ mod postgres {
         CREATE INDEX IF NOT EXISTS server_policy_bindings_listing
             ON server_policy_bindings (tenant, bound_at)";
 
+    /// The capsule registry (R0.9 wave 1): one row per immutable capsule
+    /// manifest, keyed by tenant-scoped content address. Immutability is
+    /// the insert's `ON CONFLICT DO NOTHING` plus a payload comparison in
+    /// Rust (the file backend's rule): same manifest converges, different
+    /// manifest conflicts — the table never updates.
+    pub(crate) const CREATE_CAPSULES_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_capsules (
+            capsule_id   TEXT PRIMARY KEY,
+            tenant       TEXT NOT NULL,
+            identity     TEXT NOT NULL,
+            version      TEXT NOT NULL,
+            build_digest TEXT NOT NULL,
+            payload      JSONB NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The pin-uniqueness rule the file backend checks by scan: a
+    /// `(name, version)` pin is claimed exactly once per tenant, so a
+    /// changed declaration can never silently re-point a resolution.
+    /// UNIQUE (not a plain index) because the rule is integrity, not
+    /// performance.
+    pub(crate) const CREATE_CAPSULES_PIN_INDEX_SQL: &str = "
+        CREATE UNIQUE INDEX IF NOT EXISTS server_capsules_version_pin
+            ON server_capsules (tenant, identity, version)";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -2409,6 +2554,8 @@ mod postgres {
         CREATE_POLICY_ACTIVATIONS_INDEX_SQL,
         CREATE_POLICY_BINDINGS_SQL,
         CREATE_POLICY_BINDINGS_INDEX_SQL,
+        CREATE_CAPSULES_SQL,
+        CREATE_CAPSULES_PIN_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -3008,6 +3155,29 @@ mod postgres {
 
     pub(crate) const LIST_POLICY_BINDINGS_SQL: &str =
         "SELECT payload FROM server_policy_bindings WHERE tenant = $1";
+
+    /// Capsule registry statements (R0.9 wave 1). Registration is
+    /// insert-only on the tenant-scoped content address (immutability: a
+    /// conflict on the address returns no row, and the caller's payload
+    /// comparison decides converge vs conflict; a conflict on the
+    /// `(tenant, identity, version)` pin index raises — the pin is
+    /// claimed by another address, also a conflict). The table never
+    /// updates.
+    pub(crate) const INSERT_CAPSULE_SQL: &str = r#"
+        INSERT INTO server_capsules (capsule_id, tenant, identity, version, build_digest, payload)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (capsule_id) DO NOTHING
+        RETURNING capsule_id"#;
+
+    pub(crate) const SELECT_CAPSULE_SQL: &str =
+        "SELECT payload FROM server_capsules WHERE capsule_id = $1";
+
+    pub(crate) const LIST_CAPSULES_SQL: &str =
+        "SELECT payload FROM server_capsules WHERE tenant = $1";
+
+    pub(crate) const SELECT_CAPSULE_BY_VERSION_SQL: &str = r#"
+        SELECT payload FROM server_capsules
+        WHERE tenant = $1 AND identity = $2 AND version = $3"#;
 
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
@@ -5144,6 +5314,97 @@ mod postgres {
                 .map(|row| record_from_payload("policy binding", row.get::<Value, _>("payload")))
                 .collect()
         }
+
+        async fn put_capsule(
+            &self,
+            tenant: &str,
+            record: &CapsuleRecord,
+        ) -> StoreResult<CapsuleWrite> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, record.capsule_id.as_str());
+            let inserted = sqlx::query(INSERT_CAPSULE_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind(&record.manifest.identity.name)
+                .bind(&record.manifest.version)
+                .bind(&record.manifest.build_digest)
+                .bind(record_to_payload(record)?)
+                .fetch_optional(pool)
+                .await;
+            let row = match inserted {
+                Ok(row) => row,
+                // The address is free but the `(tenant, identity,
+                // version)` pin index rejected the insert: the pin is
+                // claimed by another address — the file backend's scan,
+                // enforced by the database.
+                Err(error) if is_unique_violation(&error) => return Ok(CapsuleWrite::Conflict),
+                Err(error) => return Err(db_err("insert capsule")(error)),
+            };
+            if row.is_some() {
+                return Ok(CapsuleWrite::Created);
+            }
+            // The address is taken: same manifest converges, different
+            // manifest conflicts — the file backend's immutability rule,
+            // exact here.
+            let existing = sqlx::query(SELECT_CAPSULE_SQL)
+                .bind(&scoped)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("select capsule"))?
+                .ok_or_else(|| "capsule insert conflicted but the row is gone".to_string())?;
+            let existing: CapsuleRecord =
+                record_from_payload("capsule", existing.get::<Value, _>("payload"))?;
+            Ok(
+                if existing.capsule_id == record.capsule_id && existing.manifest == record.manifest
+                {
+                    CapsuleWrite::Converged
+                } else {
+                    CapsuleWrite::Conflict
+                },
+            )
+        }
+
+        async fn get_capsule(
+            &self,
+            tenant: &str,
+            capsule_id: &str,
+        ) -> StoreResult<Option<CapsuleRecord>> {
+            let row = sqlx::query(SELECT_CAPSULE_SQL)
+                .bind(crate::auth::scope_id(tenant, capsule_id))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select capsule"))?;
+            row.map(|row| record_from_payload("capsule", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_capsules(&self, tenant: &str) -> StoreResult<Vec<CapsuleRecord>> {
+            let rows = sqlx::query(LIST_CAPSULES_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list capsules"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("capsule", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn get_capsule_by_version(
+            &self,
+            tenant: &str,
+            name: &str,
+            version: &str,
+        ) -> StoreResult<Option<CapsuleRecord>> {
+            let row = sqlx::query(SELECT_CAPSULE_BY_VERSION_SQL)
+                .bind(tenant)
+                .bind(name)
+                .bind(version)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select capsule by version"))?;
+            row.map(|row| record_from_payload("capsule", row.get::<Value, _>("payload")))
+                .transpose()
+        }
     }
 
     impl PostgresStore {
@@ -5289,7 +5550,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 35);
+            assert_eq!(MIGRATION_SQL.len(), 37);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -5384,6 +5645,15 @@ mod postgres {
             assert!(CREATE_POLICY_BINDINGS_SQL.contains("server_policy_bindings"));
             assert!(CREATE_POLICY_BINDINGS_SQL.contains("binding_id TEXT PRIMARY KEY"));
             assert!(CREATE_POLICY_BINDINGS_INDEX_SQL.contains("(tenant, bound_at)"));
+            // R0.9 wave 1: the capsule registry — immutable manifests keyed
+            // by tenant-scoped content address, with pin uniqueness
+            // (`(tenant, identity, version)`) enforced by the database.
+            assert!(CREATE_CAPSULES_SQL.contains("server_capsules"));
+            assert!(CREATE_CAPSULES_SQL.contains("capsule_id   TEXT PRIMARY KEY"));
+            assert!(CREATE_CAPSULES_SQL.contains("build_digest TEXT NOT NULL"));
+            assert!(CREATE_CAPSULES_SQL.contains("payload      JSONB"));
+            assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("CREATE UNIQUE INDEX"));
+            assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("(tenant, identity, version)"));
         }
 
         #[test]

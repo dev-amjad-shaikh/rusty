@@ -80,8 +80,11 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 ///   all under its capability grants.
 ///
 /// The order of variants is a severity ladder: each class permits strictly
-/// less automation freedom than the one before.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// less automation freedom than the one before. The `Ord` derive is that
+/// ladder made mechanical (declaration order), which is what capsule
+/// manifests (R0.9) compare declared effects against grant-implied minima
+/// with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Effect {
     /// No observable effect beyond its return value: a deterministic function
@@ -497,6 +500,44 @@ pub enum RunEventKind {
     /// [`DecisionEvent`] — features, the closed legal-action set, the
     /// selected action, the propensity, and the policy version that decided.
     PolicyDecision,
+
+    /// A run manifest's capsule version pin was resolved to a content
+    /// address (R0.9 Rusty Capsules, wave 1): the server's capsule registry
+    /// mapped `(identity, version)` →
+    /// [`crate::capsule::CapsuleId`] at admission and journaled the
+    /// resolution, so the full chain — header pin → journaled resolution →
+    /// receipt — reaches the manifest digest. An [`Effect::ReadOnly`]
+    /// record (a registry lookup): output carries the journaled
+    /// [`crate::capsule::CapsuleResolution`] — the pin name, the version
+    /// string, the resolved capsule id, and the build digest the registry
+    /// holds for it. A pin that resolves to a manifest failing its own
+    /// content address fails admission instead — tampering is an admission
+    /// error, never a journaled resolution.
+    CapsuleResolved,
+
+    /// A granted capsule capability was exercised (R0.9 wave 1): the guest
+    /// called a linked import and the host performed (or attempted) the
+    /// operation. The capsule rule's "every use is journaled" half: output
+    /// carries the journaled [`crate::capsule::CapsuleUse`] — the capsule
+    /// id, the capability kind, the operation, and the request/response
+    /// summaries. The effect class is the operation's own (a `GET` fetch
+    /// records [`Effect::ReadOnly`]; a writing method records
+    /// [`Effect::NonIdempotent`]), and a failed operation is journaled with
+    /// [`EventStatus::Error`] — a granted call that fails is still a use.
+    CapsuleCall,
+
+    /// A capsule capability attempt was refused (R0.9 wave 1): either the
+    /// guest probed an import its manifest's grants never linked (the
+    /// structural denial — the import does not exist), or it called a
+    /// granted import outside the grant's scope (a `network` grant naming
+    /// host A, a fetch attempted against host B). An [`Effect::Pure`]
+    /// record: nothing executed, so there is no external effect to
+    /// classify — the event is the evidence that nothing happened. Output
+    /// carries the journaled [`crate::capsule::CapsuleDenial`] — the
+    /// capsule id, the requested capability, and **the manifest grant that
+    /// was absent** (the grant that would have permitted the attempt), so
+    /// the denial is attributable to a declaration, not to a stack trace.
+    CapsuleDenied,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

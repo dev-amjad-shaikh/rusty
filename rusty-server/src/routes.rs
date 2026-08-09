@@ -17,6 +17,7 @@ use rusty_agent_runtime::agents::{
     AgentId, CapabilityManifest, CoordinationContract, DelegateContract, FanOutContract,
     QuorumContract, RaceContract, StateScope, COORDINATION_RESULT_KIND,
 };
+use rusty_agent_runtime::capsule::{derive_capsule_id, CapsuleManifest, CapsuleResolution};
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
@@ -37,8 +38,8 @@ use rusty_agent_runtime::memory::{
     MemoryScope, MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
 use rusty_agent_runtime::record::{
-    derive_policy_version, sha256_hex, Effect, EffectReceipt, ExecutorPolicy, PayloadRef,
-    PolicyVersion, RunEventKind,
+    derive_policy_version, sha256_hex, CapsuleVersion, Effect, EffectReceipt, ExecutorPolicy,
+    PayloadRef, PolicyVersion, RunEventKind,
 };
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
@@ -52,6 +53,7 @@ use crate::agents::{
 };
 use crate::assistants::AssistantRecord;
 use crate::auth::TenantContext;
+use crate::capsules::{CapsuleRecord, CapsuleWrite};
 use crate::coordination;
 use crate::crons::{self, CronRecord, OnRunCompleted};
 use crate::error::ApiError;
@@ -266,6 +268,14 @@ pub(crate) fn router_with_shutdown(
         .route("/policy/activations", post(activate_policy))
         .route("/policy/active", get(get_active_policy))
         .route("/policy/epochs", get(list_policy_epochs))
+        // The capsule registry (R0.9 wave 1): immutable, content-addressed
+        // capsule manifests; the `(name, version)` pin resolution that
+        // journals one `CapsuleResolved` event per pin into the resolving
+        // run. Invocation itself is the runtime host's seam, not an HTTP
+        // route.
+        .route("/capsules", post(register_capsule).get(list_capsules))
+        .route("/capsules/{id}", get(get_capsule))
+        .route("/capsules/resolve", post(resolve_capsules))
         .route("/coordination/delegate", post(submit_delegate))
         .route("/coordination/fan_out", post(submit_fan_out))
         .route("/coordination/race", post(submit_race))
@@ -4540,6 +4550,180 @@ async fn list_policy_epochs(
         .map_err(internal_err)?;
     let epochs = policy::derive_epochs(activations, bindings);
     Ok(Json(json!({ "epochs": epochs })))
+}
+
+// --------------------------------------------------------------------- //
+// The capsule registry (R0.9 Rusty Capsules, wave 1)
+//
+// Immutable, content-addressed capsule manifests; the `(name, version)`
+// pin resolution that links a run's version pins to the addresses the
+// capability host will admit. Invocation is the runtime's seam
+// (`rusty_agent_runtime::capsule_host`, feature `wasm`); these routes are
+// the registry's operator face — registration, reads, and journaled
+// resolution.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct RegisterCapsulePayload {
+    /// The capsule's declaration. Validated on the way in (`422`), and
+    /// the content address is derived — callers never mint ids.
+    manifest: CapsuleManifest,
+}
+
+/// `POST /capsules` — register an immutable capsule manifest → `201
+/// {capsule_id, record}`; `200` when the derived address already names
+/// exactly this manifest (the idempotent create); `409` when the
+/// `(name, version)` pin is claimed by a different address (registry
+/// immutability) or the address collides with a different manifest;
+/// `422` when the manifest fails validation.
+async fn register_capsule(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterCapsulePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    payload
+        .manifest
+        .validate()
+        .map_err(|e| ApiError::unprocessable(format!("invalid capsule manifest: {e}")))?;
+    let capsule_id = derive_capsule_id(&payload.manifest).map_err(internal_err)?;
+    let record = CapsuleRecord {
+        capsule_id,
+        manifest: payload.manifest,
+        registered_at: Utc::now(),
+    };
+    let write = state
+        .server_store
+        .put_capsule(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    match write {
+        CapsuleWrite::Created => Ok((
+            StatusCode::CREATED,
+            Json(json!({ "capsule_id": record.capsule_id, "record": record })),
+        )),
+        CapsuleWrite::Converged => Ok((
+            StatusCode::OK,
+            Json(json!({ "capsule_id": record.capsule_id, "record": record })),
+        )),
+        CapsuleWrite::Conflict => Err(ApiError::conflict(format!(
+            "capsule `{}` version `{}` is already registered under a different content address \
+             (or the address collides with a different manifest) — versions are immutable; \
+             register the changed declaration under a new version",
+            record.manifest.identity.name, record.manifest.version
+        ))),
+    }
+}
+
+/// `GET /capsules` — the tenant's registered capsule manifests, sorted
+/// by content address for a deterministic listing.
+async fn list_capsules(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut capsules = state
+        .server_store
+        .list_capsules(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    capsules.sort_by(|a, b| a.capsule_id.as_str().cmp(b.capsule_id.as_str()));
+    Ok(Json(json!({ "capsules": capsules })))
+}
+
+/// `GET /capsules/{id}` — fetch one registered manifest by content
+/// address (`404` unknown/cross-tenant).
+async fn get_capsule(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(capsule_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_capsule(tenant.tenant(), &capsule_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule `{capsule_id}` not found")))?;
+    Ok(Json(
+        json!({ "capsule_id": record.capsule_id, "record": record }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ResolveCapsulesPayload {
+    /// The run's capsule pins: name → version (the
+    /// `RunManifest::capsules` map, wire-shaped).
+    pins: std::collections::BTreeMap<String, String>,
+    /// The run whose journal the resolutions join. Required — every
+    /// resolution is journaled (the wave's exit criterion: the journaled
+    /// resolution is what lets a checkpoint's version *string* pin reach
+    /// the content *address*).
+    run_id: String,
+    /// The causal parent journal-event id (default: the journal's
+    /// current head, the receipt precedent).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /capsules/resolve` — resolve a run's capsule pins against the
+/// registry → `200 {resolutions}` with one `CapsuleResolution` per pin
+/// (name, version, content address, build digest), sorted by pin name.
+/// Every stored manifest re-derives its content address before
+/// answering: a record whose recomputed address no longer matches its
+/// key is tampered evidence and fails closed (`422`); an unknown pin is
+/// `404`. One `capsule_resolved` event per pin is journaled into
+/// `run_id`'s journal (read-only evidence: resolution decides nothing
+/// about what will run) — hard-fail, the candidate-lifecycle discipline:
+/// an unresolvable run stops the request (`404`).
+async fn resolve_capsules(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ResolveCapsulesPayload>,
+) -> Result<Json<Value>, ApiError> {
+    // Validate every pin before journaling any: a failed resolution
+    // leaves no partial evidence.
+    let mut resolutions = Vec::with_capacity(payload.pins.len());
+    for (name, version) in &payload.pins {
+        let record = state
+            .server_store
+            .get_capsule_by_version(tenant.tenant(), name, version)
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "capsule pin `{name}` version `{version}` is not registered"
+                ))
+            })?;
+        let recomputed = derive_capsule_id(&record.manifest).map_err(internal_err)?;
+        if recomputed != record.capsule_id {
+            return Err(ApiError::unprocessable(format!(
+                "capsule `{}` (pin `{name}` version `{version}`) fails its integrity check: \
+                 the stored manifest re-derives to {recomputed} — the registry record is \
+                 corrupt; re-register the manifest",
+                record.capsule_id
+            )));
+        }
+        resolutions.push(CapsuleResolution {
+            name: name.clone(),
+            version: CapsuleVersion::new(version.clone()),
+            capsule_id: record.capsule_id.clone(),
+            build_digest: record.manifest.build_digest.clone(),
+        });
+    }
+    for resolution in &resolutions {
+        let draft = EventDraft::new(RunEventKind::CapsuleResolved, Effect::ReadOnly).output(
+            serde_json::to_value(resolution)
+                .map_err(|e| ApiError::internal(format!("serialize resolution: {e}")))?,
+        );
+        try_journal_memory_event(
+            &state,
+            &tenant,
+            &payload.run_id,
+            payload.parent.clone(),
+            draft,
+        )
+        .await
+        .map_err(journal_gate_error)?;
+    }
+    Ok(Json(json!({ "resolutions": resolutions })))
 }
 
 /// The wave-4 promotion hook: a full-traffic policy promotion overlays

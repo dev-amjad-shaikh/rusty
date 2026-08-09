@@ -592,6 +592,44 @@ import does not exist); fuel, memory, and wall-time limits each abort a
 planted misbehaving guest; a scoped-grant violation journals a
 `CapsuleDenied` naming the absent grant.
 
+> **Wave 1 status: implemented.** The manifest contract landed as
+> written (`CapsuleManifest` / `CapsuleId` / `CapsuleIdentity` /
+> `CapsuleInterface` / `CapabilityGrant` / `ResourceBudget` /
+> `derive_capsule_id`, with goldens in `rusty-core/tests/golden/`), the
+> capability host landed behind `wasm` (structural import gating, grant-
+> scoped linking, fuel + memory + epoch governance, the output gate,
+> journaled uses and denials), and the server registry resolves
+> `(name, version)` pins to content addresses over both store backends
+> (`POST /capsules`, `GET /capsules[{/id}]`, `POST /capsules/resolve`),
+> journaling one resolution per pin. Five additive refinements worth
+> naming. **Three event kinds joined `RunEventKind`, not one**:
+> `capsule_resolved` / `capsule_call` / `capsule_denied` — the design
+> named the denial and "journaled the resolution" without naming their
+> kinds, and a granted use needs its own evidence (the memory plane's
+> read/write precedent). **A `Clock` grant variant exists**: the opening
+> rule names the clock as governed I/O, but the grant table predates it —
+> `clock.now-millis` is granted and journaled like any other capability.
+> **The v1 world is narrower than the table above**: only
+> `rusty:capsule/net@0.1.0` (`fetch`) and `rusty:capsule/clock@0.1.0`
+> (`now-millis`) are importable this wave; filesystem, secret, tool, and
+> model grants are contract-only (valid in manifests, nothing links them
+> yet) — narrowing the v1 surface beat fighting wasmtime for imports no
+> wave-1 exit criterion exercises. **Output-schema validation is
+> declared-but-pinned, not enforced** (the `ArtifactContract` precedent):
+> the output gate enforces `max_output_bytes` and well-formed JSON; the
+> optional `output_schema` travels in the manifest for a later wave's
+> validator. **No `Cargo.toml` change was needed**: wasmtime 47's default
+> features already include `component-model` and `wat`, so the reference
+> guests are hand-written component WAT compiled by wasmtime itself — no
+> guest toolchain (`wit-bindgen`, `cargo-component`) builds or tests this
+> wave, exactly the design's stance. Two implementation notes: wall-time
+> enforcement is a per-host ticker thread bumping the engine epoch every
+> 5 ms with the deadline expressed in ticks (started on first use,
+> stopped on drop), and the network connector is a deployment seam
+> (`NetworkConnector` trait) with no default implementation — a host
+> with a granted network capability but no configured connector fails
+> closed at invocation.
+
 **Wave 2 — Cedar, tenant overlays, budget composition.** `cedar-policy`
 behind the server's `capsules` feature; admission and grant checks;
 overlay authoring with structural narrowing; policy versioning on both

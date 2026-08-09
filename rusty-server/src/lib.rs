@@ -96,6 +96,9 @@
 //! | `POST /policy/activations` | R0.8 (wave 4): move the active-version pointer `{version}` → `200 {version, active}`; `422` when the version is not registered (the floor is always activatable — reverting to pre-learning behavior needs no candidate) |
 //! | `GET /policy/active` | R0.8 (wave 4): the tenant's active policy — the last activation's body, or the floor when the registry never moved |
 //! | `GET /policy/epochs` | R0.8 (wave 4): the epoch history — each activation's reign window plus the admission bindings recorded inside it (and the implicit floor epoch covering pre-activation bindings) |
+//! | `POST /capsules` | R0.9 Rusty Capsules (wave 1): register an immutable capsule manifest `{manifest}` → `201 {capsule_id, record}` (`200` converged when the content address already names exactly this manifest; `409` when the `(name, version)` pin is claimed by a different address — registry immutability; `422` when the manifest fails validation). The manifest's content address is derived; callers never mint ids |
+//! | `GET /capsules` / `GET /capsules/{id}` | R0.9 (wave 1): the tenant's registered capsule manifests (sorted by content address) / fetch one (`404` unknown/cross-tenant) |
+//! | `POST /capsules/resolve` | R0.9 (wave 1): resolve a run's capsule pins `{pins: {name: version}, run_id, parent?}` → `200 {resolutions}` — each pin's stored manifest re-derives its content address before answering (a tampered record fails closed, `422`; an unknown pin is `404`), and one `capsule_resolved` event per pin is journaled into `run_id`'s journal (hard-fail: an unresolvable run is `404`) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -106,6 +109,7 @@
 mod agents;
 mod assistants;
 mod auth;
+mod capsules;
 mod coordination;
 mod crons;
 mod error;
@@ -154,10 +158,10 @@ pub use runs::RunStatus;
 pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
 
 /// Names the JSON-file layout already owns at the store root
-/// (`agent_leases/`, `agents/`, `assistants/`, `coordinations/`, `crons/`,
-/// `journals/`, `learn/`, `memory/`, `memory_artifacts/`, `outbox/`,
-/// `policy/`, `store/`, `tasks/`, `threads/`, `trigger_events/`,
-/// `triggers/`, plus the `latest`
+/// (`agent_leases/`, `agents/`, `assistants/`, `capsules/`,
+/// `coordinations/`, `crons/`, `journals/`, `learn/`, `memory/`,
+/// `memory_artifacts/`, `outbox/`, `policy/`, `store/`, `tasks/`,
+/// `threads/`, `trigger_events/`, `triggers/`, plus the `latest`
 /// pointer file inside each thread's checkpoint dir).
 /// Client-chosen ids and tenant ids claiming one of these would write
 /// checkpoints into platform directories (or platform records into
@@ -167,6 +171,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "agent_leases",
     "agents",
     "assistants",
+    "capsules",
     "coordinations",
     "crons",
     "journals",

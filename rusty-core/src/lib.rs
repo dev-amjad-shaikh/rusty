@@ -91,6 +91,18 @@
 //!   `CandidatePromoted` / `CandidateRolledBack` event kinds.
 //! - **WASM nodes** (`wasm_node`, feature `wasm`): sandboxed WebAssembly
 //!   modules run as graph nodes via Wasmtime.
+//! - **Rusty Capsules** ([`capsule`], R0.9 wave 1): the content-addressed
+//!   [`capsule::CapsuleManifest`] — identity, version, build digest, the
+//!   declared WIT-world interface, the closed [`capsule::CapabilityGrant`]
+//!   set (the whole reach), and the [`capsule::ResourceBudget`] — plus the
+//!   journaled payloads ([`capsule::CapsuleResolution`] /
+//!   [`capsule::CapsuleUse`] / [`capsule::CapsuleDenial`]) that make
+//!   capability enforcement attributable. The capability host
+//!   (`capsule_host`, feature `wasm`) instantiates components against the
+//!   declared world with imports linked only where granted — deny by
+//!   default, structurally — and the registry resolving `RunManifest`
+//!   capsule pins to content addresses lives in `rusty-server`; these are
+//!   the pure contracts both sides agree on.
 //!
 //! ## Quick sketch
 //!
@@ -117,6 +129,9 @@
 //! ```
 
 pub mod agents;
+pub mod capsule;
+#[cfg(feature = "wasm")]
+pub mod capsule_host;
 pub mod checkpoint;
 #[cfg(feature = "postgres")]
 pub mod checkpoint_postgres;
@@ -152,6 +167,12 @@ pub mod prelude {
         QuorumOutcome, QuorumResolver, QuorumResolverRecord, QuorumTally, RaceContract,
         RestartPolicy, StateScope, SupervisionAttempt, SupervisionPolicy, SupervisionTrigger,
         AGENT_RECIPIENT_PREFIX, COORDINATION_RESULT_KIND, ESCALATION_MESSAGE_KIND,
+    };
+    pub use crate::capsule::{
+        any_grant_of_kind, derive_capsule_id, network_grant_covers, CapabilityGrant,
+        CapabilityKind, CapsuleDenial, CapsuleId, CapsuleIdentity, CapsuleInterface,
+        CapsuleManifest, CapsuleResolution, CapsuleUse, FilesystemMode, ResourceBudget,
+        SUPPORTED_WORLDS, WORLD_V1,
     };
     pub use crate::checkpoint::{
         Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
