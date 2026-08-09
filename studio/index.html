@@ -649,12 +649,111 @@
   .memory-conflict-peers button { font-family: var(--mono); }
   .memory-manifest { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
   .memory-manifest summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
+
+  /* ---------- Agent Fabric team observatory ---------- */
+  .fabric-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 14px; }
+  .fabric-head h1 { margin: 0 0 3px; font-size: 24px; }
+  .fabric-head p { margin: 0; color: var(--text-dim); max-width: 760px; }
+  .fabric-head-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
+  .fabric-identity-note {
+    display: grid; grid-template-columns: minmax(150px, .8fr) 28px minmax(240px, 1.4fr);
+    align-items: center; gap: 10px; padding: 11px 14px; margin-bottom: 14px;
+    border: 1px solid #405d74; border-radius: 8px; background: #151d23;
+  }
+  .fabric-identity-note b { display: block; color: #c7d9e6; font-size: 12px; }
+  .fabric-identity-note span { display: block; color: #91a7b5; font-size: 11.5px; }
+  .fabric-identity-note .bridge { color: var(--accent); font: 700 18px var(--mono); text-align: center; }
+  .fabric-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .fabric-summary > div { padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); }
+  .fabric-summary b { display: block; color: #eadfae; font: 700 20px var(--mono); }
+  .fabric-summary span { display: block; color: var(--text-dim); font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; }
+  .fabric-layout { display: grid; grid-template-columns: minmax(210px, .64fr) minmax(0, 1.7fr); gap: 14px; align-items: start; }
+  .fabric-groups, .fabric-member-list { min-width: 0; }
+  .fabric-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .fabric-panel-head h2, .fabric-evidence h2, .fabric-coordination h2 { margin: 0; font-size: 15px; }
+  .fabric-panel-head span { color: var(--text-dim); font-size: 11px; }
+  .fabric-group {
+    display: block; width: 100%; text-align: left; margin-bottom: 7px; padding: 9px 10px;
+    border-color: var(--border); background: var(--bg-raised);
+  }
+  .fabric-group:hover { border-color: var(--border-hi); }
+  .fabric-group[aria-current="true"] { border-color: var(--accent-dim); background: #302b20; }
+  .fabric-group b { display: block; font: 600 12px var(--mono); overflow-wrap: anywhere; }
+  .fabric-group span { display: block; margin-top: 3px; color: var(--text-dim); font-size: 10.5px; }
+  .fabric-group .fabric-group-mark { color: var(--accent); text-transform: uppercase; letter-spacing: .6px; }
+  .fabric-team-card { padding: 0; overflow: hidden; }
+  .fabric-team-head { padding: 12px 14px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, #302a1e, var(--bg-panel)); }
+  .fabric-team-head h2 { margin: 0; font: 700 16px var(--mono); overflow-wrap: anywhere; }
+  .fabric-team-head p { margin: 3px 0 0; color: var(--text-dim); font-size: 11.5px; }
+  .fabric-members { display: grid; grid-template-columns: minmax(190px, .78fr) minmax(0, 1.35fr); min-height: 315px; }
+  .fabric-member-list { padding: 10px; border-right: 1px solid var(--border); background: var(--bg-inset); }
+  .fabric-member {
+    width: 100%; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+    padding: 8px 9px; margin-bottom: 6px; text-align: left; background: var(--bg-raised); border-color: var(--border);
+  }
+  .fabric-member[aria-current="true"] { border-color: #637b54; background: #222b1f; }
+  .fabric-health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pending); box-shadow: 0 0 0 2px #31302b; }
+  .fabric-health-dot.active { background: var(--ok); }
+  .fabric-health-dot.attention { background: var(--err); }
+  .fabric-health-dot.waiting { background: var(--warn); }
+  .fabric-health-dot.idle { background: #687a60; }
+  .fabric-health-dot.unknown { background: var(--text-faint); }
+  .fabric-member b { display: block; font: 600 11.5px var(--mono); overflow-wrap: anywhere; }
+  .fabric-member small { display: block; color: var(--text-dim); overflow-wrap: anywhere; }
+  .fabric-member .fabric-mailbox-mini { color: var(--text-dim); font: 10px var(--mono); white-space: nowrap; }
+  .fabric-evidence { min-width: 0; padding: 13px 14px; }
+  .fabric-evidence-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .fabric-evidence-top h2 { overflow-wrap: anywhere; }
+  .fabric-evidence-top p { margin: 2px 0 0; color: var(--text-dim); font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .fabric-evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 12px 0; }
+  .fabric-gauge { padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-raised); }
+  .fabric-gauge b { display: block; font: 700 18px var(--mono); }
+  .fabric-gauge span { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; }
+  .fabric-gauge.danger { border-color: #633c34; background: #2c1e1b; }
+  .fabric-manifest { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 6px 12px; margin: 12px 0; }
+  .fabric-manifest .k { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+  .fabric-manifest .v { font: 11px var(--mono); overflow-wrap: anywhere; }
+  .fabric-supervision { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .fabric-supervision-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .fabric-supervision-head b { font-size: 12px; }
+  .fabric-attempts { margin: 8px 0 0; padding: 0; list-style: none; }
+  .fabric-attempts li { padding: 6px 8px; margin-top: 5px; border-left: 2px solid var(--interrupt); background: var(--bg-inset); font-size: 11px; overflow-wrap: anywhere; }
+  .fabric-coordination { margin-top: 14px; }
+  .fabric-coordination-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .fabric-coordination-head p { margin: 3px 0 0; color: var(--text-dim); font-size: 11.5px; max-width: 700px; }
+  .fabric-coordination-load { display: flex; gap: 7px; align-items: flex-end; flex-wrap: wrap; }
+  .fabric-coordination-load label { color: var(--text-dim); font-size: 10.5px; }
+  .fabric-coordination-load input { display: block; width: 250px; margin-top: 3px; background: var(--bg-inset); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: 11.5px var(--mono); }
+  .fabric-coordination-body { margin-top: 13px; }
+  .fabric-coordination-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-bottom: 12px; }
+  .fabric-coordination-summary > div { padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset); }
+  .fabric-coordination-summary b { display: block; font-size: 12px; overflow-wrap: anywhere; }
+  .fabric-coordination-summary span { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+  .fabric-dispositions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .fabric-disposition { padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-raised); font: 10.5px var(--mono); }
+  .fabric-trace-banner { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid #3d5136; border-radius: 7px; background: #1c271b; }
+  .fabric-trace-banner.incomplete { border-color: #70443a; background: #2c1d1a; }
+  .fabric-trace-banner b { font-size: 11.5px; }
+  .fabric-trace-banner span { color: var(--text-dim); font-size: 10.5px; }
+  .fabric-trace { position: relative; margin-top: 10px; padding: 3px 0; overflow-x: auto; }
+  .fabric-trace-node { position: relative; min-width: 360px; margin: 5px 0; padding-left: calc(12px + var(--trace-offset, 0px)); }
+  .fabric-trace-node::before { content: ""; position: absolute; left: calc(4px + var(--trace-offset, 0px)); top: 0; bottom: -10px; width: 1px; background: #514a3c; }
+  .fabric-trace-node::after { content: ""; position: absolute; left: calc(4px + var(--trace-offset, 0px)); top: 17px; width: 9px; height: 1px; background: #756b56; }
+  .fabric-trace-event { display: grid; grid-template-columns: minmax(110px, .6fr) minmax(155px, 1.1fr) minmax(130px, .9fr) auto; gap: 10px; align-items: center; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); }
+  .fabric-trace-event b { color: #e3d4a4; font: 600 10.5px var(--mono); text-transform: uppercase; letter-spacing: .5px; }
+  .fabric-trace-event span { color: var(--text-dim); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .fabric-trace-event small { color: var(--text-dim); font: 10px var(--mono); white-space: nowrap; }
+  .fabric-raw summary { color: var(--text-dim); cursor: pointer; font-size: 11px; }
+  .fabric-error { border-left-color: var(--err); }
   @media (max-width: 1120px) {
     .agent-workshop { grid-template-columns: 1fr; }
     .agent-contract-panel { position: static; }
     .memory-layout { grid-template-columns: 1fr; }
     .memory-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .memory-toolbar label:first-child { grid-column: 1 / -1; }
+    .fabric-layout { grid-template-columns: 1fr; }
+    .fabric-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+    .fabric-group { margin: 0; }
   }
   @media (max-width: 900px) {
     aside { width: 250px; flex-basis: 250px; }
@@ -665,6 +764,9 @@
     .rec-split { flex-direction: column; }
     #rec-body, #rec-detail { width: 100%; }
     #rec-detail { flex-basis: auto; }
+    .fabric-identity-note { grid-template-columns: 1fr; }
+    .fabric-identity-note .bridge { transform: rotate(90deg); }
+    .fabric-coordination-head { flex-direction: column; }
   }
   @media (max-width: 680px) {
     #body { display: block; overflow-y: auto; }
@@ -700,6 +802,20 @@
     .memory-kv { grid-template-columns: 1fr; gap: 2px; }
     .memory-kv .v { margin-bottom: 7px; }
     .memory-review-banner { align-items: flex-start; flex-direction: column; }
+    .fabric-head { flex-direction: column; }
+    .fabric-head-actions { justify-content: flex-start; }
+    .fabric-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fabric-groups { grid-template-columns: 1fr; }
+    .fabric-members { grid-template-columns: 1fr; }
+    .fabric-member-list { border-right: 0; border-bottom: 1px solid var(--border); }
+    .fabric-evidence-grid { grid-template-columns: repeat(3, minmax(74px, 1fr)); }
+    .fabric-manifest { grid-template-columns: 1fr; gap: 2px; }
+    .fabric-manifest .v { margin-bottom: 7px; }
+    .fabric-coordination-load { width: 100%; align-items: stretch; }
+    .fabric-coordination-load label { flex: 1 1 100%; }
+    .fabric-coordination-load input { width: 100%; }
+    .fabric-coordination-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fabric-trace-event { grid-template-columns: 1fr; gap: 2px; }
     .rec-story-head { flex-direction: column; gap: 8px; }
     .rec-story-spine { grid-template-columns: 1fr; }
     .rec-story-step { padding-top: 10px; padding-left: 27px; }
@@ -745,7 +861,11 @@
     <aside>
       <h2 class="section">Agents</h2>
       <button class="small primary" id="btn-agents-open" style="width:100%">Open agent workbench</button>
-      <div class="muted tiny" id="agent-side-count" style="margin:6px 2px 0">Connect to load durable agents.</div>
+      <div class="muted tiny" id="agent-side-count" style="margin:6px 2px 0">Connect to load assistant configurations.</div>
+
+      <h2 class="section">Teams</h2>
+      <button class="small primary" id="btn-fabric-open" style="width:100%">Open team observatory</button>
+      <div class="muted tiny" id="fabric-side-count" style="margin:6px 2px 0">Connect to discover durable identities.</div>
 
       <h2 class="section">Memory</h2>
       <button class="small primary" id="btn-memory-open" style="width:100%">Open memory ledger</button>
@@ -774,7 +894,7 @@
     </aside>
 
     <main id="main">
-      <div class="empty" id="main-empty">Open the agent workbench or memory ledger, or select a thread to debug a run.</div>
+      <div class="empty" id="main-empty">Open the agent workbench, team observatory, or memory ledger—or select a thread to debug a run.</div>
 
       <div id="agents-view" style="display:none">
         <div class="workbench-head">
@@ -844,6 +964,52 @@
           <div class="agent-list" id="agent-list"><div class="empty">Open the workbench to load agents.</div></div>
           <div class="card" id="agent-detail"><div class="empty">Select an agent to inspect and test it.</div></div>
         </div>
+      </div>
+
+      <div id="fabric-view" style="display:none" aria-labelledby="fabric-title">
+        <div class="fabric-head">
+          <div>
+            <h1 id="fabric-title" tabindex="-1">Team observatory</h1>
+            <p>See the durable identities behind a team, inspect mailbox and supervision health, and follow one coordination through its causal evidence.</p>
+          </div>
+          <div class="fabric-head-actions">
+            <span class="muted tiny" id="fabric-statusline" role="status" aria-live="polite"></span>
+            <button class="small" id="btn-fabric-refresh" disabled>Refresh inventory</button>
+          </div>
+        </div>
+
+        <div class="fabric-identity-note" role="note" aria-label="Assistant and durable agent relationship">
+          <div><b>Workbench assistant</b><span>A runnable graph configuration used to start threads and runs.</span></div>
+          <div class="bridge" aria-hidden="true">→</div>
+          <div><b>Durable agent identity</b><span>A mailbox-addressed runtime identity with a pinned capability manifest, optional team label, activation lease, and supervision policy.</span></div>
+        </div>
+
+        <div class="fabric-summary" id="fabric-summary" aria-label="Durable agent inventory summary"></div>
+        <div class="fabric-layout">
+          <section class="card fabric-groups-panel" aria-labelledby="fabric-groups-title">
+            <div class="fabric-panel-head"><h2 id="fabric-groups-title">Declared teams</h2><span id="fabric-groups-count"></span></div>
+            <div class="fabric-groups" id="fabric-groups" role="listbox" aria-label="Team labels"><div class="empty">Connect to load declared team labels.</div></div>
+          </section>
+          <section class="card fabric-team-card" id="fabric-team"><div class="empty">Connect to inspect durable team members.</div></section>
+          <span class="sr-only" id="fabric-team-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+        </div>
+
+        <section class="card fabric-coordination" aria-labelledby="fabric-coordination-title">
+          <div class="fabric-coordination-head">
+            <div>
+              <h2 id="fabric-coordination-title">Coordination investigation</h2>
+              <p>Enter a known coordination ID. Rusty does not yet expose coordination discovery, and refreshing this evidence also reconciles any newly settled member work.</p>
+            </div>
+            <form class="fabric-coordination-load" id="fabric-coordination-form">
+              <label>Coordination ID
+                <input id="inp-fabric-coordination" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="team-run-42">
+              </label>
+              <button class="small primary" id="btn-fabric-coordination" type="submit">Load evidence</button>
+            </form>
+          </div>
+          <div class="fabric-coordination-body" id="fabric-coordination-body"><div class="empty">Load a coordination to see its contract, members, outcome, and TeamTrace.</div></div>
+          <span class="sr-only" id="fabric-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+        </section>
       </div>
 
       <div id="memory-view" style="display:none" aria-labelledby="memory-title">
@@ -1096,10 +1262,10 @@ const store = {
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, partial } for fork compare
-  view: "thread",      // "thread" | "tasks" | "agents" | "memory" — active workspace
+  view: "thread",      // "thread" | "tasks" | "agents" | "fabric" | "memory" — active workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
-  agents: null,        // { list, selected, error } for the durable-agent workbench
+  agents: null,        // { list, selected, error } for the assistant-configuration workbench
   agentRuns: Object.create(null),       // latest full run from this browser session, keyed by assistant id
   agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
   agentCreateOpen: false, // creation form temporarily owns the guided journey
@@ -1107,6 +1273,10 @@ const store = {
   agentManifestSource: null, // imported/copied config + metadata preserved while the workshop is open
   agentManifestDirty: false, // exact JSON has unapplied edits that must never be ignored
   agentsUnsupported: false, // server build has no /assistants routes
+  fabric: null,        // durable agent registry, selected team/member, evidence, and coordination trace
+  fabricUnsupported: false, // server build has no Agent Fabric registry routes
+  fabricRequest: 0,   // generation guard for inventory/member/coordination reads
+  fabricLeaseTimer: null, // rerenders live activation evidence when its observed lease expires
   memory: null,        // bounded audit snapshot + conflicts, selection, search index, and load state
   memoryUnsupported: false, // server build has no governed-memory query route
   memoryRequest: 0,    // generation guard: stale server/tenant responses never cross connection boundaries
@@ -1371,6 +1541,7 @@ async function connect() {
   store.info = info;
   if (connectionIdentityChanged(previousConnection, store.conn)) {
     store.memoryRequest += 1;
+    store.fabricRequest += 1;
     clearTimeout(store.memorySearchTimer);
     store.memorySearchTimer = null;
     clearTimeout(store.memoryLifecycleTimer);
@@ -1383,6 +1554,10 @@ async function connect() {
     store.agentManifestDirty = false;
     store.agents = null;
     store.agentsUnsupported = false;
+    store.fabric = null;
+    store.fabricUnsupported = false;
+    clearTimeout(store.fabricLeaseTimer);
+    store.fabricLeaseTimer = null;
     store.memory = null;
     store.memoryUnsupported = false;
     $("agent-create-panel").style.display = "none";
@@ -1398,6 +1573,7 @@ async function connect() {
   renderGraphs();
   renderThreads();
   agentsLoad(true);
+  fabricLoad(true);
   renderMain();
 }
 
@@ -1517,23 +1693,33 @@ function renderThreads() {
 function renderMain() {
   const tasks = store.view === "tasks";
   const agents = store.view === "agents";
+  const fabric = store.view === "fabric";
   const memory = store.view === "memory";
+  if (!fabric) {
+    clearTimeout(store.fabricLeaseTimer);
+    store.fabricLeaseTimer = null;
+  }
   if (!memory) {
     clearTimeout(store.memoryLifecycleTimer);
     store.memoryLifecycleTimer = null;
   }
   $("tasks-view").style.display = tasks ? "block" : "none";
   $("agents-view").style.display = agents ? "block" : "none";
+  $("fabric-view").style.display = fabric ? "block" : "none";
   $("memory-view").style.display = memory ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !tasks && !agents && !memory && !t ? "block" : "none";
-  $("thread-view").style.display = !tasks && !agents && !memory && t ? "block" : "none";
+  $("main-empty").style.display = !tasks && !agents && !fabric && !memory && !t ? "block" : "none";
+  $("thread-view").style.display = !tasks && !agents && !fabric && !memory && t ? "block" : "none";
   if (tasks) {
     tasksLoad(true); // quiet: a pre-R0.6 server shows a panel note, not toast spam
     return;
   }
   if (agents) {
     agentsLoad(true);
+    return;
+  }
+  if (fabric) {
+    fabricLoad(true);
     return;
   }
   if (memory) {
@@ -3414,7 +3600,7 @@ function agentCopyContextHtml(agent) {
       `<span>Step limit<b>${limit !== null ? escapeHtml(String(limit)) : "runtime default"}</b></span>` +
       `<span>Carried fields<b>${storedFields} stored field${storedFields === 1 ? "" : "s"}</b></span>` +
     `</div><p>The source agent, its runs, threads, and evidence stay unchanged. ` +
-    `This draft becomes a separate durable agent.</p>` +
+    `This draft becomes a separate assistant configuration.</p>` +
     (lockedShapes ? `<p>Non-object stored values are carried exactly; their shortcut fields are locked for this copy.</p>` : "") +
     `<details class="agent-copy-manifest"><summary>Review carried manifest</summary>` +
       `<pre class="json">${escapeHtml(agentCopyManifestText(source))}</pre>` +
@@ -3585,10 +3771,10 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
 
 function agentsUpdateSidebar() {
   const el = $("agent-side-count");
-  if (!store.conn) { el.textContent = "Connect to load durable agents."; return; }
-  if (store.agentsUnsupported) { el.textContent = "Agent API unavailable on this server."; return; }
+  if (!store.conn) { el.textContent = "Connect to load assistant configurations."; return; }
+  if (store.agentsUnsupported) { el.textContent = "Assistant API unavailable on this server."; return; }
   const count = store.agents && store.agents.list ? store.agents.list.length : 0;
-  el.textContent = `${count} durable agent${count === 1 ? "" : "s"}`;
+  el.textContent = `${count} assistant configuration${count === 1 ? "" : "s"}`;
 }
 
 async function agentsLoad(quiet) {
@@ -3624,7 +3810,7 @@ function agentsRender() {
   const selectedHistory = selected ? agentRunsFor(selected.assistant_id) : [];
   $("agent-journey").innerHTML = agentJourneyHtml(selected, selectedRun, store.agentCreateOpen);
   $("agent-summary").innerHTML =
-    `<div><b>${list.length}</b><span>Durable agents</span></div>` +
+    `<div><b>${list.length}</b><span>Assistant configurations</span></div>` +
     `<div><b>${runnable}</b><span>Runnable now</span></div>` +
     `<div><b>${tested}</b><span>Tested here</span></div>` +
     `<div><b>${recentRuns}</b><span>Recent runs</span></div>`;
@@ -3637,7 +3823,7 @@ function agentsRender() {
   const filtered = agentSearchItems(list, $("inp-agent-search").value);
   const listEl = $("agent-list");
   if (!filtered.length) {
-    listEl.innerHTML = `<div class="empty">${list.length ? "No agents match this search." : "No durable agents yet — create the first one."}</div>`;
+    listEl.innerHTML = `<div class="empty">${list.length ? "No assistants match this search." : "No assistant configurations yet — create the first one."}</div>`;
   } else {
     listEl.innerHTML = "";
     for (const agent of filtered) {
@@ -4095,6 +4281,832 @@ function openAgents() {
   store.view = "agents";
   renderMain();
   $("main").scrollTop = 0;
+}
+
+/* ---------------- Agent Fabric team observatory (R0.7) ----------------
+ * Read-only operator surface over the durable-agent registry, activation /
+ * mailbox gauges, supervision evidence, and one explicitly addressed
+ * coordination + TeamTrace. A `team_id` is a declared grouping label today,
+ * not a durable team definition; the UI preserves that distinction.
+ * ------------------------------------------------------------------------- */
+
+const FABRIC_AGENT_LIMIT = 500;
+const FABRIC_STATUS_LIMIT = 30;
+const FABRIC_STATUS_CONCURRENCY = 4;
+const FABRIC_TRACE_LIMIT = 500;
+const FABRIC_ATTEMPT_LIMIT = 5;
+const FABRIC_MEMBER_RENDER_LIMIT = 200;
+
+function fabricObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function fabricRequestCurrent(request, connection, currentRequest, currentConnection) {
+  return request === currentRequest && connection && currentConnection &&
+    connection.baseUrl === currentConnection.baseUrl && connection.apiKey === currentConnection.apiKey;
+}
+
+function fabricNormalizeAgents(value, limit) {
+  const source = Array.isArray(value) ? value : [];
+  const valid = source.filter((agent) => agent && typeof agent === "object" &&
+    typeof agent.agent_id === "string" && agent.agent_id.trim());
+  const cap = Math.max(0, Number.isFinite(limit) ? Math.floor(limit) : FABRIC_AGENT_LIMIT);
+  return {
+    list: valid.slice(0, cap).map((agent) => {
+      const normalized = {
+        ...agent,
+        agent_id: agent.agent_id.trim(),
+        team_id: typeof agent.team_id === "string" && agent.team_id.trim() ? agent.team_id.trim() : null,
+        manifest: fabricObject(agent.manifest),
+        metadata: agent.metadata === undefined ? null : agent.metadata,
+      };
+      if (agent[AGENT_NUMBER_TOKENS]) {
+        Object.defineProperty(normalized, AGENT_NUMBER_TOKENS, {
+          value: agent[AGENT_NUMBER_TOKENS], enumerable: false, configurable: true,
+        });
+      }
+      return normalized;
+    }),
+    total: valid.length,
+    omitted: Math.max(0, valid.length - cap),
+  };
+}
+
+function fabricGroupKey(teamId) { return teamId ? `team:${teamId}` : "ungrouped"; }
+function fabricGroupLabel(group) { return group && group.teamId ? group.teamId : "Ungrouped"; }
+
+function fabricGroups(agents) {
+  const groups = new Map();
+  for (const agent of Array.isArray(agents) ? agents : []) {
+    if (!agent || !agent.agent_id) continue;
+    const teamId = typeof agent.team_id === "string" && agent.team_id ? agent.team_id : null;
+    const key = fabricGroupKey(teamId);
+    if (!groups.has(key)) groups.set(key, { key, teamId, members: [] });
+    groups.get(key).members.push(agent);
+  }
+  return Array.from(groups.values()).sort((left, right) => {
+    if (!left.teamId) return 1;
+    if (!right.teamId) return -1;
+    return left.teamId.localeCompare(right.teamId);
+  });
+}
+
+function fabricNavigationTarget(ids, current, key) {
+  const list = Array.isArray(ids) ? ids.filter(Boolean) : [];
+  if (!list.length) return null;
+  const index = Math.max(0, list.indexOf(current));
+  if (key === "Home") return list[0];
+  if (key === "End") return list[list.length - 1];
+  if (["ArrowDown", "ArrowRight"].includes(key)) return list[Math.min(list.length - 1, index + 1)];
+  if (["ArrowUp", "ArrowLeft"].includes(key)) return list[Math.max(0, index - 1)];
+  return current;
+}
+
+function fabricFocusData(container, attribute, value) {
+  const target = Array.from(container.querySelectorAll(`[${attribute}]`))
+    .find((element) => element.getAttribute(attribute) === value);
+  target?.focus({ preventScroll: true });
+  return target || null;
+}
+
+function fabricFocusIdentity(element) {
+  if (!element || typeof element.getAttribute !== "function") return null;
+  const group = element.getAttribute("data-fabric-group");
+  if (group) return { kind: "group", value: group };
+  const agent = element.getAttribute("data-fabric-agent");
+  if (agent) return { kind: "agent", value: agent };
+  const control = element.getAttribute("data-fabric-focus");
+  return control ? { kind: "control", value: control } : null;
+}
+
+function fabricRestoreFocus(identity) {
+  if (!identity) return;
+  const group = identity.kind === "group";
+  const agent = identity.kind === "agent";
+  fabricFocusData($(group ? "fabric-groups" : agent ? "fabric-team" : "fabric-view"),
+    group ? "data-fabric-group" : agent ? "data-fabric-agent" : "data-fabric-focus", identity.value);
+}
+
+function fabricDisclosureState(container) {
+  if (!container || typeof container.querySelectorAll !== "function") return [];
+  return Array.from(container.querySelectorAll("details[data-fabric-disclosure][open]"),
+    (details) => details.getAttribute("data-fabric-disclosure")).filter(Boolean);
+}
+
+function fabricRestoreDisclosures(container, disclosures) {
+  if (!container || typeof container.querySelectorAll !== "function") return;
+  const retained = new Set(Array.isArray(disclosures) ? disclosures : []);
+  for (const details of container.querySelectorAll("details[data-fabric-disclosure]")) {
+    if (retained.has(details.getAttribute("data-fabric-disclosure"))) details.open = true;
+  }
+}
+
+function fabricCreateScheduler(concurrency) {
+  const width = Math.max(1, Math.floor(Number(concurrency) || 1));
+  const state = { active: 0, queue: [] };
+  const drain = () => {
+    while (state.active < width && state.queue.length) {
+      const item = state.queue.shift();
+      if (!item.current()) { item.resolve({ skipped: true }); continue; }
+      state.active++;
+      Promise.resolve().then(item.job).then(item.resolve, item.reject).finally(() => {
+        state.active--;
+        drain();
+      });
+    }
+  };
+  return {
+    run(job, current) {
+      return new Promise((resolve, reject) => {
+        state.queue.push({ job, current: typeof current === "function" ? current : () => true, resolve, reject });
+        drain();
+      });
+    },
+  };
+}
+
+const fabricStatusScheduler = fabricCreateScheduler(FABRIC_STATUS_CONCURRENCY);
+const fabricSupervisionScheduler = fabricCreateScheduler(2);
+
+function fabricStatusTargets(group, selectedAgent, limit = FABRIC_STATUS_LIMIT) {
+  const members = group && Array.isArray(group.members) ? group.members : [];
+  const cap = Math.max(0, limit);
+  const selected = members.find((agent) => agent.agent_id === selectedAgent);
+  return (selected ? [selected, ...members.filter((agent) => agent !== selected)] : members).slice(0, cap);
+}
+
+function fabricStatusCoverage(group, selectedAgent, statuses, errors, limit = FABRIC_STATUS_LIMIT) {
+  const members = group && Array.isArray(group.members) ? group.members : [];
+  const requested = fabricStatusTargets(group, selectedAgent, limit);
+  const has = (object, id) => Object.prototype.hasOwnProperty.call(object || {}, id);
+  const loaded = requested.filter((agent) => has(statuses, agent.agent_id)).length;
+  const failed = requested.filter((agent) => has(errors, agent.agent_id)).length;
+  return {
+    requested: requested.length,
+    loaded,
+    failed,
+    pending: Math.max(0, requested.length - loaded - failed),
+    notRequested: Math.max(0, members.length - requested.length),
+  };
+}
+
+function fabricCoverageLabel(coverage) {
+  const parts = [`Health: ${coverage.loaded} loaded`];
+  if (coverage.failed) parts.push(`${coverage.failed} unavailable`);
+  if (coverage.pending) parts.push(`${coverage.pending} pending`);
+  if (coverage.notRequested) parts.push(`${coverage.notRequested} not requested`);
+  return parts.join(" · ");
+}
+
+function fabricCacheStatus(state, agentId, status, error) {
+  if (!state || !agentId) return;
+  if (error) {
+    delete state.statuses[agentId];
+    state.statusErrors[agentId] = error;
+  } else {
+    state.statuses[agentId] = status;
+    delete state.statusErrors[agentId];
+  }
+}
+
+function fabricBatchOwnsStatus(agentId, selectedAgent) {
+  return agentId !== selectedAgent;
+}
+
+function fabricActivationState(status, now = Date.now()) {
+  if (!status || typeof status !== "object" || !Object.prototype.hasOwnProperty.call(status, "activation")) {
+    return { state: "unknown", label: "Activation evidence not loaded", activation: {} };
+  }
+  if (status.activation === null) return { state: "none", label: "No current host lease", activation: {} };
+  const activation = fabricObject(status.activation);
+  if (!activation.owner) return { state: "unknown", label: "Activation record is invalid", activation };
+  const expiresAt = Date.parse(activation.lease_expires_at);
+  if (!Number.isFinite(expiresAt)) return { state: "unknown", label: "Lease expiry is invalid", activation };
+  if (expiresAt <= now) return { state: "expired", label: `Lease expired ${activation.lease_expires_at}`, activation };
+  return { state: "live", label: `${activation.owner} · fence ${activation.fencing ?? "?"}`, activation };
+}
+
+function fabricAgentHealth(status, error, now = Date.now()) {
+  if (error || !status || typeof status !== "object") return { tone: "unknown", label: "health unknown" };
+  const mailbox = fabricObject(status.mailbox);
+  const dead = Math.max(0, Number(mailbox.dead) || 0);
+  const queued = Math.max(0, Number(mailbox.queued) || 0);
+  const inFlight = Math.max(0, Number(mailbox.in_flight) || 0);
+  const activation = fabricActivationState(status, now);
+  if (dead > 0) return { tone: "attention", label: `${dead} dead-lettered` };
+  if (activation.state === "expired") return { tone: "attention", label: "activation lease expired" };
+  if (activation.state === "unknown") return { tone: "unknown", label: "activation expiry unknown" };
+  if (activation.state === "live") return { tone: "active", label: inFlight ? "active turn" : "activation held" };
+  if (queued > 0 || inFlight > 0) return { tone: "waiting", label: `${queued + inFlight} awaiting service` };
+  return { tone: "idle", label: "idle" };
+}
+
+function fabricNextLeaseDelay(statuses, now = Date.now()) {
+  let nearest = Infinity;
+  for (const status of Object.values(statuses || {})) {
+    const activation = fabricObject(fabricObject(status).activation);
+    const expiresAt = Date.parse(activation.lease_expires_at);
+    if (Number.isFinite(expiresAt) && expiresAt > now) nearest = Math.min(nearest, expiresAt);
+  }
+  return Number.isFinite(nearest) ? Math.min(2147483647, Math.max(25, nearest - now + 25)) : null;
+}
+
+function fabricScheduleLeaseRefresh() {
+  clearTimeout(store.fabricLeaseTimer);
+  store.fabricLeaseTimer = null;
+  if (store.view !== "fabric" || !store.fabric) return;
+  const delay = fabricNextLeaseDelay(store.fabric.statuses);
+  if (delay === null) return;
+  store.fabricLeaseTimer = setTimeout(() => {
+    store.fabricLeaseTimer = null;
+    if (store.view !== "fabric" || !store.fabric) return;
+    const selected = store.fabric.selectedAgent;
+    if (selected && fabricActivationState(store.fabric.statuses[selected]).state === "expired") {
+      $("fabric-team-announcer").textContent = `${selected} activation lease has expired.`;
+    }
+    fabricRender();
+  }, delay);
+}
+
+function fabricAcceptedKinds(agent) {
+  return Object.keys(fabricObject(fabricObject(agent).manifest).accepts || {}).sort();
+}
+
+function fabricSummaryHtml(agents) {
+  const list = Array.isArray(agents) ? agents : [];
+  const groups = fabricGroups(list);
+  const declared = groups.filter((group) => group.teamId).length;
+  const supervised = list.filter((agent) => Boolean(fabricObject(agent.manifest).supervision)).length;
+  const kinds = new Set(list.flatMap(fabricAcceptedKinds));
+  return `<div><b>${list.length}</b><span>Retained identities</span></div>` +
+    `<div><b>${declared}</b><span>Declared team labels</span></div>` +
+    `<div><b>${supervised}</b><span>Supervised manifests</span></div>` +
+    `<div><b>${kinds.size}</b><span>Accepted message kinds</span></div>`;
+}
+
+function fabricGroupButtonHtml(group, selected) {
+  const label = fabricGroupLabel(group);
+  const kinds = new Set(group.members.flatMap(fabricAcceptedKinds));
+  return `<button class="fabric-group" type="button" role="option" data-fabric-group="${escapeHtml(group.key)}" ` +
+    `tabindex="${selected ? "0" : "-1"}" aria-selected="${selected ? "true" : "false"}"${selected ? ` aria-current="true"` : ""}>` +
+    `<span class="fabric-group-mark">${group.teamId ? "team label" : "no team label"}</span>` +
+    `<b>${escapeHtml(label)}</b><span>${group.members.length} member${group.members.length === 1 ? "" : "s"} · ${kinds.size} message kind${kinds.size === 1 ? "" : "s"}</span></button>`;
+}
+
+function fabricMailboxLabel(status) {
+  const mailbox = fabricObject(fabricObject(status).mailbox);
+  if (!status) return "not loaded";
+  return `${Math.max(0, Number(mailbox.queued) || 0)} queued · ${Math.max(0, Number(mailbox.in_flight) || 0)} live · ${Math.max(0, Number(mailbox.dead) || 0)} dead`;
+}
+
+function fabricMemberButtonHtml(agent, selected, status, error) {
+  const manifest = fabricObject(agent.manifest);
+  const health = fabricAgentHealth(status, error);
+  return `<button class="fabric-member" type="button" role="option" data-fabric-agent="${escapeHtml(agent.agent_id)}" ` +
+    `tabindex="${selected ? "0" : "-1"}" aria-selected="${selected ? "true" : "false"}"${selected ? ` aria-current="true"` : ""} ` +
+    `aria-label="${escapeHtml(`${agent.agent_id}, ${manifest.agent_kind || "unknown kind"}, ${health.label}`)}">` +
+    `<span class="fabric-health-dot ${escapeHtml(health.tone)}" aria-hidden="true"></span>` +
+    `<span><b>${escapeHtml(agent.agent_id)}</b><small>${escapeHtml(manifest.agent_kind || "unknown kind")} · ${escapeHtml(manifest.manifest_version || "unversioned")}</small></span>` +
+    `<span class="fabric-mailbox-mini">${escapeHtml(fabricMailboxLabel(status))}</span></button>`;
+}
+
+function fabricRestartLabel(policy) {
+  const value = fabricObject(policy).restart;
+  return value ? String(value).replaceAll("_", " ") : "unmanaged";
+}
+
+function fabricJsonText(value, limit = 12000) {
+  let lossyNumber = false;
+  const seen = new Set();
+  const render = (item, depth, parent, key) => {
+    if (typeof item === "number") {
+      const tokens = parent && parent[AGENT_NUMBER_TOKENS];
+      const token = tokens && tokens[key];
+      if (typeof token === "string") return token;
+      if (!Number.isSafeInteger(item)) lossyNumber = true;
+      return JSON.stringify(item);
+    }
+    if (item === null || typeof item === "boolean" || typeof item === "string") return JSON.stringify(item);
+    if (!item || typeof item !== "object") return undefined;
+    if (seen.has(item)) throw new Error("circular evidence");
+    seen.add(item);
+    const indent = "  ".repeat(depth);
+    const childIndent = "  ".repeat(depth + 1);
+    let text;
+    if (Array.isArray(item)) {
+      const values = item.map((child, index) => render(child, depth + 1, item, String(index)) ?? "null");
+      text = values.length ? `[\n${childIndent}${values.join(`,\n${childIndent}`)}\n${indent}]` : "[]";
+    } else {
+      const values = Object.entries(item).flatMap(([childKey, child]) => {
+        const rendered = render(child, depth + 1, item, childKey);
+        return rendered === undefined ? [] : [`${JSON.stringify(childKey)}: ${rendered}`];
+      });
+      text = values.length ? `{\n${childIndent}${values.join(`,\n${childIndent}`)}\n${indent}}` : "{}";
+    }
+    seen.delete(item);
+    return text;
+  };
+  let text;
+  try { text = render(value, 0, null, ""); }
+  catch { return "Inspection unavailable: value could not be serialized."; }
+  if (text === undefined) return "No evidence payload.";
+  if (lossyNumber) text = `WARNING: One or more numeric values arrived without a preserved wire token and may be rounded.\n${text}`;
+  const cap = Math.max(80, limit);
+  return text.length <= cap ? text : `${text.slice(0, cap)}\n… inspection view truncated …`;
+}
+
+function fabricSupervisionHtml(supervision, error) {
+  if (error) return `<div class="note fabric-error"><b>Supervision evidence unavailable.</b> ${escapeHtml(error.message || "The server could not return it.")}</div>`;
+  if (!supervision) return `<div class="empty">Loading supervision evidence…</div>`;
+  const policy = fabricObject(supervision.policy);
+  const attempts = Array.isArray(supervision.attempts) ? supervision.attempts : [];
+  const recent = attempts.slice(-FABRIC_ATTEMPT_LIMIT).reverse();
+  const flags = [];
+  if (supervision.escalated) flags.push(`<span class="badge error">escalated</span>`);
+  if (supervision.deadline_breached) flags.push(`<span class="badge interrupted">deadline breached</span>`);
+  if (!policy.restart) flags.push(`<span class="badge pending">unmanaged</span>`);
+  if (!flags.length) flags.push(`<span class="badge success">policy healthy</span>`);
+  const list = recent.length ? `<ul class="fabric-attempts">${recent.map((attempt) => {
+    const record = fabricObject(attempt);
+    const trigger = String(record.trigger || "decision").replaceAll("_", " ");
+    const ordinal = Number.isFinite(Number(record.ordinal)) ? `#${Number(record.ordinal)}` : "";
+    const detail = record.message || record.error_class || record.task_id || record.at || "recorded";
+    return `<li><b>${escapeHtml(`${trigger} ${ordinal}`.trim())}</b> · ${escapeHtml(detail)}</li>`;
+  }).join("")}</ul>` : `<p class="muted tiny">No supervision decisions have been recorded.</p>`;
+  return `<div class="fabric-supervision"><div class="fabric-supervision-head"><b>Supervision</b>${flags.join("")}</div>` +
+    `<div class="fabric-manifest"><span class="k">Restart policy</span><span class="v">${escapeHtml(fabricRestartLabel(policy))}</span>` +
+    `<span class="k">Intensity window</span><span class="v">${escapeHtml(policy.intensity == null ? "—" : `${policy.intensity} in ${policy.period_ms || "?"} ms`)}</span>` +
+    `<span class="k">Supervisor</span><span class="v">${escapeHtml(policy.supervisor || "not declared")}</span>` +
+    `<span class="k">Suppressed failures</span><span class="v">${escapeHtml(supervision.suppressed_failures ?? 0)}</span></div>${list}` +
+    `<details class="fabric-raw" data-fabric-disclosure="member-supervision"><summary data-fabric-focus="member-supervision">Raw supervision evidence excerpt</summary><pre class="json">${escapeHtml(fabricJsonText(supervision))}</pre></details></div>`;
+}
+
+function fabricMemberEvidenceHtml(agent, evidence) {
+  if (!agent) return `<div class="empty">Select a durable member.</div>`;
+  const manifest = fabricObject(agent.manifest);
+  const state = evidence && evidence.agentId === agent.agent_id ? evidence : null;
+  const status = state && state.status;
+  const statusError = state && state.statusError;
+  const health = fabricAgentHealth(status, statusError);
+  const mailbox = fabricObject(fabricObject(status).mailbox);
+  const activation = fabricActivationState(status);
+  const kinds = fabricAcceptedKinds(agent);
+  const scopes = Array.isArray(manifest.scopes) ? manifest.scopes.map(String) : [];
+  const loading = state && state.loading;
+  return `<div class="fabric-evidence-top"><div><h2>${escapeHtml(agent.agent_id)}</h2>` +
+    `<p>${escapeHtml(manifest.agent_kind || "unknown kind")} · ${escapeHtml(manifest.manifest_version || "unversioned")}</p></div>` +
+    `<span class="badge ${health.tone === "attention" ? "error" : health.tone === "active" ? "success" : "pending"}">${escapeHtml(loading ? "refreshing" : health.label)}</span></div>` +
+    (statusError ? `<div class="note fabric-error">Mailbox and activation evidence unavailable: ${escapeHtml(statusError.message || "request failed")}</div>` :
+      `<div class="fabric-evidence-grid"><div class="fabric-gauge"><b>${escapeHtml(status ? (mailbox.queued ?? 0) : "—")}</b><span>Queued</span></div>` +
+      `<div class="fabric-gauge"><b>${escapeHtml(status ? (mailbox.in_flight ?? 0) : "—")}</b><span>In flight</span></div>` +
+      `<div class="fabric-gauge${Number(mailbox.dead) > 0 ? " danger" : ""}"><b>${escapeHtml(status ? (mailbox.dead ?? 0) : "—")}</b><span>Dead letter</span></div></div>`) +
+    `<div class="fabric-manifest"><span class="k">Team label</span><span class="v">${escapeHtml(agent.team_id || "Ungrouped")}</span>` +
+    `<span class="k">Activation</span><span class="v">${escapeHtml(activation.label)}</span>` +
+    `<span class="k">Lease expires</span><span class="v">${escapeHtml(activation.activation.lease_expires_at || "—")}</span>` +
+    `<span class="k">Accepts</span><span class="v">${escapeHtml(kinds.join(", ") || "No mailbox message kinds")}</span>` +
+    `<span class="k">State scopes</span><span class="v">${escapeHtml(scopes.join(", ") || "None declared")}</span>` +
+    `<span class="k">Registered</span><span class="v">${escapeHtml(agent.created_at || "—")}</span></div>` +
+    fabricSupervisionHtml(state && state.supervision, state && state.supervisionError) +
+    `<details class="fabric-raw" data-fabric-disclosure="member-manifest"><summary data-fabric-focus="member-manifest">Raw registered-manifest excerpt</summary><pre class="json">${escapeHtml(fabricJsonText(agent))}</pre></details>`;
+}
+
+function fabricTraceModel(response, limit = FABRIC_TRACE_LIMIT) {
+  const trace = fabricObject(fabricObject(response).trace);
+  const source = Array.isArray(trace.nodes) ? trace.nodes : [];
+  const sourceValid = source.length > 0 && source.every((node) => node && typeof node === "object" &&
+    node.event_id && node.depth != null && Number.isFinite(Number(node.depth)) && Number(node.depth) >= 0);
+  const unreachable = source.filter((node) => !node || typeof node !== "object" ||
+    node.depth == null || !Number.isFinite(Number(node.depth)) || Number(node.depth) < 0).length;
+  const normalized = source.filter((node) => node && typeof node === "object" && node.event_id).map((node) => ({
+    eventId: String(node.event_id),
+    runId: String(node.run_id || "unknown journal"),
+    seq: Number.isFinite(Number(node.seq)) ? Number(node.seq) : null,
+    kind: String(node.kind || "unknown_event"),
+    parent: node.parent == null ? null : String(node.parent),
+    depth: node.depth != null && Number.isFinite(Number(node.depth)) && Number(node.depth) >= 0 ? Math.min(20, Math.floor(Number(node.depth))) : null,
+  }));
+  const roots = Array.isArray(trace.roots) ? trace.roots.map(String) : [];
+  const runIds = Array.isArray(trace.run_ids) ? trace.run_ids.map(String) : [];
+  const byId = new Map(normalized.map((node) => [node.eventId, node]));
+  const children = new Map();
+  for (const node of normalized) {
+    if (!node.parent || !byId.has(node.parent)) continue;
+    if (!children.has(node.parent)) children.set(node.parent, []);
+    children.get(node.parent).push(node.eventId);
+  }
+  const ordered = [];
+  const visited = new Set();
+  const visit = (start) => {
+    const stack = [start];
+    while (stack.length) {
+      const id = stack.pop();
+      if (visited.has(id) || !byId.has(id)) continue;
+      visited.add(id);
+      ordered.push(byId.get(id));
+      const next = children.get(id) || [];
+      for (let index = next.length - 1; index >= 0; index--) stack.push(next[index]);
+    }
+  };
+  for (const root of roots) visit(root);
+  for (const node of normalized) visit(node.eventId); // detached/cyclic evidence remains visible
+  const cap = Math.max(0, limit);
+  const nodes = ordered.slice(0, cap);
+  const structurallyConnected = roots.length === 1 && sourceValid;
+  return {
+    nodes, roots, runIds,
+    connected: response && response.connected === true && structurallyConnected,
+    omitted: Math.max(0, normalized.length - cap),
+    unreachable,
+  };
+}
+
+function fabricTraceHtml(response) {
+  if (!response) return `<div class="note fabric-error"><b>TeamTrace unavailable.</b> The coordination record is still shown above.</div>`;
+  const model = fabricTraceModel(response);
+  const total = model.nodes.length + model.omitted;
+  const banner = model.connected
+    ? `<div class="fabric-trace-banner"><b>Connected causal evidence</b><span>1 root · ${model.runIds.length} journal${model.runIds.length === 1 ? "" : "s"} · ${total} events${model.omitted ? ` · ${model.nodes.length} rendered` : ""}</span></div>`
+    : `<div class="fabric-trace-banner incomplete"><b>Incomplete causal evidence</b><span>${model.roots.length} roots · ${model.unreachable} unreachable · do not treat this as one trustworthy tree</span></div>`;
+  if (!model.nodes.length) return `${banner}<div class="empty">No journaled coordination events are available yet.</div>`;
+  const nodes = model.nodes.map((node) => `<div class="fabric-trace-node" style="--trace-offset:${(node.depth == null ? 0 : node.depth) * 29}px">` +
+    `<div class="fabric-trace-event"><b>${escapeHtml(node.kind.replaceAll("_", " "))}</b>` +
+    `<span title="event ${escapeHtml(node.eventId)} · journal ${escapeHtml(node.runId)}">${escapeHtml(shortId(node.eventId))} · ${escapeHtml(shortId(node.runId))}</span>` +
+    `<span>${node.parent ? `caused by ${escapeHtml(shortId(node.parent))}` : "causal root"}</span>` +
+    `<small>${escapeHtml(node.seq == null ? "seq ?" : `seq ${node.seq}`)} · depth ${escapeHtml(node.depth == null ? "?" : node.depth)}</small></div></div>`).join("");
+  return `${banner}<div class="fabric-trace" aria-label="Coordination causal trace">${nodes}</div>` +
+    (model.omitted ? `<div class="note tiny">${model.omitted} additional trace events were not rendered. Use the raw evidence excerpt below for bounded inspection.</div>` : "") +
+    `<details class="fabric-raw" data-fabric-disclosure="trace-raw"><summary data-fabric-focus="trace-raw">Raw TeamTrace evidence excerpt</summary><pre class="json">${escapeHtml(fabricJsonText(response))}</pre></details>`;
+}
+
+function fabricCoordinationConsistency(expectedId, record, trace) {
+  const warnings = [];
+  const recordId = fabricObject(record).coordination_id;
+  const traceId = fabricObject(trace).coordination_id;
+  if (recordId && recordId !== expectedId) warnings.push(`record id ${recordId} does not match ${expectedId}`);
+  if (traceId && traceId !== expectedId) warnings.push(`trace id ${traceId} does not match ${expectedId}`);
+  if (record && trace) {
+    const nodes = Array.isArray(fabricObject(trace.trace).nodes) ? trace.trace.nodes : [];
+    const traceSettled = nodes.some((node) => fabricObject(node).kind === "coordination_end");
+    if (Boolean(record.settled) !== traceSettled) warnings.push("record settlement and TeamTrace terminal evidence were observed at different revisions");
+  }
+  return { consistent: warnings.length === 0, warning: warnings.join("; ") };
+}
+
+function fabricCarryCoordination(value) {
+  const previous = fabricObject(value);
+  if (previous.loading) {
+    return { id: String(previous.id || ""), loading: false, record: null, trace: null, traceError: null,
+      consistencyWarning: null, error: null,
+      notice: "Inventory refresh cancelled the coordination evidence read. Load it again when ready." };
+  }
+  return {
+    id: String(previous.id || ""), loading: false, record: previous.record || null,
+    trace: previous.trace || null, traceError: previous.traceError || null,
+    consistencyWarning: previous.consistencyWarning || null, error: previous.error || null, notice: null,
+  };
+}
+
+async function fabricReadCoordinationEvidence(id, readTrace, readRecord, current) {
+  const errorRecord = (error) => ({ status: error.status, body: error.body, message: error.message || "request failed" });
+  let trace = null;
+  let traceError = null;
+  try { trace = await readTrace(); }
+  catch (error) { traceError = errorRecord(error); }
+  if (!current()) return { stale: true };
+  let record = null;
+  let recordError = null;
+  try { record = await readRecord(); }
+  catch (error) { recordError = errorRecord(error); }
+  if (!current()) return { stale: true };
+  if (recordError) return { stale: false, record: null, recordError, trace: null, traceError: null, consistencyWarning: null };
+
+  let consistency = fabricCoordinationConsistency(id, record, trace);
+  let retryWarning = "";
+  // The endpoints expose reconciled state independently and have no shared
+  // revision. Retry one later ordered pair before presenting a mismatch.
+  if (trace && !consistency.consistent) {
+    try {
+      const refreshedTrace = await readTrace();
+      if (!current()) return { stale: true };
+      trace = refreshedTrace;
+      traceError = null;
+    } catch (error) {
+      retryWarning = `ordered consistency refresh could not reload TeamTrace: ${error.message || "request failed"}`;
+    }
+    if (!current()) return { stale: true };
+    try {
+      const refreshedRecord = await readRecord();
+      if (!current()) return { stale: true };
+      record = refreshedRecord;
+    } catch (error) {
+      retryWarning = [retryWarning,
+        `ordered consistency refresh could not reload the coordination record: ${error.message || "request failed"}`]
+        .filter(Boolean).join("; ");
+    }
+    if (!current()) return { stale: true };
+    consistency = fabricCoordinationConsistency(id, record, trace);
+  }
+  return {
+    stale: false, record, recordError: null, trace, traceError,
+    consistencyWarning: [consistency.warning, retryWarning].filter(Boolean).join("; ") || null,
+  };
+}
+
+function fabricCoordinationHtml(record, trace, traceError, consistencyWarning) {
+  if (!record) return `<div class="empty">No coordination record loaded.</div>`;
+  const contract = fabricObject(record.contract);
+  const outcome = fabricObject(record.outcome);
+  const allMembers = Array.isArray(record.members) ? record.members : [];
+  const members = allMembers.slice(0, FABRIC_MEMBER_RENDER_LIMIT);
+  const omittedMembers = Math.max(0, allMembers.length - members.length);
+  const status = record.settled ? String(outcome.status || "settled") : "in progress";
+  const dispositions = members.map((member) => {
+    const row = fabricObject(member);
+    const disposition = fabricObject(row.disposition);
+    const label = disposition.settlement || (row.submitted ? "submitted" : "not submitted");
+    return `<span class="fabric-disposition">${escapeHtml(row.member || "unknown member")} · ${escapeHtml(String(label).replaceAll("_", " "))}</span>`;
+  }).join("");
+  return `<div class="fabric-coordination-summary"><div><span>Coordination</span><b>${escapeHtml(record.coordination_id || "—")}</b></div>` +
+    `<div><span>Pattern</span><b>${escapeHtml(String(contract.pattern || outcome.pattern || "unknown").replaceAll("_", " "))}</b></div>` +
+    `<div><span>Status</span><b>${escapeHtml(status.replaceAll("_", " "))}</b></div>` +
+    `<div><span>Members</span><b>${allMembers.length}</b></div></div>` +
+    `<p class="muted tiny">TeamTrace was observed first; the contract and settlement record were reconciled immediately afterward through a separate endpoint.</p>` +
+    (consistencyWarning ? `<div class="note fabric-error"><b>Evidence revision mismatch.</b> ${escapeHtml(consistencyWarning)}. Refresh before relying on this joined view.</div>` : "") +
+    `<div class="fabric-dispositions" aria-label="Member dispositions">${dispositions || `<span class="muted tiny">No member records.</span>`}</div>` +
+    (omittedMembers ? `<div class="note tiny">${omittedMembers} additional member dispositions were not rendered; the raw excerpt below remains bounded too.</div>` : "") +
+    (traceError ? `<div class="note fabric-error"><b>TeamTrace request failed.</b> ${escapeHtml(traceError.message || "The causal view is unavailable.")}</div>` : fabricTraceHtml(trace)) +
+    `<details class="fabric-raw" data-fabric-disclosure="coordination-raw"><summary data-fabric-focus="coordination-raw">Raw coordination contract and outcome excerpt</summary><pre class="json">${escapeHtml(fabricJsonText(record))}</pre></details>`;
+}
+
+function fabricErrorHtml(status, body, subject) {
+  const message = body && (body.message || body.error);
+  if (status === 404 && (!body || body.raw !== undefined)) {
+    return `<div class="note fabric-error"><b>${escapeHtml(subject)} needs an Agent Fabric server.</b> This connected server does not expose the required route.</div>`;
+  }
+  if (status === 404) return `<div class="note fabric-error"><b>${escapeHtml(subject)} was not found.</b> ${escapeHtml(message || "Check the identifier and tenant.")}</div>`;
+  if (status === 400) return `<div class="note fabric-error"><b>The identifier is not valid.</b> ${escapeHtml(message || "Use a server-safe identifier.")}</div>`;
+  return `<div class="note fabric-error"><b>${escapeHtml(subject)} could not be loaded.</b> ${escapeHtml(message || `HTTP ${status || "network"}`)}</div>`;
+}
+
+function fabricUpdateSidebar() {
+  const el = $("fabric-side-count");
+  if (!store.conn) { el.textContent = "Connect to discover durable identities."; return; }
+  if (store.fabricUnsupported) { el.textContent = "Agent Fabric unavailable on this server."; return; }
+  const count = store.fabric && store.fabric.list ? store.fabric.list.length : 0;
+  const teams = fabricGroups(store.fabric && store.fabric.list).filter((group) => group.teamId).length;
+  el.textContent = `${count} durable identit${count === 1 ? "y" : "ies"} · ${teams} team label${teams === 1 ? "" : "s"}`;
+}
+
+function fabricRender() {
+  if (!store.fabric) return;
+  const focusIdentity = fabricFocusIdentity(document.activeElement);
+  const disclosures = fabricDisclosureState($("fabric-view"));
+  const state = store.fabric;
+  const groups = fabricGroups(state.list);
+  $("btn-fabric-refresh").disabled = Boolean(state.loading);
+  $("fabric-coordination-body").setAttribute("aria-busy", state.coordination.loading ? "true" : "false");
+  $("btn-fabric-coordination").disabled = Boolean(state.coordination.loading);
+  $("fabric-summary").innerHTML = fabricSummaryHtml(state.list);
+  $("fabric-statusline").textContent = state.error ? "inventory load failed" :
+    `${state.list.length}${state.omitted ? ` of ${state.total}` : ""} retained${state.loading ? " · refreshing" : ""}`;
+  $("fabric-groups-count").textContent = `${groups.length} group${groups.length === 1 ? "" : "s"}`;
+  if (state.error) {
+    $("fabric-groups").innerHTML = fabricErrorHtml(state.error.status, state.error.body, "Durable inventory");
+    $("fabric-team").innerHTML = `<div class="empty">Team evidence unavailable.</div>`;
+  } else if (!groups.length) {
+    $("fabric-groups").innerHTML = `<div class="empty">No durable agent identities are registered.</div>`;
+    $("fabric-team").innerHTML = `<div class="empty">Register durable agents through the Agent Fabric API to form an observable team.</div>`;
+  } else {
+    $("fabric-groups").innerHTML = groups.map((group) => fabricGroupButtonHtml(group, group.key === state.selectedGroup)).join("");
+    const group = groups.find((item) => item.key === state.selectedGroup) || groups[0];
+    const selected = group.members.find((agent) => agent.agent_id === state.selectedAgent) || group.members[0];
+    const targets = fabricStatusTargets(group, selected && selected.agent_id, FABRIC_STATUS_LIMIT);
+    const targetIds = new Set(targets.map((agent) => agent.agent_id));
+    const coverage = fabricStatusCoverage(group, selected && selected.agent_id, state.statuses, state.statusErrors);
+    const list = group.members.map((agent) => fabricMemberButtonHtml(
+      agent, selected && agent.agent_id === selected.agent_id,
+      state.statuses[agent.agent_id], state.statusErrors[agent.agent_id] || (!targetIds.has(agent.agent_id) ? { message: "not requested" } : null),
+    )).join("");
+    $("fabric-team").innerHTML = `<div class="fabric-team-head"><h2>${escapeHtml(fabricGroupLabel(group))}</h2>` +
+      `<p>${group.teamId ? "Members share this declared team label; Rusty does not yet store a separate editable team definition." : "These identities do not declare a team label."} ` +
+      `${escapeHtml(fabricCoverageLabel(coverage))}.</p></div>` +
+      `<div class="fabric-members"><div class="fabric-member-list" role="listbox" aria-label="Durable team members">${list}</div>` +
+      `<div class="fabric-evidence">${fabricMemberEvidenceHtml(selected, state.evidence)}</div></div>`;
+  }
+  if (state.coordination.loading) {
+    $("fabric-coordination-body").innerHTML = `<div class="empty">Reconciling coordination and assembling TeamTrace…</div>`;
+  } else if (state.coordination.error) {
+    $("fabric-coordination-body").innerHTML = fabricErrorHtml(state.coordination.error.status, state.coordination.error.body, "Coordination");
+  } else if (state.coordination.record) {
+    $("fabric-coordination-body").innerHTML = fabricCoordinationHtml(
+      state.coordination.record, state.coordination.trace, state.coordination.traceError, state.coordination.consistencyWarning);
+  } else if (state.coordination.notice) {
+    $("fabric-coordination-body").innerHTML = `<div class="note">${escapeHtml(state.coordination.notice)}</div>`;
+  } else {
+    $("fabric-coordination-body").innerHTML = `<div class="empty">Load a coordination to see its contract, members, outcome, and TeamTrace.</div>`;
+  }
+  fabricRestoreDisclosures($("fabric-view"), disclosures);
+  fabricRestoreFocus(focusIdentity);
+  fabricScheduleLeaseRefresh();
+}
+
+async function fabricLoadGroupStatuses(groupKey) {
+  const state = store.fabric;
+  if (!state || !store.conn) return;
+  const group = fabricGroups(state.list).find((item) => item.key === groupKey);
+  if (!group) return;
+  const request = ++state.statusRequest;
+  const generation = state.generation;
+  const connection = { ...store.conn };
+  const members = fabricStatusTargets(group, state.selectedAgent, FABRIC_STATUS_LIMIT)
+    .filter((agent) => agent.agent_id !== state.selectedAgent);
+  const isCurrent = () => Boolean(store.fabric && request === store.fabric.statusRequest &&
+    fabricRequestCurrent(generation, connection, store.fabricRequest, store.conn) &&
+    store.fabric.selectedGroup === groupKey);
+  const results = await Promise.allSettled(members.map((agent) => fabricStatusScheduler.run(
+    () => apiForConnection(connection, "GET", `/agents/${encodeURIComponent(agent.agent_id)}/status`), isCurrent)));
+  if (!store.fabric || request !== store.fabric.statusRequest ||
+      !fabricRequestCurrent(generation, connection, store.fabricRequest, store.conn) ||
+      store.fabric.selectedGroup !== groupKey) return;
+  results.forEach((result, index) => {
+    const id = members[index].agent_id;
+    if (!fabricBatchOwnsStatus(id, store.fabric.selectedAgent)) return;
+    if (result.status === "fulfilled") {
+      fabricCacheStatus(store.fabric, id, result.value, null);
+    } else {
+      fabricCacheStatus(store.fabric, id, null,
+        { status: result.reason.status, body: result.reason.body, message: result.reason.message });
+    }
+  });
+  fabricRender();
+  const currentGroup = fabricGroups(store.fabric.list).find((item) => item.key === groupKey);
+  if (currentGroup) $("fabric-team-announcer").textContent =
+    `${fabricGroupLabel(currentGroup)}. ${fabricCoverageLabel(fabricStatusCoverage(
+      currentGroup, store.fabric.selectedAgent, store.fabric.statuses, store.fabric.statusErrors))}.`;
+}
+
+async function fabricLoadMemberEvidence(agentId) {
+  const state = store.fabric;
+  if (!state || !store.conn || !state.list.some((agent) => agent.agent_id === agentId)) return;
+  const request = ++state.evidenceRequest;
+  const generation = state.generation;
+  const connection = { ...store.conn };
+  state.evidence = { agentId, loading: true, status: state.statuses[agentId] || null, statusError: null, supervision: null, supervisionError: null };
+  fabricRender();
+  const path = `/agents/${encodeURIComponent(agentId)}`;
+  const isCurrent = () => Boolean(store.fabric && request === store.fabric.evidenceRequest &&
+    fabricRequestCurrent(generation, connection, store.fabricRequest, store.conn) &&
+    store.fabric.selectedAgent === agentId);
+  const [statusResult, supervisionResult] = await Promise.allSettled([
+    fabricStatusScheduler.run(() => apiForConnection(connection, "GET", `${path}/status`), isCurrent),
+    fabricSupervisionScheduler.run(() => apiForConnection(connection, "GET", `${path}/supervision`), isCurrent),
+  ]);
+  if (!isCurrent()) return;
+  const evidence = { agentId, loading: false, status: null, statusError: null, supervision: null, supervisionError: null };
+  if (statusResult.status === "fulfilled") {
+    evidence.status = statusResult.value;
+    fabricCacheStatus(store.fabric, agentId, statusResult.value, null);
+  } else {
+    evidence.statusError = { status: statusResult.reason.status, body: statusResult.reason.body, message: statusResult.reason.message };
+    fabricCacheStatus(store.fabric, agentId, null, evidence.statusError);
+  }
+  if (supervisionResult.status === "fulfilled") evidence.supervision = supervisionResult.value;
+  else evidence.supervisionError = { status: supervisionResult.reason.status, body: supervisionResult.reason.body, message: supervisionResult.reason.message };
+  store.fabric.evidence = evidence;
+  fabricRender();
+  $("fabric-team-announcer").textContent = `${agentId} evidence loaded. ${fabricAgentHealth(evidence.status, evidence.statusError).label}.`;
+}
+
+function fabricSelectGroup(key, focus) {
+  const state = store.fabric;
+  const group = state && fabricGroups(state.list).find((item) => item.key === key);
+  if (!group) return;
+  if (state.selectedGroup === group.key) {
+    if (focus && state.selectedAgent) fabricFocusData($("fabric-team"), "data-fabric-agent", state.selectedAgent);
+    return;
+  }
+  state.selectedGroup = group.key;
+  state.selectedAgent = group.members[0] ? group.members[0].agent_id : null;
+  state.statusRequest += 1;
+  state.evidenceRequest += 1;
+  state.evidence = null;
+  fabricRender();
+  $("fabric-team-announcer").textContent = `${fabricGroupLabel(group)} selected, ${group.members.length} member${group.members.length === 1 ? "" : "s"}.`;
+  fabricLoadGroupStatuses(group.key);
+  if (state.selectedAgent) fabricLoadMemberEvidence(state.selectedAgent);
+  if (focus) $("fabric-team").querySelector("[data-fabric-agent]")?.focus({ preventScroll: true });
+}
+
+function fabricSelectAgent(agentId, focus) {
+  const state = store.fabric;
+  const group = state && fabricGroups(state.list).find((item) => item.key === state.selectedGroup);
+  if (!group || !group.members.some((agent) => agent.agent_id === agentId)) return;
+  if (state.selectedAgent === agentId) {
+    if (focus) fabricFocusData($("fabric-team"), "data-fabric-agent", agentId);
+    return;
+  }
+  state.selectedAgent = agentId;
+  state.evidenceRequest += 1;
+  state.evidence = null;
+  fabricRender();
+  $("fabric-team-announcer").textContent = `${agentId} selected. Loading mailbox and supervision evidence.`;
+  fabricLoadMemberEvidence(agentId);
+  if (focus) fabricFocusData($("fabric-team"), "data-fabric-agent", agentId);
+}
+
+async function fabricLoad(quiet, force) {
+  if (!store.conn) return;
+  if (!force && store.fabric && store.fabric.loading) {
+    if (store.view === "fabric") fabricRender();
+    return;
+  }
+  if (!force && store.fabric && store.fabric.list && !store.fabric.error && !store.fabric.loading) {
+    if (store.view === "fabric") fabricRender();
+    return;
+  }
+  const previous = store.fabric || {};
+  const request = ++store.fabricRequest;
+  const connection = { ...store.conn };
+  const coordination = fabricCarryCoordination(previous.coordination);
+  store.fabric = {
+    list: previous.list || [], total: previous.total || 0, omitted: previous.omitted || 0,
+    selectedGroup: previous.selectedGroup || null, selectedAgent: previous.selectedAgent || null,
+    statuses: Object.create(null), statusErrors: Object.create(null), evidence: null,
+    coordination,
+    statusRequest: 0, evidenceRequest: 0, coordinationRequest: previous.coordinationRequest || 0,
+    generation: request, loading: true, error: null,
+  };
+  if (store.view === "fabric") fabricRender();
+  if (coordination.notice) $("fabric-announcer").textContent = coordination.notice;
+  try {
+    const value = await apiForConnection(connection, "GET", "/agents");
+    if (!fabricRequestCurrent(request, connection, store.fabricRequest, store.conn)) return;
+    const normalized = fabricNormalizeAgents(value, FABRIC_AGENT_LIMIT);
+    const groups = fabricGroups(normalized.list);
+    store.fabric.list = normalized.list;
+    store.fabric.total = normalized.total;
+    store.fabric.omitted = normalized.omitted;
+    store.fabric.loading = false;
+    store.fabric.error = null;
+    store.fabricUnsupported = false;
+    let group = groups.find((item) => item.key === store.fabric.selectedGroup) || groups[0] || null;
+    store.fabric.selectedGroup = group && group.key;
+    if (!group || !group.members.some((agent) => agent.agent_id === store.fabric.selectedAgent)) {
+      store.fabric.selectedAgent = group && group.members[0] ? group.members[0].agent_id : null;
+    }
+  } catch (error) {
+    if (!fabricRequestCurrent(request, connection, store.fabricRequest, store.conn)) return;
+    store.fabric.loading = false;
+    store.fabric.error = { status: error.status, body: error.body, message: error.message };
+    store.fabricUnsupported = error.status === 404 && (!error.body || error.body.raw !== undefined);
+    if (!quiet) toast(error.message, "err");
+  }
+  fabricUpdateSidebar();
+  if (store.view === "fabric") fabricRender();
+  if (!store.fabric.error && store.fabric.selectedGroup) fabricLoadGroupStatuses(store.fabric.selectedGroup);
+  if (!store.fabric.error && store.fabric.selectedAgent) fabricLoadMemberEvidence(store.fabric.selectedAgent);
+}
+
+async function fabricRefresh() {
+  await fabricLoad(false, true);
+}
+
+async function fabricLoadCoordination(rawId) {
+  const id = String(rawId || "").trim();
+  if (!id) { toast("Enter a coordination ID.", "err"); $("inp-fabric-coordination").focus(); return; }
+  if (!store.fabric || !store.conn) return;
+  const request = ++store.fabric.coordinationRequest;
+  const generation = store.fabric.generation;
+  const connection = { ...store.conn };
+  store.fabric.coordination = { id, loading: true, record: null, trace: null, traceError: null,
+    consistencyWarning: null, error: null, notice: null };
+  fabricRender();
+  const path = `/coordination/${encodeURIComponent(id)}`;
+  const current = () => Boolean(store.fabric && request === store.fabric.coordinationRequest &&
+    fabricRequestCurrent(generation, connection, store.fabricRequest, store.conn));
+  const evidence = await fabricReadCoordinationEvidence(id,
+    () => apiForConnection(connection, "GET", `${path}/trace`),
+    () => apiForConnection(connection, "GET", path), current);
+  if (evidence.stale) return;
+  if (evidence.recordError) {
+    store.fabric.coordination = { id, loading: false, record: null, trace: null, traceError: null,
+      consistencyWarning: null, error: evidence.recordError, notice: null };
+    $("fabric-announcer").textContent = `Coordination ${id} could not be loaded.`;
+  } else {
+    store.fabric.coordination = { id, loading: false, record: evidence.record, trace: evidence.trace,
+      traceError: evidence.traceError, consistencyWarning: evidence.consistencyWarning, error: null, notice: null };
+    $("fabric-announcer").textContent = `Coordination ${id} loaded with ${Array.isArray(evidence.record.members) ? evidence.record.members.length : 0} members` +
+      `${evidence.consistencyWarning ? "; consistency refresh incomplete—review the visible evidence warning" : ""}.`;
+  }
+  fabricRender();
+}
+
+function openFabric() {
+  store.view = "fabric";
+  renderMain();
+  $("main").scrollTop = 0;
+  if (!store.conn) $("fabric-statusline").textContent = "Connect to a Rusty server to load evidence.";
+  $("fabric-title").focus({ preventScroll: true });
 }
 
 /* ---------------- governed memory (R0.8) ----------------
@@ -5126,6 +6138,55 @@ function init() {
       thread.getAttribute("data-agent-open-run"),
       thread.getAttribute("data-agent-open-graph"),
     );
+  });
+
+  // Team observatory: durable identity and runtime evidence remain distinct
+  // from assistant configuration, while selection is fully keyboard operable.
+  $("btn-fabric-open").onclick = openFabric;
+  $("btn-fabric-refresh").onclick = fabricRefresh;
+  const fabricGroupActivate = (event) => {
+    const item = event.target.closest("[data-fabric-group]");
+    if (!item) return;
+    const id = item.getAttribute("data-fabric-group");
+    if (event.type === "click") { fabricSelectGroup(id, false); return; }
+    if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const ids = Array.from($("fabric-groups").querySelectorAll("[data-fabric-group]"),
+        (row) => row.getAttribute("data-fabric-group"));
+      const next = fabricNavigationTarget(ids, id, event.key);
+      fabricSelectGroup(next, false);
+      fabricFocusData($("fabric-groups"), "data-fabric-group", next);
+      return;
+    }
+    if (!["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    fabricSelectGroup(id, true);
+  };
+  $("fabric-groups").addEventListener("click", fabricGroupActivate);
+  $("fabric-groups").addEventListener("keydown", fabricGroupActivate);
+  const fabricMemberActivate = (event) => {
+    const item = event.target.closest("[data-fabric-agent]");
+    if (!item) return;
+    const id = item.getAttribute("data-fabric-agent");
+    if (event.type === "click") { fabricSelectAgent(id, false); return; }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const ids = Array.from($("fabric-team").querySelectorAll("[data-fabric-agent]"),
+        (row) => row.getAttribute("data-fabric-agent"));
+      const next = fabricNavigationTarget(ids, id, event.key);
+      fabricSelectAgent(next, false);
+      fabricFocusData($("fabric-team"), "data-fabric-agent", next);
+      return;
+    }
+    if (!["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    fabricSelectAgent(id, true);
+  };
+  $("fabric-team").addEventListener("click", fabricMemberActivate);
+  $("fabric-team").addEventListener("keydown", fabricMemberActivate);
+  $("fabric-coordination-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    fabricLoadCoordination($("inp-fabric-coordination").value);
   });
 
   // Governed memory: immutable records, provenance, lifecycle filters,

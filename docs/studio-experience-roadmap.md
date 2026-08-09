@@ -86,6 +86,9 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Create an assistant through the Agent Workbench.
 - Safely duplicate an assistant, review the configuration contract, and import or export a bounded,
   versioned assistant manifest without copying run history.
+- Distinguish runnable assistant configurations from mailbox-addressed durable identities, browse
+  identities by declared team label, inspect activation / mailbox / supervision evidence, and
+  investigate a known coordination through its typed member state and read-only TeamTrace.
 - Follow a guided Create → Run → Inspect first-run path.
 - Run in background, blocking, or streaming modes.
 - Inspect state, checkpoint history, interrupts, and resumes.
@@ -102,10 +105,13 @@ Studio is a useful engineering console, not yet the complete experience describe
   metadata, exact advanced JSON, and manifest portability. Model, tool, memory, output, guardrail, and
   budget configuration still lack typed server discovery and first-class runtime forms.
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
-- Durable agents and assistants are separate concepts without a coherent UI explanation.
-- Multi-agent topology and coordination contracts have no visual workspace.
+- Assistant configuration and durable identity are explained together, but there is no lifecycle link
+  that binds an assistant version to a registered durable identity.
+- The Team Observatory provides inventory and read-only coordination evidence, but visual topology,
+  team definitions, creation, editing, execution controls, discovery, and coordinated replay remain.
 - Evaluation capabilities exist as a Rust library but not as a server-backed Studio workflow.
-- Memory operations have no human-readable browser, conflict inbox, or forgetting workflow.
+- Memory records and structural conflicts have a human-readable audit workspace; correction,
+  resolution, approval, consolidation, and forgetting workflows remain.
 - Learning candidates and version pointers are not yet surfaced in Studio.
 - Triggers, crons, credentials, artifacts, deployments, and fleet operations are not unified.
 - Authentication identifies a tenant API key, not an attributed human or service principal with scoped roles and auditable authority.
@@ -313,7 +319,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 5 | Flight Recorder investigation layout and manifest/effect context | Partial — causal run story, recovery boundary, and effect-risk guidance delivered; immutable configuration-manifest resolution still pending | Makes Rusty's strongest runtime advantage understandable |
 | 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, and conflict review delivered; governed mutations pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
-| 8 | Durable agent/team inventory and read-only TeamTrace visualization | Not started | Exposes the already-shipped Agent Fabric before adding editing complexity |
+| 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, coordination-by-id, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Not started | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Not started | Completes safe multi-agent construction |
 | 11 | Evaluation experiment workspace and comparison report | Platform API needed | Converts the existing quality library into a product workflow |

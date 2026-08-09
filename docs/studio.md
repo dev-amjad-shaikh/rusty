@@ -10,6 +10,7 @@ studio/
 ├── test-recorder.mjs  ← node unit tests for the Flight Recorder timeline helpers
 ├── test-tasks.mjs     ← node unit tests for the durable-tasks view helpers
 ├── test-workbench.mjs ← node unit tests for the agent-creation and run journey
+├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
 └── test-all.mjs       ← discovers and runs every Studio test suite
 ```
@@ -30,6 +31,21 @@ studio/
   stay hidden in the evidence preview. A bounded, connection-scoped browser ledger preserves only safe
   run metadata (identity, status, timing, and stable error category); prompts and result payloads are
   deliberately not stored.
+- **Team observatory** — a read-only Agent Fabric workspace that explains the boundary between a
+  runnable assistant configuration and a mailbox-addressed durable agent identity. It groups registry
+  records by their declared `team_id` label (with an explicit **Ungrouped** bucket), shows pinned
+  capability manifests, and loads bounded operational health for the selected team: activation lease,
+  queued / in-flight / dead-letter mailbox counts, and lazily loaded supervision policy, attempts,
+  escalation, and deadline evidence for the selected member. Lease timestamps are interpreted against
+  the browser clock, expire visibly without a manual refresh, and are never presented as active when
+  missing or malformed. A coordination investigation accepts a
+  known coordination id, joins its typed contract and member dispositions with `TeamTrace`, and renders
+  a depth-aligned causal braid reordered from journal serialization into bounded parent-to-child
+  traversal, with journal and parent identity on every row. A trace is called connected only when the server says it is connected,
+  it has exactly one root, and every rendered node has a depth; detached or unreachable evidence gets
+  a prominent incomplete-evidence warning instead of a trustworthy-tree claim. Because the trace and
+  coordination record are separate observations, Studio warns when their identifiers or settlement
+  revisions do not reconcile.
 - **Governed memory ledger** — a tenant-wide workspace over `POST /memory/query` and
   `POST /memory/conflicts`. It retrieves active, candidate, expired, and superseded records so an
   operator can audit what Rusty retained rather than seeing only the current answer. Search and
@@ -222,6 +238,22 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   counts. Large content and raw-record views are visibly truncated to keep inspection responsive.
   Server-side pagination remains the proper next step for very large tenants. Semantic similarity
   search is not exposed by the current HTTP contract.
+- **The team observatory is an evidence surface, not a team editor.** `team_id` is currently a label on
+  durable agent registrations, not a separately versioned team resource. The registry endpoint is
+  unpaginated; Studio retains the first 500 valid identities for rendering and reports omissions. It
+  requests live status for at most 30 members of the selected label (always including the selected
+  identity) through one global four-request scheduler; stale queued selection and group scans are
+  cancelled before they reach the server. All other health remains explicitly unknown. Supervision is
+  loaded only for the selected identity through a separate two-request scheduler. Activation leases
+  are shown as live only when their owner and expiry are valid, and the selected lease changes to expired
+  at its observed deadline without a manual refresh. Coordination chips render at most 200 member
+  dispositions and disclose omissions; raw evidence excerpts are separately bounded. The server has no
+  coordination-list endpoint, so investigations start from an id the operator already knows. TeamTrace
+  and the durable coordination record are separate reconcile-on-read endpoints with no shared revision;
+  Studio observes trace first, record second, retries one inconsistent observation pair, and leaves an
+  explicit warning if the evidence still differs. The view intentionally offers no restart, cancellation, coordination submission, team
+  editing, or replay controls. Team creation, durable discovery, and coordinated replay need their own
+  runtime and safety contracts before those actions become honest affordances.
 - **Thread list is local-only.** The server (as of v0.4) has no `GET /threads`; the Studio's thread list lives in
   `localStorage`, keyed by server base URL, and is not shared across browsers or machines. Server restarts
   drop the in-memory thread registry — **Attach** re-creates a thread with the same id to re-attach to its
@@ -260,6 +292,13 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
   route compatibility, and explicit render bounds.
+- `node studio/test-fabric.mjs` — 68 assertions over bounded durable-agent normalization, deterministic
+  declared-team grouping, assistant-versus-runtime identity language, mailbox health precedence,
+  activation and supervision evidence, independent endpoint failures, tenant/request isolation,
+  keyboard navigation and focus continuity, responsive semantics, bounded coordination dispositions,
+  connected and incomplete causal TeamTrace ordering, deep stack-safe traversal, hostile future-wire
+  escaping, preserved Rust integer wire tokens, ordered evidence-reconciliation failures, and bounded
+  raw-evidence excerpts.
 - `node --check` on the extracted `<script>` block — syntax OK.
 - `node studio/test-recorder.mjs` — 107 unit tests over the Flight Recorder timeline helpers (extracted
   from the same `<script>` block, run under `vm`): `seq` ordering with missing-field fallbacks,
