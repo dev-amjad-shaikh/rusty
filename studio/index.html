@@ -789,6 +789,81 @@
   .fabric-compose-actions { display: grid; gap: 9px; margin-top: 12px; }
   .fabric-compose-actions button { width: 100%; }
   .fabric-compose-receipt { margin-top: 10px; border-left-color: var(--ok); }
+  .learn-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+  .learn-head h1 { margin-bottom: 4px; }
+  .learn-head p { margin: 0; max-width: 760px; color: var(--text-dim); font-size: 12px; }
+  .learn-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+  .learn-principle { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: center; margin: 14px 0; padding: 12px 14px; border: 1px solid #514a3c; border-radius: 8px; background: linear-gradient(100deg, #211d19, var(--bg-panel) 70%); }
+  .learn-principle div { min-width: 0; }
+  .learn-principle b, .learn-principle span { display: block; }
+  .learn-principle b { font-size: 11.5px; }
+  .learn-principle span { margin-top: 2px; color: var(--text-dim); font-size: 10.5px; }
+  .learn-principle .bridge { color: #9d8560; font: 700 16px var(--mono); }
+  .learn-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .learn-summary > div { padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); }
+  .learn-summary b { display: block; font: 700 19px var(--mono); }
+  .learn-summary span { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .55px; }
+  .learn-toolbar { display: grid; grid-template-columns: minmax(230px, 1fr) 170px 170px auto; gap: 8px; align-items: end; margin-bottom: 10px; }
+  .learn-toolbar label, .learn-action label { color: var(--text-dim); font-size: 10.5px; }
+  .learn-toolbar input, .learn-toolbar select, .learn-action input, .learn-action textarea { width: 100%; margin-top: 3px; background: var(--bg-inset); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 8px; font: 11px var(--mono); }
+  .learn-toolbar input[aria-invalid="true"], .learn-action input[aria-invalid="true"], .learn-action textarea[aria-invalid="true"] { border-color: var(--err); }
+  .learn-layout { display: grid; grid-template-columns: minmax(245px, .55fr) minmax(0, 1.45fr); min-height: 520px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg-panel); }
+  .learn-list { max-height: calc(100vh - 300px); min-height: 480px; overflow-y: auto; border-right: 1px solid var(--border); background: var(--bg-inset); }
+  .learn-item { width: 100%; padding: 11px 12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+  .learn-item:hover { background: var(--bg-raised); }
+  .learn-item[aria-selected="true"] { background: #29251f; box-shadow: inset 3px 0 #b17848; }
+  .learn-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .learn-item-head b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11.5px var(--mono); }
+  .learn-item p { margin: 5px 0; color: var(--text-dim); font-size: 10.5px; overflow-wrap: anywhere; }
+  .learn-item small { color: var(--text-dim); font: 10px var(--mono); }
+  .learn-status { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-dim); font: 9.5px var(--mono); white-space: nowrap; }
+  .learn-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+  .learn-status.evaluated::before { background: var(--warn); }
+  .learn-status.promoted::before { background: var(--ok); }
+  .learn-status.rolled_back::before { background: var(--interrupt); }
+  .learn-detail { min-width: 0; padding: 16px; background: var(--bg-panel); }
+  .learn-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+  .learn-detail-head h2 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+  .learn-detail-head p { margin: 4px 0 0; color: var(--text-dim); font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .learn-rail { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 18px 0; padding: 0; list-style: none; }
+  .learn-rail::before { content: ""; position: absolute; top: 13px; left: 10%; right: 10%; height: 1px; background: #514a3c; }
+  .learn-stage { position: relative; z-index: 1; padding-top: 26px; color: var(--text-faint); text-align: center; font-size: 10px; }
+  .learn-stage::before { content: ""; position: absolute; top: 8px; left: 50%; width: 11px; height: 11px; transform: translateX(-50%) rotate(45deg); border: 2px solid #655d50; background: var(--bg-panel); }
+  .learn-stage.done { color: var(--text); }
+  .learn-stage.done::before { border-color: #8ea471; background: #546848; }
+  .learn-stage.current::before { border-color: #d29b67; background: #9a6034; box-shadow: 0 0 0 4px rgba(178, 120, 69, .14); }
+  .learn-stage b, .learn-stage span { display: block; }
+  .learn-stage span { margin-top: 2px; color: var(--text-dim); }
+  .learn-dossier { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .learn-panel { min-width: 0; padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset); }
+  .learn-panel.wide { grid-column: 1 / -1; }
+  .learn-panel h3 { margin: 0 0 8px; font-size: 12px; }
+  .learn-kv { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 6px 11px; }
+  .learn-kv .k { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .45px; }
+  .learn-kv .v { font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .learn-verdict { padding: 9px 10px; border-left: 3px solid var(--ok); background: #1d281d; }
+  .learn-verdict.regressed { border-left-color: var(--err); background: #2b1c1b; }
+  .learn-verdict.unknown { border-left-color: var(--warn); background: #2a251b; }
+  .learn-verdict b, .learn-verdict span { display: block; }
+  .learn-verdict span { margin-top: 2px; color: var(--text-dim); font-size: 10.5px; }
+  .learn-versions { margin-top: 14px; }
+  .learn-version { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(130px, .8fr) minmax(120px, .6fr); gap: 10px; padding: 7px 9px; border-top: 1px solid var(--border); font: 10.5px var(--mono); }
+  .learn-version:first-child { border-top: 0; }
+  .learn-version span { min-width: 0; overflow-wrap: anywhere; }
+  .learn-action-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .learn-action { margin-top: 14px; padding: 13px; border: 1px solid #5b4938; border-radius: 8px; background: #211d19; }
+  .learn-action-choices .learn-action { min-width: 0; }
+  .learn-action h3 { margin: 0 0 4px; font-size: 13px; }
+  .learn-action > p { margin: 0 0 10px; color: var(--text-dim); font-size: 10.5px; }
+  .learn-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .learn-action .wide { grid-column: 1 / -1; }
+  .learn-action textarea { min-height: 68px; resize: vertical; }
+  .learn-confirm { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0; color: var(--text-dim); font-size: 10.5px; }
+  .learn-confirm input { width: auto; margin: 1px 0 0; }
+  .learn-action-buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+  .learn-action-error { margin: 9px 0; border-left-color: var(--err); }
+  .learn-raw summary { color: var(--text-dim); cursor: pointer; font-size: 10.5px; }
+  .learn-raw pre { max-height: 260px; overflow: auto; }
   @media (max-width: 1120px) {
     .agent-workshop { grid-template-columns: 1fr; }
     .agent-contract-panel { position: static; }
@@ -800,6 +875,9 @@
     .fabric-group { margin: 0; }
     .fabric-compose-grid { grid-template-columns: 1fr; }
     .fabric-compose-form { border-right: 0; border-bottom: 1px solid var(--border); }
+    .learn-layout { grid-template-columns: 1fr; }
+    .learn-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: auto; max-height: 360px; border-right: 0; border-bottom: 1px solid var(--border); }
+    .learn-item { border-right: 1px solid var(--border); }
   }
   @media (max-width: 900px) {
     aside { width: 250px; flex-basis: 250px; }
@@ -814,6 +892,11 @@
     .fabric-identity-note .bridge { transform: rotate(90deg); }
     .fabric-coordination-head { flex-direction: column; }
     .fabric-compose-head { flex-direction: column; }
+    .learn-principle { grid-template-columns: 1fr; }
+    .learn-principle .bridge { transform: rotate(90deg); justify-self: center; }
+    .learn-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .learn-toolbar label:first-child { grid-column: 1 / -1; }
+    .learn-action-choices { grid-template-columns: 1fr; }
   }
   @media (max-width: 680px) {
     #body { display: block; overflow-y: auto; }
@@ -864,6 +947,17 @@
     .fabric-coordination-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .fabric-trace-event { grid-template-columns: 1fr; gap: 2px; }
     .fabric-compose-meta, .fabric-assignment-grid, .fabric-assignment-task, .fabric-compose-options { grid-template-columns: 1fr; }
+    .learn-head { flex-direction: column; }
+    .learn-head-actions { justify-content: flex-start; }
+    .learn-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .learn-toolbar, .learn-dossier, .learn-action-grid { grid-template-columns: 1fr; }
+    .learn-toolbar label:first-child, .learn-panel.wide, .learn-action .wide { grid-column: auto; }
+    .learn-list { grid-template-columns: 1fr; max-height: 300px; }
+    .learn-detail-head { flex-direction: column; }
+    .learn-stage span { display: none; }
+    .learn-kv { grid-template-columns: 1fr; gap: 2px; }
+    .learn-kv .v { margin-bottom: 7px; }
+    .learn-version { grid-template-columns: 1fr; gap: 2px; }
     .rec-story-head { flex-direction: column; gap: 8px; }
     .rec-story-spine { grid-template-columns: 1fr; }
     .rec-story-step { padding-top: 10px; padding-left: 27px; }
@@ -919,6 +1013,10 @@
       <button class="small primary" id="btn-memory-open" style="width:100%">Open memory ledger</button>
       <div class="muted tiny" id="memory-side-count" style="margin:6px 2px 0">Connect to inspect governed memory.</div>
 
+      <h2 class="section">Learning</h2>
+      <button class="small primary" id="btn-learn-open" style="width:100%">Open learning control room</button>
+      <div class="muted tiny" id="learn-side-count" style="margin:6px 2px 0">Connect to review proposed changes.</div>
+
       <h2 class="section">Graphs</h2>
       <div id="graph-list"><div class="empty">Connect to a server.</div></div>
 
@@ -942,7 +1040,7 @@
     </aside>
 
     <main id="main">
-      <div class="empty" id="main-empty">Open the agent workbench, team observatory, or memory ledger—or select a thread to debug a run.</div>
+      <div class="empty" id="main-empty">Open the agent workbench, team observatory, memory ledger, or learning control room—or select a thread to debug a run.</div>
 
       <div id="agents-view" style="display:none">
         <div class="workbench-head">
@@ -1123,6 +1221,47 @@
         </div>
       </div>
 
+      <div id="learn-view" style="display:none" aria-labelledby="learn-title">
+        <div class="learn-head">
+          <div>
+            <h1 id="learn-title" tabindex="-1">Learning control room</h1>
+            <p>Review immutable proposed changes, inspect the evidence that tested them, and control exactly which version serves.</p>
+          </div>
+          <div class="learn-head-actions">
+            <span class="muted tiny" id="learn-statusline" role="status" aria-live="polite"></span>
+            <button class="small" id="btn-learn-refresh">Refresh evidence</button>
+          </div>
+        </div>
+
+        <div class="learn-principle" role="note" aria-label="Governed learning lifecycle">
+          <div><b>Immutable proposal</b><span>A content-addressed candidate; changing it creates a new identity.</span></div>
+          <div class="bridge" aria-hidden="true">→</div>
+          <div><b>Journaled evidence gate</b><span>Evaluation and approval evidence must clear the deployment envelope.</span></div>
+          <div class="bridge" aria-hidden="true">→</div>
+          <div><b>Reversible serving pointer</b><span>Promotion moves a version pointer; rollback restores the displaced version.</span></div>
+        </div>
+
+        <div class="learn-summary" id="learn-summary" aria-label="Learning candidate summary"></div>
+        <div class="learn-toolbar" role="search" aria-label="Filter learning candidates">
+          <label>Find a proposed change
+            <input id="inp-learn-search" type="search" placeholder="Search surface, candidate, distiller, evidence, or dataset…">
+          </label>
+          <label>Change type
+            <select id="sel-learn-kind"><option value="">All types</option><option value="prompt">Prompt</option><option value="policy">Policy</option><option value="memory_set">Memory set</option><option value="tool_permission">Tool permission</option></select>
+          </label>
+          <label>Lifecycle
+            <select id="sel-learn-status"><option value="">All stages</option><option value="created">Needs evaluation</option><option value="evaluated">Ready for gate</option><option value="promoted">Serving</option><option value="rolled_back">Rolled back</option></select>
+          </label>
+          <button class="small" id="btn-learn-clear">Clear</button>
+        </div>
+
+        <div class="learn-layout">
+          <div class="learn-list" id="learn-list" role="listbox" aria-label="Learning candidates" aria-describedby="learn-statusline"><div class="empty">Open the control room to load candidates.</div></div>
+          <section class="learn-detail" id="learn-detail" aria-label="Selected candidate evidence"><div class="empty">Select a proposed change to inspect its evidence and serving state.</div></section>
+        </div>
+        <span class="sr-only" id="learn-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+      </div>
+
       <div id="thread-view" style="display:none">
 
         <div id="thread-head">
@@ -1301,6 +1440,15 @@ const AGENT_MANIFEST_TEXT_LIMIT = 65536;
 const AGENT_MANIFEST_DEPTH_LIMIT = 16;
 const AGENT_MANIFEST_NODE_LIMIT = 2000;
 const AGENT_NUMBER_TOKENS = Symbol("rusty.json.number_tokens");
+const LEARN_SNAPSHOT_LIMIT = 200;
+const LEARN_RENDER_LIMIT = 100;
+const LEARN_VERSION_LIMIT = 200;
+const LEARN_ID_LIMIT = 256;
+const LEARN_SURFACE_LIMIT = 4096;
+const LEARN_TEXT_LIMIT = 4096;
+const LEARN_PREVIEW_LIMIT = 32768;
+const LEARN_REPLAY_LIMIT = 8;
+const LEARN_REPLAY_TEXT_LIMIT = 2048;
 const AGENT_RESERVED_IDS = new Set([
   "agent_leases", "agents", "assistants", "coordinations", "crons", "journals", "learn", "memory",
   "memory_artifacts", "outbox", "store", "tasks", "threads", "trigger_events", "triggers", "latest",
@@ -1320,7 +1468,7 @@ const store = {
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, partial } for fork compare
-  view: "thread",      // "thread" | "tasks" | "agents" | "fabric" | "memory" — active workspace
+  view: "thread",      // "thread" | "tasks" | "agents" | "fabric" | "memory" | "learn" — active workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
   agents: null,        // { list, selected, error } for the assistant-configuration workbench
@@ -1340,6 +1488,10 @@ const store = {
   memoryRequest: 0,    // generation guard: stale server/tenant responses never cross connection boundaries
   memorySearchTimer: null,
   memoryLifecycleTimer: null,
+  learn: null,         // bounded candidate/version evidence, filters, selection, and action drafts
+  learnUnsupported: false, // server build has no governed-learning routes
+  learnRequest: 0,     // generation guard for candidate/version reads and lifecycle actions
+  learnSearchTimer: null,
 };
 
 /* ---------------- persistence ---------------- */
@@ -1600,6 +1752,7 @@ async function connect() {
   if (connectionIdentityChanged(previousConnection, store.conn)) {
     store.memoryRequest += 1;
     store.fabricRequest += 1;
+    store.learnRequest += 1;
     clearTimeout(store.memorySearchTimer);
     store.memorySearchTimer = null;
     clearTimeout(store.memoryLifecycleTimer);
@@ -1618,6 +1771,10 @@ async function connect() {
     store.fabricLeaseTimer = null;
     store.memory = null;
     store.memoryUnsupported = false;
+    clearTimeout(store.learnSearchTimer);
+    store.learnSearchTimer = null;
+    store.learn = null;
+    store.learnUnsupported = false;
     $("agent-create-panel").style.display = "none";
     $("sel-agent-graph").innerHTML = "";
     for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
@@ -1632,6 +1789,7 @@ async function connect() {
   renderThreads();
   agentsLoad(true);
   fabricLoad(true);
+  learnLoad(true);
   renderMain();
 }
 
@@ -1753,6 +1911,7 @@ function renderMain() {
   const agents = store.view === "agents";
   const fabric = store.view === "fabric";
   const memory = store.view === "memory";
+  const learn = store.view === "learn";
   if (!fabric) {
     clearTimeout(store.fabricLeaseTimer);
     store.fabricLeaseTimer = null;
@@ -1765,9 +1924,10 @@ function renderMain() {
   $("agents-view").style.display = agents ? "block" : "none";
   $("fabric-view").style.display = fabric ? "block" : "none";
   $("memory-view").style.display = memory ? "block" : "none";
+  $("learn-view").style.display = learn ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !tasks && !agents && !fabric && !memory && !t ? "block" : "none";
-  $("thread-view").style.display = !tasks && !agents && !fabric && !memory && t ? "block" : "none";
+  $("main-empty").style.display = !tasks && !agents && !fabric && !memory && !learn && !t ? "block" : "none";
+  $("thread-view").style.display = !tasks && !agents && !fabric && !memory && !learn && t ? "block" : "none";
   if (tasks) {
     tasksLoad(true); // quiet: a pre-R0.6 server shows a panel note, not toast spam
     return;
@@ -1782,6 +1942,10 @@ function renderMain() {
   }
   if (memory) {
     memoryLoad(true);
+    return;
+  }
+  if (learn) {
+    learnLoad(true);
     return;
   }
   if (!t) return;
@@ -6406,6 +6570,956 @@ function openMemory() {
   $("memory-title").focus({ preventScroll: true });
 }
 
+/* ---------------- governed learning (R0.8) ----------------
+ * Candidate lifecycle and active-version evidence over GET /learn/candidates,
+ * GET /learn/versions, and the evaluate / promote / rollback transitions.
+ * A candidate is immutable; all mutations move its journaled lifecycle or a
+ * serving pointer. The view therefore renders evidence before action and
+ * re-reads durable state after every uncertain response.
+ * ------------------------------------------------------------------------- */
+
+function learnObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function learnText(value, maximum = LEARN_TEXT_LIMIT) {
+  const text = String(value == null ? "" : value);
+  const limit = Math.max(0, Number(maximum) || 0);
+  return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1))}…`;
+}
+
+function learnValidAuthor(value) {
+  const author = learnObject(value);
+  if (author.type === "system") return Object.keys(author).length === 1;
+  if (author.type === "agent") return learnValidWireText(author.agent_id, LEARN_ID_LIMIT);
+  if (author.type === "human") return learnValidWireText(author.human_id, LEARN_ID_LIMIT);
+  if (author.type === "distiller") return learnValidWireText(author.name, LEARN_ID_LIMIT);
+  return false;
+}
+
+function learnValidWireText(value, maximum = LEARN_TEXT_LIMIT) {
+  return typeof value === "string" && value.trim().length > 0 && agentUtf8Length(value) <= maximum &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function learnValidEvidenceSpan(value) {
+  if (value == null) return true;
+  const evidence = learnObject(value);
+  return ["run_ids", "correction_ids", "memory_ids"].every((key) =>
+    evidence[key] == null || (Array.isArray(evidence[key]) && evidence[key].every((id) => typeof id === "string")));
+}
+
+function learnValidContent(content) {
+  if (content.kind === "prompt") return typeof content.name === "string" && typeof content.prompt === "string";
+  if (content.kind === "policy") return ["retry", "timeout", "worker_placement", "concurrency", "checkpoint_placement"].includes(content.family) &&
+    Object.prototype.hasOwnProperty.call(content, "parameters");
+  if (content.kind === "memory_set") {
+    const scope = learnObject(content.scope);
+    return ["run", "agent", "team", "user", "tenant"].includes(scope.scope) && typeof scope.id === "string" &&
+      Array.isArray(content.adds) && (content.supersedes == null || (Array.isArray(content.supersedes) && content.supersedes.every((id) => typeof id === "string")));
+  }
+  return content.kind === "tool_permission" && typeof content.tool === "string" && ["narrow", "widen"].includes(content.direction);
+}
+
+function learnValidReplay(value) {
+  const replay = learnObject(value);
+  if (!Array.isArray(replay.fixture_ids) || replay.fixture_ids.length === 0 ||
+      !replay.fixture_ids.every((id) => learnValidWireText(id, LEARN_ID_LIMIT)) ||
+      new Set(replay.fixture_ids).size !== replay.fixture_ids.length ||
+      !Number.isSafeInteger(replay.matched) || replay.matched < 0 || replay.matched > replay.fixture_ids.length) return false;
+  if (replay.divergences != null && !Array.isArray(replay.divergences)) return false;
+  const divergences = replay.divergences || [];
+  const divergentIds = new Set();
+  for (const value of divergences) {
+    const divergence = learnObject(value);
+    if (!learnValidWireText(divergence.fixture_id, LEARN_ID_LIMIT) || !replay.fixture_ids.includes(divergence.fixture_id) ||
+        divergentIds.has(divergence.fixture_id) || !learnValidWireText(divergence.detail, LEARN_TEXT_LIMIT)) return false;
+    divergentIds.add(divergence.fixture_id);
+  }
+  return replay.matched + divergences.length === replay.fixture_ids.length;
+}
+
+function learnValidOptionalMetric(value) {
+  return value == null || (typeof value === "number" && Number.isFinite(value));
+}
+
+function learnValidVerdict(value) {
+  const verdict = learnObject(value);
+  return typeof verdict.regressed === "boolean" && learnValidWireText(verdict.target_metric, LEARN_ID_LIMIT) &&
+    learnValidOptionalMetric(verdict.baseline) && learnValidOptionalMetric(verdict.candidate) &&
+    learnValidOptionalMetric(verdict.delta);
+}
+
+function learnValidThresholds(value) {
+  const thresholds = learnObject(value);
+  return typeof thresholds.max_pass_rate_drop === "number" && Number.isFinite(thresholds.max_pass_rate_drop) &&
+    thresholds.max_pass_rate_drop >= 0 && typeof thresholds.max_latency_p95_ratio === "number" &&
+    Number.isFinite(thresholds.max_latency_p95_ratio) && thresholds.max_latency_p95_ratio > 0;
+}
+
+function learnValidEvaluationReport(value, datasetVersion) {
+  const report = learnObject(value);
+  const summary = learnObject(report.summary);
+  if (!learnValidWireText(report.name, LEARN_TEXT_LIMIT) || !Object.keys(summary).length) return false;
+  if (report.format_version != null && (!Number.isSafeInteger(report.format_version) || report.format_version < 1)) return false;
+  return report.dataset_version == null || report.dataset_version === datasetVersion;
+}
+
+function learnValidEvaluation(evaluation, candidateId) {
+  const datasetVersion = evaluation.dataset_version;
+  return evaluation.candidate_id === candidateId && learnValidWireText(datasetVersion, LEARN_ID_LIMIT) &&
+    learnValidReplay(evaluation.replay) && learnValidVerdict(evaluation.verdict) &&
+    learnValidThresholds(evaluation.thresholds) && learnValidAuthor(evaluation.evaluated_by) &&
+    typeof evaluation.evaluated_at === "string" && Number.isFinite(Date.parse(evaluation.evaluated_at)) &&
+    learnValidEvaluationReport(evaluation.baseline_report, datasetVersion) &&
+    learnValidEvaluationReport(evaluation.candidate_report, datasetVersion);
+}
+
+function learnValidLifecycle(record, candidateId, surface) {
+  const evaluation = learnObject(record.evaluation);
+  const promotion = learnObject(record.promotion);
+  const rollback = learnObject(record.rollback);
+  const hasEvaluation = Object.keys(evaluation).length > 0;
+  const hasPromotion = Object.keys(promotion).length > 0;
+  const hasRollback = Object.keys(rollback).length > 0;
+  if ((record.status === "created" && (hasEvaluation || hasPromotion || hasRollback)) ||
+      (record.status === "evaluated" && (!hasEvaluation || hasPromotion || hasRollback)) ||
+      (record.status === "promoted" && (!hasEvaluation || !hasPromotion || hasRollback)) ||
+      (record.status === "rolled_back" && (!hasEvaluation || !hasPromotion || !hasRollback))) return false;
+  if (hasEvaluation && !learnValidEvaluation(evaluation, candidateId)) return false;
+  if (hasPromotion && (promotion.candidate_id !== candidateId || promotion.surface !== surface ||
+      (promotion.previous != null && !/^[a-f0-9]{64}$/.test(String(promotion.previous))) ||
+      typeof promotion.promoted_at !== "string" || !Object.keys(learnObject(promotion.decision)).length)) return false;
+  if (hasRollback && (rollback.from !== candidateId || rollback.surface !== surface ||
+      (rollback.to != null && !/^[a-f0-9]{64}$/.test(String(rollback.to))) ||
+      typeof rollback.cause !== "string" || typeof rollback.rolled_back_at !== "string")) return false;
+  return true;
+}
+
+function learnNormalizeRecord(value) {
+  const record = learnObject(value);
+  const candidate = learnObject(record.candidate);
+  const content = learnObject(candidate.content);
+  const candidateId = String(candidate.candidate_id || "");
+  const status = String(record.status || "");
+  const kind = String(content.kind || "");
+  if (!/^[a-f0-9]{64}$/.test(candidateId)) return null;
+  if (!["created", "evaluated", "promoted", "rolled_back"].includes(status)) return null;
+  if (!["prompt", "policy", "memory_set", "tool_permission"].includes(kind)) return null;
+  if (!learnValidContent(content) || !learnValidAuthor(candidate.distilled_by) || !learnValidEvidenceSpan(candidate.evidence) ||
+      typeof candidate.created_at !== "string") return null;
+  const normalized = {
+    ...record,
+    candidate: { ...candidate, candidate_id: candidateId, content: { ...content, kind } },
+    status,
+  };
+  const surface = learnSurfaceKey(normalized);
+  if (!surface || agentUtf8Length(surface) > LEARN_SURFACE_LIMIT || /[\u0000-\u001f\u007f]/.test(surface)) return null;
+  if (!learnValidLifecycle(normalized, candidateId, surface)) return null;
+  return normalized;
+}
+
+function learnNormalizePointer(value) {
+  const pointer = learnObject(value);
+  const surface = String(pointer.surface || "");
+  if (!surface || agentUtf8Length(surface) > LEARN_SURFACE_LIMIT || /[\u0000-\u001f\u007f]/.test(surface)) return null;
+  const active = pointer.active == null ? null : String(pointer.active);
+  if (active != null && !/^[a-f0-9]{64}$/.test(active)) return null;
+  const hasCanary = pointer.canary != null;
+  const canary = learnObject(pointer.canary);
+  const candidateId = canary.candidate_id == null ? null : String(canary.candidate_id);
+  const fraction = Number(canary.fraction);
+  if (hasCanary && (!/^[a-f0-9]{64}$/.test(candidateId) || !Number.isFinite(fraction) || fraction <= 0 || fraction > 1)) return null;
+  return {
+    surface,
+    active,
+    canary: hasCanary
+      ? { candidate_id: candidateId, fraction } : null,
+  };
+}
+
+function learnKind(record) {
+  return String(learnObject(learnObject(record).candidate).content?.kind || "unknown");
+}
+
+function learnKindLabel(kind) {
+  return ({ prompt: "Prompt", policy: "Policy", memory_set: "Memory set", tool_permission: "Tool permission" })[kind] || "Unknown change";
+}
+
+function learnStatusLabel(status) {
+  return ({ created: "Needs evaluation", evaluated: "Ready for gate", promoted: "Serving", rolled_back: "Rolled back" })[status] || "Unknown";
+}
+
+function learnScopeAddressKey(scope) {
+  const value = learnObject(scope);
+  return `${String(value.scope)}:${String(value.id)}`;
+}
+
+function learnScopeAddress(scope) {
+  return learnText(learnScopeAddressKey(scope), 240);
+}
+
+function learnSurfaceKey(record) {
+  const content = learnObject(learnObject(learnObject(record).candidate).content);
+  if (content.kind === "prompt") return `prompt:${String(content.name)}`;
+  if (content.kind === "policy") return `policy:${String(content.family)}`;
+  if (content.kind === "memory_set") return `memory:${learnScopeAddressKey(content.scope)}`;
+  if (content.kind === "tool_permission") return `tool:${String(content.tool)}`;
+  return "unknown";
+}
+
+function learnSurface(record) {
+  return learnText(learnSurfaceKey(record), 256);
+}
+
+function learnCandidateTitle(record) {
+  const content = learnObject(learnObject(learnObject(record).candidate).content);
+  if (content.kind === "prompt") return learnText(content.name || "Unnamed prompt", 160);
+  if (content.kind === "policy") return `${learnText(content.family || "Unknown", 140)} policy`;
+  if (content.kind === "memory_set") return `${learnScopeAddress(content.scope)} memory`;
+  if (content.kind === "tool_permission") return `${learnText(content.tool || "Unknown tool", 120)} · ${learnText(content.direction || "changed", 32)}`;
+  return "Unknown candidate";
+}
+
+function learnCandidateId(record) {
+  return String(learnObject(learnObject(record).candidate).candidate_id || "");
+}
+
+function learnSearchText(record) {
+  const candidate = learnObject(learnObject(record).candidate);
+  const evaluation = learnObject(record && record.evaluation);
+  return [
+    learnCandidateId(record), learnSurface(record), learnCandidateTitle(record), learnKind(record),
+    record && record.status, memoryAuthorLabel(candidate.distilled_by), candidate.created_at,
+    evaluation.dataset_version, learnObject(evaluation.verdict).target_metric,
+    memoryJsonText(candidate.evidence, 3000), memoryJsonText(candidate.content, 5000),
+  ].join(" ").toLowerCase();
+}
+
+function learnBuildSearchIndex(records) {
+  const index = new Map();
+  for (const record of Array.isArray(records) ? records : []) index.set(learnCandidateId(record), learnSearchText(record));
+  return index;
+}
+
+function learnFilterRecords(records, filters, searchIndex) {
+  const f = learnObject(filters);
+  const query = String(f.search || "").trim().toLowerCase();
+  return (Array.isArray(records) ? records : []).filter((record) => {
+    if (f.kind && learnKind(record) !== f.kind) return false;
+    if (f.status && record.status !== f.status) return false;
+    const indexed = searchIndex instanceof Map ? searchIndex.get(learnCandidateId(record)) : null;
+    return !query || String(indexed == null ? learnSearchText(record) : indexed).includes(query);
+  });
+}
+
+function learnPointerFor(record, versions) {
+  const surface = learnSurfaceKey(record);
+  return (Array.isArray(versions) ? versions : []).find((pointer) => pointer && pointer.surface === surface) || null;
+}
+
+function learnServingState(record, pointer, versionsKnown = true) {
+  if (!versionsKnown) return { mode: "unknown", label: "Serving state unavailable" };
+  const id = learnCandidateId(record);
+  if (pointer && pointer.active === id) return { mode: "active", label: "Serving all new traffic" };
+  if (pointer && pointer.canary && pointer.canary.candidate_id === id) {
+    return { mode: "canary", label: `Canary on ${Math.round(pointer.canary.fraction * 10000) / 100}% of new runs` };
+  }
+  if (record && record.status === "promoted") return { mode: "mismatch", label: "Record says promoted, but this version no longer serves" };
+  return { mode: "inactive", label: pointer ? "Another immutable version serves" : "Static version serves" };
+}
+
+function learnStatusHtml(status) {
+  return `<span class="learn-status ${escapeHtml(status)}">${escapeHtml(learnStatusLabel(status))}</span>`;
+}
+
+function learnCandidateRowHtml(record) {
+  const candidate = learnObject(record && record.candidate);
+  return `<div class="learn-item-head"><b>${escapeHtml(learnCandidateTitle(record))}</b>${learnStatusHtml(record && record.status)}</div>` +
+    `<p>${escapeHtml(learnKindLabel(learnKind(record)))} · ${escapeHtml(learnSurface(record))}</p>` +
+    `<small>${escapeHtml(learnText(memoryAuthorLabel(candidate.distilled_by), 200))} · ${escapeHtml(learnText(candidate.created_at || "time unavailable", 80))}</small>`;
+}
+
+function learnSummaryHtml(records, versions, totals) {
+  const list = Array.isArray(records) ? records : [];
+  const count = (status) => list.filter((record) => record && record.status === status).length;
+  const opts = learnObject(totals);
+  const totalCandidates = Number.isFinite(Number(opts.candidates)) ? Number(opts.candidates) : list.length;
+  const totalVersions = Number.isFinite(Number(opts.versions)) ? Number(opts.versions) : (Array.isArray(versions) ? versions.length : 0);
+  const snapshot = opts.snapshotTruncated ? " · snapshot" : "";
+  return `<div><b>${totalCandidates}</b><span>Immutable candidates</span></div>` +
+    `<div><b>${count("created")}</b><span>Need evaluation${snapshot}</span></div>` +
+    `<div><b>${count("evaluated")}</b><span>Awaiting gate${snapshot}</span></div>` +
+    `<div><b>${totalVersions}</b><span>Serving surfaces</span></div>`;
+}
+
+function learnRailHtml(record, serving) {
+  const status = String(record && record.status || "created");
+  const index = ({ created: 0, evaluated: 1, promoted: 2, rolled_back: 3 })[status] ?? 0;
+  const labels = [
+    ["Observed", "immutable proposal"], ["Evaluated", "journaled evidence"],
+    ["Serving", "version pointer"], ["Recoverable", "byte-exact rollback"],
+  ];
+  return `<ol class="learn-rail" aria-label="Candidate lifecycle">` + labels.map(([label, hint], stage) => {
+    const done = stage <= index || (stage === 3 && serving && ["active", "canary"].includes(serving.mode));
+    const current = stage === index;
+    return `<li class="learn-stage${done ? " done" : ""}${current ? " current" : ""}"${current ? ' aria-current="step"' : ""}><b>${label}</b><span>${hint}</span></li>`;
+  }).join("") + `</ol>`;
+}
+
+function learnChangeHtml(record) {
+  const content = learnObject(learnObject(learnObject(record).candidate).content);
+  if (content.kind === "prompt") {
+    return `<div class="learn-kv"><span class="k">Prompt</span><span class="v">${escapeHtml(learnText(content.name || "unnamed", 160))}</span></div>` +
+      `<pre class="json">${escapeHtml(learnText(content.prompt || "", 4000))}</pre>`;
+  }
+  if (content.kind === "policy") {
+    return `<div class="learn-kv"><span class="k">Decision family</span><span class="v">${escapeHtml(learnText(content.family || "unknown", 160))}</span></div>` +
+      `<pre class="json">${escapeHtml(memoryJsonText(content.parameters, 12000))}</pre>`;
+  }
+  if (content.kind === "memory_set") {
+    const adds = Array.isArray(content.adds) ? content.adds : [];
+    const supersedes = Array.isArray(content.supersedes) ? content.supersedes : [];
+    return `<div class="learn-kv"><span class="k">Scope</span><span class="v">${escapeHtml(learnScopeAddress(content.scope))}</span>` +
+      `<span class="k">Adds</span><span class="v">${adds.length} immutable record${adds.length === 1 ? "" : "s"}</span>` +
+      `<span class="k">Supersedes</span><span class="v">${supersedes.length} record${supersedes.length === 1 ? "" : "s"}</span></div>` +
+      `<details class="learn-raw"><summary>Preview proposed records</summary><pre class="json">${escapeHtml(memoryJsonText({ adds, supersedes }, 12000))}</pre></details>`;
+  }
+  return `<div class="learn-kv"><span class="k">Tool</span><span class="v">${escapeHtml(learnText(content.tool || "unknown", 160))}</span>` +
+    `<span class="k">Grant direction</span><span class="v">${escapeHtml(learnText(content.direction || "unknown", 32))}</span></div>`;
+}
+
+function learnEvidenceCounts(candidate) {
+  const evidence = learnObject(candidate && candidate.evidence);
+  const count = (name) => Array.isArray(evidence[name]) ? evidence[name].length : 0;
+  return { runs: count("run_ids"), corrections: count("correction_ids"), memories: count("memory_ids") };
+}
+
+function learnVerdictHtml(evaluation) {
+  const value = learnObject(evaluation);
+  if (!Object.keys(value).length) return `<div class="learn-verdict unknown"><b>No evaluation recorded</b><span>Promotion is impossible until an evaluator journals evidence for this candidate.</span></div>`;
+  const verdict = learnObject(value.verdict);
+  const delta = Number(verdict.delta);
+  const hasDelta = Number.isFinite(delta);
+  const regressed = verdict.regressed === true;
+  const cls = regressed ? " regressed" : (!hasDelta ? " unknown" : "");
+  const headline = regressed ? "Regression detected" : (hasDelta ? "No threshold regression" : "Verdict lacks target movement");
+  const movement = hasDelta ? `${delta >= 0 ? "+" : ""}${delta}` : "unavailable";
+  return `<div class="learn-verdict${cls}"><b>${headline}</b><span>${escapeHtml(learnText(verdict.target_metric || "target metric unavailable", 160))} · movement ${escapeHtml(movement)} · dataset ${escapeHtml(learnText(value.dataset_version || "unknown", 160))}</span></div>`;
+}
+
+function learnEvaluationHtml(record) {
+  const evaluation = learnObject(record && record.evaluation);
+  if (!Object.keys(evaluation).length) return learnVerdictHtml(null);
+  const verdict = learnObject(evaluation.verdict);
+  const replay = learnObject(evaluation.replay);
+  const fixtures = Array.isArray(replay.fixture_ids) ? replay.fixture_ids : [];
+  const divergences = Array.isArray(replay.divergences) ? replay.divergences : [];
+  const thresholds = learnObject(evaluation.thresholds);
+  return learnVerdictHtml(evaluation) + `<div class="learn-kv" style="margin-top:9px">` +
+    `<span class="k">Baseline</span><span class="v">${escapeHtml(verdict.baseline ?? "unavailable")}</span>` +
+    `<span class="k">Candidate</span><span class="v">${escapeHtml(verdict.candidate ?? "unavailable")}</span>` +
+    `<span class="k">Replay</span><span class="v">${escapeHtml(`${replay.matched ?? 0}/${fixtures.length} matched · ${divergences.length} divergences`)}</span>` +
+    `<span class="k">Thresholds</span><span class="v">pass drop ≤ ${escapeHtml(thresholds.max_pass_rate_drop ?? "?")} · latency ratio ≤ ${escapeHtml(thresholds.max_latency_p95_ratio ?? "?")}</span>` +
+    `<span class="k">Evaluator</span><span class="v">${escapeHtml(learnText(memoryAuthorLabel(evaluation.evaluated_by), 200))} · ${escapeHtml(learnText(evaluation.evaluated_at || "time unavailable", 80))}</span></div>` +
+    `<details class="learn-raw"><summary>Inspect bounded evaluation reports</summary><pre class="json">${escapeHtml(memoryJsonText({ replay, baseline_report: evaluation.baseline_report, candidate_report: evaluation.candidate_report }, LEARN_PREVIEW_LIMIT))}</pre></details>`;
+}
+
+function learnServingHtml(record, pointer, versionsKnown) {
+  const serving = learnServingState(record, pointer, versionsKnown);
+  const active = pointer && pointer.active || "static version";
+  const canary = pointer && pointer.canary
+    ? `${pointer.canary.candidate_id} at ${Math.round(pointer.canary.fraction * 10000) / 100}%`
+    : "none";
+  return `<div class="learn-verdict${serving.mode === "mismatch" || serving.mode === "unknown" ? " unknown" : ""}"><b>${escapeHtml(serving.label)}</b><span>${escapeHtml(learnSurface(record))}</span></div>` +
+    `<div class="learn-kv" style="margin-top:9px"><span class="k">Full traffic</span><span class="v">${escapeHtml(active)}</span>` +
+    `<span class="k">Canary</span><span class="v">${escapeHtml(canary)}</span></div>`;
+}
+
+function learnVersionsHtml(versions, error) {
+  if (error) return `<div class="note learn-action-error"><b>Serving versions unavailable.</b> ${escapeHtml(learnText(error, LEARN_TEXT_LIMIT))}</div>`;
+  const list = Array.isArray(versions) ? versions : [];
+  if (!list.length) return `<div class="empty">No learned version pointer has moved yet; static versions serve.</div>`;
+  return `<div class="learn-versions">${list.slice(0, LEARN_VERSION_LIMIT).map((pointer) =>
+    `<div class="learn-version"><span>${escapeHtml(learnText(pointer.surface, 256))}</span><span>active · ${escapeHtml(pointer.active || "static")}</span><span>${pointer.canary ? `canary · ${escapeHtml(`${Math.round(pointer.canary.fraction * 10000) / 100}%`)}` : "no canary"}</span></div>`).join("")}</div>`;
+}
+
+function learnDraftFor(state, record, action) {
+  if (!state.drafts || typeof state.drafts !== "object") state.drafts = Object.create(null);
+  const id = learnCandidateId(record);
+  if (!state.drafts[id]) state.drafts[id] = Object.create(null);
+  if (!state.drafts[id][action]) {
+    const evidenceRuns = learnObject(learnObject(record).candidate).evidence?.run_ids;
+    const validEvidenceRuns = (Array.isArray(evidenceRuns) ? evidenceRuns : []).slice(0, LEARN_REPLAY_LIMIT)
+      .map(String).filter((runId) => runId && agentUtf8Length(runId) <= LEARN_ID_LIMIT && !/[\u0000-\u001f\u007f]/.test(runId));
+    const suggestedRun = validEvidenceRuns.length ? validEvidenceRuns[validEvidenceRuns.length - 1] : "";
+    state.drafts[id][action] = action === "evaluate"
+      ? { runId: suggestedRun, parent: "", replayRuns: validEvidenceRuns.join(", "),
+        dataset: "support-v1", metric: "run_pass_rate", passDrop: "0.05", latencyRatio: "1.25", acknowledge: false, error: null }
+      : action === "promote"
+        ? { runId: suggestedRun, parent: "", approvedBy: "", requiredEffectId: "", acknowledge: false, error: null }
+        : { runId: suggestedRun, parent: "", cause: "", acknowledge: false, error: null };
+  }
+  return state.drafts[id][action];
+}
+
+function learnValidateLink(runId, parent, errors) {
+  const run = String(runId || "").trim();
+  const causal = String(parent || "").trim();
+  if (!run) errors.push({ field: "runId", message: "Choose the completed run whose journal will record this transition." });
+  else if (agentUtf8Length(run) > LEARN_ID_LIMIT || /[\u0000-\u001f\u007f]/.test(run)) errors.push({ field: "runId", message: "Run ID must be a bounded printable identifier." });
+  if (causal && (agentUtf8Length(causal) > LEARN_ID_LIMIT || /[\u0000-\u001f\u007f]/.test(causal))) errors.push({ field: "parent", message: "Causal parent must be a bounded printable event identifier." });
+  return { run, causal };
+}
+
+function learnReplayRunIds(value) {
+  const text = String(value || "");
+  if (agentUtf8Length(text) > LEARN_REPLAY_TEXT_LIMIT) return { ids: [], error: "Replay run list must be at most 2 KiB." };
+  const ids = [...new Set(text.split(/[,\n]/).map((item) => item.trim()).filter(Boolean))];
+  if (!ids.length) return { ids, error: "Name at least one completed run so replay cleanliness is based on recorded evidence." };
+  if (ids.length > LEARN_REPLAY_LIMIT) return { ids: [], error: `At most ${LEARN_REPLAY_LIMIT} replay fixtures may be evaluated at once.` };
+  if (ids.some((id) => agentUtf8Length(id) > LEARN_ID_LIMIT || /[\u0000-\u001f\u007f]/.test(id))) {
+    return { ids: [], error: "Every replay run must be a bounded printable identifier." };
+  }
+  return { ids, error: null };
+}
+
+function learnEvaluatePayload(draft) {
+  const value = learnObject(draft), errors = [];
+  const link = learnValidateLink(value.runId, value.parent, errors);
+  const dataset = String(value.dataset || "").trim();
+  const metric = String(value.metric || "").trim();
+  const passDrop = Number(value.passDrop), latencyRatio = Number(value.latencyRatio);
+  const replay = learnReplayRunIds(value.replayRuns);
+  if (!dataset || agentUtf8Length(dataset) > LEARN_ID_LIMIT) errors.push({ field: "dataset", message: "Dataset version is required and must be at most 256 UTF-8 bytes." });
+  if (!metric || agentUtf8Length(metric) > LEARN_ID_LIMIT) errors.push({ field: "metric", message: "Target metric is required and must be at most 256 UTF-8 bytes." });
+  if (!Number.isFinite(passDrop) || passDrop < 0 || passDrop > 1) errors.push({ field: "passDrop", message: "Allowed pass-rate drop must be between 0 and 1." });
+  if (!Number.isFinite(latencyRatio) || latencyRatio <= 0 || latencyRatio > 100) errors.push({ field: "latencyRatio", message: "Allowed latency ratio must be greater than 0 and at most 100." });
+  if (replay.error) errors.push({ field: "replayRuns", message: replay.error });
+  if (!value.acknowledge) errors.push({ field: "acknowledge", message: "Confirm that this evaluation will be journaled against the named run and dataset." });
+  if (errors.length) return { errors, payload: null };
+  return { errors, replayRunIds: replay.ids, payload: {
+    request: { dataset_version: dataset, target_metric: metric,
+      thresholds: { max_pass_rate_drop: passDrop, max_latency_p95_ratio: latencyRatio }, replay_evidence: [] },
+    run_id: link.run, ...(link.causal ? { parent: link.causal } : {}),
+  } };
+}
+
+function learnPromotePayload(draft) {
+  const value = learnObject(draft), errors = [];
+  const link = learnValidateLink(value.runId, value.parent, errors);
+  const required = String(value.requiredEffectId || "").trim();
+  const approvedBy = String(value.approvedBy || "").trim();
+  if (required && !/^[a-f0-9]{64}$/.test(required)) errors.push({ field: "requiredEffectId", message: "The server-required approval scope is not a valid effect ID." });
+  if (required && (!approvedBy || agentUtf8Length(approvedBy) > LEARN_ID_LIMIT)) errors.push({ field: "approvedBy", message: "Name the bounded human or policy identity authorizing this exact promotion." });
+  if (!value.acknowledge) errors.push({ field: "acknowledge", message: "Confirm that this exact immutable candidate may move its serving pointer." });
+  if (errors.length) return { errors, payload: null };
+  return { errors, payload: {
+    run_id: link.run, ...(link.causal ? { parent: link.causal } : {}),
+    ...(required ? { approval: { effect_id: required, approved_by: approvedBy } } : {}),
+  } };
+}
+
+function learnRollbackPayload(draft) {
+  const value = learnObject(draft), errors = [];
+  const link = learnValidateLink(value.runId, value.parent, errors);
+  const cause = String(value.cause || "").trim();
+  if (!cause) errors.push({ field: "cause", message: "State the observed evidence or operator reason for rollback." });
+  else if (agentUtf8Length(cause) > LEARN_TEXT_LIMIT) errors.push({ field: "cause", message: "Rollback cause must be at most 4 KiB." });
+  if (!value.acknowledge) errors.push({ field: "acknowledge", message: "Confirm the serving pointer should return to the displaced immutable version." });
+  if (errors.length) return { errors, payload: null };
+  return { errors, payload: { run_id: link.run, cause, ...(link.causal ? { parent: link.causal } : {}) } };
+}
+
+function learnActionValidation(action, draft) {
+  if (action === "evaluate") return learnEvaluatePayload(draft);
+  if (action === "promote") return learnPromotePayload(draft);
+  return learnRollbackPayload(draft);
+}
+
+function learnFieldError(result, field) {
+  return (result.errors || []).some((error) => error.field === field);
+}
+
+function learnErrorListHtml(draft, result) {
+  const messages = [...(result.errors || []).map((error) => error.message)];
+  if (draft && draft.error) messages.unshift(draft.error);
+  return messages.length ? `<div class="note learn-action-error" role="alert" tabindex="-1"><b>Action blocked.</b><ul>${messages.map((message) => `<li>${escapeHtml(message)}</li>`).join("")}</ul></div>` : "";
+}
+
+function learnActionFormHtml(state, record, pointer, action) {
+  const status = record && record.status;
+  const serving = learnServingState(record, pointer, !state.versionsError);
+  const draft = learnDraftFor(state, record, action);
+  const result = learnActionValidation(action, draft);
+  const busy = Boolean(state.action);
+  const field = (name, label, value, options = {}) => `<label class="${options.wide ? "wide" : ""}">${label}<input data-learn-field="${name}" value="${escapeHtml(value || "")}"${options.type ? ` type="${options.type}"` : ""}${options.readonly ? " readonly" : ""}${options.max ? ` maxlength="${options.max}"` : ""} aria-invalid="${learnFieldError(result, name)}"></label>`;
+  const linkFields = field("runId", "Journal run · completed", draft.runId, { max: LEARN_ID_LIMIT }) +
+    field("parent", "Causal parent · optional", draft.parent, { max: LEARN_ID_LIMIT });
+  let fields = "", heading = "", copy = "", button = "";
+  if (action === "evaluate") {
+    heading = status === "evaluated" ? "Evaluate again on a new evidence version" : "Evaluate this candidate";
+    copy = "Studio resolves each named completed run into an integrity-checked replay fixture before Rusty compares baseline and candidate behavior and journals the verdict.";
+    fields = linkFields + field("dataset", "Dataset version", draft.dataset, { max: LEARN_ID_LIMIT }) +
+      field("metric", "Target metric", draft.metric, { max: LEARN_ID_LIMIT }) +
+      field("replayRuns", `Replay runs · 1–${LEARN_REPLAY_LIMIT}, comma or line separated`, draft.replayRuns, { max: LEARN_REPLAY_TEXT_LIMIT, wide: true }) +
+      field("passDrop", "Maximum pass-rate drop", draft.passDrop, { type: "number" }) +
+      field("latencyRatio", "Maximum p95 latency ratio", draft.latencyRatio, { type: "number" });
+    button = "Run journaled evaluation";
+  } else if (action === "promote") {
+    heading = draft.requiredEffectId ? "Record scoped approval and promote" : "Ask Rusty’s promotion gate";
+    copy = draft.requiredEffectId
+      ? "The deployment requires an attributed approval scoped to this candidate’s exact promotion effect. It cannot authorize another candidate."
+      : "The deployment envelope decides whether clean evidence may auto-promote, enter a canary, or requires a candidate-scoped approval. A refusal changes nothing.";
+    fields = linkFields + (draft.requiredEffectId
+      ? field("requiredEffectId", "Server-required effect ID", draft.requiredEffectId, { readonly: true, wide: true }) + field("approvedBy", "Approved by", draft.approvedBy, { max: LEARN_ID_LIMIT, wide: true })
+      : "");
+    button = draft.requiredEffectId ? "Approve exact candidate and promote" : "Check gate and promote";
+  } else {
+    heading = "Roll back the serving candidate";
+    copy = serving.mode === "canary" ? "This clears the canary binding; the full-traffic or static version keeps serving." : "This byte-exactly restores the version displaced by promotion, or the static floor when none preceded it.";
+    fields = linkFields + `<label class="wide">Observed reason and evidence<textarea data-learn-field="cause" maxlength="${LEARN_TEXT_LIMIT}" aria-invalid="${learnFieldError(result, "cause")}" placeholder="Regression in run …; gate observation …">${escapeHtml(draft.cause || "")}</textarea></label>`;
+    button = "Roll back serving version";
+  }
+  return `<form class="learn-action" data-learn-action="${action}" novalidate><h3>${escapeHtml(heading)}</h3><p>${escapeHtml(copy)}</p>` +
+    `<fieldset${busy ? " disabled" : ""} style="border:0;margin:0;padding:0"><div class="learn-action-grid">${fields}</div>` +
+    `<label class="learn-confirm"><input type="checkbox" data-learn-field="acknowledge"${draft.acknowledge ? " checked" : ""}>` +
+    `${action === "evaluate" ? "I confirm this evaluation is attributable to the named run, dataset, metric, and thresholds." : action === "promote" ? "I confirm this immutable candidate and its recorded evaluation may move the serving pointer under Rusty’s gate." : "I confirm this serving pointer should return to the displaced immutable version."}</label>` +
+    `${learnErrorListHtml(draft, result)}<div class="learn-action-buttons"><button class="primary" type="submit"${!result.payload || busy ? " disabled" : ""}>${busy ? "Reconciling durable state…" : escapeHtml(button)}</button></div></fieldset></form>`;
+}
+
+function learnActionHtml(state, record, pointer) {
+  const status = record && record.status;
+  const serving = learnServingState(record, pointer, !state.versionsError);
+  const pointerBlocked = `<div class="learn-action"><h3>Serving evidence required</h3><p>Studio will not move a version pointer while the current pointer cannot be verified. Refresh after the version endpoint recovers.</p></div>`;
+  if (status === "created") return learnActionFormHtml(state, record, pointer, "evaluate");
+  if (status === "evaluated") {
+    const promote = state.versionsError ? pointerBlocked : learnActionFormHtml(state, record, pointer, "promote");
+    return `<div class="learn-action-choices">${promote}${learnActionFormHtml(state, record, pointer, "evaluate")}</div>`;
+  }
+  if (status === "promoted" && state.versionsError) return pointerBlocked;
+  if (status === "promoted" && ["active", "canary"].includes(serving.mode)) {
+    return learnActionFormHtml(state, record, pointer, "rollback");
+  }
+  const explanation = status === "rolled_back"
+    ? "This immutable candidate is settled as rolled back. A changed proposal must be distilled as a new candidate."
+    : status === "promoted" && serving.mode === "mismatch"
+      ? "This candidate no longer owns the serving pointer. Refresh and roll back the version that actually serves."
+      : "No lifecycle action is available from this evidence state.";
+  return `<div class="learn-action"><h3>No mutation available</h3><p>${escapeHtml(explanation)}</p></div>`;
+}
+
+function learnDetailHtml(state, record) {
+  if (!record) return `<div class="empty">Select a proposed change to inspect its evidence and serving state.</div>`;
+  const candidate = learnObject(record.candidate);
+  const counts = learnEvidenceCounts(candidate);
+  const pointer = learnPointerFor(record, state.versions);
+  const serving = learnServingState(record, pointer, !state.versionsError);
+  const promotion = learnObject(record.promotion);
+  const rollback = learnObject(record.rollback);
+  return `<div class="learn-detail-head"><div><h2 id="learn-detail-title" tabindex="-1">${escapeHtml(learnCandidateTitle(record))}</h2>` +
+    `<p>${escapeHtml(learnCandidateId(record))}</p></div>${learnStatusHtml(record.status)}</div>` +
+    learnRailHtml(record, serving) +
+    `<div class="learn-dossier"><section class="learn-panel"><h3>Proposed change</h3>${learnChangeHtml(record)}</section>` +
+    `<section class="learn-panel"><h3>Identity and provenance</h3><div class="learn-kv">` +
+      `<span class="k">Surface</span><span class="v">${escapeHtml(learnSurface(record))}</span>` +
+      `<span class="k">Distilled by</span><span class="v">${escapeHtml(learnText(memoryAuthorLabel(candidate.distilled_by), 200))}</span>` +
+      `<span class="k">Created</span><span class="v">${escapeHtml(learnText(candidate.created_at || "unavailable", 80))}</span>` +
+      `<span class="k">Evidence span</span><span class="v">${counts.runs} runs · ${counts.corrections} corrections · ${counts.memories} memories</span></div></section>` +
+    `<section class="learn-panel wide"><h3>Evaluation evidence</h3>${learnEvaluationHtml(record)}</section>` +
+    `<section class="learn-panel"><h3>Serving pointer</h3>${learnServingHtml(record, pointer, !state.versionsError)}</section>` +
+    `<section class="learn-panel"><h3>Recovery receipt</h3><div class="learn-kv">` +
+      `<span class="k">Promoted</span><span class="v">${escapeHtml(learnText(promotion.promoted_at || "not promoted", 80))}</span>` +
+      `<span class="k">Previous</span><span class="v">${escapeHtml(learnText(promotion.previous || "static version", LEARN_ID_LIMIT))}</span>` +
+      `<span class="k">Rolled back</span><span class="v">${escapeHtml(learnText(rollback.rolled_back_at || "not rolled back", 80))}</span>` +
+      `<span class="k">Restored</span><span class="v">${escapeHtml(learnText(rollback.to || (rollback.rolled_back_at ? "static version" : "—"), LEARN_ID_LIMIT))}</span></div></section></div>` +
+    (state.notice ? `<div class="note"><b>Transition status.</b> ${escapeHtml(state.notice)}</div>` : "") +
+    learnActionHtml(state, record, pointer) +
+    `<details class="learn-raw" style="margin-top:12px"><summary>Inspect bounded immutable candidate record</summary><pre class="json">${escapeHtml(memoryJsonText(record, LEARN_PREVIEW_LIMIT))}</pre></details>` +
+    `<section class="learn-panel wide" style="margin-top:14px"><h3>All serving surfaces</h3>${learnVersionsHtml(state.versions, state.versionsError)}</section>`;
+}
+
+function learnErrorHtml(status, body) {
+  if (status === 404 && (!body || body.raw !== undefined)) {
+    return `<div class="note">This server build does not expose the governed learning lifecycle. Upgrade Rusty Server to use the candidate control room.</div>`;
+  }
+  return `<div class="note">${escapeHtml(learnText(body && (body.message || body.error) || `Learning evidence could not be loaded (HTTP ${status || "?"}).`, LEARN_TEXT_LIMIT))}</div>`;
+}
+
+function learnRequestCurrent(request, connection) {
+  return Boolean(request === store.learnRequest && connection && store.conn &&
+    connection.baseUrl === store.conn.baseUrl && connection.apiKey === store.conn.apiKey);
+}
+
+function learnCandidateSnapshot(payload) {
+  const body = learnObject(payload);
+  if (!Array.isArray(body.candidates)) {
+    return { records: [], total: 0, truncated: false, error: "The candidate response is malformed; Studio will not infer an empty learning state." };
+  }
+  const retained = body.candidates.slice(0, LEARN_SNAPSHOT_LIMIT);
+  const records = retained.map(learnNormalizeRecord);
+  if (records.some((record) => !record)) {
+    return { records: [], total: body.candidates.length, truncated: body.candidates.length > LEARN_SNAPSHOT_LIMIT,
+      error: "At least one retained candidate violates the immutable learning contract; actions are blocked." };
+  }
+  if (new Set(records.map(learnCandidateId)).size !== records.length) {
+    return { records: [], total: body.candidates.length, truncated: body.candidates.length > LEARN_SNAPSHOT_LIMIT,
+      error: "The candidate response repeats an immutable identity; actions are blocked." };
+  }
+  records.sort((left, right) => String(right.candidate.created_at || "").localeCompare(String(left.candidate.created_at || "")) ||
+    learnCandidateId(left).localeCompare(learnCandidateId(right)));
+  return { records, total: body.candidates.length, truncated: body.candidates.length > LEARN_SNAPSHOT_LIMIT, error: null };
+}
+
+function learnVersionSnapshot(payload) {
+  const body = learnObject(payload);
+  if (!Array.isArray(body.versions)) {
+    return { versions: [], total: 0, error: "The serving-pointer response is malformed; current serving state is unavailable." };
+  }
+  if (body.versions.length > LEARN_VERSION_LIMIT) {
+    return { versions: [], total: body.versions.length,
+      error: `The server returned more than ${LEARN_VERSION_LIMIT} serving surfaces without pagination; pointer-changing actions are blocked.` };
+  }
+  const versions = body.versions.map(learnNormalizePointer);
+  if (versions.some((pointer) => !pointer)) {
+    return { versions: [], total: body.versions.length,
+      error: "At least one serving pointer violates the immutable version contract; pointer-changing actions are blocked." };
+  }
+  if (new Set(versions.map((pointer) => pointer.surface)).size !== versions.length) {
+    return { versions: [], total: body.versions.length,
+      error: "The serving-pointer response repeats a surface; pointer-changing actions are blocked." };
+  }
+  return { versions, total: body.versions.length, error: null };
+}
+
+async function learnLoad(quiet) {
+  if (store.learn && store.learn.loading) return { candidates: false, versions: false, skipped: true };
+  const previous = store.learn || {};
+  const request = ++store.learnRequest;
+  const connection = store.conn && { ...store.conn };
+  if (!connection) {
+    store.learn = { records: [], versions: [], selected: null, drafts: Object.create(null), action: null,
+      loading: false, error: `<div class="note">Connect to a Rusty server before opening governed learning.</div>`,
+      versionsError: null, totalCandidates: 0, totalVersions: 0, snapshotTruncated: false, searchIndex: new Map(), notice: null };
+    learnRender();
+    return { candidates: false, versions: false };
+  }
+  store.learn = { ...previous, loading: true, action: null, notice: null };
+  if (store.view === "learn") learnRender();
+  const [candidatesResult, versionsResult] = await Promise.allSettled([
+    apiForConnection(connection, "GET", "/learn/candidates"),
+    apiForConnection(connection, "GET", "/learn/versions"),
+  ]);
+  if (!learnRequestCurrent(request, connection)) return { candidates: false, versions: false, stale: true };
+  if (candidatesResult.status === "rejected") {
+    const error = candidatesResult.reason || {};
+    const noRoute = error.status === 404 && (!error.body || error.body.raw !== undefined);
+    store.learnUnsupported = noRoute;
+    store.learn = { records: [], versions: [], selected: null, drafts: previous.drafts || Object.create(null), action: null,
+      loading: false, error: learnErrorHtml(error.status, error.body), versionsError: null,
+      totalCandidates: 0, totalVersions: 0, snapshotTruncated: false, searchIndex: new Map(), notice: null };
+    $("learn-side-count").textContent = noRoute ? "Learning is unavailable on this server build." : "Learning evidence could not be loaded.";
+    if (!quiet && !noRoute) toast(error.message || "Learning evidence could not be loaded.", "err");
+    learnRender();
+    return { candidates: false, versions: false };
+  }
+  const candidates = learnCandidateSnapshot(candidatesResult.value);
+  if (candidates.error) {
+    store.learn = { records: [], versions: [], selected: null, drafts: previous.drafts || Object.create(null), action: null,
+      loading: false, error: `<div class="note learn-action-error">${escapeHtml(candidates.error)}</div>`, versionsError: null,
+      totalCandidates: candidates.total, totalVersions: 0, snapshotTruncated: candidates.truncated, searchIndex: new Map(), notice: null };
+    $("learn-side-count").textContent = "Learning evidence violates the expected contract.";
+    learnRender();
+    return { candidates: false, versions: false };
+  }
+  const records = candidates.records;
+  let versions = [], versionsError = null, totalVersions = 0;
+  if (versionsResult.status === "fulfilled") {
+    const snapshot = learnVersionSnapshot(versionsResult.value);
+    totalVersions = snapshot.total;
+    versions = snapshot.versions;
+    versionsError = snapshot.error;
+  } else {
+    const error = versionsResult.reason || {};
+    versionsError = error.message || "Active version pointers could not be loaded.";
+  }
+  const selected = previous.selected && records.some((record) => learnCandidateId(record) === previous.selected)
+    ? previous.selected : (records[0] && learnCandidateId(records[0])) || null;
+  store.learnUnsupported = false;
+  store.learn = {
+    records, versions, selected, drafts: previous.drafts || Object.create(null), action: null,
+    loading: false, error: null, versionsError, totalCandidates: candidates.total, totalVersions,
+    snapshotTruncated: candidates.truncated, searchIndex: learnBuildSearchIndex(records), notice: null,
+  };
+  $("learn-side-count").textContent = `${candidates.total} candidate${candidates.total === 1 ? "" : "s"} · ` +
+    (versionsError ? "serving state unavailable" : `${totalVersions} serving surface${totalVersions === 1 ? "" : "s"}`);
+  learnRender();
+  return { candidates: true, versions: !versionsError };
+}
+
+function learnFilters() {
+  return { search: $("inp-learn-search").value, kind: $("sel-learn-kind").value, status: $("sel-learn-status").value };
+}
+
+function learnRender() {
+  const state = store.learn;
+  const list = $("learn-list"), detail = $("learn-detail");
+  if (!state || state.loading) {
+    $("learn-summary").innerHTML = "";
+    $("learn-statusline").textContent = "loading learning evidence…";
+    $("btn-learn-refresh").disabled = true;
+    list.innerHTML = `<div class="empty">Loading immutable candidates and serving pointers…</div>`;
+    detail.innerHTML = `<div class="empty">Waiting for governed evidence.</div>`;
+    return;
+  }
+  $("btn-learn-refresh").disabled = Boolean(state.action);
+  if (state.error) {
+    $("learn-summary").innerHTML = "";
+    $("learn-statusline").textContent = "unavailable";
+    list.innerHTML = state.error;
+    detail.innerHTML = `<div class="empty">Candidate evidence unavailable.</div>`;
+    return;
+  }
+  $("learn-summary").innerHTML = learnSummaryHtml(state.records, state.versions,
+    { candidates: state.totalCandidates, versions: state.totalVersions, snapshotTruncated: state.snapshotTruncated });
+  const filtered = learnFilterRecords(state.records, learnFilters(), state.searchIndex);
+  const shown = filtered.slice(0, LEARN_RENDER_LIMIT);
+  $("learn-statusline").textContent = `${filtered.length} matching · ${state.totalCandidates} retained` +
+    (state.snapshotTruncated ? ` · searching ${state.records.length}-candidate audit snapshot` : "") +
+    (filtered.length > shown.length ? ` · showing first ${shown.length}` : "") +
+    (state.versionsError ? " · serving state unavailable" : "");
+  if (!shown.length) {
+    list.innerHTML = `<div class="empty">No candidate ${state.snapshotTruncated ? "in this audit snapshot " : ""}matches these filters.</div>`;
+    detail.innerHTML = `<div class="empty">Clear filters or select another lifecycle stage.</div>`;
+    return;
+  }
+  if (!shown.some((record) => learnCandidateId(record) === state.selected)) state.selected = learnCandidateId(shown[0]);
+  list.innerHTML = shown.map((record) => {
+    const id = learnCandidateId(record), selected = id === state.selected;
+    return `<button class="learn-item" type="button" role="option" data-learn-id="${escapeHtml(id)}" aria-selected="${selected}" tabindex="${selected ? "0" : "-1"}"${state.action ? " disabled" : ""} aria-label="Inspect ${escapeHtml(learnCandidateTitle(record))}, ${escapeHtml(learnStatusLabel(record.status))}">${learnCandidateRowHtml(record)}</button>`;
+  }).join("");
+  const selected = state.records.find((record) => learnCandidateId(record) === state.selected);
+  detail.innerHTML = learnDetailHtml(state, selected);
+}
+
+function learnSelect(candidateId, focusDetail) {
+  const state = store.learn;
+  if (!state || state.action || !state.records.some((record) => learnCandidateId(record) === candidateId)) return false;
+  state.selected = candidateId;
+  state.notice = null;
+  learnRender();
+  if (focusDetail) $("learn-detail-title")?.focus({ preventScroll: true });
+  else $("learn-list").querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+  return true;
+}
+
+function learnClearFilters() {
+  clearTimeout(store.learnSearchTimer);
+  store.learnSearchTimer = null;
+  $("inp-learn-search").value = "";
+  $("sel-learn-kind").value = "";
+  $("sel-learn-status").value = "";
+  learnRender();
+  $("inp-learn-search").focus({ preventScroll: true });
+}
+
+function learnPromotionRequiredEffect(error) {
+  const message = String(learnObject(error && error.body).message || error && error.message || "");
+  const match = message.match(/effect id ([a-f0-9]{64})(?:\b|$)/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function learnActionPath(candidateId, action) {
+  return `/learn/candidates/${encodeURIComponent(candidateId)}/${action === "evaluate" ? "evaluate" : action === "promote" ? "promote" : "rollback"}`;
+}
+
+function learnRefusalMessage(error) {
+  const message = String(learnObject(error && error.body).message || error && error.message || "");
+  if (/no candidate evaluator is configured/i.test(message)) {
+    return "This server cannot evaluate learning candidates yet. Configure a candidate evaluator and its dataset source, then refresh the evidence.";
+  }
+  return learnText(message || "Rusty refused the lifecycle transition.", LEARN_TEXT_LIMIT);
+}
+
+function learnConflictNeedsRefresh(error) {
+  return Number(error && error.status) === 409 && !/no candidate evaluator is configured/i.test(
+    String(learnObject(error && error.body).message || error && error.message || ""));
+}
+
+function learnFinalizedRunEvidence(eventFeed, runId) {
+  const expected = String(runId || "");
+  const events = learnObject(eventFeed);
+  if (String(events.run_id || "") !== expected || !Array.isArray(events.events)) {
+    return { error: `Run ${expected} did not return its exact journal status.` };
+  }
+  if (events.complete !== true) {
+    return { error: `Run ${expected} is still active; only a finalized journal can enter an evaluation gate.` };
+  }
+  return { error: null };
+}
+
+function learnReplayEvidenceJournal(fixture, eventFeed, runId) {
+  const expected = String(runId || "");
+  const finalized = learnFinalizedRunEvidence(eventFeed, expected);
+  if (finalized.error) return { journal: null, error: finalized.error };
+  const journal = learnObject(fixture).journal;
+  if (!journal || typeof journal !== "object" || String(journal.run_id || "") !== expected) {
+    return { journal: null, error: `Replay fixture ${expected} did not return its exact journal.` };
+  }
+  return { journal, error: null };
+}
+
+function learnTransitionMessage(action, outcome, refresh, detail) {
+  const reads = learnObject(refresh);
+  const candidatesKnown = reads.candidates === true;
+  const versionsKnown = reads.versions === true;
+  const accepted = action === "evaluate" ? "Evaluation recorded." : action === "promote" ? "Promotion admitted." : "Rollback recorded.";
+  if (outcome === "confirmed") {
+    if (!candidatesKnown) return `${accepted} Rusty confirmed the receipt, but Studio could not reload candidate evidence. Refresh before another action.`;
+    if (!versionsKnown) return `${accepted} Candidate evidence refreshed, but the current serving pointer could not be verified. Refresh before another pointer action.`;
+    return action === "evaluate" ? `${accepted} Review the refreshed verdict before promotion.` :
+      action === "promote" ? `${accepted} The refreshed serving pointer is authoritative.` :
+        `${accepted} The refreshed pointer shows which immutable version serves now.`;
+  }
+  const diagnosis = detail ? ` ${learnText(detail, LEARN_TEXT_LIMIT)}` : "";
+  if (outcome === "conflict") {
+    return candidatesKnown && versionsKnown
+      ? `Rusty refused this request because durable state changed. Studio refreshed the settled lifecycle and serving pointer.${diagnosis}`
+      : `Rusty refused this request because durable state changed, but Studio could not fully refresh the settled evidence. Refresh before another action.${diagnosis}`;
+  }
+  return candidatesKnown && versionsKnown
+    ? "The transition receipt was not confirmed. Studio re-read durable candidate and serving-pointer state; review it before acting again."
+    : "The transition receipt was not confirmed, and Studio could not fully re-read durable candidate and serving-pointer state. Do not retry until refresh succeeds.";
+}
+
+function learnShowRefreshResult(candidateId, message, connection, refresh) {
+  if (!connection || !store.conn || connection.baseUrl !== store.conn.baseUrl || connection.apiKey !== store.conn.apiKey ||
+      learnObject(refresh).stale || learnObject(refresh).skipped) return;
+  if (store.learn && !store.learn.error) {
+    store.learn.selected = store.learn.records.some((item) => learnCandidateId(item) === candidateId) ? candidateId : store.learn.selected;
+    store.learn.notice = message;
+    learnRender();
+    $("learn-detail-title")?.focus({ preventScroll: true });
+  }
+  $("learn-announcer").textContent = message;
+}
+
+async function learnSubmitAction(form) {
+  const state = store.learn;
+  const action = form && form.dataset.learnAction;
+  const record = state && state.records.find((item) => learnCandidateId(item) === state.selected);
+  if (!state || !record || state.action || !["evaluate", "promote", "rollback"].includes(action)) return;
+  const draft = learnDraftFor(state, record, action);
+  const result = learnActionValidation(action, draft);
+  if (!result.payload) {
+    draft.error = null;
+    learnRender();
+    form = $("learn-detail").querySelector(`[data-learn-action="${action}"]`);
+    const invalid = form && form.querySelector('[aria-invalid="true"]');
+    (invalid || form)?.focus({ preventScroll: true });
+    $("learn-announcer").textContent = `Action has ${result.errors.length} validation issue${result.errors.length === 1 ? "" : "s"}.`;
+    return;
+  }
+  const candidateId = learnCandidateId(record);
+  const request = store.learnRequest;
+  const connection = store.conn && { ...store.conn };
+  state.action = { candidateId, action };
+  state.notice = null;
+  draft.error = null;
+  learnRender();
+  $("learn-detail-title")?.focus({ preventScroll: true });
+  $("learn-announcer").textContent = `${action === "evaluate" ? "Running evaluation" : action === "promote" ? "Checking promotion gate" : "Rolling back serving version"}.`;
+  let posted = false;
+  try {
+    if (action === "evaluate") {
+      const evidence = await Promise.all(result.replayRunIds.map(async (runId) => {
+        const eventFeed = await apiForConnection(connection, "GET", `/runs/${encodeURIComponent(runId)}/events`);
+        const finalized = learnFinalizedRunEvidence(eventFeed, runId);
+        if (finalized.error) throw new Error(finalized.error);
+        const fixture = await apiForConnection(connection, "GET", `/runs/${encodeURIComponent(runId)}/fixture`);
+        const checked = learnReplayEvidenceJournal(fixture, eventFeed, runId);
+        if (checked.error) throw new Error(checked.error);
+        return checked.journal;
+      }));
+      if (!learnRequestCurrent(request, connection) || store.learn !== state) return;
+      result.payload.request.replay_evidence = evidence;
+    }
+    posted = true;
+    await apiForConnection(connection, "POST", learnActionPath(candidateId, action), result.payload);
+    if (!learnRequestCurrent(request, connection) || store.learn !== state) return;
+    state.action = null;
+    draft.acknowledge = false;
+    const refresh = await learnLoad(true);
+    learnShowRefreshResult(candidateId, learnTransitionMessage(action, "confirmed", refresh), connection, refresh);
+  } catch (error) {
+    if (!learnRequestCurrent(request, connection) || store.learn !== state) return;
+    state.action = null;
+    if (!posted) {
+      draft.acknowledge = false;
+      draft.error = error.message || "Replay evidence could not be loaded.";
+      learnRender();
+      $("learn-detail").querySelector('[role="alert"]')?.focus({ preventScroll: true });
+      $("learn-announcer").textContent = `Evaluation was not started. ${draft.error}`;
+      return;
+    }
+    if (action === "promote" && Number(error.status) === 403) {
+      const effectId = learnPromotionRequiredEffect(error);
+      if (effectId) draft.requiredEffectId = effectId;
+      draft.acknowledge = false;
+      draft.error = effectId
+        ? "Rusty requires a human approval scoped to this exact candidate. Name the approver, review the effect ID, and confirm again."
+        : (error.message || "Rusty’s promotion envelope requires an approval this form could not prepare.");
+      learnRender();
+      $("learn-detail").querySelector('[data-learn-field="approvedBy"]')?.focus({ preventScroll: true });
+      $("learn-announcer").textContent = "Promotion refused without mutation. Candidate-scoped approval is required.";
+      return;
+    }
+    if (learnConflictNeedsRefresh(error)) {
+      const diagnosis = learnRefusalMessage(error);
+      const refresh = await learnLoad(true);
+      learnShowRefreshResult(candidateId, learnTransitionMessage(action, "conflict", refresh, diagnosis), connection, refresh);
+      return;
+    }
+    // Network failures and 5xx responses can leave the receipt uncertain;
+    // confirmed contract refusals remain in-place with their diagnosis.
+    const ambiguous = ![400, 403, 404, 409, 422].includes(Number(error.status));
+    if (ambiguous) {
+      const refresh = await learnLoad(true);
+      learnShowRefreshResult(candidateId, learnTransitionMessage(action, "ambiguous", refresh), connection, refresh);
+      return;
+    }
+    draft.acknowledge = false;
+    draft.error = learnRefusalMessage(error);
+    learnRender();
+    $("learn-detail").querySelector('[role="alert"]')?.focus({ preventScroll: true });
+    $("learn-announcer").textContent = `Transition refused without a confirmed change. ${draft.error}`;
+  }
+}
+
+function learnHandleEdit(event) {
+  const state = store.learn;
+  const record = state && state.records.find((item) => learnCandidateId(item) === state.selected);
+  const form = event.target && event.target.closest("[data-learn-action]");
+  const field = event.target && event.target.dataset.learnField;
+  if (!state || !record || !form || !field || state.action) return;
+  const action = form.dataset.learnAction;
+  const draft = learnDraftFor(state, record, action);
+  draft[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+  draft.error = null;
+  const result = learnActionValidation(action, draft);
+  form.querySelector('button[type="submit"]').disabled = !result.payload;
+  event.target.setAttribute("aria-invalid", String(learnFieldError(result, field)));
+  const alert = form.querySelector('[role="alert"]');
+  if (alert) alert.remove();
+}
+
+function openLearn() {
+  store.view = "learn";
+  renderMain();
+  $("main").scrollTop = 0;
+  $("learn-title").focus({ preventScroll: true });
+}
+
 /* ---------------- durable tasks (R0.6) ----------------
  * Control-plane view over the task queue: GET /tasks?status=… (the list
  * payload doubles as the detail source — GET /tasks/{id} returns the same
@@ -6911,6 +8025,47 @@ function init() {
   $("memory-detail").addEventListener("click", (e) => {
     const target = e.target.closest("[data-memory-select]");
     if (target) memorySelect(target.getAttribute("data-memory-select"), true);
+  });
+
+  // Governed learning: immutable candidate evidence stays beside every
+  // evaluation, promotion, and rollback decision. Selection is roving and
+  // lifecycle actions reconcile the authoritative server state afterward.
+  $("btn-learn-open").onclick = openLearn;
+  $("btn-learn-refresh").onclick = () => learnLoad(false);
+  $("btn-learn-clear").onclick = learnClearFilters;
+  $("inp-learn-search").addEventListener("input", () => {
+    clearTimeout(store.learnSearchTimer);
+    store.learnSearchTimer = setTimeout(() => {
+      store.learnSearchTimer = null;
+      learnRender();
+    }, 120);
+  });
+  for (const id of ["sel-learn-kind", "sel-learn-status"]) $(id).addEventListener("change", learnRender);
+  const learnActivate = (event) => {
+    const item = event.target.closest("[data-learn-id]");
+    if (!item) return;
+    const id = item.getAttribute("data-learn-id");
+    if (event.type === "click") { learnSelect(id, false); return; }
+    if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const ids = Array.from($("learn-list").querySelectorAll("[data-learn-id]"), (row) => row.getAttribute("data-learn-id"));
+      const next = fabricNavigationTarget(ids, id, event.key);
+      learnSelect(next, false);
+      return;
+    }
+    if (!["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    learnSelect(id, true);
+  };
+  $("learn-list").addEventListener("click", learnActivate);
+  $("learn-list").addEventListener("keydown", learnActivate);
+  $("learn-detail").addEventListener("input", learnHandleEdit);
+  $("learn-detail").addEventListener("change", learnHandleEdit);
+  $("learn-detail").addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-learn-action]");
+    if (!form) return;
+    event.preventDefault();
+    learnSubmitAction(form);
   });
 
   // Durable tasks: open the tenant-wide queue view, filter, refresh, and

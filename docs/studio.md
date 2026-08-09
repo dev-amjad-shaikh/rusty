@@ -12,6 +12,7 @@ studio/
 ├── test-workbench.mjs ← node unit tests for the agent-creation and run journey
 ├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
+├── test-learn.mjs     ← node unit tests for the governed-learning control room
 └── test-all.mjs       ← discovers and runs every Studio test suite
 ```
 
@@ -63,6 +64,20 @@ studio/
   human, agent, distiller, or system author and the run, correction, candidate, or journal evidence
   that produced it. Structural conflicts get a dedicated inbox: reviewing one isolates every peer
   record and lets the operator compare evidence. The Studio never silently chooses a winner.
+- **Learning control room** — a governed inbox over `GET /learn/candidates` and
+  `GET /learn/versions` for prompt, policy, memory-set, and tool-permission proposals. Each immutable
+  candidate dossier keeps its provenance, proposed change, evaluation verdict, replay coverage,
+  serving pointer, promotion receipt, and rollback receipt on one four-stage evidence rail:
+  **Observed → Evaluated → Serving → Recoverable**. Evaluation preflights one to eight real run
+  fixtures, verifies each journal is finalized through the run-events evidence endpoint, and submits
+  their journal snapshots; an empty or still-active replay set cannot satisfy the gate. Promotion
+  first asks the server's deployment envelope for a decision, then turns an explicit `403` into an
+  approval request scoped to the exact candidate effect id and an attributed approver. Canary and full
+  serving pointers remain distinct, rollback is offered only for the exact candidate currently serving,
+  lifecycle conflicts force a settled-state reread, and ambiguous network outcomes remain explicitly
+  uncertain until candidate and serving-pointer evidence can both be refreshed rather than blind-retried.
+  Candidate, version, evidence, text, and raw-record views are bounded and hostile future wire shapes
+  fail closed before actions become available.
 - **Threads panel (local-only)** — the server API (as of v0.4) has **no list-threads endpoint**, so threads you create or
   attach are remembered in your browser, keyed by server URL. **Attach by id** re-connects a thread the
   server already knows, and offers to re-create it with the same id when the in-memory thread registry has
@@ -246,6 +261,16 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   counts. Large content and raw-record views are visibly truncated to keep inspection responsive.
   Server-side pagination remains the proper next step for very large tenants. Semantic similarity
   search is not exposed by the current HTTP contract.
+- **The learning control room governs existing candidates; it does not create or distill them.** The
+  connected server must have a candidate evaluator and dataset source configured for evaluation. The
+  current API does not disclose its deployment envelope before a promotion attempt, so Studio asks the
+  gate first and only then requests the exact candidate-scoped approval named by the server. Approval
+  attribution is currently free text because the platform does not yet expose human/service principals,
+  assigned reviewer identities, or signed approval tokens. Candidate search is a bounded client-side
+  audit snapshot because the list endpoint is unpaginated. Drift monitoring, automated canary analysis,
+  candidate generation, and before/after case comparison remain future workflows. Policy proposals can
+  be reviewed through the shared candidate contract; runtime policy activation requires the connected
+  server's policy-plane implementation and must not be inferred from a promotion receipt alone.
 - **The team observatory is an evidence surface, not a team editor.** `team_id` is currently a label on
   durable agent registrations, not a separately versioned team resource. The registry endpoint is
   unpaginated; Studio retains the first 500 valid identities for rendering and reports omissions. It
@@ -303,6 +328,21 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
   route compatibility, and explicit render bounds.
+- `node studio/test-learn.mjs` — 107 assertions over immutable candidate and version-pointer
+  normalization, prompt/policy/memory/tool proposal rendering, bounded search and filters, provenance,
+  evaluation verdicts, active/canary/mismatch/unknown serving states, real replay-fixture preflight,
+  exact evaluation/promotion/rollback payloads, candidate-scoped approval extraction, lifecycle action
+  gating, uncertain-outcome reconciliation, hostile wire escaping, keyboard/focus behavior, responsive
+  layout, and accessible evidence-state semantics.
+- Live against `cargo run -p rusty-server --example server_demo`: a completed pipeline run was used to
+  register real prompt, policy, and tool-permission candidates. Studio loaded the tenant candidate inbox,
+  resolved the exact run fixture and finalized run-events evidence before evaluation, preserved the
+  server's confirmed missing-evaluator `409` without claiming an ambiguous receipt, translated that
+  capability gap into an operator action,
+  navigated candidates with roving keyboard focus, filtered by kind, and rendered at 390 px without
+  horizontal overflow. `cargo test -p rusty-server --test learn_gate` independently passed all 9 real
+  server lifecycle cases, including scoped approval, canary binding, byte-exact rollback, restart
+  durability, tenant isolation, and causal lifecycle journaling.
 - `node studio/test-fabric.mjs` — 110 assertions over bounded durable-agent normalization, deterministic
   declared-team grouping, assistant-versus-runtime identity language, mailbox health precedence,
   activation and supervision evidence, independent endpoint failures, tenant/request isolation,
