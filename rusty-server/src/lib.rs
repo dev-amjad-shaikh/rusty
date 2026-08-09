@@ -85,6 +85,12 @@
 //! | `POST /memory/conflicts` | R0.8 (wave 2): the conflict review listing `{scope?}` → `{conflicts: [{scope, key, memory_ids, overlap}]}` — live same-key records with overlapping validity and contradictory content. Flags only; nothing is resolved |
 //! | `POST /memory/forget` | R0.8 (wave 2): erase one record `{memory_id, reason, run_id?, parent?}` → `200 {forgotten, invalidated, tombstone}`. Real deletion; dependent summaries are invalidated (deleted) transitively; a metadata-only `memory_forget` tombstone is journaled into the named run (best-effort) |
 //! | `POST /memory/forget_scope` | R0.8 (wave 2): erase every record at a scope address `{scope, reason, run_id?, parent?}` → `200 {forgotten, invalidated, tombstones}` — one tombstone per forgotten record; idempotent (empty scope → `200` with empty lists); tenant scope is self-only (`403`) |
+//! | `POST /learn/candidates` | R0.8 (wave 3): register a distilled candidate `{candidate, run_id, parent?}` → `201 {candidate_id, created, record}` (`200` + `created: false` when the content address is already stored — creation converges). The address is verified (`422`); the `candidate_created` event is journaled into `run_id`'s journal before the store write — hard-fail: an unresolvable run stops the transition (`404`) |
+//! | `GET /learn/candidates` / `GET /learn/candidates/{id}` | R0.8 (wave 3): the tenant's candidates (sorted by id) / fetch one record (`404` unknown/cross-tenant) |
+//! | `POST /learn/candidates/{id}/evaluate` | R0.8 (wave 3): drive the configured `CandidateEvaluator` `{request, run_id, parent?}` → `200 {candidate_id, status, evaluation}`; `409` when no evaluator is configured or the lifecycle forbids re-evaluation; `422` when the evaluation fails or violates the seam contract (it must name this candidate and the request's dataset version) |
+//! | `POST /learn/candidates/{id}/promote` | R0.8 (wave 3): run the promotion gate `{run_id, approval?, parent?}` → `200 {candidate_id, status, receipt, pointer}`. `403` on approval failures (out-of-envelope promotion needs an `ApprovalToken` scoped to the candidate's promotion effect id — non-transferable), `422` on evidence failures, `409` when the candidate is not `evaluated`. The status flip and the version-pointer move are one store transition |
+//! | `POST /learn/candidates/{id}/rollback` | R0.8 (wave 3): re-point the surface to the displaced version `{run_id, cause, parent?}` → `200 {candidate_id, status, receipt, pointer}`; `409` when the candidate is not `promoted` or the pointer no longer serves it. Byte-exact: the pointer's `to` is the promotion's recorded `previous`, and candidates are content-addressed — the restored version is the version that served |
+//! | `GET /learn/versions` | R0.8 (wave 3): the tenant's version pointers, sorted by surface |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -99,6 +105,7 @@ mod coordination;
 mod crons;
 mod error;
 mod journals;
+mod learn;
 mod memory;
 mod outbox;
 mod replay;
@@ -115,9 +122,11 @@ mod triggers;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::Router;
 use rusty_agent_runtime::graph::Graph;
+use rusty_agent_runtime::learn::{CandidateEvaluator, PromotionEnvelope};
 use rusty_agent_runtime::state::StateSpec;
 use tokio_util::sync::CancellationToken;
 
@@ -139,7 +148,7 @@ pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::fro
 
 /// Names the JSON-file layout already owns at the store root
 /// (`agent_leases/`, `agents/`, `assistants/`, `coordinations/`, `crons/`,
-/// `journals/`, `memory/`, `memory_artifacts/`, `outbox/`, `store/`,
+/// `journals/`, `learn/`, `memory/`, `memory_artifacts/`, `outbox/`, `store/`,
 /// `tasks/`, `threads/`, `trigger_events/`, `triggers/`, plus the `latest`
 /// pointer file inside each thread's checkpoint dir).
 /// Client-chosen ids and tenant ids claiming one of these would write
@@ -153,6 +162,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "coordinations",
     "crons",
     "journals",
+    "learn",
     "memory",
     "memory_artifacts",
     "outbox",
@@ -365,6 +375,23 @@ pub struct ServerConfig {
     /// override *is* the tenant's quota, not a patch on the default).
     /// See [`ServerConfig::with_tenant_quota`].
     pub tenant_task_quotas: HashMap<String, TaskQuota>,
+
+    /// The promotion envelope (R0.8 Rusty Learn, wave 3): the declared,
+    /// per-deployment standing approval the promotion gate evaluates
+    /// every promotion against. Defaults to
+    /// [`PromotionEnvelope::r08_default`] — memory-set candidates at
+    /// run/agent scope auto-promote on cleared evidence; everything else
+    /// requires an approval token. See
+    /// [`ServerConfig::with_promotion_envelope`].
+    pub promotion_envelope: PromotionEnvelope,
+
+    /// The candidate evaluator (R0.8 wave 3): the evaluation
+    /// composition `POST /learn/candidates/{id}/evaluate` drives. `None`
+    /// (the default) answers `409` — a deployment without an evaluator
+    /// can hold and inspect candidates, but promotion is gated on
+    /// evidence, and evidence requires an evaluator. See
+    /// [`ServerConfig::with_candidate_evaluator`].
+    pub candidate_evaluator: Option<Arc<dyn CandidateEvaluator>>,
 }
 
 impl Default for ServerConfig {
@@ -382,6 +409,8 @@ impl Default for ServerConfig {
             task_pool_limits: HashMap::new(),
             task_quota: TaskQuota::default(),
             tenant_task_quotas: HashMap::new(),
+            promotion_envelope: PromotionEnvelope::r08_default(),
+            candidate_evaluator: None,
         }
     }
 }
@@ -563,6 +592,33 @@ impl ServerConfig {
         self.tenant_task_quotas
             .get(tenant)
             .unwrap_or(&self.task_quota)
+    }
+
+    /// Builder-style: set the promotion envelope (R0.8 Rusty Learn, wave
+    /// 3) — the declared, per-deployment standing approval the promotion
+    /// gate evaluates every promotion against. Replaces
+    /// [`PromotionEnvelope::r08_default`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when the envelope fails [`PromotionEnvelope::validate`]
+    /// (a canary fraction outside `(0, 1]`, a negative improvement bar —
+    /// configuration is a programmer error, caught at startup).
+    pub fn with_promotion_envelope(mut self, envelope: PromotionEnvelope) -> Self {
+        if let Err(error) = envelope.validate() {
+            panic!("invalid promotion envelope: {error}");
+        }
+        self.promotion_envelope = envelope;
+        self
+    }
+
+    /// Builder-style: register the candidate evaluator (R0.8 wave 3) —
+    /// the evaluation composition `POST /learn/candidates/{id}/evaluate`
+    /// drives. Without one the route answers `409`: promotion is gated
+    /// on evidence, and evidence requires an evaluator.
+    pub fn with_candidate_evaluator(mut self, evaluator: Arc<dyn CandidateEvaluator>) -> Self {
+        self.candidate_evaluator = Some(evaluator);
+        self
     }
 }
 

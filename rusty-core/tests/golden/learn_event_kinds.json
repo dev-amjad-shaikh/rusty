@@ -1,0 +1,6 @@
+[
+  "candidate_created",
+  "candidate_evaluated",
+  "candidate_promoted",
+  "candidate_rolled_back"
+]

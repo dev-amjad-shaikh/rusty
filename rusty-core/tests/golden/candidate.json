@@ -1,0 +1,63 @@
+{
+  "candidate_id": "dee1cf631ee3558a3612b169df27751ff26713ff1a91f35e798c62563ae71a3a",
+  "content": {
+    "kind": "memory_set",
+    "scope": {
+      "scope": "agent",
+      "id": "support-1"
+    },
+    "adds": [
+      {
+        "memory_id": "13f27e28d128e08120549185747987a858c091ed9e33429e7834832979d6da8c",
+        "kind": "fact",
+        "scope": {
+          "scope": "agent",
+          "id": "support-1"
+        },
+        "key": "tone",
+        "provenance": {
+          "author": {
+            "type": "human",
+            "human_id": "amjad"
+          },
+          "evidence": {
+            "correction_id": "correction-9"
+          },
+          "written_at": "2025-06-15T15:06:41Z"
+        },
+        "confidence": 1.0,
+        "validity": {
+          "valid_from": "2025-06-15T15:06:40Z"
+        },
+        "created_at": "2025-06-15T15:06:41Z",
+        "candidacy": "pending",
+        "content": {
+          "kind": "inline",
+          "value": {
+            "greeting": "hello",
+            "tone": "warm"
+          }
+        }
+      }
+    ],
+    "supersedes": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+  },
+  "distilled_by": {
+    "type": "distiller",
+    "name": "correction-loop"
+  },
+  "evidence": {
+    "run_ids": [
+      "run-abc"
+    ],
+    "correction_ids": [
+      "correction-9"
+    ],
+    "memory_ids": [
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ]
+  },
+  "created_at": "2025-06-15T15:06:42Z"
+}

@@ -1,0 +1,18 @@
+{
+  "candidate_id": "4859edea224c5cbe1fb1eab37fbee365f0c64b183839f51a3e5331f58574362f",
+  "content": {
+    "kind": "prompt",
+    "name": "system",
+    "prompt": "You are a careful support agent. Answer tersely."
+  },
+  "distilled_by": {
+    "type": "distiller",
+    "name": "correction-loop"
+  },
+  "evidence": {
+    "run_ids": [
+      "run-abc"
+    ]
+  },
+  "created_at": "2025-06-15T15:06:42Z"
+}

@@ -79,6 +79,16 @@
 //!   [`record::RunEventKind::MemoryWrite`] ([`record::Effect::Idempotent`]
 //!   under a derived key). The store backends and endpoints live in
 //!   `rusty-server`; these are the pure contracts both sides agree on.
+//! - **Learning candidates** ([`learn`], R0.8 wave 3): the candidate
+//!   pipeline — content-addressed [`learn::Candidate`]s (identity is
+//!   integrity), the evaluation composition seam ([`learn::CandidateEvaluator`]
+//!   with its replay + experiment + verdict payload), the declared
+//!   [`learn::PromotionEnvelope`] and its gate ([`learn::admit_promotion`],
+//!   out-of-envelope promotions requiring a scoped
+//!   [`effects::ApprovalToken`]), canary binding by seeded draw, and the
+//!   active-version pointer with byte-exact rollback. Every transition
+//!   journals through the `CandidateCreated` / `CandidateEvaluated` /
+//!   `CandidatePromoted` / `CandidateRolledBack` event kinds.
 //! - **WASM nodes** (`wasm_node`, feature `wasm`): sandboxed WebAssembly
 //!   modules run as graph nodes via Wasmtime.
 //!
@@ -116,6 +126,7 @@ pub mod error;
 pub mod executor;
 pub mod graph;
 pub mod journal;
+pub mod learn;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
@@ -162,6 +173,16 @@ pub mod prelude {
     pub use crate::graph::{ConditionalRouter, Edge, Graph, GraphBuilder, Route, Send};
     pub use crate::journal::{
         Clock, EventDraft, Journal, JournalSnapshot, RngSource, PARENT_EVENT_KEY,
+    };
+    pub use crate::learn::{
+        admit_promotion, canary_admits, candidate_effect_key, derive_candidate_id,
+        evaluation_effect_key, promotion_effect_id, promotion_effect_key, rollback_effect_key,
+        AutoPromotion, CanaryBinding, Candidate, CandidateContent, CandidateEvaluation,
+        CandidateEvaluator, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
+        CandidateStatus, EnvelopeRule, EvaluationRequest, EvaluationThresholds, EvaluationVerdict,
+        EvidenceSpan, GrantDirection, LearnError, PromotionAuthority, PromotionDecision,
+        PromotionEnvelope, PromotionReceipt, PromotionRefusal, ReplayDivergence, ReplaySummary,
+        RollbackReceipt, SurfaceKey, VersionPointer, CANARY_DRAW_DOMAIN, PROMOTION_EFFECT_KIND,
     };
     pub use crate::llm::{
         ChatMessage, ChatModel, ChatResponse, OpenAiCompatibleClient, Role, ToolCall, Usage,

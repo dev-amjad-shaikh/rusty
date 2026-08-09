@@ -1,0 +1,42 @@
+{
+  "candidate_id": "dee1cf631ee3558a3612b169df27751ff26713ff1a91f35e798c62563ae71a3a",
+  "dataset_version": "support-v3",
+  "replay": {
+    "fixture_ids": [
+      "run-abc"
+    ],
+    "matched": 1
+  },
+  "baseline_report": {
+    "dataset_version": "support-v3",
+    "format_version": 1,
+    "name": "support@support-v3",
+    "summary": {
+      "run_pass_rate": 0.5
+    }
+  },
+  "candidate_report": {
+    "dataset_version": "support-v3",
+    "format_version": 1,
+    "name": "support@support-v3",
+    "summary": {
+      "run_pass_rate": 1.0
+    }
+  },
+  "verdict": {
+    "regressed": false,
+    "target_metric": "run_pass_rate",
+    "baseline": 0.5,
+    "candidate": 1.0,
+    "delta": 0.5
+  },
+  "thresholds": {
+    "max_pass_rate_drop": 0.05,
+    "max_latency_p95_ratio": 1.25
+  },
+  "evaluated_by": {
+    "type": "distiller",
+    "name": "correction-loop"
+  },
+  "evaluated_at": "2025-06-15T15:06:43Z"
+}

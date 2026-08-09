@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
 use rusty_agent_runtime::journal::{FileArtifactStore, JournalSnapshot};
+use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
 use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -44,6 +45,7 @@ use crate::assistants::{self, AssistantRecord};
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::journals;
+use crate::learn;
 use crate::memory;
 use crate::outbox::{self, OutboxRecord};
 use crate::store::{self, StoreItem};
@@ -498,6 +500,67 @@ pub(crate) trait ServerStore: Send + Sync {
     /// spilled content-addressed blobs stay (shared evidence under the
     /// same boundary, design open question 4).
     async fn delete_memory(&self, tenant: &str, memory_id: &str) -> StoreResult<bool>;
+
+    // -- Learning candidates (R0.8 Rusty Learn, wave 3) ----------------- //
+
+    /// Store a candidate record under its tenant-scoped candidate id;
+    /// `false` (no write) when the id is already present — candidates
+    /// are content-addressed, so creation converges the way memory
+    /// writes do (the `Effect::Idempotent` create).
+    async fn put_candidate(&self, tenant: &str, record: &CandidateRecord) -> StoreResult<bool>;
+    /// Fetch one candidate record by its (bare) candidate id,
+    /// tenant-scoped (`None` for unknown or cross-tenant ids — the two
+    /// are indistinguishable by design).
+    async fn get_candidate(
+        &self,
+        tenant: &str,
+        candidate_id: &str,
+    ) -> StoreResult<Option<CandidateRecord>>;
+    /// The tenant's candidate records (order unspecified; routes sort).
+    async fn list_candidates(&self, tenant: &str) -> StoreResult<Vec<CandidateRecord>>;
+    /// Apply a lifecycle transition: the record's live status must be
+    /// `expect`; on a match, atomically replace the record with `next`
+    /// and, when `pointer` is set, move that surface's version pointer.
+    /// One transaction on Postgres, one lock pair (candidates →
+    /// versions, the only order taken) on the file backend — a promoted
+    /// candidate whose pointer never moved (or the inverse) must not be
+    /// a reachable state. Unknown/cross-tenant ids answer
+    /// [`CandidateTransition::Unknown`] (`404`); a status mismatch
+    /// answers [`CandidateTransition::Conflict`] with the live status
+    /// (`409`) and changes nothing.
+    async fn transition_candidate(
+        &self,
+        tenant: &str,
+        candidate_id: &str,
+        expect: CandidateStatus,
+        next: &CandidateRecord,
+        pointer: Option<&VersionPointer>,
+    ) -> StoreResult<CandidateTransition>;
+    /// Fetch the version pointer for a surface, tenant-scoped (`None`
+    /// when nothing was ever promoted onto the surface — the static
+    /// version serves).
+    async fn get_version_pointer(
+        &self,
+        tenant: &str,
+        surface: &str,
+    ) -> StoreResult<Option<VersionPointer>>;
+    /// The tenant's version pointers (order unspecified; routes sort).
+    async fn list_version_pointers(&self, tenant: &str) -> StoreResult<Vec<VersionPointer>>;
+}
+
+/// The outcome of a candidate lifecycle transition
+/// ([`ServerStore::transition_candidate`]) — the task-mutation
+/// convention ([`MutationOutcome`]): unknown and cross-tenant ids are
+/// indistinguishable, a status mismatch is a conflict, and anything but
+/// `Applied` changes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CandidateTransition {
+    /// The transition applied: record replaced, pointer moved when given.
+    Applied,
+    /// No such candidate in this tenant.
+    Unknown,
+    /// The candidate's live status is not the expected one.
+    Conflict(CandidateStatus),
 }
 
 // --------------------------------------------------------------------- //
@@ -541,6 +604,14 @@ pub(crate) struct JsonFileStore {
     /// the records dir, so the recursive record loader never picks up a
     /// blob).
     memory_artifacts: FileArtifactStore,
+    /// Learning candidates (R0.8 wave 3): the in-memory index keyed by
+    /// tenant-scoped candidate id (`{tenant}/{candidate_id}`), persisted
+    /// as one file per record under `{store_path}/learn/candidates/`.
+    candidates: Mutex<HashMap<String, CandidateRecord>>,
+    /// Version pointers keyed by tenant-scoped surface key, one file
+    /// per pointer under `{store_path}/learn/versions/` (the filename is
+    /// the key's hash; the file body carries the key).
+    versions: Mutex<HashMap<String, VersionPointer>>,
 }
 
 impl JsonFileStore {
@@ -562,6 +633,8 @@ impl JsonFileStore {
             trigger_events: Mutex::new(triggers::load_events(root)),
             memories: Mutex::new(memory::load(root)),
             memory_artifacts: memory::artifact_store(root),
+            candidates: Mutex::new(learn::load_candidates(root)),
+            versions: Mutex::new(learn::load_versions(root)),
         }
     }
 }
@@ -1559,6 +1632,104 @@ impl ServerStore for JsonFileStore {
         memory::remove(&self.root, &scoped).await?;
         Ok(self.memories.lock().await.remove(&scoped).is_some())
     }
+
+    async fn put_candidate(&self, tenant: &str, record: &CandidateRecord) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, record.candidate.candidate_id.as_str());
+        let mut map = self.candidates.lock().await;
+        if map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        // Hold the lock across the file write (the assistants
+        // convention): a concurrent create of the same id can't
+        // interleave.
+        learn::persist_candidate(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist candidate"))?;
+        map.insert(scoped, record.clone());
+        Ok(true)
+    }
+
+    async fn get_candidate(
+        &self,
+        tenant: &str,
+        candidate_id: &str,
+    ) -> StoreResult<Option<CandidateRecord>> {
+        let scoped = crate::auth::scope_id(tenant, candidate_id);
+        Ok(self.candidates.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_candidates(&self, tenant: &str) -> StoreResult<Vec<CandidateRecord>> {
+        let map = self.candidates.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn transition_candidate(
+        &self,
+        tenant: &str,
+        candidate_id: &str,
+        expect: CandidateStatus,
+        next: &CandidateRecord,
+        pointer: Option<&VersionPointer>,
+    ) -> StoreResult<CandidateTransition> {
+        let scoped = crate::auth::scope_id(tenant, candidate_id);
+        // Lock order is candidates → versions everywhere (promotion and
+        // rollback take both): one fixed order, no deadlock. The lock
+        // pair is the file backend's transaction — the status check and
+        // both index swaps cannot interleave with another transition.
+        let mut candidates = self.candidates.lock().await;
+        let Some(current) = candidates.get(&scoped) else {
+            return Ok(CandidateTransition::Unknown);
+        };
+        if current.status != expect {
+            return Ok(CandidateTransition::Conflict(current.status));
+        }
+        // Files before index swaps (the `mutate_task` convention): a
+        // failed write never leaves state a restart would silently
+        // rewind. Two files cannot land atomically — but the candidate
+        // object is immutable and complete inside the record, so a crash
+        // between the writes leaves a consistent serving picture under
+        // either interleaving (the pointer resolves a fully formed
+        // candidate either way; only the lifecycle metadata can lag, and
+        // the retry converges it). Postgres makes the pair one
+        // transaction instead.
+        learn::persist_candidate(&self.root, &scoped, next)
+            .await
+            .map_err(io_err("persist candidate"))?;
+        if let Some(pointer) = pointer {
+            let scoped_surface = crate::auth::scope_id(tenant, pointer.surface.as_str());
+            learn::persist_version(&self.root, &scoped_surface, pointer)
+                .await
+                .map_err(io_err("persist version pointer"))?;
+            self.versions
+                .lock()
+                .await
+                .insert(scoped_surface, pointer.clone());
+        }
+        candidates.insert(scoped, next.clone());
+        Ok(CandidateTransition::Applied)
+    }
+
+    async fn get_version_pointer(
+        &self,
+        tenant: &str,
+        surface: &str,
+    ) -> StoreResult<Option<VersionPointer>> {
+        let scoped = crate::auth::scope_id(tenant, surface);
+        Ok(self.versions.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_version_pointers(&self, tenant: &str) -> StoreResult<Vec<VersionPointer>> {
+        let map = self.versions.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, pointer)| pointer.clone())
+            .collect())
+    }
 }
 
 impl JsonFileStore {
@@ -1658,12 +1829,13 @@ mod postgres {
     use chrono::{DateTime, Utc};
     use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
     use rusty_agent_runtime::journal::JournalSnapshot;
+    use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
     use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
     use serde_json::Value;
     use sqlx::{PgPool, Row};
     use tokio::sync::OnceCell;
 
-    use super::{ServerStore, StoreResult};
+    use super::{CandidateTransition, ServerStore, StoreResult};
     use crate::agents::{
         self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
         MailboxClaimScope,
@@ -1962,6 +2134,39 @@ mod postgres {
         CREATE INDEX IF NOT EXISTS server_memory_query
             ON server_memory (tenant, scope, scope_id, kind)";
 
+    /// Learning candidates (R0.8 wave 3): one row per candidate record,
+    /// keyed by tenant-scoped candidate id. Lifecycle columns are real
+    /// columns (the transition transaction reads `status FOR UPDATE`;
+    /// listings filter on surface/status); the record itself travels as
+    /// JSONB, the `server_memory` discipline.
+    pub(crate) const CREATE_LEARN_CANDIDATES_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_learn_candidates (
+            candidate_id TEXT PRIMARY KEY,
+            tenant       TEXT NOT NULL,
+            kind         TEXT NOT NULL,
+            surface      TEXT NOT NULL,
+            status       TEXT NOT NULL,
+            payload      JSONB NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The lifecycle listing's leading columns: every candidate query is
+    /// tenant-scoped, most filter on a surface or a status.
+    pub(crate) const CREATE_LEARN_CANDIDATES_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_learn_candidates_listing
+            ON server_learn_candidates (tenant, surface, status)";
+
+    /// Version pointers (R0.8 wave 3): one row per tenant-scoped
+    /// surface, upserted on every promotion and rollback inside the
+    /// transition's transaction.
+    pub(crate) const CREATE_LEARN_VERSIONS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_learn_versions (
+            surface    TEXT PRIMARY KEY,
+            tenant     TEXT NOT NULL,
+            payload    JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -1990,6 +2195,9 @@ mod postgres {
         CREATE_TRIGGER_EVENTS_INDEX_SQL,
         CREATE_MEMORY_SQL,
         CREATE_MEMORY_QUERY_INDEX_SQL,
+        CREATE_LEARN_CANDIDATES_SQL,
+        CREATE_LEARN_CANDIDATES_INDEX_SQL,
+        CREATE_LEARN_VERSIONS_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -2510,6 +2718,48 @@ mod postgres {
     /// journal-erasure boundary (open question 4).
     pub(crate) const DELETE_MEMORY_SQL: &str =
         "DELETE FROM server_memory WHERE memory_id = $1 RETURNING memory_id";
+
+    /// Learning-candidate statements (R0.8 wave 3). Creation is
+    /// insert-only on the tenant-scoped candidate id (content addressing
+    /// makes the create converge); lifecycle moves go through the
+    /// transition pair below.
+    pub(crate) const INSERT_LEARN_CANDIDATE_SQL: &str = r#"
+        INSERT INTO server_learn_candidates (
+            candidate_id, tenant, kind, surface, status, payload
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (candidate_id) DO NOTHING
+        RETURNING candidate_id"#;
+
+    pub(crate) const SELECT_LEARN_CANDIDATE_SQL: &str =
+        "SELECT payload FROM server_learn_candidates WHERE candidate_id = $1";
+
+    pub(crate) const LIST_LEARN_CANDIDATES_SQL: &str =
+        "SELECT payload FROM server_learn_candidates WHERE tenant = $1";
+
+    /// Transition, step 1: lock the row — the status check and the
+    /// update must serialize against a concurrent transition (the task
+    /// cancel pair's discipline).
+    pub(crate) const LOCK_LEARN_CANDIDATE_SQL: &str =
+        "SELECT status FROM server_learn_candidates WHERE candidate_id = $1 FOR UPDATE";
+
+    /// Transition, step 2: apply the new status and record to the locked
+    /// row.
+    pub(crate) const UPDATE_LEARN_CANDIDATE_SQL: &str =
+        "UPDATE server_learn_candidates SET status = $2, payload = $3 WHERE candidate_id = $1";
+
+    /// The pointer half of the transition: upsert the surface's pointer
+    /// in the same transaction, so a promoted candidate whose pointer
+    /// never moved (or the inverse) is not a reachable state.
+    pub(crate) const UPSERT_LEARN_VERSION_SQL: &str = r#"
+        INSERT INTO server_learn_versions (surface, tenant, payload)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (surface) DO UPDATE SET payload = $3, updated_at = now()"#;
+
+    pub(crate) const SELECT_LEARN_VERSION_SQL: &str =
+        "SELECT payload FROM server_learn_versions WHERE surface = $1";
+
+    pub(crate) const LIST_LEARN_VERSIONS_SQL: &str =
+        "SELECT payload FROM server_learn_versions WHERE tenant = $1";
 
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
@@ -4397,6 +4647,128 @@ mod postgres {
                 .map_err(db_err("delete memory"))?;
             Ok(row.is_some())
         }
+
+        async fn put_candidate(&self, tenant: &str, record: &CandidateRecord) -> StoreResult<bool> {
+            let pool = self.pool().await?;
+            let candidate = &record.candidate;
+            let row = sqlx::query(INSERT_LEARN_CANDIDATE_SQL)
+                .bind(crate::auth::scope_id(
+                    tenant,
+                    candidate.candidate_id.as_str(),
+                ))
+                .bind(tenant)
+                .bind(memory_wire_str(&candidate.kind())?)
+                .bind(candidate.surface().as_str())
+                .bind(memory_wire_str(&record.status)?)
+                .bind(record_to_payload(record)?)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("insert candidate"))?;
+            Ok(row.is_some())
+        }
+
+        async fn get_candidate(
+            &self,
+            tenant: &str,
+            candidate_id: &str,
+        ) -> StoreResult<Option<CandidateRecord>> {
+            let row = sqlx::query(SELECT_LEARN_CANDIDATE_SQL)
+                .bind(crate::auth::scope_id(tenant, candidate_id))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select candidate"))?;
+            row.map(|row| record_from_payload("candidate", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_candidates(&self, tenant: &str) -> StoreResult<Vec<CandidateRecord>> {
+            let rows = sqlx::query(LIST_LEARN_CANDIDATES_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list candidates"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("candidate", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn transition_candidate(
+            &self,
+            tenant: &str,
+            candidate_id: &str,
+            expect: CandidateStatus,
+            next: &CandidateRecord,
+            pointer: Option<&VersionPointer>,
+        ) -> StoreResult<CandidateTransition> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, candidate_id);
+            // Status flip and pointer move in one transaction: a crash
+            // cannot leave a promoted candidate whose pointer never
+            // moved — the file backend's lock-pair rule, exact here.
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin candidate transition"))?;
+            let row = sqlx::query(LOCK_LEARN_CANDIDATE_SQL)
+                .bind(&scoped)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("lock candidate"))?;
+            let Some(row) = row else {
+                return Ok(CandidateTransition::Unknown);
+            };
+            let live: String = row.get("status");
+            let live_status: CandidateStatus = serde_json::from_value(Value::String(live))
+                .map_err(|e| format!("corrupt candidate status: {e}"))?;
+            if live_status != expect {
+                return Ok(CandidateTransition::Conflict(live_status));
+            }
+            sqlx::query(UPDATE_LEARN_CANDIDATE_SQL)
+                .bind(&scoped)
+                .bind(memory_wire_str(&next.status)?)
+                .bind(record_to_payload(next)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("update candidate"))?;
+            if let Some(pointer) = pointer {
+                sqlx::query(UPSERT_LEARN_VERSION_SQL)
+                    .bind(crate::auth::scope_id(tenant, pointer.surface.as_str()))
+                    .bind(tenant)
+                    .bind(record_to_payload(pointer)?)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err("upsert version pointer"))?;
+            }
+            tx.commit()
+                .await
+                .map_err(db_err("commit candidate transition"))?;
+            Ok(CandidateTransition::Applied)
+        }
+
+        async fn get_version_pointer(
+            &self,
+            tenant: &str,
+            surface: &str,
+        ) -> StoreResult<Option<VersionPointer>> {
+            let row = sqlx::query(SELECT_LEARN_VERSION_SQL)
+                .bind(crate::auth::scope_id(tenant, surface))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select version pointer"))?;
+            row.map(|row| record_from_payload("version pointer", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_version_pointers(&self, tenant: &str) -> StoreResult<Vec<VersionPointer>> {
+            let rows = sqlx::query(LIST_LEARN_VERSIONS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list version pointers"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("version pointer", row.get::<Value, _>("payload")))
+                .collect()
+        }
     }
 
     impl PostgresStore {
@@ -4542,7 +4914,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 26);
+            assert_eq!(MIGRATION_SQL.len(), 29);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -4614,6 +4986,16 @@ mod postgres {
             assert!(CREATE_MEMORY_SQL.contains("valid_until TIMESTAMPTZ"));
             assert!(CREATE_MEMORY_SQL.contains("payload     JSONB"));
             assert!(CREATE_MEMORY_QUERY_INDEX_SQL.contains("(tenant, scope, scope_id, kind)"));
+            // R0.8 wave 3: candidates are column-mapped on the lifecycle
+            // (the transition locks `status` FOR UPDATE; listings filter
+            // on surface/status); pointers are one upserted row per
+            // tenant-scoped surface.
+            assert!(CREATE_LEARN_CANDIDATES_SQL.contains("server_learn_candidates"));
+            assert!(CREATE_LEARN_CANDIDATES_SQL.contains("status       TEXT NOT NULL"));
+            assert!(CREATE_LEARN_CANDIDATES_SQL.contains("payload      JSONB"));
+            assert!(CREATE_LEARN_CANDIDATES_INDEX_SQL.contains("(tenant, surface, status)"));
+            assert!(CREATE_LEARN_VERSIONS_SQL.contains("server_learn_versions"));
+            assert!(CREATE_LEARN_VERSIONS_SQL.contains("surface    TEXT PRIMARY KEY"));
         }
 
         #[test]

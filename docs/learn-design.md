@@ -567,6 +567,50 @@ pointer. Exit: an out-of-envelope promotion without an approval is refused;
 a promoted candidate rolls back byte-exactly; every transition is in the
 journal.
 
+> **Wave 3 status: implemented.** The contracts landed as written
+> (`Candidate` / `CandidateKind` / `CandidateContent` /
+> `CandidateEvaluation` / `PromotionEnvelope` / `PromotionReceipt` /
+> `RollbackReceipt` / `VersionPointer`, with goldens in
+> `rusty-core/tests/golden/` and the four lifecycle event kinds
+> `candidate_created` / `candidate_evaluated` / `candidate_promoted` /
+> `candidate_rolled_back` appended to `RunEventKind`), with one deliberate
+> composition seam and two server-side disciplines worth naming. **The
+> evaluation composition is a trait, not a link**: the workspace's
+> dependency direction is `rusty-eval` → `rusty-core`, never the reverse,
+> so the runtime owns the `CandidateEvaluator` trait (async,
+> `evaluate(&Candidate, &EvaluationRequest) -> CandidateEvaluation`) and
+> `EvaluationVerdict` / `EvaluationThresholds` are serde mirrors of
+> `compare()`'s output and `CompareThresholds` — the same way `rusty-eval`
+> already meets the runtime at the `Journal`. Wave 4's release proof
+> implements the trait over `rusty-eval`'s public API; wave 3 proves the
+> machinery end to end with scripted nodes driven through the real
+> executor (`rusty-core/tests/learn.rs::
+> scripted_evaluation_composes_through_the_real_executor`). **Journaling
+> is hard-fail on this surface** (memory's is best-effort): every
+> lifecycle payload requires `run_id`, and a run that cannot take the
+> event stops the transition (`404` unresolvable, `422` otherwise) —
+> nothing reaches the store the journal did not record first, which is
+> the third exit criterion made structural. **The gate runs in the
+> handler**, `admit_promotion` a pure function over the deployment's
+> declared envelope: `403` on approval failures (out-of-envelope needs an
+> `ApprovalToken` scoped to `promotion_effect_id` — derived over the
+> candidate's content hash, so approvals are non-transferable), `422` on
+> evidence failures, `409` on lifecycle conflicts. The server surface is
+> `POST/GET /learn/candidates`, `GET /learn/candidates/{id}`,
+> `POST /learn/candidates/{id}/evaluate|promote|rollback`, and
+> `GET /learn/versions`, on both store backends — one JSON file per
+> record under `{store_path}/learn/{candidates,versions}/` (pointers
+> named by their surface key's hash) and the column-mapped
+> `server_learn_candidates` / `server_learn_versions` tables on Postgres,
+> with the status flip and pointer move in one transaction (one lock
+> pair on the file backend). All three exit criteria are automated tests
+> in `rusty-server/tests/learn_gate.rs`:
+> `out_of_envelope_promotion_requires_a_scoped_approval`,
+> `promote_then_rollback_restores_the_prior_candidate_byte_exactly`, and
+> `the_lifecycle_journals_all_four_events_with_causal_parentage` —
+> plus canary binding, tenant isolation, and restart durability on both
+> backends (the Postgres half gated on `RUSTY_TEST_DATABASE_URL`).
+
 **Wave 4 — policy plane v1 and the release proof.** The policy registry,
 epoch binding at admission, `DecisionEvent` emission at `classify_retry`,
 static-floor enforcement. Exit: the release proof below.

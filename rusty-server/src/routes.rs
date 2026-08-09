@@ -20,7 +20,13 @@ use rusty_agent_runtime::agents::{
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
+use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
+use rusty_agent_runtime::learn::{
+    admit_promotion, candidate_effect_key, evaluation_effect_key, promotion_effect_key,
+    rollback_effect_key, Candidate, CandidateRecord, CandidateStatus, EvaluationRequest,
+    LearnError, PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer,
+};
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
     assemble, detect_conflicts, memory_effect_key, memory_forget_effect_key, memory_read_request,
@@ -47,7 +53,7 @@ use crate::error::ApiError;
 use crate::runs::{
     self, MultitaskStrategy, RunConfigPayload, RunDeps, RunManager, RunPayload, RunStatus,
 };
-use crate::server_store::{JsonFileStore, ServerStore};
+use crate::server_store::{CandidateTransition, JsonFileStore, ServerStore};
 use crate::sse;
 use crate::supervision;
 use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
@@ -209,6 +215,29 @@ pub(crate) fn router_with_shutdown(
         .route("/memory/forget", post(forget_memory))
         .route("/memory/forget_scope", post(forget_memory_scope))
         .route("/memory/{memory_id}", get(get_memory))
+        // The learning-candidate lifecycle (R0.8 wave 3): creation plus
+        // the three journaled transitions, and the version-pointer
+        // listing. Every transition requires `run_id` — the journal is
+        // the evidence, and a transition the journal cannot take does
+        // not reach the store.
+        .route(
+            "/learn/candidates",
+            post(create_candidate).get(list_candidates),
+        )
+        .route("/learn/candidates/{candidate_id}", get(get_candidate))
+        .route(
+            "/learn/candidates/{candidate_id}/evaluate",
+            post(evaluate_candidate),
+        )
+        .route(
+            "/learn/candidates/{candidate_id}/promote",
+            post(promote_candidate),
+        )
+        .route(
+            "/learn/candidates/{candidate_id}/rollback",
+            post(rollback_candidate),
+        )
+        .route("/learn/versions", get(list_version_pointers))
         .route("/coordination/delegate", post(submit_delegate))
         .route("/coordination/fan_out", post(submit_fan_out))
         .route("/coordination/race", post(submit_race))
@@ -3568,6 +3597,516 @@ async fn journal_memory_forget(
             "forgetting is durable in the store; tombstone journaling skipped"
         );
     }
+}
+
+// --------------------------------------------------------------------- //
+// The candidate lifecycle and promotion gate (R0.8 Rusty Learn, wave 3)
+//
+// Candidates are content-addressed, immutable proposals; the lifecycle —
+// created → evaluated → promoted → rolled back — is four journaled
+// transitions over the store, never background daemons. Two disciplines
+// distinguish this surface from the memory routes:
+//
+// - **Journaling is hard-fail, not best-effort.** Every transition is in
+//   the journal (the wave's exit criterion): `run_id` is required on
+//   every lifecycle payload, and a run that cannot take the event stops
+//   the request (`404` when the run does not resolve in this tenant —
+//   the linkage the caller named does not exist; `422` otherwise).
+//   Nothing reaches the store that the journal did not record first.
+// - **The gate runs at promotion, in the handler.** `admit_promotion`
+//   evaluates the deployment's declared envelope against the journaled
+//   evaluation; out-of-envelope promotion needs an approval token
+//   scoped to the candidate's promotion effect id. Refusal is a typed
+//   `PromotionRefusal` mapped to `403`/`422` — never a silent no-op.
+// --------------------------------------------------------------------- //
+
+/// The wire name of a lifecycle status, so error messages read like the
+/// API's JSON.
+fn status_wire(status: CandidateStatus) -> String {
+    serde_json::to_value(status)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("{status:?}"))
+}
+
+/// Map a gate refusal to its HTTP status: approval failures are `403`
+/// (the caller holds neither the standing nor the presented approval),
+/// evidence failures are `422` (the request is well-formed; the
+/// evidence does not clear the bar).
+fn refusal_error(refusal: &PromotionRefusal) -> ApiError {
+    match refusal {
+        PromotionRefusal::RequiresApproval { .. } | PromotionRefusal::ApprovalMismatch { .. } => {
+            ApiError::new(StatusCode::FORBIDDEN, "forbidden", refusal.to_string())
+        }
+        _ => ApiError::unprocessable(refusal.to_string()),
+    }
+}
+
+/// Map a lifecycle error: a refused promotion through [`refusal_error`],
+/// a state-machine violation to `409` (a concurrent transition, or an
+/// action out of order — retry reads the settled state), everything
+/// else (address and receipt mismatches) to `422`.
+fn learn_error(error: &LearnError) -> ApiError {
+    match error {
+        LearnError::InvalidTransition { .. } => ApiError::conflict(error.to_string()),
+        LearnError::Refused(refusal) => refusal_error(refusal),
+        _ => ApiError::unprocessable(error.to_string()),
+    }
+}
+
+/// The learn lifecycle's journaling gate (hard-fail — see the section
+/// header): an unresolvable run is a `404`, any other append failure a
+/// `422`.
+fn journal_gate_error(error: String) -> ApiError {
+    if error.contains("no persisted journal") || error.contains("does not resolve") {
+        ApiError::not_found(error)
+    } else {
+        ApiError::unprocessable(error)
+    }
+}
+
+/// Map the store's transition outcome to the route's statuses, with the
+/// settled record on `Applied`.
+fn transition_outcome(outcome: CandidateTransition, candidate_id: &str) -> Result<(), ApiError> {
+    match outcome {
+        CandidateTransition::Applied => Ok(()),
+        CandidateTransition::Unknown => Err(ApiError::not_found(format!(
+            "candidate `{candidate_id}` not found"
+        ))),
+        CandidateTransition::Conflict(live) => Err(ApiError::conflict(format!(
+            "candidate `{candidate_id}` is `{}` — a concurrent transition won the race; \
+             retry against the settled state",
+            status_wire(live)
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateCandidatePayload {
+    /// The candidate. Its content address must verify (`422`) — the
+    /// store holds only well-addressed candidates, so every served
+    /// record re-derives its id.
+    candidate: Candidate,
+    /// The run whose journal the creation event joins. Required —
+    /// every lifecycle transition is journaled (the wave's exit
+    /// criterion), and creation is the first one.
+    run_id: String,
+    /// The causal parent journal-event id (default: the journal's
+    /// current head, the receipt precedent).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates` — register a distilled candidate → `201
+/// {candidate_id, created, record}`; `200` + `created: false` when the
+/// candidate id is already stored (content addressing makes the create
+/// converge — the `Effect::Idempotent` creation). The address is
+/// verified on the way in (`422`): the store holds only well-addressed
+/// candidates. The `candidate_created` event is journaled into
+/// `run_id`'s journal before the store write — hard-fail (see the
+/// section header).
+async fn create_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CreateCandidatePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    payload
+        .candidate
+        .verify_address()
+        .map_err(|e| learn_error(&e))?;
+    let candidate_id = payload.candidate.candidate_id.to_string();
+    // Retry convergence on the candidate id (the memory write's rule):
+    // a re-posted create returns the stored record without re-journaling.
+    if let Some(existing) = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+    {
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "candidate_id": candidate_id,
+                "created": false,
+                "record": existing,
+            })),
+        ));
+    }
+    let draft = EventDraft::new(RunEventKind::CandidateCreated, Effect::Idempotent)
+        .input(json!({
+            "effect_key": candidate_effect_key(&payload.candidate.candidate_id),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&payload.candidate)
+                .map_err(|e| ApiError::internal(format!("serialize candidate: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    let record = CandidateRecord::new(payload.candidate);
+    state
+        .server_store
+        .put_candidate(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "candidate_id": candidate_id,
+            "created": true,
+            "record": record,
+        })),
+    ))
+}
+
+/// `GET /learn/candidates` — the tenant's candidates, sorted by
+/// candidate id for a deterministic listing.
+async fn list_candidates(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .server_store
+        .list_candidates(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    records.sort_by(|a, b| a.candidate.candidate_id.cmp(&b.candidate.candidate_id));
+    Ok(Json(json!({ "candidates": records })))
+}
+
+/// `GET /learn/candidates/{candidate_id}` — fetch one candidate record
+/// (`404` unknown/cross-tenant — the two are indistinguishable by
+/// design).
+async fn get_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+) -> Result<Json<CandidateRecord>, ApiError> {
+    state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct EvaluateCandidatePayload {
+    /// What to evaluate against: the dataset version, target metric,
+    /// thresholds, and replay evidence.
+    request: EvaluationRequest,
+    /// The run whose journal the evaluation event joins (required — the
+    /// evaluation is the evidence the gate reads; it must be journaled).
+    run_id: String,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates/{candidate_id}/evaluate` — drive the
+/// configured [`CandidateEvaluator`](rusty_agent_runtime::learn::CandidateEvaluator)
+/// over the candidate and record the evaluation → `200 {candidate_id,
+/// status, evaluation}`; `404` unknown/cross-tenant; `409` when no
+/// evaluator is configured (a deployment without one can hold and
+/// inspect candidates but cannot produce evidence) or the lifecycle
+/// forbids re-evaluation; `422` when the evaluation fails or violates
+/// the seam contract (it must name this candidate and the request's
+/// dataset version — mismatches the gate would refuse at promotion are
+/// caught here, at the first transition they would poison).
+async fn evaluate_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+    Json(payload): Json<EvaluateCandidatePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut record = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))?;
+    let expect = record.status;
+    let Some(evaluator) = state.config.candidate_evaluator.clone() else {
+        return Err(ApiError::conflict(
+            "no candidate evaluator is configured on this server — promotion is gated on \
+             evidence, and evidence requires an evaluator \
+             (`ServerConfig::with_candidate_evaluator`)"
+                .to_string(),
+        ));
+    };
+    let evaluation = evaluator
+        .evaluate(&record.candidate, &payload.request)
+        .await
+        .map_err(|e| ApiError::unprocessable(format!("candidate evaluation failed: {e}")))?;
+    if evaluation.candidate_id != record.candidate.candidate_id
+        || evaluation.dataset_version != payload.request.dataset_version
+    {
+        return Err(ApiError::unprocessable(
+            "the evaluator returned an evaluation naming a different candidate or dataset \
+             version — the CandidateEvaluator contract requires both to match the request"
+                .to_string(),
+        ));
+    }
+    record
+        .apply_evaluation(evaluation.clone())
+        .map_err(|e| learn_error(&e))?;
+    let draft = EventDraft::new(RunEventKind::CandidateEvaluated, Effect::Idempotent)
+        .input(json!({
+            "effect_key": evaluation_effect_key(
+                &record.candidate.candidate_id,
+                &evaluation.dataset_version,
+            ),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&evaluation)
+                .map_err(|e| ApiError::internal(format!("serialize evaluation: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    transition_outcome(
+        state
+            .server_store
+            .transition_candidate(tenant.tenant(), &candidate_id, expect, &record, None)
+            .await
+            .map_err(internal_err)?,
+        &candidate_id,
+    )?;
+    Ok(Json(json!({
+        "candidate_id": candidate_id,
+        "status": status_wire(record.status),
+        "evaluation": evaluation,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct PromoteCandidatePayload {
+    /// The run whose journal the promotion event joins (required — the
+    /// promotion receipt is the gate's positive decision, and it must
+    /// be journaled).
+    run_id: String,
+    /// The approval token for out-of-envelope promotions, scoped to the
+    /// candidate's promotion effect id (an approval for one candidate
+    /// does not transfer to another). In-envelope promotions ignore it;
+    /// approval-ruled promotions fail `403` without it.
+    #[serde(default)]
+    approval: Option<ApprovalToken>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates/{candidate_id}/promote` — run the promotion
+/// gate and, on admission, move the surface's version pointer → `200
+/// {candidate_id, status, receipt, pointer}`. The gate
+/// (`admit_promotion`) reads the deployment's declared envelope against
+/// the journaled evaluation: `403` on approval failures, `422` on
+/// evidence failures, `409` when the candidate is not `evaluated`. The
+/// status flip and the pointer move are one store transition (one
+/// transaction on Postgres, one lock pair on the file backend).
+async fn promote_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+    Json(payload): Json<PromoteCandidatePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut record = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))?;
+    let decision = admit_promotion(
+        &state.config.promotion_envelope,
+        &record.candidate,
+        record.evaluation.as_ref(),
+        payload.approval.as_ref(),
+    )
+    .map_err(|e| learn_error(&e))?;
+    let surface = record.candidate.surface();
+    let pointer = state
+        .server_store
+        .get_version_pointer(tenant.tenant(), surface.as_str())
+        .await
+        .map_err(internal_err)?
+        .unwrap_or_else(|| VersionPointer::new(surface.clone()));
+    let receipt = PromotionReceipt {
+        candidate_id: record.candidate.candidate_id.clone(),
+        surface: surface.clone(),
+        previous: pointer.active.clone(),
+        decision,
+        promoted_at: Utc::now(),
+    };
+    record
+        .apply_promotion(receipt.clone())
+        .map_err(|e| learn_error(&e))?;
+    let moved = pointer.promoted(&receipt);
+    let draft = EventDraft::new(RunEventKind::CandidatePromoted, Effect::Idempotent)
+        .input(json!({
+            "effect_key": promotion_effect_key(&record.candidate.candidate_id),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&receipt)
+                .map_err(|e| ApiError::internal(format!("serialize promotion receipt: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    transition_outcome(
+        state
+            .server_store
+            .transition_candidate(
+                tenant.tenant(),
+                &candidate_id,
+                CandidateStatus::Evaluated,
+                &record,
+                Some(&moved),
+            )
+            .await
+            .map_err(internal_err)?,
+        &candidate_id,
+    )?;
+    Ok(Json(json!({
+        "candidate_id": candidate_id,
+        "status": status_wire(record.status),
+        "receipt": receipt,
+        "pointer": moved,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct RollbackCandidatePayload {
+    /// The run whose journal the rollback event joins (required).
+    run_id: String,
+    /// Why the rollback happened — the drift monitor's verdict, the
+    /// operator's note. Journaled on the receipt.
+    cause: String,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates/{candidate_id}/rollback` — re-point the
+/// surface to the version the promotion displaced → `200 {candidate_id,
+/// status, receipt, pointer}`; `404` unknown/cross-tenant; `409` when
+/// the candidate is not `promoted`, or the surface's pointer no longer
+/// serves it (roll back what serves, not a superseded experiment).
+/// Rollback is byte-exact: the pointer's `to` is the promotion's
+/// recorded `previous`, and candidates are content-addressed — the
+/// restored version is the version that served, not a reconstruction.
+async fn rollback_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+    Json(payload): Json<RollbackCandidatePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut record = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))?;
+    if record.status != CandidateStatus::Promoted {
+        return Err(ApiError::conflict(format!(
+            "candidate `{candidate_id}` is `{}` — only a promoted candidate can roll back",
+            status_wire(record.status)
+        )));
+    }
+    let surface = record.candidate.surface();
+    let pointer = state
+        .server_store
+        .get_version_pointer(tenant.tenant(), surface.as_str())
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::conflict(format!(
+                "surface `{surface}` has no version pointer — the candidate is not serving"
+            ))
+        })?;
+    let serves_active = pointer.active.as_ref() == Some(record.candidate_id());
+    let serves_canary = pointer
+        .canary
+        .as_ref()
+        .is_some_and(|binding| &binding.candidate_id == record.candidate_id());
+    if !serves_active && !serves_canary {
+        return Err(ApiError::conflict(format!(
+            "candidate `{candidate_id}` is marked promoted but surface `{surface}` does not \
+             serve it — the pointer moved on; roll back what serves"
+        )));
+    }
+    // Re-point to the promotion's recorded `previous` (full-traffic
+    // rollback) or clear the binding (canary rollback — the static or
+    // active version keeps serving).
+    let to = if serves_active {
+        record
+            .promotion
+            .as_ref()
+            .and_then(|receipt| receipt.previous.clone())
+    } else {
+        None
+    };
+    let receipt = RollbackReceipt {
+        surface: surface.clone(),
+        from: record.candidate.candidate_id.clone(),
+        to,
+        cause: payload.cause,
+        rolled_back_at: Utc::now(),
+    };
+    record
+        .apply_rollback(receipt.clone())
+        .map_err(|e| learn_error(&e))?;
+    let moved = pointer.rolled_back(&receipt);
+    let draft = EventDraft::new(RunEventKind::CandidateRolledBack, Effect::Idempotent)
+        .input(json!({
+            "effect_key": rollback_effect_key(&surface, &record.candidate.candidate_id),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&receipt)
+                .map_err(|e| ApiError::internal(format!("serialize rollback receipt: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    transition_outcome(
+        state
+            .server_store
+            .transition_candidate(
+                tenant.tenant(),
+                &candidate_id,
+                CandidateStatus::Promoted,
+                &record,
+                Some(&moved),
+            )
+            .await
+            .map_err(internal_err)?,
+        &candidate_id,
+    )?;
+    Ok(Json(json!({
+        "candidate_id": candidate_id,
+        "status": status_wire(record.status),
+        "receipt": receipt,
+        "pointer": moved,
+    })))
+}
+
+/// `GET /learn/versions` — the tenant's version pointers, sorted by
+/// surface for a deterministic listing.
+async fn list_version_pointers(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut pointers = state
+        .server_store
+        .list_version_pointers(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    pointers.sort_by(|a, b| a.surface.as_str().cmp(b.surface.as_str()));
+    Ok(Json(json!({ "versions": pointers })))
 }
 
 /// `POST /tasks/{id}/fail` — record a failed attempt → `200 {requeued,

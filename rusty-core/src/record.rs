@@ -437,6 +437,55 @@ pub enum RunEventKind {
     /// separate variant: they journal through `MemoryWrite` with the
     /// correction's attribution in the derived record's provenance.
     MemoryForget,
+
+    /// A learning candidate was created (R0.8 wave 3): a distiller's
+    /// proposed change landed as an immutable, content-addressed
+    /// [`crate::learn::Candidate`] — identity is integrity, so two
+    /// distillations of the same change converge on one id and a tampered
+    /// candidate fails its own address. An [`Effect::Idempotent`] effect
+    /// under the derived key `candidate:{candidate_id}` (see
+    /// [`crate::learn::candidate_effect_key`]), so retried submissions
+    /// converge. Input carries the effect key and the candidate id; output
+    /// carries the candidate itself — the distiller's identity and the
+    /// evidence span it read are journaled with it, not implied.
+    CandidateCreated,
+
+    /// A candidate was evaluated against recorded evidence (R0.8 wave 3):
+    /// replay re-drove recorded runs with the candidate applied, the
+    /// experiment runner graded it over the versioned dataset, and the
+    /// comparison diffed it against the baseline. An
+    /// [`Effect::Idempotent`] effect under the derived key
+    /// `evaluation:{candidate_id}:{dataset_version}` (see
+    /// [`crate::learn::evaluation_effect_key`]): re-evaluation against the
+    /// same dataset version converges; a new dataset version is a new
+    /// evaluation. Output carries the journaled
+    /// [`crate::learn::CandidateEvaluation`] — the replay divergence
+    /// summary, the report pair, the dataset version, and the verdict.
+    /// The evaluation is evidence, not a log line.
+    CandidateEvaluated,
+
+    /// A candidate was promoted (R0.8 wave 3): the active-version pointer
+    /// for its production surface moved. An [`Effect::Idempotent`] effect
+    /// under the derived key `promotion:{candidate_id}` (see
+    /// [`crate::learn::promotion_effect_key`]) — retried promotions
+    /// converge, and recovery re-derives the same key. Output carries the
+    /// [`crate::learn::PromotionReceipt`]: the pointer's previous value
+    /// and the promotion's authority — the envelope version (the standing
+    /// approval) or the approval token's `approved_by` for an
+    /// out-of-envelope promotion.
+    CandidatePromoted,
+
+    /// A promoted candidate was rolled back (R0.8 wave 3): the surface's
+    /// active-version pointer re-pointed to the previous candidate.
+    /// Byte-exact because candidates are content-addressed and immutable —
+    /// the restored version is the one that previously served, not a
+    /// reconstruction. An [`Effect::Idempotent`] effect under the derived
+    /// key `rollback:{surface}:{candidate_id}` (see
+    /// [`crate::learn::rollback_effect_key`]). Output carries the
+    /// [`crate::learn::RollbackReceipt`]: from, to, and the causing
+    /// evidence. New runs bind the re-pointed version at admission;
+    /// in-flight runs keep the version their checkpoint header pins.
+    CandidateRolledBack,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.
