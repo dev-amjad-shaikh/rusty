@@ -28,6 +28,19 @@ pub enum EvalError {
         supported: u64,
     },
 
+    /// Malformed or invalid human-feedback queue state.
+    #[error("feedback error: {0}")]
+    Feedback(String),
+
+    /// The feedback queue format is not supported by this build.
+    #[error("unsupported feedback format version: found {found}, this build supports {supported}")]
+    UnsupportedFeedbackVersion {
+        /// The version the queue declares.
+        found: u64,
+        /// The version this build loads.
+        supported: u64,
+    },
+
     /// The agent factory failed to build a graph for a case, or the initial
     /// state derived from the case input is not a JSON object.
     #[error("agent build error: {0}")]

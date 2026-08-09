@@ -29,6 +29,10 @@
 //!   for future LLM-as-judge evaluators, mirroring the runtime's `ChatModel`
 //!   style; [`judge::RuleBasedJudge`] is the deterministic implementation,
 //!   scoring runs by the fraction of expectations met.
+//! - **Human feedback** ([`feedback`]) — deterministic pairwise annotation
+//!   queues with reviewer leases, rubric validation, consensus resolution,
+//!   disagreement adjudication, corrections, and promotion into versioned
+//!   evaluation cases.
 //!
 //! ## Quick sketch
 //!
@@ -62,6 +66,7 @@ pub mod dataset;
 pub mod error;
 pub mod evidence;
 pub mod experiment;
+pub mod feedback;
 pub mod judge;
 
 pub use assertion::{Assertion, AssertionResult};
@@ -77,5 +82,10 @@ pub use evidence::{RunEvidence, RunStatus, ToolCallRecord};
 pub use experiment::{
     AssertionPassRate, CaseReport, CaseRunReport, ExperimentConfig, ExperimentReport,
     ExperimentRunner, LatencyStats, PreparedRun, ReportSummary, REPORT_FORMAT_VERSION,
+};
+pub use feedback::{
+    AnnotationQueue, AnnotationStatus, AnnotationTask, ResolutionAuthority, ReviewCandidate,
+    ReviewDecision, ReviewLease, ReviewResolution, ReviewRubric, ReviewSubmission, RubricCriterion,
+    StoredReview, TraceRef, FEEDBACK_FORMAT_VERSION,
 };
 pub use judge::{JudgeModel, JudgeRequest, JudgeVerdict, RuleBasedJudge};
