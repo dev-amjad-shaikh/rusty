@@ -444,8 +444,10 @@ fn classify_error(error: &RustyError) -> (ErrorClass, bool) {
 
 /// The outcome of one claim poll.
 enum ClaimOutcome {
-    /// A task was claimed and must be executed and settled.
-    Task(ClaimedTask),
+    /// A task was claimed and must be executed and settled. Boxed: the
+    /// claimed-task payload dwarfs the other variants and the wasm-enabled
+    /// feature combination pushes it past clippy's size threshold.
+    Task(Box<ClaimedTask>),
     /// The server answered `204`: no work available.
     Empty,
     /// The poll failed (transport error, unexpected status, undecodable
@@ -684,7 +686,7 @@ impl ActivityWorker {
             match claim {
                 ClaimOutcome::Task(task) => {
                     backoff = self.claim_backoff_base;
-                    self.run_activity(task, &shutdown).await;
+                    self.run_activity(*task, &shutdown).await;
                 }
                 ClaimOutcome::Empty | ClaimOutcome::Unavailable => {
                     let delay = backoff;
@@ -739,7 +741,7 @@ impl ActivityWorker {
         };
         match response.status() {
             StatusCode::OK => match response.json::<ClaimResponse>().await {
-                Ok(claimed) => ClaimOutcome::Task(claimed.task),
+                Ok(claimed) => ClaimOutcome::Task(Box::new(claimed.task)),
                 Err(e) => {
                     tracing::warn!(error = %e, "claim returned an undecodable task body");
                     ClaimOutcome::Unavailable
