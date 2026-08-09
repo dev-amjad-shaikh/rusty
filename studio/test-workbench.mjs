@@ -20,12 +20,23 @@ if (/\ninit\(\);/.test(src)) { console.error("FAIL: bootstrap init() was not str
 const localData = new Map();
 let quotaFailures = 0;
 let storageWrites = 0;
+let fetchFailure = null;
 const fetchCalls = [];
+const uiElements = new Map();
 const sandbox = {
   async fetch(url, options) {
     fetchCalls.push({ url, options });
+    if (fetchFailure) {
+      return {
+        ok: false, status: fetchFailure.status,
+        async text() { return JSON.stringify(fetchFailure.body); },
+      };
+    }
     return { ok: true, status: 200, async text() { return '{"service":"rusty"}'; } };
   },
+  document: { getElementById(id) { return uiElements.get(id) || null; } },
+  setTimeout() { return 1; },
+  clearTimeout() {},
   localStorage: {
     getItem(key) { return localData.has(key) ? localData.get(key) : null; },
     setItem(key, value) {
@@ -45,9 +56,11 @@ globalThis.__workbench = {
   agentCardHtml, agentGraphLabel, agentDefaultInput, agentBuildRunInput,
   agentRunTone, agentErrorCategory, agentNormalizeRunRecord, agentMergeRunHistory,
   agentDurationLabel, agentRunTimeLabel, agentRunHistoryHtml,
-  agentJourney, agentJourneyHtml, agentBuildCreatePayload,
+  agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft,
+  agentSensitiveKey, agentRedactedValue, agentCopyManifestText, agentCopyContextHtml,
+  agentCopyIdentityConflict, agentBuildCreatePayload,
   agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
-  store,
+  agentCreate, store,
 };`, sandbox, { filename: "index.html<script>" });
 
 const W = sandbox.__workbench;
@@ -236,6 +249,113 @@ check("graph labels: built-in behaviors are understandable",
   check("create payload omits empty optional objects", !("config" in minimal) && !("metadata" in minimal) && !("assistant_id" in minimal));
 }
 
+{
+  const source = {
+    ...agent,
+    name: "Research <Coordinator>",
+    config: { recursion_limit: 12, temperature: 0.2, runtime: { mode: "careful" } },
+    metadata: { description: "Collect evidence", tags: ["research", "production"], owner: "quality" },
+  };
+  const before = JSON.stringify(source);
+  const draft = W.agentCopyDraft(source);
+  check("copy draft: makes the new identity explicit and preserves editable fields",
+    draft.name === "Copy of Research <Coordinator>" && draft.assistantId === "" &&
+    draft.graph === "react_agent" && draft.recursionLimit === "12" &&
+    draft.description === "Collect evidence" && draft.tags === "research, production");
+  const copied = W.agentBuildCreatePayload({
+    ...draft, name: "Research coordinator v2", recursionLimit: "18",
+    description: "Review evidence", tags: "research, review",
+  }, source);
+  check("copy payload: carries unknown stored configuration without mutating the source",
+    copied.config.temperature === 0.2 && copied.config.runtime.mode === "careful" &&
+    copied.config.recursion_limit === 18 && copied.metadata.owner === "quality" &&
+    copied.metadata.description === "Review evidence" && JSON.stringify(source) === before);
+  eq("copy payload: known metadata changes are deliberate",
+    copied.metadata.tags, ["research", "review"]);
+  const cleared = W.agentBuildCreatePayload({ ...draft, recursionLimit: "", description: "", tags: "" }, source);
+  check("copy payload: clearing known fields keeps unrelated configuration",
+    !("recursion_limit" in cleared.config) && cleared.config.temperature === 0.2 &&
+    !("description" in cleared.metadata) && !("tags" in cleared.metadata) && cleared.metadata.owner === "quality");
+  check("copy payload: source identity is never inherited",
+    !("assistant_id" in copied) && W.agentCopyIdentityConflict(source, { assistant_id: source.assistant_id }));
+  check("copy payload: a generated or distinct identity is accepted",
+    !W.agentCopyIdentityConflict(source, {}) &&
+    !W.agentCopyIdentityConflict(source, { assistant_id: "research-coordinator-v2" }));
+  const receipt = W.agentCopyContextHtml({ ...source, config: { ...source.config, credential: "must-not-render" } });
+  check("copy receipt: explains isolation, escapes identity, and does not expose stored values",
+    receipt.includes("Source agent → new draft") && receipt.includes("Research &lt;Coordinator&gt;") &&
+    receipt.includes("research-coordinator") && receipt.includes("source agent") &&
+    receipt.includes("stay unchanged") && receipt.includes("Review carried manifest") &&
+    receipt.includes("[hidden]") && !receipt.includes("must-not-render"));
+  const manifest = W.agentCopyManifestText({ config: { api_key: "private", model: "local" }, metadata: { owner: "quality" } });
+  check("copy receipt: advanced manifest is readable and redacts sensitive-looking values",
+    manifest.includes('"model": "local"') && manifest.includes('"owner": "quality"') &&
+    manifest.includes('"api_key": "[hidden]"') && !manifest.includes("private"));
+  const aliases = W.agentCopyManifestText({
+    config: {
+      auth: "Basic private", headers: { authentication: "Bearer private", authorization: "Bearer private", cookie: "session=private" },
+      private_key: "private",
+    },
+    metadata: { connection_string: "private", session_id: "private", public_label: "visible" },
+  });
+  check("copy receipt: nested and common credential aliases are redacted",
+    !aliases.includes("Bearer private") && !aliases.includes("session=private") &&
+    !aliases.includes('"private"') && aliases.includes('"public_label": "visible"') &&
+    W.agentSensitiveKey("auth") && W.agentSensitiveKey("authentication") &&
+    W.agentSensitiveKey("set-cookie") && W.agentSensitiveKey("accessKey"));
+  const deep = { a: { b: { c: { d: { e: { f: { g: { h: "hidden" } } } } } } } };
+  check("copy receipt: deeply nested and oversized values are bounded",
+    W.agentRedactedValue(deep).a.b.c.d.e.f.g.h === "[depth limit]" &&
+    W.agentCopyManifestText({ config: { note: "x".repeat(2000) } }, 512).endsWith("… preview truncated"));
+  check("copy helpers: the editable map view remains defensive for non-object values",
+    Object.keys(W.agentCopyableMap([])).length === 0 && Object.keys(W.agentCopyableMap("bad")).length === 0);
+  const arbitrary = { ...source, config: ["model", { retries: 2 }], metadata: "opaque metadata" };
+  const arbitraryBefore = JSON.stringify(arbitrary);
+  const arbitraryCopy = W.agentBuildCreatePayload({
+    name: "Exact JSON copy", graph: "react_agent", assistantId: "",
+    recursionLimit: "", description: "", tags: "",
+  }, arbitrary);
+  eq("copy payload: array config is preserved exactly", arbitraryCopy.config, arbitrary.config);
+  eq("copy payload: scalar metadata is preserved exactly", arbitraryCopy.metadata, arbitrary.metadata);
+  check("copy payload: arbitrary JSON round-trip does not mutate its source",
+    JSON.stringify(arbitrary) === arbitraryBefore &&
+    W.agentCopyManifestText(arbitrary).includes("opaque metadata"));
+}
+
+{
+  function element(value = "") {
+    return {
+      value, disabled: false, style: {}, className: "", textContent: "", focused: false,
+      focus() { this.focused = true; },
+      removeAttribute(name) { delete this[name]; },
+    };
+  }
+  uiElements.clear();
+  for (const [id, value] of Object.entries({
+    "inp-agent-name": "Copy draft", "sel-agent-graph": "react_agent",
+    "inp-agent-id": agent.assistant_id, "inp-agent-limit": "12",
+    "inp-agent-description": "Collect evidence", "inp-agent-tags": "research",
+    "btn-agent-create": "", toast: "",
+  })) uiElements.set(id, element(value));
+  W.store.agentCopySource = JSON.parse(JSON.stringify(agent));
+  const callsBeforeConflict = fetchCalls.length;
+  await W.agentCreate();
+  check("copy interaction: source identity is rejected before any POST",
+    fetchCalls.length === callsBeforeConflict && uiElements.get("inp-agent-id").focused &&
+    uiElements.get("toast").textContent.includes("source agent stays unchanged"));
+  uiElements.get("inp-agent-id").value = "research-copy";
+  uiElements.get("inp-agent-id").focused = false;
+  fetchFailure = { status: 409, body: { message: "assistant already exists" } };
+  await W.agentCreate();
+  fetchFailure = null;
+  check("copy interaction: server failure preserves the draft and source context",
+    fetchCalls.length === callsBeforeConflict + 1 && W.store.agentCopySource.assistant_id === agent.assistant_id &&
+    uiElements.get("inp-agent-name").value === "Copy draft" &&
+    uiElements.get("inp-agent-id").value === "research-copy" &&
+    uiElements.get("btn-agent-create").disabled === false &&
+    uiElements.get("toast").textContent === "assistant already exists");
+}
+
 check("route-missing error explains the required server capability",
   W.agentErrorHtml(404, null).includes("no <code>/assistants</code> routes"));
 check("server error message is escaped",
@@ -327,6 +447,8 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     detail.includes('data-agent-run="research-coordinator"') &&
     detail.includes('data-agent-open-thread="thread-42"') &&
     detail.includes('data-agent-open-run="019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d"'));
+  check("detail offers a source-safe copy action",
+    detail.includes('data-agent-copy="research-coordinator"') && detail.includes(">Copy agent</button>"));
   check("detail uses a plain-language task instead of raw JSON for conversational agents",
     detail.includes('id="inp-agent-prompt"') && detail.includes("Reply with a short hello.") && !detail.includes("Test input (JSON)"));
   check("detail escapes names and offers the trace as the next step",
@@ -356,6 +478,12 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     W.agentRunAnnouncement({ status: "success", run_id: "run-42" }).includes("Run succeeded") &&
     W.agentRunAnnouncement({ status: "running" }).includes("Run started") &&
     html.includes('id="flight-recorder-title" tabindex="-1"'));
+  check("copy form uses native submission and an explicitly labelled review region",
+    html.includes('id="agent-create-panel" role="region" aria-labelledby="agent-create-title"') &&
+    html.includes('id="agent-copy-context" role="note" hidden') &&
+    html.includes('id="agent-create-form"') && html.includes('type="submit" class="primary" id="btn-agent-create"'));
+  check("copy outcomes are announced through an atomic live region",
+    html.includes('id="toast" role="status" aria-live="polite" aria-atomic="true"'));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

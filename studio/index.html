@@ -373,6 +373,7 @@
   .readiness-labels span.ready { color: #91b9dc; }
   .agent-detail-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
   .agent-detail-head h2 { margin: 0; font-size: 19px; }
+  .agent-detail-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .agent-kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 16px 0; }
   .agent-kv .k { color: var(--text-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px; }
   .agent-kv .v { font-family: var(--mono); font-size: 11.5px; word-break: break-word; }
@@ -382,6 +383,23 @@
   .agent-form label.wide { grid-column: 1 / -1; }
   .agent-form textarea, .agent-test textarea { min-height: 82px; resize: vertical; font-family: var(--mono); }
   .agent-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+  .agent-copy-receipt {
+    position: relative; margin: 10px 0 14px; padding: 12px 14px 12px 18px;
+    border: 1px solid #405d74; border-radius: 7px; background: #18232c;
+    box-shadow: inset 3px 0 0 #6fa8dc;
+  }
+  .agent-copy-receipt[hidden] { display: none; }
+  .agent-copy-flow { color: #91b9dc; font: 700 9.5px var(--mono); letter-spacing: .7px; text-transform: uppercase; }
+  .agent-copy-receipt h3 { margin: 4px 0 1px; color: #eef7ff; font-size: 14px; }
+  .agent-copy-id { margin-bottom: 8px; color: var(--text-faint); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .agent-copy-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .agent-copy-summary span { min-width: 0; padding-top: 7px; border-top: 1px solid #314858; color: var(--text-dim); font-size: 10.5px; }
+  .agent-copy-summary b { display: block; margin-top: 2px; color: var(--text); font: 11px var(--mono); overflow-wrap: anywhere; }
+  .agent-copy-receipt p { margin: 9px 0 0; color: var(--text-dim); font-size: 11px; }
+  .agent-copy-manifest { margin-top: 9px; padding-top: 8px; border-top: 1px solid #314858; }
+  .agent-copy-manifest summary { color: #b9cddd; cursor: pointer; font-size: 11px; }
+  .agent-copy-manifest pre { max-height: 220px; margin: 8px 0 0; overflow: auto; }
+  .agent-copy-manifest p { color: var(--text-faint); font-size: 10.5px; }
   .agent-advanced { grid-column: 1 / -1; border-top: 1px solid var(--border); padding-top: 8px; }
   .agent-advanced summary, .run-evidence summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
   .agent-advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 10px; }
@@ -444,6 +462,9 @@
     main { overflow: visible; }
     .agent-form { grid-template-columns: 1fr; }
     .agent-form label.wide, .agent-form-actions { grid-column: auto; }
+    .agent-copy-summary { grid-template-columns: 1fr; }
+    .agent-detail-head { flex-direction: column; }
+    .agent-detail-actions { justify-content: flex-start; }
     .agent-journey { grid-template-columns: 1fr; }
     .journey-step { border-right: 0; border-bottom: 1px solid var(--border); }
     .journey-step:last-child { border-bottom: 0; }
@@ -531,10 +552,11 @@
         <div class="agent-journey" id="agent-journey" aria-live="polite"></div>
         <div class="sr-only" id="agent-run-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
-        <div class="card" id="agent-create-panel" style="display:none">
-          <h2 class="section" style="margin-top:0">Create an agent</h2>
-          <div class="note tiny">Choose what this agent does. You can tune its runtime settings later.</div>
-          <div class="agent-form">
+        <div class="card" id="agent-create-panel" role="region" aria-labelledby="agent-create-title" style="display:none">
+          <h2 class="section" id="agent-create-title" style="margin-top:0">Create an agent</h2>
+          <div class="note tiny" id="agent-create-note">Choose what this agent does. You can tune its runtime settings later.</div>
+          <div class="agent-copy-receipt" id="agent-copy-context" role="note" hidden></div>
+          <form class="agent-form" id="agent-create-form">
             <label>Name <input id="inp-agent-name" type="text" autocomplete="off" placeholder="Research coordinator"></label>
             <label>Behavior <select id="sel-agent-graph" aria-describedby="agent-graph-help"></select><span class="field-help" id="agent-graph-help">The runtime workflow this agent will use.</span></label>
             <label class="wide">Responsibility <textarea id="inp-agent-description" placeholder="Research a question and return a concise, sourced answer."></textarea></label>
@@ -547,10 +569,10 @@
               </div>
             </details>
             <div class="agent-form-actions">
-              <button id="btn-agent-create-cancel">Cancel</button>
-              <button class="primary" id="btn-agent-create">Create and continue</button>
+              <button type="button" id="btn-agent-create-cancel">Cancel</button>
+              <button type="submit" class="primary" id="btn-agent-create">Create and continue</button>
             </div>
-          </div>
+          </form>
         </div>
 
         <div class="agent-summary" id="agent-summary"></div>
@@ -715,7 +737,7 @@
     </main>
   </div>
 </div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script>
 "use strict";
@@ -759,6 +781,7 @@ const store = {
   agentRuns: Object.create(null),       // latest full run from this browser session, keyed by assistant id
   agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
   agentCreateOpen: false, // creation form temporarily owns the guided journey
+  agentCopySource: null, // source snapshot while a copy-to-draft form is open
   agentsUnsupported: false, // server build has no /assistants routes
 };
 
@@ -1021,6 +1044,7 @@ async function connect() {
     store.agentRuns = Object.create(null);
     store.agentRunHistory = Object.create(null);
     store.agentCreateOpen = false;
+    store.agentCopySource = null;
     store.agents = null;
     store.agentsUnsupported = false;
     $("agent-create-panel").style.display = "none";
@@ -2396,18 +2420,139 @@ function agentJourneyHtml(agent, testRun, creating) {
     `<strong>${escapeHtml(step.label)}</strong><span>${escapeHtml(step.detail)}</span></div>`).join("");
 }
 
-function agentBuildCreatePayload(fields) {
+function agentCopyableValue(value) {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch { return undefined; }
+}
+
+function agentCopyableMap(value) {
+  const parsed = agentCopyableValue(value);
+  if (!agentPlainObject(parsed)) return Object.create(null);
+  const copy = Object.create(null);
+  for (const [key, item] of Object.entries(parsed)) copy[key] = item;
+  return copy;
+}
+
+function agentSensitiveKey(key) {
+  return /(secret|token|password|credential|api.?key|auth(?:entication|orization)?|cookie|private.?key|access.?key|bearer|session|connection.?string)/i.test(String(key));
+}
+
+function agentCopyDraft(agent) {
+  const source = agent && typeof agent === "object" ? agent : {};
+  const config = agentCopyableMap(source.config);
+  const metadata = agentCopyableMap(source.metadata);
+  const limit = Number(config.recursion_limit);
+  return {
+    name: `Copy of ${String(source.name || "Unnamed agent")}`,
+    graph: String(source.graph || ""),
+    assistantId: "",
+    recursionLimit: Number.isInteger(limit) && limit > 0 ? String(limit) : "",
+    description: String(metadata.description || ""),
+    tags: agentTags(source).join(", "),
+  };
+}
+
+function agentRedactedValue(value, depth) {
+  const level = Number(depth) || 0;
+  if (level >= 8) return "[depth limit]";
+  if (Array.isArray(value)) {
+    const items = value.slice(0, 50).map((item) => agentRedactedValue(item, level + 1));
+    if (value.length > 50) items.push(`[${value.length - 50} more items]`);
+    return items;
+  }
+  if (agentPlainObject(value)) {
+    const result = Object.create(null);
+    const entries = Object.entries(value);
+    for (const [key, item] of entries.slice(0, 100)) {
+      result[key] = agentSensitiveKey(key)
+        ? "[hidden]" : agentRedactedValue(item, level + 1);
+    }
+    if (entries.length > 100) result["…"] = `[${entries.length - 100} more fields]`;
+    return result;
+  }
+  if (typeof value === "string" && value.length > 500) return value.slice(0, 500) + "…";
+  return value;
+}
+
+function agentCopyManifestText(agent, maximum) {
+  const source = agent && typeof agent === "object" ? agent : {};
+  const manifest = {
+    config: agentRedactedValue(agentCopyableValue(source.config)),
+    metadata: agentRedactedValue(agentCopyableValue(source.metadata)),
+  };
+  const text = JSON.stringify(manifest, null, 2);
+  const limit = Math.max(512, Number(maximum) || 6000);
+  return text.length > limit ? text.slice(0, limit) + "\n… preview truncated" : text;
+}
+
+function agentCopyContextHtml(agent) {
+  const source = agent && typeof agent === "object" ? agent : {};
+  const config = agentCopyableMap(source.config);
+  const metadata = agentCopyableMap(source.metadata);
+  const limit = Number(config.recursion_limit);
+  const storedFields = Object.keys(config).length + Object.keys(metadata).length +
+    (!agentPlainObject(source.config) && source.config != null ? 1 : 0) +
+    (!agentPlainObject(source.metadata) && source.metadata != null ? 1 : 0);
+  const lockedShapes = (!agentPlainObject(source.config) && source.config != null) ||
+    (!agentPlainObject(source.metadata) && source.metadata != null);
+  return `<div class="agent-copy-flow">Source agent → new draft</div>` +
+    `<h3>${escapeHtml(source.name || "Unnamed agent")}</h3>` +
+    `<div class="agent-copy-id">${escapeHtml(source.assistant_id || "identity unavailable")}</div>` +
+    `<div class="agent-copy-summary">` +
+      `<span>Behavior<b>${escapeHtml(agentGraphLabel(source.graph))}</b></span>` +
+      `<span>Step limit<b>${Number.isInteger(limit) && limit > 0 ? escapeHtml(String(limit)) : "runtime default"}</b></span>` +
+      `<span>Carried fields<b>${storedFields} stored field${storedFields === 1 ? "" : "s"}</b></span>` +
+    `</div><p>The source agent, its runs, threads, and evidence stay unchanged. ` +
+    `This draft becomes a separate durable agent.</p>` +
+    (lockedShapes ? `<p>Non-object stored values are carried exactly; their shortcut fields are locked for this copy.</p>` : "") +
+    `<details class="agent-copy-manifest"><summary>Review carried manifest</summary>` +
+      `<pre class="json">${escapeHtml(agentCopyManifestText(source))}</pre>` +
+      `<p>Sensitive-looking values are hidden in this preview and still carried unchanged.</p></details>`;
+}
+
+function agentCopyIdentityConflict(source, payload) {
+  const sourceId = String(source && source.assistant_id || "");
+  const nextId = String(payload && payload.assistant_id || "");
+  return Boolean(sourceId && nextId && sourceId === nextId);
+}
+
+function agentBuildCreatePayload(fields, source) {
   const payload = {
     name: String(fields && fields.name || "").trim(),
     graph: String(fields && fields.graph || "").trim(),
   };
+  const hasSource = Boolean(source && typeof source === "object");
+  const hasSourceConfig = hasSource && Object.prototype.hasOwnProperty.call(source, "config");
+  const hasSourceMetadata = hasSource && Object.prototype.hasOwnProperty.call(source, "metadata");
+  let config = hasSourceConfig ? agentCopyableValue(source.config) : undefined;
+  let metadata = hasSourceMetadata ? agentCopyableValue(source.metadata) : undefined;
   const assistantId = String(fields && fields.assistantId || "").trim();
   const limit = Number(fields && fields.recursionLimit);
   const description = String(fields && fields.description || "").trim();
   const tags = String(fields && fields.tags || "").split(",").map((x) => x.trim()).filter(Boolean);
   if (assistantId) payload.assistant_id = assistantId;
-  if (Number.isInteger(limit) && limit > 0) payload.config = { recursion_limit: limit };
-  if (description || tags.length) payload.metadata = { description, tags };
+  if (agentPlainObject(config)) {
+    if (Number.isInteger(limit) && limit > 0) config.recursion_limit = limit;
+    else delete config.recursion_limit;
+  } else if ((config == null) && Number.isInteger(limit) && limit > 0) {
+    config = { recursion_limit: limit };
+  }
+  if (agentPlainObject(metadata)) {
+    if (description) metadata.description = description;
+    else delete metadata.description;
+    if (tags.length) metadata.tags = tags;
+    else delete metadata.tags;
+  } else if (metadata == null && (description || tags.length)) {
+    metadata = {};
+    if (description) metadata.description = description;
+    if (tags.length) metadata.tags = tags;
+  }
+  if (hasSourceConfig && config !== undefined) payload.config = config;
+  else if (agentPlainObject(config) && Object.keys(config).length) payload.config = config;
+  if (hasSourceMetadata && metadata !== undefined) payload.metadata = metadata;
+  else if (agentPlainObject(metadata) && Object.keys(metadata).length) payload.metadata = metadata;
   return payload;
 }
 
@@ -2461,7 +2606,9 @@ function agentDetailHtml(agent, readiness, testRun, runHistory) {
     : `<label>Starting data (JSON)<textarea id="inp-agent-test" spellcheck="false">${escapeHtml(pretty(agentDefaultInput(agent.graph)))}</textarea><span class="field-help">This workflow accepts structured input.</span></label>`;
   return `<div class="agent-detail-head"><div><h2>${escapeHtml(agent.name || "Unnamed agent")}</h2>` +
     `<div class="muted tiny">${escapeHtml(meta.description || agentGraphLabel(agent.graph))}</div></div>` +
-    `<span class="badge ${readiness.ready === readiness.total ? "success" : "pending"}">${readiness.ready}/${readiness.total} ready</span></div>` +
+    `<div class="agent-detail-actions"><button class="small" type="button" data-agent-copy="${escapeHtml(agent.assistant_id || "")}"` +
+      `${runnable ? "" : ` disabled title="Register this graph before copying the agent"`}>Copy agent</button>` +
+      `<span class="badge ${readiness.ready === readiness.total ? "success" : "pending"}">${readiness.ready}/${readiness.total} ready</span></div></div>` +
     agentReadinessHtml(readiness, true) +
     `<div class="agent-kv">` +
       `<span class="k">Agent ID</span><span class="v">${escapeHtml(agent.assistant_id || "—")}</span>` +
@@ -2559,23 +2706,74 @@ function agentsRender() {
   );
 }
 
-function agentOpenCreate() {
+function agentResetCreateForm() {
+  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
+  for (const id of ["inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) {
+    $(id).disabled = false;
+    $(id).removeAttribute("title");
+  }
+  $("agent-create-title").textContent = "Create an agent";
+  $("agent-create-note").textContent = "Choose what this agent does. You can tune its runtime settings later.";
+  $("btn-agent-create").textContent = "Create and continue";
+  $("agent-copy-context").hidden = true;
+  $("agent-copy-context").innerHTML = "";
+}
+
+function agentOpenCreate(source) {
+  agentResetCreateForm();
   store.agentCreateOpen = true;
+  store.agentCopySource = source ? JSON.parse(JSON.stringify(source)) : null;
   const select = $("sel-agent-graph");
   select.innerHTML = (((store.info && store.info.graphs) || []).map((g) =>
     `<option value="${escapeHtml(g.name)}">${escapeHtml(agentGraphLabel(g.name))} · ${escapeHtml(g.name)}</option>`).join(""));
+  if (store.agentCopySource) {
+    const draft = agentCopyDraft(store.agentCopySource);
+    $("agent-create-title").textContent = "Copy agent";
+    $("agent-create-note").textContent = "Review the carried configuration, then give this copy its own identity.";
+    $("btn-agent-create").textContent = "Create copy";
+    $("agent-copy-context").innerHTML = agentCopyContextHtml(store.agentCopySource);
+    $("agent-copy-context").hidden = false;
+    $("inp-agent-name").value = draft.name;
+    $("sel-agent-graph").value = draft.graph;
+    $("inp-agent-limit").value = draft.recursionLimit;
+    $("inp-agent-description").value = draft.description;
+    $("inp-agent-tags").value = draft.tags;
+    if (!agentPlainObject(store.agentCopySource.config) && store.agentCopySource.config != null) {
+      $("inp-agent-limit").disabled = true;
+      $("inp-agent-limit").title = "This source uses a non-object config that will be copied exactly.";
+    }
+    if (!agentPlainObject(store.agentCopySource.metadata) && store.agentCopySource.metadata != null) {
+      for (const id of ["inp-agent-description", "inp-agent-tags"]) {
+        $(id).disabled = true;
+        $(id).title = "This source uses non-object metadata that will be copied exactly.";
+      }
+    }
+  }
   $("agent-create-panel").style.display = "block";
   $("agent-journey").innerHTML = agentJourneyHtml(null, null, true);
-  $("inp-agent-name").focus();
+  $("agent-create-panel").scrollIntoView({ block: "start" });
+  $("inp-agent-name").focus({ preventScroll: true });
+  if (store.agentCopySource) $("inp-agent-name").select();
 }
 
-function agentCloseCreate() {
+function agentCloseCreate(returnFocus) {
+  const sourceId = store.agentCopySource && store.agentCopySource.assistant_id;
   store.agentCreateOpen = false;
+  store.agentCopySource = null;
   $("agent-create-panel").style.display = "none";
+  agentResetCreateForm();
   agentsRender();
+  if (returnFocus !== false) {
+    const target = sourceId
+      ? Array.from($("agent-detail").querySelectorAll("[data-agent-copy]"))
+        .find((button) => button.getAttribute("data-agent-copy") === String(sourceId))
+      : $("btn-agent-create-open");
+    if (target) target.focus({ preventScroll: true });
+  }
 }
 
 async function agentCreate() {
+  const source = store.agentCopySource;
   const payload = agentBuildCreatePayload({
     name: $("inp-agent-name").value,
     graph: $("sel-agent-graph").value,
@@ -2583,22 +2781,29 @@ async function agentCreate() {
     recursionLimit: $("inp-agent-limit").value,
     description: $("inp-agent-description").value,
     tags: $("inp-agent-tags").value,
-  });
+  }, source);
   if (!payload.name) { toast("Enter an agent name.", "err"); return; }
   if (!payload.graph) { toast("Choose a registered graph.", "err"); return; }
+  if (agentCopyIdentityConflict(source, payload)) {
+    toast("Use a new agent ID for the copy. The source agent stays unchanged.", "err");
+    $("inp-agent-id").focus();
+    return;
+  }
   $("btn-agent-create").disabled = true;
   try {
     const created = await api("POST", "/assistants", payload);
     if (!store.agents) store.agents = { list: [], selected: null, error: null };
     store.agents.list.push(created);
     store.agents.selected = created.assistant_id;
-    agentCloseCreate();
-    for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
+    const sourceName = source && source.name;
+    agentCloseCreate(false);
     agentsUpdateSidebar();
     agentsRender();
     const firstTask = $("inp-agent-prompt") || $("inp-agent-test");
     if (firstTask) firstTask.focus();
-    toast(`${created.name} is ready for a first run`, "ok");
+    toast(sourceName
+      ? `${created.name} is ready. ${sourceName} is unchanged.`
+      : `${created.name} is ready for a first run`, "ok");
   } catch (e) { toast(e.message, "err"); }
   finally { $("btn-agent-create").disabled = false; }
 }
@@ -3008,9 +3213,17 @@ function init() {
   $("btn-agents-open").onclick = openAgents;
   $("btn-agents-refresh").onclick = () => agentsLoad(false);
   $("inp-agent-search").addEventListener("input", agentsRender);
-  $("btn-agent-create-open").onclick = agentOpenCreate;
-  $("btn-agent-create-cancel").onclick = agentCloseCreate;
-  $("btn-agent-create").onclick = agentCreate;
+  $("btn-agent-create-open").onclick = () => agentOpenCreate();
+  $("btn-agent-create-cancel").onclick = () => agentCloseCreate();
+  $("agent-create-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    agentCreate();
+  });
+  $("agent-create-panel").addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !store.agentCreateOpen) return;
+    e.preventDefault();
+    agentCloseCreate();
+  });
   $("agent-list").addEventListener("click", (e) => {
     const item = e.target.closest("[data-assistant-id]");
     if (!item || !store.agents) return;
@@ -3026,6 +3239,12 @@ function init() {
     agentsRender();
   });
   $("agent-detail").addEventListener("click", (e) => {
+    const copy = e.target.closest("[data-agent-copy]");
+    if (copy && !copy.disabled && store.agents) {
+      const source = store.agents.list.find((item) => item.assistant_id === copy.getAttribute("data-agent-copy"));
+      if (source) agentOpenCreate(source);
+      return;
+    }
     const run = e.target.closest("[data-agent-run]");
     if (run && !run.disabled) { agentRunTest(run.getAttribute("data-agent-run")); return; }
     const thread = e.target.closest("[data-agent-open-thread]");
