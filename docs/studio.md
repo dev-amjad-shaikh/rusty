@@ -8,7 +8,10 @@ studio/
 ├── index.html         ← the entire UI (open this)
 ├── serve.py           ← optional same-origin static host + API proxy
 ├── test-recorder.mjs  ← node unit tests for the Flight Recorder timeline helpers
-└── test-tasks.mjs     ← node unit tests for the durable-tasks view helpers
+├── test-tasks.mjs     ← node unit tests for the durable-tasks view helpers
+├── test-workbench.mjs ← node unit tests for the agent-creation and run journey
+├── test-memory.mjs    ← node unit tests for governed-memory inspection
+└── test-all.mjs       ← discovers and runs every Studio test suite
 ```
 
 ## What it does
@@ -17,6 +20,20 @@ studio/
   header). Connect calls `GET /info` and shows the service version, checkpointer kind, and every registered
   graph with its channel names. URL, key, and thread list persist in `localStorage`.
 - **Graphs panel** — one card per registered graph, with a **New thread** button (`POST /threads`).
+- **Agent workbench** — a user-facing catalog for durable assistants. Create an agent from a registered
+  behavior, inspect its runtime configuration and readiness, copy an existing agent without carrying
+  over identity or run history, give it a real task, and move directly into the resulting thread and
+  trace. A bounded, connection-scoped browser ledger preserves only safe run metadata (identity,
+  status, timing, and stable error category); prompts and result payloads are deliberately not stored.
+- **Governed memory ledger** — a tenant-wide workspace over `POST /memory/query` and
+  `POST /memory/conflicts`. It retrieves active, candidate, expired, and superseded records so an
+  operator can audit what Rusty retained rather than seeing only the current answer. Search and
+  composable scope, kind, and lifecycle filters narrow the ledger. Selecting a record exposes its
+  immutable content, scope, validity window, expiry, confidence, priority, tags, candidacy,
+  supersession link, and a bounded raw-record manifest with an explicit truncation marker. A visual provenance spine connects the record to its
+  human, agent, distiller, or system author and the run, correction, candidate, or journal evidence
+  that produced it. Structural conflicts get a dedicated inbox: reviewing one isolates every peer
+  record and lets the operator compare evidence. The Studio never silently chooses a winner.
 - **Threads panel (local-only)** — the server API (as of v0.4) has **no list-threads endpoint**, so threads you create or
   attach are remembered in your browser, keyed by server URL. **Attach by id** re-connects a thread the
   server already knows, and offers to re-create it with the same id when the in-memory thread registry has
@@ -169,6 +186,17 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
 
 ## Limitations (by design or by server version)
 
+- **The memory ledger is an audit surface, not an editor.** This first governed-memory slice is
+  intentionally read-only: correction, approval/rejection of candidates, conflict resolution, and
+  forgetting remain server-governed operations until their policy and audit contracts can be preserved
+  in the UI. The query endpoint is currently unpaginated, so after receiving its response the Studio
+  builds a bounded audit snapshot from the first 1,000 ranked records plus the peers needed for the
+  first 50 conflicts. Search text is precomputed once for that snapshot and input is debounced; the
+  content portion of the index is limited to the first 2,000 characters of each record, and the UI
+  says so beside the search field. The first 200 matches are rendered. Status copy distinguishes retained totals from snapshot-derived
+  counts. Large content and raw-record views are visibly truncated to keep inspection responsive.
+  Server-side pagination remains the proper next step for very large tenants. Semantic similarity
+  search is not exposed by the current HTTP contract.
 - **Thread list is local-only.** The server (as of v0.4) has no `GET /threads`; the Studio's thread list lives in
   `localStorage`, keyed by server base URL, and is not shared across browsers or machines. Server restarts
   drop the in-memory thread registry — **Attach** re-creates a thread with the same id to re-attach to its
@@ -193,14 +221,16 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   and whose graph is still registered — the 409 and 422 banners say which. Replay of *resumed* runs is
   rejected by the replay engine itself (`ExactReplay` refuses journals that begin with a resume event);
   replay the original run instead.
-- **Static verification only.** The page was syntax-checked (see below) but not exercised in a real browser
-  in this workspace; visual/behavioral bugs are possible. The API shapes it targets were read from
-  `rusty-server/src/routes.rs` + `src/runs.rs`, not guessed.
 - The server is **single-process** with an in-memory run registry: background-run polling (`GET
   /runs/{run_id}`) 404s for runs created before a server restart.
 
 ## Verification performed
 
+- `node studio/test-all.mjs` — discovers every Studio suite and fails if any suite fails. The governed
+  memory suite covers immutable content handling, every frozen provenance-author variant, active /
+  candidate / expired / superseded classification, combined search and filters, conflict isolation,
+  evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,
+  route compatibility, and explicit render bounds.
 - `node --check` on the extracted `<script>` block — syntax OK.
 - `node studio/test-recorder.mjs` — 71 unit tests over the Flight Recorder timeline helpers (extracted
   from the same `<script>` block, run under `vm`): `seq` ordering with missing-field fallbacks,

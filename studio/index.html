@@ -451,6 +451,106 @@
   .agent-summary > div { border: 1px solid var(--border); background: var(--bg-inset); border-radius: 7px; padding: 8px 10px; }
   .agent-summary b { display: block; font: 700 17px var(--mono); color: #91b9dc; }
   .agent-summary span { color: var(--text-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; }
+
+  /* ---------- governed memory workspace ---------- */
+  .memory-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+  .memory-head h1 { margin: 0; font-size: 24px; letter-spacing: -.4px; }
+  .memory-head p { margin: 4px 0 0; max-width: 700px; color: var(--text-dim); }
+  .memory-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .memory-summary { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .memory-summary > div { border: 1px solid var(--border); background: var(--bg-inset); border-radius: 7px; padding: 9px 11px; }
+  .memory-summary b { display: block; color: #b7cba9; font: 700 17px var(--mono); }
+  .memory-summary .attention b { color: #efdfae; }
+  .memory-summary span { color: var(--text-dim); font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; }
+  .memory-toolbar {
+    display: grid; grid-template-columns: minmax(190px, 1.7fr) repeat(3, minmax(112px, .65fr)) auto;
+    gap: 8px; align-items: end; margin-bottom: 12px;
+  }
+  .memory-toolbar label { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim); font-size: 10.5px; }
+  .memory-toolbar .field-help { color: var(--text-dim); }
+  .memory-toolbar input, .memory-toolbar select {
+    width: 100%; min-width: 0; background: var(--bg-inset); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 12px;
+  }
+  .memory-toolbar input { font-family: var(--sans); }
+  .memory-review-banner {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin: 0 0 12px; padding: 9px 11px; border: 1px solid #6e5c26;
+    border-radius: 7px; background: #302918; color: #e8dcb8; font-size: 11.5px;
+  }
+  .memory-review-banner[hidden] { display: none; }
+  .memory-conflict-inbox { margin-bottom: 12px; }
+  .memory-conflict-inbox > h2 { margin: 0 0 3px; font-size: 15px; }
+  .memory-conflict-inbox > p { margin: 0 0 9px; color: var(--text-dim); font-size: 11.5px; }
+  .memory-conflict-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+  .memory-conflict-card {
+    display: block; width: 100%; text-align: left; padding: 10px 11px;
+    background: #2d271a; border: 1px solid #625326; border-radius: 7px;
+  }
+  .memory-conflict-card strong { display: block; color: #f0e2b1; font-size: 12.5px; }
+  .memory-conflict-card span { display: block; margin-top: 4px; color: var(--text-dim); font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .memory-layout { display: grid; grid-template-columns: minmax(270px, 370px) minmax(420px, 1fr); gap: 14px; align-items: start; }
+  .memory-list { display: flex; flex-direction: column; gap: 7px; }
+  .memory-item {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised);
+    padding: 10px 11px; cursor: pointer;
+  }
+  .memory-item:hover { border-color: var(--border-hi); }
+  .memory-item.selected { border-color: #637956; box-shadow: inset 3px 0 0 #8dac7b; }
+  .memory-item.conflicted { border-right-color: #806b2b; }
+  .memory-item:focus-visible { outline: 2px solid #8dac7b; outline-offset: 2px; }
+  .memory-item-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .memory-key { color: #eef1e8; font-weight: 650; overflow-wrap: anywhere; }
+  .memory-kind { color: #b7cba9; font: 10px var(--mono); text-transform: uppercase; letter-spacing: .5px; }
+  .memory-preview { margin: 5px 0 8px; color: var(--text-dim); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
+  .memory-item-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .memory-scope { color: var(--text-dim); font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .memory-state { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 10.5px; }
+  .memory-state::before { content: ""; width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; }
+  .memory-state.active { color: #b7cba9; }
+  .memory-state.candidate { color: #efdfae; }
+  .memory-state.expired { color: #d7a98d; }
+  .memory-state.superseded { color: var(--text-dim); }
+  .memory-state.scheduled { color: #91b9dc; }
+  .memory-state.historical { color: #c5a590; }
+  .memory-conflict-mark { color: #efdfae; font: 10.5px var(--mono); }
+  .memory-detail { min-width: 0; }
+  .memory-detail h2 { margin: 0; font-size: 19px; overflow-wrap: anywhere; }
+  .memory-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .memory-detail-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .memory-content {
+    margin: 14px 0; padding: 12px 14px; border: 1px solid #3d4c37;
+    border-radius: 7px; background: #182019;
+  }
+  .memory-content-label { color: #9fba90; font: 700 9.5px var(--mono); text-transform: uppercase; letter-spacing: .7px; }
+  .memory-content pre { margin: 7px 0 0; white-space: pre-wrap; word-break: break-word; }
+  .memory-provenance { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 15px 0; }
+  .memory-provenance::before {
+    content: ""; position: absolute; top: 12px; left: 12%; right: 12%; height: 1px;
+    background: linear-gradient(90deg, #647858, var(--border-hi), #647858);
+  }
+  .memory-proof-step { position: relative; min-width: 0; padding: 27px 10px 0; text-align: center; }
+  .memory-proof-step::before {
+    content: ""; position: absolute; top: 7px; left: calc(50% - 5px); width: 9px; height: 9px;
+    border: 2px solid #8dac7b; border-radius: 50%; background: var(--bg-panel);
+  }
+  .memory-proof-step b { display: block; color: var(--text); font-size: 11.5px; }
+  .memory-proof-step span { display: block; margin-top: 3px; color: var(--text-dim); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .memory-kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 12px; margin: 15px 0; }
+  .memory-kv .k { color: var(--text-dim); font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; }
+  .memory-kv .v { color: var(--text); font: 11px var(--mono); overflow-wrap: anywhere; }
+  .memory-conflict-detail { margin: 12px 0; padding: 10px 12px; border: 1px solid #6e5c26; border-radius: 7px; background: #302918; }
+  .memory-conflict-detail strong { color: #efdfae; }
+  .memory-conflict-detail p { margin: 4px 0 8px; color: #aaa08f; font-size: 11.5px; }
+  .memory-conflict-peers { display: flex; gap: 6px; flex-wrap: wrap; }
+  .memory-conflict-peers button { font-family: var(--mono); }
+  .memory-manifest { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
+  .memory-manifest summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
+  @media (max-width: 1120px) {
+    .memory-layout { grid-template-columns: 1fr; }
+    .memory-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .memory-toolbar label:first-child { grid-column: 1 / -1; }
+  }
   @media (max-width: 900px) {
     aside { width: 250px; flex-basis: 250px; }
     .agent-layout { grid-template-columns: 1fr; }
@@ -458,7 +558,10 @@
   }
   @media (max-width: 680px) {
     #body { display: block; overflow-y: auto; }
-    aside { width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+    aside {
+      width: 100%; height: auto; max-height: 34vh; overflow-y: auto;
+      border-right: 0; border-bottom: 1px solid var(--border);
+    }
     main { overflow: visible; }
     .agent-form { grid-template-columns: 1fr; }
     .agent-form label.wide, .agent-form-actions { grid-column: auto; }
@@ -473,6 +576,19 @@
     .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-run-row { grid-template-columns: 1fr; }
     .agent-run-row button { justify-self: start; }
+    .memory-head { flex-direction: column; }
+    .memory-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .memory-toolbar { grid-template-columns: 1fr; }
+    .memory-toolbar label:first-child { grid-column: auto; }
+    .memory-detail-head { flex-direction: column; }
+    .memory-detail-badges { justify-content: flex-start; }
+    .memory-provenance { grid-template-columns: 1fr; padding-left: 18px; }
+    .memory-provenance::before { top: 10px; bottom: 10px; left: 9px; right: auto; width: 1px; height: auto; }
+    .memory-proof-step { padding: 0 0 13px 17px; text-align: left; }
+    .memory-proof-step::before { top: 2px; left: -14px; }
+    .memory-kv { grid-template-columns: 1fr; gap: 2px; }
+    .memory-kv .v { margin-bottom: 7px; }
+    .memory-review-banner { align-items: flex-start; flex-direction: column; }
   }
 
   :is(button, input, select, textarea, summary):focus-visible {
@@ -515,6 +631,10 @@
       <button class="small primary" id="btn-agents-open" style="width:100%">Open agent workbench</button>
       <div class="muted tiny" id="agent-side-count" style="margin:6px 2px 0">Connect to load durable agents.</div>
 
+      <h2 class="section">Memory</h2>
+      <button class="small primary" id="btn-memory-open" style="width:100%">Open memory ledger</button>
+      <div class="muted tiny" id="memory-side-count" style="margin:6px 2px 0">Connect to inspect governed memory.</div>
+
       <h2 class="section">Graphs</h2>
       <div id="graph-list"><div class="empty">Connect to a server.</div></div>
 
@@ -538,7 +658,7 @@
     </aside>
 
     <main id="main">
-      <div class="empty" id="main-empty">Open the agent workbench, or select a thread to debug a run.</div>
+      <div class="empty" id="main-empty">Open the agent workbench or memory ledger, or select a thread to debug a run.</div>
 
       <div id="agents-view" style="display:none">
         <div class="workbench-head">
@@ -584,6 +704,59 @@
         <div class="agent-layout">
           <div class="agent-list" id="agent-list"><div class="empty">Open the workbench to load agents.</div></div>
           <div class="card" id="agent-detail"><div class="empty">Select an agent to inspect and test it.</div></div>
+        </div>
+      </div>
+
+      <div id="memory-view" style="display:none" aria-labelledby="memory-title">
+        <div class="memory-head">
+          <div>
+            <h1 id="memory-title" tabindex="-1">Memory ledger</h1>
+            <p>See what Rusty remembers, whose memory it is, who wrote it, and which evidence supports it.</p>
+          </div>
+          <div class="memory-head-actions">
+            <span class="muted tiny" id="memory-statusline" role="status" aria-live="polite"></span>
+            <button class="small" id="btn-memory-refresh">Refresh</button>
+          </div>
+        </div>
+
+        <div class="memory-summary" id="memory-summary" aria-label="Memory summary"></div>
+        <div class="memory-conflict-inbox" id="memory-conflicts"></div>
+
+        <div class="memory-toolbar" role="search" aria-label="Filter memory records">
+          <label>Find memory
+            <input id="inp-memory-search" type="search" aria-describedby="memory-search-help" placeholder="Search content, key, scope, author, tag, or ID…">
+            <span class="field-help" id="memory-search-help">Content search reads the first 2,000 characters per record.</span>
+          </label>
+          <label>Scope
+            <select id="sel-memory-scope">
+              <option value="">All scopes</option>
+              <option value="run">Run</option><option value="agent">Agent</option>
+              <option value="team">Team</option><option value="user">User</option>
+              <option value="tenant">Tenant</option>
+            </select>
+          </label>
+          <label>Kind
+            <select id="sel-memory-kind">
+              <option value="">All kinds</option>
+              <option value="fact">Fact</option><option value="preference">Preference</option>
+              <option value="example">Example</option><option value="summary">Summary</option>
+            </select>
+          </label>
+          <label>Lifecycle
+            <select id="sel-memory-state">
+              <option value="">All records</option>
+              <option value="active">Active</option><option value="candidate">Pending candidates</option>
+              <option value="scheduled">Not yet valid</option><option value="historical">Validity ended</option>
+              <option value="expired">Expired</option><option value="superseded">Superseded</option>
+            </select>
+          </label>
+          <button class="small" id="btn-memory-clear">Clear</button>
+        </div>
+
+        <div class="memory-review-banner" id="memory-review-banner" role="status" hidden></div>
+        <div class="memory-layout">
+          <div class="memory-list" id="memory-list" role="listbox" aria-label="Memory records" aria-describedby="memory-statusline"><div class="empty">Open the ledger to load memory.</div></div>
+          <div class="card memory-detail" id="memory-detail"><div class="empty">Select a record to inspect its provenance.</div></div>
         </div>
       </div>
 
@@ -774,7 +947,7 @@ const store = {
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, partial } for fork compare
-  view: "thread",      // "thread" | "tasks" | "agents" — active workspace
+  view: "thread",      // "thread" | "tasks" | "agents" | "memory" — active workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
   agents: null,        // { list, selected, error } for the durable-agent workbench
@@ -783,6 +956,11 @@ const store = {
   agentCreateOpen: false, // creation form temporarily owns the guided journey
   agentCopySource: null, // source snapshot while a copy-to-draft form is open
   agentsUnsupported: false, // server build has no /assistants routes
+  memory: null,        // bounded audit snapshot + conflicts, selection, search index, and load state
+  memoryUnsupported: false, // server build has no governed-memory query route
+  memoryRequest: 0,    // generation guard: stale server/tenant responses never cross connection boundaries
+  memorySearchTimer: null,
+  memoryLifecycleTimer: null,
 };
 
 /* ---------------- persistence ---------------- */
@@ -1041,12 +1219,19 @@ async function connect() {
   store.conn = connectionAfterAttempt(previousConnection, candidateConnection, true);
   store.info = info;
   if (connectionIdentityChanged(previousConnection, store.conn)) {
+    store.memoryRequest += 1;
+    clearTimeout(store.memorySearchTimer);
+    store.memorySearchTimer = null;
+    clearTimeout(store.memoryLifecycleTimer);
+    store.memoryLifecycleTimer = null;
     store.agentRuns = Object.create(null);
     store.agentRunHistory = Object.create(null);
     store.agentCreateOpen = false;
     store.agentCopySource = null;
     store.agents = null;
     store.agentsUnsupported = false;
+    store.memory = null;
+    store.memoryUnsupported = false;
     $("agent-create-panel").style.display = "none";
     $("sel-agent-graph").innerHTML = "";
     for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
@@ -1179,17 +1364,27 @@ function renderThreads() {
 function renderMain() {
   const tasks = store.view === "tasks";
   const agents = store.view === "agents";
+  const memory = store.view === "memory";
+  if (!memory) {
+    clearTimeout(store.memoryLifecycleTimer);
+    store.memoryLifecycleTimer = null;
+  }
   $("tasks-view").style.display = tasks ? "block" : "none";
   $("agents-view").style.display = agents ? "block" : "none";
+  $("memory-view").style.display = memory ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !tasks && !agents && !t ? "block" : "none";
-  $("thread-view").style.display = !tasks && !agents && t ? "block" : "none";
+  $("main-empty").style.display = !tasks && !agents && !memory && !t ? "block" : "none";
+  $("thread-view").style.display = !tasks && !agents && !memory && t ? "block" : "none";
   if (tasks) {
     tasksLoad(true); // quiet: a pre-R0.6 server shows a panel note, not toast spam
     return;
   }
   if (agents) {
     agentsLoad(true);
+    return;
+  }
+  if (memory) {
+    memoryLoad(true);
     return;
   }
   if (!t) return;
@@ -2907,6 +3102,635 @@ function openAgents() {
   $("main").scrollTop = 0;
 }
 
+/* ---------------- governed memory (R0.8) ----------------
+ * Read-only evidence workspace over POST /memory/query and
+ * POST /memory/conflicts. The server returns immutable, content-addressed
+ * records; this view makes their scope, provenance, validity, candidacy,
+ * supersession, and conflicts legible without changing governance state.
+ * ------------------------------------------------------------------------- */
+
+const MEMORY_RENDER_LIMIT = 200;
+const MEMORY_SNAPSHOT_LIMIT = 1000;
+const MEMORY_CONFLICT_RENDER_LIMIT = 50;
+
+function memoryRequestCurrent(requestId, requestConnection, currentRequestId, currentConnection) {
+  return requestId === currentRequestId && !connectionIdentityChanged(requestConnection, currentConnection);
+}
+
+function memoryContentValue(record) {
+  const content = record && record.content;
+  if (content && typeof content === "object" && content.kind === "inline") return content.value;
+  if (content && typeof content === "object" && content.kind === "artifact") {
+    return { artifact: content.sha256 || "unresolved", bytes: content.bytes ?? null };
+  }
+  return content === undefined ? null : content;
+}
+
+function memoryAuthorLabel(author) {
+  const a = author && typeof author === "object" ? author : {};
+  if (a.type === "agent") return `agent:${a.agent_id || "unknown"}`;
+  if (a.type === "human") return `human:${a.human_id || "unknown"}`;
+  if (a.type === "distiller") return `distiller:${a.name || "unknown"}`;
+  if (a.type === "system") return "system";
+  return a.type ? String(a.type) : "unknown author";
+}
+
+function memoryPlainPreview(value, maximum) {
+  const limit = Math.max(40, Number(maximum) || 180);
+  let text = typeof value === "string" ? value : memoryJsonText(value, Math.max(200, limit * 2));
+  text = String(text || "No content").replace(/\s+/g, " ");
+  return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
+}
+
+function memoryBoundedProjection(value, state, depth) {
+  const tracker = state;
+  if (tracker.remainingNodes <= 0) {
+    tracker.truncated = true;
+    return "[inspection node limit]";
+  }
+  tracker.remainingNodes -= 1;
+  if (value == null || typeof value === "boolean" || typeof value === "number") return value;
+  if (typeof value === "string") {
+    const take = Math.max(0, Math.min(value.length, tracker.remainingChars));
+    tracker.remainingChars -= take;
+    if (take < value.length) tracker.truncated = true;
+    return value.slice(0, take) + (take < value.length ? "…" : "");
+  }
+  if (typeof value !== "object") return String(value);
+  if (depth >= 10) {
+    tracker.truncated = true;
+    return "[inspection depth limit]";
+  }
+  if (tracker.seen.has(value)) return "[circular reference]";
+  tracker.seen.add(value);
+  if (Array.isArray(value)) {
+    const out = [];
+    const count = Math.min(value.length, 80);
+    for (let index = 0; index < count && tracker.remainingNodes > 0; index += 1) {
+      out.push(memoryBoundedProjection(value[index], tracker, depth + 1));
+    }
+    if (count < value.length || out.length < count) {
+      tracker.truncated = true;
+      out.push(`[additional array items omitted]`);
+    }
+    tracker.seen.delete(value);
+    return out;
+  }
+  const out = {};
+  let count = 0, omitted = false;
+  for (const key in value) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    if (count >= 80 || tracker.remainingNodes <= 0) { omitted = true; break; }
+    const safeKey = String(key).slice(0, 256);
+    if (safeKey.length < String(key).length) tracker.truncated = true;
+    try { out[safeKey] = memoryBoundedProjection(value[key], tracker, depth + 1); }
+    catch { out[safeKey] = "[unreadable field]"; }
+    count += 1;
+  }
+  if (omitted) {
+    tracker.truncated = true;
+    out.__rusty_inspection__ = "additional fields omitted";
+  }
+  tracker.seen.delete(value);
+  return out;
+}
+
+function memoryJsonText(value, maximum) {
+  const limit = Math.max(200, Number(maximum) || 16000);
+  const state = {
+    remainingNodes: Math.min(800, Math.max(40, Math.floor(limit / 20))),
+    remainingChars: limit,
+    truncated: false,
+    seen: new WeakSet(),
+  };
+  let text;
+  try { text = JSON.stringify(memoryBoundedProjection(value, state, 0), null, 2); }
+  catch { text = "[unreadable content]"; }
+  if (text === undefined) text = String(value);
+  return state.truncated || text.length > limit
+    ? text.slice(0, limit) + "\n… inspection view truncated" : text;
+}
+
+function memoryEvidenceId(value) {
+  const text = String(value || "");
+  return text.length > 80 ? text.slice(0, 79) + "…" : text;
+}
+
+function memorySupersededIds(records) {
+  const list = Array.isArray(records) ? records : [];
+  const superseded = new Set();
+  for (const record of list) {
+    if (record && record.supersedes) superseded.add(String(record.supersedes));
+    const sourceIds = record && record.kind === "summary" && record.provenance &&
+      record.provenance.evidence && record.provenance.evidence.source_memory_ids;
+    for (const id of Array.isArray(sourceIds) ? sourceIds : []) superseded.add(String(id));
+  }
+  return superseded;
+}
+
+function memoryIntersectIds(ids, records) {
+  const allowed = new Set((Array.isArray(records) ? records : [])
+    .map((record) => String(record && record.memory_id || "")).filter(Boolean));
+  const source = ids && typeof ids[Symbol.iterator] === "function" ? ids : [];
+  return new Set(Array.from(source, String).filter((id) => allowed.has(id)));
+}
+
+function memoryContext(records, conflicts, now, options) {
+  const opts = options || {};
+  const superseded = opts.superseded instanceof Set ? opts.superseded : memorySupersededIds(records);
+  const conflictMap = new Map();
+  for (const conflict of Array.isArray(conflicts) ? conflicts : []) {
+    for (const id of Array.isArray(conflict && conflict.memory_ids) ? conflict.memory_ids : []) {
+      const key = String(id);
+      if (!conflictMap.has(key)) conflictMap.set(key, []);
+      conflictMap.get(key).push(conflict);
+    }
+  }
+  const parsedNow = Date.parse(now || "");
+  return {
+    superseded, conflictMap,
+    searchIndex: opts.searchIndex instanceof Map ? opts.searchIndex : null,
+    nowMs: Number.isFinite(parsedNow) ? parsedNow : Date.now(),
+  };
+}
+
+function memoryRecordState(record, context) {
+  const r = record || {};
+  const ctx = context || memoryContext([], [], null);
+  if (ctx.superseded.has(String(r.memory_id || ""))) return "superseded";
+  const expires = Date.parse(r.expires_at || "");
+  if (Number.isFinite(expires) && expires <= ctx.nowMs) return "expired";
+  if (r.candidacy) return "candidate";
+  const validFrom = Date.parse(r.validity && r.validity.valid_from || "");
+  if (Number.isFinite(validFrom) && validFrom > ctx.nowMs) return "scheduled";
+  const validUntil = Date.parse(r.validity && r.validity.valid_until || "");
+  if (Number.isFinite(validUntil) && validUntil <= ctx.nowMs) return "historical";
+  return "active";
+}
+
+function memoryStateLabel(state) {
+  return ({
+    active: "active now", candidate: "pending candidate", expired: "expired",
+    superseded: "superseded", scheduled: "not yet valid", historical: "validity ended",
+  })[state] || "unknown";
+}
+
+function memoryStateHtml(record, context) {
+  const state = memoryRecordState(record, context);
+  return `<span class="memory-state ${state}">${memoryStateLabel(state)}</span>`;
+}
+
+function memoryScopeLabel(record) {
+  const scope = record && record.scope || {};
+  return `${scope.scope || "unknown"}:${scope.id || "?"}`;
+}
+
+function memoryConfidenceLabel(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${Math.round(n * 100)}% declared confidence` : "confidence unavailable";
+}
+
+function memorySearchText(record) {
+  const r = record || {};
+  const parts = [
+    r.memory_id, r.kind, r.key, memoryScopeLabel(r), memoryAuthorLabel(r.provenance && r.provenance.author),
+    ...(Array.isArray(r.tags) ? r.tags : []), memoryPlainPreview(memoryContentValue(r), 2000),
+  ];
+  return parts.filter((value) => value != null).join(" ").toLowerCase();
+}
+
+function memoryBuildSearchIndex(records) {
+  const index = new Map();
+  for (const record of Array.isArray(records) ? records : []) {
+    if (record && record.memory_id) index.set(String(record.memory_id), memorySearchText(record));
+  }
+  return index;
+}
+
+function memoryBoundedSnapshot(records, conflicts, maximum, conflictMaximum) {
+  const source = Array.isArray(records) ? records : [];
+  const parsedLimit = Number(maximum), parsedConflictLimit = Number(conflictMaximum);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.floor(parsedLimit) : MEMORY_SNAPSHOT_LIMIT;
+  const conflictLimit = Number.isFinite(parsedConflictLimit) && parsedConflictLimit >= 0
+    ? Math.floor(parsedConflictLimit) : MEMORY_CONFLICT_RENDER_LIMIT;
+  const snapshot = source.slice(0, limit);
+  const seen = new Set(snapshot.map((record) => String(record && record.memory_id || "")));
+  const wanted = new Set((Array.isArray(conflicts) ? conflicts : []).slice(0, conflictLimit)
+    .flatMap((conflict) => Array.isArray(conflict && conflict.memory_ids) ? conflict.memory_ids.map(String) : []));
+  if (!wanted.size) return snapshot;
+  for (const record of source) {
+    const id = String(record && record.memory_id || "");
+    if (id && wanted.has(id) && !seen.has(id)) {
+      snapshot.push(record);
+      seen.add(id);
+    }
+  }
+  return snapshot;
+}
+
+function memoryFilterRecords(records, filters, context) {
+  const f = filters || {};
+  const query = String(f.search || "").trim().toLowerCase();
+  const reviewIds = new Set(Array.isArray(f.reviewIds) ? f.reviewIds.map(String) : []);
+  return (Array.isArray(records) ? records : []).filter((record) => {
+    if (!record || !record.memory_id) return false;
+    if (reviewIds.size && !reviewIds.has(String(record.memory_id))) return false;
+    if (f.scope && String(record.scope && record.scope.scope || "") !== f.scope) return false;
+    if (f.kind && String(record.kind || "") !== f.kind) return false;
+    if (f.state && memoryRecordState(record, context) !== f.state) return false;
+    const indexed = context && context.searchIndex && context.searchIndex.get(String(record.memory_id));
+    return !query || String(indexed == null ? memorySearchText(record) : indexed).includes(query);
+  });
+}
+
+function memoryRecordRowHtml(record, context) {
+  const r = record || {};
+  const conflicts = context && context.conflictMap.get(String(r.memory_id || "")) || [];
+  const key = r.key || memoryPlainPreview(memoryContentValue(r), 52);
+  return `<div class="memory-item-head"><span class="memory-key">${escapeHtml(key)}</span>` +
+    `<span class="memory-kind">${escapeHtml(r.kind || "unknown")}</span></div>` +
+    `<div class="memory-preview">${escapeHtml(memoryPlainPreview(memoryContentValue(r), 170))}</div>` +
+    `<div class="memory-item-meta">${memoryStateHtml(r, context)}` +
+      `<span class="memory-scope">${escapeHtml(memoryScopeLabel(r))}</span>` +
+      `<span class="memory-scope">${escapeHtml(memoryConfidenceLabel(r.confidence))}</span>` +
+      (conflicts.length ? `<span class="memory-conflict-mark">◆ conflict</span>` : "") +
+    `</div>`;
+}
+
+function memoryRecordAriaLabel(record, context) {
+  const r = record || {};
+  const name = r.key || r.kind || "memory";
+  const state = memoryStateLabel(memoryRecordState(r, context));
+  return `Inspect ${name}, ${state}, ${memoryScopeLabel(r)}, record ${shortId(String(r.memory_id || "unknown"))}`;
+}
+
+function memoryNavigationTarget(ids, currentId, key) {
+  const list = Array.isArray(ids) ? ids.map(String) : [];
+  if (!list.length) return null;
+  const current = Math.max(0, list.indexOf(String(currentId || "")));
+  if (key === "Home") return list[0];
+  if (key === "End") return list[list.length - 1];
+  if (key === "ArrowDown") return list[Math.min(list.length - 1, current + 1)];
+  if (key === "ArrowUp") return list[Math.max(0, current - 1)];
+  return list[current];
+}
+
+function memoryNextLifecycleDelay(records, nowMs) {
+  const now = Number(nowMs);
+  if (!Number.isFinite(now)) return null;
+  let next = Infinity;
+  for (const record of Array.isArray(records) ? records : []) {
+    const values = [
+      record && record.expires_at,
+      record && record.validity && record.validity.valid_from,
+      record && record.validity && record.validity.valid_until,
+    ];
+    for (const value of values) {
+      const instant = Date.parse(value || "");
+      if (Number.isFinite(instant) && instant > now && instant < next) next = instant;
+    }
+  }
+  return Number.isFinite(next) ? Math.max(25, next - now + 25) : null;
+}
+
+function memoryEvidenceSummary(record) {
+  const evidence = record && record.provenance && record.provenance.evidence || {};
+  const parts = [];
+  if (evidence.run_id) parts.push(`run ${memoryEvidenceId(evidence.run_id)}`);
+  if (Array.isArray(evidence.event_ids) && evidence.event_ids.length) parts.push(`${evidence.event_ids.length} journal event(s)`);
+  if (evidence.correction_id) parts.push(`correction ${memoryEvidenceId(evidence.correction_id)}`);
+  if (evidence.candidate_id) parts.push(`candidate ${memoryEvidenceId(evidence.candidate_id)}`);
+  if (Array.isArray(evidence.source_memory_ids) && evidence.source_memory_ids.length) {
+    parts.push(`${evidence.source_memory_ids.length} source record(s)`);
+  }
+  return parts.length ? parts.join(" · ") : "Directly stated; no derivation IDs";
+}
+
+function memoryDetailHtml(record, context) {
+  if (!record) return `<div class="empty">Select a record to inspect its provenance.</div>`;
+  const r = record;
+  const state = memoryRecordState(r, context);
+  const conflicts = context && context.conflictMap.get(String(r.memory_id || "")) || [];
+  const provenance = r.provenance || {};
+  const validity = r.validity || {};
+  const content = memoryContentValue(r);
+  const tags = Array.isArray(r.tags) && r.tags.length ? r.tags.join(", ") : "—";
+  const rows = [
+    ["Memory ID", r.memory_id || "?"], ["Scope", memoryScopeLabel(r)],
+    ["Kind", r.kind || "unknown"], ["Key", r.key || "—"],
+    ["Confidence", memoryConfidenceLabel(r.confidence)], ["Priority", r.priority ?? 0],
+    ["Valid from", validity.valid_from || "—"], ["Valid until", validity.valid_until || "open-ended"],
+    ["Expires", r.expires_at || "does not expire"], ["Tags", tags],
+    ["Supersedes", r.supersedes || "—"], ["Candidacy", r.candidacy || "—"],
+  ];
+  let html = `<div class="memory-detail-head"><div><h2 id="memory-detail-title" tabindex="-1">${escapeHtml(r.key || `${r.kind || "Memory"} record`)}</h2>` +
+    `<div class="muted tiny">Immutable record · learned ${escapeHtml(r.created_at || provenance.written_at || "time unavailable")}</div></div>` +
+    `<div class="memory-detail-badges">${memoryStateHtml(r, context)}` +
+      (conflicts.length ? `<span class="badge running">conflict</span>` : "") + `</div></div>`;
+  html += `<div class="memory-content"><div class="memory-content-label">Remembered content</div>` +
+    `<pre>${escapeHtml(memoryJsonText(content, 12000))}</pre></div>`;
+  html += `<div class="memory-provenance" aria-label="Memory provenance">` +
+    `<div class="memory-proof-step"><b>Record</b><span>${escapeHtml(shortId(r.memory_id || "?"))}</span></div>` +
+    `<div class="memory-proof-step"><b>Authored by</b><span>${escapeHtml(memoryAuthorLabel(provenance.author))}</span></div>` +
+    `<div class="memory-proof-step"><b>Evidence</b><span>${escapeHtml(memoryEvidenceSummary(r))}</span></div></div>`;
+  html += `<div class="memory-kv">` + rows.map(([key, value]) =>
+    `<span class="k">${escapeHtml(key)}</span><span class="v">${escapeHtml(String(value))}</span>`).join("") + `</div>`;
+  if (conflicts.length) {
+    const peerIds = Array.from(new Set(conflicts.flatMap((conflict) => conflict.memory_ids || [])));
+    html += `<div class="memory-conflict-detail"><strong>Conflicting live memory</strong>` +
+      `<p>${conflicts.length} structural conflict${conflicts.length === 1 ? "" : "s"}: the same key has different content over an overlapping validity window. Rusty flags this; it does not silently choose a winner.</p>` +
+      `<div class="memory-conflict-peers">` + peerIds.map((id) =>
+        `<button class="small" type="button" data-memory-select="${escapeHtml(id)}">${escapeHtml(shortId(id))}</button>`).join("") +
+      `</div></div>`;
+  }
+  html += `<details class="memory-manifest"><summary>Raw immutable record</summary>` +
+    `<pre class="json">${escapeHtml(memoryJsonText(r, 20000))}</pre></details>`;
+  return html;
+}
+
+function memorySummaryHtml(records, conflicts, context, metadata) {
+  const list = Array.isArray(records) ? records : [];
+  const meta = metadata || {};
+  const total = Number.isFinite(Number(meta.totalRecords)) ? Number(meta.totalRecords) : list.length;
+  const snapshot = Boolean(meta.snapshotTruncated);
+  const active = list.filter((record) => memoryRecordState(record, context) === "active").length;
+  const candidates = list.filter((record) => memoryRecordState(record, context) === "candidate").length;
+  const conflictKnown = Array.isArray(conflicts);
+  const conflictCount = conflictKnown && Number.isFinite(Number(meta.totalConflicts))
+    ? Number(meta.totalConflicts) : conflictKnown ? conflicts.length : null;
+  const scopes = conflictKnown ? new Set(conflicts.map((conflict) => {
+    const scope = conflict && conflict.scope || {};
+    return `${scope.scope || "unknown"}:${scope.id || "?"}`;
+  })).size : 0;
+  const conflictCard = conflictKnown
+    ? `<div class="${conflictCount ? "attention" : ""}"><b>${conflictCount}</b><span>${conflictCount ?
+      (conflictCount > conflicts.length ? `Conflicts · first ${conflicts.length} reviewable` : `Conflicts across ${scopes} scope${scopes === 1 ? "" : "s"}`)
+      : "No detected conflicts"}</span></div>`
+    : `<div class="attention"><b>—</b><span>Conflict status unavailable</span></div>`;
+  return `<div><b>${total}</b><span>Retained records</span></div>` +
+    `<div><b>${active}</b><span>${snapshot ? "Active in snapshot" : "Active now"}</span></div>` +
+    `<div class="${candidates ? "attention" : ""}"><b>${candidates}</b><span>${snapshot ? "Candidates in snapshot" : "Pending candidates"}</span></div>` +
+    conflictCard;
+}
+
+function memoryConflictsHtml(conflicts, error, totalConflicts) {
+  if (error) return `<div class="note tiny">${escapeHtml(error)}</div>`;
+  const list = Array.isArray(conflicts) ? conflicts : [];
+  if (!list.length) {
+    return `<div class="note tiny">No unresolved structural conflicts detected. Rusty compares live records with the same key and overlapping validity.</div>`;
+  }
+  const total = Number.isFinite(Number(totalConflicts)) ? Number(totalConflicts) : list.length;
+  return `<h2>Conflict inbox</h2><p>Different live values claim the same key. Review the evidence; Rusty does not resolve them silently.</p>` +
+    (total > list.length ? `<div class="note tiny">Showing the first ${list.length} of ${total} conflicts in this bounded review snapshot.</div>` : "") +
+    `<div class="memory-conflict-list">` + list.slice(0, MEMORY_CONFLICT_RENDER_LIMIT).map((conflict, index) => {
+      const scope = conflict && conflict.scope || {};
+      const count = Array.isArray(conflict && conflict.memory_ids) ? conflict.memory_ids.length : 0;
+      return `<button class="memory-conflict-card" type="button" data-memory-conflict="${index}" ` +
+        `aria-label="Review conflict for ${escapeHtml(conflict && conflict.key || "unknown key")}">` +
+        `<strong>◆ ${escapeHtml(conflict && conflict.key || "Unkeyed conflict")}</strong>` +
+        `<span>${escapeHtml(`${scope.scope || "unknown"}:${scope.id || "?"}`)} · ${count} records · review evidence</span></button>`;
+    }).join("") + `</div>`;
+}
+
+function memoryErrorHtml(status, body) {
+  if (status === 404 && !(body && body.error)) {
+    return `<div class="note">This server build does not expose governed memory yet. Rebuild or upgrade Rusty Server to a version with <code>POST /memory/query</code>.</div>`;
+  }
+  return `<div class="note">${escapeHtml(body && body.message || `Memory could not be loaded (HTTP ${status || "?"}).`)}</div>`;
+}
+
+async function memoryLoad(quiet) {
+  if (store.memory && store.memory.loading) return;
+  const previous = store.memory || {};
+  const requestId = ++store.memoryRequest;
+  const requestConnection = store.conn;
+  if (!requestConnection) {
+    store.memory = {
+      records: [], conflicts: null, conflictsError: "Connect to inspect conflict status.", selected: null,
+      reviewIds: null, loadedAt: null, loading: false,
+      totalRecords: 0, snapshotTruncated: false, totalConflicts: null, superseded: new Set(), searchIndex: new Map(),
+      error: `<div class="note">Connect to a Rusty server before opening governed memory.</div>`,
+    };
+    memoryRender();
+    return;
+  }
+  store.memory = { ...previous, loading: true };
+  $("memory-statusline").textContent = "loading memory…";
+  const [recordsResult, conflictsResult] = await Promise.allSettled([
+    apiForConnection(requestConnection, "POST", "/memory/query", { include_expired: true, include_superseded: true }),
+    apiForConnection(requestConnection, "POST", "/memory/conflicts", {}),
+  ]);
+  if (!memoryRequestCurrent(requestId, requestConnection, store.memoryRequest, store.conn)) return;
+  if (recordsResult.status === "rejected") {
+    const error = recordsResult.reason || {};
+    const noRoute = error.status === 404 && !(error.body && error.body.error);
+    store.memoryUnsupported = noRoute;
+    store.memory = {
+      records: [], conflicts: null, conflictsError: null, selected: null, reviewIds: null,
+      loadedAt: null, loading: false, totalRecords: 0, snapshotTruncated: false,
+      totalConflicts: null, superseded: new Set(), searchIndex: new Map(), error: memoryErrorHtml(error.status, error.body),
+    };
+    $("memory-side-count").textContent = noRoute ? "Memory is unavailable on this server build." : "Memory could not be loaded.";
+    if (!quiet && !noRoute) toast(error.message || "Memory could not be loaded.", "err");
+    memoryRender();
+    return;
+  }
+  const recordsBody = recordsResult.value || {};
+  const rawRecords = Array.isArray(recordsBody.records) ? recordsBody.records : [];
+  let conflicts = null, totalConflicts = null, conflictsError = null;
+  if (conflictsResult.status === "fulfilled") {
+    const rawConflicts = Array.isArray(conflictsResult.value && conflictsResult.value.conflicts)
+      ? conflictsResult.value.conflicts : [];
+    totalConflicts = rawConflicts.length;
+    conflicts = rawConflicts.slice(0, MEMORY_CONFLICT_RENDER_LIMIT);
+  } else {
+    const error = conflictsResult.reason || {};
+    conflictsError = error.status === 404 && !(error.body && error.body.error)
+      ? "Conflict detection is unavailable on this server build; memory records are still shown."
+      : (error.message || "Conflict detection could not be loaded; memory records are still shown.");
+  }
+  const records = memoryBoundedSnapshot(rawRecords, conflicts || [], MEMORY_SNAPSHOT_LIMIT, MEMORY_CONFLICT_RENDER_LIMIT);
+  const superseded = memoryIntersectIds(memorySupersededIds(rawRecords), records);
+  const searchIndex = memoryBuildSearchIndex(records);
+  const snapshotTruncated = records.length < rawRecords.length;
+  const selected = previous.selected && records.some((record) => record && record.memory_id === previous.selected)
+    ? previous.selected : (records[0] && records[0].memory_id) || null;
+  const reviewIds = Array.isArray(previous.reviewIds) && previous.reviewIds.every((id) =>
+    records.some((record) => record && record.memory_id === id)) ? previous.reviewIds : null;
+  store.memoryUnsupported = false;
+  store.memory = {
+    records, conflicts, conflictsError, selected, reviewIds,
+    loadedAt: new Date().toISOString(), loading: false, error: null,
+    totalRecords: rawRecords.length, snapshotTruncated, totalConflicts, superseded, searchIndex,
+  };
+  $("memory-side-count").textContent = `${rawRecords.length} retained record${rawRecords.length === 1 ? "" : "s"} · ` +
+    (Array.isArray(conflicts) ? `${totalConflicts} conflict${totalConflicts === 1 ? "" : "s"}` : "conflict status unavailable");
+  memoryRender();
+}
+
+function memoryFilters() {
+  return {
+    search: $("inp-memory-search").value,
+    scope: $("sel-memory-scope").value,
+    kind: $("sel-memory-kind").value,
+    state: $("sel-memory-state").value,
+    reviewIds: store.memory && store.memory.reviewIds,
+  };
+}
+
+function memoryScheduleLifecycleRefresh(records, nowMs) {
+  clearTimeout(store.memoryLifecycleTimer);
+  store.memoryLifecycleTimer = null;
+  if (store.view !== "memory") return;
+  const delay = memoryNextLifecycleDelay(records, nowMs);
+  if (delay == null) return;
+  store.memoryLifecycleTimer = setTimeout(() => {
+    store.memoryLifecycleTimer = null;
+    if (store.view === "memory" && store.memory && !store.memory.loading && !store.memory.error) {
+      const focus = memoryCaptureDynamicFocus();
+      memoryRender();
+      memoryRestoreDynamicFocus(focus);
+    }
+  }, Math.min(delay, 2147483000));
+}
+
+function memoryCaptureDynamicFocus() {
+  const active = document.activeElement;
+  if (!active || typeof active.closest !== "function") return null;
+  const row = active.closest("[data-memory-id]");
+  if (row && $("memory-list").contains(row)) {
+    return { area: "list", id: row.getAttribute("data-memory-id") };
+  }
+  const peer = active.closest("[data-memory-select]");
+  if (peer && $("memory-detail").contains(peer)) {
+    return { area: "peer", id: peer.getAttribute("data-memory-select") };
+  }
+  return $("memory-detail").contains(active) ? { area: "detail", id: null } : null;
+}
+
+function memoryRestoreDynamicFocus(target) {
+  if (!target) return;
+  let next = null;
+  if (target.area === "list") {
+    next = Array.from($("memory-list").querySelectorAll("[data-memory-id]"))
+      .find((row) => row.getAttribute("data-memory-id") === target.id) ||
+      $("memory-list").querySelector('[aria-selected="true"]') || $("inp-memory-search");
+  } else if (target.area === "peer") {
+    next = Array.from($("memory-detail").querySelectorAll("[data-memory-select]"))
+      .find((peer) => peer.getAttribute("data-memory-select") === target.id) ||
+      $("memory-detail-title") || $("inp-memory-search");
+  } else {
+    next = $("memory-detail-title") || $("inp-memory-search");
+  }
+  if (next) next.focus({ preventScroll: true });
+}
+
+function memoryRender() {
+  const state = store.memory;
+  const listEl = $("memory-list"), detailEl = $("memory-detail");
+  if (!state || state.loading) {
+    $("memory-summary").innerHTML = "";
+    $("memory-conflicts").innerHTML = "";
+    listEl.innerHTML = `<div class="empty">Loading governed memory…</div>`;
+    detailEl.innerHTML = `<div class="empty">Waiting for memory records.</div>`;
+    return;
+  }
+  if (state.error) {
+    $("memory-summary").innerHTML = "";
+    $("memory-conflicts").innerHTML = "";
+    $("memory-statusline").textContent = "unavailable";
+    listEl.innerHTML = state.error;
+    detailEl.innerHTML = `<div class="empty">Memory details unavailable.</div>`;
+    return;
+  }
+  const nowMs = Date.now();
+  const context = memoryContext(state.records, state.conflicts, new Date(nowMs).toISOString(), {
+    superseded: state.superseded, searchIndex: state.searchIndex,
+  });
+  memoryScheduleLifecycleRefresh(state.records, nowMs);
+  $("memory-summary").innerHTML = memorySummaryHtml(state.records, state.conflicts, context, {
+    totalRecords: state.totalRecords, snapshotTruncated: state.snapshotTruncated,
+    totalConflicts: state.totalConflicts,
+  });
+  $("memory-conflicts").innerHTML = memoryConflictsHtml(state.conflicts, state.conflictsError, state.totalConflicts);
+  const filtered = memoryFilterRecords(state.records, memoryFilters(), context);
+  const shown = filtered.slice(0, MEMORY_RENDER_LIMIT);
+  const reviewing = Array.isArray(state.reviewIds) && state.reviewIds.length > 0;
+  const banner = $("memory-review-banner");
+  banner.hidden = !reviewing;
+  banner.innerHTML = reviewing
+    ? `<span>Reviewing ${state.reviewIds.length} records from one conflict. Filters still apply.</span><button class="small" type="button" data-memory-review-clear>Show all memory</button>`
+    : "";
+  $("memory-statusline").textContent = `${filtered.length} matching · ${state.totalRecords ?? state.records.length} retained` +
+    (state.snapshotTruncated ? ` · searching ${state.records.length}-record audit snapshot` : "") +
+    (filtered.length > shown.length ? ` · showing first ${shown.length}` : "");
+  if (!shown.length) {
+    listEl.innerHTML = `<div class="empty">No memory ${state.snapshotTruncated ? "in this audit snapshot " : ""}matches these filters. Clear filters or review another scope.</div>`;
+    detailEl.innerHTML = `<div class="empty">No matching record to inspect.</div>`;
+    return;
+  }
+  if (!shown.some((record) => record.memory_id === state.selected)) state.selected = shown[0].memory_id;
+  listEl.innerHTML = "";
+  for (const record of shown) {
+    const item = document.createElement("div");
+    const conflicted = context.conflictMap.has(String(record.memory_id));
+    item.className = "memory-item" + (record.memory_id === state.selected ? " selected" : "") + (conflicted ? " conflicted" : "");
+    const selected = record.memory_id === state.selected;
+    item.setAttribute("role", "option");
+    item.setAttribute("tabindex", selected ? "0" : "-1");
+    item.setAttribute("data-memory-id", record.memory_id);
+    item.setAttribute("aria-label", memoryRecordAriaLabel(record, context));
+    item.setAttribute("aria-selected", selected ? "true" : "false");
+    item.innerHTML = memoryRecordRowHtml(record, context);
+    listEl.appendChild(item);
+  }
+  const selected = state.records.find((record) => record && record.memory_id === state.selected);
+  detailEl.innerHTML = memoryDetailHtml(selected, context);
+}
+
+function memorySelect(memoryId, focusDetail) {
+  if (!store.memory || !store.memory.records.some((record) => record && record.memory_id === memoryId)) return;
+  store.memory.selected = memoryId;
+  memoryRender();
+  if (focusDetail) {
+    const title = $("memory-detail-title");
+    if (title) title.focus({ preventScroll: true });
+  } else {
+    const selected = $("memory-list").querySelector('[aria-selected="true"]');
+    if (selected) selected.focus({ preventScroll: true });
+  }
+}
+
+function memoryReviewConflict(index) {
+  const conflict = store.memory && store.memory.conflicts[Number(index)];
+  const ids = conflict && Array.isArray(conflict.memory_ids) ? conflict.memory_ids.map(String) : [];
+  if (!ids.length) return;
+  store.memory.reviewIds = ids;
+  store.memory.selected = ids[0];
+  memoryRender();
+  const title = $("memory-detail-title");
+  if (title) title.focus({ preventScroll: true });
+}
+
+function memoryClearFilters() {
+  clearTimeout(store.memorySearchTimer);
+  store.memorySearchTimer = null;
+  $("inp-memory-search").value = "";
+  $("sel-memory-scope").value = "";
+  $("sel-memory-kind").value = "";
+  $("sel-memory-state").value = "";
+  if (store.memory) store.memory.reviewIds = null;
+  memoryRender();
+  $("inp-memory-search").focus();
+}
+
+function openMemory() {
+  store.view = "memory";
+  renderMain();
+  $("main").scrollTop = 0;
+  $("memory-title").focus({ preventScroll: true });
+}
+
 /* ---------------- durable tasks (R0.6) ----------------
  * Control-plane view over the task queue: GET /tasks?status=… (the list
  * payload doubles as the detail source — GET /tasks/{id} returns the same
@@ -3253,6 +4077,53 @@ function init() {
       thread.getAttribute("data-agent-open-run"),
       thread.getAttribute("data-agent-open-graph"),
     );
+  });
+
+  // Governed memory: immutable records, provenance, lifecycle filters,
+  // and a conflict review path that never implies automatic resolution.
+  $("btn-memory-open").onclick = openMemory;
+  $("btn-memory-refresh").onclick = () => memoryLoad(false);
+  $("btn-memory-clear").onclick = memoryClearFilters;
+  $("inp-memory-search").addEventListener("input", () => {
+    clearTimeout(store.memorySearchTimer);
+    store.memorySearchTimer = setTimeout(() => {
+      store.memorySearchTimer = null;
+      memoryRender();
+    }, 120);
+  });
+  for (const id of ["sel-memory-scope", "sel-memory-kind", "sel-memory-state"]) {
+    $(id).addEventListener("change", memoryRender);
+  }
+  const memoryActivate = (e) => {
+    const item = e.target.closest("[data-memory-id]");
+    if (!item) return;
+    const id = item.getAttribute("data-memory-id");
+    if (e.type !== "keydown") { memorySelect(id, false); return; }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+      e.preventDefault();
+      const ids = Array.from($("memory-list").querySelectorAll("[data-memory-id]"), (row) => row.getAttribute("data-memory-id"));
+      memorySelect(memoryNavigationTarget(ids, id, e.key), false);
+      return;
+    }
+    if (!["Enter", " "].includes(e.key)) return;
+    e.preventDefault();
+    memorySelect(id, true);
+  };
+  $("memory-list").addEventListener("click", memoryActivate);
+  $("memory-list").addEventListener("keydown", memoryActivate);
+  $("memory-conflicts").addEventListener("click", (e) => {
+    const target = e.target.closest("[data-memory-conflict]");
+    if (target) memoryReviewConflict(target.getAttribute("data-memory-conflict"));
+  });
+  $("memory-review-banner").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-memory-review-clear]")) return;
+    if (store.memory) store.memory.reviewIds = null;
+    memoryRender();
+    $("memory-conflicts").querySelector("[data-memory-conflict]")?.focus({ preventScroll: true });
+  });
+  $("memory-detail").addEventListener("click", (e) => {
+    const target = e.target.closest("[data-memory-select]");
+    if (target) memorySelect(target.getAttribute("data-memory-select"), true);
   });
 
   // Durable tasks: open the tenant-wide queue view, filter, refresh, and
