@@ -1,6 +1,6 @@
 [package]
 name = "rusty-eval"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,7 +13,7 @@ keywords = ["agent", "evaluation", "testing", "llm"]
 categories = ["asynchronous"]
 
 [dependencies]
-rusty-agent-runtime = { path = "../rusty-core", version = "0.7" }
+rusty-agent-runtime = { path = "../rusty-core", version = "0.8" }
 async-trait = "0.1"
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }

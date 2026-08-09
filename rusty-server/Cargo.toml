@@ -1,6 +1,6 @@
 [package]
 name = "rusty-server"
-version = "0.7.0"
+version = "0.8.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -19,11 +19,11 @@ categories = ["asynchronous", "network-programming"]
 postgres = ["dep:sqlx", "rusty-agent-runtime/postgres"]
 
 [dependencies]
-rusty-agent-runtime = { path = "../rusty-core", version = "0.7" }
+rusty-agent-runtime = { path = "../rusty-core", version = "0.8" }
 # Wave 4: the server-side candidate evaluator composes `rusty-eval`'s
 # experiment runner over live graph preparation plus a versioned dataset
 # source; `promote → evaluate` calls it through the learning gate.
-rusty-eval = { path = "../rusty-eval" }
+rusty-eval = { path = "../rusty-eval", version = "0.1" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 # Graceful shutdown (R0.6 wave 2c): one `CancellationToken` drains the run
