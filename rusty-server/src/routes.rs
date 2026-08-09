@@ -109,6 +109,24 @@ pub(crate) struct AppState {
     /// through `POST /receipt_keys/rotate`; the key history both store
     /// backends keep is what old receipts verify against.
     pub receipt_keyring: Arc<crate::receipts::SigningKeyring>,
+    /// The MCP bridge's in-flight `tools/call` map (R0.9 wave 4): request
+    /// id → run id, the lookup `notifications/cancelled` resolves. Lives
+    /// on the state (not inside the handler) so the cancellation
+    /// notification and the disconnect guard share one map.
+    pub mcp_bridge: crate::mcp_bridge::McpBridgeState,
+    /// Live A2A task-event fan-out (R0.9 wave 4): one broadcast sender per
+    /// streaming task, inserted by `message/stream` and fed by the task
+    /// lifecycle hooks; removed when the task goes terminal. In-memory by
+    /// design — a stream is a live attachment, and a reconnecting client
+    /// re-reads the durable task record instead of replaying events.
+    pub a2a_streams: Mutex<HashMap<String, tokio::sync::broadcast::Sender<Value>>>,
+    /// Per-run locks serializing A2A context journal access (R0.9 wave 4):
+    /// several tasks of one A2A context (one run journal) may execute
+    /// capsules concurrently, and each execution is a load → append →
+    /// persist cycle — without a per-context lock, a later persist would
+    /// clobber a sibling's freshly journaled events. Mirrors
+    /// `state_locks`' shape and reasoning.
+    pub journal_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -185,6 +203,9 @@ pub(crate) fn router_with_shutdown(
         #[cfg(feature = "capsules")]
         capsule_plane,
         receipt_keyring,
+        mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
+        a2a_streams: Mutex::new(HashMap::new()),
+        journal_locks: Mutex::new(HashMap::new()),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // Warm the capsule authorization plane (R0.9 wave 2): register any
@@ -353,6 +374,19 @@ pub(crate) fn router_with_shutdown(
             post(attach_capsule_overlay).get(list_capsule_overlays),
         )
         .route("/capsules/overlays/{name}", get(get_capsule_overlay))
+        // The interop bridges (R0.9 wave 4): the MCP tool surface
+        // (every registered graph as one tool), the A2A agent card and
+        // JSON-RPC task surface, and the capsule component-blob upload
+        // the bridge executor executes from. All three are thin
+        // adaptations over the same run/journal/task machinery the
+        // native routes drive — no parallel execution path.
+        .route("/mcp", post(crate::mcp_bridge::handle))
+        .route(
+            crate::a2a::AGENT_CARD_PATH,
+            get(crate::a2a::agent_card_route),
+        )
+        .route("/a2a", post(crate::a2a::handle))
+        .route("/capsules/{id}/blob", put(put_capsule_blob_route))
         .route("/coordination/delegate", post(submit_delegate))
         .route("/coordination/fan_out", post(submit_fan_out))
         .route("/coordination/race", post(submit_race))
@@ -2389,7 +2423,23 @@ async fn enforce_task_quota(
     Ok(())
 }
 
-/// `POST /tasks` — enqueue a durable task. `201 {task_id, deduplicated:
+/// The A2A bridge's submission path (R0.9 wave 4), sharing the quota gate
+/// and the store's idempotent enqueue with `POST /tasks`: the bridge must
+/// not become a quota bypass, and a redelivered A2A message dedups on its
+/// `messageId`-derived idempotency key the way a retried `POST /tasks`
+/// dedups on its own key. Returns the stored record plus the dedup flag.
+pub(crate) async fn a2a_enqueue(
+    state: &AppState,
+    tenant: &TenantContext,
+    record: &TaskRecord,
+) -> Result<(TaskRecord, bool), ApiError> {
+    enforce_task_quota(state, tenant, 1).await?;
+    state
+        .server_store
+        .enqueue_task(record)
+        .await
+        .map_err(internal_err)
+}
 /// false}` on creation, `200 {task_id, deduplicated: true}` when the
 /// idempotency key already names a live task in this tenant. `429` when the
 /// tenant is over its configured task quota (R0.6 wave 3).
@@ -2684,6 +2734,9 @@ async fn complete_task(
     )
     .await
     .map_err(internal_err)?;
+    // A2A bridge (R0.9 wave 4): fan the settlement out to any live
+    // `message/stream` attachment. A no-op for non-A2A tasks.
+    crate::a2a::publish_task_update(&state, &task).await;
     Ok(Json(task.wire()))
 }
 
@@ -4968,6 +5021,56 @@ async fn get_capsule(
     ))
 }
 
+/// `PUT /capsules/{id}/blob` — upload the component bytes a registered
+/// manifest commits to (R0.9 wave 4). Raw body, not JSON: a wasm
+/// component is megabytes of binary. The route is the digest checkpoint —
+/// the store keeps bytes, not policy, so the `sha256` of the body is
+/// verified against the manifest's `build_digest` here (`422` on
+/// mismatch); a different-bytes re-upload under the same address is the
+/// store's immutability conflict (`409`). `201 {capsule_id, sha256,
+/// bytes}` on success.
+async fn put_capsule_blob_route(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(capsule_id): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let record = state
+        .server_store
+        .get_capsule(tenant.tenant(), &capsule_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule `{capsule_id}` not found")))?;
+    let digest = sha256_hex(&body);
+    if digest != record.manifest.build_digest {
+        return Err(ApiError::unprocessable(format!(
+            "blob digest `{digest}` does not match the manifest's build_digest `{}` — \
+             the registry stores only the bytes the manifest commits to",
+            record.manifest.build_digest
+        )));
+    }
+    let len = body.len();
+    state
+        .server_store
+        .put_capsule_blob(tenant.tenant(), &capsule_id, &body)
+        .await
+        .map_err(|e| {
+            if e.starts_with("capsule blob conflict") {
+                ApiError::conflict(e)
+            } else {
+                internal_err(e)
+            }
+        })?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "capsule_id": capsule_id,
+            "sha256": digest,
+            "bytes": len,
+        })),
+    ))
+}
+
 #[derive(Debug, Deserialize)]
 struct ResolveCapsulesPayload {
     /// The run's capsule pins: name → version (the
@@ -5695,6 +5798,9 @@ async fn fail_task(
         .await
         .map_err(internal_err)?;
     }
+    // A2A bridge (R0.9 wave 4): fan the settlement out to any live
+    // `message/stream` attachment. A no-op for non-A2A tasks.
+    crate::a2a::publish_task_update(&state, &task).await;
     Ok(Json(json!({
         // A retry is outstanding exactly when a next attempt is scheduled;
         // a `failed` task with a null schedule failed outright.
@@ -5742,6 +5848,9 @@ async fn cancel_task(
                 .await
                 .map_err(internal_err)?;
             }
+            // A2A bridge (R0.9 wave 4): fan the cancellation out to any
+            // live `message/stream` attachment. A no-op for non-A2A tasks.
+            crate::a2a::publish_task_update(&state, &task).await;
             Ok(Json(task.wire()))
         }
         CancelOutcome::Terminal(status) => Err(ApiError::conflict(format!(

@@ -628,6 +628,32 @@ pub(crate) trait ServerStore: Send + Sync {
         version: &str,
     ) -> StoreResult<Option<CapsuleRecord>>;
 
+    /// Store one capsule's component blob (R0.9 wave 4): the wasm bytes
+    /// the manifest's `build_digest` commits to, keyed by the same
+    /// tenant-scoped content address as the manifest. Storing bytes that
+    /// match an already-stored blob converges (the registry's
+    /// immutability posture — the bytes a content address names never
+    /// change); storing *different* bytes under a taken address is an
+    /// error. Digest verification against the manifest happens at the
+    /// route; the store keeps bytes, not policy.
+    async fn put_capsule_blob(
+        &self,
+        tenant: &str,
+        capsule_id: &str,
+        bytes: &[u8],
+    ) -> StoreResult<()>;
+    /// Fetch a capsule's component blob (`None` when none was stored —
+    /// the executor's "registered but never uploaded" signal). Only the
+    /// `capsules`-feature A2A executor reads blobs back; the upload route
+    /// is feature-independent, so the read half is dead code in a
+    /// non-capsules build.
+    #[allow(dead_code)]
+    async fn get_capsule_blob(
+        &self,
+        tenant: &str,
+        capsule_id: &str,
+    ) -> StoreResult<Option<Vec<u8>>>;
+
     // -- The capsule authorization plane (R0.9 Rusty Capsules, wave 2) -- //
 
     #[cfg(feature = "capsules")]
@@ -862,6 +888,18 @@ impl JsonFileStore {
 
 fn io_err(context: &str) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{context}: {e}")
+}
+
+/// Blob bytes live outside the capsule registry files
+/// (`capsules/*.json`) because the registry records stay small enough to
+/// load wholesale, while a wasm module is megabytes the list path should
+/// never touch. The tenant-scoped id is the whole filename: the address
+/// is content-derived, so the digest the route verified is recoverable
+/// from the bytes themselves on every read.
+fn capsule_blob_path(root: &std::path::Path, scoped_id: &str) -> std::path::PathBuf {
+    root.join("capsules")
+        .join("blobs")
+        .join(format!("{scoped_id}.wasm"))
 }
 
 #[async_trait::async_trait]
@@ -2123,6 +2161,56 @@ impl ServerStore for JsonFileStore {
             .cloned())
     }
 
+    async fn put_capsule_blob(
+        &self,
+        tenant: &str,
+        capsule_id: &str,
+        bytes: &[u8],
+    ) -> StoreResult<()> {
+        let scoped = crate::auth::scope_id(tenant, capsule_id);
+        let path = capsule_blob_path(&self.root, &scoped);
+        // Immutability over bytes: an already-stored blob must be exactly
+        // these bytes — a different upload under a taken address is a
+        // content conflict, refused rather than overwritten. The digest
+        // comparison is cheap insurance; the route already verified the
+        // bytes against the manifest's `build_digest`.
+        if let Ok(existing) = tokio::fs::read(&path).await {
+            if existing == bytes {
+                return Ok(());
+            }
+            return Err(format!(
+                "capsule blob conflict: `{capsule_id}` already names different bytes \
+                 (the registry's immutability rule — blobs never update)"
+            ));
+        }
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(io_err("create capsule blob dir"))?;
+        }
+        let tmp = path.with_extension("wasm.tmp");
+        tokio::fs::write(&tmp, bytes)
+            .await
+            .map_err(io_err("write capsule blob"))?;
+        tokio::fs::rename(&tmp, &path)
+            .await
+            .map_err(io_err("rename capsule blob"))?;
+        Ok(())
+    }
+
+    async fn get_capsule_blob(
+        &self,
+        tenant: &str,
+        capsule_id: &str,
+    ) -> StoreResult<Option<Vec<u8>>> {
+        let scoped = crate::auth::scope_id(tenant, capsule_id);
+        match tokio::fs::read(capsule_blob_path(&self.root, &scoped)).await {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err("read capsule blob")(e)),
+        }
+    }
+
     #[cfg(feature = "capsules")]
     async fn put_capsule_policy(
         &self,
@@ -2850,6 +2938,22 @@ mod postgres {
         CREATE UNIQUE INDEX IF NOT EXISTS server_capsules_version_pin
             ON server_capsules (tenant, identity, version)";
 
+    /// The capsule component blobs (R0.9 wave 4): one row per uploaded
+    /// wasm component, keyed by the same tenant-scoped content address as
+    /// its manifest. Bytes live in a real `BYTEA` column, not the JSONB
+    /// payload — a component is megabytes of binary, and JSONB would
+    /// base64 it into the record row. The `sha256` column is the stored
+    /// bytes' digest (the manifest's `build_digest`), so a conflict check
+    /// reads one column instead of re-hashing megabytes.
+    pub(crate) const CREATE_CAPSULE_BLOBS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_capsule_blobs (
+            capsule_id TEXT PRIMARY KEY,
+            tenant     TEXT NOT NULL,
+            sha256     TEXT NOT NULL,
+            bytes      BYTEA NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
     /// The capsule authorization plane (R0.9 wave 2): one row per
     /// immutable Cedar policy body, keyed by tenant-scoped version.
     /// Immutability is the insert's `ON CONFLICT DO NOTHING` plus a
@@ -2961,6 +3065,7 @@ mod postgres {
         CREATE_POLICY_BINDINGS_INDEX_SQL,
         CREATE_CAPSULES_SQL,
         CREATE_CAPSULES_PIN_INDEX_SQL,
+        CREATE_CAPSULE_BLOBS_SQL,
         CREATE_CAPSULE_POLICIES_SQL,
         CREATE_CAPSULE_POLICIES_INDEX_SQL,
         CREATE_CAPSULE_POLICIES_ACTIVE_INDEX_SQL,
@@ -3590,6 +3695,24 @@ mod postgres {
     pub(crate) const SELECT_CAPSULE_BY_VERSION_SQL: &str = r#"
         SELECT payload FROM server_capsules
         WHERE tenant = $1 AND identity = $2 AND version = $3"#;
+
+    /// Blob upload (R0.9 wave 4): insert-only on the tenant-scoped
+    /// content address — a conflict returns no row, and the caller
+    /// compares the stored digest to decide converge vs refuse, the
+    /// registry's immutability rule over bytes.
+    pub(crate) const INSERT_CAPSULE_BLOB_SQL: &str = r#"
+        INSERT INTO server_capsule_blobs (capsule_id, tenant, sha256, bytes)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (capsule_id) DO NOTHING
+        RETURNING capsule_id"#;
+
+    pub(crate) const SELECT_CAPSULE_BLOB_SQL: &str =
+        "SELECT bytes FROM server_capsule_blobs WHERE capsule_id = $1";
+
+    /// The conflict-check half of the blob upload: the stored digest for
+    /// an already-taken address.
+    pub(crate) const SELECT_CAPSULE_BLOB_DIGEST_SQL: &str =
+        "SELECT sha256 FROM server_capsule_blobs WHERE capsule_id = $1";
 
     #[cfg(feature = "capsules")]
     /// Capsule policy statements (R0.9 wave 2). Registration is
@@ -5901,6 +6024,57 @@ mod postgres {
                 .transpose()
         }
 
+        async fn put_capsule_blob(
+            &self,
+            tenant: &str,
+            capsule_id: &str,
+            bytes: &[u8],
+        ) -> StoreResult<()> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, capsule_id);
+            let sha256 = rusty_agent_runtime::record::sha256_hex(bytes);
+            let inserted = sqlx::query(INSERT_CAPSULE_BLOB_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind(&sha256)
+                .bind(bytes)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("insert capsule blob"))?;
+            if inserted.is_some() {
+                return Ok(());
+            }
+            // The address is taken: identical bytes converge (upload
+            // retries are safe), different bytes conflict — the file
+            // backend's immutability rule over bytes, exact here.
+            let existing = sqlx::query(SELECT_CAPSULE_BLOB_DIGEST_SQL)
+                .bind(&scoped)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("select capsule blob digest"))?
+                .ok_or_else(|| "capsule blob insert conflicted but the row is gone".to_string())?;
+            if existing.get::<String, _>("sha256") == sha256 {
+                return Ok(());
+            }
+            Err(format!(
+                "capsule blob conflict: `{capsule_id}` already names different bytes \
+                 (the registry's immutability rule — blobs never update)"
+            ))
+        }
+
+        async fn get_capsule_blob(
+            &self,
+            tenant: &str,
+            capsule_id: &str,
+        ) -> StoreResult<Option<Vec<u8>>> {
+            let row = sqlx::query(SELECT_CAPSULE_BLOB_SQL)
+                .bind(crate::auth::scope_id(tenant, capsule_id))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select capsule blob"))?;
+            Ok(row.map(|row| row.get::<Vec<u8>, _>("bytes")))
+        }
+
         #[cfg(feature = "capsules")]
         async fn put_capsule_policy(
             &self,
@@ -6306,7 +6480,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 44);
+            assert_eq!(MIGRATION_SQL.len(), 45);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -6410,6 +6584,12 @@ mod postgres {
             assert!(CREATE_CAPSULES_SQL.contains("payload      JSONB"));
             assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("CREATE UNIQUE INDEX"));
             assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("(tenant, identity, version)"));
+            // R0.9 wave 4: the component blobs — binary in BYTEA beside
+            // the manifest rows, digest column for the cheap conflict
+            // check, same tenant-scoped content address as the key.
+            assert!(CREATE_CAPSULE_BLOBS_SQL.contains("server_capsule_blobs"));
+            assert!(CREATE_CAPSULE_BLOBS_SQL.contains("capsule_id TEXT PRIMARY KEY"));
+            assert!(CREATE_CAPSULE_BLOBS_SQL.contains("bytes      BYTEA NOT NULL"));
             // R0.9 wave 3: the signing-key history and the minted receipts —
             // both deployment-wide (no tenant column; keys are not tenant
             // state), keyed by content-addressed key id and run id.

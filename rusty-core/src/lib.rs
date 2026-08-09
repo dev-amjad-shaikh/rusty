@@ -39,6 +39,11 @@
 //! - **Remote nodes** ([`remote`]): a [`remote::RemoteNode`] executes node
 //!   work on a remote worker over HTTP behind the same [`node::Node`] trait;
 //!   HITL interrupts cross the wire.
+//! - **A2A client** ([`a2a`], R0.9 wave 4): an [`a2a::A2aNode`] delegates a
+//!   node's work to a remote A2A agent behind the same [`node::Node`] trait —
+//!   journaled as one replay-servable `RemoteCall` event with the derived
+//!   `messageId` idempotency handle, replay-served outcomes with no outbound
+//!   calls, and `tasks/cancel` propagation on run cancellation.
 //! - **Durable work** ([`durable`]): the shared R0.6 contracts for
 //!   effectively-once distributed activities — the [`durable::ErrorClass`]
 //!   retry taxonomy, the [`durable::RetryDecision`] policy mapping, and the
@@ -138,6 +143,7 @@
 //! # }
 //! ```
 
+pub mod a2a;
 pub mod agents;
 pub mod capsule;
 #[cfg(feature = "wasm")]
@@ -170,6 +176,7 @@ pub mod wasm_node;
 
 /// Convenience re-exports of the main public API.
 pub mod prelude {
+    pub use crate::a2a::{A2aNode, A2A_PROTOCOL_VERSION};
     pub use crate::agents::{
         agent_id_from_recipient, AgentBudget, AgentId, CapabilityManifest, ContextGrant,
         CoordinationContract, CoordinationKind, CoordinationMessage, CoordinationOutcome,

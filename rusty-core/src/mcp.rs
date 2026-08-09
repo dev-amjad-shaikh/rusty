@@ -803,6 +803,183 @@ impl Tool for McpToolAdapter {
 }
 
 // ---------------------------------------------------------------------------
+// Journaled MCP tools (R0.9 Rusty Capsules, wave 4)
+// ---------------------------------------------------------------------------
+
+/// The deterministic identity of one journaled MCP tool call.
+///
+/// Derived — never minted — over `(scope, tool name, canonical arguments)`
+/// through the shared [`crate::effects::derive_effect_id`] construction,
+/// hashing the canonical [`crate::replay::tool_call_request`] payload so
+/// the id commits to exactly what the journal records. The key doubles as
+/// the replay lookup identity: a recovering run re-derives the id of the
+/// call it was about to issue, and [`JournaledMcpTool::replaying`] serves
+/// the journaled response instead of re-issuing the call.
+pub fn mcp_tool_effect_id(
+    scope: &str,
+    tool_name: &str,
+    arguments: &Value,
+) -> crate::effects::EffectId {
+    let request = crate::replay::tool_call_request(tool_name, arguments);
+    let input_hash = crate::record::PayloadRef::inline(request)
+        .content_hash()
+        .expect("a serde_json::Value always serializes");
+    crate::effects::derive_effect_id(scope, &format!("mcp_tool:{tool_name}"), &input_hash, None)
+}
+
+/// An MCP tool that leaves evidence (R0.9 wave 4): the durable half of the
+/// MCP client bridge.
+///
+/// Live ([`JournaledMcpTool::new`]), every call is dispatched through the
+/// wrapped [`McpClient`] and journaled as a
+/// [`RunEventKind::ToolCall`](crate::record::RunEventKind::ToolCall)
+/// event in the canonical [`crate::replay::tool_call_request`] shape — the
+/// same shape [`crate::replay::RecordingTool`] writes, so journals produced
+/// here are exact-replay servable. The call's identity is
+/// [`mcp_tool_effect_id`], reported through [`Tool::idempotency_key`].
+///
+/// Replaying ([`JournaledMcpTool::replaying`]), the tool holds **no client
+/// at all** — not a disconnected one, none — so a replayed run cannot
+/// respawn the stdio server (or reopen any transport) by construction; the
+/// type makes the zero-outbound guarantee rather than promising it. Calls
+/// are served from the recorded journal's [`crate::replay::ReplaySource`]
+/// by canonical request hash and re-journaled into the replay run, the
+/// [`crate::replay::ReplayingTool`] precedent.
+///
+/// The wrapper changes the evidence posture, not the effect class: an MCP
+/// call is arbitrary remote work, so [`Tool::effect`] stays the adapter's
+/// [`crate::record::Effect::NonIdempotent`] default.
+pub struct JournaledMcpTool {
+    info: McpToolInfo,
+    /// The live transport; `None` in replay mode (see the type docs).
+    client: Option<McpClient>,
+    /// The recorded journal's serving cursor; `Some` in replay mode.
+    source: Option<crate::replay::ReplaySource>,
+    journal: crate::journal::Journal,
+    parent: String,
+    scope: String,
+}
+
+impl JournaledMcpTool {
+    /// The live half: dispatch `info`'s tool through `client`, journaling
+    /// every call into `journal` under causal parent `parent` (the invoking
+    /// node's node-input event id, delivered via
+    /// [`crate::journal::PARENT_EVENT_KEY`]). `scope` names the run scope
+    /// the effect id derives under — conventionally the run id.
+    pub fn new(
+        client: McpClient,
+        info: McpToolInfo,
+        scope: impl Into<String>,
+        journal: crate::journal::Journal,
+        parent: impl Into<String>,
+    ) -> Self {
+        Self {
+            info,
+            client: Some(client),
+            source: None,
+            journal,
+            parent: parent.into(),
+            scope: scope.into(),
+        }
+    }
+
+    /// The replaying half: serve calls from `source` (built over the
+    /// recorded run's verified snapshot), re-journaling into the replay
+    /// run's `journal` under `parent`. No client is taken — a replayed run
+    /// never respawns the server.
+    pub fn replaying(
+        info: McpToolInfo,
+        scope: impl Into<String>,
+        source: crate::replay::ReplaySource,
+        journal: crate::journal::Journal,
+        parent: impl Into<String>,
+    ) -> Self {
+        Self {
+            info,
+            client: None,
+            source: Some(source),
+            journal,
+            parent: parent.into(),
+            scope: scope.into(),
+        }
+    }
+
+    /// This call's derived identity ([`mcp_tool_effect_id`]).
+    pub fn effect_id(&self, arguments: &Value) -> crate::effects::EffectId {
+        mcp_tool_effect_id(&self.scope, &self.info.name, arguments)
+    }
+}
+
+#[async_trait]
+impl Tool for JournaledMcpTool {
+    fn name(&self) -> &str {
+        &self.info.name
+    }
+
+    fn description(&self) -> &str {
+        &self.info.description
+    }
+
+    fn parameters_schema(&self) -> Value {
+        self.info.input_schema.clone()
+    }
+
+    fn idempotency_key(&self, args: &Value) -> Option<String> {
+        Some(self.effect_id(args).as_str().to_string())
+    }
+
+    async fn call(&self, args: Value) -> Result<Value> {
+        let request = crate::replay::tool_call_request(&self.info.name, &args);
+        match (&self.client, &self.source) {
+            (Some(client), None) => {
+                let result = client.call_tool(&self.info.name, args).await;
+                // The journaled shape is RecordingTool's exactly: success
+                // carries the verbatim response; failure carries
+                // `{"error": msg}` under EventStatus::Error — so either way
+                // the event is servable by exact replay.
+                let mut draft = crate::journal::EventDraft::new(
+                    crate::record::RunEventKind::ToolCall,
+                    <Self as Tool>::effect(self),
+                )
+                .input(request)
+                .parent(self.parent.clone());
+                match &result {
+                    Ok(value) => {
+                        draft = draft.output(value.clone());
+                    }
+                    Err(error) => {
+                        draft = draft
+                            .output(json!({ "error": error.to_string() }))
+                            .status(crate::record::EventStatus::Error);
+                    }
+                }
+                self.journal.record(draft);
+                result
+            }
+            (None, Some(source)) => {
+                let served = source
+                    .serve(crate::record::RunEventKind::ToolCall, &request)
+                    .map_err(|e| tool_err(format!("replay serve failed: {e}")))?;
+                served.rejournal(&self.journal, self.parent.clone());
+                if served.event.status == crate::record::EventStatus::Error {
+                    let message = served
+                        .output
+                        .as_ref()
+                        .and_then(|value| value.get("error"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("recorded tool call failed");
+                    return Err(tool_err(message));
+                }
+                Ok(served.output.unwrap_or(Value::Null))
+            }
+            // The two constructors set exactly one half; this arm is
+            // unreachable by construction.
+            _ => Err(tool_err("journaled MCP tool is neither live nor replaying")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

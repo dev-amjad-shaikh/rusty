@@ -750,6 +750,56 @@ with streaming and cancellation preserved; generated MCP schemas and
 generated Agent Cards; journaled MCP/A2A client calls with derived
 idempotency keys. Exit: the release proof below.
 
+> **Wave 4 status: implemented.** The bridges landed as written. Server
+> side: `POST /mcp` exposes every registered graph as one MCP tool
+> (`tools/list` schemas derived from each graph's state spec — append
+> channels are arrays, deep-merge channels objects; `tools/call` runs the
+> graph on a fresh thread, answering plain JSON or SSE
+> `notifications/progress` plus the terminal result, with
+> disconnect-cancels-the-run and `notifications/cancelled` mapped to the
+> run-level cancel); `GET /.well-known/agent-card.json` serves the
+> derived, deterministic Agent Card; `POST /a2a` maps A2A tasks onto the
+> durable task queue (`message/send`, `message/stream`, `tasks/get`,
+> `tasks/cancel`); `PUT /capsules/{id}/blob` stores the component bytes
+> the manifest's `build_digest` commits to, digest-checked at the route.
+> Client side: `JournaledMcpTool` journals every live MCP call (effect id
+> derived from the request hash) and replays from a `ReplaySource`
+> without a client by construction; `A2aNode` delegates over JSON-RPC
+> with the derived `a2a-{thread}-{step}-{node}` message id as its
+> idempotency handle, journals the terminal task as one `RemoteCall`,
+> and maps remote cancellation to `tasks/cancel`. Refinements worth
+> naming. **The protocol revisions are pinned, not negotiated** — MCP
+> `2025-03-26` (the Streamable HTTP revision) and A2A `0.3.0` (which
+> renamed the well-known card path) — the runtime's own pin posture:
+> the pin is what the conformance evidence records. **An A2A context is
+> one Flight Recorder journal** (`a2a-{tenant}-{contextId}` — the tenant
+> is embedded because journal keys are bare run ids and context ids are
+> client-chosen), bound to a synthetic thread record whose graph is the
+> registered name `a2a`, so the native `/events`, `/fixture`, and
+> `/receipt` endpoints resolve context evidence exactly as for a graph
+> run; the release proof registers that trivial graph. **Capsule
+> payloads execute in-process; plain messages queue for external
+> workers** — the pool is the addressing (`a2a-capsule` vs `a2a`), the
+> bridge's drainer claims only capsule work, and the connector is the
+> deployment's explicit egress seam (`ServerConfig::with_capsule_connector`;
+> absent, capsule tasks fail closed with `capsule_execution_unavailable`).
+> **The filesystem refusal is journaled at admission**: the v1 world has
+> no filesystem import for a guest to probe, so the bridge journals the
+> unscoped (empty-scope) structural denial the host would have recorded —
+> the caller's `requires: ["filesystem"]` declaration is the refusal
+> trigger, and the evidence shape is identical to a host-raised denial.
+> **Journal writes are serialized per context** (`journal_locks`): each
+> execution is a load → append → persist cycle over a whole-journal
+> snapshot, so concurrent capsule tasks of one context cannot clobber
+> each other's freshly journaled events. **Artifacts are content-addressed
+> by construction** — the artifact id derives from the canonical output
+> bytes, the body lives on the durable task record, and the digest is
+> journaled; no second artifact store, and both store backends stay
+> equal. Two honest edges: the MCP bridge answers JSON-RPC errors in the
+> envelope with HTTP 200 (clients dispatch on `error.code`, and a non-200
+> would read as transport failure), and batch requests are refused — one
+> envelope per POST keeps the SSE answer shape unambiguous.
+
 **Release proof (the whole release).** The roadmap's sentence, automated
 as an integration test in the crash-recovery family
 (`rusty-server/tests/capsules_release.rs`): *run an untrusted remote

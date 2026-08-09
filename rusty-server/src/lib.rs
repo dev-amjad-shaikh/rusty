@@ -107,6 +107,10 @@
 //! | `GET /receipt_keys` | R0.9 (wave 3): the deployment's signing-key history (public keys, registration and retirement instants) plus the active key id — what an auditor needs to verify receipts offline |
 //! | `POST /receipt_keys/rotate` | R0.9 (wave 3): rotate the signing key → `201 {previous_key_id, key_id, public_key, event_id}`; the new key id is journaled as a `signing_key_rotated` event in the deployment's receipts journal, and receipts signed by the retired key keep verifying against the history |
 //! | `GET /receipt_keys/journal` | R0.9 (wave 3): the deployment's key-lineage journal — the chained `signing_key_rotated` events, integrity re-verified on read |
+//! | `POST /mcp` | R0.9 (wave 4): the MCP bridge (pinned revision `2025-03-26`) — every registered graph as one tool. `initialize` / `ping` / `notifications/*` / `tools/list` (tool schemas derived from each graph's state spec: append channels are arrays, deep-merge channels objects) / `tools/call` (runs the graph on a fresh thread; plain-JSON answer, or SSE `notifications/progress` + the final response when the request accepts `text/event-stream`; a mid-stream disconnect cancels the run). JSON-RPC errors in the envelope with HTTP 200; notifications answer `202` |
+//! | `GET /.well-known/agent-card.json` | R0.9 (wave 4): the A2A agent card (pinned spec `0.3.0`), derived from the registry on every read — one skill per registered graph; deterministic, no timestamps |
+//! | `POST /a2a` | R0.9 (wave 4): the A2A JSON-RPC task surface — `message/send` (enqueue a durable task, `kind = "a2a"`, idempotent on `messageId`; a capsule data part `{"capsule": {name, version}, "input"}` routes to the in-process executor over the `a2a-capsule` pool, plain messages queue on `a2a` for external workers) / `message/stream` (the same plus SSE status events) / `tasks/get` / `tasks/cancel`. The context id maps to one Flight Recorder journal (`a2a-{tenant}-{contextId}`), so capsule executions leave their evidence on the native `/runs/{id}/events` and `/fixture` endpoints |
+//! | `PUT /capsules/{id}/blob` | R0.9 (wave 4): upload the component bytes a registered manifest's `build_digest` commits to (raw body) → `201 {capsule_id, sha256, bytes}`; `404` unknown capsule, `422` digest mismatch, `409` different bytes under a taken address (registry immutability over bytes) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -114,6 +118,7 @@
 //! `config.recursion_limit` as a default), and `checkpoint.checkpoint_id`
 //! (time-travel replay from that checkpoint instead of the latest).
 
+mod a2a;
 mod agents;
 mod assistants;
 mod auth;
@@ -124,6 +129,7 @@ mod crons;
 mod error;
 mod journals;
 mod learn;
+mod mcp_bridge;
 mod memory;
 mod outbox;
 mod policy;
@@ -439,6 +445,17 @@ pub struct ServerConfig {
     /// mid-run the way fuel can, so admission refuses the overspend. See
     /// [`ServerConfig::with_capsule_budget_ceiling`].
     pub capsule_budget_ceiling: Option<ResourceBudget>,
+
+    /// The deployment's network-egress seam for capsules the A2A bridge
+    /// executes in-process (R0.9 wave 4): the [`NetworkConnector`] every
+    /// bridge-built capsule host is constructed with. Without one, A2A
+    /// tasks carrying a capsule payload fail closed with
+    /// `capsule_execution_unavailable` — the bridge never executes guest
+    /// code against an egress path the operator did not explicitly wire.
+    /// Requires the `capsules` feature. See
+    /// [`ServerConfig::with_capsule_connector`].
+    #[cfg(feature = "capsules")]
+    pub capsule_connector: Option<Arc<dyn rusty_agent_runtime::capsule_host::NetworkConnector>>,
 }
 
 impl Default for ServerConfig {
@@ -460,6 +477,8 @@ impl Default for ServerConfig {
             candidate_evaluator: None,
             capsule_policy_files: Vec::new(),
             capsule_budget_ceiling: None,
+            #[cfg(feature = "capsules")]
+            capsule_connector: None,
         }
     }
 }
@@ -688,6 +707,20 @@ impl ServerConfig {
     /// run's own declaration and each capsule's manifest.
     pub fn with_capsule_budget_ceiling(mut self, ceiling: ResourceBudget) -> Self {
         self.capsule_budget_ceiling = Some(ceiling);
+        self
+    }
+
+    /// Builder-style: set the network connector for capsules the A2A
+    /// bridge executes in-process (R0.9 wave 4) — the deployment's
+    /// explicit egress seam. `None` (the default) refuses capsule
+    /// execution over A2A with `capsule_execution_unavailable`: guest
+    /// code never runs against an egress path the operator did not wire.
+    #[cfg(feature = "capsules")]
+    pub fn with_capsule_connector(
+        mut self,
+        connector: Arc<dyn rusty_agent_runtime::capsule_host::NetworkConnector>,
+    ) -> Self {
+        self.capsule_connector = Some(connector);
         self
     }
 }
