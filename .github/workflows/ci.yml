@@ -232,3 +232,20 @@ jobs:
       - name: TypeScript SDK tests
         working-directory: sdks/typescript
         run: npm test
+
+  # Dependency-free Studio tests run directly under Node. The entrypoint
+  # discovers every test-*.mjs suite so newly added UI coverage is included
+  # automatically instead of requiring another workflow edit.
+  studio:
+    name: studio
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Studio tests
+        run: node studio/test-all.mjs
