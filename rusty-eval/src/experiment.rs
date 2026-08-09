@@ -4,18 +4,22 @@
 //! case, through the real `rusty-agent-runtime` executor — no simulation
 //! harness. Each run records into its own Flight Recorder journal; the
 //! journal plus the run outcome become [`RunEvidence`], which the case's
-//! assertions grade. Runs are sequential and each gets a fresh journal, so
-//! repetition *i*'s evidence can never bleed into repetition *i+1*'s.
+//! assertions grade. Runs are sequential by default or explicitly
+//! bounded-parallel; each gets a fresh journal, so repetition *i*'s evidence
+//! can never bleed into repetition *i+1*'s.
 //!
 //! The output is a serializable [`ExperimentReport`]: per-case-run detail
 //! (assertion verdicts with evidence, status, latency, cost), pass rates per
 //! assertion, latency percentiles, and totals — everything
 //! [`crate::compare()`] needs to judge a candidate against a baseline.
+//! Parallel completion never controls artifact ordering or which
+//! infrastructure error is returned.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::{stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use rusty_agent_runtime::error::Result as RuntimeResult;
@@ -71,10 +75,16 @@ impl PreparedRun {
 }
 
 /// Experiment configuration.
-#[derive(Default)]
 pub struct ExperimentConfig {
     runs_per_case: usize,
+    max_concurrency: usize,
     judge: Option<Arc<dyn JudgeModel>>,
+}
+
+impl Default for ExperimentConfig {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ExperimentConfig {
@@ -82,6 +92,7 @@ impl ExperimentConfig {
     pub fn new() -> Self {
         Self {
             runs_per_case: 1,
+            max_concurrency: 1,
             judge: None,
         }
     }
@@ -90,6 +101,18 @@ impl ExperimentConfig {
     /// pass rates are computed over all repetitions.
     pub fn with_runs_per_case(mut self, n: usize) -> Self {
         self.runs_per_case = n.max(1);
+        self
+    }
+
+    /// Allow at most `n` case runs to execute concurrently.
+    ///
+    /// The default is `1`, preserving sequential execution and uncontended
+    /// latency measurement. Zero is normalized to one, matching
+    /// [`Self::with_runs_per_case`]. Parallel runs still receive isolated
+    /// graphs and journals, and the report remains ordered by dataset case
+    /// then repetition regardless of completion order.
+    pub fn with_max_concurrency(mut self, n: usize) -> Self {
+        self.max_concurrency = n.max(1);
         self
     }
 
@@ -105,6 +128,7 @@ impl std::fmt::Debug for ExperimentConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExperimentConfig")
             .field("runs_per_case", &self.runs_per_case)
+            .field("max_concurrency", &self.max_concurrency)
             .field("judge", &self.judge.as_ref().map(|_| "<judge>"))
             .finish()
     }
@@ -125,49 +149,103 @@ impl ExperimentRunner {
     /// `runs_per_case` times each, and grade the evidence.
     ///
     /// `prepare` builds the graph under test for one case run and receives
-    /// the run's journal for evidence wiring. Runs execute sequentially:
-    /// evaluation values reproducibility over throughput, and sequential
-    /// runs keep latency measurement honest.
+    /// the run's journal for evidence wiring. At most the configured number
+    /// of runs are in flight. The default sequential path retains fail-fast
+    /// behavior. In parallel mode, observing an infrastructure error stops
+    /// admission of new runs; the already-active window settles, and the
+    /// earliest dataset-case/repetition error from that window wins
+    /// deterministically.
     pub async fn run<F>(&self, dataset: &Dataset, prepare: F) -> Result<ExperimentReport>
     where
         F: Fn(&EvalCase, &Journal) -> RuntimeResult<PreparedRun>,
     {
-        let mut case_reports = Vec::with_capacity(dataset.cases().len());
-        for case in dataset.cases() {
-            let mut runs = Vec::with_capacity(self.config.runs_per_case);
-            for repetition in 0..self.config.runs_per_case {
-                runs.push(
-                    self.run_case_once(dataset, case, repetition, &prepare)
-                        .await?,
-                );
+        if self.config.max_concurrency == 1 {
+            let mut case_reports = Vec::with_capacity(dataset.cases().len());
+            for case in dataset.cases() {
+                let mut runs = Vec::with_capacity(self.config.runs_per_case);
+                for repetition in 0..self.config.runs_per_case {
+                    runs.push(
+                        self.run_case_once(dataset, case, repetition, &prepare)
+                            .await?,
+                    );
+                }
+                case_reports.push(case_report(case, runs));
             }
-            let pass_rate = runs.iter().filter(|run| run.passed).count() as f64 / runs.len() as f64;
-            case_reports.push(CaseReport {
-                case_id: case.id.clone(),
-                tags: case.tags.clone(),
-                pass_rate,
-                runs,
-            });
+            return Ok(self.finish_report(dataset, case_reports));
         }
 
+        let mut jobs = dataset
+            .cases()
+            .iter()
+            .enumerate()
+            .flat_map(|(case_index, case)| {
+                (0..self.config.runs_per_case).map(move |repetition| (case_index, case, repetition))
+            });
+        let prepare = &prepare;
+        let run_job = |(case_index, case, repetition)| async move {
+            (
+                case_index,
+                repetition,
+                self.run_case_once(dataset, case, repetition, prepare).await,
+            )
+        };
+        let mut active = FuturesUnordered::new();
+        for _ in 0..self.config.max_concurrency {
+            let Some(job) = jobs.next() else {
+                break;
+            };
+            active.push(run_job(job));
+        }
+
+        let mut completed = Vec::new();
+        let mut admission_stopped = false;
+        while let Some(result) = active.next().await {
+            admission_stopped |= result.2.is_err();
+            completed.push(result);
+            if !admission_stopped {
+                if let Some(job) = jobs.next() {
+                    active.push(run_job(job));
+                }
+            }
+        }
+
+        completed.sort_unstable_by_key(|(case_index, repetition, _)| (*case_index, *repetition));
+        let mut runs_by_case: Vec<Vec<CaseRunReport>> = (0..dataset.cases().len())
+            .map(|_| Vec::with_capacity(self.config.runs_per_case))
+            .collect();
+        for (case_index, _, result) in completed {
+            runs_by_case[case_index].push(result?);
+        }
+
+        let mut case_reports = Vec::with_capacity(dataset.cases().len());
+        for (case, runs) in dataset.cases().iter().zip(runs_by_case) {
+            case_reports.push(case_report(case, runs));
+        }
+
+        Ok(self.finish_report(dataset, case_reports))
+    }
+
+    fn finish_report(&self, dataset: &Dataset, case_reports: Vec<CaseReport>) -> ExperimentReport {
         let summary = ReportSummary::compute(&case_reports);
         tracing::info!(
             dataset = %dataset.name(),
             version = %dataset.version(),
+            max_concurrency = self.config.max_concurrency,
             cases = summary.cases,
             runs = summary.runs,
             run_pass_rate = summary.run_pass_rate,
             "experiment complete"
         );
-        Ok(ExperimentReport {
+        ExperimentReport {
             format_version: REPORT_FORMAT_VERSION,
             name: format!("{}@{}", dataset.name(), dataset.version()),
             dataset_name: dataset.name().to_owned(),
             dataset_version: dataset.version().to_owned(),
             runs_per_case: self.config.runs_per_case,
+            max_concurrency: self.config.max_concurrency,
             cases: case_reports,
             summary,
-        })
+        }
     }
 
     /// One case repetition: build, run, distill evidence, grade.
@@ -261,6 +339,16 @@ impl ExperimentRunner {
             cost_usd: evidence.cost_usd,
             total_tokens: evidence.total_tokens,
         })
+    }
+}
+
+fn case_report(case: &EvalCase, runs: Vec<CaseRunReport>) -> CaseReport {
+    let pass_rate = runs.iter().filter(|run| run.passed).count() as f64 / runs.len() as f64;
+    CaseReport {
+        case_id: case.id.clone(),
+        tags: case.tags.clone(),
+        pass_rate,
+        runs,
     }
 }
 
@@ -460,11 +548,19 @@ pub struct ExperimentReport {
     /// Repetitions per case.
     pub runs_per_case: usize,
 
+    /// Maximum case runs allowed in flight when this report was produced.
+    #[serde(default = "default_max_concurrency")]
+    pub max_concurrency: usize,
+
     /// Per-case detail.
     pub cases: Vec<CaseReport>,
 
     /// Experiment-wide aggregates.
     pub summary: ReportSummary,
+}
+
+fn default_max_concurrency() -> usize {
+    1
 }
 
 impl ExperimentReport {

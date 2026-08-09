@@ -159,6 +159,7 @@ fn report(name: &str, cases: Vec<CaseReport>) -> ExperimentReport {
         dataset_name: "support".to_owned(),
         dataset_version: "v4".to_owned(),
         runs_per_case,
+        max_concurrency: 1,
         summary: ReportSummary {
             cases: cases.len(),
             runs: runs.len(),

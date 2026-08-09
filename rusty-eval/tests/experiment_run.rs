@@ -375,6 +375,7 @@ fn fabricated_report(name: &str, p50: u64, p95: u64, cost: f64) -> ExperimentRep
         dataset_name: "d".to_owned(),
         dataset_version: "1".to_owned(),
         runs_per_case: 1,
+        max_concurrency: 1,
         cases: vec![],
         summary: ReportSummary {
             cases: 0,
@@ -431,6 +432,11 @@ fn report_json_round_trip_and_version_guard() {
     let json = report.to_json().unwrap();
     let parsed = ExperimentReport::from_json(&json).unwrap();
     assert_eq!(parsed, report);
+
+    let mut legacy: Value = serde_json::from_str(&json).unwrap();
+    legacy.as_object_mut().unwrap().remove("max_concurrency");
+    let legacy = ExperimentReport::from_json(&legacy.to_string()).unwrap();
+    assert_eq!(legacy.max_concurrency, 1);
 
     let bumped = json.replace(
         &format!("\"format_version\": {}", rusty_eval::REPORT_FORMAT_VERSION),

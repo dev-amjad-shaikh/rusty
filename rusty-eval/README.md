@@ -13,7 +13,8 @@ dataset (JSONL, versioned)
       │
       ▼
 ExperimentRunner ── runs the agent N× per case through Executor::run,
-      │            each run journaling into its own Flight Recorder journal
+      │            each run journaling into its own Flight Recorder journal;
+      │            sequential by default or bounded-parallel
       ▼
 RunEvidence ── ordered tool-call trajectory + final state + latency/cost,
       │        distilled from the journal
@@ -65,6 +66,20 @@ Deterministic checks only — no model in the loop:
 Every verdict returns `{ assertion, passed, expected, observed, detail }` —
 the report shows *why* a run failed, not just that it did.
 
+Experiments run sequentially by default so latency measurements remain
+uncontended. `ExperimentConfig::with_max_concurrency(n)` opts into bounded
+parallel execution for larger suites. The bound covers graph execution and
+judge calls; every run still gets a fresh graph and journal. Reports always
+sort by dataset case and repetition, and concurrent infrastructure failures
+resolve to the earliest case/repetition rather than whichever future happens
+to finish first. Once a parallel failure is observed, no new runs are
+admitted; only the already-active window is drained. Sequential execution
+retains its original fail-fast behavior.
+
+Baseline gates require matching concurrency settings. This keeps latency, cost,
+and rate-limit evidence comparable instead of silently mixing sequential and
+parallel workloads.
+
 ## Statistical regression detection
 
 `detect_pass_rate_regression` pairs baseline and candidate outcomes by case id
@@ -100,5 +115,5 @@ is derived locally.
 
 Foundation release (v0.1.0): library only, no CLI. Deliberately absent for
 now: provider-specific judge clients (use the runtime's `ChatModel` adapters),
-dataset/report storage backends beyond JSON files, parallel experiment
-execution, and assertion kinds beyond the deterministic set above.
+dataset/report storage backends beyond JSON files, and assertion kinds beyond
+the deterministic set above.

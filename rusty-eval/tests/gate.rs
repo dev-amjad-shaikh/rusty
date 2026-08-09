@@ -94,6 +94,7 @@ fn report(
         dataset_name: "release".to_owned(),
         dataset_version: "1".to_owned(),
         runs_per_case,
+        max_concurrency: 1,
         summary: ReportSummary {
             cases: cases.len(),
             runs,
@@ -259,6 +260,15 @@ fn baseline_must_describe_the_same_dataset() {
     let policy = GatePolicy::new("p").unwrap().with_maximum_regressions(0);
     let error = evaluate_gate(&policy, &candidate, Some(&baseline)).unwrap_err();
     assert!(error.to_string().contains("baseline dataset"), "{error}");
+}
+
+#[test]
+fn baseline_and_candidate_require_matching_concurrency() {
+    let (baseline, mut candidate) = clean_reports();
+    candidate.max_concurrency = 2;
+    let policy = GatePolicy::new("p").unwrap().with_maximum_regressions(0);
+    let error = evaluate_gate(&policy, &candidate, Some(&baseline)).unwrap_err();
+    assert!(error.to_string().contains("maximum concurrency"), "{error}");
 }
 
 #[test]

@@ -390,6 +390,12 @@ pub fn evaluate_gate(
                 baseline.dataset_name, candidate.dataset_name
             ));
         }
+        if baseline.max_concurrency != candidate.max_concurrency {
+            return gate_error(format!(
+                "baseline maximum concurrency {} does not match candidate maximum concurrency {}",
+                baseline.max_concurrency, candidate.max_concurrency
+            ));
+        }
     }
     let comparison =
         baseline.map(|baseline| compare(baseline, candidate, &policy.comparison_thresholds));
@@ -669,6 +675,12 @@ pub(crate) fn validate_report(report: &ExperimentReport) -> Result<()> {
     if report.runs_per_case == 0 {
         return gate_error(format!(
             "experiment `{}` has zero runs per case",
+            report.name
+        ));
+    }
+    if report.max_concurrency == 0 {
+        return gate_error(format!(
+            "experiment `{}` has zero maximum concurrency",
             report.name
         ));
     }

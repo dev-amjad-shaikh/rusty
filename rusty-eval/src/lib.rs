@@ -20,7 +20,8 @@
 //!   `rusty-agent-runtime` executor, distills each run's journal into
 //!   evidence, grades it, and aggregates an
 //!   [`experiment::ExperimentReport`]: pass rate per assertion, per-case
-//!   detail, latency percentiles, total cost.
+//!   detail, latency percentiles, total cost. Runs are sequential by default
+//!   or bounded-parallel with deterministic report ordering.
 //! - **Comparison** ([`mod@compare`]) — [`compare::compare`] diffs a candidate
 //!   report against a baseline: per-assertion deltas, per-case regressions
 //!   and improvements, and threshold-based regression flags (pass-rate drop,

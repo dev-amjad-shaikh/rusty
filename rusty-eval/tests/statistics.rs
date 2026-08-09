@@ -52,6 +52,7 @@ fn report(name: &str, dataset: &str, version: &str, cases: &[(&str, &[bool])]) -
         dataset_name: dataset.to_owned(),
         dataset_version: version.to_owned(),
         runs_per_case,
+        max_concurrency: 1,
         cases: case_reports,
         summary: ReportSummary {
             cases: cases.len(),
