@@ -767,6 +767,40 @@
   .fabric-supervision-head b { font-size: 12px; }
   .fabric-attempts { margin: 8px 0 0; padding: 0; list-style: none; }
   .fabric-attempts li { padding: 6px 8px; margin-top: 5px; border-left: 2px solid var(--interrupt); background: var(--bg-inset); font-size: 11px; overflow-wrap: anywhere; }
+  .fabric-run-desk { margin-top: 14px; padding: 0; overflow: hidden; }
+  .fabric-run-desk-head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 14px 16px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(110deg, #20251d, var(--bg-panel) 62%); }
+  .fabric-run-desk-head h2 { margin: 0; font-size: 16px; }
+  .fabric-run-desk-head p { max-width: 720px; margin: 4px 0 0; color: var(--text-dim); font-size: 11.5px; }
+  .fabric-run-scope { flex: 0 0 auto; color: #c6b476; font: 700 10px var(--mono); letter-spacing: .7px; text-transform: uppercase; white-space: nowrap; }
+  .fabric-run-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(150px, .45fr) auto; gap: 8px; align-items: end; padding: 11px 16px; border-bottom: 1px solid var(--border); background: var(--bg-inset); }
+  .fabric-run-toolbar label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .45px; }
+  .fabric-run-toolbar input, .fabric-run-toolbar select { display: block; width: 100%; margin-top: 3px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); color: var(--text); font: 11px var(--mono); }
+  .fabric-run-toolbar-actions { display: flex; gap: 8px; align-items: center; }
+  .fabric-run-follow { display: inline-flex; gap: 6px; align-items: center; color: var(--text-dim); font-size: 10.5px; white-space: nowrap; }
+  .fabric-run-follow input { width: auto; margin: 0; }
+  .fabric-run-statusline { min-height: 18px; padding: 7px 16px 0; color: var(--text-dim); font: 10.5px var(--mono); }
+  .fabric-run-list { display: grid; gap: 7px; padding: 8px 12px 13px; }
+  .fabric-run-row { display: grid; grid-template-columns: minmax(150px, .85fr) minmax(190px, 1.15fr) minmax(112px, .55fr) auto; gap: 12px; align-items: center; width: 100%; padding: 10px 11px; border-color: var(--border); background: var(--bg-raised); text-align: left; }
+  .fabric-run-row:hover { border-color: #665e48; background: #24251f; }
+  .fabric-run-row[aria-current="true"] { border-color: #85744a; background: #29271d; }
+  .fabric-run-identity, .fabric-run-state { min-width: 0; }
+  .fabric-run-identity b, .fabric-run-identity span, .fabric-run-state b, .fabric-run-state span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fabric-run-identity b { font: 600 11px var(--mono); }
+  .fabric-run-identity span, .fabric-run-state span { margin-top: 2px; color: var(--text-dim); font-size: 10px; }
+  .fabric-run-state b { font-size: 10.5px; text-transform: uppercase; letter-spacing: .45px; }
+  .fabric-run-state b.active { color: #a9c797; }
+  .fabric-run-state b.attention { color: #e19a84; }
+  .fabric-run-state b.settled { color: #c9b979; }
+  .fabric-run-pulse { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; min-width: 0; }
+  .fabric-run-pulse-track { position: relative; height: 7px; overflow: hidden; border: 1px solid #4f4b3d; border-radius: 999px; background: #171915; }
+  .fabric-run-pulse-track i { display: block; height: 100%; background: linear-gradient(90deg, #687f58, #b49b57); }
+  .fabric-run-pulse.attention .fabric-run-pulse-track i { background: linear-gradient(90deg, #8a4c3d, #c97b59); }
+  .fabric-run-pulse-node { width: 10px; height: 10px; border: 2px solid #756d56; border-radius: 2px; background: var(--bg-inset); transform: rotate(45deg); }
+  .fabric-run-pulse.complete .fabric-run-pulse-node { border-color: #b7a45c; background: #76662f; }
+  .fabric-run-pulse.attention .fabric-run-pulse-node { border-color: #b66d57; background: #6f382d; }
+  .fabric-run-open { color: #c9b979; font: 700 10px var(--mono); text-transform: uppercase; letter-spacing: .55px; white-space: nowrap; }
+  .fabric-follow-state { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; padding: 7px 9px; border-left: 2px solid #6c7e59; background: #1e241c; color: var(--text-dim); font-size: 10.5px; }
+  .fabric-follow-state.attention { border-left-color: var(--err); background: #2a1e1b; }
   .fabric-coordination { margin-top: 14px; }
   .fabric-coordination-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
   .fabric-coordination-head p { margin: 3px 0 0; color: var(--text-dim); font-size: 11.5px; max-width: 700px; }
@@ -1000,6 +1034,10 @@
     .fabric-identity-note { grid-template-columns: 1fr; }
     .fabric-identity-note .bridge { transform: rotate(90deg); }
     .fabric-coordination-head { flex-direction: column; }
+    .fabric-run-desk-head { flex-direction: column; }
+    .fabric-run-toolbar { grid-template-columns: minmax(0, 1fr) minmax(150px, .5fr); }
+    .fabric-run-toolbar-actions { grid-column: 1 / -1; }
+    .fabric-run-row { grid-template-columns: minmax(130px, .85fr) minmax(130px, 1.1fr) minmax(90px, .55fr) auto; }
     .fabric-compose-head { flex-direction: column; }
     .fabric-patterns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .learn-principle { grid-template-columns: 1fr; }
@@ -1071,6 +1109,13 @@
     .fabric-coordination-load label { flex: 1 1 100%; }
     .fabric-coordination-load input { width: 100%; }
     .fabric-coordination-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fabric-run-toolbar { grid-template-columns: 1fr; }
+    .fabric-run-toolbar-actions { grid-column: auto; align-items: flex-start; flex-direction: column; }
+    .fabric-run-row { grid-template-columns: 1fr auto; gap: 8px; }
+    .fabric-run-pulse { grid-column: 1 / -1; grid-row: 2; }
+    .fabric-run-state { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; grid-column: 1 / -1; grid-row: 3; align-items: baseline; }
+    .fabric-run-state span { margin-top: 0; text-align: right; }
+    .fabric-run-open { grid-column: 2; grid-row: 1; }
     .fabric-trace-event { grid-template-columns: 1fr; gap: 2px; }
     .fabric-compose-meta, .fabric-assignment-grid, .fabric-assignment-task, .fabric-compose-options { grid-template-columns: 1fr; }
     .learn-head { flex-direction: column; }
@@ -1282,11 +1327,41 @@
           <span class="sr-only" id="fabric-compose-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
         </section>
 
+        <section class="card fabric-run-desk" id="fabric-run-desk" aria-labelledby="fabric-run-desk-title" aria-busy="false">
+          <div class="fabric-run-desk-head">
+            <div>
+              <h2 id="fabric-run-desk-title">Team run desk</h2>
+              <p>Return to coordinations started or attached in this browser. Every refresh asks Rusty for current state; this remembered list is not server-side discovery.</p>
+            </div>
+            <span class="fabric-run-scope">browser recall · server truth</span>
+          </div>
+          <div class="fabric-run-toolbar">
+            <label>Find a remembered run
+              <input id="inp-fabric-run-search" type="search" autocomplete="off" spellcheck="false" placeholder="Coordination ID, pattern, or status">
+            </label>
+            <label>Lifecycle
+              <select id="sel-fabric-run-state">
+                <option value="all">All remembered</option>
+                <option value="active">Active</option>
+                <option value="settled">Settled</option>
+                <option value="attention">Needs attention</option>
+              </select>
+            </label>
+            <div class="fabric-run-toolbar-actions">
+              <label class="fabric-run-follow"><input id="chk-fabric-follow" type="checkbox" checked> Follow inspected active run</label>
+              <button class="small" id="btn-fabric-runs-refresh" type="button">Refresh remembered</button>
+            </div>
+          </div>
+          <div class="fabric-run-statusline" id="fabric-run-statusline" role="status" aria-live="polite"></div>
+          <div class="fabric-run-list" id="fabric-run-list"><div class="empty">No team runs have been remembered in this browser.</div></div>
+          <span class="sr-only" id="fabric-run-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+        </section>
+
         <section class="card fabric-coordination" aria-labelledby="fabric-coordination-title">
           <div class="fabric-coordination-head">
             <div>
-              <h2 id="fabric-coordination-title">Coordination investigation</h2>
-              <p>Enter a known coordination ID. Rusty does not yet expose coordination discovery, and refreshing this evidence also reconciles any newly settled member work.</p>
+              <h2 id="fabric-coordination-title" tabindex="-1">Coordination investigation</h2>
+              <p>Inspect one coordination's current contract, settlement, and causal evidence. Active work can be followed live while this view is open.</p>
             </div>
             <form class="fabric-coordination-load" id="fabric-coordination-form">
               <label>Coordination ID
@@ -1565,6 +1640,7 @@ const LS = {
   threads: "ags:threads",   // { [baseUrl]: [threadRecord] }
   sel:     "ags:selected",  // { [baseUrl]: threadId }
   agentRuns: "ags:agentRuns", // bounded v1 envelope of connection-scoped, sanitized run metadata
+  fabricRuns: "ags:fabricRuns", // bounded v1 envelope of connection-scoped coordination metadata
 };
 
 const AGENT_RUN_HISTORY_LIMIT = 12;
@@ -1572,6 +1648,16 @@ const AGENT_RUN_SCOPE_LIMIT = 8;
 const AGENT_RUN_ASSISTANT_LIMIT = 40;
 const AGENT_RUN_GLOBAL_ASSISTANT_LIMIT = 80;
 const AGENT_RUN_STORAGE_LIMIT = 196608;
+const FABRIC_RUN_HISTORY_LIMIT = 24;
+const FABRIC_RUN_SCOPE_LIMIT = 8;
+const FABRIC_RUN_GLOBAL_LIMIT = 120;
+const FABRIC_RUN_STORAGE_LIMIT = 65536;
+const FABRIC_RUN_REFRESH_LIMIT = 24;
+const FABRIC_RUN_REFRESH_CONCURRENCY = 3;
+const FABRIC_FOLLOW_INTERVAL = 2000;
+const FABRIC_FOLLOW_MAX_INTERVAL = 16000;
+const FABRIC_RUN_STATUSES = new Set(["in_progress", "completed", "failed", "cancelled", "unreachable", "unknown"]);
+const FABRIC_RUN_FILTERS = new Set(["all", "active", "settled", "attention"]);
 const AGENT_MANIFEST_FORMAT = "rusty.assistant/v1";
 const AGENT_MANIFEST_TEXT_LIMIT = 65536;
 const AGENT_MANIFEST_DEPTH_LIMIT = 16;
@@ -1622,6 +1708,15 @@ const store = {
   fabricUnsupported: false, // server build has no Agent Fabric registry routes
   fabricRequest: 0,   // generation guard for inventory/member/coordination reads
   fabricLeaseTimer: null, // rerenders live activation evidence when its observed lease expires
+  fabricRunHistory: [], // sanitized browser-scoped coordination metadata for the current connection
+  fabricRunQuery: "",
+  fabricRunFilter: "all",
+  fabricRunRefreshing: false,
+  fabricRunRequest: 0,
+  fabricRunPersistenceWarning: false,
+  fabricFollowEnabled: true,
+  fabricFollowTimer: null,
+  fabricFollowFailures: 0,
   memory: null,        // bounded audit snapshot + conflicts, selection, search index, and load state
   memoryUnsupported: false, // server build has no governed-memory query route
   memoryRequest: 0,    // generation guard: stale server/tenant responses never cross connection boundaries
@@ -1796,6 +1891,239 @@ function saveAgentRunHistory(activeAssistant) {
   }
 }
 
+function fabricRunSafeId(value) {
+  const id = String(value || "").trim();
+  return id && agentUtf8Length(id) <= 256 && !/[\\/\u0000-\u001f\u007f]/.test(id) && !/^\.+$/.test(id) && !AGENT_RESERVED_IDS.has(id)
+    ? id : "";
+}
+
+function fabricRunTimestamp(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+function fabricRunCount(value, maximum) {
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 0 ? Math.min(count, maximum) : 0;
+}
+
+function fabricNormalizeRunRecord(value) {
+  if (!agentPlainObject(value)) return null;
+  const coordinationId = fabricRunSafeId(value.coordination_id);
+  if (!coordinationId) return null;
+  let status = FABRIC_RUN_STATUSES.has(String(value.status || "")) ? String(value.status) : "unknown";
+  const terminal = ["completed", "failed", "cancelled", "unreachable"].includes(status);
+  const settled = value.settled === true || terminal;
+  if (settled && status === "in_progress") status = "unknown";
+  const memberCount = fabricRunCount(value.member_count, 100000);
+  const settledCount = Math.min(memberCount, fabricRunCount(value.settled_count, 100000));
+  const completedCount = Math.min(settledCount, fabricRunCount(value.completed_count, 100000));
+  const failedCount = Math.min(settledCount - completedCount, fabricRunCount(value.failed_count, 100000));
+  const cancelledCount = Math.min(settledCount - completedCount - failedCount,
+    fabricRunCount(value.cancelled_count, 100000));
+  return {
+    coordination_id: coordinationId,
+    pattern: FABRIC_COMPOSER_PATTERNS.includes(String(value.pattern || "")) ? String(value.pattern) : "unknown",
+    status,
+    settled,
+    member_count: memberCount,
+    settled_count: settledCount,
+    completed_count: completedCount,
+    failed_count: failedCount,
+    cancelled_count: cancelledCount,
+    created_at: fabricRunTimestamp(value.created_at),
+    observed_at: fabricRunTimestamp(value.observed_at) || new Date(0).toISOString(),
+    checked_at: fabricRunTimestamp(value.checked_at) || fabricRunTimestamp(value.observed_at) || new Date(0).toISOString(),
+    source: value.source === "launched" ? "launched" : "attached",
+    stale: value.stale === true,
+    error_class: ["not_found", "unavailable"].includes(value.error_class) ? value.error_class : null,
+  };
+}
+
+function fabricRunFromRecord(record, source = "attached", now = Date.now()) {
+  const row = agentPlainObject(record) ? record : {};
+  const members = Array.isArray(row.members) ? row.members : [];
+  const outcome = agentPlainObject(row.outcome) ? row.outcome : {};
+  const outcomeMembers = Array.isArray(outcome.members) ? outcome.members : [];
+  const dispositionSource = outcomeMembers.length ? outcomeMembers : members;
+  const settlements = dispositionSource.map((member) => {
+    const disposition = agentPlainObject(member) && agentPlainObject(member.disposition) ? member.disposition : null;
+    const settlement = disposition ? disposition.settlement : fabricObject(member).settlement;
+    return ["completed", "failed", "cancelled", "dead"].includes(settlement) ? settlement : null;
+  });
+  const contract = agentPlainObject(row.contract) ? row.contract : {};
+  return fabricNormalizeRunRecord({
+    coordination_id: row.coordination_id,
+    pattern: contract.pattern || outcome.pattern,
+    status: row.settled === true ? outcome.status : "in_progress",
+    settled: row.settled === true,
+    member_count: members.length || outcomeMembers.length,
+    settled_count: settlements.filter(Boolean).length,
+    completed_count: settlements.filter((value) => value === "completed").length,
+    failed_count: settlements.filter((value) => value === "failed" || value === "dead").length,
+    cancelled_count: settlements.filter((value) => value === "cancelled").length,
+    created_at: row.created_at,
+    observed_at: new Date(now).toISOString(),
+    checked_at: new Date(now).toISOString(),
+    source,
+    stale: false,
+    error_class: null,
+  });
+}
+
+function fabricRunFromPayload(payload, coordinationId, now = Date.now()) {
+  const body = agentPlainObject(payload) ? payload : {};
+  const pattern = FABRIC_COMPOSER_PATTERNS.find((candidate) => agentPlainObject(body[candidate]));
+  if (!pattern) return null;
+  const contract = body[pattern];
+  const members = pattern === "delegate" ? [contract.delegate]
+    : pattern === "race" ? contract.candidates : contract.members;
+  return fabricNormalizeRunRecord({
+    coordination_id: coordinationId,
+    pattern,
+    status: "in_progress",
+    settled: false,
+    member_count: Array.isArray(members) ? members.length : 0,
+    settled_count: 0,
+    completed_count: 0,
+    failed_count: 0,
+    cancelled_count: 0,
+    observed_at: new Date(now).toISOString(),
+    checked_at: new Date(now).toISOString(),
+    source: "launched",
+  });
+}
+
+function fabricMergeRunHistory(history, record, limit = FABRIC_RUN_HISTORY_LIMIT) {
+  const next = fabricNormalizeRunRecord(record);
+  const source = Array.isArray(history) ? history.map(fabricNormalizeRunRecord).filter(Boolean) : [];
+  if (!next) return source.slice(0, Math.max(0, limit));
+  const prior = source.find((item) => item.coordination_id === next.coordination_id);
+  if (prior && prior.source === "launched") next.source = "launched";
+  return [next, ...source.filter((item) => item.coordination_id !== next.coordination_id)]
+    .sort((left, right) => Date.parse(right.observed_at) - Date.parse(left.observed_at) ||
+      left.coordination_id.localeCompare(right.coordination_id))
+    .slice(0, Math.max(0, limit));
+}
+
+function fabricEmptyRunEnvelope() {
+  return { version: 1, scopes: Object.create(null) };
+}
+
+function fabricParseRunEnvelope(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return fabricEmptyRunEnvelope(); }
+  if (!agentPlainObject(parsed) || parsed.version !== 1 || !agentPlainObject(parsed.scopes)) {
+    return fabricEmptyRunEnvelope();
+  }
+  const envelope = fabricEmptyRunEnvelope();
+  for (const [scope, value] of Object.entries(parsed.scopes).slice(0, FABRIC_RUN_SCOPE_LIMIT * 4)) {
+    if (!scope || !agentPlainObject(value) || !Array.isArray(value.runs)) continue;
+    const runs = value.runs.map(fabricNormalizeRunRecord).filter(Boolean).slice(0, FABRIC_RUN_HISTORY_LIMIT);
+    if (!runs.length) continue;
+    envelope.scopes[scope] = {
+      touched_at: Number.isFinite(Number(value.touched_at)) ? Number(value.touched_at) : 0,
+      runs,
+    };
+  }
+  return envelope;
+}
+
+function fabricPruneRunEnvelope(value, currentScope, maxSize = FABRIC_RUN_STORAGE_LIMIT) {
+  const envelope = fabricParseRunEnvelope(JSON.stringify(value));
+  const orderedScopes = () => Object.keys(envelope.scopes).sort((left, right) => {
+    if (left === currentScope) return -1;
+    if (right === currentScope) return 1;
+    return envelope.scopes[right].touched_at - envelope.scopes[left].touched_at || left.localeCompare(right);
+  });
+  for (const scope of orderedScopes().slice(FABRIC_RUN_SCOPE_LIMIT)) delete envelope.scopes[scope];
+  const totalRuns = () => Object.values(envelope.scopes).reduce((total, entry) => total + entry.runs.length, 0);
+  while (totalRuns() > FABRIC_RUN_GLOBAL_LIMIT) {
+    const candidate = orderedScopes().reverse().find((scope) => scope !== currentScope && envelope.scopes[scope].runs.length);
+    const scope = candidate || currentScope;
+    if (!scope || !envelope.scopes[scope] || envelope.scopes[scope].runs.length <= (scope === currentScope ? 1 : 0)) break;
+    envelope.scopes[scope].runs.pop();
+  }
+  const budget = Math.max(1024, Number(maxSize) || FABRIC_RUN_STORAGE_LIMIT);
+  while (JSON.stringify(envelope).length > budget) {
+    const oldScope = orderedScopes().reverse().find((scope) => scope !== currentScope);
+    if (oldScope) { delete envelope.scopes[oldScope]; continue; }
+    const current = envelope.scopes[currentScope];
+    if (!current) break;
+    if (current.runs.length > 1) { current.runs.pop(); continue; }
+    // An unusually long connection namespace or run id can make even one
+    // record exceed the budget. Persistence is optional; the live session
+    // remains intact, but the serialized envelope must keep its hard bound.
+    delete envelope.scopes[currentScope];
+  }
+  return envelope;
+}
+
+function loadFabricRunHistory() {
+  store.fabricRunHistory = [];
+  store.fabricRunPersistenceWarning = false;
+  const scope = connectionRunScope(store.conn);
+  if (!scope) return;
+  let raw;
+  try { raw = localStorage.getItem(LS.fabricRuns); }
+  catch { store.fabricRunPersistenceWarning = true; return; }
+  const envelope = fabricParseRunEnvelope(raw);
+  store.fabricRunHistory = envelope.scopes[scope]?.runs || [];
+}
+
+function saveFabricRunHistory() {
+  const scope = connectionRunScope(store.conn);
+  if (!scope) return false;
+  let raw;
+  try { raw = localStorage.getItem(LS.fabricRuns); }
+  catch { store.fabricRunPersistenceWarning = true; return false; }
+  const envelope = fabricParseRunEnvelope(raw);
+  envelope.scopes[scope] = {
+    touched_at: Date.now(),
+    runs: store.fabricRunHistory.map(fabricNormalizeRunRecord).filter(Boolean).slice(0, FABRIC_RUN_HISTORY_LIMIT),
+  };
+  const intendedIds = envelope.scopes[scope].runs.map((run) => run.coordination_id);
+  const fullyRetained = (candidate) => {
+    const retained = candidate.scopes[scope]?.runs || [];
+    return retained.length === intendedIds.length &&
+      retained.every((run, index) => run.coordination_id === intendedIds[index]);
+  };
+  let bounded = fabricPruneRunEnvelope(envelope, scope, FABRIC_RUN_STORAGE_LIMIT);
+  try {
+    localStorage.setItem(LS.fabricRuns, JSON.stringify(bounded));
+    const retained = fullyRetained(bounded);
+    store.fabricRunPersistenceWarning = !retained;
+    return retained;
+  } catch {
+    bounded = fabricPruneRunEnvelope(bounded, scope, Math.floor(FABRIC_RUN_STORAGE_LIMIT / 2));
+    try {
+      localStorage.setItem(LS.fabricRuns, JSON.stringify(bounded));
+      const retained = fullyRetained(bounded);
+      store.fabricRunPersistenceWarning = !retained;
+      return retained;
+    } catch {
+      store.fabricRunPersistenceWarning = true;
+      return false;
+    }
+  }
+}
+
+function fabricRememberRun(record) {
+  const normalized = fabricNormalizeRunRecord(record);
+  if (!normalized) return false;
+  store.fabricRunHistory = fabricMergeRunHistory(store.fabricRunHistory, normalized);
+  return saveFabricRunHistory();
+}
+
+function fabricMarkRunStale(coordinationId, errorClass, checkedAt = Date.now()) {
+  const id = fabricRunSafeId(coordinationId);
+  const prior = store.fabricRunHistory.find((record) => record.coordination_id === id);
+  if (!prior) return false;
+  return fabricRememberRun({ ...prior, stale: true,
+    error_class: errorClass === "not_found" ? "not_found" : "unavailable",
+    checked_at: new Date(checkedAt).toISOString() });
+}
+
 /* ---------------- HTTP ---------------- */
 
 class ApiError extends Error {
@@ -1910,6 +2238,15 @@ async function connect() {
     store.fabricUnsupported = false;
     clearTimeout(store.fabricLeaseTimer);
     store.fabricLeaseTimer = null;
+    clearTimeout(store.fabricFollowTimer);
+    store.fabricFollowTimer = null;
+    store.fabricFollowFailures = 0;
+    store.fabricRunRequest += 1;
+    store.fabricRunHistory = [];
+    store.fabricRunQuery = "";
+    store.fabricRunFilter = "all";
+    store.fabricRunRefreshing = false;
+    store.fabricRunPersistenceWarning = false;
     store.memory = null;
     store.memoryUnsupported = false;
     store.memoryCorrection = null;
@@ -1925,6 +2262,7 @@ async function connect() {
   saveConn();
   loadThreads();
   loadAgentRunHistory();
+  loadFabricRunHistory();
   $("conn-status").innerHTML =
     `connected — <b>${escapeHtml(store.info.service)}</b> v${escapeHtml(store.info.version)} · ` +
     `${store.info.graphs.length} graph(s) · checkpointer: ${escapeHtml(store.info.checkpointer)}`;
@@ -2058,6 +2396,8 @@ function renderMain() {
   if (!fabric) {
     clearTimeout(store.fabricLeaseTimer);
     store.fabricLeaseTimer = null;
+    clearTimeout(store.fabricFollowTimer);
+    store.fabricFollowTimer = null;
   }
   if (!memory) {
     clearTimeout(store.memoryLifecycleTimer);
@@ -4759,6 +5099,8 @@ function fabricFocusIdentity(element) {
   if (group) return { kind: "group", value: group };
   const agent = element.getAttribute("data-fabric-agent");
   if (agent) return { kind: "agent", value: agent };
+  const run = element.getAttribute("data-fabric-run");
+  if (run) return { kind: "run", value: run };
   const control = element.getAttribute("data-fabric-focus");
   return control ? { kind: "control", value: control } : null;
 }
@@ -4767,8 +5109,10 @@ function fabricRestoreFocus(identity) {
   if (!identity) return;
   const group = identity.kind === "group";
   const agent = identity.kind === "agent";
-  fabricFocusData($(group ? "fabric-groups" : agent ? "fabric-team" : "fabric-view"),
-    group ? "data-fabric-group" : agent ? "data-fabric-agent" : "data-fabric-focus", identity.value);
+  const run = identity.kind === "run";
+  const restored = fabricFocusData($(group ? "fabric-groups" : agent ? "fabric-team" : run ? "fabric-run-list" : "fabric-view"),
+    group ? "data-fabric-group" : agent ? "data-fabric-agent" : run ? "data-fabric-run" : "data-fabric-focus", identity.value);
+  if (run && !restored) $("inp-fabric-run-search")?.focus({ preventScroll: true });
 }
 
 function fabricDisclosureState(container) {
@@ -5625,13 +5969,20 @@ function fabricCoordinationHtml(record, trace, traceError, consistencyWarning) {
   if (!record) return `<div class="empty">No coordination record loaded.</div>`;
   const contract = fabricObject(record.contract);
   const outcome = fabricObject(record.outcome);
-  const allMembers = Array.isArray(record.members) ? record.members : [];
+  const contractMembers = Array.isArray(record.members) ? record.members : [];
+  const outcomeMembers = Array.isArray(outcome.members) ? outcome.members : [];
+  const allMembers = contractMembers.length ? contractMembers : outcomeMembers;
   const members = allMembers.slice(0, FABRIC_MEMBER_RENDER_LIMIT);
   const omittedMembers = Math.max(0, allMembers.length - members.length);
   const status = record.settled ? String(outcome.status || "settled") : "in progress";
   const dispositions = members.map((member) => {
     const row = fabricObject(member);
-    const disposition = fabricObject(row.disposition);
+    const terminal = outcomeMembers.find((candidate) => {
+      const evidence = fabricObject(candidate);
+      return (row.task_id && evidence.task_id === row.task_id) || (row.member && evidence.member === row.member);
+    });
+    const disposition = Object.keys(fabricObject(row.disposition)).length
+      ? fabricObject(row.disposition) : fabricObject(terminal);
     const label = disposition.settlement || (row.submitted ? "submitted" : "not submitted");
     return `<span class="fabric-disposition">${escapeHtml(row.member || "unknown member")} · ${escapeHtml(String(label).replaceAll("_", " "))}</span>`;
   }).join("");
@@ -5645,6 +5996,125 @@ function fabricCoordinationHtml(record, trace, traceError, consistencyWarning) {
     (omittedMembers ? `<div class="note tiny">${omittedMembers} additional member dispositions were not rendered; the raw excerpt below remains bounded too.</div>` : "") +
     (traceError ? `<div class="note fabric-error"><b>TeamTrace request failed.</b> ${escapeHtml(traceError.message || "The causal view is unavailable.")}</div>` : fabricTraceHtml(trace)) +
     `<details class="fabric-raw" data-fabric-disclosure="coordination-raw"><summary data-fabric-focus="coordination-raw">Raw coordination contract and outcome excerpt</summary><pre class="json">${escapeHtml(fabricJsonText(record))}</pre></details>`;
+}
+
+function fabricRunStatusLabel(record) {
+  const run = fabricNormalizeRunRecord(record);
+  if (!run) return "unknown";
+  if (run.stale) return run.error_class === "not_found" ? "not found" : "refresh unavailable";
+  if (run.status === "completed" && run.failed_count > 0) return "completed with member failures";
+  return ({ in_progress: "active", completed: "completed", failed: "failed",
+    cancelled: "cancelled", unreachable: "threshold unreachable", unknown: "unknown" })[run.status] || "unknown";
+}
+
+function fabricRunTone(record) {
+  const run = fabricNormalizeRunRecord(record);
+  if (!run || run.stale || run.failed_count > 0 || ["failed", "cancelled", "unreachable"].includes(run.status)) return "attention";
+  if (run.status === "in_progress") return "active";
+  return "settled";
+}
+
+function fabricRunObservedLabel(value, now = Date.now()) {
+  const observed = Date.parse(String(value || ""));
+  if (!Number.isFinite(observed) || observed <= 0) return "observation unavailable";
+  const elapsed = Math.max(0, now - observed);
+  if (elapsed < 5000) return "observed just now";
+  if (elapsed < 60000) return `observed ${Math.floor(elapsed / 1000)}s ago`;
+  if (elapsed < 3600000) return `observed ${Math.floor(elapsed / 60000)}m ago`;
+  if (elapsed < 86400000) return `observed ${Math.floor(elapsed / 3600000)}h ago`;
+  return `observed ${Math.floor(elapsed / 86400000)}d ago`;
+}
+
+function fabricRunPulseHtml(record, decorative = false) {
+  const run = fabricNormalizeRunRecord(record);
+  if (!run) return "";
+  const count = run.member_count;
+  const settled = Math.min(count, run.settled_count);
+  const progress = count ? Math.max(0, Math.min(100, (settled / count) * 100)) : 0;
+  const tone = fabricRunTone(run);
+  const complete = run.settled ? " complete" : "";
+  const aria = count ? `${settled} of ${count} members settled` : "Member progress unavailable";
+  const progressAttributes = decorative ? ` aria-hidden="true"` : count
+    ? ` role="progressbar" aria-valuemin="0" aria-valuemax="${count}" aria-valuenow="${settled}"`
+    : ` role="img"`;
+  return `<div class="fabric-run-pulse ${tone}${complete}"${progressAttributes}${decorative ? "" : ` aria-label="${escapeHtml(aria)}"`}>` +
+    `<span class="fabric-run-pulse-track" aria-hidden="true"><i style="width:${progress.toFixed(2)}%"></i></span>` +
+    `<span class="fabric-run-pulse-node" aria-hidden="true"></span></div>`;
+}
+
+function fabricVisibleRuns(history, query, filter) {
+  const search = String(query || "").trim().toLocaleLowerCase();
+  const lifecycle = FABRIC_RUN_FILTERS.has(filter) ? filter : "all";
+  return (Array.isArray(history) ? history : []).map(fabricNormalizeRunRecord).filter(Boolean).filter((run) => {
+    const attention = run.stale || run.failed_count > 0 || ["failed", "cancelled", "unreachable"].includes(run.status);
+    const lifecycleMatch = lifecycle === "all" || (lifecycle === "active" && run.status === "in_progress" && !run.stale) ||
+      (lifecycle === "settled" && run.settled) || (lifecycle === "attention" && attention);
+    const haystack = `${run.coordination_id} ${run.pattern} ${run.status} ${fabricRunStatusLabel(run)} ${run.source}`.toLocaleLowerCase();
+    return lifecycleMatch && (!search || haystack.includes(search));
+  });
+}
+
+function fabricRunDeskHtml(history, query, filter, selectedId, now = Date.now()) {
+  const runs = fabricVisibleRuns(history, query, filter);
+  if (!runs.length) {
+    return `<div class="empty">${Array.isArray(history) && history.length
+      ? "No remembered team runs match these filters."
+      : "No team runs are remembered here yet. Start a coordination or attach one by ID."}</div>`;
+  }
+  return runs.map((run, index) => {
+    const tone = fabricRunTone(run);
+    const status = fabricRunStatusLabel(run);
+    const source = run.source === "launched" ? "started here" : "attached here";
+    const progressId = `fabric-run-progress-${index}`;
+    const progressText = run.member_count
+      ? `${run.settled_count} of ${run.member_count} members settled`
+      : "Member progress unavailable";
+    return `<button type="button" class="fabric-run-row" data-fabric-run="${escapeHtml(run.coordination_id)}" aria-current="${run.coordination_id === selectedId}" aria-describedby="${progressId}">` +
+      `<span class="fabric-run-identity"><b>${escapeHtml(run.coordination_id)}</b><span>${escapeHtml(run.pattern.replaceAll("_", " "))} · ${source}</span></span>` +
+      fabricRunPulseHtml(run, true) +
+      `<span class="fabric-run-state"><b class="${tone}">${escapeHtml(status)}</b><span>${escapeHtml(fabricRunObservedLabel(run.observed_at, now))}</span></span>` +
+      `<span class="fabric-run-open">Inspect →</span></button><span class="sr-only" id="${progressId}">${escapeHtml(progressText)}</span>`;
+  }).join("");
+}
+
+function fabricFollowDelay(view, enabled, visibility, coordination, failures = 0) {
+  const state = fabricObject(coordination);
+  const record = fabricObject(state.record);
+  if (view !== "fabric" || !enabled || visibility === "hidden" || !record.coordination_id ||
+      record.settled === true || state.loading || state.refreshing) return null;
+  return Math.min(FABRIC_FOLLOW_MAX_INTERVAL,
+    FABRIC_FOLLOW_INTERVAL * (2 ** Math.min(3, fabricRunCount(failures, 100))));
+}
+
+function fabricCoordinationFollowHtml(coordination, enabled, failures = 0) {
+  const state = fabricObject(coordination);
+  const record = fabricObject(state.record);
+  if (!record.coordination_id) return "";
+  if (record.settled === true) return `<div class="fabric-follow-state"><b>Settled</b><span>Live follow stopped at terminal evidence.</span></div>`;
+  if (!enabled) return `<div class="fabric-follow-state"><b>Live follow paused</b><span>Use “Follow inspected active run” to resume reconciliation.</span></div>`;
+  if (state.followError) {
+    const delay = fabricFollowDelay("fabric", true, "visible", { ...state, refreshing: false }, failures) || FABRIC_FOLLOW_MAX_INTERVAL;
+    return `<div class="fabric-follow-state attention"><b>Showing last observed evidence</b><span>Rusty refresh unavailable · retrying in ${Math.round(delay / 1000)}s</span></div>`;
+  }
+  return `<div class="fabric-follow-state"><b>${state.refreshing ? "Reconciling now" : "Following active run"}</b>` +
+    `<span>${state.refreshing ? "Keeping the current evidence visible while Rusty responds." : `Refreshes every ${Math.round(FABRIC_FOLLOW_INTERVAL / 1000)}s while this view is visible.`}</span></div>`;
+}
+
+function fabricRenderRunDesk() {
+  if (!$('fabric-run-list')) return;
+  const selectedId = store.fabric && store.fabric.coordination ? store.fabric.coordination.id : "";
+  const runs = fabricVisibleRuns(store.fabricRunHistory, store.fabricRunQuery, store.fabricRunFilter);
+  $("fabric-run-list").innerHTML = fabricRunDeskHtml(
+    store.fabricRunHistory, store.fabricRunQuery, store.fabricRunFilter, selectedId);
+  $("fabric-run-desk").setAttribute("aria-busy", store.fabricRunRefreshing ? "true" : "false");
+  $("fabric-run-statusline").textContent = `${runs.length} of ${store.fabricRunHistory.length} remembered` +
+    `${store.fabricRunRefreshing ? " · reconciling with Rusty" : store.fabricRunPersistenceWarning
+      ? " · visible this session; browser persistence unavailable"
+      : " · browser-scoped metadata only"}`;
+  $("btn-fabric-runs-refresh").disabled = !store.conn || !store.fabricRunHistory.length || store.fabricRunRefreshing;
+  $("chk-fabric-follow").checked = Boolean(store.fabricFollowEnabled);
+  if (document.activeElement !== $("inp-fabric-run-search")) $("inp-fabric-run-search").value = store.fabricRunQuery;
+  if (document.activeElement !== $("sel-fabric-run-state")) $("sel-fabric-run-state").value = store.fabricRunFilter;
 }
 
 function fabricErrorHtml(status, body, subject) {
@@ -5921,6 +6391,10 @@ async function fabricSubmitComposer() {
     if (!checkedReceipt.ok) throw new Error(checkedReceipt.error);
     const receiptId = checkedReceipt.coordinationId;
     const deduplicated = checkedReceipt.deduplicated;
+    if (!deduplicated) {
+      const launchedRun = fabricRunFromPayload(result.payload, receiptId);
+      if (launchedRun) fabricRememberRun(launchedRun);
+    }
     draft.submitting = false;
     draft.errorAmbiguous = false;
     draft.launchedPayload = deduplicated
@@ -5940,7 +6414,9 @@ async function fabricSubmitComposer() {
       ? `Existing coordination ${draft.coordinationId} reused. Loading its evidence.`
       : `Coordination ${draft.coordinationId} started. Loading its evidence.`;
     $("inp-fabric-coordination").value = draft.coordinationId;
-    await fabricLoadCoordination(draft.coordinationId);
+    await fabricLoadCoordination(draft.coordinationId, {
+      source: deduplicated ? "attached" : "launched",
+    });
     if (!current()) return;
     if (deduplicated) {
       const existing = fabricObject(store.fabric.coordination).record;
@@ -5980,8 +6456,8 @@ function fabricRender() {
   const state = store.fabric;
   const groups = fabricGroups(state.list);
   $("btn-fabric-refresh").disabled = Boolean(state.loading || (state.composer && state.composer.submitting));
-  $("fabric-coordination-body").setAttribute("aria-busy", state.coordination.loading ? "true" : "false");
-  $("btn-fabric-coordination").disabled = Boolean(state.coordination.loading);
+  $("fabric-coordination-body").setAttribute("aria-busy", state.coordination.loading || state.coordination.refreshing ? "true" : "false");
+  $("btn-fabric-coordination").disabled = Boolean(state.coordination.loading || state.coordination.refreshing);
   $("fabric-summary").innerHTML = fabricSummaryHtml(state.list);
   $("fabric-statusline").textContent = state.error ? "inventory load failed" :
     `${state.list.length}${state.omitted ? ` of ${state.total}` : ""} retained${state.loading ? " · refreshing" : ""}`;
@@ -6010,12 +6486,14 @@ function fabricRender() {
       `<div class="fabric-evidence">${fabricMemberEvidenceHtml(selected, state.evidence)}</div></div>`;
   }
   fabricRenderComposer(false);
+  fabricRenderRunDesk();
   if (state.coordination.loading) {
     $("fabric-coordination-body").innerHTML = `<div class="empty">Reconciling coordination and assembling TeamTrace…</div>`;
   } else if (state.coordination.error) {
     $("fabric-coordination-body").innerHTML = fabricErrorHtml(state.coordination.error.status, state.coordination.error.body, "Coordination");
   } else if (state.coordination.record) {
-    $("fabric-coordination-body").innerHTML = fabricCoordinationHtml(
+    $("fabric-coordination-body").innerHTML = fabricCoordinationFollowHtml(
+      state.coordination, store.fabricFollowEnabled, store.fabricFollowFailures) + fabricCoordinationHtml(
       state.coordination.record, state.coordination.trace, state.coordination.traceError, state.coordination.consistencyWarning);
   } else if (state.coordination.notice) {
     $("fabric-coordination-body").innerHTML = `<div class="note">${escapeHtml(state.coordination.notice)}</div>`;
@@ -6025,6 +6503,7 @@ function fabricRender() {
   fabricRestoreDisclosures($("fabric-view"), disclosures);
   fabricRestoreFocus(focusIdentity);
   fabricScheduleLeaseRefresh();
+  fabricScheduleCoordinationFollow();
 }
 
 async function fabricLoadGroupStatuses(groupKey) {
@@ -6203,15 +6682,71 @@ async function fabricRefresh() {
   await fabricLoad(false, true);
 }
 
-async function fabricLoadCoordination(rawId) {
-  const id = String(rawId || "").trim();
-  if (!id) { toast("Enter a coordination ID.", "err"); $("inp-fabric-coordination").focus(); return; }
+function fabricRunErrorClass(error) {
+  const routeMissing = error && error.body && Object.prototype.hasOwnProperty.call(error.body, "raw");
+  return Number(error && error.status) === 404 && !routeMissing ? "not_found" : "unavailable";
+}
+
+async function fabricRefreshRememberedRuns() {
+  if (!store.conn || store.fabricRunRefreshing || !store.fabricRunHistory.length) return;
+  const request = ++store.fabricRunRequest;
+  const connection = { ...store.conn };
+  const targets = store.fabricRunHistory.slice(0, FABRIC_RUN_REFRESH_LIMIT);
+  const scheduler = fabricCreateScheduler(FABRIC_RUN_REFRESH_CONCURRENCY);
+  const current = () => fabricRequestCurrent(request, connection, store.fabricRunRequest, store.conn);
+  store.fabricRunRefreshing = true;
+  fabricRenderRunDesk();
+  const results = await Promise.allSettled(targets.map((run) => scheduler.run(
+    () => apiForConnection(connection, "GET", `/coordination/${encodeURIComponent(run.coordination_id)}`), current)));
+  if (!current()) return;
+  let history = store.fabricRunHistory;
+  results.forEach((result, index) => {
+    const prior = targets[index];
+    if (result.status === "fulfilled") {
+      history = fabricMergeRunHistory(history, fabricRunFromRecord(result.value, prior.source));
+    } else {
+      history = fabricMergeRunHistory(history, { ...prior, stale: true,
+        error_class: fabricRunErrorClass(result.reason), checked_at: new Date().toISOString() });
+    }
+  });
+  store.fabricRunHistory = history;
+  store.fabricRunRefreshing = false;
+  saveFabricRunHistory();
+  fabricRenderRunDesk();
+  const stale = history.filter((run) => run.stale).length;
+  $("fabric-run-announcer").textContent = `${targets.length} remembered team run${targets.length === 1 ? "" : "s"} refreshed` +
+    `${stale ? `; ${stale} need attention` : ""}.`;
+}
+
+function fabricScheduleCoordinationFollow() {
+  clearTimeout(store.fabricFollowTimer);
+  store.fabricFollowTimer = null;
+  const coordination = store.fabric && store.fabric.coordination;
+  const delay = fabricFollowDelay(store.view, store.fabricFollowEnabled,
+    document.visibilityState, coordination, store.fabricFollowFailures);
+  if (delay == null) return;
+  const id = coordination.id;
+  const connection = store.conn && { ...store.conn };
+  store.fabricFollowTimer = setTimeout(() => {
+    store.fabricFollowTimer = null;
+    if (store.view !== "fabric" || !store.conn || connectionIdentityChanged(connection, store.conn)) return;
+    fabricLoadCoordination(id, { background: true });
+  }, delay);
+}
+
+async function fabricLoadCoordination(rawId, options = {}) {
+  const id = fabricRunSafeId(rawId);
+  if (!id) { toast("Enter a server-safe coordination ID without path separators or control characters.", "err"); $("inp-fabric-coordination").focus(); return; }
   if (!store.fabric || !store.conn) return;
+  const prior = fabricObject(store.fabric.coordination);
+  const background = Boolean(options.background === true && prior.id === id && prior.record);
   const request = ++store.fabric.coordinationRequest;
   const generation = store.fabric.generation;
   const connection = { ...store.conn };
-  store.fabric.coordination = { id, loading: true, record: null, trace: null, traceError: null,
-    consistencyWarning: null, error: null, notice: null };
+  store.fabric.coordination = background
+    ? { ...prior, id, loading: false, refreshing: true, followError: null, error: null, notice: null }
+    : { id, loading: true, refreshing: false, record: null, trace: null, traceError: null,
+      consistencyWarning: null, followError: null, error: null, notice: null };
   fabricRender();
   const path = `/coordination/${encodeURIComponent(id)}`;
   const current = () => Boolean(store.fabric && request === store.fabric.coordinationRequest &&
@@ -6221,14 +6756,33 @@ async function fabricLoadCoordination(rawId) {
     () => apiForConnection(connection, "GET", path), current);
   if (evidence.stale) return;
   if (evidence.recordError) {
-    store.fabric.coordination = { id, loading: false, record: null, trace: null, traceError: null,
-      consistencyWarning: null, error: evidence.recordError, notice: null };
-    $("fabric-announcer").textContent = `Coordination ${id} could not be loaded.`;
+    fabricMarkRunStale(id, fabricRunErrorClass(evidence.recordError));
+    if (background) {
+      store.fabricFollowFailures += 1;
+      store.fabric.coordination = { ...prior, id, loading: false, refreshing: false,
+        followError: evidence.recordError, error: null, notice: null };
+      if (store.fabricFollowFailures === 1) {
+        $("fabric-run-announcer").textContent = `Live refresh for ${id} is unavailable. Last observed evidence remains visible.`;
+      }
+    } else {
+      store.fabric.coordination = { id, loading: false, refreshing: false, record: null, trace: null, traceError: null,
+        consistencyWarning: null, followError: null, error: evidence.recordError, notice: null };
+      $("fabric-announcer").textContent = `Coordination ${id} could not be loaded.`;
+    }
   } else {
-    store.fabric.coordination = { id, loading: false, record: evidence.record, trace: evidence.trace,
-      traceError: evidence.traceError, consistencyWarning: evidence.consistencyWarning, error: null, notice: null };
-    $("fabric-announcer").textContent = `Coordination ${id} loaded with ${Array.isArray(evidence.record.members) ? evidence.record.members.length : 0} members` +
-      `${evidence.consistencyWarning ? "; consistency refresh incomplete—review the visible evidence warning" : ""}.`;
+    const existing = store.fabricRunHistory.find((run) => run.coordination_id === id);
+    const previousSettled = Boolean(prior.record && prior.record.settled);
+    const run = fabricRunFromRecord(evidence.record, existing?.source || options.source || "attached");
+    if (run) fabricRememberRun(run);
+    store.fabricFollowFailures = 0;
+    store.fabric.coordination = { id, loading: false, refreshing: false, record: evidence.record, trace: evidence.trace,
+      traceError: evidence.traceError, consistencyWarning: evidence.consistencyWarning,
+      followError: null, error: null, notice: null };
+    if (!background || (!previousSettled && evidence.record.settled === true)) {
+      $("fabric-announcer").textContent = `Coordination ${id} loaded with ${Array.isArray(evidence.record.members) ? evidence.record.members.length : 0} members` +
+        `${evidence.record.settled === true ? `; ${fabricRunStatusLabel(run)}` : "; following active work"}` +
+        `${evidence.consistencyWarning ? "; consistency refresh incomplete—review the visible evidence warning" : ""}.`;
+    }
   }
   fabricRender();
 }
@@ -9331,6 +9885,38 @@ function init() {
   $("fabric-coordination-form").addEventListener("submit", (event) => {
     event.preventDefault();
     fabricLoadCoordination($("inp-fabric-coordination").value);
+  });
+  $("inp-fabric-run-search").addEventListener("input", (event) => {
+    store.fabricRunQuery = event.target.value;
+    fabricRenderRunDesk();
+  });
+  $("sel-fabric-run-state").addEventListener("change", (event) => {
+    store.fabricRunFilter = FABRIC_RUN_FILTERS.has(event.target.value) ? event.target.value : "all";
+    fabricRenderRunDesk();
+  });
+  $("btn-fabric-runs-refresh").onclick = fabricRefreshRememberedRuns;
+  $("chk-fabric-follow").addEventListener("change", (event) => {
+    store.fabricFollowEnabled = Boolean(event.target.checked);
+    clearTimeout(store.fabricFollowTimer);
+    store.fabricFollowTimer = null;
+    fabricRender();
+    $("fabric-run-announcer").textContent = store.fabricFollowEnabled
+      ? "Live follow enabled for the inspected active run."
+      : "Live follow paused. Current evidence remains visible.";
+  });
+  $("fabric-run-list").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-fabric-run]");
+    if (!row) return;
+    const id = row.getAttribute("data-fabric-run");
+    $("inp-fabric-coordination").value = id;
+    fabricLoadCoordination(id);
+    $("fabric-coordination-title").focus({ preventScroll: true });
+    $("fabric-coordination-title").scrollIntoView({ block: "start", behavior: "smooth" });
+  });
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(store.fabricFollowTimer);
+    store.fabricFollowTimer = null;
+    if (document.visibilityState === "visible") fabricScheduleCoordinationFollow();
   });
 
   // Governed memory: immutable records, provenance, lifecycle filters,

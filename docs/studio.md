@@ -52,7 +52,15 @@ studio/
   and initial member window. Network-ambiguous attempts remain locked to the exact approved
   contract for convergent retry. If Rusty reuses an existing retry key, Studio discards the requested
   preview and loads the actual durable contract. Successful submissions open directly in the coordination
-  investigation, which also accepts a
+  investigation. A **Team Run Desk** remembers sanitized coordination metadata for runs started or
+  attached in the current browser and server/tenant connection scope; task inputs, outputs, results, member
+  identities, and API keys are never written into that ledger. Search and lifecycle filters find recent
+  work, the pulse rail shows only settlement Rusty has actually reported, and a bounded three-request
+  refresh reconciles up to 24 remembered runs. The selected active coordination follows Rusty while the
+  view is visible, backs off from two to sixteen seconds after failures, and keeps the last observed
+  evidence visible with an explicit stale state. This is browser recall backed by fresh server truth,
+  not a claim of server-side discovery. If browser storage is blocked or full after one bounded retry,
+  the current session stays usable and says that its full recall may not survive reload. The investigation also accepts a
   known coordination id, joins its typed contract and member dispositions with `TeamTrace`, and renders
   a depth-aligned causal braid reordered from journal serialization into bounded parent-to-child
   traversal, with journal and parent identity on every row. A trace is called connected only when the server says it is connected,
@@ -308,7 +316,11 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   are shown as live only when their owner and expiry are valid, and the selected lease changes to expired
   at its observed deadline without a manual refresh. Coordination chips render at most 200 member
   dispositions and disclose omissions; raw evidence excerpts are separately bounded. The server has no
-  coordination-list endpoint, so investigations start from an id the operator already knows. TeamTrace
+  coordination-list endpoint. The Team Run Desk therefore contains only coordinations started or
+  manually attached in this browser and current server/tenant connection scope; it cannot discover work
+  created elsewhere. It persists bounded metadata only, refreshes at most 24 entries with three
+  concurrent requests, and follows only the selected active coordination while the page is visible.
+  Server errors mark the remembered observation stale without erasing its last evidence. TeamTrace
   and the durable coordination record are separate reconcile-on-read endpoints with no shared revision;
   Studio observes trace first, record second, retries one inconsistent observation pair, and leaves an
   explicit warning if the evidence still differs. Composition currently targets at most the first 20
@@ -374,7 +386,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   `cargo test -p rusty-server --test learn_gate` independently passed all 9 real
   server lifecycle cases, including scoped approval, canary binding, byte-exact rollback, restart
   durability, tenant isolation, and causal lifecycle journaling.
-- `node studio/test-fabric.mjs` — 126 assertions over bounded durable-agent normalization, deterministic
+- `node studio/test-fabric.mjs` — 164 assertions over bounded durable-agent normalization, deterministic
   declared-team grouping, assistant-versus-runtime identity language, mailbox health precedence,
   activation and supervision evidence, independent endpoint failures, tenant/request isolation,
   keyboard navigation and focus continuity, responsive semantics, bounded coordination dispositions,
@@ -383,7 +395,20 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   raw-evidence excerpts, all four typed coordination payloads, manifest/context narrowing, race effect
   admission, quorum threshold/resolver semantics, exact sparse receipt validation, cancellation/waste
   preflight, compensatable effects, stable retry/deduplication identity, bounded task/context input and
-  preview, durable-work acknowledgement, submission generation guards, and composer accessibility.
+  preview, durable-work acknowledgement, submission generation guards, composer accessibility,
+  privacy-minimized and tenant-isolated Team Run Desk persistence, hard scope/history/storage bounds,
+  blocked-storage containment, search and lifecycle filters, authoritative terminal and dead-letter
+  dispositions, accessible pulse-rail progress and button descriptions, refresh-safe keyboard focus,
+  visibility-aware live following, bounded exponential backoff, stale evidence retention, responsive
+  layout, and complete operator-control wiring.
+- Live against `cargo run -p rusty-server --example server_demo`: registered a three-member declared
+  team, launched a real delegated task through Studio, observed it enter the Team Run Desk immediately,
+  and saw the selected investigation advance from submitted work to the exact completed member
+  disposition and four-event TeamTrace without a manual reload. The sanitized run survived a Studio
+  reload in the same connection scope. Stopping the server changed the retained row to **Refresh
+  unavailable** without erasing its last observation; restarting the same durable store and refreshing
+  restored **Completed**. At a 390 × 844 viewport the run status, observation age, pulse rail, and
+  inspection action remained visible with no horizontal overflow.
 - `node --check` on the extracted `<script>` block — syntax OK.
 - `node studio/test-recorder.mjs` — 111 unit tests over the Flight Recorder timeline helpers (extracted
   from the same `<script>` block, run under `vm`): `seq` ordering with missing-field fallbacks,

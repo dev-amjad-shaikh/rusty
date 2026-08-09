@@ -95,6 +95,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   discarded-work, threshold, resolver, tie, and compensation risk, requires an explicit durable-work
   acknowledgement, reconciles deduplicated keys to the actual durable contract, and opens the created
   coordination directly in its evidence view.
+- Return to recently started or attached team coordinations through a browser-scoped Team Run Desk.
+  Search and lifecycle filters, an accessible settlement pulse rail, bounded manual reconciliation,
+  visibility-aware live following, and explicit stale-evidence recovery make current team work usable
+  without claiming the server can discover every coordination.
 - Follow a guided Create → Run → Inspect first-run path.
 - Run in background, blocking, or streaming modes.
 - Inspect state, checkpoint history, interrupts, and resumes.
@@ -113,9 +117,10 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
 - Assistant configuration and durable identity are explained together, but there is no lifecycle link
   that binds an assistant version to a registered durable identity.
-- The Team Observatory provides inventory, all four typed coordination launches, and read-only
-  coordination evidence. Persistent visual topology, durable team definitions, creation/editing
-  lifecycle, recovery controls, coordination discovery, and coordinated replay remain.
+- The Team Observatory provides inventory, all four typed coordination launches, read-only coordination
+  evidence, and browser-scoped run recall with a selected-run live settlement overlay. Persistent visual
+  topology, durable team definitions, creation/editing lifecycle, server-side coordination discovery,
+  supervisor and recovery controls, richer active-member evidence, and coordinated replay remain.
 - The general-purpose dataset and evaluation experiment workspace remains library-only; governed
   learning-candidate evaluation is now server-backed in Studio.
 - Memory records and structural conflicts have a human-readable audit workspace. Selected-memory
@@ -218,10 +223,13 @@ Exit criteria:
 
 **Outcome:** design, test, and recover a durable agent team visually.
 
-Status: **usable coordination foundation delivered**. Delegate, fan-out, race, and quorum can be
-composed without raw payloads, with pinned manifests, pattern-specific safety preflight, stable retry,
-exact receipt checks, and direct TeamTrace investigation. Persistent team topology and lifecycle,
-supervision control, live execution overlay, recovery actions, templates, and coordinated replay remain.
+Status: **usable coordination and run-monitoring foundation delivered**. Delegate, fan-out, race, and
+quorum can be composed without raw payloads, with pinned manifests, pattern-specific safety preflight,
+stable retry, exact receipt checks, and direct TeamTrace investigation. The Team Run Desk adds
+privacy-minimized browser recall, bounded reconciliation, trustworthy terminal settlement progress,
+visibility-aware live following, and last-evidence preservation during outages. Persistent team topology
+and lifecycle, durable server-side discovery, richer active-member execution evidence, supervision
+control, recovery actions, templates, and coordinated replay remain.
 
 Scope:
 
@@ -352,9 +360,9 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 5 | Flight Recorder investigation layout and manifest/effect context | Partial — causal run story, recovery boundary, and effect-risk guidance delivered; immutable configuration-manifest resolution still pending | Makes Rusty's strongest runtime advantage understandable |
 | 6 | Memory browser, provenance, conflicts, corrections, and forgetting | Partial — browser, provenance, conflict review, and selected-memory correction delivered; conflict decisions, candidate approval, consolidation, expiration, and forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
-| 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, coordination-by-id, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
+| 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch foundation delivered — selected-group roster, per-role pinned contract, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; persistent team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
-| 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, and direct evidence handoff delivered; supervision control, recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
+| 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
 | 11 | Evaluation experiment workspace and comparison report | Platform API needed | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |
 | 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |

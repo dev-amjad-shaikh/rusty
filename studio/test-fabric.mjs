@@ -15,7 +15,24 @@ if (!match) { console.error("FAIL: no <script> block found in index.html"); proc
 const src = match[1].replace(/\ninit\(\);\s*$/, "\n");
 if (/\ninit\(\);/.test(src)) { console.error("FAIL: bootstrap init() was not stripped cleanly"); process.exit(1); }
 
-const sandbox = {};
+const localStorageData = new Map();
+const fakeLocalStorage = {
+  writes: 0,
+  failWrites: 0,
+  failReads: 0,
+  getItem(key) {
+    if (this.failReads > 0) { this.failReads--; throw new Error("blocked"); }
+    return localStorageData.has(key) ? localStorageData.get(key) : null;
+  },
+  setItem(key, value) {
+    this.writes++;
+    if (this.failWrites > 0) { this.failWrites--; throw new Error("quota"); }
+    localStorageData.set(key, String(value));
+  },
+  removeItem(key) { localStorageData.delete(key); },
+  clear() { localStorageData.clear(); },
+};
+const sandbox = { localStorage: fakeLocalStorage };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__fabric = {
@@ -25,8 +42,11 @@ globalThis.__fabric = {
   FABRIC_COMPOSER_CHANNEL_TEXT_LIMIT, FABRIC_COMPOSER_CHANNEL_LIMIT, FABRIC_COMPOSER_CHANNEL_NAME_LIMIT,
   FABRIC_COMPOSER_EFFECTS, FABRIC_COMPOSER_PATTERNS, FABRIC_COMPOSER_RACE_EFFECTS,
   FABRIC_COMPOSER_QUORUM_RESOLVERS,
+  FABRIC_RUN_HISTORY_LIMIT, FABRIC_RUN_SCOPE_LIMIT, FABRIC_RUN_GLOBAL_LIMIT, FABRIC_RUN_STORAGE_LIMIT,
+  FABRIC_RUN_REFRESH_LIMIT, FABRIC_RUN_REFRESH_CONCURRENCY, FABRIC_FOLLOW_INTERVAL, FABRIC_FOLLOW_MAX_INTERVAL,
+  LS, store, connectionRunScope,
   agentParseJsonWithNumberKinds, fabricObject, fabricRequestCurrent, fabricNormalizeAgents, fabricGroupKey, fabricGroupLabel,
-  fabricGroups, fabricNavigationTarget, fabricFocusData, fabricFocusIdentity,
+  fabricGroups, fabricNavigationTarget, fabricFocusData, fabricFocusIdentity, fabricRestoreFocus,
   fabricDisclosureState, fabricRestoreDisclosures, fabricCreateScheduler,
   fabricStatusTargets, fabricStatusCoverage, fabricCoverageLabel, fabricCacheStatus, fabricBatchOwnsStatus,
   fabricActivationState, fabricAgentHealth, fabricNextLeaseDelay, fabricAcceptedKinds,
@@ -39,6 +59,12 @@ globalThis.__fabric = {
   fabricComposerErrorFor, fabricComposerPatternLabel, fabricComposerDecisionBraidHtml,
   fabricComposerHtml, fabricComposerResetApproval, fabricComposerValidateReceipt,
   fabricComposerReviewHtml, fabricComposerSubmitError,
+  fabricRunSafeId, fabricRunTimestamp, fabricRunCount, fabricNormalizeRunRecord,
+  fabricRunFromRecord, fabricRunFromPayload, fabricMergeRunHistory, fabricEmptyRunEnvelope,
+  fabricParseRunEnvelope, fabricPruneRunEnvelope, loadFabricRunHistory, saveFabricRunHistory,
+  fabricRememberRun, fabricMarkRunStale, fabricRunStatusLabel, fabricRunTone,
+  fabricRunObservedLabel, fabricRunPulseHtml, fabricVisibleRuns, fabricRunDeskHtml,
+  fabricFollowDelay, fabricCoordinationFollowHtml, fabricRunErrorClass,
 };`, sandbox, { filename: "index.html<script>" });
 
 const F = sandbox.__fabric;
@@ -809,11 +835,192 @@ const connectedTrace = {
 }
 
 {
+  const observedAt = Date.parse("2026-08-09T08:00:00Z");
+  const activeRecord = {
+    coordination_id: "team-run-active", created_at: "2026-08-09T07:55:00Z",
+    contract: { pattern: "race" },
+    members: [
+      { member: "research", task_id: "default--team-run-active--research", submitted: true },
+      { member: "write", task_id: "default--team-run-active--write", submitted: true },
+    ],
+    settled: false, outcome: null,
+  };
+  const terminalRecord = {
+    ...activeRecord, coordination_id: "team-run-done", settled: true,
+    outcome: { pattern: "race", status: "completed", members: [
+      { member: "research", task_id: "default--team-run-done--research", settlement: "completed" },
+      { member: "write", task_id: "default--team-run-done--write", settlement: "cancelled" },
+    ] },
+  };
+  const active = F.fabricRunFromRecord(activeRecord, "attached", observedAt);
+  const terminal = F.fabricRunFromRecord(terminalRecord, "launched", observedAt + 1000);
+  check("run desk model: an open durable record stays active without inventing partial settlement",
+    active.status === "in_progress" && !active.settled && active.member_count === 2 && active.settled_count === 0);
+  check("run desk model: terminal progress comes from the server outcome dispositions",
+    terminal.status === "completed" && terminal.settled && terminal.member_count === 2 &&
+    terminal.settled_count === 2 && terminal.completed_count === 1 && terminal.cancelled_count === 1);
+  const deadMemberRecord = { ...terminalRecord, coordination_id: "team-run-dead",
+    outcome: { ...terminalRecord.outcome, status: "completed", members: [
+      terminalRecord.outcome.members[0],
+      { ...terminalRecord.outcome.members[1], settlement: "dead" },
+    ] } };
+  const deadMemberRun = F.fabricRunFromRecord(deadMemberRecord, "attached", observedAt + 2000);
+  check("run desk model: Rust dead-letter settlement is terminal failure evidence, never missing progress",
+    deadMemberRun.settled_count === 2 && deadMemberRun.failed_count === 1 &&
+    F.fabricRunStatusLabel(deadMemberRun) === "completed with member failures" &&
+    F.fabricRunTone(deadMemberRun) === "attention");
+  const malicious = F.fabricNormalizeRunRecord({ ...terminal, completed_count: 2, failed_count: 2,
+    cancelled_count: 2, payload: { secret: "never retain" }, member_ids: ["private-agent"] });
+  check("run desk model: untrusted counters cannot exceed the settled total",
+    malicious.completed_count + malicious.failed_count + malicious.cancelled_count === malicious.settled_count);
+  check("run desk privacy: normalization retains metadata only",
+    !JSON.stringify(malicious).includes("never retain") && !JSON.stringify(malicious).includes("private-agent") &&
+    !Object.prototype.hasOwnProperty.call(malicious, "payload"));
+  check("run desk identity: path and control characters fail closed while valid opaque ids survive",
+    !F.fabricRunSafeId("../other") && !F.fabricRunSafeId("run\tother") && F.fabricRunSafeId("run:@-._9") === "run:@-._9");
+
+  const launch = F.fabricRunFromPayload({ fan_out: { members: [{}, {}, {}] } }, "launch-1", observedAt);
+  check("run desk launch: accepted typed payloads create an immediate bounded active receipt",
+    launch.pattern === "fan_out" && launch.member_count === 3 && launch.source === "launched" && !launch.settled &&
+    F.fabricRunFromPayload({ unknown: {} }, "launch-2", observedAt) === null);
+  const merged = F.fabricMergeRunHistory([active], { ...terminal, coordination_id: active.coordination_id, source: "attached" });
+  check("run desk merge: authoritative refresh replaces state but preserves started-here provenance",
+    merged.length === 1 && merged[0].settled && merged[0].source === "attached");
+  const launchedFirst = F.fabricMergeRunHistory([{ ...active, source: "launched" }],
+    { ...terminal, coordination_id: active.coordination_id, source: "attached" });
+  check("run desk merge: a launch provenance cannot be downgraded by later attachment",
+    launchedFirst[0].source === "launched");
+
+  const scopeA = F.connectionRunScope({ baseUrl: "/api", apiKey: "tenant-secret-a" });
+  const scopeB = F.connectionRunScope({ baseUrl: "/api", apiKey: "tenant-secret-b" });
+  check("run desk isolation: server and tenant scopes are stable, distinct, and never store clear keys",
+    scopeA === F.connectionRunScope({ baseUrl: "/api", apiKey: "tenant-secret-a" }) && scopeA !== scopeB &&
+    !scopeA.includes("tenant-secret-a"));
+  check("run desk persistence: malformed and future envelopes fail closed",
+    Object.keys(F.fabricParseRunEnvelope("not-json").scopes).length === 0 &&
+    Object.keys(F.fabricParseRunEnvelope(JSON.stringify({ version: 2, scopes: { unsafe: {} } })).scopes).length === 0);
+
+  fakeLocalStorage.clear();
+  fakeLocalStorage.writes = 0;
+  fakeLocalStorage.failWrites = 0;
+  F.store.conn = { baseUrl: "/api", apiKey: "tenant-secret-a" };
+  F.store.fabricRunHistory = [{ ...terminal, source: "launched" }];
+  check("run desk persistence: sanitized current-scope metadata round-trips",
+    F.saveFabricRunHistory() && localStorageData.get(F.LS.fabricRuns).includes("team-run-done"));
+  F.store.fabricRunHistory = [];
+  F.loadFabricRunHistory();
+  check("run desk persistence: reload restores only the current opaque connection scope",
+    F.store.fabricRunHistory.length === 1 && F.store.fabricRunHistory[0].coordination_id === "team-run-done");
+  F.store.conn = { baseUrl: "/api", apiKey: "tenant-secret-b" };
+  F.loadFabricRunHistory();
+  check("run desk persistence: another tenant never inherits the prior tenant's remembered runs",
+    F.store.fabricRunHistory.length === 0);
+  F.store.fabricRunHistory = [terminal];
+  fakeLocalStorage.failWrites = 1;
+  const writesBeforeRetry = fakeLocalStorage.writes;
+  check("run desk persistence: quota pressure compacts once and retries without breaking the run",
+    F.saveFabricRunHistory() && fakeLocalStorage.writes === writesBeforeRetry + 2);
+  fakeLocalStorage.failWrites = 2;
+  check("run desk persistence: repeated quota failure is contained and reported to the caller",
+    !F.saveFabricRunHistory() && F.store.fabricRunPersistenceWarning);
+  fakeLocalStorage.failWrites = 0;
+  fakeLocalStorage.failReads = 1;
+  const sessionOnly = { ...active, coordination_id: "session-only" };
+  check("run desk persistence: blocked storage reads never turn a confirmed launch into a thrown failure",
+    !F.fabricRememberRun(sessionOnly) && F.store.fabricRunPersistenceWarning &&
+    F.store.fabricRunHistory.some((run) => run.coordination_id === "session-only"));
+  fakeLocalStorage.failReads = 1;
+  F.loadFabricRunHistory();
+  check("run desk persistence: blocked reload fails closed with a visible session-persistence warning",
+    F.store.fabricRunHistory.length === 0 && F.store.fabricRunPersistenceWarning);
+  fakeLocalStorage.failReads = 0;
+  F.store.fabricRunHistory = [terminal];
+  check("run desk persistence: a later successful write clears the persistence warning",
+    F.saveFabricRunHistory() && !F.store.fabricRunPersistenceWarning);
+
+  const manyScopes = { version: 1, scopes: Object.create(null) };
+  for (let scope = 0; scope < 12; scope++) {
+    manyScopes.scopes[`scope-${scope}`] = { touched_at: scope,
+      runs: Array.from({ length: 24 }, (_, index) => ({ ...active,
+        coordination_id: `scope-${scope}-run-${index}`, observed_at: new Date(observedAt - index).toISOString() })) };
+  }
+  const pruned = F.fabricPruneRunEnvelope(manyScopes, "scope-11");
+  const scopeCount = Object.keys(pruned.scopes).length;
+  const runCount = Object.values(pruned.scopes).reduce((sum, entry) => sum + entry.runs.length, 0);
+  check("run desk persistence: scope, per-scope, global, and byte budgets remain hard bounds",
+    scopeCount <= F.FABRIC_RUN_SCOPE_LIMIT && runCount <= F.FABRIC_RUN_GLOBAL_LIMIT &&
+    Object.values(pruned.scopes).every((entry) => entry.runs.length <= F.FABRIC_RUN_HISTORY_LIMIT) &&
+    JSON.stringify(pruned).length <= F.FABRIC_RUN_STORAGE_LIMIT);
+  const oversizedScope = `server-${"x".repeat(F.FABRIC_RUN_STORAGE_LIMIT + 100)}`;
+  const oversizedEnvelope = { version: 1, scopes: { [oversizedScope]: { touched_at: 1, runs: [terminal] } } };
+  const oversizedPruned = F.fabricPruneRunEnvelope(oversizedEnvelope, oversizedScope);
+  check("run desk persistence: one oversized current scope is omitted rather than violating the byte ceiling",
+    JSON.stringify(oversizedPruned).length <= F.FABRIC_RUN_STORAGE_LIMIT &&
+    !Object.prototype.hasOwnProperty.call(oversizedPruned.scopes, oversizedScope));
+  F.store.conn = { baseUrl: `http://${"x".repeat(F.FABRIC_RUN_STORAGE_LIMIT + 100)}`, apiKey: "tenant" };
+  F.store.fabricRunHistory = [terminal];
+  check("run desk persistence: an omitted oversized current scope is reported as session-only",
+    !F.saveFabricRunHistory() && F.store.fabricRunPersistenceWarning);
+  fakeLocalStorage.clear();
+  const partialConnection = { baseUrl: `http://${"s".repeat(24000)}`, apiKey: "tenant" };
+  const partialScope = F.connectionRunScope(partialConnection);
+  F.store.conn = partialConnection;
+  F.store.fabricRunHistory = Array.from({ length: F.FABRIC_RUN_HISTORY_LIMIT }, (_, index) => ({
+    ...active,
+    coordination_id: `partial-${index}-${"y".repeat(180)}`,
+    observed_at: new Date(observedAt - index).toISOString(),
+  }));
+  fakeLocalStorage.failWrites = 1;
+  const partialSaved = F.saveFabricRunHistory();
+  const partialEnvelope = F.fabricParseRunEnvelope(localStorageData.get(F.LS.fabricRuns));
+  const partialCount = partialEnvelope.scopes[partialScope]?.runs.length || 0;
+  check("run desk persistence: half-budget compaction reports session-only when any visible rows are omitted",
+    !partialSaved && F.store.fabricRunPersistenceWarning && partialCount > 0 &&
+    partialCount < F.FABRIC_RUN_HISTORY_LIMIT);
+  fakeLocalStorage.failWrites = 0;
+
+  const stale = { ...active, stale: true, error_class: "unavailable" };
+  const failedRun = { ...terminal, coordination_id: "team-run-failed", status: "failed" };
+  check("run desk filters: lifecycle, attention, and search compose over normalized metadata",
+    F.fabricVisibleRuns([active, terminal, stale, failedRun], "race", "active").length === 1 &&
+    F.fabricVisibleRuns([active, terminal, stale, failedRun], "refresh unavailable", "attention").length === 1 &&
+    F.fabricVisibleRuns([active, terminal, stale, failedRun], "team-run-done", "settled").length === 1);
+  const pulse = F.fabricRunPulseHtml(terminal);
+  check("run desk pulse rail: exact member settlement is exposed as an accessible progress value",
+    pulse.includes('role="progressbar"') && pulse.includes('aria-valuemax="2"') &&
+    pulse.includes('aria-valuenow="2"') && pulse.includes("2 of 2 members settled"));
+  check("run desk pulse rail: absent member evidence is labelled unknown rather than zero-percent complete",
+    F.fabricRunPulseHtml({ ...active, member_count: 0 }).includes('role="img"') &&
+    F.fabricRunPulseHtml({ ...active, member_count: 0 }).includes("Member progress unavailable"));
+  const escapedDesk = F.fabricRunDeskHtml([{ ...active, coordination_id: "run-&lt;script&gt;" }], "", "all", "", observedAt);
+  check("run desk rendering: rows are native controls and hostile identifiers remain escaped",
+    escapedDesk.startsWith('<button type="button"') && !escapedDesk.includes("<script>") &&
+    escapedDesk.includes("browser") === false);
+  check("run desk accessibility: native row buttons receive settlement text through an explicit description",
+    escapedDesk.includes('aria-describedby="fabric-run-progress-0"') &&
+    escapedDesk.includes('id="fabric-run-progress-0">0 of 2 members settled') &&
+    escapedDesk.includes('class="fabric-run-pulse active" aria-hidden="true"'));
+  check("run desk follow: only one visible active inspection polls with bounded exponential backoff",
+    F.fabricFollowDelay("fabric", true, "visible", { record: activeRecord }, 0) === F.FABRIC_FOLLOW_INTERVAL &&
+    F.fabricFollowDelay("fabric", true, "visible", { record: activeRecord }, 99) === F.FABRIC_FOLLOW_MAX_INTERVAL &&
+    F.fabricFollowDelay("fabric", true, "hidden", { record: activeRecord }, 0) === null &&
+    F.fabricFollowDelay("fabric", true, "visible", { record: terminalRecord }, 0) === null);
+  check("run desk follow: stale, paused, and terminal states preserve explicit operator truth",
+    F.fabricCoordinationFollowHtml({ record: activeRecord, followError: { status: 503 } }, true, 2).includes("last observed evidence") &&
+    F.fabricCoordinationFollowHtml({ record: activeRecord }, false).includes("Live follow paused") &&
+    F.fabricCoordinationFollowHtml({ record: terminalRecord }, true).includes("Live follow stopped"));
+}
+
+{
   check("compatibility: route-less older server is explained as a capability gap",
     F.fabricErrorHtml(404, { raw: "not found" }, "Durable inventory").includes("needs an Agent Fabric server"));
   check("errors: unknown coordination and invalid identifiers have distinct recovery copy",
     F.fabricErrorHtml(404, { message: "coordination missing" }, "Coordination").includes("was not found") &&
     F.fabricErrorHtml(400, { message: "invalid id" }, "Coordination").includes("not valid"));
+  check("run desk errors: only structured coordination-missing 404s become not-found evidence",
+    F.fabricRunErrorClass({ status: 404, body: { message: "coordination missing" } }) === "not_found" &&
+    F.fabricRunErrorClass({ status: 404, body: { raw: "route not found" } }) === "unavailable" &&
+    F.fabricRunErrorClass({ status: 503, body: { message: "down" } }) === "unavailable");
   check("raw evidence: large values are visibly bounded", F.fabricJsonText({ value: "x".repeat(500) }, 100).includes("truncated"));
 }
 
@@ -841,6 +1048,26 @@ const connectedTrace = {
   F.fabricFocusData(fakeContainer, "data-fabric-agent", identity.value);
   check("focus continuity: a replaced roving option can be resolved and focused by stable identity",
     identity.kind === "agent" && identity.value === "member-b" && focused.id === "member-b" && focused.options.preventScroll);
+  let focusedRun = null;
+  const fakeRun = {
+    getAttribute(name) { return name === "data-fabric-run" ? "coord-a" : null; },
+    focus(options) { focusedRun = options; },
+  };
+  const fakeRunContainer = { querySelectorAll(selector) { return selector === "[data-fabric-run]" ? [fakeRun] : []; } };
+  sandbox.document = { getElementById(id) { return id === "fabric-run-list" ? fakeRunContainer : null; } };
+  const runIdentity = F.fabricFocusIdentity(fakeRun);
+  F.fabricRestoreFocus(runIdentity);
+  check("focus continuity: a replaced Team Run Desk row regains focus after live reconciliation",
+    runIdentity.kind === "run" && runIdentity.value === "coord-a" && focusedRun.preventScroll);
+  let fallbackFocused = false;
+  sandbox.document = { getElementById(id) {
+    if (id === "fabric-run-list") return { querySelectorAll() { return []; } };
+    if (id === "inp-fabric-run-search") return { focus(options) { fallbackFocused = options.preventScroll; } };
+    return null;
+  } };
+  F.fabricRestoreFocus({ kind: "run", value: "settled-and-filtered" });
+  check("focus continuity: a run leaving the active filter moves focus to stable Run Desk search",
+    fallbackFocused);
   check("focus continuity: every Team Observatory render captures and restores the active option",
     html.includes("const focusIdentity = fabricFocusIdentity(document.activeElement)") &&
     html.includes("fabricRestoreFocus(focusIdentity);"));
@@ -880,6 +1107,19 @@ check("markup: assistant configuration and durable runtime identity are explicit
 check("markup: inventory, team labels, member evidence, and coordination form have semantic controls",
   html.includes('id="fabric-groups" role="listbox"') &&
   html.includes('id="fabric-coordination-form"') && html.includes('id="fabric-announcer" role="status"'));
+check("run desk markup: browser recall and server truth are explicitly distinguished",
+  html.includes('id="fabric-run-desk-title">Team run desk') &&
+  html.includes("Every refresh asks Rusty for current state") &&
+  html.includes("remembered list is not server-side discovery") &&
+  html.includes("browser recall · server truth"));
+check("run desk accessibility: search, lifecycle, follow, refresh, list, and quiet status surfaces are labelled",
+  html.includes('id="inp-fabric-run-search" type="search"') &&
+  html.includes('id="sel-fabric-run-state"') && html.includes('id="chk-fabric-follow"') &&
+  html.includes('id="btn-fabric-runs-refresh" type="button"') &&
+  html.includes('id="fabric-run-desk" aria-labelledby="fabric-run-desk-title" aria-busy="false"') &&
+  html.includes('$("fabric-run-desk").setAttribute("aria-busy"') &&
+  html.includes('id="fabric-run-list"') && !html.includes('id="fabric-run-list" aria-live=') &&
+  html.includes('id="fabric-run-announcer" role="status" aria-live="polite"'));
 check("accessibility: team rerenders stay quiet while concise selected-state changes use a dedicated announcer",
   html.includes('id="fabric-team-announcer" role="status" aria-live="polite"') &&
   html.includes('<section class="card fabric-team-card" id="fabric-team">') &&
@@ -893,7 +1133,20 @@ check("composer lifecycle: delegated event wiring, generation guards, edit inval
   html.includes('$("fabric-compose-body").addEventListener("submit"') &&
   html.includes('fabricRequestCurrent(generation, connection, store.fabricRequest, store.conn)') &&
   html.includes('if (field !== "acknowledge") fabricComposerResetApproval(draft, field === "coordinationId");') &&
-  html.includes('await fabricLoadCoordination(draft.coordinationId);'));
+  html.includes('await fabricLoadCoordination(draft.coordinationId, {'));
+check("run desk lifecycle: accepted launches are recalled before evidence loading and every operator control is wired",
+  html.includes("if (launchedRun) fabricRememberRun(launchedRun);") &&
+  html.includes('$("inp-fabric-run-search").addEventListener("input"') &&
+  html.includes('$("sel-fabric-run-state").addEventListener("change"') &&
+  html.includes('$("btn-fabric-runs-refresh").onclick = fabricRefreshRememberedRuns;') &&
+  html.includes('$("chk-fabric-follow").addEventListener("change"') &&
+  html.includes('$("fabric-run-list").addEventListener("click"') &&
+  html.includes('document.addEventListener("visibilitychange"'));
+check("run desk networking: recall refresh and live follow remain bounded and connection-generation guarded",
+  html.includes("const targets = store.fabricRunHistory.slice(0, FABRIC_RUN_REFRESH_LIMIT);") &&
+  html.includes("const scheduler = fabricCreateScheduler(FABRIC_RUN_REFRESH_CONCURRENCY);") &&
+  html.includes("fabricRequestCurrent(request, connection, store.fabricRunRequest, store.conn)") &&
+  html.includes("connectionIdentityChanged(connection, store.conn)"));
 check("composer lifecycle: launch and ambiguous failure fully rerender to lock every editor and refresh control",
   html.includes('if (refresh) refresh.disabled = Boolean(state.loading || draft.submitting);') &&
   html.includes('draft.submitting = true;') &&
@@ -919,6 +1172,12 @@ check("responsive: team layout and causal evidence stack at narrow widths",
   html.includes(".fabric-trace-event { grid-template-columns: 1fr;") &&
   html.includes(".fabric-compose-grid { grid-template-columns: 1fr;") &&
   html.includes(".fabric-decision-braid { grid-template-columns: 1fr;"));
+check("run desk responsive: toolbar, rows, and the pulse rail collapse without hiding progress",
+  html.includes(".fabric-run-toolbar { grid-template-columns: 1fr;") &&
+  html.includes(".fabric-run-row { grid-template-columns: 1fr auto;") &&
+  html.includes(".fabric-run-pulse { grid-column: 1 / -1;") &&
+  html.includes(".fabric-run-state { display: grid;") &&
+  !html.includes(".fabric-run-state { display: none;"));
 check("accessibility: essential TeamTrace sequence and depth use the AA text token",
   html.includes(".fabric-trace-event small { color: var(--text-dim);") &&
   !html.includes(".fabric-trace-event small { color: var(--text-faint);"));
