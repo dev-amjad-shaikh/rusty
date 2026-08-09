@@ -14,6 +14,7 @@ studio/
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
 ├── test-learn.mjs     ← node unit tests for the governed-learning control room
 ├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
+├── test-connection.mjs ← node unit tests for connection profiles, secrets, and compatibility evidence
 └── test-all.mjs       ← discovers and runs every Studio test suite
 ```
 
@@ -24,9 +25,13 @@ studio/
   run metadata, and can continue into the latest agent or team evidence without copying an identifier.
   Server catalog counts, browser-scoped blueprints and run recall, and not-yet-loaded memory evidence
   are labelled distinctly; prompts, results, and connection credentials never enter the Home model.
-- **Connect bar** — server base URL (default `http://127.0.0.1:8100`) + optional API key (`X-Api-Key`
-  header). Connect calls `GET /info` and shows the service version, checkpointer kind, and every registered
-  graph with its channel names. URL, key, and thread list persist in `localStorage`.
+- **Connection Hub** — a guided **Reach server → Verify identity → Inspect features** handshake replaces
+  the raw connection form. Reusable profiles remember only non-secret server metadata by default. Access
+  keys stay in the browser session unless the user explicitly accepts a device-local plaintext warning;
+  legacy stored keys are migrated into the session boundary. A successful handshake verifies the exact
+  `rusty-server` identity, version, persistence kind, and registered behaviors, then performs bounded,
+  read-only compatibility checks for assistants, durable agents, tasks, governed memory, governed
+  learning, and capsules. Failed switches preserve the active workspace and explain how to recover.
 - **Graphs panel** — one card per registered graph, with a **New thread** button (`POST /threads`).
 - **Agent workbench** — a user-facing catalog for durable assistants. Create an agent from a registered
   behavior, inspect its runtime configuration and readiness, copy an existing agent without carrying
@@ -121,7 +126,7 @@ studio/
   Candidate, version, evidence, text, and raw-record views are bounded and hostile future wire shapes
   fail closed before actions become available.
 - **Threads panel (local-only)** — the server API (as of v0.4) has **no list-threads endpoint**, so threads you create or
-  attach are remembered in your browser, keyed by server URL. **Attach by id** re-connects a thread the
+  attach are remembered in your browser, isolated by server and access boundary. **Attach by id** re-connects a thread the
   server already knows, and offers to re-create it with the same id when the in-memory thread registry has
   forgotten it (e.g. after a server restart — on-disk checkpoints then re-attach). ✕ *forget* only removes
   the entry from your local list; nothing is deleted server-side.
@@ -349,7 +354,7 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   offers no coordination restart, operator cancellation, team editing, coordination discovery, or replay controls.
   Those actions need their own runtime and safety contracts before they become honest affordances.
 - **Thread list is local-only.** The server (as of v0.4) has no `GET /threads`; the Studio's thread list lives in
-  `localStorage`, keyed by server base URL, and is not shared across browsers or machines. Server restarts
+  `localStorage`, isolated by server and an opaque access-boundary scope, and is not shared across browsers or machines. Server restarts
   drop the in-memory thread registry — **Attach** re-creates a thread with the same id to re-attach to its
   on-disk checkpoints.
 - **Replay appends history.** `Replay & run` on the original thread grows new checkpoints on top of the old
@@ -390,6 +395,17 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   evidence, privacy-minimized run summaries, deterministic recency and attention routing, bounded hostile
   history, memory-unknown semantics, next-action guidance, identifier escaping, responsive layout,
   labelled journey stages, asynchronous focus continuity, and labelled focus handoff into every workspace.
+- `node studio/test-connection.mjs` — 63 assertions over strict URL and server-identity validation,
+  bounded non-secret profiles, session-only and explicit device-local secret boundaries, legacy-key
+  migration and damaged-secret cleanup warnings, blocked-storage containment, tenant-scoped recall,
+  read-only compatibility classification, recorder/stream request ownership, concurrent-request isolation,
+  failed-switch rollback, informed storage consent, responsive layout, and complete interaction wiring.
+- Live against `cargo run -p rusty-server --example server_demo`: created and reused a local profile,
+  verified `rusty-server v0.8.0` with two registered behaviors, and confirmed all six feature families.
+  Switching to an incompatible `/missing` endpoint produced a recovery-focused identity error while the
+  original workspace remained active. Stopping the server and reloading proved that a saved profile remains
+  an unverified candidate—not a connected workspace—until the server answers again; restarting it and
+  reconnecting restored the complete handshake.
 - Live against `cargo run -p rusty-server --example server_demo`: Home moved from a disconnected local-first
   state to a confirmed server with two registered behaviors, then updated its agent/team/learning signals
   from asynchronous server reads. Its primary action opened the real first-agent form. At 390 × 844 the

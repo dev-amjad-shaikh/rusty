@@ -38,22 +38,97 @@
   /* ---------- layout ---------- */
   #app { display: flex; flex-direction: column; height: 100vh; }
   header {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
     padding: 10px 16px;
     background: var(--bg-panel);
     border-bottom: 1px solid var(--border);
   }
   header .brand { font-weight: 700; letter-spacing: .4px; }
   header .brand span { color: var(--accent); }
-  header input[type=text], header input[type=password] {
-    background: var(--bg-inset); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px;
-    padding: 6px 10px; font-family: var(--mono); font-size: 12.5px;
-  }
-  header input.url { width: 250px; }
-  header input.key { width: 170px; }
   #conn-status { font-size: 12.5px; color: var(--text-dim); }
   #conn-status b { color: var(--text); font-weight: 600; }
+  .connection-chip {
+    display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: center; gap: 9px;
+    min-width: min(430px, 60vw); max-width: 620px; padding: 7px 10px; text-align: left;
+    background: var(--bg-inset); border-color: var(--border);
+  }
+  .connection-chip:hover { background: #1d1a16; }
+  .connection-chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pending); box-shadow: 0 0 0 3px rgba(138,131,117,.12); }
+  .connection-chip.connected .connection-chip-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(127,166,113,.14); }
+  .connection-chip.failed .connection-chip-dot { background: var(--err); box-shadow: 0 0 0 3px rgba(179,87,79,.14); }
+  .connection-chip-copy { min-width: 0; }
+  .connection-chip-copy b, .connection-chip-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .connection-chip-copy b { color: var(--text); font-size: 12px; }
+  .connection-chip-copy small { color: var(--text-dim); font-family: var(--mono); font-size: 10.5px; margin-top: 1px; }
+  .connection-chip-warning { color: #f0b9ae; font: 9px var(--mono); text-transform: uppercase; letter-spacing: .45px; }
+  .connection-chip.warning { border-color: var(--err); box-shadow: 0 0 0 1px rgba(201,84,69,.16); }
+  .connection-chip-action { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .9px; }
+
+  .connection-dialog {
+    width: min(980px, calc(100vw - 28px)); max-height: min(780px, calc(100vh - 28px));
+    padding: 0; color: var(--text); background: var(--bg-panel); border: 1px solid var(--border-hi);
+    border-radius: 12px; box-shadow: 0 24px 80px rgba(0,0,0,.68); overflow: hidden;
+  }
+  .connection-dialog::backdrop { background: rgba(10,9,8,.78); backdrop-filter: blur(3px); }
+  .connection-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); max-height: min(780px, calc(100vh - 28px)); }
+  .connection-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px; border-bottom: 1px solid var(--border); background: linear-gradient(110deg, #2a241b, #201d18 58%); }
+  .connection-head h1 { margin: 2px 0 3px; font-size: 22px; letter-spacing: -.45px; }
+  .connection-head p { margin: 0; color: var(--text-dim); font-size: 12px; }
+  .connection-kicker { color: #d19a71; font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 1.7px; }
+  .connection-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; overflow: hidden; }
+  .connection-profiles { width: auto; max-height: none; flex: none; overflow-y: auto; padding: 15px; border-right: 1px solid var(--border); background: var(--bg-inset); }
+  .connection-profiles-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .connection-profiles-head h2, .connection-panel h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+  .connection-profile-list { display: grid; gap: 7px; }
+  .connection-profile {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; width: 100%; padding: 9px 10px;
+    text-align: left; background: var(--bg-raised); border-color: var(--border);
+  }
+  .connection-profile[aria-current="true"] { border-color: var(--accent-dim); background: #30291e; }
+  .connection-profile b, .connection-profile small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .connection-profile b { font-size: 12px; }
+  .connection-profile small { grid-column: 1 / -1; color: var(--text-dim); font-family: var(--mono); font-size: 9.5px; }
+  .connection-profile em { color: var(--ok); font-style: normal; font-size: 9px; text-transform: uppercase; letter-spacing: .7px; }
+  .connection-profile-empty { padding: 16px 4px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+  .connection-workspace { overflow-y: auto; padding: 17px 20px 22px; }
+  .connection-handshake { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg-inset); }
+  .connection-handshake-step { position: relative; padding: 10px 11px 10px 31px; border-right: 1px solid var(--border); }
+  .connection-handshake-step:last-child { border-right: 0; }
+  .connection-handshake-step::before { content: ""; position: absolute; top: 13px; left: 11px; width: 9px; height: 9px; border: 2px solid var(--pending); border-radius: 50%; }
+  .connection-handshake-step.ready::before { border-color: var(--ok); background: #293524; }
+  .connection-handshake-step.active::before { border-color: var(--accent); background: #493d1e; box-shadow: 0 0 0 3px rgba(201,162,39,.1); }
+  .connection-handshake-step.failed::before { border-color: var(--err); background: #45231f; }
+  .connection-handshake-step b, .connection-handshake-step span { display: block; }
+  .connection-handshake-step b { font-size: 10.5px; }
+  .connection-handshake-step span { color: var(--text-dim); font-size: 9.5px; margin-top: 2px; }
+  .connection-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, .8fr); gap: 14px; align-items: start; }
+  .connection-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); padding: 13px; }
+  .connection-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 11px; }
+  .connection-form label { display: grid; gap: 4px; color: var(--text-dim); font-size: 10.5px; }
+  .connection-form label.wide, .connection-access, .connection-actions, .connection-error { grid-column: 1 / -1; }
+  .connection-form input { width: 100%; min-width: 0; background: var(--bg-inset); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 9px; font-family: var(--mono); font-size: 11.5px; }
+  .connection-key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+  .connection-access { display: grid; gap: 6px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset); }
+  .connection-access label { display: flex; flex-direction: row; align-items: flex-start; gap: 7px; }
+  .connection-access input { width: auto; margin-top: 2px; }
+  .connection-access small { color: var(--text-faint); padding-left: 21px; line-height: 1.4; }
+  .connection-access .danger { color: #e0b7af; }
+  .connection-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
+  .connection-actions .danger { margin-right: auto; }
+  .connection-error { padding: 8px 10px; border: 1px solid #67352f; border-radius: 7px; color: #e8c2bc; background: #301d1a; font-size: 11px; }
+  .connection-identity { display: grid; gap: 8px; margin-top: 11px; }
+  .connection-identity-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+  .connection-identity-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .connection-identity-row span { color: var(--text-dim); font-size: 10px; }
+  .connection-identity-row b { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 10.5px; font-weight: 500; }
+  .connection-capabilities { display: grid; gap: 6px; margin-top: 12px; }
+  .connection-capability { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 8px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset); }
+  .connection-capability b { font-size: 10.5px; }
+  .connection-capability span { color: var(--text-dim); font-size: 9.5px; }
+  .connection-capability em { grid-row: 1 / 3; grid-column: 2; align-self: center; color: var(--text-dim); font-style: normal; font-size: 8.5px; text-transform: uppercase; letter-spacing: .7px; }
+  .connection-capability.supported em { color: var(--ok); }
+  .connection-capability.locked em { color: var(--accent); }
+  .connection-capability.unavailable em { color: var(--interrupt); }
 
   #body { display: flex; flex: 1; min-height: 0; }
   aside {
@@ -1099,6 +1174,8 @@
     .learn-item { border-right: 1px solid var(--border); }
   }
   @media (max-width: 900px) {
+    .connection-body { grid-template-columns: 220px minmax(0, 1fr); }
+    .connection-grid { grid-template-columns: 1fr; }
     aside { width: 250px; flex-basis: 250px; }
     .agent-layout { grid-template-columns: 1fr; }
     .home-grid { grid-template-columns: 1fr; }
@@ -1132,6 +1209,20 @@
     .memory-correction-form { border-right: 0; border-bottom: 1px solid #544824; }
   }
   @media (max-width: 680px) {
+    header { padding: 8px 10px; }
+    .connection-chip { min-width: 0; width: min(72vw, 430px); }
+    .connection-chip-action { display: none; }
+    .connection-dialog { width: calc(100vw - 12px); max-height: calc(100vh - 12px); }
+    .connection-shell { max-height: calc(100vh - 12px); }
+    .connection-head { padding: 14px; }
+    .connection-body { display: block; overflow-y: auto; }
+    .connection-profiles { width: auto; height: auto; max-height: none; overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); }
+    .connection-workspace { overflow: visible; padding: 14px; }
+    .connection-handshake { grid-template-columns: 1fr; }
+    .connection-handshake-step { border-right: 0; border-bottom: 1px solid var(--border); }
+    .connection-handshake-step:last-child { border-bottom: 0; }
+    .connection-form { grid-template-columns: 1fr; }
+    .connection-form label.wide, .connection-access, .connection-actions, .connection-error { grid-column: auto; }
     #body { display: block; overflow-y: auto; }
     aside {
       width: 100%; height: auto; max-height: 34vh; overflow-y: auto;
@@ -1264,11 +1355,55 @@
 <div id="app">
   <header>
     <div class="brand">Rusty <span>Studio</span></div>
-    <input class="url" id="inp-url" type="text" spellcheck="false" placeholder="http://127.0.0.1:8100">
-    <input class="key" id="inp-key" type="password" spellcheck="false" placeholder="API key (optional)" title="Stored in plaintext in this browser's localStorage — use a dev-only key.">
-    <button class="primary" id="btn-connect">Connect</button>
-    <span id="conn-status">not connected</span>
+    <button class="connection-chip" id="btn-connection-open" type="button" aria-haspopup="dialog" aria-controls="connection-dialog">
+      <span class="connection-chip-dot" aria-hidden="true"></span>
+      <span class="connection-chip-copy"><b id="conn-profile">Choose a server</b><small id="conn-status">Not connected · local-first</small></span>
+      <span class="connection-chip-warning" id="conn-warning" hidden>Security cleanup needed</span>
+      <span class="connection-chip-action">Manage</span>
+    </button>
+    <span class="sr-only" id="connection-global-announcer" role="status" aria-live="assertive" aria-atomic="true"></span>
   </header>
+
+  <dialog class="connection-dialog" id="connection-dialog" aria-labelledby="connection-title">
+    <div class="connection-shell">
+      <div class="connection-head">
+        <div><span class="connection-kicker">Connection hub · ignition desk</span><h1 id="connection-title" tabindex="-1">Choose where Studio works</h1><p>Verify one Rusty server, keep its non-secret profile, and see exactly which workspaces it can support.</p></div>
+        <button class="small" id="btn-connection-close" type="button" aria-label="Close connection hub">Close</button>
+      </div>
+      <div class="connection-body">
+        <aside class="connection-profiles" aria-labelledby="connection-profiles-title">
+          <div class="connection-profiles-head"><h2 id="connection-profiles-title">Saved profiles</h2><button class="small" id="btn-connection-new" type="button">New</button></div>
+          <div class="connection-profile-list" id="connection-profile-list"></div>
+        </aside>
+        <div class="connection-workspace">
+          <div class="connection-handshake" id="connection-handshake" role="status" aria-live="polite" aria-label="Connection handshake"></div>
+          <div class="connection-grid">
+            <section class="connection-panel" aria-labelledby="connection-form-title">
+              <h2 id="connection-form-title">Server access</h2>
+              <form class="connection-form" id="connection-form" novalidate>
+                <label>Profile name<input id="inp-profile-name" type="text" maxlength="80" autocomplete="off" placeholder="Local development"></label>
+                <label>Server address<input id="inp-url" type="text" maxlength="2048" spellcheck="false" inputmode="url" placeholder="http://127.0.0.1:8100"></label>
+                <label class="wide">Access key <span class="connection-key-row"><input id="inp-key" type="password" maxlength="4096" spellcheck="false" autocomplete="off" aria-label="Access key" placeholder="Optional"><button class="small" id="btn-key-reveal" type="button" aria-pressed="false">Show</button></span></label>
+                <fieldset class="connection-access"><legend>Keep this key</legend>
+                  <label><input type="radio" name="connection-secret-mode" value="session" aria-describedby="connection-session-key-note" checked> This browser session only <span class="sr-only">recommended</span></label>
+                  <small id="connection-session-key-note">Recommended. Closing the browser forgets the key; the saved server profile remains.</small>
+                  <label><input type="radio" name="connection-secret-mode" value="local" aria-describedby="connection-local-key-warning"> On this device until I remove the profile</label>
+                  <small class="danger" id="connection-local-key-warning">Stores the key as readable browser data. Use only on a device and browser profile you trust.</small>
+                </fieldset>
+                <div class="connection-error" id="connection-error" role="alert" tabindex="-1" hidden></div>
+                <div class="connection-actions"><button class="small danger" id="btn-profile-forget" type="button" disabled>Forget profile</button><button class="small" id="btn-disconnect" type="button" disabled>Disconnect</button><button class="primary" id="btn-connect" type="submit">Connect and save</button></div>
+              </form>
+            </section>
+            <section class="connection-panel" aria-labelledby="connection-evidence-title">
+              <h2 id="connection-evidence-title">Compatibility evidence</h2>
+              <div id="connection-evidence"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+    <span class="sr-only" id="connection-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+  </dialog>
 
   <div id="body">
     <aside>
@@ -1297,7 +1432,7 @@
       <h2 class="section">Threads (local)</h2>
       <div class="note tiny">
         The server has no list-threads endpoint (v0.2) — threads you create or attach are remembered in this
-        browser only, keyed by server URL.
+        browser only, isolated by server and access boundary.
       </div>
       <div id="thread-list"></div>
       <div class="attach-row">
@@ -1758,6 +1893,9 @@
 
 const LS = {
   conn:    "ags:conn",
+  connectionProfiles: "ags:connectionProfiles", // bounded v1 non-secret server profiles
+  connectionSecrets: "ags:connectionSecrets", // explicit opt-in device-local access keys
+  connectionSessionSecrets: "ags:connectionSessionSecrets", // sessionStorage only
   threads: "ags:threads",   // { [baseUrl]: [threadRecord] }
   sel:     "ags:selected",  // { [baseUrl]: threadId }
   agentRuns: "ags:agentRuns", // bounded v1 envelope of connection-scoped, sanitized run metadata
@@ -1765,6 +1903,13 @@ const LS = {
   fabricBlueprints: "ags:fabricBlueprints", // bounded v1 envelope of connection-scoped structural team blueprints
 };
 
+const CONNECTION_PROFILE_FORMAT = "rusty.connection-profiles/v1";
+const CONNECTION_PROFILE_LIMIT = 12;
+const CONNECTION_PROFILE_STORAGE_LIMIT = 32768;
+const CONNECTION_PROFILE_NAME_LIMIT = 80;
+const CONNECTION_URL_LIMIT = 2048;
+const CONNECTION_SECRET_LIMIT = 4096;
+const CONNECTION_PROBE_ID = "__rusty_studio_capability_probe__";
 const AGENT_RUN_HISTORY_LIMIT = 12;
 const AGENT_RUN_SCOPE_LIMIT = 8;
 const AGENT_RUN_ASSISTANT_LIMIT = 40;
@@ -1813,17 +1958,30 @@ const $ = (id) => document.getElementById(id);
 const store = {
   conn: null,          // { baseUrl, apiKey }
   info: null,          // GET /info response
+  connectionProfiles: [], // bounded non-secret server metadata
+  selectedConnectionProfile: null,
+  connectionDraftNew: false,
+  connectionAttempt: 0,
+  connectionEpoch: 0,
+  connectionCompatibilityRequest: 0,
+  connectionCompatibility: null,
+  connectionPersistenceWarning: "",
+  connectionPrivacyWarning: "",
   threads: [],         // local thread records for current baseUrl
   selected: null,      // selected thread_id
   history: [],         // last fetched history items
   selectedCp: null,    // selected checkpoint (history item)
   pollTimer: null,     // background-run poll timer
+  pollRequest: 0,      // generation guard for an in-flight background poll
   streamAbort: null,   // AbortController for an active SSE fetch
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
+  recReplayRequest: 0,
+  recCompareRequest: 0,
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, partial } for fork compare
   view: "home",        // "home" | "thread" | "tasks" | "agents" | "fabric" | "memory" | "learn" — active workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
+  taskRequest: 0,      // generation guard: task catalogs never cross connection boundaries
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
   agents: null,        // { list, selected, error } for the assistant-configuration workbench
   agentRequest: 0,     // generation guard: assistant catalogs never cross connection boundaries
@@ -1866,29 +2024,418 @@ const store = {
 
 /* ---------------- persistence ---------------- */
 
-function loadConn() {
-  try { store.conn = JSON.parse(localStorage.getItem(LS.conn)) || null; }
-  catch { store.conn = null; }
+function connectionLocalStorage() {
+  try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
 }
-function saveConn() { localStorage.setItem(LS.conn, JSON.stringify(store.conn)); }
+
+function connectionStorageRead(storage, key) {
+  if (!storage) return { ok: false, value: null };
+  try { return { ok: true, value: storage.getItem(key) }; } catch { return { ok: false, value: null }; }
+}
+
+function connectionStorageGet(storage, key) {
+  return connectionStorageRead(storage, key).value;
+}
+
+function connectionStorageSet(storage, key, value) {
+  try { storage.setItem(key, value); return true; } catch { return false; }
+}
+
+function connectionStorageRemove(storage, key) {
+  if (!storage) return false;
+  try { storage.removeItem(key); return true; } catch { return false; }
+}
+
+function connectionSessionStorage() {
+  try { return typeof sessionStorage === "undefined" ? null : sessionStorage; } catch { return null; }
+}
+
+function connectionProfileSafeId(value) {
+  const id = typeof value === "string" ? value : "";
+  return /^[A-Za-z0-9_-]{8,96}$/.test(id) ? id : "";
+}
+
+function connectionNormalizeBaseUrl(value) {
+  const text = typeof value === "string" ? value.trim().replace(/\/+$/, "") : "";
+  if (!text || agentUtf8Length(text) > CONNECTION_URL_LIMIT || /[\u0000-\u001f\u007f]/.test(text)) {
+    return { value: "", error: "Enter a server address no longer than 2,048 bytes." };
+  }
+  if (text.startsWith("/")) {
+    if (text.startsWith("//") || /[?#]/.test(text)) return { value: "", error: "Use a relative path such as /api without a query or fragment." };
+    return { value: text, error: "" };
+  }
+  let parsed;
+  try { parsed = new URL(text); } catch { return { value: "", error: "Use an http:// or https:// Rusty server address." }; }
+  if (!new Set(["http:", "https:"]).has(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    return { value: "", error: "Use an http:// or https:// address without credentials, a query, or a fragment." };
+  }
+  return { value: parsed.toString().replace(/\/+$/, ""), error: "" };
+}
+
+function connectionDefaultProfileName(baseUrl) {
+  if (String(baseUrl || "").startsWith("/")) return "Studio proxy";
+  try { return new URL(baseUrl).host || "Rusty server"; } catch { return "Rusty server"; }
+}
+
+function connectionNormalizeProfile(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const profileId = connectionProfileSafeId(value.profile_id);
+  const base = connectionNormalizeBaseUrl(value.base_url);
+  const rawName = typeof value.name === "string" ? value.name.trim() : "";
+  if (!profileId || base.error || !rawName || agentUtf8Length(rawName) > CONNECTION_PROFILE_NAME_LIMIT) return null;
+  const text = (field, maximum) => typeof value[field] === "string" && agentUtf8Length(value[field]) <= maximum ? value[field] : "";
+  return {
+    profile_id: profileId,
+    name: rawName,
+    base_url: base.value,
+    service: text("service", 80),
+    version: text("version", 80),
+    last_connected_at: text("last_connected_at", 64),
+    secret_mode: value.secret_mode === "local" ? "local" : "session",
+  };
+}
+
+function connectionProfilesResult(raw) {
+  if (raw === null || raw === undefined || raw === "") return { profiles: [], warning: "" };
+  if (typeof raw === "string" && raw.length > CONNECTION_PROFILE_STORAGE_LIMIT) {
+    return { profiles: [], warning: "Saved server profiles exceed Studio's safety limit and were not loaded." };
+  }
+  let value;
+  try { value = typeof raw === "string" ? JSON.parse(raw) : raw; }
+  catch { return { profiles: [], warning: "Saved server profiles are damaged and were not loaded." }; }
+  if (!value || value.format !== CONNECTION_PROFILE_FORMAT || !Array.isArray(value.profiles)) {
+    return { profiles: [], warning: "Saved server profiles use an unreadable format and were not loaded." };
+  }
+  const seen = new Set();
+  let dropped = value.profiles.length > CONNECTION_PROFILE_LIMIT;
+  const profiles = [];
+  for (const item of value.profiles) {
+    const profile = connectionNormalizeProfile(item);
+    if (!profile || seen.has(profile.profile_id)) { dropped = true; continue; }
+    seen.add(profile.profile_id);
+    if (profiles.length < CONNECTION_PROFILE_LIMIT) profiles.push(profile);
+  }
+  return { profiles, warning: dropped ? "Some saved server profiles were invalid or exceeded Studio's limit and were not loaded." : "" };
+}
+
+function connectionParseProfiles(raw) {
+  return connectionProfilesResult(raw).profiles;
+}
+
+function loadConnectionProfiles() {
+  const read = connectionStorageRead(connectionLocalStorage(), LS.connectionProfiles);
+  if (!read.ok) {
+    store.connectionProfiles = [];
+    store.connectionPersistenceWarning = "Browser storage is unavailable. Server profiles will last only in this open page.";
+    return;
+  }
+  const result = connectionProfilesResult(read.value);
+  store.connectionProfiles = result.profiles;
+  store.connectionPersistenceWarning = result.warning;
+}
+
+function saveConnectionProfiles() {
+  const envelope = { format: CONNECTION_PROFILE_FORMAT, profiles: store.connectionProfiles
+    .map(connectionNormalizeProfile).filter(Boolean).slice(0, CONNECTION_PROFILE_LIMIT) };
+  const raw = JSON.stringify(envelope);
+  return raw.length <= CONNECTION_PROFILE_STORAGE_LIMIT && connectionStorageSet(connectionLocalStorage(), LS.connectionProfiles, raw);
+}
+
+function connectionAddPersistenceWarning(message) {
+  const warning = typeof message === "string" ? message.trim() : "";
+  if (!warning || store.connectionPersistenceWarning.includes(warning)) return;
+  store.connectionPersistenceWarning = store.connectionPersistenceWarning
+    ? `${store.connectionPersistenceWarning} ${warning}`
+    : warning;
+}
+
+function connectionSecretsResult(raw) {
+  const empty = () => Object.create(null);
+  if (raw === null || raw === undefined || raw === "") return { secrets: empty(), valid: true };
+  if (typeof raw === "string" && raw.length > CONNECTION_PROFILE_STORAGE_LIMIT) return { secrets: empty(), valid: false };
+  let value;
+  try { value = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { return { secrets: empty(), valid: false }; }
+  const result = empty();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { secrets: result, valid: false };
+  const entries = Object.entries(value);
+  let valid = entries.length <= CONNECTION_PROFILE_LIMIT;
+  for (const [id, secret] of entries.slice(0, CONNECTION_PROFILE_LIMIT)) {
+    const safeId = connectionProfileSafeId(id);
+    if (safeId && typeof secret === "string" && agentUtf8Length(secret) <= CONNECTION_SECRET_LIMIT) result[safeId] = secret;
+    else valid = false;
+  }
+  return { secrets: result, valid };
+}
+
+function connectionParseSecrets(raw) {
+  return connectionSecretsResult(raw).secrets;
+}
+
+function connectionSecretMap(storage, key) {
+  const read = connectionStorageRead(storage, key);
+  if (!read.ok) {
+    if (!store.connectionPrivacyWarning) {
+      store.connectionPrivacyWarning = "Studio could not safely read browser key storage. A plaintext key may remain; remove this site's browser data before leaving the device.";
+    }
+    return Object.create(null);
+  }
+  const result = connectionSecretsResult(read.value);
+  if (!result.valid && !store.connectionPrivacyWarning) {
+    store.connectionPrivacyWarning = "Studio found damaged browser key storage. A plaintext key may remain; remove this site's browser data before leaving the device.";
+  }
+  return result.secrets;
+}
+
+function connectionWriteSecretMap(storage, key, value) {
+  const entries = value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : [];
+  if (entries.length > CONNECTION_PROFILE_LIMIT || entries.some(([id, secret]) =>
+    !connectionProfileSafeId(id) || typeof secret !== "string" || agentUtf8Length(secret) > CONNECTION_SECRET_LIMIT)) return false;
+  const raw = JSON.stringify(value);
+  return raw.length <= CONNECTION_PROFILE_STORAGE_LIMIT && connectionStorageSet(storage, key, raw);
+}
+
+function connectionForgetSecret(profileId) {
+  const id = connectionProfileSafeId(profileId);
+  if (!id) return false;
+  const session = connectionSessionStorage();
+  let confirmed = true;
+  for (const [storage, key] of [[session, LS.connectionSessionSecrets], [connectionLocalStorage(), LS.connectionSecrets]]) {
+    const read = connectionStorageRead(storage, key);
+    if (!read.ok) { confirmed = false; continue; }
+    if (read.value === null) continue;
+    const parsed = connectionSecretsResult(read.value);
+    if (!parsed.valid) {
+      if (!connectionStorageRemove(storage, key)) confirmed = false;
+      continue;
+    }
+    const secrets = parsed.secrets;
+    if (!Object.prototype.hasOwnProperty.call(secrets, id)) continue;
+    delete secrets[id];
+    const changed = Object.keys(secrets).length
+      ? connectionWriteSecretMap(storage, key, secrets)
+      : connectionStorageRemove(storage, key);
+    if (!changed) confirmed = false;
+  }
+  return confirmed;
+}
+
+function connectionPruneSecrets(profileIds) {
+  const retained = new Set(Array.from(profileIds || [], connectionProfileSafeId).filter(Boolean));
+  let confirmed = true;
+  for (const [storage, key] of [[connectionSessionStorage(), LS.connectionSessionSecrets], [connectionLocalStorage(), LS.connectionSecrets]]) {
+    const read = connectionStorageRead(storage, key);
+    if (!read.ok) { confirmed = false; continue; }
+    if (read.value === null) continue;
+    const parsed = connectionSecretsResult(read.value);
+    if (!parsed.valid) {
+      if (!connectionStorageRemove(storage, key)) confirmed = false;
+      continue;
+    }
+    const secrets = parsed.secrets;
+    let changed = false;
+    for (const id of Object.keys(secrets)) {
+      if (!retained.has(id)) { delete secrets[id]; changed = true; }
+    }
+    if (!changed) continue;
+    const saved = Object.keys(secrets).length
+      ? connectionWriteSecretMap(storage, key, secrets)
+      : connectionStorageRemove(storage, key);
+    if (!saved) confirmed = false;
+  }
+  return confirmed;
+}
+
+function connectionStoreSecret(profileId, secret, mode) {
+  const id = connectionProfileSafeId(profileId);
+  if (!id || typeof secret !== "string" || agentUtf8Length(secret) > CONNECTION_SECRET_LIMIT) return false;
+  if (!connectionForgetSecret(id)) return false;
+  if (!secret) return true;
+  const storage = mode === "local" ? connectionLocalStorage() : connectionSessionStorage();
+  const key = mode === "local" ? LS.connectionSecrets : LS.connectionSessionSecrets;
+  if (!storage) return false;
+  const secrets = connectionSecretMap(storage, key);
+  if (!Object.prototype.hasOwnProperty.call(secrets, id) && Object.keys(secrets).length >= CONNECTION_PROFILE_LIMIT) return false;
+  secrets[id] = secret;
+  return connectionWriteSecretMap(storage, key, secrets);
+}
+
+function connectionLoadSecret(profile) {
+  const value = connectionNormalizeProfile(profile);
+  if (!value) return "";
+  const session = connectionSecretMap(connectionSessionStorage(), LS.connectionSessionSecrets)[value.profile_id];
+  if (typeof session === "string") return session;
+  if (value.secret_mode === "local") {
+    const local = connectionSecretMap(connectionLocalStorage(), LS.connectionSecrets)[value.profile_id];
+    if (typeof local === "string") return local;
+  }
+  return "";
+}
+
+function connectionNewProfileId() {
+  const random = (() => {
+    try {
+      const bytes = new Uint32Array(2);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (value) => value.toString(36)).join("");
+    } catch { return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`; }
+  })();
+  return `profile_${random}`.slice(0, 96);
+}
+
+function connectionRememberProfile(fields, info) {
+  const base = connectionNormalizeBaseUrl(fields && fields.baseUrl);
+  if (base.error) return null;
+  const existingId = connectionProfileSafeId(fields && fields.profileId);
+  const profileId = existingId || connectionNewProfileId();
+  const profile = connectionNormalizeProfile({
+    profile_id: profileId,
+    name: String(fields && fields.name || "").trim() || connectionDefaultProfileName(base.value),
+    base_url: base.value,
+    service: info && info.service,
+    version: info && info.version,
+    last_connected_at: new Date().toISOString(),
+    secret_mode: fields && fields.secretMode,
+  });
+  if (!profile) return null;
+  store.connectionProfiles = [profile, ...store.connectionProfiles.filter((item) => item.profile_id !== profileId)]
+    .slice(0, CONNECTION_PROFILE_LIMIT);
+  const profilesSaved = saveConnectionProfiles();
+  const secretsPruned = profilesSaved
+    ? connectionPruneSecrets(store.connectionProfiles.map((item) => item.profile_id))
+    : true;
+  store.connectionPersistenceWarning = profilesSaved ? "" :
+    "Profile changes are available only in this open page because browser storage is unavailable.";
+  if (!secretsPruned) {
+    store.connectionPrivacyWarning = "Studio could not confirm cleanup of keys for removed profiles. Review this site's browser data before leaving the device.";
+  }
+  return profile;
+}
+
+function connectionAcceptVerifiedProfile(fields, info, preserveStorage) {
+  if (!preserveStorage) return connectionRememberProfile(fields, info);
+  const base = connectionNormalizeBaseUrl(fields && fields.baseUrl);
+  const profileId = connectionProfileSafeId(fields && fields.profileId);
+  if (base.error || !profileId) return null;
+  const profile = connectionNormalizeProfile({
+    profile_id: profileId,
+    name: String(fields && fields.name || "").trim() || connectionDefaultProfileName(base.value),
+    base_url: base.value,
+    service: info && info.service,
+    version: info && info.version,
+    last_connected_at: new Date().toISOString(),
+    secret_mode: fields && fields.secretMode,
+  });
+  if (!profile) return null;
+  store.connectionProfiles = [profile, ...store.connectionProfiles.filter((item) => item.profile_id !== profileId)]
+    .slice(0, CONNECTION_PROFILE_LIMIT);
+  const suffix = " Use Reconnect and save explicitly to replace the damaged profile data.";
+  if (!store.connectionPersistenceWarning.includes("Reconnect and save explicitly")) {
+    store.connectionPersistenceWarning = (store.connectionPersistenceWarning || "Saved server profiles were not changed.") + suffix;
+  }
+  return profile;
+}
+
+function loadConn() {
+  const storage = connectionLocalStorage();
+  const read = connectionStorageRead(storage, LS.conn);
+  if (!read.ok) {
+    store.connectionPersistenceWarning = store.connectionPersistenceWarning ||
+      "Browser storage is unavailable. The last active server could not be restored.";
+    return null;
+  }
+  let saved = null;
+  try { saved = read.value ? JSON.parse(read.value) : null; }
+  catch {
+    const removed = connectionStorageRemove(storage, LS.conn);
+    store.connectionPersistenceWarning = removed
+      ? "The damaged active-server pointer was removed and was not used."
+      : "The saved active-server pointer is damaged and could not be removed.";
+    if (!removed && !store.connectionPrivacyWarning) {
+      store.connectionPrivacyWarning = "Studio could not remove a damaged connection record that may contain a plaintext access key. Remove this site's browser data before leaving the device.";
+    }
+    return null;
+  }
+  if (!saved) return null;
+  const base = connectionNormalizeBaseUrl(saved && saved.baseUrl);
+  if (base.error) {
+    const removed = connectionStorageRemove(storage, LS.conn);
+    store.connectionPersistenceWarning = removed
+      ? "An invalid active-server pointer was removed and was not used."
+      : "An invalid active-server pointer could not be removed.";
+    if (!removed && !store.connectionPrivacyWarning) {
+      store.connectionPrivacyWarning = "Studio could not remove an invalid connection record that may contain a plaintext access key. Remove this site's browser data before leaving the device.";
+    }
+    return null;
+  }
+  let profile = store.connectionProfiles.find((item) => item.profile_id === saved.profileId) || null;
+  let preserveProfileStorage = false;
+  if (!profile) {
+    const recovered = connectionNormalizeProfile({ profile_id: connectionNewProfileId(),
+      name: connectionDefaultProfileName(base.value), base_url: base.value, secret_mode: "session" });
+    if (store.connectionPersistenceWarning) {
+      preserveProfileStorage = true;
+      profile = recovered;
+      if (profile) store.connectionProfiles = [profile, ...store.connectionProfiles].slice(0, CONNECTION_PROFILE_LIMIT);
+    } else {
+      profile = connectionRememberProfile({ profileId: recovered && recovered.profile_id,
+        name: connectionDefaultProfileName(base.value), baseUrl: base.value, secretMode: "session" }, null);
+    }
+  }
+  const legacyKeyPresent = Object.prototype.hasOwnProperty.call(saved, "apiKey");
+  const migratedSecret = typeof saved.apiKey === "string" && agentUtf8Length(saved.apiKey) <= CONNECTION_SECRET_LIMIT ? saved.apiKey : "";
+  const migrated = !migratedSecret || (profile && connectionStoreSecret(profile.profile_id, migratedSecret, "session"));
+  const sanitized = { baseUrl: base.value, profileId: profile && profile.profile_id };
+  let legacyScrubbed = true;
+  if (legacyKeyPresent) {
+    connectionStorageSet(storage, LS.conn, JSON.stringify(sanitized));
+    const verification = connectionStorageRead(storage, LS.conn);
+    let retainedLegacyKey = true;
+    if (verification.ok && typeof verification.value === "string") {
+      try { retainedLegacyKey = Object.prototype.hasOwnProperty.call(JSON.parse(verification.value), "apiKey"); }
+      catch { retainedLegacyKey = true; }
+    }
+    if (!verification.ok || retainedLegacyKey) legacyScrubbed = connectionStorageRemove(storage, LS.conn);
+    if (!legacyScrubbed) {
+      store.connectionPrivacyWarning = "Studio could not remove a legacy plaintext access key from browser storage. Remove this site's browser data before leaving the device.";
+    } else if (!migrated) {
+      store.connectionPrivacyWarning = "The legacy connection record was sanitized, but Studio could not confirm cleanup of every prior key store. Clear this site's browser data before leaving the device.";
+    }
+  }
+  store.selectedConnectionProfile = profile && profile.profile_id;
+  return { baseUrl: base.value, apiKey: migratedSecret || connectionLoadSecret(profile),
+    profileId: profile && profile.profile_id, legacyScrubbed, preserveProfileStorage };
+}
+function saveConn() {
+  const storage = connectionLocalStorage();
+  if (!store.conn) return connectionStorageRemove(storage, LS.conn);
+  return connectionStorageSet(storage, LS.conn, JSON.stringify({
+    baseUrl: store.conn.baseUrl,
+    profileId: connectionProfileSafeId(store.conn.profileId) || null,
+  }));
+}
 
 function loadThreads() {
+  const storage = connectionLocalStorage();
   let all = {};
-  try { all = JSON.parse(localStorage.getItem(LS.threads)) || {}; } catch { all = {}; }
-  store.threads = (store.conn && all[store.conn.baseUrl]) || [];
+  try { all = JSON.parse(connectionStorageGet(storage, LS.threads)) || {}; } catch { all = {}; }
+  const scope = connectionRunScope(store.conn);
+  store.threads = (store.conn && Array.isArray(all[scope]) ? all[scope] : []) || [];
   let sel = {};
-  try { sel = JSON.parse(localStorage.getItem(LS.sel)) || {}; } catch { sel = {}; }
-  store.selected = (store.conn && sel[store.conn.baseUrl]) || null;
+  try { sel = JSON.parse(connectionStorageGet(storage, LS.sel)) || {}; } catch { sel = {}; }
+  store.selected = (store.conn && typeof sel[scope] === "string" ? sel[scope] : null) || null;
 }
 function saveThreads() {
+  const storage = connectionLocalStorage();
+  const scope = connectionRunScope(store.conn);
+  if (!scope || !storage) return false;
   let all = {};
-  try { all = JSON.parse(localStorage.getItem(LS.threads)) || {}; } catch { all = {}; }
-  all[store.conn.baseUrl] = store.threads;
-  localStorage.setItem(LS.threads, JSON.stringify(all));
+  try { all = JSON.parse(connectionStorageGet(storage, LS.threads)) || {}; } catch { all = {}; }
+  all[scope] = store.threads;
+  const threadsSaved = connectionStorageSet(storage, LS.threads, JSON.stringify(all));
   let sel = {};
-  try { sel = JSON.parse(localStorage.getItem(LS.sel)) || {}; } catch { sel = {}; }
-  sel[store.conn.baseUrl] = store.selected || "";
-  localStorage.setItem(LS.sel, JSON.stringify(sel));
+  try { sel = JSON.parse(connectionStorageGet(storage, LS.sel)) || {}; } catch { sel = {}; }
+  sel[scope] = store.selected || "";
+  return connectionStorageSet(storage, LS.sel, JSON.stringify(sel)) && threadsSaved;
 }
 
 function connectionRunScope(conn) {
@@ -1988,7 +2535,9 @@ function loadAgentRunHistory() {
   store.agentRunHistory = Object.create(null);
   const scope = connectionRunScope(store.conn);
   if (!scope) return;
-  const envelope = agentParseRunEnvelope(localStorage.getItem(LS.agentRuns));
+  const read = connectionStorageRead(connectionLocalStorage(), LS.agentRuns);
+  if (!read.ok) return;
+  const envelope = agentParseRunEnvelope(read.value);
   const scoped = envelope.scopes[scope];
   if (!scoped) return;
   for (const [assistantId, entry] of Object.entries(scoped.assistants)) {
@@ -1999,8 +2548,11 @@ function loadAgentRunHistory() {
 function saveAgentRunHistory(activeAssistant) {
   const scope = connectionRunScope(store.conn);
   if (!scope) return false;
+  const storage = connectionLocalStorage();
+  const read = connectionStorageRead(storage, LS.agentRuns);
+  if (!read.ok) return false;
   const now = Date.now();
-  const envelope = agentParseRunEnvelope(localStorage.getItem(LS.agentRuns));
+  const envelope = agentParseRunEnvelope(read.value);
   const previous = envelope.scopes[scope];
   const assistants = Object.create(null);
   for (const [assistantId, runs] of Object.entries(store.agentRunHistory)) {
@@ -2013,15 +2565,12 @@ function saveAgentRunHistory(activeAssistant) {
   }
   envelope.scopes[scope] = { touched_at: now, assistants };
   let bounded = agentPruneRunEnvelope(envelope, scope, activeAssistant, AGENT_RUN_STORAGE_LIMIT);
-  try {
-    localStorage.setItem(LS.agentRuns, JSON.stringify(bounded));
-    return true;
-  } catch {
+  if (connectionStorageSet(storage, LS.agentRuns, JSON.stringify(bounded))) return true;
+  {
     // A quota failure can include unrelated local data. Compact our ledger once
     // more and retry, but never let this convenience break the real run.
     bounded = agentPruneRunEnvelope(bounded, scope, activeAssistant, Math.floor(AGENT_RUN_STORAGE_LIMIT / 2));
-    try { localStorage.setItem(LS.agentRuns, JSON.stringify(bounded)); return true; }
-    catch { return false; }
+    return connectionStorageSet(storage, LS.agentRuns, JSON.stringify(bounded));
   }
 }
 
@@ -2290,10 +2839,6 @@ async function apiForConnection(connection, method, path, body) {
   return json;
 }
 
-async function api(method, path, body) {
-  return apiForConnection(store.conn, method, path, body);
-}
-
 /* ---------------- small helpers ---------------- */
 
 function toast(msg, kind) {
@@ -2541,7 +3086,7 @@ function openHome(focus = true) {
 }
 
 function homeNavigate(action, id, owner) {
-  if (action === "connect") { $("inp-url").focus(); return; }
+  if (action === "connect") { connectionOpen(); return; }
   if (action === "create-agent") { openAgents(); agentOpenCreate(); return; }
   if (action === "agents") { openAgents(); return; }
   if (action === "fabric") { openFabric(); return; }
@@ -2597,87 +3142,488 @@ function connectionIdentityChanged(previous, next) {
   return !previous || !next || previous.baseUrl !== next.baseUrl || previous.apiKey !== next.apiKey;
 }
 
+function connectionOperation(threadId = null) {
+  return store.conn ? { epoch: store.connectionEpoch, connection: { ...store.conn }, threadId } : null;
+}
+
+function connectionOperationCurrent(operation) {
+  if (!operation || operation.epoch !== store.connectionEpoch ||
+      connectionIdentityChanged(operation.connection, store.conn)) return false;
+  if (operation.threadId === null) return true;
+  const thread = currentThread();
+  return Boolean(thread && thread.thread_id === operation.threadId);
+}
+
 function connectionAfterAttempt(previous, candidate, succeeded) {
   return succeeded ? candidate : previous;
 }
 
-async function connect() {
-  const baseUrl = $("inp-url").value.trim().replace(/\/+$/, "");
-  const apiKey = $("inp-key").value;
-  if (!baseUrl) { toast("Enter a server base URL.", "err"); return; }
-  const previousConnection = store.conn;
-  const candidateConnection = { baseUrl, apiKey };
-  $("conn-status").textContent = "connecting…";
-  let info;
+function connectionSemver(value) {
+  if (typeof value !== "string" || agentUtf8Length(value) > 80) return false;
+  const core = "(?:0|[1-9]\\d*)";
+  const identifier = "(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)";
+  const prerelease = `(?:-${identifier}(?:\\.${identifier})*)?`;
+  const build = "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?";
+  return new RegExp(`^${core}\\.${core}\\.${core}${prerelease}${build}$`).test(value);
+}
+
+function connectionInfoContract(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { info: null, error: "The address answered, but did not identify a Rusty server." };
+  const service = typeof value.service === "string" ? value.service : "";
+  const version = typeof value.version === "string" ? value.version : "";
+  if (service !== "rusty-server") return { info: null, error: "The address answered, but it is not Rusty Server." };
+  if (!connectionSemver(version)) {
+    return { info: null, error: "Rusty Server did not provide a readable semantic version." };
+  }
+  if (!Array.isArray(value.graphs) || value.graphs.length > 500) return { info: null, error: "Rusty Server returned an invalid behavior catalog." };
+  const graphs = [];
+  const seen = new Set();
+  for (const graph of value.graphs) {
+    const name = graph && typeof graph.name === "string" ? graph.name : "";
+    const channels = graph && Array.isArray(graph.channels) ? graph.channels : null;
+    if (!name || agentUtf8Length(name) > 256 || !channels || channels.length > 256 ||
+        channels.some((channel) => typeof channel !== "string" || agentUtf8Length(channel) > 256) || seen.has(name)) {
+      return { info: null, error: "Rusty Server returned an invalid behavior catalog." };
+    }
+    seen.add(name);
+    graphs.push({ name, channels: [...channels] });
+  }
+  const optional = (field) => typeof value[field] === "string" && agentUtf8Length(value[field]) <= 80 ? value[field] : "unknown";
+  return { info: { service, version, graphs, checkpointer: optional("checkpointer"), server_store: optional("server_store") }, error: "" };
+}
+
+function connectionFailureMessage(error) {
+  const status = Number(error && error.status) || 0;
+  if (!status) return "Studio could not reach that address. Start Rusty Server, check the address, and try again.";
+  if (status === 401 || status === 403) return "Rusty Server rejected this access key. Check the key and try again; the current connection was not changed.";
+  if (status === 404 && (!error.body || error.body.raw !== undefined)) return "That address does not expose Rusty Server's identity endpoint. Check the server address or upgrade the server.";
+  if (status >= 500) return "Rusty Server answered but could not complete the handshake. The current connection was not changed.";
+  return String(error && error.message || `Rusty Server rejected the connection (HTTP ${status}).`);
+}
+
+const CONNECTION_CAPABILITIES = [
+  { key: "assistants", label: "Agent workshop", detail: "Create, copy, configure, and run assistants", path: `/assistants/${CONNECTION_PROBE_ID}` },
+  { key: "fabric", label: "Multi-agent teams", detail: "Durable identities, coordination, and TeamTrace", path: `/agents/${CONNECTION_PROBE_ID}` },
+  { key: "tasks", label: "Durable work", detail: "Queue, lease, retry, cancellation, and dead letters", path: `/tasks/${CONNECTION_PROBE_ID}` },
+  { key: "memory", label: "Governed memory", detail: "Provenance, conflicts, corrections, and forgetting", path: `/memory/${CONNECTION_PROBE_ID}` },
+  { key: "learning", label: "Governed learning", detail: "Candidate evidence, evaluation, promotion, and rollback", path: `/learn/candidates/${CONNECTION_PROBE_ID}` },
+  { key: "capsules", label: "Rusty Capsules", detail: "Immutable capability packages and resolution", path: `/capsules/${CONNECTION_PROBE_ID}` },
+];
+
+function connectionCapabilityFromError(error) {
+  const status = Number(error && error.status) || 0;
+  if (status === 404 && error && error.body && error.body.error === "not_found") return { state: "supported", note: "Route contract confirmed" };
+  if (status === 401 || status === 403) return { state: "locked", note: "Available with authorized access" };
+  if (status === 404) return { state: "unavailable", note: "Not exposed by this server build" };
+  if (!status) return { state: "error", note: "Could not verify while the server was unreachable" };
+  return { state: "error", note: `Probe failed with HTTP ${status}` };
+}
+
+function connectionCapabilityFromSuccess() {
+  return { state: "unverified", note: "Unexpected response; missing-record contract not confirmed" };
+}
+
+async function connectionProbeCapability(connection, capability) {
   try {
-    info = await apiForConnection(candidateConnection, "GET", "/info");
+    await apiForConnection(connection, "GET", capability.path);
+    return { key: capability.key, ...connectionCapabilityFromSuccess() };
+  } catch (error) {
+    return { key: capability.key, ...connectionCapabilityFromError(error) };
+  }
+}
+
+function connectionCompatibilityCurrent(request, connection) {
+  return request === store.connectionCompatibilityRequest && !connectionIdentityChanged(connection, store.conn);
+}
+
+async function connectionCheckCompatibility(connection, info) {
+  const request = ++store.connectionCompatibilityRequest;
+  store.connectionCompatibility = { phase: "checking", info, capabilities: Object.create(null), error: "", attempted: null };
+  connectionRender();
+  const results = await Promise.all(CONNECTION_CAPABILITIES.map((capability) => connectionProbeCapability(connection, capability)));
+  if (!connectionCompatibilityCurrent(request, connection)) return false;
+  const capabilities = Object.create(null);
+  for (const result of results) capabilities[result.key] = { state: result.state, note: result.note };
+  store.connectionCompatibility = { phase: "ready", info, capabilities, error: "", attempted: null };
+  connectionRender();
+  $("connection-announcer").textContent = `Compatibility check complete for Rusty Server ${info.version}.`;
+  return true;
+}
+
+function connectionHandshakeHtml(state) {
+  const value = state || { phase: "idle" };
+  const reached = ["checking", "ready"].includes(value.phase);
+  const verified = reached && Boolean(value.info);
+  const checked = value.phase === "ready";
+  const failed = value.phase === "failed";
+  const step = (label, detail, tone) => `<div class="connection-handshake-step ${tone}"><b>${escapeHtml(label)}</b><span>${escapeHtml(detail)}</span></div>`;
+  return step("1 · Reach server", failed ? "Attempt did not connect" : reached ? "Server answered" : value.phase === "connecting" ? "Contacting address" : "Waiting for an address", failed ? "failed" : reached ? "ready" : value.phase === "connecting" ? "active" : "") +
+    step("2 · Verify identity", verified ? `${value.info.service} v${value.info.version}` : failed ? "Identity not accepted" : "Confirm Rusty contract", failed ? "failed" : verified ? "ready" : reached ? "active" : "") +
+    step("3 · Inspect features", checked ? "Capability check complete" : value.phase === "checking" ? "Checking safe read routes" : "No feature claims yet", checked ? "ready" : value.phase === "checking" ? "active" : "");
+}
+
+function connectionCompatibilityHtml(state, connection, profile) {
+  const value = state || { phase: "idle", capabilities: Object.create(null) };
+  if (value.phase === "failed") {
+    const preserved = connection && store.info ? `<p class="muted tiny">Studio is still using ${escapeHtml(profile && profile.name || connection.baseUrl)}.</p>` : "";
+    return `<div class="connection-error">${escapeHtml(value.error || "Connection was not confirmed.")}</div>${preserved}`;
+  }
+  if (!value.info) return `<div class="connection-profile-empty">Connect to verify the server identity before Studio claims any workspace is available.</div>`;
+  const localAccess = connection && connection.apiKey ? "Access key supplied · tenant label is not disclosed by the server" : "Public access · server does not disclose a tenant label";
+  const identity = `<div class="connection-identity">` +
+    `<div class="connection-identity-row"><span>Server</span><b>${escapeHtml(value.info.service)} v${escapeHtml(value.info.version)}</b></div>` +
+    `<div class="connection-identity-row"><span>Address</span><b>${escapeHtml(connection && connection.baseUrl || "—")}</b></div>` +
+    `<div class="connection-identity-row"><span>Access boundary</span><b>${escapeHtml(localAccess)}</b></div>` +
+    `<div class="connection-identity-row"><span>Persistence</span><b>${escapeHtml(`${value.info.checkpointer} checkpoints · ${value.info.server_store} server store`)}</b></div>` +
+    `<div class="connection-identity-row"><span>Behaviors</span><b>${value.info.graphs.length} registered</b></div></div>`;
+  const capabilities = `<div class="connection-capabilities">${CONNECTION_CAPABILITIES.map((capability) => {
+    const result = value.capabilities && value.capabilities[capability.key] || { state: value.phase === "checking" ? "checking" : "unknown", note: value.phase === "checking" ? "Checking…" : "Not checked" };
+    const label = result.state === "supported" ? "Available" : result.state === "locked" ? "Locked" : result.state === "unavailable" ? "Unavailable" : result.state === "checking" ? "Checking" : "Unknown";
+    return `<div class="connection-capability ${escapeHtml(result.state)}"><b>${escapeHtml(capability.label)}</b><span>${escapeHtml(result.note)}</span><em>${escapeHtml(label)}</em></div>`;
+  }).join("")}</div>`;
+  return identity + capabilities;
+}
+
+function connectionActiveProfile() {
+  const id = connectionProfileSafeId(store.conn && store.conn.profileId);
+  return store.connectionProfiles.find((profile) => profile.profile_id === id) || null;
+}
+
+function connectionProfilesHtml(profiles, selectedId, activeId) {
+  const list = Array.isArray(profiles) ? profiles.slice(0, CONNECTION_PROFILE_LIMIT) : [];
+  if (!list.length) return `<div class="connection-profile-empty">No saved servers yet. Your first successful connection creates a profile without storing its key.</div>`;
+  return list.map((profile) => `<button class="connection-profile" type="button" data-connection-profile="${escapeHtml(profile.profile_id)}" aria-current="${profile.profile_id === selectedId}">` +
+    `<b>${escapeHtml(profile.name)}</b>${profile.profile_id === activeId ? `<em>active</em>` : ""}<small>${escapeHtml(profile.base_url)}</small></button>`).join("");
+}
+
+function connectionRenderChip() {
+  const chip = $("btn-connection-open");
+  const profile = connectionActiveProfile();
+  chip.classList.toggle("connected", Boolean(store.conn && store.info));
+  chip.classList.toggle("failed", !store.conn && store.connectionCompatibility && store.connectionCompatibility.phase === "failed");
+  $("conn-profile").textContent = store.conn ? (profile && profile.name || "Current server") : "Choose a server";
+  $("conn-status").textContent = store.conn && store.info
+    ? `${store.info.service} v${store.info.version} · ${store.conn.baseUrl}`
+    : "Not connected · local-first";
+  const warning = $("conn-warning");
+  const privacy = Boolean(store.connectionPrivacyWarning);
+  const persistence = Boolean(store.connectionPersistenceWarning);
+  const attention = privacy || persistence;
+  chip.classList.toggle("warning", attention);
+  warning.hidden = !attention;
+  warning.textContent = privacy ? "Security cleanup needed" : "Browser storage warning";
+  const announcer = $("connection-global-announcer");
+  const announcement = privacy ? `Security cleanup needed. ${store.connectionPrivacyWarning}`
+    : persistence ? `Browser storage warning. ${store.connectionPersistenceWarning}` : "";
+  if (announcer.textContent !== announcement) announcer.textContent = announcement;
+}
+
+function connectionSelectedProfile() {
+  return store.connectionProfiles.find((profile) => profile.profile_id === store.selectedConnectionProfile) || null;
+}
+
+function connectionRender() {
+  connectionRenderChip();
+  const profile = connectionSelectedProfile();
+  $("connection-profile-list").innerHTML = connectionProfilesHtml(store.connectionProfiles,
+    store.selectedConnectionProfile, store.conn && store.conn.profileId) +
+    (store.connectionPersistenceWarning ? `<div class="connection-error">${escapeHtml(store.connectionPersistenceWarning)}</div>` : "") +
+    (store.connectionPrivacyWarning ? `<div class="connection-error">${escapeHtml(store.connectionPrivacyWarning)}</div>` : "");
+  $("connection-handshake").innerHTML = connectionHandshakeHtml(store.connectionCompatibility);
+  $("connection-evidence").innerHTML = connectionCompatibilityHtml(store.connectionCompatibility, store.conn, connectionActiveProfile());
+  $("btn-profile-forget").disabled = !profile;
+  $("btn-disconnect").disabled = !(store.conn && store.info);
+}
+
+function connectionConcealSecret() {
+  const input = $("inp-key");
+  const button = $("btn-key-reveal");
+  if (input) input.type = "password";
+  if (button) {
+    button.textContent = "Show";
+    button.setAttribute("aria-pressed", "false");
+  }
+}
+
+function connectionSelectProfile(profileId, focus = false) {
+  const profile = store.connectionProfiles.find((item) => item.profile_id === profileId);
+  if (!profile) return false;
+  connectionConcealSecret();
+  store.selectedConnectionProfile = profile.profile_id;
+  store.connectionDraftNew = false;
+  $("inp-profile-name").value = profile.name;
+  $("inp-url").value = profile.base_url;
+  $("inp-key").value = connectionLoadSecret(profile);
+  const mode = profile.secret_mode === "local" ? "local" : "session";
+  const radio = document.querySelector(`input[name="connection-secret-mode"][value="${mode}"]`);
+  if (radio) radio.checked = true;
+  $("connection-error").hidden = true;
+  connectionRender();
+  if (focus) $("inp-profile-name").focus();
+  return true;
+}
+
+function connectionNewDraft(focus = true) {
+  connectionConcealSecret();
+  store.selectedConnectionProfile = null;
+  store.connectionDraftNew = true;
+  $("inp-profile-name").value = "";
+  $("inp-url").value = "http://127.0.0.1:8100";
+  $("inp-key").value = "";
+  const session = document.querySelector('input[name="connection-secret-mode"][value="session"]');
+  if (session) session.checked = true;
+  $("connection-error").hidden = true;
+  connectionRender();
+  if (focus) $("inp-profile-name").focus();
+}
+
+function connectionOpen() {
+  connectionConcealSecret();
+  const dialog = $("connection-dialog");
+  if (!dialog.open) dialog.showModal();
+  const activeId = connectionProfileSafeId(store.conn && store.conn.profileId);
+  const preferred = store.selectedConnectionProfile || activeId || (store.connectionProfiles[0] && store.connectionProfiles[0].profile_id);
+  if (preferred) connectionSelectProfile(preferred, false);
+  else connectionNewDraft(false);
+  connectionRender();
+  $("connection-title").focus({ preventScroll: true });
+}
+
+function connectionClose() {
+  connectionConcealSecret();
+  const dialog = $("connection-dialog");
+  if (dialog.open) dialog.close();
+  $("btn-connection-open").focus({ preventScroll: true });
+}
+
+function connectionFormValues() {
+  const selected = document.querySelector('input[name="connection-secret-mode"]:checked');
+  return {
+    profileId: store.selectedConnectionProfile,
+    name: $("inp-profile-name").value,
+    baseUrl: $("inp-url").value,
+    apiKey: $("inp-key").value,
+    secretMode: selected && selected.value === "local" ? "local" : "session",
+  };
+}
+
+function connectionValidateDraft(fields) {
+  const base = connectionNormalizeBaseUrl(fields && fields.baseUrl);
+  const name = String(fields && fields.name || "").trim() || (base.error ? "" : connectionDefaultProfileName(base.value));
+  if (base.error) return { value: null, error: base.error };
+  if (!name || agentUtf8Length(name) > CONNECTION_PROFILE_NAME_LIMIT) return { value: null, error: "Profile name must be 1–80 UTF-8 bytes." };
+  if (typeof fields.apiKey !== "string" || agentUtf8Length(fields.apiKey) > CONNECTION_SECRET_LIMIT) return { value: null, error: "Access key must be no longer than 4,096 UTF-8 bytes." };
+  return { value: { ...fields, name, baseUrl: base.value, secretMode: fields.secretMode === "local" ? "local" : "session" }, error: "" };
+}
+
+function connectionShowError(message) {
+  const error = $("connection-error");
+  error.textContent = message;
+  error.hidden = false;
+  error.focus({ preventScroll: true });
+  $("connection-announcer").textContent = message;
+}
+
+function connectionSetSubmitting(submitting) {
+  const button = $("btn-connect");
+  if (!button) return;
+  button.disabled = Boolean(submitting);
+  button.textContent = submitting ? "Connecting…" : (store.conn && store.info ? "Reconnect and save" : "Connect and save");
+}
+
+function connectionResetWorkspace() {
+  store.connectionEpoch += 1;
+  store.agentRequest += 1;
+  store.taskRequest += 1;
+  store.memoryRequest += 1;
+  store.fabricRequest += 1;
+  store.learnRequest += 1;
+  clearTimeout(store.memorySearchTimer);
+  store.memorySearchTimer = null;
+  clearTimeout(store.memoryLifecycleTimer);
+  store.memoryLifecycleTimer = null;
+  store.agentRuns = Object.create(null);
+  store.agentRunHistory = Object.create(null);
+  store.agentCreateOpen = false;
+  store.agentCopySource = null;
+  store.agentManifestSource = null;
+  store.agentManifestDirty = false;
+  store.agents = null;
+  store.agentsUnsupported = false;
+  store.agentFocusRecord = null;
+  store.tasks = null;
+  store.tasksUnsupported = false;
+  stopPoll();
+  abortStream();
+  store.streamRunId = null;
+  store.history = [];
+  store.selectedCp = null;
+  store.recorder = null;
+  store.compare = null;
+  store.recUnsupported = false;
+  store.recReplayRequest += 1;
+  store.recCompareRequest += 1;
+  store.fabric = null;
+  store.fabricUnsupported = false;
+  clearTimeout(store.fabricLeaseTimer);
+  store.fabricLeaseTimer = null;
+  clearTimeout(store.fabricFollowTimer);
+  store.fabricFollowTimer = null;
+  store.fabricFollowFailures = 0;
+  store.fabricRunRequest += 1;
+  store.fabricRunHistory = [];
+  store.fabricRunQuery = "";
+  store.fabricRunFilter = "all";
+  store.fabricRunRefreshing = false;
+  store.fabricRunPersistenceWarning = false;
+  store.fabricBlueprints = [];
+  store.fabricBlueprintPersistenceWarning = false;
+  store.fabricBlueprintRenderKey = "";
+  store.memory = null;
+  store.memoryUnsupported = false;
+  store.memoryCorrection = null;
+  clearTimeout(store.learnSearchTimer);
+  store.learnSearchTimer = null;
+  store.learn = null;
+  store.learnUnsupported = false;
+  store.learnFoundry = null;
+  $("agent-create-panel").style.display = "none";
+  $("btn-agent-create").disabled = false;
+  $("btn-rec-replay").disabled = false;
+  $("btn-rec-compare").disabled = false;
+  $("sel-agent-graph").innerHTML = "";
+  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
+}
+
+async function connect(options = {}) {
+  const validation = connectionValidateDraft(connectionFormValues());
+  if (!validation.value) { connectionShowError(validation.error); return; }
+  const fields = validation.value;
+  const baseUrl = fields.baseUrl;
+  const apiKey = fields.apiKey;
+  const previousConnection = store.conn;
+  const candidateConnection = { baseUrl, apiKey, profileId: connectionProfileSafeId(fields.profileId) || null };
+  const attempt = ++store.connectionAttempt;
+  store.connectionCompatibility = { phase: "connecting", info: null, capabilities: Object.create(null), error: "", attempted: baseUrl };
+  $("connection-error").hidden = true;
+  connectionSetSubmitting(true);
+  connectionRender();
+  let rawInfo;
+  try {
+    rawInfo = await apiForConnection(candidateConnection, "GET", "/info");
   } catch (e) {
+    if (attempt !== store.connectionAttempt) return;
     store.conn = connectionAfterAttempt(previousConnection, candidateConnection, false);
-    $("conn-status").textContent = "connection failed";
-    toast(e.message, "err");
+    const message = connectionFailureMessage(e);
+    store.connectionCompatibility = { phase: "failed", info: null, capabilities: Object.create(null), error: message, attempted: baseUrl };
+    connectionSetSubmitting(false);
+    connectionRender();
+    connectionShowError(message);
     return;
   }
+  if (attempt !== store.connectionAttempt) return;
+  const contract = connectionInfoContract(rawInfo);
+  if (!contract.info) {
+    store.connectionCompatibility = { phase: "failed", info: null, capabilities: Object.create(null), error: contract.error, attempted: baseUrl };
+    connectionSetSubmitting(false);
+    connectionRender();
+    connectionShowError(contract.error);
+    return;
+  }
+  const info = contract.info;
+  const profile = connectionAcceptVerifiedProfile(fields, info, Boolean(options.preserveProfileStorage));
+  if (!profile) {
+    const message = "Studio verified the server but could not create a safe profile. Review the profile name and address.";
+    store.connectionCompatibility = { phase: "failed", info: null, capabilities: Object.create(null), error: message, attempted: baseUrl };
+    connectionSetSubmitting(false);
+    connectionRender();
+    connectionShowError(message);
+    return;
+  }
+  const secretSaved = options.preserveProfileStorage ? true : connectionStoreSecret(profile.profile_id, apiKey, fields.secretMode);
+  candidateConnection.profileId = profile.profile_id;
   store.conn = connectionAfterAttempt(previousConnection, candidateConnection, true);
   store.info = info;
   if (connectionIdentityChanged(previousConnection, store.conn)) {
-    store.agentRequest += 1;
-    store.memoryRequest += 1;
-    store.fabricRequest += 1;
-    store.learnRequest += 1;
-    clearTimeout(store.memorySearchTimer);
-    store.memorySearchTimer = null;
-    clearTimeout(store.memoryLifecycleTimer);
-    store.memoryLifecycleTimer = null;
-    store.agentRuns = Object.create(null);
-    store.agentRunHistory = Object.create(null);
-    store.agentCreateOpen = false;
-    store.agentCopySource = null;
-    store.agentManifestSource = null;
-    store.agentManifestDirty = false;
-    store.agents = null;
-    store.agentsUnsupported = false;
-    store.fabric = null;
-    store.fabricUnsupported = false;
-    clearTimeout(store.fabricLeaseTimer);
-    store.fabricLeaseTimer = null;
-    clearTimeout(store.fabricFollowTimer);
-    store.fabricFollowTimer = null;
-    store.fabricFollowFailures = 0;
-    store.fabricRunRequest += 1;
-    store.fabricRunHistory = [];
-    store.fabricRunQuery = "";
-    store.fabricRunFilter = "all";
-    store.fabricRunRefreshing = false;
-    store.fabricRunPersistenceWarning = false;
-    store.fabricBlueprints = [];
-    store.fabricBlueprintPersistenceWarning = false;
-    store.fabricBlueprintRenderKey = "";
-    store.memory = null;
-    store.memoryUnsupported = false;
-    store.memoryCorrection = null;
-    clearTimeout(store.learnSearchTimer);
-    store.learnSearchTimer = null;
-    store.learn = null;
-    store.learnUnsupported = false;
-    store.learnFoundry = null;
-    $("agent-create-panel").style.display = "none";
-    $("sel-agent-graph").innerHTML = "";
-    for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
+    connectionResetWorkspace();
   }
-  saveConn();
+  store.selectedConnectionProfile = profile.profile_id;
+  store.connectionDraftNew = false;
+  if (!saveConn()) connectionAddPersistenceWarning("The active profile could not be remembered for reload.");
   loadThreads();
   loadAgentRunHistory();
   loadFabricRunHistory();
   loadFabricBlueprints();
-  $("conn-status").innerHTML =
-    `connected — <b>${escapeHtml(store.info.service)}</b> v${escapeHtml(store.info.version)} · ` +
-    `${store.info.graphs.length} graph(s) · checkpointer: ${escapeHtml(store.info.checkpointer)}`;
+  store.connectionCompatibility = { phase: "checking", info, capabilities: Object.create(null), error: "", attempted: null };
+  connectionSetSubmitting(false);
   renderGraphs();
   renderThreads();
   agentsLoad(true);
   fabricLoad(true);
   learnLoad(true);
   renderMain();
+  connectionRender();
+  $("connection-announcer").textContent = `${profile.name} connected. Checking workspace compatibility.`;
+  if (!secretSaved && apiKey) {
+    store.connectionPrivacyWarning = "Studio could not confirm the requested access-key storage change. The connection is active for this page; remove this site's browser data if an older local copy may exist.";
+    connectionRender();
+    toast("Connected, but Studio could not confirm the access-key storage change.", "warn");
+  } else if (!secretSaved) {
+    store.connectionPrivacyWarning = "Studio could not confirm removal of the previously stored access key. Review this site's browser data before leaving the device.";
+    connectionRender();
+    toast("Connected, but the earlier stored key could not be confirmed removed.", "warn");
+  }
+  connectionCheckCompatibility({ ...store.conn }, info);
+}
+
+function connectionForgetSelected() {
+  const profile = connectionSelectedProfile();
+  if (!profile) return;
+  if (!connectionForgetSecret(profile.profile_id)) {
+    store.connectionPrivacyWarning = "Studio could not confirm removal of this profile's stored key. The profile was kept so you can retry or clear this site's browser data.";
+    connectionRender();
+    $("connection-announcer").textContent = `${profile.name} was not removed because its stored key could not be confirmed deleted.`;
+    toast("Stored-key removal could not be confirmed.", "warn");
+    return;
+  }
+  store.connectionProfiles = store.connectionProfiles.filter((item) => item.profile_id !== profile.profile_id);
+  const profileRemoved = saveConnectionProfiles();
+  store.connectionPersistenceWarning = profileRemoved ? "" :
+    "The profile was removed from this open page, but browser storage could not confirm the deletion.";
+  if (store.conn && store.conn.profileId === profile.profile_id) {
+    store.conn.profileId = null;
+    saveConn();
+  }
+  $("connection-announcer").textContent = profileRemoved
+    ? `${profile.name} profile and its stored key were removed. The running server connection was not interrupted.`
+    : `${profile.name}'s stored key was removed. The profile is hidden in this page, but browser storage could not confirm profile deletion.`;
+  connectionNewDraft(false);
+  connectionRender();
+  $("inp-profile-name").focus();
+}
+
+function connectionDisconnect() {
+  store.connectionAttempt += 1;
+  store.connectionCompatibilityRequest += 1;
+  connectionResetWorkspace();
+  store.conn = null;
+  store.info = null;
+  store.threads = [];
+  store.selected = null;
+  store.connectionCompatibility = null;
+  const pointerRemoved = saveConn();
+  if (!pointerRemoved) {
+    store.connectionPersistenceWarning = "Studio disconnected this page, but browser storage could not remove the saved reconnect pointer. It may try this profile again after reload.";
+  }
+  renderGraphs();
+  renderThreads();
+  renderMain();
+  connectionRender();
+  $("connection-announcer").textContent = pointerRemoved
+    ? "Studio disconnected. Saved non-secret profiles remain available."
+    : "Studio disconnected this page, but could not remove its saved reconnect pointer.";
+  connectionSetSubmitting(false);
+  connectionConcealSecret();
 }
 
 /* ---------------- sidebar: graphs & threads ---------------- */
@@ -2705,9 +3651,12 @@ function renderGraphs() {
 }
 
 async function createThread(graph, threadId) {
+  const operation = connectionOperation();
+  if (!operation) return null;
   try {
-    const rec = await api("POST", "/threads",
+    const rec = await apiForConnection(operation.connection, "POST", "/threads",
       threadId ? { graph, thread_id: threadId } : { graph });
+    if (!connectionOperationCurrent(operation)) return null;
     store.threads.unshift(rec);
     store.selected = rec.thread_id;
     store.view = "thread";
@@ -2717,6 +3666,7 @@ async function createThread(graph, threadId) {
     toast(`thread ${shortId(rec.thread_id)} created`, "ok");
     return rec;
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return null;
     toast(e.message, "err");
     return null;
   }
@@ -2725,6 +3675,8 @@ async function createThread(graph, threadId) {
 async function attachThread() {
   const id = $("inp-attach").value.trim();
   if (!id) return;
+  const operation = connectionOperation();
+  if (!operation) return;
   if (store.threads.some((t) => t.thread_id === id)) {
     store.selected = id; store.view = "thread";
     saveThreads(); renderThreads(); renderMain(); return;
@@ -2732,11 +3684,13 @@ async function attachThread() {
   // No GET /threads/{id} exists; probe via /state. A 404 means the in-memory
   // thread registry doesn't know it (e.g. after a server restart).
   try {
-    await api("GET", `/threads/${encodeURIComponent(id)}/state`);
+    await apiForConnection(operation.connection, "GET", `/threads/${encodeURIComponent(id)}/state`);
+    if (!connectionOperationCurrent(operation)) return;
     store.threads.unshift({ thread_id: id, graph: "?", metadata: null, created_at: null });
     store.selected = id;
     store.view = "thread";
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     if (e.status === 404) {
       const graphs = (store.info && store.info.graphs.map((g) => g.name)) || [];
       const graph = graphs.length === 1 ? graphs[0]
@@ -2750,6 +3704,7 @@ async function attachThread() {
       return;
     }
   }
+  if (!connectionOperationCurrent(operation)) return;
   $("inp-attach").value = "";
   saveThreads();
   renderThreads();
@@ -2907,23 +3862,31 @@ function withRunOpts(payload) {
 
 async function runBackground() {
   const t = currentThread(); if (!t) return;
+  const operation = connectionOperation(t.thread_id); if (!operation) return;
+  const connection = operation.connection;
   const payload = readPayload(); if (payload === null) return;
   try {
-    const res = await api("POST", `/threads/${t.thread_id}/runs`, withRunOpts(payload));
+    const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs`, withRunOpts(payload));
+    if (!connectionOperationCurrent(operation)) return;
     toast(`run ${shortId(res.run_id)} started`, "ok");
     setRunStatus(res.status, `run ${shortId(res.run_id)}`);
     noteRunId(res.run_id);
-    pollRun(res.run_id);
-  } catch (e) { toast(e.message, "err"); }
+    pollRun(res.run_id, operation);
+  } catch (e) { if (connectionOperationCurrent(operation)) toast(e.message, "err"); }
 }
 
-function pollRun(runId) {
+function pollRun(runId, sourceOperation) {
   stopPoll();
+  const operation = sourceOperation && sourceOperation.connection ? sourceOperation : connectionOperation(currentThread()?.thread_id || null);
+  if (!operation) return;
+  const connection = operation.connection;
+  const request = store.pollRequest;
   // Recursive setTimeout (not setInterval): a slow poll response must
   // never overlap with the next tick.
   const tick = async () => {
     try {
-      const info = await api("GET", `/runs/${runId}`);
+      const info = await apiForConnection(connection, "GET", `/runs/${runId}`);
+      if (request !== store.pollRequest || !connectionOperationCurrent(operation)) return;
       setRunStatus(info.status, `run ${shortId(runId)} · attempt ${info.attempt}`);
       if (!["pending", "running"].includes(info.status)) {
         stopPoll();
@@ -2934,6 +3897,7 @@ function pollRun(runId) {
         return;
       }
     } catch (e) {
+      if (request !== store.pollRequest || !connectionOperationCurrent(operation)) return;
       stopPoll();
       setRunStatus(null);
       toast(`poll failed: ${e.message}`, "err");
@@ -2945,6 +3909,7 @@ function pollRun(runId) {
 }
 
 function stopPoll() {
+  store.pollRequest += 1;
   if (store.pollTimer) { clearTimeout(store.pollTimer); store.pollTimer = null; }
 }
 
@@ -2952,20 +3917,28 @@ function stopPoll() {
 
 async function runWait(payloadOverride) {
   const t = currentThread(); if (!t) return;
+  const operation = connectionOperation(t.thread_id); if (!operation) return;
+  const connection = operation.connection;
   const payload = payloadOverride !== undefined ? payloadOverride : readPayload();
   if (payload === null) return;
   setRunStatus("running", "runs/wait");
   try {
-    const res = await api("POST", `/threads/${t.thread_id}/runs/wait`, withRunOpts({ ...payload }));
+    const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs/wait`, withRunOpts({ ...payload }));
+    if (!connectionOperationCurrent(operation)) return;
     setRunStatus(res.status, `run ${shortId(res.run_id)}`);
     showRunResult(res);
     refreshState();
     refreshHistory();
     recAutoLoad(res.run_id);
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     setRunStatus(null);
     toast(e.message, "err");
   }
+}
+
+function streamOperationCurrent(controller, operation) {
+  return store.streamAbort === controller && connectionOperationCurrent(operation);
 }
 
 /* ---------------- run: SSE stream via fetch + ReadableStream ----------------
@@ -2975,6 +3948,8 @@ async function runWait(payloadOverride) {
 
 async function runStream(payloadOverride) {
   const t = currentThread(); if (!t) return;
+  const operation = connectionOperation(t.thread_id); if (!operation) return;
+  const connection = operation.connection;
   const payload = payloadOverride !== undefined ? { ...payloadOverride } : readPayload();
   if (payload === null) return;
   payload.stream_mode = selectedStreamModes();
@@ -2989,14 +3964,15 @@ async function runStream(payloadOverride) {
   setRunStatus("running", "streaming");
 
   const headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
-  if (store.conn.apiKey) headers["X-Api-Key"] = store.conn.apiKey;
+  if (connection.apiKey) headers["X-Api-Key"] = connection.apiKey;
 
   let res;
   try {
-    res = await fetch(store.conn.baseUrl + `/threads/${t.thread_id}/runs/stream`, {
+    res = await fetch(connection.baseUrl + `/threads/${t.thread_id}/runs/stream`, {
       method: "POST", headers, body: JSON.stringify(payload), signal: ctrl.signal,
     });
   } catch (e) {
+    if (!streamOperationCurrent(ctrl, operation)) return;
     if (e.name !== "AbortError") {
       feedEvent("error", { error: "network", message: e.message }, "-");
       setRunStatus(null);
@@ -3004,8 +3980,10 @@ async function runStream(payloadOverride) {
     return;
   }
   if (!res.ok || !res.body) {
+    if (!streamOperationCurrent(ctrl, operation)) return;
     let body = null;
     try { body = await res.json(); } catch { /* ignore */ }
+    if (!streamOperationCurrent(ctrl, operation)) return;
     feedEvent("error", body || { error: "http", message: `HTTP ${res.status}` }, "-");
     setRunStatus(null);
     return;
@@ -3019,6 +3997,7 @@ async function runStream(payloadOverride) {
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      if (!streamOperationCurrent(ctrl, operation)) return;
       if (done) break;
       buf += decoder.decode(value, { stream: true });
       let match;
@@ -3041,8 +4020,12 @@ async function runStream(payloadOverride) {
       if (tail.event === "end") endData = tail.data;
     }
   } catch (e) {
+    if (!streamOperationCurrent(ctrl, operation)) return;
     if (e.name !== "AbortError") feedEvent("error", { error: "stream", message: e.message }, "-");
   }
+
+  if (!streamOperationCurrent(ctrl, operation)) return;
+  store.streamAbort = null;
 
   if (endData) {
     setRunStatus(endData.status, "stream ended");
@@ -3138,9 +4121,11 @@ function resume(wait) {
 
 async function refreshState() {
   const t = currentThread(); if (!t) return;
+  const operation = connectionOperation(t.thread_id); if (!operation) return;
   const el = $("state-view");
   try {
-    const st = await api("GET", `/threads/${t.thread_id}/state`);
+    const st = await apiForConnection(operation.connection, "GET", `/threads/${t.thread_id}/state`);
+    if (!connectionOperationCurrent(operation)) return;
     let html = "";
     const values = st.values || {};
     const keys = Object.keys(values);
@@ -3162,6 +4147,7 @@ async function refreshState() {
     html += `</div>`;
     el.innerHTML = html;
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     el.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
   }
 }
@@ -3170,9 +4156,11 @@ async function refreshState() {
 
 async function refreshHistory() {
   const t = currentThread(); if (!t) return;
+  const operation = connectionOperation(t.thread_id); if (!operation) return;
   const el = $("history-list");
   try {
-    const items = await api("POST", `/threads/${t.thread_id}/history`, { limit: 50 });
+    const items = await apiForConnection(operation.connection, "POST", `/threads/${t.thread_id}/history`, { limit: 50 });
+    if (!connectionOperationCurrent(operation)) return;
     store.history = items;
     store.selectedCp = null;
     updateHistSelection();
@@ -3200,6 +4188,7 @@ async function refreshHistory() {
       el.appendChild(div);
     });
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     el.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
   }
 }
@@ -3220,10 +4209,12 @@ function updateHistSelection() {
 async function forkAtSelected() {
   const t = currentThread(); const item = store.selectedCp;
   if (!t || !item || !item.checkpoint) return;
+  const operation = connectionOperation(t.thread_id); if (!operation) return;
   const base = `${t.thread_id}-fork-${item.checkpoint.step}`;
   try {
-    const res = await api("POST", `/threads/${t.thread_id}/fork`,
+    const res = await apiForConnection(operation.connection, "POST", `/threads/${t.thread_id}/fork`,
       { new_thread_id: base, checkpoint_id: item.checkpoint.checkpoint_id });
+    if (!connectionOperationCurrent(operation)) return;
     const rec = {
       thread_id: res.thread_id, graph: t.graph,
       metadata: { forked_from: t.thread_id, fork_checkpoint_id: item.checkpoint.checkpoint_id },
@@ -3239,6 +4230,7 @@ async function forkAtSelected() {
       ` (${res.checkpoints_copied} checkpoint(s) copied)`, "ok");
     return;
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     const oldServer = e.status === 404 && !(e.body && e.body.error);
     if (!oldServer) { toast(e.message, "err"); return; }
     toast("server has no /fork route (older version) — using client-side fallback", "warn");
@@ -3247,17 +4239,20 @@ async function forkAtSelected() {
   let newId = base, n = 1, rec = null;
   for (;;) {
     try {
-      rec = await api("POST", "/threads", { graph: t.graph, thread_id: newId });
+      rec = await apiForConnection(operation.connection, "POST", "/threads", { graph: t.graph, thread_id: newId });
+      if (!connectionOperationCurrent(operation)) return;
       break;
     } catch (e) {
+      if (!connectionOperationCurrent(operation)) return;
       if (e.status === 409 && n < 20) { newId = `${base}-${++n}`; continue; }
       toast(e.message, "err"); return;
     }
   }
   try {
-    await api("POST", `/threads/${newId}/state`,
+    await apiForConnection(operation.connection, "POST", `/threads/${newId}/state`,
       { values: item.values || {}, next_nodes: item.next || [] });
-  } catch (e) { toast(`fork thread created but state write failed: ${e.message}`, "err"); }
+    if (!connectionOperationCurrent(operation)) return;
+  } catch (e) { if (!connectionOperationCurrent(operation)) return; toast(`fork thread created but state write failed: ${e.message}`, "err"); }
   store.threads.unshift(rec);
   store.selected = newId;
   store.view = "thread";
@@ -3275,29 +4270,34 @@ async function forkAtSelected() {
 async function replayFromSelected() {
   const t = currentThread(); const item = store.selectedCp;
   if (!t || !item || !item.checkpoint) return;
+  const operation = connectionOperation(t.thread_id); if (!operation) return;
   try {
-    const res = await api("POST", `/threads/${t.thread_id}/runs`,
+    const res = await apiForConnection(operation.connection, "POST", `/threads/${t.thread_id}/runs`,
       withRunOpts({ checkpoint: { checkpoint_id: item.checkpoint.checkpoint_id } }));
+    if (!connectionOperationCurrent(operation)) return;
     toast(`replaying from step ${item.checkpoint.step} — run ${shortId(res.run_id)} started`, "ok");
     setRunStatus(res.status, `run ${shortId(res.run_id)}`);
     pollRun(res.run_id);
     return;
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     const oldServer = e.status === 404 && !(e.body && e.body.error);
     if (!oldServer) { toast(e.message, "err"); return; }
     toast("server rejected the replay route (older version?) — using client-side fallback", "warn");
   }
   /* Fallback for pre-time-travel servers: re-anchor state, then plain run. */
   try {
-    await api("POST", `/threads/${t.thread_id}/state`,
+    await apiForConnection(operation.connection, "POST", `/threads/${t.thread_id}/state`,
       { values: item.values || {}, next_nodes: item.next || [] });
-  } catch (e) { toast(e.message, "err"); return; }
+    if (!connectionOperationCurrent(operation)) return;
+  } catch (e) { if (!connectionOperationCurrent(operation)) return; toast(e.message, "err"); return; }
   toast(`re-anchored to step ${item.checkpoint.step}; starting run`, "ok");
   try {
-    const res = await api("POST", `/threads/${t.thread_id}/runs`, withRunOpts({}));
+    const res = await apiForConnection(operation.connection, "POST", `/threads/${t.thread_id}/runs`, withRunOpts({}));
+    if (!connectionOperationCurrent(operation)) return;
     setRunStatus(res.status, `run ${shortId(res.run_id)}`);
     pollRun(res.run_id);
-  } catch (e) { toast(e.message, "err"); }
+  } catch (e) { if (connectionOperationCurrent(operation)) toast(e.message, "err"); }
 }
 
 /* ---------------- flight recorder ----------------
@@ -3631,9 +4631,11 @@ function recDetailHtml(ev) {
 async function recLoad(runId, quiet) {
   runId = (runId || "").trim();
   if (!runId) { if (!quiet) toast("Enter a run id.", "err"); return; }
+  const operation = connectionOperation(currentThread()?.thread_id || null); if (!operation) return;
   $("rec-statusline").textContent = "loading…";
   try {
-    const res = await api("GET", `/runs/${encodeURIComponent(runId)}/events`);
+    const res = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(runId)}/events`);
+    if (!connectionOperationCurrent(operation)) return;
     store.recorder = {
       runId: res.run_id || runId,
       events: recSortEvents(res.events),
@@ -3646,6 +4648,7 @@ async function recLoad(runId, quiet) {
     $("rec-replay-banner").innerHTML = "";
     if (!$("inp-cmp-base").value.trim()) $("inp-cmp-base").value = store.recorder.runId;
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     // A 404 with a non-JSON body means a server build without the route at
     // all (the Flight Recorder server API is a later R0.5 wave); a JSON 404
     // means the run is genuinely unknown — surface that one.
@@ -3918,6 +4921,14 @@ function recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff) {
   return html + `</div>`;
 }
 
+function recReplayOperationCurrent(request, operation) {
+  return request === store.recReplayRequest && connectionOperationCurrent(operation);
+}
+
+function recCompareOperationCurrent(request, operation) {
+  return request === store.recCompareRequest && connectionOperationCurrent(operation);
+}
+
 /* Re-drive the loaded run from its persisted journal (POST /runs/replay) and
  * show the verdict as a banner; the banner's divergence link jumps into the
  * timeline via the delegated data-jump-seq handler in init(). */
@@ -3925,15 +4936,19 @@ async function recReplay() {
   const runId = ((store.recorder && store.recorder.runId) || $("inp-rec-run").value || "").trim();
   const el = $("rec-replay-banner");
   if (!runId) { toast("Load a journal first, or paste a run id.", "err"); return; }
+  const operation = connectionOperation(currentThread()?.thread_id || null); if (!operation) return;
+  const request = ++store.recReplayRequest;
   $("btn-rec-replay").disabled = true;
   el.innerHTML = `<div class="rec-banner warn">replaying run ${escapeHtml(shortId(runId))} from its persisted journal…</div>`;
   try {
-    const res = await api("POST", "/runs/replay", { run_id: runId });
+    const res = await apiForConnection(operation.connection, "POST", "/runs/replay", { run_id: runId });
+    if (!recReplayOperationCurrent(request, operation)) return;
     el.innerHTML = recReplayBannerHtml(res);
   } catch (e) {
+    if (!recReplayOperationCurrent(request, operation)) return;
     el.innerHTML = recApiErrorBannerHtml("POST /runs/replay", e.status, e.body);
   } finally {
-    $("btn-rec-replay").disabled = false;
+    if (recReplayOperationCurrent(request, operation)) $("btn-rec-replay").disabled = false;
   }
 }
 
@@ -3946,13 +4961,17 @@ async function recCompare() {
   const view = $("rec-compare-view");
   if (!baseId || !branchId) { toast("Enter both run ids to compare.", "err"); return; }
   if (baseId === branchId) { toast("Base and branch are the same run.", "warn"); return; }
+  const operation = connectionOperation(currentThread()?.thread_id || null); if (!operation) return;
+  const request = ++store.recCompareRequest;
   $("btn-rec-compare").disabled = true;
   view.innerHTML = `<div class="muted tiny">diffing ${escapeHtml(shortId(baseId))} vs ${escapeHtml(shortId(branchId))}…</div>`;
   store.compare = null;
   let diff;
   try {
-    diff = await api("GET", `/runs/diff?base=${encodeURIComponent(baseId)}&branch=${encodeURIComponent(branchId)}`);
+    diff = await apiForConnection(operation.connection, "GET", `/runs/diff?base=${encodeURIComponent(baseId)}&branch=${encodeURIComponent(branchId)}`);
+    if (!recCompareOperationCurrent(request, operation)) return;
   } catch (e) {
+    if (!recCompareOperationCurrent(request, operation)) return;
     view.innerHTML = recApiErrorBannerHtml("GET /runs/diff", e.status, e.body);
     $("btn-rec-compare").disabled = false;
     return;
@@ -3960,12 +4979,14 @@ async function recCompare() {
   let baseEvents, branchEvents, partial = false;
   try {
     const [baseRes, branchRes] = await Promise.all([
-      api("GET", `/runs/${encodeURIComponent(baseId)}/events`),
-      api("GET", `/runs/${encodeURIComponent(branchId)}/events`),
+      apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(baseId)}/events`),
+      apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(branchId)}/events`),
     ]);
+    if (!recCompareOperationCurrent(request, operation)) return;
     baseEvents = recSortEvents(baseRes && baseRes.events);
     branchEvents = recSortEvents(branchRes && branchRes.events);
   } catch {
+    if (!recCompareOperationCurrent(request, operation)) return;
     // The diff succeeded but the timelines did not: render the divergence
     // region the diff itself carries rather than dropping the result.
     partial = true;
@@ -3978,7 +4999,7 @@ async function recCompare() {
       `showing only the divergence region carried by the diff.</div>`
     : "";
   view.innerHTML = note + recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff);
-  $("btn-rec-compare").disabled = false;
+  if (recCompareOperationCurrent(request, operation)) $("btn-rec-compare").disabled = false;
 }
 
 
@@ -5175,12 +6196,15 @@ async function agentReadManifestFile(file) {
 
 async function agentImportFile(file) {
   if (!file) return false;
+  const operation = connectionOperation(); if (!operation) return false;
   try {
     const text = await agentReadManifestFile(file);
+    if (!connectionOperationCurrent(operation)) return false;
     const applied = agentApplyManifestText(text, file.name || "Imported manifest", true);
     if (applied) $("inp-agent-name").focus({ preventScroll: true });
     return applied;
   } catch (error) {
+    if (!connectionOperationCurrent(operation)) return false;
     const message = String(error.message || "").startsWith("Manifest is larger")
       ? error.message : `Could not read manifest: ${error.message}`;
     agentSetManifestStatus(message);
@@ -5308,9 +6332,11 @@ async function agentCreate() {
     $("inp-agent-id").focus();
     return;
   }
+  const operation = connectionOperation(); if (!operation) return;
   $("btn-agent-create").disabled = true;
   try {
-    const created = await api("POST", "/assistants", payload);
+    const created = await apiForConnection(operation.connection, "POST", "/assistants", payload);
+    if (!connectionOperationCurrent(operation)) return;
     if (!store.agents) store.agents = { list: [], selected: null, error: null };
     store.agents.list.push(created);
     store.agents.selected = created.assistant_id;
@@ -5324,13 +6350,14 @@ async function agentCreate() {
       ? `${created.name} is ready. ${sourceName} is unchanged.`
       : imported ? `${created.name} is ready from the reviewed manifest.`
       : `${created.name} is ready for a first run`, "ok");
-  } catch (e) { toast(e.message, "err"); }
-  finally { $("btn-agent-create").disabled = false; }
+  } catch (e) { if (connectionOperationCurrent(operation)) toast(e.message, "err"); }
+  finally { if (connectionOperationCurrent(operation)) $("btn-agent-create").disabled = false; }
 }
 
 async function agentRunTest(assistantId) {
   const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
   if (!agent) return;
+  const operation = connectionOperation(); if (!operation) return;
   const startedMs = Date.now();
   const startedAt = new Date(startedMs).toISOString();
   const attemptId = `attempt-${startedMs}-${Math.random().toString(36).slice(2, 8)}`;
@@ -5344,11 +6371,13 @@ async function agentRunTest(assistantId) {
   $("agent-test-status").innerHTML = badge("running") + ` <span class="muted tiny">creating test thread…</span>`;
   agentAnnounceRun({ status: "running" });
   try {
-    thread = await api("POST", "/threads", { graph: agent.graph, metadata: { source: "agent_workbench", assistant_id: assistantId } });
+    thread = await apiForConnection(operation.connection, "POST", "/threads", { graph: agent.graph, metadata: { source: "agent_workbench", assistant_id: assistantId } });
+    if (!connectionOperationCurrent(operation)) return;
     store.threads.unshift(thread);
     saveThreads();
     renderThreads();
-    const result = await api("POST", `/threads/${encodeURIComponent(thread.thread_id)}/runs/wait`, { assistant_id: assistantId, input });
+    const result = await apiForConnection(operation.connection, "POST", `/threads/${encodeURIComponent(thread.thread_id)}/runs/wait`, { assistant_id: assistantId, input });
+    if (!connectionOperationCurrent(operation)) return;
     const run = {
       record_id: result.run_id || attemptId,
       status: result.status,
@@ -5372,6 +6401,7 @@ async function agentRunTest(assistantId) {
     else toast(`agent run ${result.status}`, result.status === "success" ? "ok"
       : ["interrupted", "cancelled"].includes(result.status) ? "warn" : "err");
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     const run = {
       record_id: attemptId,
       status: "error",
@@ -5409,9 +6439,11 @@ async function agentOpenThread(threadId, runId, graph) {
   saveThreads();
   renderThreads();
   renderMain();
+  const operation = connectionOperation(threadId);
   if (runId) {
     noteRunId(runId);
     await recLoad(runId, true);
+    if (!connectionOperationCurrent(operation)) return;
     const recorder = $("flight-recorder-card");
     if (recorder) recorder.scrollIntoView({ block: "start" });
     const recorderTitle = $("flight-recorder-title");
@@ -7130,9 +8162,11 @@ function fabricExportBlueprint(blueprintId) {
 
 async function fabricImportBlueprint(file) {
   if (!file) return false;
+  const operation = connectionOperation(); if (!operation) return false;
   try {
     if (Number(file.size) > FABRIC_BLUEPRINT_TEXT_LIMIT) throw new Error(`Blueprint is larger than ${Math.round(FABRIC_BLUEPRINT_TEXT_LIMIT / 1024)} KiB.`);
     const blueprint = fabricParseBlueprintText(String(await file.text()));
+    if (!connectionOperationCurrent(operation)) return false;
     const remembered = fabricRememberBlueprint(blueprint);
     if (!remembered.ok) throw new Error(remembered.error);
     fabricRenderBlueprints(true);
@@ -7142,6 +8176,7 @@ async function fabricImportBlueprint(file) {
     $("fabric-blueprints-status").textContent = message;
     return true;
   } catch (error) {
+    if (!connectionOperationCurrent(operation)) return false;
     const message = error.message || "Blueprint could not be imported.";
     $("fabric-blueprints-status").textContent = message;
     $("fabric-blueprints-announcer").textContent = `Blueprint was not imported. ${message}`;
@@ -10598,11 +11633,24 @@ function tasksErrorHtml(status, body) {
   return `<div class="note">${msg}</div>`;
 }
 
+function tasksRequestCurrent(request, connection) {
+  return request === store.taskRequest && !connectionIdentityChanged(connection, store.conn);
+}
+
 async function tasksLoad(quiet) {
+  const request = ++store.taskRequest;
+  const connection = store.conn && { ...store.conn };
+  if (!connection) {
+    store.tasks = { list: [], selected: null,
+      error: `<div class="note">Connect to a verified Rusty server before opening durable work.</div>` };
+    tasksRender();
+    return false;
+  }
   const status = $("sel-task-status").value;
   $("tasks-statusline").textContent = "loading…";
   try {
-    const list = await api("GET", tasksListPath(status));
+    const list = await apiForConnection(connection, "GET", tasksListPath(status));
+    if (!tasksRequestCurrent(request, connection)) return false;
     const arr = Array.isArray(list) ? list : [];
     const keep = store.tasks && store.tasks.selected;
     store.tasks = {
@@ -10613,6 +11661,7 @@ async function tasksLoad(quiet) {
     };
     store.tasksUnsupported = false;
   } catch (e) {
+    if (!tasksRequestCurrent(request, connection)) return false;
     // A 404 with a non-JSON body means a server build without the routes
     // at all (pre-R0.6); a JSON 404 cannot happen on the list route, but
     // any other error renders verbatim.
@@ -10622,6 +11671,7 @@ async function tasksLoad(quiet) {
     if (!quiet && !noRoute) toast(e.message, "err");
   }
   tasksRender();
+  return true;
 }
 
 function tasksRender() {
@@ -10673,8 +11723,10 @@ function tasksSelect(taskId) {
  * immediately, a leased task is only signalled — and the toast says which;
  * the list refresh then makes the transition visible. */
 async function taskCancel(taskId) {
+  const operation = connectionOperation(); if (!operation) return;
   try {
-    const updated = await api("POST", `/tasks/${encodeURIComponent(taskId)}/cancel`);
+    const updated = await apiForConnection(operation.connection, "POST", `/tasks/${encodeURIComponent(taskId)}/cancel`);
+    if (!connectionOperationCurrent(operation)) return;
     if (updated && updated.status === "cancelled") {
       toast(`task ${shortId(taskId)} cancelled`, "ok");
     } else if (updated && updated.cancel_requested) {
@@ -10683,8 +11735,10 @@ async function taskCancel(taskId) {
       toast(`cancel requested for task ${shortId(taskId)}`, "ok");
     }
   } catch (e) {
+    if (!connectionOperationCurrent(operation)) return;
     toast(e.message, "err");
   }
+  if (!connectionOperationCurrent(operation)) return;
   await tasksLoad(true);
 }
 
@@ -10696,11 +11750,34 @@ function openTasks() {
 }
 
 function init() {
-  loadConn();
-  $("inp-url").value = (store.conn && store.conn.baseUrl) || "http://127.0.0.1:8100";
-  $("inp-key").value = (store.conn && store.conn.apiKey) || "";
+  loadConnectionProfiles();
+  const startupConnection = loadConn();
+  const startupProfile = store.connectionProfiles.find((profile) =>
+    profile.profile_id === connectionProfileSafeId(startupConnection && startupConnection.profileId)) || null;
+  if (startupProfile) connectionSelectProfile(startupProfile.profile_id, false);
+  else connectionNewDraft(false);
+  if (startupConnection && startupConnection.apiKey && !$("inp-key").value) $("inp-key").value = startupConnection.apiKey;
 
-  $("btn-connect").onclick = connect;
+  $("btn-connection-open").onclick = connectionOpen;
+  $("btn-connection-close").onclick = connectionClose;
+  $("btn-connection-new").onclick = () => connectionNewDraft();
+  $("connection-profile-list").addEventListener("click", (event) => {
+    const target = event.target.closest("[data-connection-profile]");
+    if (target) connectionSelectProfile(target.getAttribute("data-connection-profile"), true);
+  });
+  $("connection-form").addEventListener("submit", (event) => { event.preventDefault(); connect(); });
+  $("btn-profile-forget").onclick = connectionForgetSelected;
+  $("btn-disconnect").onclick = connectionDisconnect;
+  $("btn-key-reveal").onclick = () => {
+    const input = $("inp-key");
+    const visible = input.type === "text";
+    input.type = visible ? "password" : "text";
+    $("btn-key-reveal").textContent = visible ? "Show" : "Hide";
+    $("btn-key-reveal").setAttribute("aria-pressed", String(!visible));
+    input.focus({ preventScroll: true });
+  };
+  $("connection-dialog").addEventListener("cancel", (event) => { event.preventDefault(); connectionClose(); });
+  connectionRender();
   $("btn-attach").onclick = attachThread;
   $("inp-attach").addEventListener("keydown", (e) => { if (e.key === "Enter") attachThread(); });
   $("btn-run").onclick = runBackground;
@@ -11112,11 +12189,10 @@ function init() {
   });
 
   renderMain();
-  if (store.conn) {
-    loadThreads();
-    renderThreads();
-    // Reconnect silently; failures just leave the previous local state visible.
-    connect();
+  if (startupConnection) {
+    // A saved profile is only a reconnect candidate. It becomes active after
+    // the same identity handshake as a manually selected profile.
+    connect({ preserveProfileStorage: startupConnection.preserveProfileStorage });
   }
 }
 

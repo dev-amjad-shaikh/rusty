@@ -142,7 +142,9 @@ Studio is a useful engineering console, not yet the complete experience describe
   runtime activation proof remain.
 - Triggers, crons, credentials, artifacts, deployments, and fleet operations are not unified.
 - Authentication identifies a tenant API key, not an attributed human or service principal with scoped roles and auditable authority.
-- The current connection flow persists the API key in browser storage and needs the safer session model defined below.
+- Local Studio now defaults access keys to a session-only boundary and requires explicit warning-backed
+  consent before device-local persistence. A deployed Studio still needs the server-side session or
+  credential-broker boundary defined below.
 - `GET /info` does not yet advertise a versioned capability contract, so route probing is the only reliable compatibility fallback.
 - Run-manifest pins are not yet bound to a resolvable immutable assistant/configuration version on the evidence surface.
 - The single-file implementation is approaching the point where feature isolation and maintainability require a modular frontend architecture.
@@ -157,7 +159,10 @@ Each milestone is a complete user outcome. A milestone is not complete because i
 
 Status: **usable foundation delivered**. The guided path and evidence-led Home mission board work,
 including honest local/server signals and direct continuation into recent agent or team evidence.
-Connection onboarding, safe server profiles, and versioned compatibility reporting remain.
+The Connection Hub now delivers guided onboarding, bounded non-secret server profiles, session-only
+secrets by default, explicit device-local opt-in, verified server identity, safe compatibility evidence,
+and recovery-preserving connection switching. A deployed credential boundary and a versioned server
+capability contract remain.
 
 Connection and session requirements:
 
