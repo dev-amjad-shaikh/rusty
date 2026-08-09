@@ -310,6 +310,73 @@
     color: var(--interrupt); padding: 4px 0; border-bottom: 1px solid var(--border);
   }
 
+  /* ---------- agent workbench ---------- */
+  .workbench-head {
+    display: flex; justify-content: space-between; gap: 18px; align-items: flex-start;
+    margin: 2px 0 16px;
+  }
+  .workbench-head h1 { margin: 0; font-size: 24px; letter-spacing: -.5px; }
+  .workbench-head p { margin: 4px 0 0; color: var(--text-dim); max-width: 620px; }
+  .agent-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .agent-toolbar input, .agent-form input, .agent-form select, .agent-form textarea,
+  .agent-test textarea {
+    background: var(--bg-inset); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 9px; font-family: var(--sans); font-size: 12.5px;
+  }
+  .agent-toolbar input { flex: 1; min-width: 180px; }
+  .agent-layout { display: grid; grid-template-columns: minmax(260px, 360px) minmax(420px, 1fr); gap: 14px; }
+  .agent-list { display: flex; flex-direction: column; gap: 7px; }
+  .agent-item {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised);
+    padding: 10px 11px; cursor: pointer;
+  }
+  .agent-item:hover { border-color: var(--border-hi); }
+  .agent-item.selected { border-color: #547da1; box-shadow: inset 3px 0 0 #6fa8dc; }
+  .agent-item:focus-visible { outline: 2px solid #6fa8dc; outline-offset: 2px; }
+  .agent-item-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .agent-name { font-weight: 650; color: #f0eadf; }
+  .agent-graph { font-family: var(--mono); font-size: 10.5px; color: #91b9dc; }
+  .agent-desc { color: var(--text-dim); font-size: 11.5px; margin: 5px 0 8px; }
+  .agent-id { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); word-break: break-all; }
+  .readiness-rail { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px; }
+  .readiness-step {
+    min-height: 4px; border-radius: 999px; background: #302d28; border: 1px solid #3b3730;
+  }
+  .readiness-step.ready { background: #315b78; border-color: #6fa8dc; }
+  .readiness-labels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 4px; }
+  .readiness-labels span { color: var(--text-faint); font: 9.5px var(--mono); text-transform: uppercase; letter-spacing: .4px; }
+  .readiness-labels span.ready { color: #91b9dc; }
+  .agent-detail-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+  .agent-detail-head h2 { margin: 0; font-size: 19px; }
+  .agent-kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 16px 0; }
+  .agent-kv .k { color: var(--text-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px; }
+  .agent-kv .v { font-family: var(--mono); font-size: 11.5px; word-break: break-word; }
+  .agent-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+  .agent-form label, .agent-test label { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim); font-size: 11.5px; }
+  .agent-form label.wide { grid-column: 1 / -1; }
+  .agent-form textarea, .agent-test textarea { min-height: 82px; resize: vertical; font-family: var(--mono); }
+  .agent-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+  .agent-test { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 14px; }
+  .agent-test-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .agent-summary {
+    display: grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); gap: 8px; margin-bottom: 12px;
+  }
+  .agent-summary > div { border: 1px solid var(--border); background: var(--bg-inset); border-radius: 7px; padding: 8px 10px; }
+  .agent-summary b { display: block; font: 700 17px var(--mono); color: #91b9dc; }
+  .agent-summary span { color: var(--text-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; }
+  @media (max-width: 900px) {
+    aside { width: 250px; flex-basis: 250px; }
+    .agent-layout { grid-template-columns: 1fr; }
+    .workbench-head { flex-direction: column; }
+  }
+  @media (max-width: 680px) {
+    #body { display: block; overflow-y: auto; }
+    aside { width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+    main { overflow: visible; }
+    .agent-form { grid-template-columns: 1fr; }
+    .agent-form label.wide, .agent-form-actions { grid-column: auto; }
+  }
+
   .empty { color: var(--text-faint); font-style: italic; padding: 24px 0; text-align: center; }
   .note {
     border: 1px solid var(--border-hi); border-left: 3px solid var(--accent-dim);
@@ -339,6 +406,10 @@
 
   <div id="body">
     <aside>
+      <h2 class="section">Agents</h2>
+      <button class="small primary" id="btn-agents-open" style="width:100%">Open agent workbench</button>
+      <div class="muted tiny" id="agent-side-count" style="margin:6px 2px 0">Connect to load durable agents.</div>
+
       <h2 class="section">Graphs</h2>
       <div id="graph-list"><div class="empty">Connect to a server.</div></div>
 
@@ -362,7 +433,46 @@
     </aside>
 
     <main id="main">
-      <div class="empty" id="main-empty">Select or create a thread to begin.</div>
+      <div class="empty" id="main-empty">Open the agent workbench, or select a thread to debug a run.</div>
+
+      <div id="agents-view" style="display:none">
+        <div class="workbench-head">
+          <div>
+            <h1>Agent workbench</h1>
+            <p>Create durable graph bindings, check whether they are runnable, and exercise them against the real runtime before opening the full trace.</p>
+          </div>
+          <button class="primary" id="btn-agent-create-open">Create agent</button>
+        </div>
+
+        <div class="card" id="agent-create-panel" style="display:none">
+          <h2 class="section" style="margin-top:0">Create durable agent</h2>
+          <div class="note tiny">An agent currently binds a registered graph to durable config and metadata. Model, prompt, tool, and memory policies become editable here only when their runtime contracts exist.</div>
+          <div class="agent-form">
+            <label>Name <input id="inp-agent-name" type="text" placeholder="Research coordinator"></label>
+            <label>Registered graph <select id="sel-agent-graph"></select></label>
+            <label>Agent ID <input id="inp-agent-id" type="text" spellcheck="false" placeholder="generated when empty"></label>
+            <label>Recursion limit <input id="inp-agent-limit" type="number" min="1" step="1" placeholder="runtime default"></label>
+            <label class="wide">Description <textarea id="inp-agent-description" placeholder="What this agent is responsible for"></textarea></label>
+            <label class="wide">Tags <input id="inp-agent-tags" type="text" placeholder="research, production (comma separated)"></label>
+            <div class="agent-form-actions">
+              <button id="btn-agent-create-cancel">Cancel</button>
+              <button class="primary" id="btn-agent-create">Create agent</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="agent-summary" id="agent-summary"></div>
+        <div class="agent-toolbar">
+          <input id="inp-agent-search" type="search" placeholder="Search agents by name, graph, ID, or tag…">
+          <button class="small" id="btn-agents-refresh">Refresh</button>
+          <span class="muted tiny" id="agents-statusline"></span>
+        </div>
+        <div class="agent-layout">
+          <div class="agent-list" id="agent-list"><div class="empty">Open the workbench to load agents.</div></div>
+          <div class="card" id="agent-detail"><div class="empty">Select an agent to inspect and test it.</div></div>
+        </div>
+      </div>
+
       <div id="thread-view" style="display:none">
 
         <div id="thread-head">
@@ -543,9 +653,12 @@ const store = {
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, partial } for fork compare
-  view: "thread",      // "thread" | "tasks" — which workspace the main panel shows
+  view: "thread",      // "thread" | "tasks" | "agents" — active workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
+  agents: null,        // { list, selected, error } for the durable-agent workbench
+  agentRuns: {},       // successful/failed tests started from this browser session, keyed by assistant id
+  agentsUnsupported: false, // server build has no /assistants routes
 };
 
 /* ---------------- persistence ---------------- */
@@ -658,6 +771,7 @@ async function connect() {
     `${store.info.graphs.length} graph(s) · checkpointer: ${escapeHtml(store.info.checkpointer)}`;
   renderGraphs();
   renderThreads();
+  agentsLoad(true);
   renderMain();
 }
 
@@ -776,12 +890,18 @@ function renderThreads() {
 
 function renderMain() {
   const tasks = store.view === "tasks";
+  const agents = store.view === "agents";
   $("tasks-view").style.display = tasks ? "block" : "none";
+  $("agents-view").style.display = agents ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !tasks && !t ? "block" : "none";
-  $("thread-view").style.display = !tasks && t ? "block" : "none";
+  $("main-empty").style.display = !tasks && !agents && !t ? "block" : "none";
+  $("thread-view").style.display = !tasks && !agents && t ? "block" : "none";
   if (tasks) {
     tasksLoad(true); // quiet: a pre-R0.6 server shows a panel note, not toast spam
+    return;
+  }
+  if (agents) {
+    agentsLoad(true);
     return;
   }
   if (!t) return;
@@ -1774,6 +1894,263 @@ async function recCompare() {
 
 
 
+/* ---------------- agent workbench ----------------
+ * Durable assistants are the server's current managed-agent contract: a
+ * named, persisted graph binding with default config and metadata. This
+ * workbench deliberately exposes only fields the runtime stores or honors.
+ * A test creates a real thread and runs it with assistant_id, so the final
+ * readiness segment is runtime evidence rather than a form-completion flag.
+ * ------------------------------------------------------------------------- */
+
+function agentTags(agent) {
+  const raw = agent && agent.metadata && agent.metadata.tags;
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  if (typeof raw === "string") return raw.split(",").map((x) => x.trim()).filter(Boolean);
+  return [];
+}
+
+function agentSearchItems(items, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return Array.isArray(items) ? items.slice() : [];
+  return (Array.isArray(items) ? items : []).filter((agent) =>
+    [agent && agent.name, agent && agent.graph, agent && agent.assistant_id, ...agentTags(agent)]
+      .some((value) => String(value || "").toLowerCase().includes(q)));
+}
+
+function agentReadiness(agent, info, testRun) {
+  const graphNames = new Set((((info && info.graphs) || []).map((g) => g && g.name).filter(Boolean)));
+  const steps = [
+    { key: "defined", label: "Defined", ready: Boolean(agent && agent.assistant_id && String(agent.name || "").trim()) },
+    { key: "runnable", label: "Runnable", ready: Boolean(agent && graphNames.has(agent.graph)) },
+    { key: "tested", label: "Tested", ready: Boolean(testRun && testRun.status === "success") },
+  ];
+  return { steps, ready: steps.filter((step) => step.ready).length, total: steps.length };
+}
+
+function agentReadinessHtml(readiness, labels) {
+  const steps = readiness && Array.isArray(readiness.steps) ? readiness.steps : [];
+  const rail = `<div class="readiness-rail">${steps.map((step) =>
+    `<span class="readiness-step${step.ready ? " ready" : ""}" title="${escapeHtml(step.label)}"></span>`).join("")}</div>`;
+  if (!labels) return rail;
+  return rail + `<div class="readiness-labels">${steps.map((step) =>
+    `<span class="${step.ready ? "ready" : ""}">${escapeHtml(step.label)}</span>`).join("")}</div>`;
+}
+
+function agentCardHtml(agent, readiness) {
+  const meta = (agent && agent.metadata) || {};
+  const description = meta.description || "No responsibility statement yet.";
+  return `<div class="agent-item-head"><span class="agent-name">${escapeHtml(agent && agent.name || "Unnamed agent")}</span>` +
+    `<span class="agent-graph">${escapeHtml(agent && agent.graph || "unknown graph")}</span></div>` +
+    `<div class="agent-desc">${escapeHtml(description)}</div>` +
+    `<div class="agent-id">${escapeHtml(agent && agent.assistant_id || "")}</div>` +
+    agentReadinessHtml(readiness, false);
+}
+
+function agentDefaultInput(graph) {
+  if (graph === "react_agent") return { messages: [{ role: "user", content: "say pong" }] };
+  return {};
+}
+
+function agentBuildCreatePayload(fields) {
+  const payload = {
+    name: String(fields && fields.name || "").trim(),
+    graph: String(fields && fields.graph || "").trim(),
+  };
+  const assistantId = String(fields && fields.assistantId || "").trim();
+  const limit = Number(fields && fields.recursionLimit);
+  const description = String(fields && fields.description || "").trim();
+  const tags = String(fields && fields.tags || "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (assistantId) payload.assistant_id = assistantId;
+  if (Number.isInteger(limit) && limit > 0) payload.config = { recursion_limit: limit };
+  if (description || tags.length) payload.metadata = { description, tags };
+  return payload;
+}
+
+function agentErrorHtml(status, body) {
+  if (status === 404 && (!body || !body.message)) {
+    return `<div class="note tiny">This server has no <code>/assistants</code> routes. Upgrade the server to use the agent workbench.</div>`;
+  }
+  return `<div class="note tiny">${escapeHtml(body && body.message || `HTTP ${status || 0}`)}</div>`;
+}
+
+function agentTestResultHtml(run) {
+  if (!run) return `<span class="muted tiny">No workbench test in this browser session.</span>`;
+  const tone = run.status === "success" ? "success" : "error";
+  const detail = run.error ? escapeHtml(run.error) : `run ${escapeHtml(shortId(run.run_id))}`;
+  return `<span class="badge ${tone}">${escapeHtml(run.status)}</span> <span class="muted tiny">${detail}</span>`;
+}
+
+function agentDetailHtml(agent, readiness, testRun) {
+  if (!agent) return `<div class="empty">Select an agent to inspect and test it.</div>`;
+  const meta = agent.metadata || {};
+  const config = agent.config || {};
+  const tags = agentTags(agent);
+  return `<div class="agent-detail-head"><div><h2>${escapeHtml(agent.name || "Unnamed agent")}</h2>` +
+    `<div class="muted tiny">Durable graph binding</div></div>` +
+    `<span class="badge ${readiness.ready === readiness.total ? "success" : "pending"}">${readiness.ready}/${readiness.total} ready</span></div>` +
+    agentReadinessHtml(readiness, true) +
+    `<div class="agent-kv">` +
+      `<span class="k">Agent ID</span><span class="v">${escapeHtml(agent.assistant_id || "—")}</span>` +
+      `<span class="k">Graph</span><span class="v">${escapeHtml(agent.graph || "—")}</span>` +
+      `<span class="k">Created</span><span class="v">${escapeHtml(agent.created_at || "—")}</span>` +
+      `<span class="k">Recursion limit</span><span class="v">${escapeHtml(config.recursion_limit ?? "runtime default")}</span>` +
+      `<span class="k">Description</span><span class="v">${escapeHtml(meta.description || "—")}</span>` +
+      `<span class="k">Tags</span><span class="v">${escapeHtml(tags.join(", ") || "—")}</span>` +
+    `</div>` +
+    `<div class="agent-test"><label>Test input (JSON)<textarea id="inp-agent-test" spellcheck="false">${escapeHtml(pretty(agentDefaultInput(agent.graph)))}</textarea></label>` +
+    `<div class="agent-test-actions"><button class="primary" data-agent-run="${escapeHtml(agent.assistant_id)}">Run test</button>` +
+    (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}">Open run thread</button>` : "") +
+    `<span id="agent-test-status">${agentTestResultHtml(testRun)}</span></div>` +
+    `<div id="agent-test-result">${testRun && testRun.result ? `<pre class="json">${escapeHtml(pretty(testRun.result))}</pre>` : ""}</div></div>`;
+}
+
+function agentsUpdateSidebar() {
+  const el = $("agent-side-count");
+  if (!store.conn) { el.textContent = "Connect to load durable agents."; return; }
+  if (store.agentsUnsupported) { el.textContent = "Agent API unavailable on this server."; return; }
+  const count = store.agents && store.agents.list ? store.agents.list.length : 0;
+  el.textContent = `${count} durable agent${count === 1 ? "" : "s"}`;
+}
+
+async function agentsLoad(quiet) {
+  if (!store.conn) return;
+  if (!store.agents) store.agents = { list: [], selected: null, error: null };
+  try {
+    const list = await api("GET", "/assistants");
+    store.agents.list = Array.isArray(list) ? list : [];
+    store.agents.error = null;
+    store.agentsUnsupported = false;
+    if (!store.agents.list.some((a) => a.assistant_id === store.agents.selected)) {
+      store.agents.selected = store.agents.list[0] ? store.agents.list[0].assistant_id : null;
+    }
+  } catch (e) {
+    store.agents.error = { status: e.status, body: e.body };
+    store.agentsUnsupported = e.status === 404;
+    if (!quiet) toast(e.message, "err");
+  }
+  agentsUpdateSidebar();
+  if (store.view === "agents") agentsRender();
+}
+
+function agentsRender() {
+  if (!store.agents) store.agents = { list: [], selected: null, error: null };
+  const state = store.agents;
+  const list = state.list || [];
+  const tested = list.filter((agent) => store.agentRuns[agent.assistant_id] && store.agentRuns[agent.assistant_id].status === "success").length;
+  const runnable = list.filter((agent) => agentReadiness(agent, store.info, store.agentRuns[agent.assistant_id]).steps[1].ready).length;
+  $("agent-summary").innerHTML =
+    `<div><b>${list.length}</b><span>Durable agents</span></div>` +
+    `<div><b>${runnable}</b><span>Runnable now</span></div>` +
+    `<div><b>${tested}</b><span>Tested here</span></div>`;
+  $("agents-statusline").textContent = state.error ? "load failed" : `${list.length} total`;
+  if (state.error) {
+    $("agent-list").innerHTML = agentErrorHtml(state.error.status, state.error.body);
+    $("agent-detail").innerHTML = `<div class="empty">Agent details unavailable.</div>`;
+    return;
+  }
+  const filtered = agentSearchItems(list, $("inp-agent-search").value);
+  const listEl = $("agent-list");
+  if (!filtered.length) {
+    listEl.innerHTML = `<div class="empty">${list.length ? "No agents match this search." : "No durable agents yet — create the first one."}</div>`;
+  } else {
+    listEl.innerHTML = "";
+    for (const agent of filtered) {
+      const item = document.createElement("div");
+      item.className = "agent-item" + (agent.assistant_id === state.selected ? " selected" : "");
+      item.setAttribute("data-assistant-id", agent.assistant_id);
+      item.setAttribute("role", "button");
+      item.setAttribute("tabindex", "0");
+      item.setAttribute("aria-label", `Open ${agent.name || "unnamed agent"}`);
+      if (agent.assistant_id === state.selected) item.setAttribute("aria-current", "true");
+      item.innerHTML = agentCardHtml(agent, agentReadiness(agent, store.info, store.agentRuns[agent.assistant_id]));
+      listEl.appendChild(item);
+    }
+  }
+  const selected = list.find((agent) => agent.assistant_id === state.selected) || null;
+  $("agent-detail").innerHTML = agentDetailHtml(
+    selected,
+    agentReadiness(selected, store.info, selected && store.agentRuns[selected.assistant_id]),
+    selected && store.agentRuns[selected.assistant_id],
+  );
+}
+
+function agentOpenCreate() {
+  const select = $("sel-agent-graph");
+  select.innerHTML = (((store.info && store.info.graphs) || []).map((g) =>
+    `<option value="${escapeHtml(g.name)}">${escapeHtml(g.name)}</option>`).join(""));
+  $("agent-create-panel").style.display = "block";
+  $("inp-agent-name").focus();
+}
+
+function agentCloseCreate() { $("agent-create-panel").style.display = "none"; }
+
+async function agentCreate() {
+  const payload = agentBuildCreatePayload({
+    name: $("inp-agent-name").value,
+    graph: $("sel-agent-graph").value,
+    assistantId: $("inp-agent-id").value,
+    recursionLimit: $("inp-agent-limit").value,
+    description: $("inp-agent-description").value,
+    tags: $("inp-agent-tags").value,
+  });
+  if (!payload.name) { toast("Enter an agent name.", "err"); return; }
+  if (!payload.graph) { toast("Choose a registered graph.", "err"); return; }
+  $("btn-agent-create").disabled = true;
+  try {
+    const created = await api("POST", "/assistants", payload);
+    if (!store.agents) store.agents = { list: [], selected: null, error: null };
+    store.agents.list.push(created);
+    store.agents.selected = created.assistant_id;
+    agentCloseCreate();
+    for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) $(id).value = "";
+    agentsUpdateSidebar();
+    agentsRender();
+    toast(`agent ${created.name} created`, "ok");
+  } catch (e) { toast(e.message, "err"); }
+  finally { $("btn-agent-create").disabled = false; }
+}
+
+async function agentRunTest(assistantId) {
+  const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
+  if (!agent) return;
+  let input;
+  try { input = JSON.parse($("inp-agent-test").value || "{}"); }
+  catch (e) { toast(`test input is not valid JSON: ${e.message}`, "err"); return; }
+  const button = $("agent-detail").querySelector("[data-agent-run]");
+  if (button) button.disabled = true;
+  $("agent-test-status").innerHTML = badge("running") + ` <span class="muted tiny">creating test thread…</span>`;
+  try {
+    const thread = await api("POST", "/threads", { graph: agent.graph, metadata: { source: "agent_workbench", assistant_id: assistantId } });
+    store.threads.unshift(thread);
+    saveThreads();
+    renderThreads();
+    const result = await api("POST", `/threads/${encodeURIComponent(thread.thread_id)}/runs/wait`, { assistant_id: assistantId, input });
+    store.agentRuns[assistantId] = { status: result.status, run_id: result.run_id, thread_id: thread.thread_id, result };
+    agentsRender();
+    toast(`agent test ${result.status}`, result.status === "success" ? "ok" : "err");
+  } catch (e) {
+    store.agentRuns[assistantId] = { status: "error", error: e.message };
+    agentsRender();
+    toast(e.message, "err");
+  }
+}
+
+function agentOpenThread(threadId) {
+  if (!store.threads.some((thread) => thread.thread_id === threadId)) return;
+  store.selected = threadId;
+  store.view = "thread";
+  saveThreads();
+  renderThreads();
+  renderMain();
+  $("main").scrollTop = 0;
+}
+
+function openAgents() {
+  store.view = "agents";
+  renderMain();
+  $("main").scrollTop = 0;
+}
+
 /* ---------------- durable tasks (R0.6) ----------------
  * Control-plane view over the task queue: GET /tasks?status=… (the list
  * payload doubles as the detail source — GET /tasks/{id} returns the same
@@ -2073,6 +2450,35 @@ function init() {
     const ev = r && r.events.find((x) => x && x.seq === seq);
     if (ev && ev.id) recSelect(ev.id, true);
     else toast(`seq ${seq} is not in the loaded timeline`, "warn");
+  });
+
+  // Agent workbench: durable assistant catalog, guided creation, and a
+  // runtime-backed test that leaves behind a normal debuggable thread.
+  $("btn-agents-open").onclick = openAgents;
+  $("btn-agents-refresh").onclick = () => agentsLoad(false);
+  $("inp-agent-search").addEventListener("input", agentsRender);
+  $("btn-agent-create-open").onclick = agentOpenCreate;
+  $("btn-agent-create-cancel").onclick = agentCloseCreate;
+  $("btn-agent-create").onclick = agentCreate;
+  $("agent-list").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-assistant-id]");
+    if (!item || !store.agents) return;
+    store.agents.selected = item.getAttribute("data-assistant-id");
+    agentsRender();
+  });
+  $("agent-list").addEventListener("keydown", (e) => {
+    if (!["Enter", " "].includes(e.key)) return;
+    const item = e.target.closest("[data-assistant-id]");
+    if (!item || !store.agents) return;
+    e.preventDefault();
+    store.agents.selected = item.getAttribute("data-assistant-id");
+    agentsRender();
+  });
+  $("agent-detail").addEventListener("click", (e) => {
+    const run = e.target.closest("[data-agent-run]");
+    if (run && !run.disabled) { agentRunTest(run.getAttribute("data-agent-run")); return; }
+    const thread = e.target.closest("[data-agent-open-thread]");
+    if (thread) agentOpenThread(thread.getAttribute("data-agent-open-thread"));
   });
 
   // Durable tasks: open the tenant-wide queue view, filter, refresh, and
