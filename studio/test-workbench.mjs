@@ -17,15 +17,37 @@ if (!match) { console.error("FAIL: no <script> block found in index.html"); proc
 const src = match[1].replace(/\ninit\(\);\s*$/, "\n");
 if (/\ninit\(\);/.test(src)) { console.error("FAIL: bootstrap init() was not stripped cleanly"); process.exit(1); }
 
-const sandbox = {};
+const localData = new Map();
+let quotaFailures = 0;
+let storageWrites = 0;
+const fetchCalls = [];
+const sandbox = {
+  async fetch(url, options) {
+    fetchCalls.push({ url, options });
+    return { ok: true, status: 200, async text() { return '{"service":"rusty"}'; } };
+  },
+  localStorage: {
+    getItem(key) { return localData.has(key) ? localData.get(key) : null; },
+    setItem(key, value) {
+      storageWrites++;
+      if (quotaFailures > 0) { quotaFailures--; throw new Error("quota exceeded"); }
+      localData.set(key, String(value));
+    },
+  },
+};
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__workbench = {
-  connectionIdentityChanged,
+  connectionIdentityChanged, connectionAfterAttempt, apiForConnection,
+  connectionRunScope,
+  agentParseRunEnvelope, agentPruneRunEnvelope, loadAgentRunHistory, saveAgentRunHistory,
   agentTags, agentSearchItems, agentReadiness, agentReadinessHtml,
   agentCardHtml, agentGraphLabel, agentDefaultInput, agentBuildRunInput,
+  agentRunTone, agentErrorCategory, agentNormalizeRunRecord, agentMergeRunHistory,
+  agentDurationLabel, agentRunTimeLabel, agentRunHistoryHtml,
   agentJourney, agentJourneyHtml, agentBuildCreatePayload,
-  agentErrorHtml, agentTestResultHtml, agentDetailHtml,
+  agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
+  store,
 };`, sandbox, { filename: "index.html<script>" });
 
 const W = sandbox.__workbench;
@@ -55,6 +77,65 @@ check("connection scope: changing server clears session evidence",
   W.connectionIdentityChanged({ baseUrl: "/api", apiKey: "tenant-a" }, { baseUrl: "http://other", apiKey: "tenant-a" }) === true);
 check("connection scope: changing tenant key clears session evidence",
   W.connectionIdentityChanged({ baseUrl: "/api", apiKey: "tenant-a" }, { baseUrl: "/api", apiKey: "tenant-b" }) === true);
+{
+  const tenantA = { baseUrl: "/api", apiKey: "tenant-a" };
+  const tenantB = { baseUrl: "/api", apiKey: "tenant-b" };
+  const afterFailure = W.connectionAfterAttempt(tenantA, tenantB, false);
+  const afterRetry = W.connectionAfterAttempt(afterFailure, tenantB, true);
+  check("connection scope: failed tenant switch rolls back before retry",
+    afterFailure === tenantA && W.connectionIdentityChanged(afterFailure, afterRetry));
+  W.store.conn = tenantA;
+  await W.apiForConnection(tenantB, "GET", "/info");
+  check("connection scope: candidate validation does not mutate the active tenant",
+    W.store.conn === tenantA && fetchCalls.at(-1).url === "/api/info" &&
+    fetchCalls.at(-1).options.headers["X-Api-Key"] === "tenant-b");
+}
+check("run ledger scope: same connection identity is stable",
+  W.connectionRunScope({ baseUrl: "/api", apiKey: "tenant-a" }) ===
+  W.connectionRunScope({ baseUrl: "/api", apiKey: "tenant-a" }));
+check("run ledger scope: tenant keys do not share history",
+  W.connectionRunScope({ baseUrl: "/api", apiKey: "tenant-a" }) !==
+  W.connectionRunScope({ baseUrl: "/api", apiKey: "tenant-b" }));
+check("run ledger scope: API key is not copied into the storage namespace",
+  !W.connectionRunScope({ baseUrl: "/api", apiKey: "secret-tenant-key" }).includes("secret-tenant-key"));
+
+{
+  check("run ledger storage: malformed JSON becomes an empty envelope",
+    Object.keys(W.agentParseRunEnvelope("{broken").scopes).length === 0);
+  check("run ledger storage: wrong top-level types become an empty envelope",
+    Object.keys(W.agentParseRunEnvelope("[]").scopes).length === 0 &&
+    Object.keys(W.agentParseRunEnvelope('"wrong"').scopes).length === 0);
+  const envelope = { version: 1, scopes: {} };
+  for (let scope = 0; scope < 10; scope++) {
+    const assistants = {};
+    for (let assistant = 0; assistant < 12; assistant++) {
+      assistants[`agent-${scope}-${assistant}`] = {
+        touched_at: scope * 100 + assistant,
+        runs: [{ record_id: `run-${scope}-${assistant}`, status: "success" }],
+      };
+    }
+    envelope.scopes[`scope-${scope}`] = { touched_at: scope, assistants };
+  }
+  const bounded = W.agentPruneRunEnvelope(envelope, "scope-0", "agent-0-0", 196608);
+  const assistantCount = Object.values(bounded.scopes)
+    .reduce((total, scope) => total + Object.keys(scope.assistants).length, 0);
+  check("run ledger storage: scope and global assistant counts are bounded",
+    Object.keys(bounded.scopes).length <= 8 && assistantCount <= 80 && bounded.scopes["scope-0"]);
+}
+
+{
+  W.store.conn = { baseUrl: "/api", apiKey: "tenant-storage" };
+  W.store.agentRunHistory = { agent: [{ record_id: "run-storage", status: "success" }] };
+  for (const corrupt of ["{broken", "[]", '"wrong"']) {
+    localData.set("ags:agentRuns", corrupt);
+    check(`run ledger storage: a corrupt ${corrupt[0]} value self-recovers on save`,
+      W.saveAgentRunHistory("agent") && W.agentParseRunEnvelope(localData.get("ags:agentRuns")).version === 1);
+  }
+  quotaFailures = 1;
+  storageWrites = 0;
+  check("run ledger storage: quota failure prunes and retries once",
+    W.saveAgentRunHistory("agent") && storageWrites === 2);
+}
 
 eq("tags: array is preserved", W.agentTags(agent), ["research", "production"]);
 eq("tags: comma-separated legacy value is normalized",
@@ -161,8 +242,85 @@ check("server error message is escaped",
   W.agentErrorHtml(500, { message: "store <offline>" }).includes("&lt;offline&gt;"));
 
 {
+  const record = W.agentNormalizeRunRecord({
+    record_id: "attempt-1", run_id: "run-1", thread_id: "thread-1", graph: "react_agent",
+    status: "success", started_at: "2026-08-09T12:00:00Z", finished_at: "2026-08-09T12:00:02Z",
+    duration_ms: 2345, error: "provider leaked a private task", error_class: "tool_error",
+    prompt: "private task", result: { output: "private answer" },
+  });
+  check("run ledger: stores identity, status, graph, and timing",
+    record.run_id === "run-1" && record.thread_id === "thread-1" && record.graph === "react_agent" && record.duration_ms === 2345);
+  check("run ledger: strips prompts and result payloads",
+    !("prompt" in record) && !("result" in record) && !("input" in record) && !("error" in record));
+  check("run ledger: invalid records without an identity are discarded",
+    W.agentNormalizeRunRecord({ status: "success" }) === null);
+  check("run ledger: corrupt timestamps become unavailable instead of throwing",
+    W.agentNormalizeRunRecord({ record_id: "bad-time", started_at: "yesterdayish" }).started_at === null);
+  check("run ledger: only a stable error class survives sanitization",
+    record.error_class === "tool_error" && !JSON.stringify(record).includes("private task"));
+  check("run ledger: an unknown secret-bearing server error is classified, not persisted",
+    W.agentErrorCategory({ status: 500, body: { error: "sk-live-secret", message: "private task" } }) === "http_500");
+  check("run ledger: a safe HTTP category survives history normalization",
+    W.agentNormalizeRunRecord({ record_id: "http", error_class: "http_500" }).error_class === "http_500");
+  check("run ledger: network failures receive a stable category",
+    W.agentErrorCategory({ status: 0, body: { message: "private host" } }) === "network_error");
+}
+
+{
+  const old = {
+    record_id: "run-old", run_id: "run-old", status: "error",
+    started_at: "2026-08-09T11:00:00Z", duration_ms: 1000,
+  };
+  const current = {
+    record_id: "run-current", run_id: "run-current", status: "success",
+    started_at: "2026-08-09T12:00:00Z", duration_ms: 2000,
+  };
+  eq("run ledger: newest run is placed first", W.agentMergeRunHistory([old], current, 12).map((run) => run.run_id),
+    ["run-current", "run-old"]);
+  const updated = { ...current, status: "interrupted", duration_ms: 3000 };
+  const merged = W.agentMergeRunHistory([current, old], updated, 12);
+  check("run ledger: the same run updates instead of duplicating",
+    merged.length === 2 && merged[0].status === "interrupted" && merged[0].duration_ms === 3000);
+  check("run ledger: history is bounded",
+    W.agentMergeRunHistory([current, old], { ...current, run_id: "run-new", record_id: "run-new" }, 2).length === 2);
+}
+
+check("run ledger: sub-second duration is readable", W.agentDurationLabel(250) === "<1s");
+check("run ledger: seconds duration is readable", W.agentDurationLabel(2345) === "2.3s");
+check("run ledger: minute duration is readable", W.agentDurationLabel(65000) === "1m 5s");
+check("run ledger: invalid duration is explicit", W.agentDurationLabel(null) === "duration unavailable");
+check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") === "time unavailable");
+
+{
+  const empty = W.agentRunHistoryHtml([]);
+  check("run ledger: empty state invites the first real task", empty.includes("No runs from this browser yet"));
+  const history = W.agentRunHistoryHtml([{
+    record_id: "run-1", run_id: "run-1", thread_id: "thread-1", graph: "react_agent",
+    status: "error", started_at: "2026-08-09T12:00:00Z", duration_ms: 1200,
+    error: "private provider detail", error_class: "tool_error", result: { output: "must not render" },
+  }]);
+  check("run ledger: row exposes status, run, thread, and inspection",
+    history.includes("error") && history.includes("run-1") && history.includes("thread-1") && history.includes(">Inspect</button>"));
+  check("run ledger: inspection carries the graph needed to reattach a forgotten local thread",
+    history.includes('data-agent-open-graph="react_agent"'));
+  check("run ledger: only the safe error class renders and result payload is absent",
+    history.includes("Tool error") && !history.includes("private provider detail") && !history.includes("must not render"));
+  const failedStart = W.agentRunHistoryHtml([{
+    record_id: "attempt-1", status: "error", started_at: "2026-08-09T12:00:00Z", error_class: "network_error",
+  }]);
+  check("run ledger: an attempt without a thread does not offer a false Inspect action",
+    failedStart.includes("run did not start") && !failedStart.includes(">Inspect</button>"));
+  const unattachable = W.agentRunHistoryHtml([{
+    record_id: "run-no-graph", run_id: "run-no-graph", thread_id: "thread-no-graph", status: "success",
+  }]);
+  check("run ledger: a corrupt record without graph context does not offer a no-op Inspect action",
+    !unattachable.includes(">Inspect</button>"));
+}
+
+{
   const run = { status: "success", run_id: "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d", thread_id: "thread-42", result: { status: "success" } };
-  const detail = W.agentDetailHtml(agent, W.agentReadiness(agent, info, run), run);
+  const history = [{ ...run, record_id: run.run_id, graph: agent.graph, started_at: "2026-08-09T12:00:00Z", duration_ms: 850 }];
+  const detail = W.agentDetailHtml(agent, W.agentReadiness(agent, info, run), run, history);
   check("detail exposes durable identity and configuration",
     detail.includes("research-coordinator") && detail.includes("12") && detail.includes("production"));
   check("detail provides real run and open-thread actions",
@@ -172,11 +330,32 @@ check("server error message is escaped",
   check("detail uses a plain-language task instead of raw JSON for conversational agents",
     detail.includes('id="inp-agent-prompt"') && detail.includes("Reply with a short hello.") && !detail.includes("Test input (JSON)"));
   check("detail escapes names and offers the trace as the next step",
-    detail.includes("Research &lt;Coordinator&gt;") && detail.includes("Inspect run"));
+    detail.includes("Research &lt;Coordinator&gt;") && detail.includes("Inspect latest"));
+  check("detail includes the recent-run evidence ledger and privacy boundary",
+    detail.includes("Recent runs") && detail.includes("Prompts and outputs are not stored here") && detail.includes("1/12"));
   check("successful evidence is rendered with success tone",
     W.agentTestResultHtml(run).includes("Run succeeded"));
   check("failed evidence carries its message",
     W.agentTestResultHtml({ status: "error", error: "graph unavailable" }).includes("graph unavailable"));
+  check("interrupted evidence is not mislabeled as an error",
+    W.agentTestResultHtml({ status: "interrupted", run_id: "run-2" }).includes("Run interrupted"));
+  check("cancelled evidence is control flow, not a pending or generic error state",
+    W.agentRunTone("cancelled") === "interrupted" &&
+    W.agentTestResultHtml({ status: "cancelled", run_id: "run-3" }).includes("Run cancelled"));
+  check("wire error results retain a safe diagnosis without retaining the raw detail", (() => {
+    const wire = { status: "error", error: "llm_error", message: "provider secret" };
+    const saved = W.agentNormalizeRunRecord({ record_id: "run-wire", status: wire.status,
+      error: wire.message, error_class: W.agentErrorCategory(wire) });
+    return saved.error_class === "llm_error" && !JSON.stringify(saved).includes("provider secret");
+  })());
+  check("the real internal panic wire category remains diagnosable",
+    W.agentErrorCategory({ status: "error", error: "internal_panic", message: "private panic" }) === "internal_panic");
+  check("run status changes use a persistent announcement and inspection has a focus target",
+    html.includes('id="agent-run-announcer" role="status" aria-live="polite"') &&
+    html.indexOf('id="agent-run-announcer"') < html.indexOf('id="agent-detail"') &&
+    W.agentRunAnnouncement({ status: "success", run_id: "run-42" }).includes("Run succeeded") &&
+    W.agentRunAnnouncement({ status: "running" }).includes("Run started") &&
+    html.includes('id="flight-recorder-title" tabindex="-1"'));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

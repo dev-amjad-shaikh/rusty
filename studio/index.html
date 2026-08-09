@@ -93,6 +93,7 @@
   }
   .muted { color: var(--text-dim); }
   .tiny { font-size: 11.5px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   a { color: var(--accent); }
 
   /* ---------- badges ---------- */
@@ -394,9 +395,40 @@
   .run-outcome strong { font-size: 11.5px; }
   .run-outcome.success strong { color: #cfe3c6; }
   .run-outcome.error strong { color: #eac5c0; }
+  .run-outcome.interrupted strong { color: #eccbb5; }
   .run-evidence { margin-top: 10px; }
+  .agent-run-ledger { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 14px; }
+  .agent-run-ledger-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .agent-run-ledger-head h3 { margin: 0; font-size: 15px; }
+  .agent-run-ledger-head span { color: var(--text-faint); font: 10.5px var(--mono); }
+  .agent-run-ledger > p { margin: 3px 0 10px; color: var(--text-dim); font-size: 11.5px; }
+  .agent-run-list { position: relative; display: flex; flex-direction: column; gap: 7px; }
+  .agent-run-list::before {
+    content: ""; position: absolute; left: 10px; top: 10px; bottom: 10px; width: 1px;
+    background: linear-gradient(var(--border-hi), var(--border));
+  }
+  .agent-run-row {
+    position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px;
+    align-items: center; margin-left: 22px; padding: 9px 10px 9px 12px;
+    border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset);
+  }
+  .agent-run-row::before {
+    content: ""; position: absolute; left: -17px; top: 15px; width: 9px; height: 9px;
+    border: 2px solid var(--pending); border-radius: 50%; background: var(--bg-panel);
+  }
+  .agent-run-row.run-success::before { border-color: var(--ok); }
+  .agent-run-row.run-error::before { border-color: var(--err); }
+  .agent-run-row.run-interrupted::before { border-color: var(--interrupt); }
+  .agent-run-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .agent-run-line time, .agent-run-duration { color: var(--text-faint); font: 10.5px var(--mono); }
+  .agent-run-ids { margin-top: 4px; color: var(--text-dim); font: 10.5px var(--mono); word-break: break-all; }
+  .agent-run-error { margin-top: 4px; color: #eac5c0; font-size: 11px; }
+  .agent-run-empty {
+    border: 1px dashed var(--border-hi); border-radius: 7px; padding: 12px;
+    color: var(--text-faint); font-size: 11.5px; text-align: center;
+  }
   .agent-summary {
-    display: grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); gap: 8px; margin-bottom: 12px;
+    display: grid; grid-template-columns: repeat(4, minmax(90px, 1fr)); gap: 8px; margin-bottom: 12px;
   }
   .agent-summary > div { border: 1px solid var(--border); background: var(--bg-inset); border-radius: 7px; padding: 8px 10px; }
   .agent-summary b { display: block; font: 700 17px var(--mono); color: #91b9dc; }
@@ -417,6 +449,9 @@
     .journey-step:last-child { border-bottom: 0; }
     .agent-advanced-grid { grid-template-columns: 1fr; }
     .agent-advanced-grid .wide { grid-column: auto; }
+    .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .agent-run-row { grid-template-columns: 1fr; }
+    .agent-run-row button { justify-self: start; }
   }
 
   :is(button, input, select, textarea, summary):focus-visible {
@@ -494,6 +529,7 @@
         </div>
 
         <div class="agent-journey" id="agent-journey" aria-live="polite"></div>
+        <div class="sr-only" id="agent-run-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
         <div class="card" id="agent-create-panel" style="display:none">
           <h2 class="section" style="margin-top:0">Create an agent</h2>
@@ -585,7 +621,7 @@
         </div>
 
         <div class="card" id="flight-recorder-card">
-          <h2 class="section" style="margin-top:0">
+          <h2 class="section" id="flight-recorder-title" tabindex="-1" style="margin-top:0">
             Flight Recorder
             <button class="small" id="btn-rec-refresh" style="float:right">reload</button>
           </h2>
@@ -693,7 +729,14 @@ const LS = {
   conn:    "ags:conn",
   threads: "ags:threads",   // { [baseUrl]: [threadRecord] }
   sel:     "ags:selected",  // { [baseUrl]: threadId }
+  agentRuns: "ags:agentRuns", // bounded v1 envelope of connection-scoped, sanitized run metadata
 };
+
+const AGENT_RUN_HISTORY_LIMIT = 12;
+const AGENT_RUN_SCOPE_LIMIT = 8;
+const AGENT_RUN_ASSISTANT_LIMIT = 40;
+const AGENT_RUN_GLOBAL_ASSISTANT_LIMIT = 80;
+const AGENT_RUN_STORAGE_LIMIT = 196608;
 
 const $ = (id) => document.getElementById(id);
 
@@ -713,7 +756,8 @@ const store = {
   tasks: null,         // { list, selected, error } for the durable-tasks view
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
   agents: null,        // { list, selected, error } for the durable-agent workbench
-  agentRuns: {},       // successful/failed tests started from this browser session, keyed by assistant id
+  agentRuns: Object.create(null),       // latest full run from this browser session, keyed by assistant id
+  agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
   agentCreateOpen: false, // creation form temporarily owns the guided journey
   agentsUnsupported: false, // server build has no /assistants routes
 };
@@ -745,6 +789,140 @@ function saveThreads() {
   localStorage.setItem(LS.sel, JSON.stringify(sel));
 }
 
+function connectionRunScope(conn) {
+  if (!conn || !conn.baseUrl) return "";
+  const value = `${conn.baseUrl}\u0000${conn.apiKey || ""}`;
+  let first = 2166136261;
+  let second = 3335557771;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code, 2246822519);
+  }
+  const opaque = (first >>> 0).toString(16).padStart(8, "0") + (second >>> 0).toString(16).padStart(8, "0");
+  return `${conn.baseUrl}#${opaque}`;
+}
+
+function agentEmptyRunEnvelope() {
+  return { version: 1, scopes: Object.create(null) };
+}
+
+function agentPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function agentParseRunEnvelope(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return agentEmptyRunEnvelope(); }
+  if (!agentPlainObject(parsed) || parsed.version !== 1 || !agentPlainObject(parsed.scopes)) {
+    return agentEmptyRunEnvelope();
+  }
+  const envelope = agentEmptyRunEnvelope();
+  for (const [scope, value] of Object.entries(parsed.scopes)) {
+    if (!agentPlainObject(value) || !agentPlainObject(value.assistants)) continue;
+    const assistants = Object.create(null);
+    for (const [assistantId, entry] of Object.entries(value.assistants)) {
+      if (!agentPlainObject(entry) || !Array.isArray(entry.runs)) continue;
+      const runs = entry.runs.map(agentNormalizeRunRecord).filter(Boolean).slice(0, AGENT_RUN_HISTORY_LIMIT);
+      if (!runs.length) continue;
+      assistants[assistantId] = {
+        touched_at: Number.isFinite(Number(entry.touched_at)) ? Number(entry.touched_at) : 0,
+        runs,
+      };
+    }
+    if (Object.keys(assistants).length) {
+      envelope.scopes[scope] = {
+        touched_at: Number.isFinite(Number(value.touched_at)) ? Number(value.touched_at) : 0,
+        assistants,
+      };
+    }
+  }
+  return envelope;
+}
+
+function agentPruneRunEnvelope(value, currentScope, activeAssistant, maxSize) {
+  const envelope = agentParseRunEnvelope(JSON.stringify(value));
+  const scopeOrder = () => Object.keys(envelope.scopes).sort((left, right) => {
+    if (left === currentScope) return -1;
+    if (right === currentScope) return 1;
+    return envelope.scopes[right].touched_at - envelope.scopes[left].touched_at || left.localeCompare(right);
+  });
+  for (const scope of scopeOrder()) {
+    const assistants = envelope.scopes[scope].assistants;
+    const ordered = Object.keys(assistants).sort((left, right) =>
+      assistants[right].touched_at - assistants[left].touched_at || left.localeCompare(right));
+    for (const assistantId of ordered.slice(AGENT_RUN_ASSISTANT_LIMIT)) delete assistants[assistantId];
+  }
+  for (const scope of scopeOrder().slice(AGENT_RUN_SCOPE_LIMIT)) delete envelope.scopes[scope];
+
+  const assistantEntries = () => Object.entries(envelope.scopes).flatMap(([scope, entry]) =>
+    Object.entries(entry.assistants).map(([assistantId, assistant]) => ({ scope, assistantId, touchedAt: assistant.touched_at })));
+  let assistants = assistantEntries().sort((left, right) => left.touchedAt - right.touchedAt);
+  while (assistants.length > AGENT_RUN_GLOBAL_ASSISTANT_LIMIT) {
+    const index = assistants.findIndex((entry) => entry.scope !== currentScope || entry.assistantId !== activeAssistant);
+    if (index < 0) break;
+    const [oldest] = assistants.splice(index, 1);
+    delete envelope.scopes[oldest.scope].assistants[oldest.assistantId];
+  }
+
+  const budget = Math.max(1024, Number(maxSize) || AGENT_RUN_STORAGE_LIMIT);
+  while (JSON.stringify(envelope).length > budget) {
+    const oldScope = scopeOrder().reverse().find((scope) => scope !== currentScope);
+    if (oldScope) { delete envelope.scopes[oldScope]; continue; }
+    const current = envelope.scopes[currentScope];
+    if (!current) break;
+    const oldAssistant = Object.keys(current.assistants)
+      .filter((assistantId) => assistantId !== activeAssistant)
+      .sort((left, right) => current.assistants[left].touched_at - current.assistants[right].touched_at)[0];
+    if (oldAssistant) { delete current.assistants[oldAssistant]; continue; }
+    const active = current.assistants[activeAssistant];
+    if (active && active.runs.length > 1) { active.runs.pop(); continue; }
+    break;
+  }
+  return envelope;
+}
+
+function loadAgentRunHistory() {
+  store.agentRunHistory = Object.create(null);
+  const scope = connectionRunScope(store.conn);
+  if (!scope) return;
+  const envelope = agentParseRunEnvelope(localStorage.getItem(LS.agentRuns));
+  const scoped = envelope.scopes[scope];
+  if (!scoped) return;
+  for (const [assistantId, entry] of Object.entries(scoped.assistants)) {
+    if (entry.runs.length) store.agentRunHistory[assistantId] = entry.runs;
+  }
+}
+
+function saveAgentRunHistory(activeAssistant) {
+  const scope = connectionRunScope(store.conn);
+  if (!scope) return false;
+  const now = Date.now();
+  const envelope = agentParseRunEnvelope(localStorage.getItem(LS.agentRuns));
+  const previous = envelope.scopes[scope];
+  const assistants = Object.create(null);
+  for (const [assistantId, runs] of Object.entries(store.agentRunHistory)) {
+    const clean = (Array.isArray(runs) ? runs : []).map(agentNormalizeRunRecord).filter(Boolean).slice(0, AGENT_RUN_HISTORY_LIMIT);
+    if (!clean.length) continue;
+    assistants[assistantId] = {
+      touched_at: assistantId === activeAssistant ? now : previous?.assistants?.[assistantId]?.touched_at || now,
+      runs: clean,
+    };
+  }
+  envelope.scopes[scope] = { touched_at: now, assistants };
+  let bounded = agentPruneRunEnvelope(envelope, scope, activeAssistant, AGENT_RUN_STORAGE_LIMIT);
+  try {
+    localStorage.setItem(LS.agentRuns, JSON.stringify(bounded));
+    return true;
+  } catch {
+    // A quota failure can include unrelated local data. Compact our ledger once
+    // more and retry, but never let this convenience break the real run.
+    bounded = agentPruneRunEnvelope(bounded, scope, activeAssistant, Math.floor(AGENT_RUN_STORAGE_LIMIT / 2));
+    try { localStorage.setItem(LS.agentRuns, JSON.stringify(bounded)); return true; }
+    catch { return false; }
+  }
+}
+
 /* ---------------- HTTP ---------------- */
 
 class ApiError extends Error {
@@ -756,13 +934,13 @@ class ApiError extends Error {
   }
 }
 
-async function api(method, path, body) {
+async function apiForConnection(connection, method, path, body) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (store.conn && store.conn.apiKey) headers["X-Api-Key"] = store.conn.apiKey;
+  if (connection && connection.apiKey) headers["X-Api-Key"] = connection.apiKey;
   let res;
   try {
-    res = await fetch(store.conn.baseUrl + path, {
+    res = await fetch(connection.baseUrl + path, {
       method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
@@ -775,6 +953,10 @@ async function api(method, path, body) {
   try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
   if (!res.ok) throw new ApiError(res.status, json);
   return json;
+}
+
+async function api(method, path, body) {
+  return apiForConnection(store.conn, method, path, body);
 }
 
 /* ---------------- small helpers ---------------- */
@@ -793,7 +975,8 @@ function shortId(id) { return id && id.length > 13 ? id.slice(0, 8) + "…" + id
 
 function badge(status) {
   const s = String(status || "pending");
-  const cls = ["pending","running","success","interrupted","error"].includes(s) ? s : "pending";
+  const cls = ["pending","running","success","interrupted","error"].includes(s)
+    ? s : s === "cancelled" ? "interrupted" : "pending";
   return `<span class="badge ${cls}">${escapeHtml(s)}</span>`;
 }
 
@@ -812,22 +995,31 @@ function connectionIdentityChanged(previous, next) {
   return !previous || !next || previous.baseUrl !== next.baseUrl || previous.apiKey !== next.apiKey;
 }
 
+function connectionAfterAttempt(previous, candidate, succeeded) {
+  return succeeded ? candidate : previous;
+}
+
 async function connect() {
   const baseUrl = $("inp-url").value.trim().replace(/\/+$/, "");
   const apiKey = $("inp-key").value;
   if (!baseUrl) { toast("Enter a server base URL.", "err"); return; }
   const previousConnection = store.conn;
-  store.conn = { baseUrl, apiKey };
+  const candidateConnection = { baseUrl, apiKey };
   $("conn-status").textContent = "connecting…";
+  let info;
   try {
-    store.info = await api("GET", "/info");
+    info = await apiForConnection(candidateConnection, "GET", "/info");
   } catch (e) {
+    store.conn = connectionAfterAttempt(previousConnection, candidateConnection, false);
     $("conn-status").textContent = "connection failed";
     toast(e.message, "err");
     return;
   }
+  store.conn = connectionAfterAttempt(previousConnection, candidateConnection, true);
+  store.info = info;
   if (connectionIdentityChanged(previousConnection, store.conn)) {
-    store.agentRuns = {};
+    store.agentRuns = Object.create(null);
+    store.agentRunHistory = Object.create(null);
     store.agentCreateOpen = false;
     store.agents = null;
     store.agentsUnsupported = false;
@@ -837,6 +1029,7 @@ async function connect() {
   }
   saveConn();
   loadThreads();
+  loadAgentRunHistory();
   $("conn-status").innerHTML =
     `connected — <b>${escapeHtml(store.info.service)}</b> v${escapeHtml(store.info.version)} · ` +
     `${store.info.graphs.length} graph(s) · checkpointer: ${escapeHtml(store.info.checkpointer)}`;
@@ -2028,6 +2221,140 @@ function agentDefaultInput(graph) {
   return {};
 }
 
+function agentRunTone(status) {
+  const value = String(status || "pending");
+  if (value === "cancelled") return "interrupted";
+  return ["success", "error", "interrupted", "running"].includes(value) ? value : "pending";
+}
+
+function agentErrorCategory(value) {
+  const known = new Set([
+    "graph_error", "node_error", "checkpoint_error", "llm_error", "tool_error",
+    "serialization_error", "invalid_update", "replay_error", "internal_error", "internal_panic",
+    "not_found", "conflict", "quota_exceeded", "bad_request", "unprocessable",
+    "shutting_down", "interrupted", "cancelled", "network_error", "client_error",
+  ]);
+  const raw = value && value.body && value.body.error !== undefined
+    ? value.body.error : value && value.error;
+  const candidate = String(raw || "").trim().toLowerCase();
+  if (known.has(candidate) || /^http_[1-5][0-9]{2}$/.test(candidate)) return candidate;
+  if (value && Number(value.status) === 0) return "network_error";
+  if (value && Number.isInteger(Number(value.status)) && Number(value.status) > 0) {
+    return `http_${Number(value.status)}`;
+  }
+  return "client_error";
+}
+
+function agentErrorCategoryLabel(value) {
+  const category = String(value || "");
+  if (!category) return "";
+  if (category === "llm_error") return "Model error";
+  return category.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function agentNormalizeRunRecord(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const runId = String(raw.run_id || "").trim();
+  const recordId = String(raw.record_id || runId || "").trim();
+  if (!recordId) return null;
+  const timestamp = (value) => {
+    const millis = Date.parse(String(value || ""));
+    return Number.isFinite(millis) ? new Date(millis).toISOString() : null;
+  };
+  const duration = raw.duration_ms === null || raw.duration_ms === undefined || raw.duration_ms === ""
+    ? Number.NaN : Number(raw.duration_ms);
+  return {
+    record_id: recordId.slice(0, 256),
+    run_id: runId.slice(0, 256),
+    thread_id: String(raw.thread_id || "").trim().slice(0, 256),
+    graph: String(raw.graph || "").trim().slice(0, 256),
+    status: String(raw.status || "pending").trim().slice(0, 32) || "pending",
+    started_at: timestamp(raw.started_at),
+    finished_at: timestamp(raw.finished_at),
+    duration_ms: Number.isFinite(duration) && duration >= 0 ? Math.min(Math.round(duration), 604800000) : null,
+    error_class: raw.error_class ? agentErrorCategory({ error: raw.error_class }) : "",
+  };
+}
+
+function agentMergeRunHistory(existing, record, limit) {
+  const maximum = Math.max(1, Number(limit) || AGENT_RUN_HISTORY_LIMIT);
+  const clean = agentNormalizeRunRecord(record);
+  if (!clean) return (Array.isArray(existing) ? existing : []).map(agentNormalizeRunRecord).filter(Boolean).slice(0, maximum);
+  const key = (run) => run.run_id ? `run:${run.run_id}` : `record:${run.record_id}`;
+  const seen = new Set();
+  const merged = [];
+  for (const candidate of [clean, ...(Array.isArray(existing) ? existing : [])]) {
+    const normalized = agentNormalizeRunRecord(candidate);
+    if (!normalized || seen.has(key(normalized))) continue;
+    seen.add(key(normalized));
+    merged.push(normalized);
+    if (merged.length >= maximum) break;
+  }
+  return merged;
+}
+
+function agentRunsFor(assistantId) {
+  const runs = store.agentRunHistory[String(assistantId || "")];
+  return Array.isArray(runs) ? runs : [];
+}
+
+function agentLatestRun(assistantId) {
+  return store.agentRuns[assistantId] || agentRunsFor(assistantId)[0] || null;
+}
+
+function agentSuccessfulRun(assistantId) {
+  const session = store.agentRuns[assistantId];
+  if (session && session.status === "success") return session;
+  return agentRunsFor(assistantId).find((run) => run.status === "success") || null;
+}
+
+function agentRememberRun(assistantId, run) {
+  const id = String(assistantId || "");
+  if (!id) return false;
+  store.agentRunHistory[id] = agentMergeRunHistory(agentRunsFor(id), run, AGENT_RUN_HISTORY_LIMIT);
+  return saveAgentRunHistory(id);
+}
+
+function agentDurationLabel(value) {
+  if (value === null || value === undefined || value === "") return "duration unavailable";
+  const millis = Number(value);
+  if (!Number.isFinite(millis) || millis < 0) return "duration unavailable";
+  if (millis < 1000) return "<1s";
+  if (millis < 60000) return `${(millis / 1000).toFixed(millis < 10000 ? 1 : 0)}s`;
+  const minutes = Math.floor(millis / 60000);
+  const seconds = Math.floor((millis % 60000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
+function agentRunTimeLabel(value) {
+  const millis = Date.parse(String(value || ""));
+  if (!Number.isFinite(millis)) return "time unavailable";
+  return new Date(millis).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function agentRunHistoryHtml(history) {
+  const runs = (Array.isArray(history) ? history : []).map(agentNormalizeRunRecord).filter(Boolean).slice(0, AGENT_RUN_HISTORY_LIMIT);
+  if (!runs.length) {
+    return `<div class="agent-run-empty">No runs from this browser yet. Give the agent a task to start its evidence trail.</div>`;
+  }
+  return `<div class="agent-run-list">${runs.map((run) => {
+    const tone = agentRunTone(run.status);
+    const runLabel = run.run_id ? `run ${shortId(run.run_id)}` : "run did not start";
+    const threadLabel = run.thread_id ? ` · thread ${shortId(run.thread_id)}` : "";
+    const timeAttribute = run.started_at ? ` datetime="${escapeHtml(run.started_at)}"` : "";
+    const inspect = run.thread_id && run.graph
+      ? `<button class="small" data-agent-open-thread="${escapeHtml(run.thread_id)}" data-agent-open-run="${escapeHtml(run.run_id)}" data-agent-open-graph="${escapeHtml(run.graph)}" aria-label="Inspect ${escapeHtml(runLabel)}">Inspect</button>`
+      : "";
+    return `<article class="agent-run-row run-${tone}"><div>` +
+      `<div class="agent-run-line">${badge(run.status)}` +
+      `<time${timeAttribute}>${escapeHtml(agentRunTimeLabel(run.started_at))}</time>` +
+      `<span class="agent-run-duration">${escapeHtml(agentDurationLabel(run.duration_ms))}</span></div>` +
+      `<div class="agent-run-ids">${escapeHtml(runLabel + threadLabel)}</div>` +
+      (run.error_class ? `<div class="agent-run-error">${escapeHtml(agentErrorCategoryLabel(run.error_class))}</div>` : "") +
+      `</div>${inspect}</article>`;
+  }).join("")}</div>`;
+}
+
 function agentBuildRunInput(agent, value) {
   const graph = agent && agent.graph;
   const raw = String(value || "");
@@ -2093,13 +2420,36 @@ function agentErrorHtml(status, body) {
 
 function agentTestResultHtml(run) {
   if (!run) return `<span class="muted tiny">No run yet.</span>`;
-  const success = run.status === "success";
-  const detail = run.error ? escapeHtml(run.error) : `run ${escapeHtml(shortId(run.run_id))}`;
-  return `<span class="run-outcome ${success ? "success" : "error"}"><strong>${success ? "Run succeeded" : "Run needs attention"}</strong>` +
+  const rawStatus = String(run.status || "pending");
+  const status = agentRunTone(run.status);
+  const title = status === "success" ? "Run succeeded"
+    : rawStatus === "cancelled" ? "Run cancelled"
+    : status === "interrupted" ? "Run interrupted" : "Run needs attention";
+  const detail = run.error ? escapeHtml(run.error)
+    : run.error_class ? escapeHtml(agentErrorCategoryLabel(run.error_class))
+    : run.run_id ? `run ${escapeHtml(shortId(run.run_id))}` : "no run id";
+  return `<span class="run-outcome ${status}"><strong>${title}</strong>` +
     `<span class="muted tiny">${detail}</span></span>`;
 }
 
-function agentDetailHtml(agent, readiness, testRun) {
+function agentRunAnnouncement(run) {
+  if (!run) return "";
+  const status = String(run.status || "pending");
+  if (status === "running") return "Run started. Creating a test thread.";
+  const title = status === "success" ? "Run succeeded"
+    : status === "cancelled" ? "Run cancelled"
+    : status === "interrupted" ? "Run interrupted" : "Run needs attention";
+  const detail = run.error_class ? agentErrorCategoryLabel(run.error_class)
+    : run.run_id ? `Run ${shortId(run.run_id)}` : "No run ID";
+  return `${title}. ${detail}.`;
+}
+
+function agentAnnounceRun(run) {
+  const announcer = $("agent-run-announcer");
+  if (announcer) announcer.textContent = agentRunAnnouncement(run);
+}
+
+function agentDetailHtml(agent, readiness, testRun, runHistory) {
   if (!agent) return `<div class="empty">Select an agent to inspect and test it.</div>`;
   const meta = agent.metadata || {};
   const config = agent.config || {};
@@ -2123,9 +2473,13 @@ function agentDetailHtml(agent, readiness, testRun) {
     `</div>` +
     `<div class="agent-test"><h3>Try it now</h3><p>This creates a real run. Nothing here is simulated.</p>${input}` +
     `<div class="agent-test-actions"><button class="primary" data-agent-run="${escapeHtml(agent.assistant_id)}"${runnable ? "" : " disabled"}>Run agent</button>` +
-    (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}" data-agent-open-run="${escapeHtml(testRun.run_id || "")}">Inspect run</button>` : "") +
+    (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}" data-agent-open-run="${escapeHtml(testRun.run_id || "")}" data-agent-open-graph="${escapeHtml(agent.graph || "")}">Inspect latest</button>` : "") +
     `<span id="agent-test-status">${agentTestResultHtml(testRun)}</span></div>` +
-    `<div id="agent-test-result">${testRun && testRun.result ? `<details class="run-evidence"><summary>View result data</summary><pre class="json">${escapeHtml(pretty(testRun.result))}</pre></details>` : ""}</div></div>`;
+    `<div id="agent-test-result">${testRun && testRun.result ? `<details class="run-evidence"><summary>View result data</summary><pre class="json">${escapeHtml(pretty(testRun.result))}</pre></details>` : ""}</div></div>` +
+    `<section class="agent-run-ledger" aria-labelledby="agent-run-ledger-title"><div class="agent-run-ledger-head">` +
+    `<h3 id="agent-run-ledger-title">Recent runs</h3><span>${Array.isArray(runHistory) ? runHistory.length : 0}/${AGENT_RUN_HISTORY_LIMIT}</span></div>` +
+    `<p>Runs started from this browser on this server connection. Prompts and outputs are not stored here.</p>` +
+    agentRunHistoryHtml(runHistory) + `</section>`;
 }
 
 function agentsUpdateSidebar() {
@@ -2160,15 +2514,19 @@ function agentsRender() {
   if (!store.agents) store.agents = { list: [], selected: null, error: null };
   const state = store.agents;
   const list = state.list || [];
-  const tested = list.filter((agent) => store.agentRuns[agent.assistant_id] && store.agentRuns[agent.assistant_id].status === "success").length;
-  const runnable = list.filter((agent) => agentReadiness(agent, store.info, store.agentRuns[agent.assistant_id]).steps[1].ready).length;
+  const tested = list.filter((agent) => Boolean(agentSuccessfulRun(agent.assistant_id))).length;
+  const runnable = list.filter((agent) => agentReadiness(agent, store.info, agentSuccessfulRun(agent.assistant_id)).steps[1].ready).length;
+  const recentRuns = list.reduce((total, agent) => total + agentRunsFor(agent.assistant_id).length, 0);
   const selected = list.find((agent) => agent.assistant_id === state.selected) || null;
-  const selectedRun = selected && store.agentRuns[selected.assistant_id];
+  const selectedRun = selected && agentLatestRun(selected.assistant_id);
+  const selectedEvidence = selected && agentSuccessfulRun(selected.assistant_id);
+  const selectedHistory = selected ? agentRunsFor(selected.assistant_id) : [];
   $("agent-journey").innerHTML = agentJourneyHtml(selected, selectedRun, store.agentCreateOpen);
   $("agent-summary").innerHTML =
     `<div><b>${list.length}</b><span>Durable agents</span></div>` +
     `<div><b>${runnable}</b><span>Runnable now</span></div>` +
-    `<div><b>${tested}</b><span>Tested here</span></div>`;
+    `<div><b>${tested}</b><span>Tested here</span></div>` +
+    `<div><b>${recentRuns}</b><span>Recent runs</span></div>`;
   $("agents-statusline").textContent = state.error ? "load failed" : `${list.length} total`;
   if (state.error) {
     $("agent-list").innerHTML = agentErrorHtml(state.error.status, state.error.body);
@@ -2189,14 +2547,15 @@ function agentsRender() {
       item.setAttribute("tabindex", "0");
       item.setAttribute("aria-label", `Open ${agent.name || "unnamed agent"}`);
       if (agent.assistant_id === state.selected) item.setAttribute("aria-current", "true");
-      item.innerHTML = agentCardHtml(agent, agentReadiness(agent, store.info, store.agentRuns[agent.assistant_id]));
+      item.innerHTML = agentCardHtml(agent, agentReadiness(agent, store.info, agentSuccessfulRun(agent.assistant_id)));
       listEl.appendChild(item);
     }
   }
   $("agent-detail").innerHTML = agentDetailHtml(
     selected,
-    agentReadiness(selected, store.info, selectedRun),
+    agentReadiness(selected, store.info, selectedEvidence),
     selectedRun,
+    selectedHistory,
   );
 }
 
@@ -2247,6 +2606,10 @@ async function agentCreate() {
 async function agentRunTest(assistantId) {
   const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
   if (!agent) return;
+  const startedMs = Date.now();
+  const startedAt = new Date(startedMs).toISOString();
+  const attemptId = `attempt-${startedMs}-${Math.random().toString(36).slice(2, 8)}`;
+  let thread = null;
   let input;
   const inputEl = $("inp-agent-prompt") || $("inp-agent-test");
   try { input = agentBuildRunInput(agent, inputEl && inputEl.value); }
@@ -2254,24 +2617,68 @@ async function agentRunTest(assistantId) {
   const button = $("agent-detail").querySelector("[data-agent-run]");
   if (button) button.disabled = true;
   $("agent-test-status").innerHTML = badge("running") + ` <span class="muted tiny">creating test thread…</span>`;
+  agentAnnounceRun({ status: "running" });
   try {
-    const thread = await api("POST", "/threads", { graph: agent.graph, metadata: { source: "agent_workbench", assistant_id: assistantId } });
+    thread = await api("POST", "/threads", { graph: agent.graph, metadata: { source: "agent_workbench", assistant_id: assistantId } });
     store.threads.unshift(thread);
     saveThreads();
     renderThreads();
     const result = await api("POST", `/threads/${encodeURIComponent(thread.thread_id)}/runs/wait`, { assistant_id: assistantId, input });
-    store.agentRuns[assistantId] = { status: result.status, run_id: result.run_id, thread_id: thread.thread_id, result };
+    const run = {
+      record_id: result.run_id || attemptId,
+      status: result.status,
+      run_id: result.run_id,
+      thread_id: thread.thread_id,
+      graph: agent.graph,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - startedMs,
+      error: result.status === "error" || result.status === "cancelled" ? result.message : "",
+      error_class: result.error ? agentErrorCategory(result) : "",
+      result,
+    };
+    store.agentRuns[assistantId] = run;
+    const historySaved = agentRememberRun(assistantId, run);
+    agentAnnounceRun(run);
     agentsRender();
-    toast(`agent test ${result.status}`, result.status === "success" ? "ok" : "err");
+    const nextRunButton = $("agent-detail").querySelector("[data-agent-run]");
+    if (nextRunButton) nextRunButton.focus({ preventScroll: true });
+    if (!historySaved) toast(`agent run ${result.status}; recent history could not be saved`, "warn");
+    else toast(`agent run ${result.status}`, result.status === "success" ? "ok"
+      : ["interrupted", "cancelled"].includes(result.status) ? "warn" : "err");
   } catch (e) {
-    store.agentRuns[assistantId] = { status: "error", error: e.message };
+    const run = {
+      record_id: attemptId,
+      status: "error",
+      run_id: "",
+      thread_id: thread && thread.thread_id || "",
+      graph: agent.graph,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - startedMs,
+      error: e.message,
+      error_class: agentErrorCategory(e),
+    };
+    store.agentRuns[assistantId] = run;
+    const historySaved = agentRememberRun(assistantId, run);
+    agentAnnounceRun(run);
     agentsRender();
-    toast(e.message, "err");
+    const nextRunButton = $("agent-detail").querySelector("[data-agent-run]");
+    if (nextRunButton) nextRunButton.focus({ preventScroll: true });
+    toast(historySaved ? e.message : `${e.message}; recent history could not be saved`, historySaved ? "err" : "warn");
   }
 }
 
-async function agentOpenThread(threadId, runId) {
-  if (!store.threads.some((thread) => thread.thread_id === threadId)) return;
+async function agentOpenThread(threadId, runId, graph) {
+  if (!store.threads.some((thread) => thread.thread_id === threadId)) {
+    if (!graph) return;
+    store.threads.unshift({
+      thread_id: threadId,
+      graph,
+      created_at: null,
+      metadata: { source: "agent_workbench" },
+    });
+  }
   store.selected = threadId;
   store.view = "thread";
   saveThreads();
@@ -2282,6 +2689,8 @@ async function agentOpenThread(threadId, runId) {
     await recLoad(runId, true);
     const recorder = $("flight-recorder-card");
     if (recorder) recorder.scrollIntoView({ block: "start" });
+    const recorderTitle = $("flight-recorder-title");
+    if (recorderTitle) recorderTitle.focus({ preventScroll: true });
   } else {
     $("main").scrollTop = 0;
   }
@@ -2623,6 +3032,7 @@ function init() {
     if (thread) agentOpenThread(
       thread.getAttribute("data-agent-open-thread"),
       thread.getAttribute("data-agent-open-run"),
+      thread.getAttribute("data-agent-open-graph"),
     );
   });
 
