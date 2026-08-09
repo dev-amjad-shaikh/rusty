@@ -698,6 +698,53 @@ run's exported `JournalSnapshot`; flipping one byte in any journaled
 event fails verification; rotating the signing key is journaled and old
 receipts still verify against the key history.
 
+> **Wave 3 status: implemented.** The plane landed as written:
+> `RunReceipt` (serde-versioned, golden-pinned with its canonical form
+> and key id in `rusty-core/tests/golden/`) signs the journal head, the
+> manifest digests, the resolved capsule content addresses, the effect
+> and denials ledgers, and the policy versions; `verify_receipt`
+> recomputes the head with the journal's own chain step and answers a
+> typed `VerifiedRun` or a `ReceiptRejection` naming the mismatched
+> component; the server mints (`GET /runs/{id}/receipt`), verifies
+> (`POST /receipts/verify`), and runs the key lifecycle (`GET
+> /receipt_keys`, `POST /receipt_keys/rotate`, `GET
+> /receipt_keys/journal`). Refinements worth naming. **Mint semantics are
+> mint-on-first-read, then stored-and-served**: the receipt is minted
+> over the run's reverified persisted journal on first request and
+> replaced when the journal's head advances — minting at completion
+> would put signing in the runner's hot path for runs nobody audits, and
+> the head's event count already says exactly which journal state the
+> signature covers. **The manifest and executor policy are read back
+> from the run's last checkpoint header** (the journal does not hold
+> them): they are carried, signature-covered evidence, and the receipt
+> carries the manifest in full plus its `manifest_digest` commitment, so
+> tampering with either half fails verification naming
+> `manifest_digest`. **One event kind joined `RunEventKind`**:
+> `signing_key_rotated` — the design named the rotation journaling
+> without naming the kind, and the deployment's receipts journal (run id
+> `receipt-keys`, the supervision-journal precedent applied to the
+> control plane) records genesis too (`previous_key_id` absent), so the
+> lineage is complete, not just the rotations. **Key ids are full
+> content addresses** — sha256 of the public key bytes, the capsule-id
+> convention — so "which key signed what" never depends on a registry's
+> say-so. **Secrets never enter the store abstraction**: on both
+> backends the secret lives at `{store_path}/keys/{key_id}.secret`
+> (hex, `0600` from the first byte, written once per key id); the store
+> holds only public history (`{store_path}/keys/{key_id}.json` files,
+> the `server_receipt_keys` table), so the Postgres backend cannot hold
+> what a database must not leak. **Generation draws OS entropy through
+> `uuid`** (two v4 draws of `getrandom`), so `ed25519-dalek` is the
+> wave's only `Cargo.toml` change — exactly the design's dependency
+> call. Two honest edges: verification uses `verify_strict`
+> (canonical-S, one valid encoding per signature), and externalized
+> journal snapshots are refused at mint and verify in v1 with a typed
+> error — the ledger digests must cover payloads the verifier can
+> resolve. The multi-host posture is stated, not solved: a host booting
+> against a shared store without the local secret becomes its own
+> signer (a new journaled key id; old receipts keep verifying), and
+> fleet-scale key management remains the R1.0 KMS work of open question
+> 3.
+
 **Wave 4 — bridges and the release proof.** The four bridge directions
 with streaming and cancellation preserved; generated MCP schemas and
 generated Agent Cards; journaled MCP/A2A client calls with derived

@@ -652,6 +652,19 @@ fn chained_hash(prev: &str, event: &RunEvent) -> crate::error::Result<String> {
     Ok(sha256_hex(&[prev.as_bytes(), &bytes].concat()))
 }
 
+/// Recompute the chained head over `events` from the genesis hash — the
+/// verification-path half of the chain contract, shared by
+/// [`Journal::from_snapshot`] and the run-receipt verifier
+/// ([`crate::receipt::verify_receipt`]) so a receipt's head and the
+/// journal's head are the same bytes by construction.
+pub(crate) fn recompute_head_hash(events: &[RunEvent]) -> crate::error::Result<String> {
+    let mut head_hash = sha256_hex(b"");
+    for event in events {
+        head_hash = chained_hash(&head_hash, event)?;
+    }
+    Ok(head_hash)
+}
+
 /// The event as the head-hash chain covers it: identical except that every
 /// inline payload value is key-sorted recursively.
 ///

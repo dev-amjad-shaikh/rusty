@@ -36,6 +36,10 @@ chrono = { version = "0.4", features = ["serde"] }
 # heads, plus the seeded-RNG determinism seam. Minimal features: only the
 # RngCore/SeedableRng traits and the ChaCha8 core are used.
 sha2 = "0.10"
+# Signed run receipts (R0.9 wave 3): Ed25519 over the receipt's canonical
+# bytes. Small, pure-Rust, no native code; key generation draws OS entropy
+# through `uuid` (below), so no RNG feature is needed here.
+ed25519-dalek = "2"
 rand = { version = "0.8", default-features = false }
 rand_chacha = { version = "0.3", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

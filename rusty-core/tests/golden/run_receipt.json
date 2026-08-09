@@ -1,0 +1,38 @@
+{
+  "format_version": 1,
+  "run_id": "run-1",
+  "journal_head": {
+    "events": 5,
+    "sha256": "d5a8a65b6b5ccc2a02fe492bd7d661b4f77cbde8a60a6aea50fce47722e98f94"
+  },
+  "manifest_digest": "4468d1deb40b83ab661bcc42dd8077a087d6cd7362d462c3cebfdf42ac506804",
+  "manifest": {
+    "prompts": {
+      "system": "edff20fbc61c032a9206bdc94aec3b70e05ab953383972b267b83957d9ba7bfe"
+    },
+    "tool_schemas": {
+      "search": "094ec29d007cce150c65abf0756d79ad5b62a1acfdb6e0841f69f1377ef41761"
+    },
+    "model": "gpt-5.2-2026-06-01",
+    "model_params": "8fefe127d6b4ea3f3bb4dc99eada04b6134555e971d4cf7c78243456c97a71fa",
+    "memory_schema": "memory-v1",
+    "capsules": {
+      "researcher": "1.4.0"
+    }
+  },
+  "capsules": {
+    "researcher": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  },
+  "effects": [
+    "bb96b7ce206a221a6f89d30ccbdf4a3c7d9d575122130f31ec9a6136e6d1e238"
+  ],
+  "executor_policy": "policy-0123456789ab",
+  "capsule_policies": [
+    "cedar-0123456789ab"
+  ],
+  "denials": [
+    "run-1:4"
+  ],
+  "signer": "fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+  "signature": "1f12cca971f0c3ae861621c69c0f8f7958ad92edc8fb2f4308b393ebe6139c9df35f1a8bb2a031ca2fd9af0665e104bb68a415ae03794444331edc8c9b8be20f"
+}

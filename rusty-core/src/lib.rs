@@ -103,6 +103,16 @@
 //!   default, structurally — and the registry resolving `RunManifest`
 //!   capsule pins to content addresses lives in `rusty-server`; these are
 //!   the pure contracts both sides agree on.
+//! - **Signed run receipts** ([`receipt`], R0.9 wave 3): the Ed25519-signed
+//!   [`receipt::RunReceipt`] over the journal head, the run manifest
+//!   digests and resolved capsule ids, the effect and denials ledgers, and
+//!   the policy versions — plus [`receipt::verify_receipt`], which
+//!   re-walks the journal's own digests and answers with a typed
+//!   [`receipt::VerifiedRun`] or a [`receipt::ReceiptRejection`] naming the
+//!   mismatched component. The key lifecycle (first-boot generation,
+//!   journaled rotation, the key history old receipts verify against)
+//!   lives in `rusty-server`; these are the pure contracts both sides
+//!   agree on.
 //!
 //! ## Quick sketch
 //!
@@ -148,6 +158,7 @@ pub mod memory;
 pub mod middleware;
 pub mod node;
 pub mod react;
+pub mod receipt;
 pub mod record;
 pub mod remote;
 pub mod replay;
@@ -225,6 +236,10 @@ pub mod prelude {
     pub use crate::react::{
         create_react_agent, create_react_agent_replaying, create_react_agent_streaming,
         create_react_agent_with_recording,
+    };
+    pub use crate::receipt::{
+        derive_key_id, manifest_digest, mint_receipt, verify_receipt, PublicKey, ReceiptRejection,
+        RunReceipt, SigningKey, SigningKeyRotation, VerifiedRun, RECEIPT_FORMAT_VERSION,
     };
     pub use crate::record::{
         derive_policy_version, ArtifactRef, CapsuleVersion, CheckpointHeader,

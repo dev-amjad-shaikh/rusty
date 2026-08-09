@@ -34,6 +34,7 @@ use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpoi
 use rusty_agent_runtime::journal::{FileArtifactStore, JournalSnapshot};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
 use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
+use rusty_agent_runtime::receipt::RunReceipt;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -54,6 +55,7 @@ use crate::learn;
 use crate::memory;
 use crate::outbox::{self, OutboxRecord};
 use crate::policy::{self, PolicyActivation, PolicyBinding, PolicyRecord, PolicyWrite};
+use crate::receipts::ReceiptKeyRecord;
 use crate::store::{self, StoreItem};
 use crate::tasks::{self, CancelOutcome, MutationOutcome, RunCancellation, TaskRecord, TaskStatus};
 use crate::threads::{self, ThreadRecord};
@@ -699,6 +701,30 @@ pub(crate) trait ServerStore: Send + Sync {
     #[cfg(feature = "capsules")]
     /// The tenant's attached overlays (order unspecified; routes sort).
     async fn list_capsule_overlays(&self, tenant: &str) -> StoreResult<Vec<CapsuleOverlayRecord>>;
+
+    // -- Run receipts (R0.9 wave 3) ------------------------------------- //
+
+    /// The receipt signing-key history. Deployment-wide: keys are not
+    /// tenant state — one signing identity per deployment, and
+    /// verification resolves any signer's public key from the same
+    /// history. Upsert keyed by key id; the public key under one id can
+    /// never legitimately change (the id is its content address), so
+    /// callers upsert only to annotate retirement at rotation.
+    async fn put_receipt_key(&self, record: &ReceiptKeyRecord) -> StoreResult<()>;
+
+    /// Fetch one key-history record (`None` for unknown key ids).
+    async fn get_receipt_key(&self, key_id: &str) -> StoreResult<Option<ReceiptKeyRecord>>;
+
+    /// The whole key history (order unspecified; callers sort).
+    async fn list_receipt_keys(&self) -> StoreResult<Vec<ReceiptKeyRecord>>;
+
+    /// Store a minted receipt, replacing any earlier receipt for the run
+    /// (the journal-snapshot rule: a run whose journal advanced past the
+    /// stored receipt's head gets a fresh one).
+    async fn put_run_receipt(&self, run_id: &str, receipt: &RunReceipt) -> StoreResult<()>;
+
+    /// The receipt stored for `run_id` (`None` when none was minted).
+    async fn get_run_receipt(&self, run_id: &str) -> StoreResult<Option<RunReceipt>>;
 }
 
 /// The outcome of a candidate lifecycle transition
@@ -2269,6 +2295,34 @@ impl ServerStore for JsonFileStore {
             .map(|(_, record)| record.clone())
             .collect())
     }
+
+    async fn put_receipt_key(&self, record: &ReceiptKeyRecord) -> StoreResult<()> {
+        crate::receipts::persist_key_record(&self.root, record)
+            .await
+            .map_err(io_err("persist receipt key"))
+    }
+
+    async fn get_receipt_key(&self, key_id: &str) -> StoreResult<Option<ReceiptKeyRecord>> {
+        crate::receipts::load_key_record(&self.root, key_id)
+            .await
+            .map_err(io_err("load receipt key"))
+    }
+
+    async fn list_receipt_keys(&self) -> StoreResult<Vec<ReceiptKeyRecord>> {
+        Ok(crate::receipts::load_key_records(&self.root))
+    }
+
+    async fn put_run_receipt(&self, run_id: &str, receipt: &RunReceipt) -> StoreResult<()> {
+        crate::receipts::persist_run_receipt(&self.root, run_id, receipt)
+            .await
+            .map_err(io_err("persist run receipt"))
+    }
+
+    async fn get_run_receipt(&self, run_id: &str) -> StoreResult<Option<RunReceipt>> {
+        crate::receipts::load_run_receipt(&self.root, run_id)
+            .await
+            .map_err(io_err("load run receipt"))
+    }
 }
 
 impl JsonFileStore {
@@ -2370,6 +2424,7 @@ mod postgres {
     use rusty_agent_runtime::journal::JournalSnapshot;
     use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
     use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
+    use rusty_agent_runtime::receipt::RunReceipt;
     use rusty_agent_runtime::record::PolicyVersion;
     use serde_json::Value;
     use sqlx::{PgPool, Row};
@@ -2391,6 +2446,7 @@ mod postgres {
     use crate::memory;
     use crate::outbox::OutboxRecord;
     use crate::policy::{PolicyActivation, PolicyBinding, PolicyRecord, PolicyWrite};
+    use crate::receipts::ReceiptKeyRecord;
     use crate::store::StoreItem;
     use crate::tasks::{
         self, CancelOutcome, MutationOutcome, RunCancellation, TaskLease, TaskRecord, TaskStatus,
@@ -2843,6 +2899,29 @@ mod postgres {
         CREATE INDEX IF NOT EXISTS server_capsule_overlays_listing
             ON server_capsule_overlays (tenant, name)";
 
+    /// The receipt signing-key history (R0.9 wave 3): one row per
+    /// registered key, keyed by its content-addressed id. Deployment-wide
+    /// by design — no tenant column; keys are not tenant state. The public
+    /// key and retirement annotation live in the payload (retirement is
+    /// the only update, and the id being a content address makes the
+    /// public half immutable).
+    pub(crate) const CREATE_RECEIPT_KEYS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_receipt_keys (
+            key_id        TEXT PRIMARY KEY,
+            payload       JSONB NOT NULL,
+            registered_at TIMESTAMPTZ NOT NULL
+        )"#;
+
+    /// Minted run receipts (R0.9 wave 3): one row per run, replaced when
+    /// the run's journal advances past the stored receipt's head — the
+    /// `server_journals` upsert rule.
+    pub(crate) const CREATE_RUN_RECEIPTS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_run_receipts (
+            run_id    TEXT PRIMARY KEY,
+            payload   JSONB NOT NULL,
+            minted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -2887,6 +2966,8 @@ mod postgres {
         CREATE_CAPSULE_POLICIES_ACTIVE_INDEX_SQL,
         CREATE_CAPSULE_OVERLAYS_SQL,
         CREATE_CAPSULE_OVERLAYS_INDEX_SQL,
+        CREATE_RECEIPT_KEYS_SQL,
+        CREATE_RUN_RECEIPTS_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -3567,6 +3648,31 @@ mod postgres {
     #[cfg(feature = "capsules")]
     pub(crate) const LIST_CAPSULE_OVERLAYS_SQL: &str =
         "SELECT payload FROM server_capsule_overlays WHERE tenant = $1 ORDER BY attached_at";
+
+    /// Key-history upsert (R0.9 wave 3): insert on registration, payload
+    /// replace on retirement — the only update the content-addressed id
+    /// allows.
+    pub(crate) const UPSERT_RECEIPT_KEY_SQL: &str = r#"
+        INSERT INTO server_receipt_keys (key_id, payload, registered_at)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (key_id) DO UPDATE SET payload = $2"#;
+
+    pub(crate) const SELECT_RECEIPT_KEY_SQL: &str =
+        "SELECT payload FROM server_receipt_keys WHERE key_id = $1";
+
+    pub(crate) const LIST_RECEIPT_KEYS_SQL: &str =
+        "SELECT payload FROM server_receipt_keys ORDER BY registered_at";
+
+    /// Minted-receipt upsert (R0.9 wave 3): the `server_journals` rule —
+    /// a run whose journal advanced gets a fresh receipt.
+    pub(crate) const UPSERT_RUN_RECEIPT_SQL: &str = r#"
+        INSERT INTO server_run_receipts (run_id, payload)
+        VALUES ($1, $2)
+        ON CONFLICT (run_id) DO UPDATE
+            SET payload = EXCLUDED.payload, minted_at = now()"#;
+
+    pub(crate) const SELECT_RUN_RECEIPT_SQL: &str =
+        "SELECT payload FROM server_run_receipts WHERE run_id = $1";
 
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
@@ -6004,6 +6110,57 @@ mod postgres {
                 .map(|row| record_from_payload("capsule overlay", row.get::<Value, _>("payload")))
                 .collect()
         }
+
+        async fn put_receipt_key(&self, record: &ReceiptKeyRecord) -> StoreResult<()> {
+            sqlx::query(UPSERT_RECEIPT_KEY_SQL)
+                .bind(&record.key_id)
+                .bind(record_to_payload(record)?)
+                .bind(record.registered_at)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("upsert receipt key"))?;
+            Ok(())
+        }
+
+        async fn get_receipt_key(&self, key_id: &str) -> StoreResult<Option<ReceiptKeyRecord>> {
+            let row = sqlx::query(SELECT_RECEIPT_KEY_SQL)
+                .bind(key_id)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select receipt key"))?;
+            row.map(|row| record_from_payload("receipt key", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_receipt_keys(&self) -> StoreResult<Vec<ReceiptKeyRecord>> {
+            let rows = sqlx::query(LIST_RECEIPT_KEYS_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list receipt keys"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("receipt key", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn put_run_receipt(&self, run_id: &str, receipt: &RunReceipt) -> StoreResult<()> {
+            sqlx::query(UPSERT_RUN_RECEIPT_SQL)
+                .bind(run_id)
+                .bind(record_to_payload(receipt)?)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("upsert run receipt"))?;
+            Ok(())
+        }
+
+        async fn get_run_receipt(&self, run_id: &str) -> StoreResult<Option<RunReceipt>> {
+            let row = sqlx::query(SELECT_RUN_RECEIPT_SQL)
+                .bind(run_id)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select run receipt"))?;
+            row.map(|row| record_from_payload("run receipt", row.get::<Value, _>("payload")))
+                .transpose()
+        }
     }
 
     impl PostgresStore {
@@ -6149,7 +6306,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 42);
+            assert_eq!(MIGRATION_SQL.len(), 44);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -6253,6 +6410,15 @@ mod postgres {
             assert!(CREATE_CAPSULES_SQL.contains("payload      JSONB"));
             assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("CREATE UNIQUE INDEX"));
             assert!(CREATE_CAPSULES_PIN_INDEX_SQL.contains("(tenant, identity, version)"));
+            // R0.9 wave 3: the signing-key history and the minted receipts —
+            // both deployment-wide (no tenant column; keys are not tenant
+            // state), keyed by content-addressed key id and run id.
+            assert!(CREATE_RECEIPT_KEYS_SQL.contains("server_receipt_keys"));
+            assert!(CREATE_RECEIPT_KEYS_SQL.contains("key_id        TEXT PRIMARY KEY"));
+            assert!(CREATE_RECEIPT_KEYS_SQL.contains("payload       JSONB"));
+            assert!(CREATE_RUN_RECEIPTS_SQL.contains("server_run_receipts"));
+            assert!(CREATE_RUN_RECEIPTS_SQL.contains("run_id    TEXT PRIMARY KEY"));
+            assert!(CREATE_RUN_RECEIPTS_SQL.contains("payload   JSONB"));
         }
 
         #[test]

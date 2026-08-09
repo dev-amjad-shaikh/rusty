@@ -538,6 +538,20 @@ pub enum RunEventKind {
     /// was absent** (the grant that would have permitted the attempt), so
     /// the denial is attributable to a declaration, not to a stack trace.
     CapsuleDenied,
+
+    /// The deployment's receipt signing key changed (R0.9 wave 3): a
+    /// rotation was performed (or a host with no local secret joined a
+    /// shared store) and the server journaled the new key id into the
+    /// deployment's receipts journal — the run id
+    /// `receipt-keys`, not any tenant's run. An [`Effect::Pure`] record:
+    /// the key operation is local key material, so there is no external
+    /// effect to classify — the event is the lineage evidence. Output
+    /// carries the journaled [`crate::receipt::SigningKeyRotation`] — the
+    /// previous key id (`None` on genesis), the new key id, its public
+    /// half, and the rotation instant — so "which key signed what, from
+    /// when" is a chained fact, and old receipts keep verifying against
+    /// the key history the journal attests.
+    SigningKeyRotated,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

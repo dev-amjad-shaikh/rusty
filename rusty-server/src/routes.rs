@@ -41,7 +41,7 @@ use rusty_agent_runtime::memory::{
 };
 use rusty_agent_runtime::record::{
     derive_policy_version, sha256_hex, CapsuleVersion, Effect, EffectReceipt, ExecutorPolicy,
-    PayloadRef, PolicyVersion, RunEventKind,
+    JournalRef, PayloadRef, PolicyVersion, RunEventKind,
 };
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
@@ -103,6 +103,12 @@ pub(crate) struct AppState {
     /// so a revoked grant fails at its next use.
     #[cfg(feature = "capsules")]
     pub capsule_plane: Arc<crate::capsule_policy::CapsulePolicyPlane>,
+    /// The receipt signing keyring (R0.9 wave 3): the deployment's local
+    /// Ed25519 key, generated on first use under `{store_path}/keys/`
+    /// (secrets `0600`, never through the store abstraction) and rotated
+    /// through `POST /receipt_keys/rotate`; the key history both store
+    /// backends keep is what old receipts verify against.
+    pub receipt_keyring: Arc<crate::receipts::SigningKeyring>,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -163,6 +169,10 @@ pub(crate) fn router_with_shutdown(
     let outbox_relay_interval = config.outbox_relay_interval;
     #[cfg(feature = "capsules")]
     let capsule_plane = Arc::new(crate::capsule_policy::CapsulePolicyPlane::new());
+    let receipt_keyring = Arc::new(crate::receipts::SigningKeyring::new(
+        Arc::clone(&server_store),
+        config.store_path.clone(),
+    ));
     let state = Arc::new(AppState {
         registry,
         config,
@@ -174,6 +184,7 @@ pub(crate) fn router_with_shutdown(
         trigger_debounce: Mutex::new(HashMap::new()),
         #[cfg(feature = "capsules")]
         capsule_plane,
+        receipt_keyring,
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // Warm the capsule authorization plane (R0.9 wave 2): register any
@@ -228,6 +239,17 @@ pub(crate) fn router_with_shutdown(
         .route("/runs/{run_id}/fixture", get(get_run_fixture))
         .route("/runs/replay", post(replay_run))
         .route("/runs/diff", get(diff_runs))
+        // Signed run receipts (R0.9 wave 3): mint-on-read over the run's
+        // reverified journal (then stored and served while its head
+        // stands), caller-driven verification, and the deployment key
+        // lifecycle — history, journaled rotation, and the lineage
+        // journal. Keys are deployment-wide, so the key routes carry no
+        // tenant scoping beyond authentication.
+        .route("/runs/{run_id}/receipt", get(get_run_receipt))
+        .route("/receipts/verify", post(verify_receipt_route))
+        .route("/receipt_keys", get(list_receipt_keys_route))
+        .route("/receipt_keys/rotate", post(rotate_receipt_key))
+        .route("/receipt_keys/journal", get(get_receipt_keys_journal))
         .route("/assistants", post(create_assistant).get(list_assistants))
         .route("/assistants/{assistant_id}", get(get_assistant))
         .route("/crons", post(create_cron).get(list_crons))
@@ -1463,6 +1485,237 @@ fn carries_servable_effects(snapshot: &JournalSnapshot) -> bool {
                 | RunEventKind::WasmCall
         )
     })
+}
+
+// --------------------------------------------------------------------- //
+// Signed run receipts (R0.9 wave 3)
+// --------------------------------------------------------------------- //
+
+/// `GET /runs/{run_id}/receipt` — the run's signed [`RunReceipt`].
+///
+/// Mint semantics, chosen and stated: the receipt is **minted on first
+/// request** over the run's current persisted journal (integrity
+/// re-verified by [`run_evidence`] before anything is signed), then
+/// stored and served while the journal's head stands; a run whose journal
+/// has since advanced gets a fresh mint. The alternative — minting once
+/// at run completion — was rejected: it would put signing in the runner's
+/// hot path for runs nobody ever audits, and "the receipt" would need a
+/// completion hook the store contract does not have. Mint-on-read keeps
+/// every served receipt derived from reverified evidence, and the head's
+/// event count says exactly which journal state the signature covers — a
+/// receipt over an in-flight run is a statement about the run so far, not
+/// a lie about the whole.
+///
+/// The manifest and executor policy — the two components the journal does
+/// not hold — are read back from the run's last checkpoint header, the
+/// same source the checkpoint wrote them to. `409` when nothing is
+/// persisted yet (queued or pre-checkpoint, the `/fixture` rule); `404`
+/// unknown or cross-tenant.
+async fn get_run_receipt(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<rusty_agent_runtime::receipt::RunReceipt>, ApiError> {
+    let evidence = run_evidence(&state, &tenant, &run_id).await?;
+    let snapshot = evidence.journal.ok_or_else(|| {
+        ApiError::conflict(format!(
+            "run `{run_id}` has no persisted journal yet (queued or pre-checkpoint)"
+        ))
+    })?;
+    let head = JournalRef {
+        events: snapshot.events.len() as u64,
+        sha256: snapshot.head_hash.clone(),
+    };
+    if let Some(stored) = state
+        .server_store
+        .get_run_receipt(&run_id)
+        .await
+        .map_err(internal_err)?
+    {
+        // The stored receipt still names the current head: serve it
+        // verbatim rather than minting a twin (Ed25519 is deterministic,
+        // but the store's copy is the one already witnessed).
+        if stored.run_id == run_id && stored.journal_head == head {
+            return Ok(Json(stored));
+        }
+    }
+    let (manifest, executor_policy) = match evidence.checkpoint_ids.last() {
+        Some(checkpoint_id) => state
+            .checkpointer
+            .get_by_id(&evidence.internal_thread_id, checkpoint_id)
+            .await
+            .map_err(internal_err)?
+            .map(|checkpoint| {
+                (
+                    checkpoint.header.manifest,
+                    Some(checkpoint.header.policy_version),
+                )
+            })
+            .unwrap_or((None, None)),
+        None => (None, None),
+    };
+    let signing_key = state
+        .receipt_keyring
+        .active_key()
+        .await
+        .map_err(ApiError::internal)?;
+    let receipt = rusty_agent_runtime::receipt::mint_receipt(
+        &snapshot,
+        manifest,
+        executor_policy,
+        &signing_key,
+    )
+    .map_err(internal_err)?;
+    state
+        .server_store
+        .put_run_receipt(&run_id, &receipt)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(receipt))
+}
+
+#[derive(Debug, Deserialize)]
+struct VerifyReceiptPayload {
+    /// The exported journal the receipt claims to cover.
+    snapshot: JournalSnapshot,
+    /// The receipt under test.
+    receipt: rusty_agent_runtime::receipt::RunReceipt,
+    /// The key id to verify against; defaults to the receipt's `signer`
+    /// (the common case — old receipts verify against the history).
+    key_id: Option<String>,
+}
+
+/// `POST /receipts/verify` — verify caller-supplied evidence: a journal
+/// snapshot plus a receipt over it. Body: `{snapshot, receipt, key_id?}`.
+///
+/// Answers `200` with the typed [`VerifiedRun`] summary, or `422
+/// receipt_verification_failed` whose message names the mismatched
+/// component — never a bare `false`. The public key resolves from the
+/// deployment's key history by `key_id` (default: the receipt's
+/// `signer`); an id the history does not hold is `404`, distinct from a
+/// verification failure.
+///
+/// Tenant posture: any authenticated caller may verify — the evidence is
+/// caller-supplied, so nothing crosses a tenancy boundary the caller did
+/// not already hold. The endpoint reads only the key history (public
+/// material); no tenant state is touched.
+async fn verify_receipt_route(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+    Json(payload): Json<VerifyReceiptPayload>,
+) -> Result<Json<rusty_agent_runtime::receipt::VerifiedRun>, ApiError> {
+    let key_id = payload
+        .key_id
+        .unwrap_or_else(|| payload.receipt.signer.clone());
+    let record = state
+        .server_store
+        .get_receipt_key(&key_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "signing key `{key_id}` is not in this deployment's key history"
+            ))
+        })?;
+    let public_key = rusty_agent_runtime::receipt::PublicKey::from_hex(&record.public_key)
+        .map_err(internal_err)?;
+    match rusty_agent_runtime::receipt::verify_receipt(
+        &payload.snapshot,
+        &payload.receipt,
+        &public_key,
+    ) {
+        Ok(verified) => Ok(Json(verified)),
+        Err(rejection) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "receipt_verification_failed",
+            format!("{}: {rejection}", rejection.component()),
+        )),
+    }
+}
+
+/// `GET /receipt_keys` — the deployment's signing-key history (public
+/// keys with registration and retirement instants, sorted by
+/// registration) plus the active key id: everything an auditor needs to
+/// resolve signers offline. Secret material is never served — it never
+/// enters the store abstraction at all.
+async fn list_receipt_keys_route(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut keys = state
+        .server_store
+        .list_receipt_keys()
+        .await
+        .map_err(internal_err)?;
+    keys.sort_by_key(|record| record.registered_at);
+    let active = state
+        .receipt_keyring
+        .active_key()
+        .await
+        .map_err(ApiError::internal)?
+        .key_id();
+    Ok(Json(json!({
+        "keys": keys,
+        "active": active,
+    })))
+}
+
+/// `POST /receipt_keys/rotate` — rotate the deployment's signing key:
+/// generate a successor, retire the current key in the history, journal
+/// the new key id as a `signing_key_rotated` event in the receipts
+/// journal, and sign with the successor from here on. `201` with
+/// `{previous_key_id, key_id, public_key, event_id}`.
+///
+/// Receipts signed by the retired key keep verifying — verification
+/// resolves signers from the history, and retirement is an annotation,
+/// never a deletion. Tenant posture: any authenticated caller may rotate
+/// (v1's single-operator stance — the journaled rotation makes the act
+/// attributable; fleet-scale key governance is the R1.0 KMS work).
+async fn rotate_receipt_key(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let outcome = state
+        .receipt_keyring
+        .rotate()
+        .await
+        .map_err(ApiError::internal)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "previous_key_id": outcome.previous_key_id,
+            "key_id": outcome.new_key_id,
+            "public_key": outcome.public_key,
+            "event_id": outcome.event_id,
+        })),
+    ))
+}
+
+/// `GET /receipt_keys/journal` — the deployment's key-lineage journal:
+/// the chained `signing_key_rotated` events (genesis first), integrity
+/// re-verified on read like every journal this server serves. Empty until
+/// the first key registration.
+async fn get_receipt_keys_journal(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let events = match state
+        .server_store
+        .get_journal(crate::receipts::RECEIPTS_JOURNAL_RUN_ID)
+        .await
+        .map_err(internal_err)?
+    {
+        Some(snapshot) => {
+            reverify_journal(crate::receipts::RECEIPTS_JOURNAL_RUN_ID, snapshot)?.events
+        }
+        None => Vec::new(),
+    };
+    Ok(Json(json!({
+        "run_id": crate::receipts::RECEIPTS_JOURNAL_RUN_ID,
+        "events": events,
+        // The lineage never completes — it grows with every rotation.
+        "complete": false,
+    })))
 }
 
 #[derive(Debug, Deserialize)]

@@ -102,6 +102,11 @@
 //! | `POST /capsule_policies/versions` / `GET /capsule_policies/versions` / `GET /capsule_policies/versions/{version}` | R0.9 (wave 2, feature `capsules`): register an immutable Cedar policy body `{policy_text, version?}` → `201 {version, record}` (`200` converged; `409` when the version names a different body; `422` unparseable) / list the tenant's bodies (sorted by version) / fetch one (`404` unknown/cross-tenant). Without the feature: `503 capsule_policy_unavailable` |
 //! | `GET /capsule_policies/active` / `POST /capsule_policies/active` | R0.9 (wave 2, feature `capsules`): the tenant's active policy body (`404` in the unconfigured posture) / move the active-version pointer `{version}` → `200 {active}` (`422` unregistered version); the move eagerly refreshes the revocation cache. Without the feature: `503 capsule_policy_unavailable` |
 //! | `POST /capsules/overlays` / `GET /capsules/overlays` / `GET /capsules/overlays/{name}` | R0.9 (wave 2, feature `capsules`): attach (or replace) a tenant overlay `{overlay}` → `201` new / `200` replaced (`403` when the active policy refuses a widening attach; `422` invalid) / list the tenant's overlays (sorted by name) / fetch one (`404` unknown/cross-tenant). Without the feature: `503 capsule_policy_unavailable` |
+//! | `GET /runs/{id}/receipt` | R0.9 (wave 3): the run's signed `RunReceipt` — minted on first request over the run's reverified journal (manifest and executor policy read back from its last checkpoint header), then stored and served while the journal's head stands; a run whose journal advanced gets a fresh receipt. `409` when nothing is persisted yet (queued or pre-checkpoint); `404` unknown/cross-tenant |
+//! | `POST /receipts/verify` | R0.9 (wave 3): verify caller-supplied evidence `{snapshot, receipt, key_id?}` → `200` with the typed `VerifiedRun` summary, or `422 receipt_verification_failed` naming the mismatched component (`journal_head` / `manifest_digest` / `effect_ledger` / `denials_ledger` / `capsule_resolutions` / `capsule_policies` / `signer_key_id` / `signature`). The public key resolves from the deployment's key history by `key_id` (default: the receipt's `signer`); an unknown key id is `404` |
+//! | `GET /receipt_keys` | R0.9 (wave 3): the deployment's signing-key history (public keys, registration and retirement instants) plus the active key id — what an auditor needs to verify receipts offline |
+//! | `POST /receipt_keys/rotate` | R0.9 (wave 3): rotate the signing key → `201 {previous_key_id, key_id, public_key, event_id}`; the new key id is journaled as a `signing_key_rotated` event in the deployment's receipts journal, and receipts signed by the retired key keep verifying against the history |
+//! | `GET /receipt_keys/journal` | R0.9 (wave 3): the deployment's key-lineage journal — the chained `signing_key_rotated` events, integrity re-verified on read |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -122,6 +127,7 @@ mod learn;
 mod memory;
 mod outbox;
 mod policy;
+mod receipts;
 mod replay;
 mod routes;
 mod runs;
@@ -181,11 +187,13 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "coordinations",
     "crons",
     "journals",
+    "keys",
     "learn",
     "memory",
     "memory_artifacts",
     "outbox",
     "policy",
+    "receipts",
     "store",
     "tasks",
     "threads",
