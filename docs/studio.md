@@ -326,6 +326,21 @@ studio/
     change or page reload discards it unless downloaded. Download creates only a portable policy file. It does not
     run an experiment, recompute a decision, approve a release, or promote an agent; those outcomes require
     complete baseline/candidate reports and durable server-side quality resources.
+  - **Experiment Report Explorer** — import one format-v1 `rusty-eval` `ExperimentReport` into a bounded,
+    read-only evidence ledger. Studio preserves exact 64-bit count and token values, validates the known
+    report shape, and independently recomputes case/run counts, verdicts, assertion pass rates, latency
+    distribution, cost, and tokens from the carried case/run evidence. A serde-compatible report with
+    inconsistent aggregates remains inspectable but is labelled **reconciliation required**; extra future
+    fields are counted and explicitly left uninterpreted. Operators can search case ids and tags, slice
+    failing, interrupted, or judge-scored cases, and drill into repetitions, deterministic expected/observed
+    JSON, failure detail, and judge rationale. Studio bounds the artifact to 2 MiB, 256 cases, 64 runs per
+    case, 64 assertions per run, and 64 KiB per expected/observed value; visible JSON previews beyond 8 KiB
+    say they are truncated. Invalid UTF-8, duplicate JSON keys, lossy typed numbers, incompatible versions,
+    and content beyond those review boundaries fail closed. A rejected replacement preserves the already
+    loaded report. The report lives only in connection-bound page memory: it survives thread switches on the
+    same connection, while a connection change or reload discards it. The Explorer did not execute the
+    experiment, attest an external provider, evaluate an unknown future field, decide a release gate, or
+    promote an agent.
   - **Run comparison report** — enter a baseline and candidate run id (the baseline auto-fills from the
     loaded journal) and **Build report**. Studio calls the atomic
     `GET /runs/diff?base=…&branch=…` contract, then reconciles both independent

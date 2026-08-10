@@ -552,7 +552,7 @@ const connectedTrace = {
   F.fabricComposerEnsure(delegate, group);
   Object.assign(delegate.assignments[research.agent_id], {
     member: "research-role", kind: "research", input: '{"question":"What changed?"}',
-    effect: "read_only", deadline: "2026-08-10T12:00:00Z",
+    effect: "read_only", deadline: "2099-08-10T12:00:00Z",
   });
   delegate.contextScopes = ["team"];
   delegate.channels = "thread:team-7, kv:briefs\nartifact:source";
@@ -565,7 +565,7 @@ const connectedTrace = {
         delegate: {
           member: "research-role", agent_id: "researcher-1", manifest_version: "researcher/1.4.0",
           kind: "research", input: { kind: "inline", value: { question: "What changed?" } },
-          effect: "read_only", deadline: "2026-08-10T12:00:00.000Z",
+          effect: "read_only", deadline: "2099-08-10T12:00:00.000Z",
         },
         context: { scopes: ["team"], channels: ["thread:team-7", "kv:briefs", "artifact:source"] },
         handoff: true,

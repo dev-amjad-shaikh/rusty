@@ -26,12 +26,16 @@ globalThis.__quality = {
   qualityGateDraft, qualityGateU64, qualityGateF64, qualityGateMap,
   qualityGateCanonical, qualityGateValidate, qualityGateParse, qualityGateHtml,
   qualityGateFilename, qualityGateApplyField, qualityGateOperationCurrent,
+  qualityReportParse, qualityReportCases, qualityReportExcerpt,
+  qualityReportHtml, qualityReportOperationCurrent, qualityReportFile, qualityReportControl, qualityReportClick,
   QUALITY_DATASET_FORMAT_VERSION, QUALITY_TAG_LIMIT, QUALITY_PREDICATE_LIMIT,
   QUALITY_TOOL_LIMIT, QUALITY_EXPORT_LIMIT, QUALITY_LIBRARY_CASE_LIMIT,
   QUALITY_LIBRARY_BYTES, QUALITY_LIBRARY_LINE_BYTES, QUALITY_LIBRARY_DEPTH_LIMIT,
   QUALITY_LIBRARY_NODE_LIMIT, QUALITY_LIBRARY_NUMBER_BYTES, AGENT_NUMBER_TOKENS,
   QUALITY_GATE_BYTES, QUALITY_GATE_MAP_LIMIT, QUALITY_GATE_TEXT_BYTES,
   QUALITY_GATE_MAP_BYTES, QUALITY_GATE_NUMBER_BYTES,
+  QUALITY_REPORT_BYTES, QUALITY_REPORT_CASE_LIMIT, QUALITY_REPORT_RUN_LIMIT,
+  QUALITY_REPORT_ASSERTION_LIMIT, QUALITY_REPORT_VALUE_BYTES,
   runProofCanonicalJson, store,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -594,6 +598,251 @@ const strictGateValidation = Q.qualityGateValidate(strictGate);
   try { Q.qualityGateParse("x".repeat(Q.QUALITY_GATE_BYTES + 1)); } catch { oversized = true; }
   check("release gate: imported policy bytes are bounded before parsing", oversized);
 }
+
+const experimentReportValue = {
+  format_version: 1,
+  name: "support-regression@1.4.0",
+  dataset_name: "support-regression",
+  dataset_version: "1.4.0",
+  runs_per_case: 2,
+  max_concurrency: 2,
+  cases: [
+    {
+      case_id: "case-alpha", tags: ["smoke", "billing"], pass_rate: 0.5,
+      runs: [
+        { repetition: 0, status: { status: "done" }, passed: true,
+          assertions: [{ assertion: "state:/selected", passed: true,
+            expected: { selected: "room-7" }, observed: { selected: "room-7" } }],
+          judge: { score: 0.9, passed: true, rationale: "Resolved the request without unsupported claims." },
+          tool_calls: 1, latency_ms: 100, cost_usd: 0.01, total_tokens: 10 },
+        { repetition: 1, status: { status: "failed", error: "provider unavailable" }, passed: false,
+          assertions: [{ assertion: "state:/selected", passed: false,
+            expected: { selected: "room-7" }, observed: null, detail: "No terminal state was available." }],
+          tool_calls: 0, latency_ms: 200, cost_usd: 0.02, total_tokens: 20 },
+      ],
+    },
+    {
+      case_id: "case-beta", pass_rate: 0.5,
+      runs: [
+        { repetition: 0, status: { status: "done" }, passed: true,
+          assertions: [{ assertion: "state:/selected", passed: true,
+            expected: { selected: "room-7" }, observed: { selected: "room-7" } }],
+          tool_calls: 1, latency_ms: 300, cost_usd: 0.03, total_tokens: 30 },
+        { repetition: 1, status: { status: "interrupted" }, passed: false,
+          assertions: [{ assertion: "state:/selected", passed: false,
+            expected: { selected: "room-7" }, observed: { waiting: true } }],
+          judge: { score: 0.2, passed: false, rationale: "The run stopped before a final answer." },
+          tool_calls: 1, latency_ms: 400, cost_usd: 0.04, total_tokens: 40 },
+      ],
+    },
+  ],
+  summary: {
+    cases: 2, runs: 4, runs_passed: 2, run_pass_rate: 0.5, case_pass_rate: 0.5,
+    assertions: [{ assertion: "state:/selected", passed: 2, total: 4, rate: 0.5 }],
+    latency_ms: { min: 100, p50: 200, p95: 400, max: 400, mean: 250.0 },
+    total_cost_usd: 0.1, total_tokens: 100,
+  },
+};
+const experimentReportText = JSON.stringify(experimentReportValue);
+
+{
+  const report = Q.qualityReportParse(experimentReportText);
+  check("experiment report: format-v1 evidence and recomputed aggregates reconcile", report.consistent);
+  check("experiment report: serde defaults preserve omitted tags and judge",
+    report.cases[1].tags.length === 0 && report.cases[1].runs[0].judge === null);
+  check("experiment report: failing, interrupted, and judged slices use run evidence",
+    (report.filter = "failing", Q.qualityReportCases(report).length === 2) &&
+    (report.filter = "interrupted", Q.qualityReportCases(report)[0].id === "case-beta") &&
+    (report.filter = "judged", Q.qualityReportCases(report).length === 2));
+  report.filter = "all"; report.search = "billing";
+  check("experiment report: search is bounded to case identities and tags",
+    Q.qualityReportCases(report).length === 1 && Q.qualityReportCases(report)[0].id === "case-alpha");
+  report.search = "";
+  const rendered = Q.qualityReportHtml(report);
+  check("experiment report: ledger renders carried totals and exact evidence surfaces",
+    rendered.includes("50%") && rendered.includes("p95 latency") && rendered.includes("Expected") && rendered.includes("Observed"));
+  check("experiment report: artifact attribution names experiment, dataset, repetitions, and concurrency",
+    rendered.includes("support-regression@1.4.0") && rendered.includes("support-regression@1.4.0</b>") &&
+    rendered.includes("Repetitions") && rendered.includes("Max concurrency"));
+  check("experiment report: case and repetition actions retain native button semantics",
+    rendered.includes('role="list" aria-label="Experiment cases"') &&
+    rendered.includes('role="listitem"><button class="quality-report-case"') &&
+    rendered.includes('role="listitem"><button class="small"'));
+  report.filter = "interrupted"; report.search = "missing";
+  check("experiment report: an empty slice keeps a labelled case-evidence region",
+    Q.qualityReportHtml(report).includes('id="quality-report-case-title" tabindex="-1">Case evidence'));
+}
+
+{
+  const driftValue = structuredClone(experimentReportValue);
+  driftValue.summary.runs_passed = 4;
+  driftValue.summary.run_pass_rate = 1;
+  driftValue.cases[0].runs[1].passed = true;
+  const drift = Q.qualityReportParse(JSON.stringify(driftValue));
+  check("experiment report: serde-valid aggregate drift remains inspectable but never reconciled",
+    !drift.consistent && drift.issues.some((issue) => issue.includes("passed-run")) &&
+    Q.qualityReportHtml(drift).includes("reconciliation required"));
+
+  const broadValue = structuredClone(experimentReportValue);
+  broadValue.cases[0].runs[0].judge.score = 2;
+  const broad = Q.qualityReportParse(JSON.stringify(broadValue));
+  check("experiment report: broad serde f64 values are accepted as carried evidence and flagged",
+    !broad.consistent && broad.issues.some((issue) => issue.includes("judge score is outside")));
+
+  const toleratedValue = structuredClone(experimentReportValue);
+  toleratedValue.summary.run_pass_rate = 0.5 + 5e-13;
+  check("experiment report: reconciliation uses rusty-eval's finite 1e-12 float tolerance",
+    Q.qualityReportParse(JSON.stringify(toleratedValue)).consistent);
+  toleratedValue.summary.run_pass_rate = 0.5 + 2e-12;
+  check("experiment report: float drift beyond rusty-eval's tolerance remains visible",
+    !Q.qualityReportParse(JSON.stringify(toleratedValue)).consistent);
+
+  const repetitionsValue = structuredClone(experimentReportValue);
+  repetitionsValue.cases[0].runs[0].repetition = 1;
+  repetitionsValue.cases[0].runs[1].repetition = 2;
+  const repetitions = Q.qualityReportParse(JSON.stringify(repetitionsValue));
+  check("experiment report: reconciliation requires the exact zero-based repetition set",
+    !repetitions.consistent && repetitions.issues.some((issue) => issue.includes("exact 0–1 repetition set")));
+
+  const emptyEvidence = structuredClone(experimentReportValue);
+  emptyEvidence.name = "  "; emptyEvidence.dataset_name = ""; emptyEvidence.dataset_version = "\t";
+  emptyEvidence.cases[0].case_id = " ";
+  emptyEvidence.cases[0].runs[0].assertions[0].assertion = "";
+  emptyEvidence.cases[0].runs[0].judge.rationale = "  ";
+  const empty = Q.qualityReportParse(JSON.stringify(emptyEvidence));
+  check("experiment report: reconciliation mirrors rusty-eval non-empty evidence requirements",
+    !empty.consistent && empty.issues.some((issue) => issue.includes("experiment name is empty")) &&
+    empty.issues.some((issue) => issue.includes("dataset name is empty")) &&
+    empty.issues.some((issue) => issue.includes("dataset version is empty")) &&
+    empty.issues.some((issue) => issue.includes("case id is empty")) &&
+    empty.issues.some((issue) => issue.includes("empty assertion name")) &&
+    empty.issues.some((issue) => issue.includes("judge rationale is empty")));
+}
+
+{
+  const duplicateValue = structuredClone(experimentReportValue);
+  duplicateValue.cases = [structuredClone(experimentReportValue.cases[0]), structuredClone(experimentReportValue.cases[0])];
+  duplicateValue.cases[1].runs[0].assertions[0].observed = { selected: "second-copy" };
+  duplicateValue.cases[1].runs[1].repetition = 0;
+  const report = Q.qualityReportParse(JSON.stringify(duplicateValue));
+  Q.store.qualityReport = report;
+  Q.qualityReportClick({ target: { closest(selector) {
+    if (selector === "[data-quality-report-case]") return { getAttribute() { return "1"; } };
+    return null;
+  } } });
+  check("experiment report: duplicate serde-valid case IDs retain distinct selection identity",
+    report.selectedCase === "1" && Q.qualityReportHtml(report).includes("second-copy"));
+  report.selectedRun = "1";
+  check("experiment report: duplicate repetition numbers retain distinct evidence identity",
+    Q.qualityReportHtml(report).includes("provider unavailable"));
+}
+
+{
+  const exactText = experimentReportText
+    .replace('"total_tokens":10', '"total_tokens":9007199254740993')
+    .replace('"total_tokens":100', '"total_tokens":9007199254741083');
+  const exact = Q.qualityReportParse(exactText);
+  check("experiment report: u64 evidence above browser-safe range stays exact",
+    exact.cases[0].runs[0].totalTokens === "9007199254740993" &&
+    exact.summary.totalTokens === "9007199254741083" && exact.consistent);
+
+  const extraValue = structuredClone(experimentReportValue);
+  extraValue.provider_receipt = { deployment: "external" };
+  const extra = Q.qualityReportParse(JSON.stringify(extraValue));
+  check("experiment report: serde-compatible extra fields are disclosed, not interpreted",
+    extra.extras.includes("report.provider_receipt") &&
+    Q.qualityReportHtml(extra).includes("remain uninterpreted"));
+}
+
+{
+  for (const [name, text] of [
+    ["wrong version", experimentReportText.replace('"format_version":1', '"format_version":2')],
+    ["duplicate typed key", experimentReportText.replace('"name":"support-regression@1.4.0"', '"name":"first","name":"second"')],
+    ["fractional u64", experimentReportText.replace('"runs_per_case":2', '"runs_per_case":2.0')],
+    ["malformed status", experimentReportText.replace('{"status":"failed","error":"provider unavailable"}', '{"status":"failed"}')],
+  ]) {
+    let rejected = false;
+    try { Q.qualityReportParse(text); } catch { rejected = true; }
+    check(`experiment report: ${name} fails closed`, rejected);
+  }
+  let oversized = false;
+  try { Q.qualityReportParse(" ".repeat(Q.QUALITY_REPORT_BYTES + 1)); } catch { oversized = true; }
+  check("experiment report: raw import bytes are bounded before parsing", oversized);
+  const excerpt = Q.qualityReportExcerpt('"' + "🔥".repeat(3000) + '"');
+  check("experiment report: visible JSON excerpts use a truthful UTF-8 byte boundary",
+    excerpt.truncated && new TextEncoder().encode(excerpt.text).length <= 8192);
+}
+
+{
+  const hostile = structuredClone(experimentReportValue);
+  hostile.cases[0].case_id = '<img src=x onerror="alert(1)">\u202Etxt';
+  hostile.cases[0].tags = ["<script>unsafe()</script>"];
+  const report = Q.qualityReportParse(JSON.stringify(hostile));
+  const rendered = Q.qualityReportHtml(report);
+  check("experiment report: hostile report identities and tags are escaped",
+    !rendered.includes("<img src=x") && !rendered.includes("<script>unsafe") &&
+    rendered.includes("&lt;img") && rendered.includes("&lt;script&gt;") &&
+    rendered.includes("\\u{202E}") && !rendered.includes("\u202E"));
+}
+
+{
+  const nodes = new Map([
+    ["quality-report-body", { innerHTML: "", querySelector() { return { focus() {}, matches() { return false; } }; } }],
+    ["quality-report-mark", { textContent: "" }],
+    ["quality-report-announcer", { textContent: "" }],
+  ]);
+  sandbox.document.getElementById = (id) => nodes.get(id) || null;
+  Q.store.view = "thread"; Q.store.selected = "thread-a"; Q.store.connectionEpoch = 9;
+  const prior = Q.qualityReportParse(experimentReportText); Q.store.qualityReport = prior;
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const operation = Q.qualityReportFile({ target: { value: "chosen", files: [{ size: 8, arrayBuffer: () => pending }] } });
+  Q.store.selected = "thread-b";
+  release(new TextEncoder().encode(experimentReportText).buffer);
+  await operation;
+  check("experiment report: deferred file reads cannot cross the initiating thread workspace",
+    Q.store.qualityReport === prior);
+
+  Q.store.selected = "thread-a";
+  await Q.qualityReportFile({ target: { value: "chosen", files: [{ size: 8,
+    arrayBuffer: async () => new TextEncoder().encode("{bad").buffer }] } });
+  check("experiment report: a rejected replacement preserves the already-inspectable report",
+    Q.store.qualityReport === prior && prior.error.includes("Report not accepted"));
+
+  let restoredSelection = null;
+  const searchNode = { value: "bilXling", focus() {}, matches(selector) { return selector === 'input[type="search"]'; },
+    setSelectionRange(start, end) { restoredSelection = [start, end]; } };
+  nodes.get("quality-report-body").querySelector = (selector) => selector === "[data-quality-report-search]" ? searchNode : null;
+  Q.qualityReportControl({ isComposing: true, target: { value: "請求", selectionStart: 1, selectionEnd: 1,
+    matches(selector) { return selector === "[data-quality-report-search]"; } } });
+  check("experiment report: IME composition updates search state without replacing the active input",
+    Q.store.qualityReport.search === "請求" && restoredSelection === null);
+  Q.qualityReportControl({ target: { value: "bilXling", selectionStart: 4, selectionEnd: 4,
+    matches(selector) { return selector === "[data-quality-report-search]"; } } });
+  check("experiment report: mid-string search edits preserve the exact caret selection",
+    restoredSelection?.[0] === 4 && restoredSelection?.[1] === 4);
+  sandbox.document.getElementById = () => null;
+}
+
+check("experiment report markup: labelled read-only boundary and one stable live announcer",
+  html.includes('id="quality-report" aria-labelledby="quality-report-title"') &&
+  html.includes("Studio did not execute this experiment") &&
+  html.includes('id="quality-report-announcer" role="status"'));
+check("experiment report interaction: import, filters, cases, runs, and clear are delegated",
+  html.includes('matches("[data-quality-report-file]")') &&
+  html.includes('addEventListener("input", qualityReportControl)') &&
+  html.includes('addEventListener("compositionend", qualityReportControl)') &&
+  html.includes('addEventListener("click", qualityReportClick)'));
+check("experiment report lifecycle: connection reset clears evidence and invalidates pending reads",
+  html.includes("store.qualityReport = null;") && html.includes("store.qualityReportRequest += 1;"));
+check("experiment report responsive: summary, index, run, and assertion evidence collapse on narrow screens",
+  html.includes(".quality-report-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
+  html.includes(".quality-report-toolbar, .quality-report-layout { grid-template-columns:1fr; }") &&
+  html.includes(".quality-report-integrity { grid-template-columns:1fr; }") &&
+  html.includes(".quality-report-run-head { display:flex; flex-wrap:wrap;") &&
+  html.includes(".quality-report-evidence { grid-template-columns:1fr; }") &&
+  html.includes(".quality-report-identity { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
+  html.includes(".quality-report-assertion p,.quality-report-judge,.quality-report-detail .note { overflow-wrap:anywhere;"));
 
 check("release gate filename: portable and purpose-specific",
   Q.qualityGateFilename("../../Production Approval") === "production-approval.gate.json");

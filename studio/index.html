@@ -695,6 +695,53 @@
   .quality-gate-error { padding:9px 11px; border:1px solid #78483a; border-radius:7px; background:#321d18; color:#efc0b4; }
   .quality-gate-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
   .quality-gate-actions .quality-gate-check { margin-left:auto; max-width:590px; }
+  .quality-report { margin-top:14px; border:1px solid #4c465b; border-radius:9px; overflow:hidden; background:linear-gradient(150deg,#191820,#111116); }
+  .quality-report-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:14px 17px; border-bottom:1px solid #4c465b; }
+  .quality-report-head h3 { margin:3px 0 4px; font-size:16px; }
+  .quality-report-head p { margin:0; max-width:760px; }
+  .quality-report-kicker { color:#aaa2c9; font:700 9.5px/1.2 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  .quality-report-mark { flex:none; padding:6px 9px; border:1px solid #6f6784; border-radius:3px; color:#d1c9e9; font:700 9px var(--mono); text-transform:uppercase; letter-spacing:.06em; transform:rotate(1deg); }
+  .quality-report-body { padding:14px 17px 16px; }
+  .quality-report-empty { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:center; padding:14px; border:1px dashed #554e66; background:#15141b; }
+  .quality-report-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .quality-report-identity { display:grid; grid-template-columns:1.4fr 1.4fr .6fr .6fr; gap:1px; margin-top:9px; background:#403b4b; border:1px solid #4b4559; }
+  .quality-report-identity > div { min-width:0; padding:8px 10px; background:#15131a; }
+  .quality-report-identity b,.quality-report-identity span { display:block; overflow-wrap:anywhere; }
+  .quality-report-identity span { color:var(--text-faint); font:700 8px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .quality-report-stats { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); border:1px solid #4b4559; background:#121117; }
+  .quality-report-stat { min-width:0; padding:10px; border-right:1px solid #403b4b; }
+  .quality-report-stat:last-child { border-right:0; }
+  .quality-report-stat b { display:block; overflow-wrap:anywhere; font:650 15px/1.2 var(--mono); color:#ded8ed; }
+  .quality-report-stat span { color:var(--text-faint); font:700 8px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .quality-report-integrity { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; align-items:start; margin-top:9px; padding:9px 11px; border-left:3px solid #6c8271; background:#172019; }
+  .quality-report-integrity.warn { border-color:#a7794e; background:#2a2118; }
+  .quality-report-integrity strong { font:700 9px/1.3 var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .quality-report-toolbar { display:grid; grid-template-columns:minmax(180px,1fr) 190px auto; gap:8px; align-items:end; margin:11px 0 8px; }
+  .quality-report-toolbar label { display:grid; gap:4px; color:var(--text-dim); font-size:10px; }
+  .quality-report-layout { display:grid; grid-template-columns:minmax(220px,.72fr) minmax(0,1.78fr); min-height:360px; border:1px solid #4b4559; background:#121117; }
+  .quality-report-index { min-width:0; max-height:650px; overflow:auto; border-right:1px solid #4b4559; }
+  .quality-report-case { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 9px; width:100%; padding:10px 11px; border:0; border-bottom:1px solid #35313e; border-radius:0; background:transparent; color:inherit; text-align:left; }
+  .quality-report-case:hover { background:#1b1922; }
+  .quality-report-case[aria-current="true"] { background:#24202d; box-shadow:inset 3px 0 #8b81aa; }
+  .quality-report-case strong,.quality-report-case small { overflow-wrap:anywhere; }
+  .quality-report-case small { grid-column:1/-1; color:var(--text-faint); }
+  .quality-report-detail { min-width:0; padding:12px 14px 16px; }
+  .quality-report-detail h4 { margin:0; overflow-wrap:anywhere; }
+  .quality-report-tags { display:flex; flex-wrap:wrap; gap:5px; margin:7px 0 10px; }
+  .quality-report-run-tabs { display:flex; flex-wrap:wrap; gap:5px; padding-bottom:10px; border-bottom:1px solid #373240; }
+  .quality-report-run-tabs button[aria-current="true"] { border-color:#8b81aa; color:#e1dbf0; background:#282331; }
+  .quality-report-run-head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:11px 0; }
+  .quality-report-run-head h4 { flex:1 1 100%; }
+  .quality-report-run-head span { white-space:nowrap; }
+  .quality-report-assertions { display:grid; gap:8px; }
+  .quality-report-assertion { border:1px solid #3f3949; border-left:3px solid #6c8271; padding:9px 10px; background:#17151c; }
+  .quality-report-assertion.fail { border-left-color:#a85e52; }
+  .quality-report-assertion-head { display:flex; justify-content:space-between; gap:8px; margin-bottom:7px; }
+  .quality-report-assertion-head code { overflow-wrap:anywhere; }
+  .quality-report-evidence { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+  .quality-report-evidence pre { margin:3px 0 0; max-height:210px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .quality-report-judge { margin-top:9px; padding:9px 10px; border:1px solid #554c65; background:#211d29; }
+  .quality-report-assertion p,.quality-report-judge,.quality-report-detail .note { overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
   .cmp-report {
     margin-top: 10px; border: 1px solid #5a493a; border-radius: 10px; overflow: hidden;
     background: linear-gradient(135deg, #211d19 0%, #181b19 62%, #171b1e 100%);
@@ -2003,6 +2050,16 @@
     .quality-gate-contract, .quality-gate-preview, .quality-gate-fields { grid-template-columns:1fr; }
     .quality-gate-wide { grid-column:auto; }
     .quality-gate-actions .quality-gate-check { width:100%; margin-left:0; }
+    .quality-report-head, .quality-report-empty { display:grid; }
+    .quality-report-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .quality-report-stat:nth-child(2n) { border-right:0; }
+    .quality-report-stat { border-bottom:1px solid #403b4b; }
+    .quality-report-toolbar, .quality-report-layout { grid-template-columns:1fr; }
+    .quality-report-identity { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .quality-report-integrity { grid-template-columns:1fr; }
+    .quality-report-index { max-height:280px; border-right:0; border-bottom:1px solid #4b4559; }
+    .quality-report-evidence { grid-template-columns:1fr; }
+    .quality-report-run-head span { white-space:normal; }
     .cmp-report-head { flex-direction: column; gap: 8px; }
     .cmp-balance { grid-template-columns: 1fr; }
     .cmp-balance-side:last-child { text-align: left; }
@@ -2590,6 +2647,16 @@
             <div class="quality-gate-body" id="quality-gate-body"></div>
             <span class="sr-only" id="quality-gate-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
           </section>
+          <section class="quality-report" id="quality-report" aria-labelledby="quality-report-title">
+            <div class="quality-report-head">
+              <div><span class="quality-report-kicker">Experiment evidence · connection-bound page memory</span>
+                <h3 id="quality-report-title" tabindex="-1">Experiment Report Explorer</h3>
+                <p class="muted tiny">Inspect one bounded format-v1 <code>rusty-eval</code> report, reconcile its carried aggregates, and trace case/run assertion evidence. Studio did not execute this experiment and does not turn the report into a release decision.</p></div>
+              <span class="quality-report-mark" id="quality-report-mark">No report</span>
+            </div>
+            <div class="quality-report-body" id="quality-report-body"></div>
+            <span class="sr-only" id="quality-report-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
 
           <h2 class="section" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
@@ -2829,6 +2896,8 @@ const store = {
   qualityDatasetRequest: 0,
   qualityGate: null,    // connection-bound page-memory rusty-eval gate policy authoring
   qualityGateRequest: 0,
+  qualityReport: null,  // connection-bound page-memory rusty-eval experiment report inspection
+  qualityReportRequest: 0,
   recLoadRequest: 0,
   recReplayRequest: 0,
   recCompareRequest: 0,
@@ -4725,6 +4794,8 @@ function connectionResetWorkspace() {
   store.qualityDatasetRequest += 1;
   store.qualityGate = null;
   store.qualityGateRequest += 1;
+  store.qualityReport = null;
+  store.qualityReportRequest += 1;
   store.compare = null;
   store.runProof = null;
   store.recUnsupported = false;
@@ -6329,6 +6400,7 @@ function recRender() {
   qualityRender();
   qualityLibraryRender();
   if (!store.qualityGate || !$("quality-gate-form")) qualityGateRender();
+  qualityReportRender();
   detail.style.display = "none";
   detail.innerHTML = "";
   investigation.innerHTML = "";
@@ -8276,6 +8348,436 @@ function qualityGateClick(event) {
     toast("Reviewed release-gate policy downloaded. No experiment or release decision was executed.", "ok");
     $("quality-gate-announcer").textContent = "Reviewed release-gate policy downloaded.";
   }
+}
+
+/* ---------------- experiment report explorer -------------------------
+ * Reads the public rusty-eval ExperimentReport v1 wire into a bounded,
+ * page-memory evidence desk. Known fields are interpreted and aggregates are
+ * independently reconciled; serde-compatible extra fields remain disclosed
+ * as uninterpreted instead of being silently treated as verified evidence.
+ * ------------------------------------------------------------------------- */
+const QUALITY_REPORT_BYTES = 2 * 1024 * 1024;
+const QUALITY_REPORT_CASE_LIMIT = 256;
+const QUALITY_REPORT_RUN_LIMIT = 64;
+const QUALITY_REPORT_ASSERTION_LIMIT = 64;
+const QUALITY_REPORT_TAG_LIMIT = 64;
+const QUALITY_REPORT_VALUE_BYTES = 64 * 1024;
+const QUALITY_REPORT_VISIBLE_BYTES = 8 * 1024;
+
+function qualityReportFields(value, label, allowed, required, extras) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  for (const field of required) if (!qualityLibraryOwn(value, field)) throw new Error(`${label} is missing \`${field}\``);
+  for (const field of Object.keys(value)) if (!allowed.includes(field)) extras.push(`${label}.${field}`);
+  return value;
+}
+
+function qualityReportString(value, label, maximum = 4096) {
+  if (typeof value !== "string" || !qualityLibraryWellFormed(value) || agentUtf8Length(value) > maximum) {
+    throw new Error(`${label} must be well-formed UTF-8 text within ${maximum} bytes`);
+  }
+  return value;
+}
+
+function qualityReportIdentityText(value) {
+  return Array.from(String(value), (character) => /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(character)
+    ? `\\u{${character.codePointAt(0).toString(16).toUpperCase()}}` : character).join("");
+}
+
+function qualityReportU64(object, key, label) {
+  const token = object?.[AGENT_NUMBER_TOKENS]?.[key];
+  if (typeof token !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(token)) throw new Error(`${label} must be a whole unsigned integer`);
+  let value;
+  try { value = BigInt(token); } catch { throw new Error(`${label} is outside the unsigned integer range`); }
+  if (value > QUALITY_GATE_U64_MAX) throw new Error(`${label} exceeds the 64-bit report range`);
+  return String(value);
+}
+
+function qualityReportF64(object, key, label) {
+  const token = qualityLibraryCanonicalValue(object[key], object, key);
+  if (typeof token !== "string" || agentUtf8Length(token) > QUALITY_GATE_NUMBER_BYTES ||
+      !/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token)) {
+    throw new Error(`${label} must be a finite JSON number`);
+  }
+  const value = Number(token);
+  if (!Number.isFinite(value)) throw new Error(`${label} is outside serde_json's finite range`);
+  return { value, canonical: qualityLibraryRustF64(value) };
+}
+
+function qualityReportExactValue(object, key, label) {
+  const json = qualityLibraryCanonicalValue(object[key], object, key);
+  if (json == null || agentUtf8Length(json) > QUALITY_REPORT_VALUE_BYTES) {
+    throw new Error(`${label} exceeds Studio's ${QUALITY_REPORT_VALUE_BYTES / 1024} KiB evidence boundary`);
+  }
+  return json;
+}
+
+function qualityReportStatus(value, label, extras) {
+  qualityReportFields(value, label, ["status", "error"], ["status"], extras);
+  if (value.status === "done" || value.status === "interrupted") return { kind: value.status, error: "" };
+  if (value.status === "failed") return { kind: "failed", error: qualityReportString(value.error, `${label}.error`, 16384) };
+  throw new Error(`${label}.status is not a format-v1 run status`);
+}
+
+function qualityReportAssertion(value, label, extras) {
+  qualityReportFields(value, label, ["assertion", "passed", "expected", "observed", "detail"],
+    ["assertion", "passed", "expected", "observed"], extras);
+  if (typeof value.passed !== "boolean") throw new Error(`${label}.passed must be a boolean`);
+  const detail = !qualityLibraryOwn(value, "detail") || value.detail === null ? "" : qualityReportString(value.detail, `${label}.detail`, 16384);
+  return {
+    assertion: qualityReportString(value.assertion, `${label}.assertion`), passed: value.passed,
+    expected: qualityReportExactValue(value, "expected", `${label}.expected`),
+    observed: qualityReportExactValue(value, "observed", `${label}.observed`), detail,
+  };
+}
+
+function qualityReportJudge(value, label, extras) {
+  qualityReportFields(value, label, ["score", "passed", "rationale"], ["score", "passed", "rationale"], extras);
+  if (typeof value.passed !== "boolean") throw new Error(`${label}.passed must be a boolean`);
+  return {
+    score: qualityReportF64(value, "score", `${label}.score`), passed: value.passed,
+    rationale: qualityReportString(value.rationale, `${label}.rationale`, 16384),
+  };
+}
+
+function qualityReportRun(value, label, extras) {
+  qualityReportFields(value, label,
+    ["repetition", "status", "passed", "assertions", "judge", "tool_calls", "latency_ms", "cost_usd", "total_tokens"],
+    ["repetition", "status", "passed", "assertions", "tool_calls", "latency_ms", "cost_usd", "total_tokens"], extras);
+  if (typeof value.passed !== "boolean") throw new Error(`${label}.passed must be a boolean`);
+  if (!Array.isArray(value.assertions) || value.assertions.length > QUALITY_REPORT_ASSERTION_LIMIT) {
+    throw new Error(`${label}.assertions must contain at most ${QUALITY_REPORT_ASSERTION_LIMIT} verdicts`);
+  }
+  const assertions = value.assertions.map((item, index) => qualityReportAssertion(item, `${label}.assertions[${index}]`, extras));
+  const judge = !qualityLibraryOwn(value, "judge") || value.judge === null ? null : qualityReportJudge(value.judge, `${label}.judge`, extras);
+  return {
+    repetition: qualityReportU64(value, "repetition", `${label}.repetition`),
+    status: qualityReportStatus(value.status, `${label}.status`, extras), passed: value.passed, assertions, judge,
+    toolCalls: qualityReportU64(value, "tool_calls", `${label}.tool_calls`),
+    latencyMs: qualityReportU64(value, "latency_ms", `${label}.latency_ms`),
+    costUsd: qualityReportF64(value, "cost_usd", `${label}.cost_usd`),
+    totalTokens: qualityReportU64(value, "total_tokens", `${label}.total_tokens`),
+  };
+}
+
+function qualityReportCase(value, index, extras) {
+  const label = `cases[${index}]`;
+  qualityReportFields(value, label, ["case_id", "tags", "pass_rate", "runs"], ["case_id", "pass_rate", "runs"], extras);
+  const tags = qualityLibraryOwn(value, "tags") ? value.tags : [];
+  if (!Array.isArray(tags) || tags.length > QUALITY_REPORT_TAG_LIMIT) throw new Error(`${label}.tags exceeds Studio's review boundary`);
+  if (!Array.isArray(value.runs) || value.runs.length > QUALITY_REPORT_RUN_LIMIT) throw new Error(`${label}.runs exceeds Studio's review boundary`);
+  return {
+    position: String(index),
+    id: qualityReportString(value.case_id, `${label}.case_id`),
+    tags: tags.map((tag, tagIndex) => qualityReportString(tag, `${label}.tags[${tagIndex}]`)),
+    passRate: qualityReportF64(value, "pass_rate", `${label}.pass_rate`),
+    runs: value.runs.map((run, runIndex) => ({
+      ...qualityReportRun(run, `${label}.runs[${runIndex}]`, extras), position: String(runIndex),
+    })),
+  };
+}
+
+function qualityReportSummary(value, extras) {
+  const label = "summary";
+  qualityReportFields(value, label,
+    ["cases", "runs", "runs_passed", "run_pass_rate", "case_pass_rate", "assertions", "latency_ms", "total_cost_usd", "total_tokens"],
+    ["cases", "runs", "runs_passed", "run_pass_rate", "case_pass_rate", "assertions", "latency_ms", "total_cost_usd", "total_tokens"], extras);
+  if (!Array.isArray(value.assertions) || value.assertions.length > QUALITY_REPORT_ASSERTION_LIMIT) throw new Error("summary.assertions exceeds Studio's review boundary");
+  const assertions = value.assertions.map((item, index) => {
+    const itemLabel = `summary.assertions[${index}]`;
+    qualityReportFields(item, itemLabel, ["assertion", "passed", "total", "rate"], ["assertion", "passed", "total", "rate"], extras);
+    return { assertion: qualityReportString(item.assertion, `${itemLabel}.assertion`),
+      passed: qualityReportU64(item, "passed", `${itemLabel}.passed`), total: qualityReportU64(item, "total", `${itemLabel}.total`),
+      rate: qualityReportF64(item, "rate", `${itemLabel}.rate`) };
+  });
+  qualityReportFields(value.latency_ms, "summary.latency_ms", ["min", "p50", "p95", "max", "mean"], ["min", "p50", "p95", "max", "mean"], extras);
+  return {
+    cases: qualityReportU64(value, "cases", "summary.cases"), runs: qualityReportU64(value, "runs", "summary.runs"),
+    runsPassed: qualityReportU64(value, "runs_passed", "summary.runs_passed"),
+    runPassRate: qualityReportF64(value, "run_pass_rate", "summary.run_pass_rate"),
+    casePassRate: qualityReportF64(value, "case_pass_rate", "summary.case_pass_rate"), assertions,
+    latency: { min: qualityReportU64(value.latency_ms, "min", "summary.latency_ms.min"),
+      p50: qualityReportU64(value.latency_ms, "p50", "summary.latency_ms.p50"),
+      p95: qualityReportU64(value.latency_ms, "p95", "summary.latency_ms.p95"),
+      max: qualityReportU64(value.latency_ms, "max", "summary.latency_ms.max"),
+      mean: qualityReportF64(value.latency_ms, "mean", "summary.latency_ms.mean") },
+    totalCostUsd: qualityReportF64(value, "total_cost_usd", "summary.total_cost_usd"),
+    totalTokens: qualityReportU64(value, "total_tokens", "summary.total_tokens"),
+  };
+}
+
+function qualityReportPercentile(sorted, percentile) {
+  if (!sorted.length) return 0n;
+  const rank = Math.ceil(percentile / 100 * sorted.length);
+  return sorted[Math.max(1, Math.min(sorted.length, rank)) - 1];
+}
+
+function qualityReportReconcile(report) {
+  const issues = [], runs = report.cases.flatMap((item) => item.runs);
+  const flag = (condition, message) => { if (!condition && issues.length < 32) issues.push(message); };
+  const sameFloat = (actual, expected) => Number.isFinite(actual.value) && Number.isFinite(expected) &&
+    Math.abs(actual.value - expected) <= 1e-12;
+  flag(Boolean(report.name.trim()), "experiment name is empty");
+  flag(Boolean(report.datasetName.trim()), "dataset name is empty");
+  flag(Boolean(report.datasetVersion.trim()), "dataset version is empty");
+  flag(report.summary.cases === String(report.cases.length), "summary case count differs from case evidence");
+  flag(report.summary.runs === String(runs.length), "summary run count differs from run evidence");
+  flag(report.summary.runsPassed === String(runs.filter((run) => run.passed).length), "summary passed-run count differs from run evidence");
+  flag(report.summary.runPassRate.value >= 0 && report.summary.runPassRate.value <= 1, "summary run pass rate is outside 0–1");
+  flag(report.summary.casePassRate.value >= 0 && report.summary.casePassRate.value <= 1, "summary case pass rate is outside 0–1");
+  flag(sameFloat(report.summary.runPassRate, runs.length ? runs.filter((run) => run.passed).length / runs.length : 0), "summary run pass rate was not recomputed from runs");
+  flag(sameFloat(report.summary.casePassRate, report.cases.length ? report.cases.reduce((sum, item) => sum + item.passRate.value, 0) / report.cases.length : 0), "summary case pass rate was not recomputed from cases");
+  const caseIds = new Set();
+  for (const item of report.cases) {
+    const visibleId = qualityReportIdentityText(item.id);
+    flag(Boolean(item.id.trim()), "case id is empty");
+    flag(!caseIds.has(item.id), `case id \`${visibleId}\` is repeated`); caseIds.add(item.id);
+    flag(item.runs.length === Number(report.runsPerCase), `case \`${visibleId}\` does not carry the declared repetition count`);
+    flag(item.passRate.value >= 0 && item.passRate.value <= 1, `case \`${visibleId}\` pass rate is outside 0–1`);
+    flag(sameFloat(item.passRate, item.runs.length ? item.runs.filter((run) => run.passed).length / item.runs.length : 0), `case \`${visibleId}\` pass rate differs from its runs`);
+    const repetitions = new Set();
+    for (const run of item.runs) {
+      flag(!repetitions.has(run.repetition), `case \`${visibleId}\` repeats run ${run.repetition}`); repetitions.add(run.repetition);
+      const derived = run.status.kind === "done" && run.assertions.every((assertion) => assertion.passed) && (!run.judge || run.judge.passed);
+      flag(run.passed === derived, `case \`${visibleId}\` run ${run.repetition} verdict conflicts with status/assertions/judge`);
+      flag(run.costUsd.value >= 0, `case \`${visibleId}\` run ${run.repetition} cost is negative`);
+      if (run.judge) flag(run.judge.score.value >= 0 && run.judge.score.value <= 1,
+        `case \`${visibleId}\` run ${run.repetition} judge score is outside 0–1`);
+      if (run.judge) flag(Boolean(run.judge.rationale.trim()),
+        `case \`${visibleId}\` run ${run.repetition} judge rationale is empty`);
+      for (const assertion of run.assertions) flag(Boolean(assertion.assertion.trim()),
+        `case \`${visibleId}\` run ${run.repetition} has an empty assertion name`);
+    }
+    const expectedRepetitions = Number(report.runsPerCase);
+    flag(repetitions.size === item.runs.length &&
+      Array.from({ length: expectedRepetitions }, (_, index) => String(index)).every((index) => repetitions.has(index)),
+      `case \`${visibleId}\` does not carry the exact 0–${Math.max(0, expectedRepetitions - 1)} repetition set`);
+  }
+  const grouped = new Map();
+  for (const run of runs) for (const assertion of run.assertions) {
+    const current = grouped.get(assertion.assertion) || { passed: 0, total: 0 };
+    current.total += 1; current.passed += assertion.passed ? 1 : 0; grouped.set(assertion.assertion, current);
+  }
+  const expectedAssertions = [...grouped.entries()].sort((a, b) => qualityLibraryKeyCompare(a[0], b[0]));
+  flag(report.summary.assertions.length === expectedAssertions.length, "summary assertion inventory differs from run evidence");
+  for (let index = 0; index < Math.min(report.summary.assertions.length, expectedAssertions.length); index += 1) {
+    const actual = report.summary.assertions[index], [name, expected] = expectedAssertions[index];
+    flag(actual.rate.value >= 0 && actual.rate.value <= 1, `summary assertion ${index + 1} rate is outside 0–1`);
+    flag(actual.assertion === name && actual.passed === String(expected.passed) && actual.total === String(expected.total) &&
+      sameFloat(actual.rate, expected.total ? expected.passed / expected.total : 0), `summary assertion ${index + 1} differs from run evidence`);
+  }
+  const latencies = runs.map((run) => BigInt(run.latencyMs)).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  const latencySum = latencies.reduce((sum, value) => sum + value, 0n);
+  const latencyExpected = { min: latencies[0] || 0n, p50: qualityReportPercentile(latencies, 50),
+    p95: qualityReportPercentile(latencies, 95), max: latencies[latencies.length - 1] || 0n };
+  for (const key of ["min", "p50", "p95", "max"]) flag(report.summary.latency[key] === String(latencyExpected[key]), `summary latency ${key} differs from runs`);
+  flag(latencySum <= QUALITY_GATE_U64_MAX, "run latency total exceeds Rust's u64 aggregation range");
+  if (latencySum <= QUALITY_GATE_U64_MAX) {
+    flag(sameFloat(report.summary.latency.mean, latencies.length ? Number(latencySum) / latencies.length : 0), "summary mean latency differs from runs");
+  }
+  flag(report.summary.latency.mean.value >= 0, "summary mean latency is negative");
+  const cost = runs.reduce((sum, run) => sum + run.costUsd.value, 0);
+  flag(sameFloat(report.summary.totalCostUsd, cost), "summary total cost differs from runs");
+  flag(report.summary.totalCostUsd.value >= 0, "summary total cost is negative");
+  const tokens = runs.reduce((sum, run) => sum + BigInt(run.totalTokens), 0n);
+  flag(tokens <= QUALITY_GATE_U64_MAX, "run token total exceeds Rust's u64 aggregation range");
+  if (tokens <= QUALITY_GATE_U64_MAX) flag(report.summary.totalTokens === String(tokens), "summary token total differs from runs");
+  return issues;
+}
+
+function qualityReportParse(text) {
+  if (typeof text !== "string" || agentUtf8Length(text) > QUALITY_REPORT_BYTES) throw new Error("Report JSON must be no larger than 2 MiB.");
+  let value;
+  try { value = qualityLibraryParseJson(text); } catch (error) { throw new Error("Report is not valid exact JSON: " + error.message); }
+  const extras = [];
+  qualityReportFields(value, "report", ["format_version", "name", "dataset_name", "dataset_version", "runs_per_case", "max_concurrency", "cases", "summary"],
+    ["format_version", "name", "dataset_name", "dataset_version", "runs_per_case", "cases", "summary"], extras);
+  if (qualityReportU64(value, "format_version", "report.format_version") !== "1") throw new Error("Only experiment report format_version 1 is supported.");
+  if (!Array.isArray(value.cases) || value.cases.length > QUALITY_REPORT_CASE_LIMIT) throw new Error(`Report cases exceed Studio's ${QUALITY_REPORT_CASE_LIMIT}-case review boundary.`);
+  const runsPerCase = qualityReportU64(value, "runs_per_case", "report.runs_per_case");
+  if (BigInt(runsPerCase) > BigInt(QUALITY_REPORT_RUN_LIMIT)) throw new Error(`runs_per_case exceeds Studio's ${QUALITY_REPORT_RUN_LIMIT}-run review boundary.`);
+  const maxConcurrency = qualityLibraryOwn(value, "max_concurrency") ? qualityReportU64(value, "max_concurrency", "report.max_concurrency") : "1";
+  const report = { raw: qualityLibraryCanonicalValue(value), name: qualityReportString(value.name, "report.name"),
+    datasetName: qualityReportString(value.dataset_name, "report.dataset_name"), datasetVersion: qualityReportString(value.dataset_version, "report.dataset_version"),
+    runsPerCase, maxConcurrency, cases: value.cases.map((item, index) => qualityReportCase(item, index, extras)),
+    summary: qualityReportSummary(value.summary, extras), extras, selectedCase: "", selectedRun: "", search: "", filter: "all", error: "" };
+  report.issues = qualityReportReconcile(report);
+  if (BigInt(report.runsPerCase) === 0n) report.issues.unshift("declared repetitions per case is zero");
+  if (BigInt(report.maxConcurrency) === 0n) report.issues.unshift("declared maximum concurrency is zero");
+  report.consistent = report.issues.length === 0;
+  report.selectedCase = report.cases[0]?.position || "";
+  report.selectedRun = report.cases[0]?.runs[0]?.position || "";
+  return report;
+}
+
+function qualityReportCases(report) {
+  if (!report || report.invalid) return [];
+  const query = report.search.trim().toLowerCase();
+  return report.cases.filter((item) => {
+    const matches = !query || item.id.toLowerCase().includes(query) || item.tags.some((tag) => tag.toLowerCase().includes(query));
+    if (!matches) return false;
+    if (report.filter === "failing") return item.runs.some((run) => !run.passed);
+    if (report.filter === "interrupted") return item.runs.some((run) => run.status.kind === "interrupted");
+    if (report.filter === "judged") return item.runs.some((run) => run.judge);
+    return true;
+  });
+}
+
+function qualityReportExcerpt(json, maximum = QUALITY_REPORT_VISIBLE_BYTES) {
+  if (agentUtf8Length(json) <= maximum) return { text: json, truncated: false };
+  let text = "", bytes = 0;
+  for (const character of json) {
+    const width = agentUtf8Length(character);
+    if (bytes + width > maximum) break;
+    text += character; bytes += width;
+  }
+  return { text, truncated: true };
+}
+
+function qualityReportEvidenceHtml(label, json) {
+  const preview = qualityReportExcerpt(json);
+  return `<div><span class="muted tiny">${escapeHtml(label)}${preview.truncated ? " · preview truncated" : ""}</span>` +
+    `<pre class="json">${escapeHtml(preview.text)}${preview.truncated ? "\n…" : ""}</pre></div>`;
+}
+
+function qualityReportPercent(value) {
+  if (!Number.isFinite(value)) return "unavailable";
+  return (value * 100).toFixed(1).replace(/\.0$/, "") + "%";
+}
+
+function qualityReportDetailHtml(report, item) {
+  if (!item) return '<h4 id="quality-report-case-title" tabindex="-1">Case evidence</h4><div class="empty">No case matches the current report filters.</div>';
+  let run = item.runs.find((candidate) => candidate.position === report.selectedRun) || item.runs[0];
+  if (run) report.selectedRun = run.position;
+  const tags = item.tags.length ? item.tags.map((tag) => `<span class="badge pending">${escapeHtml(qualityReportIdentityText(tag))}</span>`).join("") : '<span class="muted tiny">No tags</span>';
+  let html = `<h4 id="quality-report-case-title" tabindex="-1">${escapeHtml(qualityReportIdentityText(item.id))}</h4><div class="quality-report-tags">${tags}</div>` +
+    `<div class="quality-report-run-tabs" role="list" aria-label="Case repetitions">` + item.runs.map((candidate) =>
+      `<span role="listitem"><button class="small" type="button" data-quality-report-run="${escapeHtml(candidate.position)}" aria-current="${candidate === run}">` +
+      `run ${escapeHtml(candidate.repetition)} · ${candidate.passed ? "pass" : candidate.status.kind}</button></span>`).join("") + `</div>`;
+  if (!run) return html + '<div class="empty">This case contains no run evidence.</div>';
+  const tone = run.passed ? "success" : run.status.kind === "interrupted" ? "interrupted" : "error";
+  html += `<div class="quality-report-run-head"><h4 id="quality-report-run-title" tabindex="-1">Run ${escapeHtml(run.repetition)} evidence</h4>` +
+    `<span>${badge(tone)}</span><span>${escapeHtml(run.latencyMs)} ms</span><span>${escapeHtml(run.totalTokens)} tokens</span><span>${escapeHtml(recFormatUsd(run.costUsd.value))}</span></div>`;
+  if (run.status.error) html += `<div class="note">${escapeHtml(run.status.error)}</div>`;
+  html += `<div class="quality-report-assertions">` + (run.assertions.length ? run.assertions.map((assertion) =>
+    `<article class="quality-report-assertion${assertion.passed ? "" : " fail"}"><div class="quality-report-assertion-head">` +
+      `<code>${escapeHtml(qualityReportIdentityText(assertion.assertion))}</code>${badge(assertion.passed ? "success" : "error")}</div>` +
+      (assertion.detail ? `<p class="tiny">${escapeHtml(assertion.detail)}</p>` : "") +
+      `<div class="quality-report-evidence">${qualityReportEvidenceHtml("Expected", assertion.expected)}${qualityReportEvidenceHtml("Observed", assertion.observed)}</div></article>`).join("") :
+    '<div class="empty">No deterministic assertions were recorded for this run.</div>') + `</div>`;
+  if (run.judge) html += `<div class="quality-report-judge"><b>Judge · ${escapeHtml(qualityReportPercent(run.judge.score.value))} · ${run.judge.passed ? "pass" : "fail"}</b>` +
+    `<p class="tiny">${escapeHtml(run.judge.rationale)}</p></div>`;
+  return html;
+}
+
+function qualityReportHtml(report) {
+  if (!report || report.invalid) return `<div class="quality-report-empty">` +
+    `<div><h4>Open a report artifact</h4><p class="muted tiny">Import a format-v1 <code>ExperimentReport::to_json()</code> file. The artifact stays in page memory and is discarded on connection change or reload.</p>` +
+      (report?.error ? `<div class="quality-gate-error" role="alert" tabindex="-1" id="quality-report-error">${escapeHtml(report.error)}</div>` : "") + `</div>` +
+    `<label class="small quality-file-button">Import experiment report<input type="file" data-quality-report-file accept="application/json,.json"></label></div>`;
+  const visible = qualityReportCases(report);
+  if (!visible.some((item) => item.position === report.selectedCase)) {
+    report.selectedCase = visible[0]?.position || ""; report.selectedRun = visible[0]?.runs[0]?.position || "";
+  }
+  const selected = visible.find((item) => item.position === report.selectedCase) || null;
+  const integrity = report.consistent ? "Recomputed aggregates match the carried case/run evidence." : `${report.issues.length} reconciliation issue(s): ${report.issues.slice(0, 3).join(" · ")}`;
+  const extras = report.extras.length ? ` ${report.extras.length} serde-compatible extra field(s) remain uninterpreted.` : "";
+  return `<div class="quality-report-actions"><label class="small quality-file-button">Replace report<input type="file" data-quality-report-file accept="application/json,.json"></label>` +
+    `<button class="small" type="button" data-quality-report-clear>Clear page-memory report</button></div>` +
+    (report.error ? `<div class="quality-gate-error" role="alert" tabindex="-1" id="quality-report-error">${escapeHtml(report.error)}</div>` : "") +
+    `<div class="quality-report-identity" aria-label="Experiment report identity">` +
+      `<div><span>Experiment</span><b>${escapeHtml(qualityReportIdentityText(report.name))}</b></div>` +
+      `<div><span>Dataset</span><b>${escapeHtml(qualityReportIdentityText(report.datasetName))}@${escapeHtml(qualityReportIdentityText(report.datasetVersion))}</b></div>` +
+      `<div><span>Repetitions</span><b>${escapeHtml(report.runsPerCase)}</b></div>` +
+      `<div><span>Max concurrency</span><b>${escapeHtml(report.maxConcurrency)}</b></div></div>` +
+    `<div class="quality-report-stats" aria-label="Experiment report summary">` +
+      [[qualityReportPercent(report.summary.runPassRate.value), "run pass rate"], [qualityReportPercent(report.summary.casePassRate.value), "mean case pass rate"],
+       [report.summary.runs, "runs"], [report.summary.latency.p95 + " ms", "p95 latency"], [recFormatUsd(report.summary.totalCostUsd.value), "total cost"], [report.summary.totalTokens, "tokens"]]
+      .map(([value, label]) => `<div class="quality-report-stat"><b>${escapeHtml(String(value))}</b><span>${escapeHtml(label)}</span></div>`).join("") + `</div>` +
+    `<div class="quality-report-integrity${report.consistent ? "" : " warn"}"><strong>${report.consistent ? "internally consistent" : "reconciliation required"}</strong>` +
+      `<span class="tiny">${escapeHtml(integrity + extras)} This is report integrity evidence, not external provider attestation or a gate decision.</span></div>` +
+    `<div class="quality-report-toolbar"><label>Find case or tag<input type="search" data-quality-report-search value="${escapeHtml(report.search)}" placeholder="case id or tag…"></label>` +
+      `<label>Evidence filter<select data-quality-report-filter><option value="all"${report.filter === "all" ? " selected" : ""}>All cases</option>` +
+      `<option value="failing"${report.filter === "failing" ? " selected" : ""}>Needs attention</option><option value="interrupted"${report.filter === "interrupted" ? " selected" : ""}>Interrupted</option>` +
+      `<option value="judged"${report.filter === "judged" ? " selected" : ""}>Judge-scored</option></select></label><span class="muted tiny">${visible.length} of ${report.cases.length} cases</span></div>` +
+    `<div class="quality-report-layout"><div class="quality-report-index" role="list" aria-label="Experiment cases">` +
+      (visible.length ? visible.map((item) => `<div role="listitem"><button class="quality-report-case" type="button" data-quality-report-case="${escapeHtml(item.position)}" aria-current="${item === selected}">` +
+        `<strong>${escapeHtml(qualityReportIdentityText(item.id))}</strong><span>${escapeHtml(qualityReportPercent(item.passRate.value))}</span><small>${item.runs.length} run(s) · ${item.tags.length ? escapeHtml(item.tags.map(qualityReportIdentityText).join(" · ")) : "untagged"}</small></button></div>`).join("") : '<div class="empty">No matching cases.</div>') +
+      `</div><section class="quality-report-detail" aria-labelledby="quality-report-case-title">${qualityReportDetailHtml(report, selected)}</section></div>`;
+}
+
+function qualityReportRender(focusSelector = "", selection = null) {
+  const body = $("quality-report-body"); if (!body) return;
+  body.innerHTML = qualityReportHtml(store.qualityReport);
+  $("quality-report-mark").textContent = !store.qualityReport || store.qualityReport.invalid ? "No report" :
+    (store.qualityReport.consistent ? "Reconciled" : "Review drift");
+  if (focusSelector) {
+    const target = body.querySelector(focusSelector);
+    target?.focus({ preventScroll: true });
+    if (target && target.matches('input[type="search"]')) {
+      const start = Number.isInteger(selection?.start) ? selection.start : target.value.length;
+      const end = Number.isInteger(selection?.end) ? selection.end : start;
+      target.setSelectionRange(Math.min(start, target.value.length), Math.min(end, target.value.length));
+    }
+  }
+}
+
+function qualityReportOperationCurrent(request, view, selected, epoch) {
+  return request === store.qualityReportRequest && view === store.view && selected === store.selected && epoch === store.connectionEpoch;
+}
+
+async function qualityReportFile(event) {
+  const input = event.target, file = input.files && input.files[0]; input.value = "";
+  if (!file) return;
+  const request = ++store.qualityReportRequest, view = store.view, selected = store.selected, epoch = store.connectionEpoch;
+  if (file.size > QUALITY_REPORT_BYTES) {
+    store.qualityReport = store.qualityReport && !store.qualityReport.invalid ? store.qualityReport : { invalid: true };
+    store.qualityReport.error = "Report file exceeds the 2 MiB import boundary.";
+    qualityReportRender("#quality-report-error"); return;
+  }
+  try {
+    const bytes = await file.arrayBuffer();
+    if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
+    const report = qualityReportParse(qualityLibraryDecode(bytes));
+    if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
+    store.qualityReport = report; qualityReportRender('[data-quality-report-search]');
+    $("quality-report-announcer").textContent = `Experiment report ${report.name} loaded. ${report.consistent ? "Aggregates reconciled." : "Aggregate drift requires review."}`;
+  } catch (error) {
+    if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
+    store.qualityReport = store.qualityReport && !store.qualityReport.invalid ? store.qualityReport : { invalid: true };
+    store.qualityReport.error = "Report not accepted: " + error.message;
+    qualityReportRender("#quality-report-error"); $("quality-report-announcer").textContent = store.qualityReport.error;
+  }
+}
+
+function qualityReportControl(event) {
+  const report = store.qualityReport; if (!report || report.invalid) return;
+  let selection = null;
+  if (event.target.matches("[data-quality-report-search]")) {
+    report.search = event.target.value;
+    if (event.isComposing) return;
+    selection = { start: event.target.selectionStart, end: event.target.selectionEnd };
+  }
+  else if (event.target.matches("[data-quality-report-filter]")) report.filter = event.target.value;
+  else return;
+  qualityReportRender(event.target.matches("[data-quality-report-search]") ? "[data-quality-report-search]" : "[data-quality-report-filter]", selection);
+}
+
+function qualityReportClick(event) {
+  const report = store.qualityReport;
+  if (event.target.closest("[data-quality-report-clear]")) {
+    if (!report || !window.confirm("Clear the page-memory experiment report? The source file is not affected.")) return;
+    store.qualityReportRequest += 1; store.qualityReport = null; qualityReportRender("[data-quality-report-file]");
+    $("quality-report-announcer").textContent = "Page-memory experiment report cleared."; return;
+  }
+  if (!report || report.invalid) return;
+  const caseTarget = event.target.closest("[data-quality-report-case]");
+  if (caseTarget) {
+    report.selectedCase = caseTarget.getAttribute("data-quality-report-case");
+    report.selectedRun = report.cases.find((item) => item.position === report.selectedCase)?.runs[0]?.position || "";
+    qualityReportRender("#quality-report-case-title"); return;
+  }
+  const runTarget = event.target.closest("[data-quality-report-run]");
+  if (runTarget) { report.selectedRun = runTarget.getAttribute("data-quality-report-run"); qualityReportRender("#quality-report-run-title"); }
 }
 
 /* ---------------- recorder: exact replay & run comparison --------------
@@ -19326,6 +19828,13 @@ function init() {
   });
   $("quality-gate").addEventListener("click", qualityGateClick);
   $("quality-gate").addEventListener("submit", (event) => event.preventDefault());
+  $("quality-report").addEventListener("change", (event) => {
+    if (event.target.matches("[data-quality-report-file]")) qualityReportFile(event);
+    else qualityReportControl(event);
+  });
+  $("quality-report").addEventListener("input", qualityReportControl);
+  $("quality-report").addEventListener("compositionend", qualityReportControl);
+  $("quality-report").addEventListener("click", qualityReportClick);
 
   // Replay & run comparison. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).
