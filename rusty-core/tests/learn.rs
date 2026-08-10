@@ -35,25 +35,34 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use rusty_agent_runtime::durable::{retry_decision_event, ErrorClass, RetryDecision};
+use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::error::Result as RuntimeResult;
 use rusty_agent_runtime::executor::{ExecutionOutcome, Executor, RunConfig};
 use rusty_agent_runtime::graph::GraphBuilder;
-use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, PARENT_EVENT_KEY};
+use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, PARENT_EVENT_KEY};
 use rusty_agent_runtime::learn::{
-    admit_promotion, candidate_effect_key, evaluation_effect_key, promotion_effect_key,
+    admit_promotion, candidate_effect_key, detect_policy_drift, distill_retry_parameters,
+    distill_timeout_parameters, evaluation_effect_key, promotion_effect_id, promotion_effect_key,
     rollback_effect_key, AutoPromotion, CanaryBinding, Candidate, CandidateContent,
     CandidateEvaluation, CandidateEvaluator, CandidateId, CandidateOverlay, CandidateRecord,
-    CandidateStatus, EnvelopeRule, EvaluationRequest, EvaluationThresholds, EvaluationVerdict,
-    EvidenceSpan, GrantDirection, LearnError, PromotionAuthority, PromotionDecision,
-    PromotionEnvelope, PromotionReceipt, ReplaySummary, RollbackReceipt, VersionPointer,
+    CandidateStatus, DriftBaseline, DriftThresholds, EnvelopeRule, EvaluationRequest,
+    EvaluationThresholds, EvaluationVerdict, EvidenceSpan, GrantDirection, LearnError,
+    PromotionAuthority, PromotionDecision, PromotionEnvelope, PromotionReceipt, PromotionRefusal,
+    ReplaySummary, RetryLearningConfig, RollbackReceipt, TimeoutLearningConfig,
+    TwinCandidateEvaluator, VersionPointer,
 };
 use rusty_agent_runtime::memory::{
     ContextBudget, InMemoryMemoryStore, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
     MemoryScope, MemorySource, MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
 use rusty_agent_runtime::node::{NodeContext, NodeOutput};
-use rusty_agent_runtime::record::{Effect, RunEventKind, RunManifest};
+use rusty_agent_runtime::record::{
+    derive_policy_version, DecisionEvent, DecisionFamily, DecisionOutcome, DecisionRole, Effect,
+    EventStatus, ExecutorPolicy, PolicyVersion, RunEventKind, RunManifest,
+};
 use rusty_agent_runtime::state::{Reducer, State, StateSpec};
+use rusty_agent_runtime::twin::{FaultAnchor, FaultSchedule, InjectedFault};
 
 // ---------- golden-file machinery ----------
 
@@ -727,4 +736,808 @@ fn candidate_serde_roundtrip_is_shape_stable() {
     assert_eq!(candidate, back);
     // Content-addressed: the round-tripped candidate re-derives its id.
     back.verify_address().unwrap();
+}
+
+// --------------------------------------------------------------------- //
+// R0.10 wave 3: the learned retry/timeout families, end to end
+//
+// Three test groups:
+//
+// - **The distillers** — the retry learner's margin gate (the Wave 1
+//   scar: a per-class table that does not beat the floor earns nothing),
+//   the permanent-failure stance, and the timeout learner's empirical
+//   abort-fraction fit with abstention on heavy tails (the second Wave 1
+//   scar). Sparse evidence produces no candidate, never a confident one.
+// - **The twin gate** — `TwinCandidateEvaluator` replays the evidence
+//   span's fixtures head-to-head, floor against candidate on identical
+//   seeds and fault schedules. A winning candidate clears the Auto
+//   envelope's evidence bar; a candidate that truncates completions
+//   regresses and the gate refuses it mechanically. Under the R0.8
+//   default envelope the policy family's bar is the human's: no token,
+//   no promotion — a scoped token admits, carrying the reviewer's name.
+// - **Drift detection** — the acting version's journaled outcomes
+//   against the promotion-time twin baseline: completion drops,
+//   dead-letter growth, and p95 latency growth declare drift with
+//   attributable reasons; sparse evidence declares nothing; shadow
+//   decisions are the next candidate's evidence, never the acting
+//   version's health.
+// --------------------------------------------------------------------- //
+
+/// One journaled retry decision for the learner and drift suites, built
+/// through the family's own emission contract and then given a terminal
+/// outcome when the scenario needs one (a `Retry` selection journals
+/// `outcome: None` — the re-attempt has not happened yet).
+#[allow(clippy::too_many_arguments)]
+fn journaled_retry(
+    seq: u64,
+    class: ErrorClass,
+    attempt: u32,
+    max_attempts: u32,
+    decision: &RetryDecision,
+    outcome: Option<DecisionOutcome>,
+    dependency_latency_ms: Option<u64>,
+    policy_version: &PolicyVersion,
+) -> DecisionEvent {
+    let mut event = retry_decision_event(
+        "run-evidence",
+        "thread-evidence",
+        seq,
+        Effect::Idempotent,
+        class,
+        attempt,
+        max_attempts,
+        dependency_latency_ms,
+        decision,
+        policy_version,
+        ts(1_750_000_010_000 + seq as i64 * 1_000),
+    );
+    event.outcome = outcome;
+    event
+}
+
+/// `count` retry decisions for `class`, `successes` of them journaled
+/// with a success outcome (the retry recovered the call).
+fn retry_evidence(
+    class: ErrorClass,
+    retries: u64,
+    successes: u64,
+    failures: u64,
+) -> Vec<DecisionEvent> {
+    let mut events = Vec::new();
+    let mut seq = 1u64;
+    for i in 0..retries {
+        let outcome = if i < successes {
+            Some(DecisionOutcome::Success)
+        } else {
+            None
+        };
+        events.push(journaled_retry(
+            seq,
+            class,
+            1,
+            3,
+            &RetryDecision::Retry { after_ms: 500 },
+            outcome,
+            None,
+            &PolicyVersion::default(),
+        ));
+        seq += 1;
+    }
+    for _ in 0..failures {
+        events.push(journaled_retry(
+            seq,
+            class,
+            3,
+            3,
+            &RetryDecision::Dead,
+            Some(DecisionOutcome::Failure),
+            None,
+            &PolicyVersion::default(),
+        ));
+        seq += 1;
+    }
+    events
+}
+
+/// A journaled run of tool completions for the timeout learner: `callee`
+/// completed `latencies.len()` times with the given latencies.
+fn completion_events(callee: &str, latencies: &[u64], start_seq: u64) -> JournalSnapshot {
+    let journal = Journal::new(
+        "run-latencies",
+        "thread-latencies",
+        Clock::logical(1_700_000_000_000, 10),
+    );
+    let step = journal.record(
+        EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure)
+            .input(json!({"step": 0, "active_nodes": [callee]})),
+    );
+    for (i, latency) in latencies.iter().enumerate() {
+        journal.record(
+            EventDraft::new(RunEventKind::ToolCall, Effect::Idempotent)
+                .node(callee)
+                .input(json!({"tool": callee, "arguments": {"i": i}}))
+                .output(json!({"result": "ok"}))
+                .latency_ms(*latency)
+                .status(EventStatus::Ok)
+                .parent(&step),
+        );
+    }
+    let _ = start_seq;
+    journal.snapshot()
+}
+
+/// The twin-gate winning fixture: one recorded 100 ms completion the
+/// fault schedule rate-limits on its first two attempts. The recorded
+/// world answers attempt three; the arms differ only in what the wait
+/// cost — the wall-time win a shorter backoff earns at identical
+/// completion.
+fn rate_limited_snapshot() -> JournalSnapshot {
+    let journal = Journal::new(
+        "run-rate-limited",
+        "thread-rate-limited",
+        Clock::logical(1_700_000_000_000, 10),
+    );
+    let step = journal.record(
+        EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure)
+            .input(json!({"step": 0, "active_nodes": ["search"]})),
+    );
+    journal.record(
+        EventDraft::new(RunEventKind::ToolCall, Effect::Idempotent)
+            .node("search")
+            .input(json!({"tool": "search", "arguments": {}}))
+            .output(json!({"result": "ok"}))
+            .latency_ms(100)
+            .cost_usd(0.001)
+            .parent(&step),
+    );
+    journal.record(
+        EventDraft::new(RunEventKind::SuperStepEnd, Effect::Pure)
+            .output(json!({"done": true}))
+            .parent(&step),
+    );
+    journal.snapshot()
+}
+
+/// The twin-gate losing fixture: a flaky call (recorded error, re-served
+/// on every attempt), a slow 10 s completion (the timeout family's
+/// target), and a fast one.
+fn slow_call_snapshot() -> JournalSnapshot {
+    let journal = Journal::new(
+        "run-slow-call",
+        "thread-slow-call",
+        Clock::logical(1_700_000_000_000, 10),
+    );
+    let step = journal.record(
+        EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure)
+            .input(json!({"step": 0, "active_nodes": ["flaky", "slow", "fast"]})),
+    );
+    journal.record(
+        EventDraft::new(RunEventKind::ToolCall, Effect::Idempotent)
+            .node("flaky")
+            .input(json!({"tool": "flaky", "arguments": {}}))
+            .output(json!({"error": "connection reset"}))
+            .latency_ms(100)
+            .status(EventStatus::Error)
+            .parent(&step),
+    );
+    journal.record(
+        EventDraft::new(RunEventKind::ToolCall, Effect::Idempotent)
+            .node("slow")
+            .input(json!({"tool": "slow", "arguments": {}}))
+            .output(json!({"result": "ok"}))
+            .latency_ms(10_000)
+            .cost_usd(0.002)
+            .parent(&step),
+    );
+    journal.record(
+        EventDraft::new(RunEventKind::ToolCall, Effect::Idempotent)
+            .node("fast")
+            .input(json!({"tool": "fast", "arguments": {}}))
+            .output(json!({"result": "ok"}))
+            .latency_ms(50)
+            .parent(&step),
+    );
+    journal.record(
+        EventDraft::new(RunEventKind::SuperStepEnd, Effect::Pure)
+            .output(json!({"done": true}))
+            .parent(&step),
+    );
+    journal.snapshot()
+}
+
+/// A `policy` candidate carrying `parameters` for `family`.
+fn policy_candidate(family: DecisionFamily, parameters: Value) -> Candidate {
+    Candidate::new(
+        CandidateContent::Policy { family, parameters },
+        distiller(),
+        EvidenceSpan {
+            run_ids: vec!["run-evidence".into()],
+            ..EvidenceSpan::default()
+        },
+        ts(1_750_000_020_000),
+    )
+    .unwrap()
+}
+
+/// An envelope whose policy family auto-promotes past the evidence bar —
+/// the mechanical gate the twin evaluation feeds. Every other family
+/// keeps the approval rule.
+fn auto_policy_envelope() -> PromotionEnvelope {
+    PromotionEnvelope {
+        envelope_version: "test-auto".into(),
+        prompt: EnvelopeRule::Approval,
+        policy: EnvelopeRule::Auto(AutoPromotion {
+            dataset_version: None,
+            min_improvement: 0.0,
+            scopes: Vec::new(),
+        }),
+        memory_set: EnvelopeRule::Approval,
+        tool_permission: EnvelopeRule::Approval,
+    }
+}
+
+// ---------- the distillers ----------
+
+#[test]
+fn retry_learner_emits_a_per_class_entry_when_the_margin_clears() {
+    // A class recovering on every other retry (p = 0.5): the floor's
+    // schedule pays the full backoff ladder and charges the dead-letter
+    // tail; a shorter base with a wider budget clears the 2 s margin.
+    let events = retry_evidence(ErrorClass::Timeout, 10, 5, 0);
+    let params = distill_retry_parameters(&events, &RetryLearningConfig::default());
+
+    // The flat schedule stays the floor's — only the class the evidence
+    // spoke for earns an entry.
+    assert_eq!(params.base_delay_ms, 1_000);
+    assert_eq!(params.max_delay_ms, 300_000);
+    assert_eq!(params.max_attempts, 3);
+    let entry = params
+        .per_class
+        .as_ref()
+        .and_then(|table| table.get(&ErrorClass::Timeout))
+        .expect("p = 0.5 clears the margin");
+    assert_eq!(entry.base_delay_ms, 100, "the grid's shortest base wins");
+    assert_eq!(
+        entry.max_attempts, 5,
+        "a wider budget buys back the dead-letter tail"
+    );
+}
+
+#[test]
+fn retry_learner_abstains_when_the_floor_is_already_optimal() {
+    // p = 1.0: the first retry always recovers, so the whole decision is
+    // the first draw's mean — the floor's 500 ms against the grid's best
+    // 50 ms, a 450 ms fit that does not clear the 2 s margin. The Wave 1
+    // scar is exactly this: a marginal per-class table demoting the
+    // floor's jittered exponential. No margin, no entry.
+    let events = retry_evidence(ErrorClass::Timeout, 10, 10, 0);
+    let params = distill_retry_parameters(&events, &RetryLearningConfig::default());
+    assert!(
+        params.per_class.is_none(),
+        "a fit inside the margin earns nothing: {params:?}"
+    );
+}
+
+#[test]
+fn retry_learner_marks_permanent_failure_classes_for_early_abort() {
+    // Four retries observed, four terminal failures, not one success: the
+    // permanent-failure stance — abort after the first failure — on the
+    // floor's schedule. The evidence is the terminal outcomes, never the
+    // absence of successes alone.
+    let events = retry_evidence(ErrorClass::Unknown, 4, 0, 4);
+    let params = distill_retry_parameters(&events, &RetryLearningConfig::default());
+    let entry = params
+        .per_class
+        .as_ref()
+        .and_then(|table| table.get(&ErrorClass::Unknown))
+        .expect("terminal failures are evidence");
+    assert_eq!(entry.max_attempts, 1, "abort after the first failure");
+    assert_eq!(entry.base_delay_ms, 1_000, "the floor's schedule stands");
+    assert_eq!(entry.max_delay_ms, 300_000);
+}
+
+#[test]
+fn retry_learner_abstains_on_sparse_evidence() {
+    let events = retry_evidence(ErrorClass::Timeout, 2, 2, 0);
+    let params = distill_retry_parameters(&events, &RetryLearningConfig::default());
+    assert!(
+        params.per_class.is_none(),
+        "two observations produce no confident policy"
+    );
+}
+
+#[test]
+fn timeout_learner_fits_the_smallest_rung_within_the_abort_tolerance() {
+    // `search`: 19 completions at 800 ms and one at 4.5 s. The 1 s rung
+    // would prematurely abort 5% of completions — over the 1% tolerance;
+    // the 5 s rung aborts none. `embed` has ten completions — under the
+    // 16-sample bar, no entry.
+    let mut latencies = vec![800u64; 19];
+    latencies.push(4_500);
+    let snapshot = completion_events("search", &latencies, 0);
+    let embed = completion_events("embed", &[100u64; 10], 0);
+    let events: Vec<_> = snapshot
+        .events
+        .iter()
+        .chain(embed.events.iter())
+        .cloned()
+        .collect();
+
+    let params = distill_timeout_parameters(&events, &TimeoutLearningConfig::default());
+    assert_eq!(
+        params.default_millis, None,
+        "the floor keeps unnamed callees"
+    );
+    assert_eq!(
+        params.max_millis,
+        Some(300_000),
+        "the ladder's top pins the ceiling"
+    );
+    let table = params.per_callee.expect("search earns a bound");
+    assert_eq!(table.get("search"), Some(&5_000));
+    assert!(
+        !table.contains_key("embed"),
+        "sparse evidence earns nothing"
+    );
+}
+
+#[test]
+fn timeout_learner_abstains_on_heavy_tails() {
+    // The Wave 1 scar, guarded: 19 completions at 1 s and one at 10
+    // minutes. No rung below the ladder's top fits within the abort
+    // tolerance — the tail is heavier than the ladder, and the learner
+    // abstains rather than shipping a bound that fails non-inferiority.
+    // The top rung itself is never emitted: a bound equal to it reclaims
+    // nothing the floor does not.
+    let mut latencies = vec![1_000u64; 19];
+    latencies.push(600_000);
+    let snapshot = completion_events("batch", &latencies, 0);
+    let params = distill_timeout_parameters(&snapshot.events, &TimeoutLearningConfig::default());
+    assert!(
+        params.per_callee.is_none(),
+        "a tail heavier than the ladder keeps the floor: {params:?}"
+    );
+    assert_eq!(params.max_millis, None);
+}
+
+#[test]
+fn distilled_parameters_round_trip_through_the_candidate_gate() {
+    // The learner's output IS the candidate's content: serialized into a
+    // `policy` candidate, applied to the floor by the gate's own parse
+    // path, and named by the registry's content-derived version.
+    let events = retry_evidence(ErrorClass::Timeout, 10, 5, 0);
+    let params = distill_retry_parameters(&events, &RetryLearningConfig::default());
+    let candidate = policy_candidate(
+        DecisionFamily::Retry,
+        serde_json::to_value(&params).unwrap(),
+    );
+    let CandidateContent::Policy { family, parameters } = &candidate.content else {
+        unreachable!()
+    };
+    let policy = ExecutorPolicy::static_v0()
+        .with_family_parameters(*family, parameters.clone())
+        .expect("distilled parameters apply to the floor");
+    assert!(!policy.is_static_floor());
+    let version = derive_policy_version(&policy).unwrap();
+    assert_ne!(
+        version,
+        derive_policy_version(&ExecutorPolicy::static_v0()).unwrap(),
+        "a learned body names a distinct version"
+    );
+}
+
+// ---------- the twin gate ----------
+
+/// The rate-limited fixture's evaluation: a 100 ms backoff candidate
+/// against the fault schedule that rate-limits the recorded call's first
+/// two attempts.
+fn winning_evaluation() -> (Candidate, CandidateEvaluation) {
+    let snapshot = rate_limited_snapshot();
+    let effect_seq = snapshot
+        .events
+        .iter()
+        .find(|event| event.kind == RunEventKind::ToolCall)
+        .map(|event| event.seq)
+        .expect("the fixture records the call");
+    let faults = FaultSchedule::new(42)
+        .with_injection(
+            FaultAnchor::OnAttempt {
+                effect_seq,
+                attempt: 1,
+            },
+            InjectedFault::RateLimited { retry_after_ms: 50 },
+        )
+        .with_injection(
+            FaultAnchor::OnAttempt {
+                effect_seq,
+                attempt: 2,
+            },
+            InjectedFault::RateLimited { retry_after_ms: 50 },
+        );
+    let evaluator = TwinCandidateEvaluator::new(42, distiller()).with_faults(faults);
+    let candidate = policy_candidate(
+        DecisionFamily::Retry,
+        json!({"base_delay_ms": 100, "max_delay_ms": 30_000, "max_attempts": 3}),
+    );
+    let request = EvaluationRequest {
+        dataset_version: "twin-v1".into(),
+        target_metric: "wall_time_ms".into(),
+        thresholds: EvaluationThresholds::default(),
+        replay_evidence: vec![snapshot],
+    };
+    let evaluation = futures::executor::block_on(evaluator.evaluate(&candidate, &request))
+        .expect("the twin prices the candidate");
+    (candidate, evaluation)
+}
+
+#[test]
+fn twin_gate_admits_a_candidate_that_wins_on_the_target_metric() {
+    let (candidate, evaluation) = winning_evaluation();
+    assert_eq!(evaluation.replay.matched, 1);
+    assert!(evaluation.replay.divergences.is_empty());
+    assert!(
+        !evaluation.verdict.regressed,
+        "identical completion — both arms recover on attempt three"
+    );
+    assert_eq!(evaluation.verdict.target_metric, "wall_time_ms");
+    let delta = evaluation.verdict.delta.expect("the twin prices wall time");
+    assert!(
+        delta > 0.0,
+        "the shorter backoff waits less at identical completion: delta {delta}"
+    );
+    // Both reports carry the aggregate the drift baseline later reads.
+    assert!(evaluation.baseline_report.get("aggregate").is_some());
+    assert!(evaluation.candidate_report.get("aggregate").is_some());
+
+    // The mechanical gate: clean replay, no regression, improvement past
+    // the bar — admitted on the envelope's own authority.
+    let decision = admit_promotion(&auto_policy_envelope(), &candidate, Some(&evaluation), None)
+        .expect("a winning candidate clears the evidence bar");
+    assert!(matches!(
+        decision.authority,
+        PromotionAuthority::Envelope { .. }
+    ));
+}
+
+#[test]
+fn twin_gate_refuses_a_candidate_that_regresses_completion() {
+    // A 5 s bound on a recorded 10 s completion truncates it on every
+    // attempt — observed as Timeout, retried to the budget, dead-lettered.
+    // The floor completes two of three items (flaky dead-letters either
+    // way); the candidate completes one. Completion parity is breached,
+    // the verdict regresses, and the Auto envelope refuses mechanically.
+    let evaluator = TwinCandidateEvaluator::new(42, distiller());
+    let candidate = policy_candidate(
+        DecisionFamily::Timeout,
+        json!({"max_millis": 300_000, "per_callee": {"slow": 5_000}}),
+    );
+    let request = EvaluationRequest {
+        dataset_version: "twin-v1".into(),
+        target_metric: "completion_rate".into(),
+        thresholds: EvaluationThresholds::default(),
+        replay_evidence: vec![slow_call_snapshot()],
+    };
+    let evaluation = futures::executor::block_on(evaluator.evaluate(&candidate, &request))
+        .expect("the twin prices the candidate");
+    assert!(
+        evaluation.verdict.regressed,
+        "truncating completions is the regression the gate exists to catch"
+    );
+    let delta = evaluation.verdict.delta.unwrap();
+    assert!(delta < 0.0, "completion fell: delta {delta}");
+
+    let refusal = admit_promotion(&auto_policy_envelope(), &candidate, Some(&evaluation), None)
+        .expect_err("a regressed candidate never auto-promotes");
+    assert!(
+        matches!(
+            refusal,
+            LearnError::Refused(PromotionRefusal::EvaluationRegressed { .. })
+        ),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn r08_default_leaves_the_policy_bar_to_a_human_approval() {
+    // The release default: `policy` candidates promote only under a
+    // scoped approval — the evidence bar is the reviewer's, exercised
+    // against the twin's journaled reports, not the gate's arithmetic.
+    let (candidate, evaluation) = winning_evaluation();
+    let envelope = PromotionEnvelope::r08_default();
+
+    let refusal = admit_promotion(&envelope, &candidate, Some(&evaluation), None)
+        .expect_err("no token, no promotion");
+    assert!(
+        matches!(
+            refusal,
+            LearnError::Refused(PromotionRefusal::RequiresApproval { .. })
+        ),
+        "{refusal}"
+    );
+
+    let approval = ApprovalToken::approve(promotion_effect_id(&candidate), "ops:test");
+    let decision = admit_promotion(&envelope, &candidate, Some(&evaluation), Some(&approval))
+        .expect("a scoped token admits");
+    match decision.authority {
+        PromotionAuthority::Approval { approved_by } => assert_eq!(approved_by, "ops:test"),
+        other => panic!("expected approval authority, got {other:?}"),
+    }
+
+    // The token is scoped, not transferable: a token minted for another
+    // candidate's promotion effect does not admit this one.
+    let other = policy_candidate(
+        DecisionFamily::Retry,
+        json!({"base_delay_ms": 250, "max_delay_ms": 30_000, "max_attempts": 3}),
+    );
+    let wrong = ApprovalToken::approve(promotion_effect_id(&other), "ops:test");
+    let refusal = admit_promotion(&envelope, &candidate, Some(&evaluation), Some(&wrong))
+        .expect_err("a token admits exactly one effect");
+    assert!(
+        matches!(
+            refusal,
+            LearnError::Refused(PromotionRefusal::ApprovalMismatch { .. })
+        ),
+        "{refusal}"
+    );
+}
+
+// ---------- drift detection ----------
+
+fn drift_version() -> PolicyVersion {
+    PolicyVersion::new("policy-drift-test")
+}
+
+/// `terminal` decisions by the acting version: `successes` recovered,
+/// `dead_lettered` spent their budget with the gates open, the rest
+/// failed with the gates closed. Latency feature on every decision.
+fn acting_outcomes(
+    terminal: u64,
+    successes: u64,
+    dead_lettered: u64,
+    latency_ms: u64,
+) -> Vec<DecisionEvent> {
+    let version = drift_version();
+    let mut events = Vec::new();
+    for seq in 1..=terminal {
+        if seq <= successes {
+            events.push(journaled_retry(
+                seq,
+                ErrorClass::Timeout,
+                1,
+                3,
+                &RetryDecision::Retry { after_ms: 100 },
+                Some(DecisionOutcome::Success),
+                Some(latency_ms),
+                &version,
+            ));
+        } else if seq <= successes + dead_lettered {
+            // The budget spent with the gates open: attempt 3 of 3,
+            // retryable class, repeatable effect — the dead-letter shape
+            // the retry family journals (the legal set has collapsed).
+            events.push(journaled_retry(
+                seq,
+                ErrorClass::Timeout,
+                3,
+                3,
+                &RetryDecision::Dead,
+                Some(DecisionOutcome::Failure),
+                Some(latency_ms),
+                &version,
+            ));
+        } else {
+            // The gates closed: a non-retryable class fails immediately.
+            events.push(journaled_retry(
+                seq,
+                ErrorClass::InvalidInput,
+                1,
+                3,
+                &RetryDecision::Fail,
+                Some(DecisionOutcome::Failure),
+                Some(latency_ms),
+                &version,
+            ));
+        }
+    }
+    events
+}
+
+#[test]
+fn drift_monitor_stays_quiet_on_a_healthy_version() {
+    let events = acting_outcomes(10, 10, 0, 100);
+    let baseline = DriftBaseline {
+        completion_rate: 1.0,
+        dead_letter_rate: 0.0,
+        latency_p95_ms: Some(100),
+    };
+    let report = detect_policy_drift(
+        &events,
+        &drift_version(),
+        &baseline,
+        &DriftThresholds::default(),
+    );
+    assert!(!report.drifted, "healthy: {:?}", report.reasons);
+    assert!(report.reasons.is_empty());
+    assert_eq!(report.decisions, 10);
+    assert_eq!(report.terminal, 10);
+    assert_eq!(report.completion_rate, 1.0);
+}
+
+#[test]
+fn drift_monitor_declares_a_completion_drop() {
+    let events = acting_outcomes(10, 6, 0, 100);
+    let baseline = DriftBaseline {
+        completion_rate: 1.0,
+        dead_letter_rate: 0.0,
+        latency_p95_ms: Some(100),
+    };
+    let report = detect_policy_drift(
+        &events,
+        &drift_version(),
+        &baseline,
+        &DriftThresholds::default(),
+    );
+    assert!(report.drifted);
+    assert!(
+        report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("completion rate")),
+        "{:?}",
+        report.reasons
+    );
+}
+
+#[test]
+fn drift_monitor_declares_dead_letter_growth() {
+    // Two of ten decisions spent their budget with the gates open. The
+    // baseline carried a lower completion rate already, so only the
+    // dead-letter signal breaches.
+    let events = acting_outcomes(10, 8, 2, 100);
+    let baseline = DriftBaseline {
+        completion_rate: 0.75,
+        dead_letter_rate: 0.0,
+        latency_p95_ms: None,
+    };
+    let report = detect_policy_drift(
+        &events,
+        &drift_version(),
+        &baseline,
+        &DriftThresholds::default(),
+    );
+    assert!(report.drifted);
+    assert_eq!(report.dead_letter_rate, 0.2);
+    assert!(
+        report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("dead-letter")),
+        "{:?}",
+        report.reasons
+    );
+    assert!(
+        !report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("completion rate")),
+        "completion held its baseline: {:?}",
+        report.reasons
+    );
+}
+
+#[test]
+fn drift_monitor_declares_latency_growth() {
+    let events = acting_outcomes(10, 10, 0, 200);
+    let baseline = DriftBaseline {
+        completion_rate: 1.0,
+        dead_letter_rate: 0.0,
+        latency_p95_ms: Some(100),
+    };
+    let report = detect_policy_drift(
+        &events,
+        &drift_version(),
+        &baseline,
+        &DriftThresholds::default(),
+    );
+    assert!(report.drifted);
+    assert!(
+        report.reasons.iter().any(|reason| reason.contains("p95")),
+        "{:?}",
+        report.reasons
+    );
+}
+
+#[test]
+fn drift_monitor_abstains_on_sparse_evidence() {
+    // Every terminal decision failed — and still nothing is declared:
+    // three outcomes are noise, not a verdict.
+    let events = acting_outcomes(3, 0, 0, 100);
+    let baseline = DriftBaseline {
+        completion_rate: 1.0,
+        dead_letter_rate: 0.0,
+        latency_p95_ms: Some(100),
+    };
+    let report = detect_policy_drift(
+        &events,
+        &drift_version(),
+        &baseline,
+        &DriftThresholds::default(),
+    );
+    assert!(!report.drifted);
+    assert!(
+        report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("insufficient evidence")),
+        "{:?}",
+        report.reasons
+    );
+}
+
+#[test]
+fn drift_monitor_ignores_shadow_and_other_version_decisions() {
+    let mut events = acting_outcomes(10, 10, 0, 100);
+    // Shadow decisions by the acting version — off-policy evidence for
+    // the next candidate — and acting decisions by another version:
+    // neither speaks for this version's health.
+    for seq in 100..110 {
+        let mut shadow = journaled_retry(
+            seq,
+            ErrorClass::InvalidInput,
+            1,
+            3,
+            &RetryDecision::Fail,
+            Some(DecisionOutcome::Failure),
+            Some(5_000),
+            &drift_version(),
+        );
+        shadow.role = Some(DecisionRole::Shadow);
+        events.push(shadow);
+    }
+    for seq in 200..210 {
+        events.push(journaled_retry(
+            seq,
+            ErrorClass::InvalidInput,
+            1,
+            3,
+            &RetryDecision::Fail,
+            Some(DecisionOutcome::Failure),
+            Some(5_000),
+            &PolicyVersion::new("policy-other"),
+        ));
+    }
+    let baseline = DriftBaseline {
+        completion_rate: 1.0,
+        dead_letter_rate: 0.0,
+        latency_p95_ms: Some(100),
+    };
+    let report = detect_policy_drift(
+        &events,
+        &drift_version(),
+        &baseline,
+        &DriftThresholds::default(),
+    );
+    assert!(!report.drifted, "{:?}", report.reasons);
+    assert_eq!(report.decisions, 10, "only this version's acting decisions");
+    assert_eq!(report.terminal, 10);
+}
+
+#[test]
+fn drift_baseline_round_trips_from_a_twin_evaluation_report() {
+    // The promotion-time baseline is read back off the evaluation's own
+    // baseline report — the evidence that promoted the version is the
+    // yardstick its health is measured against.
+    let (_candidate, evaluation) = winning_evaluation();
+    let baseline = DriftBaseline::from_twin_report(&evaluation.baseline_report)
+        .expect("the twin report carries the aggregate");
+    assert_eq!(
+        baseline.completion_rate, 1.0,
+        "the floor completes the fixture"
+    );
+    assert_eq!(baseline.dead_letter_rate, 0.0);
+    assert!(baseline.latency_p95_ms.is_some());
+
+    // A report with no aggregate — a non-twin evaluation, a hand-authored
+    // report — names no baseline. Drift detection fails absent rather
+    // than guessing.
+    assert!(DriftBaseline::from_twin_report(&json!({"summary": {}})).is_none());
 }

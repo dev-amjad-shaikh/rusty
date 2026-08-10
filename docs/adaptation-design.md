@@ -474,6 +474,59 @@ promote through the envelope in a test deployment — distilled from twin eviden
 against the floor on identical fixtures plus fault schedules, promoted with a scoped
 approval, bound at admission, rolled back byte-exactly; every transition journaled.
 
+> **Wave 3 status: implemented (2026-08-09).** The parameter contracts
+> landed as `BackoffParameters` (with a per-class table) on
+> `RetryPolicyParameters` and a per-callee table on
+> `TimeoutPolicyParameters` — both additive and absent from the wire when
+> unset, so the floor's R0.8 shape is byte-stable — validated against
+> declared envelopes (`POLICY_MAX_DELAY_ENVELOPE_MS`,
+> `POLICY_MAX_ATTEMPTS_ENVELOPE`, `MIN_TIMEOUT_RUNG_MS`) at
+> `ExecutorPolicy::with_family_parameters`, so an out-of-envelope
+> candidate is rejected at the gate's own parse path, and a hand-built
+> invalid policy that somehow reaches a decision point steers nothing
+> (the resolution fails closed to the floor). The application loop is
+> `resolve_retry_parameters` / `classify_retry_with_policy` for retry
+> (per-class schedules, budgets narrowed — never widened — by
+> `min(task, learned)`; `classify_retry` delegates with the floor's
+> resolution, so the R0.5/R0.8 decision contract is byte-stable) and
+> `resolve_timeout_bound_ms` with the new `timeout_decision_event`
+> emission point for timeout (closed ladder legal set, smallest covering
+> rung, acting version and degenerate propensity journaled exactly as the
+> retry family's). `ParameterizedPolicy` steers twin runs with the same
+> resolutions and the floor's stance for the shadow-only families; a
+> floor-parameterized instance re-executes a recorded run byte-identically
+> to the `StaticFloor`, which is what makes revert-to-default exact. The
+> learners are closed-form grid searches over the declared envelopes
+> (open question 1's leaning, landed): `distill_retry_parameters` keeps
+> the floor's jittered shape and fits base/cap/budget per class, gated by
+> a declared margin — the first Wave 1 scar, so a fit that does not beat
+> the floor earns nothing — with the permanent-failure stance
+> (`max_attempts: 1`) earned only by terminal-failure evidence;
+> `distill_timeout_parameters` reads the premature-abort fraction off the
+> empirical completion distribution and abstains when no rung fits the
+> tolerance — the second Wave 1 scar, abstained from rather than shipped
+> — and never emits the ladder's top rung. `TwinCandidateEvaluator` is
+> the `CandidateEvaluator` seam's policy implementation: every fixture
+> re-executed twice on identical seeds and fault schedules, non-inferior
+> completion enforced per fixture and in aggregate, `delta` signed so
+> positive is better on the request's target metric, both reports
+> carrying the aggregate the drift baseline later reads back. Drift
+> detection (`detect_policy_drift`) compares the acting version's
+> journaled outcomes — shadow decisions excluded — against the
+> promotion-time baseline on completion drop, dead-letter growth, and p95
+> latency ratio, and declares nothing under the evidence minimum. The
+> twin gate is exercised end to end in `tests/learn.rs`: a shorter
+> backoff wins on wall time at identical completion under an injected
+> rate-limit window and clears the Auto envelope's evidence bar; a
+> truncating timeout bound regresses completion and is refused
+> mechanically; under the R0.8 default the family's bar stays the
+> human's, a scoped `ApprovalToken` admits and a foreign one mismatches.
+> **Deferred to a later wave:** threading promoted bounds through
+> `rusty-server`'s production fail path (`tasks.rs` / `server_store.rs`)
+> and the drift-check HTTP endpoint — the core's application loop and the
+> twin exercise the contracts; the server's scheduler still decides on
+> the floor.
+
 **Wave 4 — release proof and evaluation publication.** The roadmap's sentence, automated as
 an integration test in the release-proof family and published as a benchmarks.md section:
 **a learned policy reduces cost or latency net of telemetry overhead at non-inferior

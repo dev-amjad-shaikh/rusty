@@ -61,7 +61,7 @@ pub const MAX_RETRY_DELAY_MS: u64 = 300_000;
 /// the handler or the transport that carried it — not inferred from logs.
 /// Each variant documents its retry semantics; the mechanical mapping lives
 /// in [`classify_retry`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorClass {
     /// A transient fault with no lasting cause: connection reset, broken
@@ -169,10 +169,19 @@ pub enum RetryDecision {
 /// it from the run's `RngSource` so seeded runs reproduce their retry
 /// schedules exactly.
 pub fn backoff_delay_ms(attempt: u32, uniform: f64) -> u64 {
+    backoff_delay_ms_with(attempt, uniform, BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS)
+}
+
+/// The backoff schedule [`backoff_delay_ms`] computes, drawn from
+/// policy-supplied `base_ms`/`cap_ms` instead of the floor constants
+/// (R0.10 wave 3). The schedule's *shape* — full jitter over a doubling
+/// window — is not learnable: the Wave 1 headroom experiment's published
+/// scar is that a fixed per-class delay table underperforms the jittered
+/// exponential on latency, so learned policies tune the base, the cap, and
+/// the budget, never the shape.
+pub fn backoff_delay_ms_with(attempt: u32, uniform: f64, base_ms: u64, cap_ms: u64) -> u64 {
     let exponent = attempt.saturating_sub(1).min(20);
-    let exponential = BASE_RETRY_DELAY_MS
-        .saturating_mul(1u64 << exponent)
-        .min(MAX_RETRY_DELAY_MS);
+    let exponential = base_ms.saturating_mul(1u64 << exponent).min(cap_ms);
     (uniform.clamp(0.0, 1.0) * exponential as f64) as u64
 }
 
@@ -180,7 +189,11 @@ pub fn backoff_delay_ms(attempt: u32, uniform: f64) -> u64 {
 ///
 /// This is the single place the retry policy lives, shared verbatim by the
 /// server scheduler and the worker SDK so both sides of the queue always
-/// agree. The order of the gates is the policy:
+/// agree. It decides with the static floor's constants — the read path
+/// every decision falls back to when no learned policy is in force
+/// (R0.10 wave 3's application loop is [`classify_retry_with_policy`],
+/// which this delegates to with the floor's parameters). The order of the
+/// gates is the policy:
 ///
 /// 1. **Effect gate.** Work whose declared [`Effect`] is not
 ///    [`Effect::is_freely_repeatable`] is never silently retried — a timed
@@ -202,14 +215,125 @@ pub fn classify_retry(
     max_attempts: u32,
     uniform: f64,
 ) -> RetryDecision {
+    classify_retry_with_policy(
+        effect,
+        class,
+        attempt,
+        &ResolvedRetryParameters::floor(max_attempts),
+        uniform,
+    )
+}
+
+/// The parameters one retry decision is made with (R0.10 wave 3): the
+/// resolution of the active policy's retry parameters for one error class
+/// against the task's declared attempt budget.
+///
+/// Produced by [`resolve_retry_parameters`]; consumed by
+/// [`classify_retry_with_policy`]. Carrying the resolution as a value —
+/// rather than re-reading the policy at the decision point — is what makes
+/// the decision's inputs journaled evidence: the features record the
+/// numbers decided with, not a pointer to state that may have moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedRetryParameters {
+    /// Base of the backoff schedule, in milliseconds.
+    pub base_delay_ms: u64,
+
+    /// Cap of the backoff schedule, in milliseconds.
+    pub max_delay_ms: u64,
+
+    /// Effective attempt budget (the task's declared budget, narrowed by a
+    /// learned budget when one is in force).
+    pub max_attempts: u32,
+}
+
+impl ResolvedRetryParameters {
+    /// The floor's resolution: the module constants and the task's own
+    /// budget, untouched. This is exactly what [`classify_retry`] decided
+    /// with before the policy plane existed.
+    pub fn floor(max_attempts: u32) -> Self {
+        Self {
+            base_delay_ms: BASE_RETRY_DELAY_MS,
+            max_delay_ms: MAX_RETRY_DELAY_MS,
+            max_attempts,
+        }
+    }
+}
+
+/// Resolve the active policy's retry parameters for one error class
+/// against the task's declared attempt budget (R0.10 wave 3 — the
+/// application loop's read path).
+///
+/// Fail-closed, in order:
+///
+/// - **An invalid policy steers nothing.** Parameters that fail
+///   [`crate::record::RetryPolicyParameters::validate`] resolve to the
+///   floor — validation is the promotion gate's job, but the decision
+///   point re-checks rather than trusting the write path, because a
+///   registry body read after a partial migration is the decision point's
+///   problem, not the gate's.
+/// - **A class with a learned entry** decides by that entry's schedule;
+///   its budget *narrows* the task's declared budget (`min`), never
+///   widens it — the task's budget is the sender's declaration, the same
+///   rule the concurrency family's quota ceiling follows.
+/// - **A flat learned schedule** (flat values differing from the floor's,
+///   no per-class entry) applies the same way.
+/// - **Otherwise the floor decides**: the module constants and the task's
+///   own budget, byte-identical to pre-learning behavior.
+pub fn resolve_retry_parameters(
+    policy: &crate::record::ExecutorPolicy,
+    class: ErrorClass,
+    task_max_attempts: u32,
+) -> ResolvedRetryParameters {
+    let retry = &policy.retry;
+    if retry.validate().is_err() {
+        return ResolvedRetryParameters::floor(task_max_attempts);
+    }
+    let floor_flat = crate::record::ExecutorPolicy::static_v0().retry.flat();
+    let flat_learned = retry.flat() != floor_flat;
+    let entry = retry.per_class.as_ref().and_then(|table| table.get(&class));
+    match (entry, flat_learned) {
+        (Some(schedule), _) => ResolvedRetryParameters {
+            base_delay_ms: schedule.base_delay_ms,
+            max_delay_ms: schedule.max_delay_ms,
+            max_attempts: schedule.max_attempts.min(task_max_attempts),
+        },
+        (None, true) => ResolvedRetryParameters {
+            base_delay_ms: retry.base_delay_ms,
+            max_delay_ms: retry.max_delay_ms,
+            max_attempts: retry.max_attempts.min(task_max_attempts),
+        },
+        (None, false) => ResolvedRetryParameters::floor(task_max_attempts),
+    }
+}
+
+/// [`classify_retry`] with policy-resolved parameters (R0.10 wave 3 — the
+/// application loop's decision path).
+///
+/// The gates never move: effect gate, class gate, attempt gate are
+/// policy-independent and evaluated in the same order as the floor's.
+/// What a learned policy tunes is the *numbers* — the backoff base and cap
+/// the delay draws from, and (narrowed) the attempt budget — never which
+/// classes or effects are retryable.
+pub fn classify_retry_with_policy(
+    effect: Effect,
+    class: ErrorClass,
+    attempt: u32,
+    resolved: &ResolvedRetryParameters,
+    uniform: f64,
+) -> RetryDecision {
     if !effect.is_freely_repeatable() || !class.is_retryable() {
         return RetryDecision::Fail;
     }
-    if attempt >= max_attempts {
+    if attempt >= resolved.max_attempts {
         return RetryDecision::Dead;
     }
     RetryDecision::Retry {
-        after_ms: backoff_delay_ms(attempt, uniform),
+        after_ms: backoff_delay_ms_with(
+            attempt,
+            uniform,
+            resolved.base_delay_ms,
+            resolved.max_delay_ms,
+        ),
     }
 }
 
@@ -328,6 +452,168 @@ pub fn retry_decision_event(
         // that executed. The twin's shadow pairs mark roles explicitly.
         role: None,
         outcome,
+        decided_at,
+    }
+}
+
+// --------------------------------------------------------------------- //
+// The timeout family (R0.10 wave 3)
+//
+// The floor's stance is "no bound in force" (`TimeoutPolicyParameters`
+// with every field `None`); a promoted policy resolves to a concrete
+// bound per callee or a default. The decision point's evidence contract
+// mirrors the retry family's: the closed legal set (the declared ladder),
+// the acting policy's version, the degenerate propensity.
+// --------------------------------------------------------------------- //
+
+/// The latency snapshot a timeout decision is made from: the callee's
+/// journaled completion percentiles over the feature window (design open
+/// question 4). Assembled server-side from rolling evidence and journaled
+/// as the feature map at decision time — the feature is then evidence the
+/// twin can reproduce, not a query re-run against mutated state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LatencyPercentiles {
+    /// Median completion latency, in milliseconds.
+    pub p50_ms: u64,
+
+    /// 95th-percentile completion latency, in milliseconds.
+    pub p95_ms: u64,
+
+    /// 99th-percentile completion latency, in milliseconds.
+    pub p99_ms: u64,
+
+    /// Completions the percentiles were computed over.
+    pub samples: u64,
+}
+
+/// Resolve the active policy's timeout bound for one callee (R0.10 wave 3
+/// — the application loop's read path for the timeout family).
+///
+/// Fail-closed, mirroring [`resolve_retry_parameters`]: an invalid policy
+/// steers nothing (`None` — no bound, the floor's stance); a callee with a
+/// learned entry resolves to it; otherwise the policy's default; otherwise
+/// no bound. A resolved bound is clamped to the declared ceiling and never
+/// below [`crate::record::MIN_TIMEOUT_RUNG_MS`] — validation is the
+/// promotion gate's job, but the clamp is the decision point's own
+/// defense, because a bound below the minimum rung aborts ordinary work
+/// early, a correctness hazard no read path may produce.
+pub fn resolve_timeout_bound_ms(
+    policy: &crate::record::ExecutorPolicy,
+    callee: Option<&str>,
+) -> Option<u64> {
+    let timeout = &policy.timeout;
+    if timeout.validate().is_err() {
+        return None;
+    }
+    let bound = callee
+        .and_then(|name| timeout.per_callee.as_ref()?.get(name).copied())
+        .or(timeout.default_millis)?;
+    Some(
+        bound
+            .max(crate::record::MIN_TIMEOUT_RUNG_MS)
+            .min(timeout.max_millis.unwrap_or(u64::MAX)),
+    )
+}
+
+/// The closed legal-action set of a timeout decision (R0.10 wave 3): one
+/// [`DecisionAction::SetTimeout`] per declared ladder rung, ascending. The
+/// top rung models "no bound in force" — the floor's stance — exactly as
+/// the twin and the Wave 1 experiment model it (the lease boundary, the
+/// queue's worst-case discovery latency for hung work).
+pub fn timeout_legal_actions(ladder: &[u64]) -> Vec<DecisionAction> {
+    ladder
+        .iter()
+        .map(|millis| DecisionAction::SetTimeout { millis: *millis })
+        .collect()
+}
+
+/// The [`DecisionAction`] a resolved bound corresponds to on `ladder`: the
+/// smallest rung at or above the bound (a policy's bound is honored by the
+/// first rung that covers it — rounding down would silently tighten the
+/// bound the policy declared), and the top rung when no bound is in force.
+pub fn timeout_selected_action(bound: Option<u64>, ladder: &[u64]) -> DecisionAction {
+    let millis = match bound {
+        Some(bound) => ladder
+            .iter()
+            .copied()
+            .find(|rung| *rung >= bound)
+            .or_else(|| ladder.last().copied())
+            .unwrap_or(bound),
+        None => ladder
+            .last()
+            .copied()
+            .unwrap_or(crate::record::MIN_TIMEOUT_RUNG_MS),
+    };
+    DecisionAction::SetTimeout { millis }
+}
+
+/// Build the [`DecisionEvent`] for one timeout decision (R0.10 wave 3) —
+/// the emission point the design's family-2 telemetry row names.
+///
+/// Features pin the observation vocabulary: `callee` (when the decision
+/// point knows the callee identity), `effect`, `attempt`, and the
+/// callee's journaled latency snapshot (`latency_p50_ms` / `p95` / `p99`
+/// / `latency_samples`) when one was assembled. `bound_ms` is the resolved
+/// bound — `None` when no timeout policy is in force, so the floor's
+/// decisions are distinguishable from a concrete bound on the wire.
+///
+/// Propensity honesty follows the retry family's contract: the acting
+/// policy is deterministic, so the event records `propensity: 1.0` — the
+/// truthful degenerate case, and the same off-policy restriction it
+/// implies. `outcome` is always `None` at decision time: whether the bound
+/// held is the operation's own journaled evidence.
+#[allow(clippy::too_many_arguments)]
+pub fn timeout_decision_event(
+    run_id: impl Into<String>,
+    thread_id: impl Into<String>,
+    seq: u64,
+    callee: Option<&str>,
+    effect: Effect,
+    attempt: u32,
+    percentiles: Option<&LatencyPercentiles>,
+    bound_ms: Option<u64>,
+    ladder: &[u64],
+    policy_version: &PolicyVersion,
+    decided_at: DateTime<Utc>,
+) -> DecisionEvent {
+    let run_id = run_id.into();
+    let mut features = Map::new();
+    if let Some(callee) = callee {
+        features.insert("callee".to_owned(), Value::from(callee));
+    }
+    features.insert(
+        "effect".to_owned(),
+        serde_json::to_value(effect).unwrap_or(Value::Null),
+    );
+    features.insert("attempt".to_owned(), Value::from(attempt));
+    if let Some(percentiles) = percentiles {
+        features.insert("latency_p50_ms".to_owned(), Value::from(percentiles.p50_ms));
+        features.insert("latency_p95_ms".to_owned(), Value::from(percentiles.p95_ms));
+        features.insert("latency_p99_ms".to_owned(), Value::from(percentiles.p99_ms));
+        features.insert(
+            "latency_samples".to_owned(),
+            Value::from(percentiles.samples),
+        );
+    }
+    match bound_ms {
+        Some(bound) => features.insert("bound_ms".to_owned(), Value::from(bound)),
+        None => features.insert("bound_ms".to_owned(), Value::Null),
+    };
+    DecisionEvent {
+        id: format!("{run_id}:d{seq}"),
+        run_id,
+        thread_id: thread_id.into(),
+        seq,
+        family: DecisionFamily::Timeout,
+        legal_actions: timeout_legal_actions(ladder),
+        selected: timeout_selected_action(bound_ms, ladder),
+        features,
+        propensity: 1.0,
+        policy_version: policy_version.clone(),
+        // Acting by construction: this emission point records the decision
+        // that executed. The twin's shadow pairs mark roles explicitly.
+        role: None,
+        outcome: None,
         decided_at,
     }
 }

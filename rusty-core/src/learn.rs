@@ -96,8 +96,7 @@ fn invalid(message: impl Into<String>) -> RustyError {
 ///
 /// Transparent newtype so the type system — not convention — keeps
 /// candidate ids distinct from memory addresses, effect ids, and other
-/// digest strings (the [`PolicyVersion`](crate::record::PolicyVersion) /
-/// [`EffectId`] precedent).
+/// digest strings (the [`PolicyVersion`] / [`EffectId`] precedent).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CandidateId(String);
@@ -1543,6 +1542,892 @@ impl VersionPointer {
             next.canary = None;
         }
         next
+    }
+}
+
+// --------------------------------------------------------------------- //
+// R0.10 wave 3: the learned retry/timeout families
+//
+// Three pieces, all consuming the same journaled evidence:
+//
+// - **Distillation** ([`distill_retry_parameters`],
+//   [`distill_timeout_parameters`]) — closed-form learners that read
+//   `DecisionEvent`s and effect events and emit family parameter sets.
+//   The fitting is a grid search over declared envelopes, per design open
+//   question 1: the runtime owns small closed-form scorers serialized as
+//   the policy's parameters; the decision path stays a lookup.
+// - **The twin-backed evaluator** ([`TwinCandidateEvaluator`]) — the
+//   `CandidateEvaluator` seam's policy-candidate implementation: replay
+//   the evidence span's fixtures with the candidate shadowing nothing and
+//   acting head-to-head against the floor on identical seeds and fault
+//   schedules, then verdict. A candidate that loses to the floor produces
+//   a regressed verdict, and the gate refuses it — promotion through the
+//   pipeline, never around it.
+// - **Drift detection** ([`detect_policy_drift`]) — the promoted
+//   version's journaled outcomes against the baseline its promotion
+//   evaluation recorded; the revert itself is one activation of
+//   `static-v0` away (server side).
+// --------------------------------------------------------------------- //
+
+use crate::durable::ErrorClass;
+use crate::record::{
+    derive_policy_version, BackoffParameters, DecisionAction, DecisionEvent, DecisionOutcome,
+    Effect, EventStatus, ExecutorPolicy, PolicyVersion, RetryPolicyParameters, RunEvent,
+    TimeoutPolicyParameters,
+};
+use crate::twin::{
+    percentile, FaultSchedule, ParameterizedPolicy, Twin, TwinMetrics, TwinPolicy, TwinRunConfig,
+    DEFAULT_TIMEOUT_LADDER,
+};
+
+/// The charged cost of a dead-lettered item in the retry learner's model,
+/// in milliseconds: the lease boundary — what a task that never
+/// recovers costs the run before the queue's worst-case discovery. The
+/// same accounting the Wave 1 experiment and the twin apply.
+const DEAD_LETTER_PENALTY_MS: u64 = crate::durable::MAX_RETRY_DELAY_MS;
+
+/// How the retry distiller fits per-class schedules (R0.10 wave 3).
+///
+/// The grid is the learner's whole search space — closed-form scores over
+/// declared values, so the fitted policy is inspectable as data and the
+/// fitting itself is deterministic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetryLearningConfig {
+    /// Minimum evidence (retries observed plus terminal outcomes) before a
+    /// class earns its own entry. Below it the class keeps the floor —
+    /// sparse evidence must not produce confident policy.
+    pub min_samples: usize,
+
+    /// The estimated wall-time margin over the floor a candidate schedule
+    /// must clear to be emitted, in milliseconds. The Wave 1 experiment's
+    /// published scar is that a cheap per-class table *underperformed* the
+    /// floor's jittered exponential on latency; the margin is what keeps
+    /// a marginal fit from demoting the floor.
+    pub min_improvement_ms: u64,
+
+    /// Candidate backoff bases, in milliseconds.
+    pub base_grid_ms: Vec<u64>,
+
+    /// Candidate backoff caps, in milliseconds.
+    pub cap_grid_ms: Vec<u64>,
+
+    /// Candidate attempt budgets.
+    pub max_attempts_grid: Vec<u32>,
+}
+
+impl Default for RetryLearningConfig {
+    fn default() -> Self {
+        Self {
+            min_samples: 4,
+            min_improvement_ms: 2_000,
+            base_grid_ms: vec![100, 250, 500, 1_000, 2_000],
+            cap_grid_ms: vec![30_000, 120_000, 300_000],
+            max_attempts_grid: vec![1, 2, 3, 5],
+        }
+    }
+}
+
+/// One class's distilled retry evidence.
+#[derive(Debug, Default)]
+struct ClassEvidence {
+    /// Decisions that selected `Retry`.
+    retries: u64,
+    /// Decisions journaled with a success outcome.
+    successes: u64,
+    /// Decisions journaled with a failure outcome (terminal: dead-letter
+    /// or outright fail).
+    failures: u64,
+    /// Callee-supplied `Retry-After` floors observed at decision time.
+    retry_after_ms: Vec<u64>,
+}
+
+/// The estimated expected cost of one schedule on one class's evidence, in
+/// milliseconds: expected backoff wall before recovery, plus the
+/// dead-letter penalty weighted by the probability the budget runs out.
+/// `p` is the estimated per-retry success probability; `retry_after` is
+/// the world's own floor on any delay (a delay shorter than the callee's
+/// `Retry-After` is not a shorter delay — it is the callee's delay).
+fn retry_schedule_score(
+    base_ms: u64,
+    cap_ms: u64,
+    max_attempts: u32,
+    p: f64,
+    retry_after: u64,
+) -> f64 {
+    let mut wall = 0.0;
+    let mut survival = 1.0;
+    for k in 0..max_attempts {
+        let mean_delay =
+            ((base_ms.saturating_mul(1u64 << k.min(20))).min(cap_ms) / 2).max(retry_after) as f64;
+        wall += survival * mean_delay;
+        survival *= 1.0 - p;
+    }
+    wall + survival * DEAD_LETTER_PENALTY_MS as f64
+}
+
+/// Distill the retry family's parameters from journaled retry
+/// [`DecisionEvent`]s (R0.10 wave 3).
+///
+/// What is learned, per error class with sufficient evidence: the backoff
+/// base and cap and the attempt budget that minimize expected wall-to-
+/// recovery charged with dead-letter risk — **never the schedule's
+/// shape** (full jitter over a doubling window is the floor's; Wave 1's
+/// scar is that fixed per-class delays lose to it), and never the gates.
+/// A class whose failures never turned into completions earns the
+/// permanent-failure stance (`max_attempts: 1` — abort after the first
+/// failure, the design's "earlier abort under permanent ones"); a class
+/// whose best grid score does not beat the floor's by
+/// [`RetryLearningConfig::min_improvement_ms`] earns nothing — the floor
+/// decides for it. The returned set carries the floor's flat schedule;
+/// `per_class` is `None` when no class cleared the margin, in which case
+/// the honest next step is no candidate at all.
+pub fn distill_retry_parameters(
+    events: &[DecisionEvent],
+    config: &RetryLearningConfig,
+) -> RetryPolicyParameters {
+    let floor = ExecutorPolicy::static_v0().retry;
+    let mut classes: std::collections::BTreeMap<ErrorClass, ClassEvidence> =
+        std::collections::BTreeMap::new();
+    for event in events {
+        if event.family != crate::record::DecisionFamily::Retry {
+            continue;
+        }
+        let class = event
+            .features
+            .get("failure_class")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or(ErrorClass::Unknown);
+        let evidence = classes.entry(class).or_default();
+        if matches!(event.selected, DecisionAction::Retry { .. }) {
+            evidence.retries += 1;
+        }
+        match event.outcome {
+            Some(DecisionOutcome::Success) => evidence.successes += 1,
+            Some(DecisionOutcome::Failure) => evidence.failures += 1,
+            _ => {}
+        }
+        if let Some(retry_after) = event
+            .features
+            .get("retry_after_ms")
+            .and_then(serde_json::Value::as_u64)
+        {
+            evidence.retry_after_ms.push(retry_after);
+        }
+    }
+
+    let mut table = std::collections::BTreeMap::new();
+    for (class, evidence) in &classes {
+        let total = evidence.retries + evidence.failures;
+        if (total as usize) < config.min_samples {
+            continue;
+        }
+        // A class with retries observed but no recorded success estimates
+        // at the boundary — the permanent-failure stance — only when the
+        // failures are themselves evidence (terminal outcomes), never on
+        // absence alone.
+        if evidence.successes == 0 && evidence.retries > 0 {
+            if evidence.failures >= config.min_samples as u64 {
+                table.insert(
+                    *class,
+                    BackoffParameters {
+                        base_delay_ms: floor.base_delay_ms,
+                        max_delay_ms: floor.max_delay_ms,
+                        max_attempts: 1,
+                    },
+                );
+            }
+            continue;
+        }
+        if evidence.retries == 0 || evidence.successes == 0 {
+            continue;
+        }
+        let p = evidence.successes as f64 / evidence.retries as f64;
+        let retry_after = percentile(&evidence.retry_after_ms, 50.0);
+        let floor_score = retry_schedule_score(
+            floor.base_delay_ms,
+            floor.max_delay_ms,
+            floor.max_attempts,
+            p,
+            retry_after,
+        );
+        let mut best: Option<(f64, BackoffParameters)> = None;
+        for &base in &config.base_grid_ms {
+            for &cap in &config.cap_grid_ms {
+                if base == 0 || base > cap {
+                    continue;
+                }
+                for &max_attempts in &config.max_attempts_grid {
+                    let score = retry_schedule_score(base, cap, max_attempts, p, retry_after);
+                    let candidate = BackoffParameters {
+                        base_delay_ms: base,
+                        max_delay_ms: cap,
+                        max_attempts,
+                    };
+                    if best
+                        .as_ref()
+                        .is_none_or(|(best_score, _)| score < *best_score)
+                    {
+                        best = Some((score, candidate));
+                    }
+                }
+            }
+        }
+        if let Some((score, schedule)) = best {
+            if floor_score - score >= config.min_improvement_ms as f64 {
+                table.insert(*class, schedule);
+            }
+        }
+    }
+
+    RetryPolicyParameters {
+        per_class: if table.is_empty() { None } else { Some(table) },
+        ..floor
+    }
+}
+
+/// How the timeout distiller fits per-callee bounds (R0.10 wave 3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimeoutLearningConfig {
+    /// Minimum completions a callee must have journaled before a bound is
+    /// fit to it. Below it the callee keeps no bound — sparse evidence
+    /// must not produce confident policy.
+    pub min_samples: usize,
+
+    /// The largest premature-abort fraction a bound may carry: the share
+    /// of journaled completions that ran longer than the bound. The Wave
+    /// 1 scar — a p99-plus-margin bound prematurely aborting heavy-tailed
+    /// work — is a percentile *estimate* multiplied by a constant missing
+    /// the tail mass the estimate cannot see; reading the abort fraction
+    /// off the empirical distribution directly is the fix, and when no
+    /// rung satisfies the tolerance the learner abstains (the floor keeps
+    /// the callee) rather than shipping a bound that fails
+    /// non-inferiority.
+    pub abort_tolerance: f64,
+
+    /// The ladder the fitted bounds are chosen from, ascending. The top
+    /// rung models "no bound in force" and is never emitted — a bound
+    /// equal to it reclaims nothing the floor does not.
+    pub ladder: Vec<u64>,
+}
+
+impl Default for TimeoutLearningConfig {
+    fn default() -> Self {
+        Self {
+            min_samples: 16,
+            abort_tolerance: 0.01,
+            ladder: DEFAULT_TIMEOUT_LADDER.to_vec(),
+        }
+    }
+}
+
+/// Distill the timeout family's parameters from journaled effect events
+/// (R0.10 wave 3). The callee identity is the event's `node_id`; only
+/// completed calls (status `Ok` with a measured latency) are evidence —
+/// a failure's latency says nothing about how long success takes.
+///
+/// Per callee: the smallest ladder rung whose empirical premature-abort
+/// fraction (the share of completions that ran longer than the rung) is
+/// within [`TimeoutLearningConfig::abort_tolerance`]. Callees with
+/// insufficient evidence, with no qualifying rung (a tail heavier than
+/// the ladder — the Wave 1 failure mode, abstained from rather than
+/// shipped), or whose qualifying rung is the ladder's top get no entry.
+/// `default_millis` stays `None` — the floor's stance for every callee
+/// the evidence did not speak for; `max_millis` pins the ladder's top as
+/// the declared ceiling when any entry exists.
+pub fn distill_timeout_parameters(
+    events: &[RunEvent],
+    config: &TimeoutLearningConfig,
+) -> TimeoutPolicyParameters {
+    let mut latencies: std::collections::BTreeMap<String, Vec<u64>> =
+        std::collections::BTreeMap::new();
+    for event in events {
+        if event.status != EventStatus::Ok {
+            continue;
+        }
+        let (Some(callee), Some(latency)) = (event.node_id.clone(), event.latency_ms) else {
+            continue;
+        };
+        latencies.entry(callee).or_default().push(latency);
+    }
+
+    let mut table = std::collections::BTreeMap::new();
+    let top = config.ladder.last().copied().unwrap_or(u64::MAX);
+    for (callee, samples) in &latencies {
+        if samples.len() < config.min_samples {
+            continue;
+        }
+        let bound = config.ladder.iter().copied().find(|rung| {
+            let aborted = samples.iter().filter(|latency| *latency > rung).count();
+            (aborted as f64 / samples.len() as f64) <= config.abort_tolerance
+        });
+        match bound {
+            Some(rung) if rung < top => {
+                table.insert(callee.clone(), rung);
+            }
+            _ => {}
+        }
+    }
+
+    TimeoutPolicyParameters {
+        default_millis: None,
+        max_millis: if table.is_empty() { None } else { Some(top) },
+        per_callee: if table.is_empty() { None } else { Some(table) },
+    }
+}
+
+/// The twin-backed [`CandidateEvaluator`] for `policy` candidates (R0.10
+/// wave 3): the governance wiring's "evaluation happens in the twin",
+/// landed. Every fixture in the request's evidence span is re-executed
+/// twice on the same seed and fault schedule — the floor acting, then the
+/// candidate's parameters acting through [`ParameterizedPolicy`] — and the
+/// verdict is computed over the paired [`TwinMetrics`]: **non-inferior
+/// completion**
+/// (the release proof's constraint, applied at the gate) and improvement
+/// on the request's target metric.
+///
+/// Verdict conventions, stated precisely: `regressed` is set when the
+/// candidate's completion rate falls below the floor's by more than the
+/// declared completion tolerance (see
+/// [`TwinCandidateEvaluator::with_completion_tolerance`]) — on any single
+/// fixture or in aggregate; `delta` is signed so that positive is better
+/// on the named metric (for cost and latency metrics, lower is better,
+/// so `delta = baseline − candidate`), keeping [`EvaluationVerdict`]'s
+/// "negative is worse" invariant true for the gate. Both reports carry
+/// every fixture's [`TwinReport`](crate::twin::TwinReport), so the
+/// twin's validity bound travels with the evaluation (design open
+/// question 5).
+///
+/// Determinism is the twin's own: same fixtures, same seed, same fault
+/// schedule ⇒ the same metrics and the same verdict.
+#[derive(Debug)]
+pub struct TwinCandidateEvaluator {
+    seed: u64,
+    faults: FaultSchedule,
+    workers: Vec<String>,
+    max_attempts: u32,
+    completion_tolerance: f64,
+    evaluated_by: ProvenanceAuthor,
+}
+
+impl TwinCandidateEvaluator {
+    /// An evaluator drawing from `seed`, attributing every evaluation to
+    /// `evaluated_by`, over an unfaulted recorded world, one worker, the
+    /// floor's attempt budget, and strict completion parity (tolerance 0).
+    pub fn new(seed: u64, evaluated_by: ProvenanceAuthor) -> Self {
+        Self {
+            seed,
+            faults: FaultSchedule::new(seed),
+            workers: vec!["worker-0".to_owned()],
+            max_attempts: 3,
+            completion_tolerance: 0.0,
+            evaluated_by,
+        }
+    }
+
+    /// Builder-style: evaluate against this fault schedule — the faults
+    /// rarer than any recorded window contains, which is the twin's
+    /// reason to exist.
+    pub fn with_faults(mut self, faults: FaultSchedule) -> Self {
+        self.faults = faults;
+        self
+    }
+
+    /// Builder-style: declare the worker pool placement ranks.
+    pub fn with_workers(mut self, workers: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.workers = workers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Builder-style: the attempt budget the world allows (a learned
+    /// policy may narrow it, never widen it).
+    pub fn with_max_attempts(mut self, max_attempts: u32) -> Self {
+        self.max_attempts = max_attempts;
+        self
+    }
+
+    /// Builder-style: the completion-rate band within which the candidate
+    /// is non-inferior. Zero is the honest default for a mechanical
+    /// family: identical completion is achievable, so parity is the bar.
+    pub fn with_completion_tolerance(mut self, tolerance: f64) -> Self {
+        self.completion_tolerance = tolerance;
+        self
+    }
+}
+
+/// Per-arm aggregates over the fixture set, computed once and shared by
+/// the verdict and the reports.
+#[derive(Debug, Clone, Copy, Default)]
+struct ArmAggregate {
+    items: usize,
+    completed: usize,
+    dead_lettered: usize,
+    attempts: u64,
+    cost_usd: f64,
+    wall_time_ms: u64,
+    latency_p95_ms: u64,
+    runs: usize,
+}
+
+impl ArmAggregate {
+    fn fold(&mut self, metrics: &TwinMetrics) {
+        self.items += metrics.items;
+        self.completed += metrics.completed;
+        self.dead_lettered += metrics.dead_lettered;
+        self.attempts += metrics.attempts;
+        self.cost_usd += metrics.cost_usd;
+        self.wall_time_ms += metrics.wall_time_ms;
+        self.latency_p95_ms = self.latency_p95_ms.max(metrics.item_latency_p95_ms);
+        self.runs += 1;
+    }
+
+    fn completion_rate(&self) -> f64 {
+        if self.items == 0 {
+            0.0
+        } else {
+            self.completed as f64 / self.items as f64
+        }
+    }
+
+    fn dead_letter_rate(&self) -> f64 {
+        if self.items == 0 {
+            0.0
+        } else {
+            self.dead_lettered as f64 / self.items as f64
+        }
+    }
+
+    fn mean_wall_ms(&self) -> f64 {
+        if self.runs == 0 {
+            0.0
+        } else {
+            self.wall_time_ms as f64 / self.runs as f64
+        }
+    }
+
+    /// The serialized aggregate both reports carry — also the shape
+    /// [`DriftBaseline::from_twin_report`] reads back.
+    fn as_value(&self) -> Value {
+        serde_json::json!({
+            "items": self.items,
+            "completed": self.completed,
+            "dead_lettered": self.dead_lettered,
+            "attempts": self.attempts,
+            "cost_usd": self.cost_usd,
+            "mean_wall_time_ms": self.mean_wall_ms(),
+            "item_latency_p95_ms": self.latency_p95_ms,
+            "completion_rate": self.completion_rate(),
+            "dead_letter_rate": self.dead_letter_rate(),
+        })
+    }
+}
+
+#[async_trait]
+impl CandidateEvaluator for TwinCandidateEvaluator {
+    async fn evaluate(
+        &self,
+        candidate: &Candidate,
+        request: &EvaluationRequest,
+    ) -> Result<CandidateEvaluation> {
+        let CandidateContent::Policy { family, parameters } = &candidate.content else {
+            return Err(invalid(format!(
+                "the twin-backed evaluator prices `policy` candidates; `{}` candidates \
+                 evaluate through the application's own evaluator",
+                match candidate.kind() {
+                    CandidateKind::Prompt => "prompt",
+                    CandidateKind::Policy => unreachable!(),
+                    CandidateKind::MemorySet => "memory_set",
+                    CandidateKind::ToolPermission => "tool_permission",
+                }
+            )));
+        };
+        // The candidate as a concrete policy: parsed against the family's
+        // contract and checked against its envelope — an out-of-envelope
+        // candidate fails here, before a single twin run.
+        let candidate_policy = ExecutorPolicy::static_v0()
+            .with_family_parameters(*family, parameters.clone())
+            .map_err(|e| {
+                invalid(format!(
+                    "policy candidate cannot be evaluated: its parameters do not apply to \
+                     the floor ({e}) — an out-of-envelope candidate never reaches evidence"
+                ))
+            })?;
+        let version = derive_policy_version(&candidate_policy)?;
+        let acting: Arc<dyn TwinPolicy> =
+            Arc::new(ParameterizedPolicy::new(candidate_policy, version.clone())?);
+
+        let mut floor_aggregate = ArmAggregate::default();
+        let mut candidate_aggregate = ArmAggregate::default();
+        let mut fixture_ids = Vec::with_capacity(request.replay_evidence.len());
+        let mut matched = 0usize;
+        let mut divergences = Vec::new();
+        let mut floor_runs = Vec::new();
+        let mut candidate_runs = Vec::new();
+        let mut completion_breached = false;
+
+        for fixture in &request.replay_evidence {
+            fixture_ids.push(fixture.run_id.clone());
+            let outcome = (|| -> Result<_> {
+                let twin = Twin::from_snapshot(fixture.clone())?;
+                let config = TwinRunConfig::new(self.seed)
+                    .with_faults(self.faults.clone())
+                    .with_workers(self.workers.clone())
+                    .with_max_attempts(self.max_attempts);
+                let floor_run = twin.run(&config)?;
+                let candidate_run = twin.run(&config.with_acting(acting.clone()))?;
+                Ok((floor_run, candidate_run))
+            })();
+            match outcome {
+                Ok((floor_run, candidate_run)) => {
+                    matched += 1;
+                    // Per-fixture non-inferiority: a candidate that
+                    // completes less of one fixture's work than the floor
+                    // is a regression the aggregate must not average away.
+                    let floor_rate =
+                        floor_run.metrics.completed as f64 / floor_run.metrics.items.max(1) as f64;
+                    let candidate_rate = candidate_run.metrics.completed as f64
+                        / candidate_run.metrics.items.max(1) as f64;
+                    if candidate_rate < floor_rate - self.completion_tolerance {
+                        completion_breached = true;
+                    }
+                    floor_aggregate.fold(&floor_run.metrics);
+                    candidate_aggregate.fold(&candidate_run.metrics);
+                    floor_runs.push(serde_json::json!({
+                        "fixture": fixture.run_id,
+                        "metrics": floor_run.metrics,
+                        "report": floor_run.report,
+                    }));
+                    candidate_runs.push(serde_json::json!({
+                        "fixture": fixture.run_id,
+                        "metrics": candidate_run.metrics,
+                        "report": candidate_run.report,
+                    }));
+                }
+                Err(error) => {
+                    // A fixture the twin cannot re-execute is evidence the
+                    // evaluation could not verify — a divergence, fail
+                    // closed, the same rule the wave-4 evaluator applies.
+                    divergences.push(ReplayDivergence {
+                        fixture_id: fixture.run_id.clone(),
+                        detail: error.to_string(),
+                    });
+                }
+            }
+        }
+        fixture_ids.sort();
+        divergences.sort_by(|a, b| a.fixture_id.cmp(&b.fixture_id));
+
+        let regressed = completion_breached
+            || candidate_aggregate.completion_rate()
+                < floor_aggregate.completion_rate() - self.completion_tolerance;
+        let (baseline, candidate_value, delta) = match request.target_metric.as_str() {
+            "completion_rate" => (
+                Some(floor_aggregate.completion_rate()),
+                Some(candidate_aggregate.completion_rate()),
+                Some(candidate_aggregate.completion_rate() - floor_aggregate.completion_rate()),
+            ),
+            "cost_usd" => (
+                Some(floor_aggregate.cost_usd),
+                Some(candidate_aggregate.cost_usd),
+                Some(floor_aggregate.cost_usd - candidate_aggregate.cost_usd),
+            ),
+            "wall_time_ms" => (
+                Some(floor_aggregate.mean_wall_ms()),
+                Some(candidate_aggregate.mean_wall_ms()),
+                Some(floor_aggregate.mean_wall_ms() - candidate_aggregate.mean_wall_ms()),
+            ),
+            "item_latency_p95_ms" => (
+                Some(floor_aggregate.latency_p95_ms as f64),
+                Some(candidate_aggregate.latency_p95_ms as f64),
+                Some(
+                    floor_aggregate.latency_p95_ms as f64
+                        - candidate_aggregate.latency_p95_ms as f64,
+                ),
+            ),
+            // A metric the twin does not price: no values, no delta — an
+            // improvement bar cannot clear on a metric the evidence does
+            // not name (the gate's own rule).
+            _ => (None, None, None),
+        };
+
+        Ok(CandidateEvaluation {
+            candidate_id: candidate.candidate_id.clone(),
+            dataset_version: request.dataset_version.clone(),
+            replay: ReplaySummary {
+                fixture_ids,
+                matched,
+                divergences,
+            },
+            baseline_report: serde_json::json!({
+                "arm": PolicyVersion::STATIC_V0,
+                "aggregate": floor_aggregate.as_value(),
+                "runs": floor_runs,
+            }),
+            candidate_report: serde_json::json!({
+                "arm": version,
+                "aggregate": candidate_aggregate.as_value(),
+                "runs": candidate_runs,
+            }),
+            verdict: EvaluationVerdict {
+                regressed,
+                target_metric: request.target_metric.clone(),
+                baseline,
+                candidate: candidate_value,
+                delta,
+            },
+            thresholds: request.thresholds,
+            evaluated_by: self.evaluated_by.clone(),
+            evaluated_at: Utc::now(),
+        })
+    }
+}
+
+/// The promotion-time baseline drift is measured against: the metrics the
+/// promoted version's own evaluation recorded for the arm it displaced
+/// (the floor's recorded baseline — "is the promoted version regressing
+/// against the evidence that promoted it", nothing deeper).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DriftBaseline {
+    /// Baseline completion rate, in `[0, 1]`.
+    pub completion_rate: f64,
+
+    /// Baseline dead-letter rate, in `[0, 1]`.
+    pub dead_letter_rate: f64,
+
+    /// Baseline p95 decision latency (the journaled
+    /// `dependency_latency_ms` feature), when the evidence carried one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_p95_ms: Option<u64>,
+}
+
+impl DriftBaseline {
+    /// Read the baseline out of a serialized twin evaluation report — the
+    /// `aggregate` section [`TwinCandidateEvaluator`] writes. `None` when
+    /// the report names no such section (a non-twin evaluation, a
+    /// hand-authored report): drift detection requires the promotion-time
+    /// evidence, and it fails absent rather than guessing a baseline.
+    pub fn from_twin_report(report: &Value) -> Option<Self> {
+        let aggregate = report.get("aggregate")?;
+        Some(Self {
+            completion_rate: aggregate.get("completion_rate")?.as_f64()?,
+            dead_letter_rate: aggregate.get("dead_letter_rate")?.as_f64()?,
+            latency_p95_ms: aggregate.get("item_latency_p95_ms").and_then(Value::as_u64),
+        })
+    }
+}
+
+/// The declared thresholds a drift check applies. All comparisons are
+/// against the promotion-time baseline, on the acting version's journaled
+/// outcomes only — shadow decisions are evidence for the *next* candidate,
+/// never for the acting version's health.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DriftThresholds {
+    /// Completion-rate drop from baseline that declares drift.
+    pub max_completion_drop: f64,
+
+    /// Dead-letter-rate growth from baseline that declares drift.
+    pub max_dead_letter_growth: f64,
+
+    /// p95 latency ratio `current / baseline` that declares drift (applied
+    /// only when both sides carry the latency feature).
+    pub max_latency_p95_ratio: f64,
+
+    /// Minimum terminal decisions before any verdict. Sparse evidence
+    /// declares nothing — a drift verdict on three outcomes is noise
+    /// wearing a label.
+    pub min_decisions: usize,
+}
+
+impl Default for DriftThresholds {
+    fn default() -> Self {
+        Self {
+            max_completion_drop: 0.05,
+            max_dead_letter_growth: 0.02,
+            max_latency_p95_ratio: 1.25,
+            min_decisions: 8,
+        }
+    }
+}
+
+/// The drift check's verdict: the acting version's journaled outcomes
+/// against its promotion-time baseline, with the reasons drift was (or
+/// was not) declared. Carried as data — the report is the revert's
+/// attributable cause.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicyDriftReport {
+    /// The version checked.
+    pub version: PolicyVersion,
+
+    /// Acting decisions examined (shadow decisions excluded).
+    pub decisions: usize,
+
+    /// Terminal decisions (outcomes recorded) the rates were computed
+    /// over.
+    pub terminal: usize,
+
+    /// The acting version's journaled completion rate.
+    pub completion_rate: f64,
+
+    /// The acting version's journaled dead-letter rate.
+    pub dead_letter_rate: f64,
+
+    /// The acting version's p95 decision latency, when carried.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_p95_ms: Option<u64>,
+
+    /// The baseline the check ran against.
+    pub baseline: DriftBaseline,
+
+    /// Whether drift was declared.
+    pub drifted: bool,
+
+    /// Why — one entry per breached threshold, or the reason nothing was
+    /// declared (including insufficient evidence).
+    pub reasons: Vec<String>,
+}
+
+/// Detect drift on the acting policy's journaled outcomes (R0.10 wave 3).
+///
+/// Reads `decisions` for those made by `version` in an acting role
+/// (`role` unset — every pre-twin decision — or
+/// [`crate::record::DecisionRole::Acting`]); shadow decisions are
+/// off-policy evidence, not the acting version's health. The signals are
+/// the design's own: completion-rate drop, dead-letter growth, p95
+/// latency ratio — declared thresholds on journaled metrics, honest about
+/// answering "is the promoted version regressing against the evidence
+/// that promoted it", nothing deeper. Pure: the revert that a drifted
+/// verdict motivates is the caller's one activation of `static-v0`.
+pub fn detect_policy_drift(
+    decisions: &[DecisionEvent],
+    version: &PolicyVersion,
+    baseline: &DriftBaseline,
+    thresholds: &DriftThresholds,
+) -> PolicyDriftReport {
+    let acting: Vec<&DecisionEvent> = decisions
+        .iter()
+        .filter(|event| {
+            &event.policy_version == version
+                && event.role != Some(crate::record::DecisionRole::Shadow)
+        })
+        .collect();
+    let terminal: Vec<&DecisionEvent> = acting
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.outcome,
+                Some(DecisionOutcome::Success) | Some(DecisionOutcome::Failure)
+            )
+        })
+        .copied()
+        .collect();
+    let successes = terminal
+        .iter()
+        .filter(|event| event.outcome == Some(DecisionOutcome::Success))
+        .count();
+    // Dead-lettered, as the retry family journals it: the Abort decision
+    // with the attempt budget spent while the gates were open. The legal
+    // set has already collapsed to `[Abort]` at that point, so the budget
+    // and the gates are read back from the journaled features — the same
+    // vocabulary `retry_decision_event` and the twin both pin.
+    let dead_letters = terminal
+        .iter()
+        .filter(|event| {
+            if event.outcome != Some(DecisionOutcome::Failure)
+                || event.selected != DecisionAction::Abort
+            {
+                return false;
+            }
+            let budget_spent = match (
+                event.features.get("attempt").and_then(Value::as_u64),
+                event.features.get("max_attempts").and_then(Value::as_u64),
+            ) {
+                (Some(attempt), Some(max_attempts)) => attempt >= max_attempts,
+                _ => false,
+            };
+            let effect_open = event
+                .features
+                .get("effect")
+                .and_then(|value| serde_json::from_value::<Effect>(value.clone()).ok())
+                .is_some_and(|effect| effect.is_freely_repeatable());
+            let class_open = event
+                .features
+                .get("failure_class")
+                .and_then(|value| serde_json::from_value::<ErrorClass>(value.clone()).ok())
+                .is_some_and(|class| class.is_retryable());
+            budget_spent && effect_open && class_open
+        })
+        .count();
+    let latencies: Vec<u64> = acting
+        .iter()
+        .filter_map(|event| {
+            event
+                .features
+                .get("dependency_latency_ms")
+                .and_then(Value::as_u64)
+        })
+        .collect();
+    let completion_rate = if terminal.is_empty() {
+        0.0
+    } else {
+        successes as f64 / terminal.len() as f64
+    };
+    let dead_letter_rate = if terminal.is_empty() {
+        0.0
+    } else {
+        dead_letters as f64 / terminal.len() as f64
+    };
+    let latency_p95_ms = (!latencies.is_empty()).then(|| percentile(&latencies, 95.0));
+
+    let mut reasons = Vec::new();
+    let sufficient = terminal.len() >= thresholds.min_decisions;
+    let mut drifted = false;
+    if !sufficient {
+        reasons.push(format!(
+            "insufficient evidence: {} terminal decisions, fewer than the declared minimum {}",
+            terminal.len(),
+            thresholds.min_decisions
+        ));
+    } else {
+        let completion_drop = baseline.completion_rate - completion_rate;
+        if completion_drop > thresholds.max_completion_drop {
+            drifted = true;
+            reasons.push(format!(
+                "completion rate {completion_rate:.3} is {completion_drop:.3} below the \
+                 promotion-time baseline {:.3} (threshold {:.3})",
+                baseline.completion_rate, thresholds.max_completion_drop
+            ));
+        }
+        let dead_letter_growth = dead_letter_rate - baseline.dead_letter_rate;
+        if dead_letter_growth > thresholds.max_dead_letter_growth {
+            drifted = true;
+            reasons.push(format!(
+                "dead-letter rate {dead_letter_rate:.3} grew {dead_letter_growth:.3} over the \
+                 promotion-time baseline {:.3} (threshold {:.3})",
+                baseline.dead_letter_rate, thresholds.max_dead_letter_growth
+            ));
+        }
+        if let (Some(current), Some(base)) = (latency_p95_ms, baseline.latency_p95_ms) {
+            if base > 0 && current as f64 / base as f64 > thresholds.max_latency_p95_ratio {
+                drifted = true;
+                reasons.push(format!(
+                    "p95 decision latency {current} ms is {:.2}x the promotion-time baseline \
+                     {base} ms (threshold {:.2}x)",
+                    current as f64 / base as f64,
+                    thresholds.max_latency_p95_ratio
+                ));
+            }
+        }
+    }
+
+    PolicyDriftReport {
+        version: version.clone(),
+        decisions: acting.len(),
+        terminal: terminal.len(),
+        completion_rate,
+        dead_letter_rate,
+        latency_p95_ms,
+        baseline: *baseline,
+        drifted,
+        reasons,
     }
 }
 

@@ -383,7 +383,7 @@ async fn registry_crud_converges_and_refuses_overwrites() {
         &app,
         "POST",
         "/policy/versions",
-        Some(json!({"policy": serde_json::to_value(body).unwrap()})),
+        Some(json!({"policy": serde_json::to_value(&body).unwrap()})),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "create failed: {v}");
@@ -401,7 +401,7 @@ async fn registry_crud_converges_and_refuses_overwrites() {
         &app,
         "POST",
         "/policy/versions",
-        Some(json!({"policy": serde_json::to_value(body).unwrap()})),
+        Some(json!({"policy": serde_json::to_value(&body).unwrap()})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "converged re-registration");
@@ -409,7 +409,7 @@ async fn registry_crud_converges_and_refuses_overwrites() {
         &app,
         "POST",
         "/policy/versions",
-        Some(json!({"version": version, "policy": serde_json::to_value(body).unwrap()})),
+        Some(json!({"version": version, "policy": serde_json::to_value(&body).unwrap()})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "explicit converged re-registration");
@@ -420,7 +420,7 @@ async fn registry_crud_converges_and_refuses_overwrites() {
         &app,
         "POST",
         "/policy/versions",
-        Some(json!({"version": version, "policy": serde_json::to_value(other).unwrap()})),
+        Some(json!({"version": version, "policy": serde_json::to_value(&other).unwrap()})),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "overwrite must refuse: {v}");
@@ -431,7 +431,7 @@ async fn registry_crud_converges_and_refuses_overwrites() {
         &app,
         "POST",
         "/policy/versions",
-        Some(json!({"version": "ops-tuned-1", "policy": serde_json::to_value(other).unwrap()})),
+        Some(json!({"version": "ops-tuned-1", "policy": serde_json::to_value(&other).unwrap()})),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "named registration");
@@ -439,7 +439,7 @@ async fn registry_crud_converges_and_refuses_overwrites() {
         &app,
         "POST",
         "/policy/versions",
-        Some(json!({"version": "bad/name", "policy": serde_json::to_value(other).unwrap()})),
+        Some(json!({"version": "bad/name", "policy": serde_json::to_value(&other).unwrap()})),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "path-unsafe name");

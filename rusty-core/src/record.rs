@@ -784,14 +784,34 @@ pub struct DecisionEvent {
     pub decided_at: DateTime<Utc>,
 }
 
-/// The retry family's parameters of an [`ExecutorPolicy`].
+/// The envelope any learned backoff cap must stay within, in milliseconds
+/// (one hour). The floor's own cap is [`crate::durable::MAX_RETRY_DELAY_MS`];
+/// a learned policy may widen the schedule, but never past the envelope —
+/// beyond it a stuck dependency parks work for longer than any operator
+/// would accept discovering by surprise.
+pub const POLICY_MAX_DELAY_ENVELOPE_MS: u64 = 3_600_000;
+
+/// The envelope any learned attempt budget must stay within. Ten attempts
+/// is already generous past the floor's three; beyond the envelope a
+/// policy is re-trying as a substitute for fixing the cause.
+pub const POLICY_MAX_ATTEMPTS_ENVELOPE: u32 = 10;
+
+/// The minimum timeout bound any policy may impose, in milliseconds.
+/// Below it ordinary work aborts early — a correctness hazard no policy
+/// may cross (the same floor the Wave 1 headroom experiment
+/// pre-registered). The twin's ladder shares this constant
+/// ([`crate::twin::MIN_TIMEOUT_RUNG_MS`] re-exports it) so the evaluation
+/// harness and the production contract enforce one bound.
+pub const MIN_TIMEOUT_RUNG_MS: u64 = 100;
+
+/// One backoff schedule: the numbers a retry decision is made with.
 ///
-/// These are the numbers [`crate::durable::classify_retry`] decides with:
-/// the backoff schedule draws from `[0, base_delay_ms * 2^(attempt-1)]`
-/// capped at `max_delay_ms`, and a retryable failure dead-letters once
-/// `attempt >= max_attempts`.
+/// This is the shape both the flat policy-wide schedule and each per-class
+/// override take (R0.10 wave 3): the backoff draws from
+/// `[0, base_delay_ms * 2^(attempt-1)]` capped at `max_delay_ms`, and a
+/// retryable failure dead-letters once `attempt >= max_attempts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RetryPolicyParameters {
+pub struct BackoffParameters {
     /// Base of the exponential backoff schedule, in milliseconds.
     pub base_delay_ms: u64,
 
@@ -803,12 +823,108 @@ pub struct RetryPolicyParameters {
     pub max_attempts: u32,
 }
 
+impl BackoffParameters {
+    /// The contract every backoff schedule — flat or per-class — must
+    /// satisfy: a positive base no larger than the cap, a cap inside the
+    /// declared envelope, and a budget inside the declared envelope.
+    /// Anything else is rejected (`Err`), so an out-of-envelope parameter
+    /// set can never become an active policy — the gate fails closed.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        let invalid = |message: String| RustyError::InvalidUpdate(message);
+        if self.base_delay_ms == 0 {
+            return Err(invalid(
+                "backoff base_delay_ms must be positive — a zero base retries immediately, \
+                 a retry storm by another name"
+                    .to_owned(),
+            ));
+        }
+        if self.base_delay_ms > self.max_delay_ms {
+            return Err(invalid(format!(
+                "backoff base_delay_ms {} exceeds max_delay_ms {} — the schedule would clamp \
+                 to the cap from the first retry, an exponential in name only",
+                self.base_delay_ms, self.max_delay_ms
+            )));
+        }
+        if self.max_delay_ms > POLICY_MAX_DELAY_ENVELOPE_MS {
+            return Err(invalid(format!(
+                "backoff max_delay_ms {} exceeds the {POLICY_MAX_DELAY_ENVELOPE_MS} ms \
+                 envelope",
+                self.max_delay_ms
+            )));
+        }
+        if self.max_attempts > POLICY_MAX_ATTEMPTS_ENVELOPE {
+            return Err(invalid(format!(
+                "backoff max_attempts {} exceeds the {POLICY_MAX_ATTEMPTS_ENVELOPE}-attempt \
+                 envelope",
+                self.max_attempts
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// The retry family's parameters of an [`ExecutorPolicy`].
+///
+/// The flat schedule is the default every class falls back to. `per_class`
+/// (R0.10 wave 3) carries learned per-[`crate::durable::ErrorClass`]
+/// overrides: a class with an entry decides by that schedule (its budget
+/// narrowing the task's declared budget, never widening it); a class
+/// without one decides by the flat schedule. Absent from the wire when
+/// `None`, so the floor's serialized shape is unchanged from v1.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetryPolicyParameters {
+    /// Base of the exponential backoff schedule, in milliseconds.
+    pub base_delay_ms: u64,
+
+    /// Cap of the backoff schedule, in milliseconds.
+    pub max_delay_ms: u64,
+
+    /// Attempt budget: the number of attempts counting the initial one.
+    /// `0` means no retries at all — every retryable failure dead-letters.
+    pub max_attempts: u32,
+
+    /// Learned per-error-class schedules (R0.10 wave 3). `None` — every
+    /// pre-learning policy — means the flat schedule decides for all
+    /// classes, exactly the v1 behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_class: Option<BTreeMap<crate::durable::ErrorClass, BackoffParameters>>,
+}
+
+impl RetryPolicyParameters {
+    /// The flat schedule as [`BackoffParameters`].
+    pub fn flat(&self) -> BackoffParameters {
+        BackoffParameters {
+            base_delay_ms: self.base_delay_ms,
+            max_delay_ms: self.max_delay_ms,
+            max_attempts: self.max_attempts,
+        }
+    }
+
+    /// The family's contract: the flat schedule validates, and every
+    /// per-class entry validates. One bad entry condemns the whole set —
+    /// there is no "apply the valid half" path, because half-applied
+    /// policy is how a deployment drifts from what was evaluated.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        self.flat().validate()?;
+        if let Some(per_class) = &self.per_class {
+            for (class, schedule) in per_class {
+                schedule.validate().map_err(|e| {
+                    RustyError::InvalidUpdate(format!("per-class backoff for {class:?}: {e}"))
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The timeout family's parameters of an [`ExecutorPolicy`].
 ///
-/// v1 pins the shape only: no executor decision point consumes these values
-/// yet. `None` means uncapped — the honest encoding of "no timeout policy
+/// `None` means uncapped — the honest encoding of "no timeout policy
 /// is in force", distinct from any concrete millisecond bound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// `per_callee` (R0.10 wave 3) carries learned per-callee bounds: the
+/// bound that applies to an operation is its callee's entry when one
+/// exists, the default otherwise, and no bound at all under the floor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeoutPolicyParameters {
     /// Default timeout applied to operations without their own bound, in
     /// milliseconds. `None` means no default is imposed.
@@ -819,6 +935,61 @@ pub struct TimeoutPolicyParameters {
     /// `None` means uncapped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_millis: Option<u64>,
+
+    /// Learned per-callee bounds in milliseconds (R0.10 wave 3), keyed by
+    /// the callee identity the decision point journals (a tool name, a
+    /// node id). `None` — every pre-learning policy — means no per-callee
+    /// bounds, exactly the v1 behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_callee: Option<BTreeMap<String, u64>>,
+}
+
+impl TimeoutPolicyParameters {
+    /// The family's contract: every bound respects the minimum rung (below
+    /// it ordinary work aborts early — a correctness hazard), the default
+    /// stays under the ceiling, and every per-callee entry stays under the
+    /// ceiling when one is declared. One bad bound condemns the whole set.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        let invalid = |message: String| RustyError::InvalidUpdate(message);
+        let check_floor = |what: &str, millis: u64| -> crate::error::Result<()> {
+            if millis < MIN_TIMEOUT_RUNG_MS {
+                return Err(invalid(format!(
+                    "timeout {what} {millis} ms is below the {MIN_TIMEOUT_RUNG_MS} ms minimum \
+                     rung — below it ordinary work aborts early, a correctness hazard no \
+                     policy may cross"
+                )));
+            }
+            Ok(())
+        };
+        if let Some(default) = self.default_millis {
+            check_floor("default_millis", default)?;
+        }
+        if let Some(max) = self.max_millis {
+            check_floor("max_millis", max)?;
+        }
+        if let (Some(default), Some(max)) = (self.default_millis, self.max_millis) {
+            if default > max {
+                return Err(invalid(format!(
+                    "timeout default_millis {default} exceeds max_millis {max} — the default \
+                     bound would sit above its own ceiling"
+                )));
+            }
+        }
+        if let Some(per_callee) = &self.per_callee {
+            for (callee, millis) in per_callee {
+                check_floor(&format!("per_callee[{callee}]"), *millis)?;
+                if let Some(max) = self.max_millis {
+                    if *millis > max {
+                        return Err(invalid(format!(
+                            "timeout per_callee[{callee}] {millis} ms exceeds max_millis \
+                             {max} — a learned bound may only narrow the declared ceiling"
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The concurrency family's parameters of an [`ExecutorPolicy`].
@@ -845,14 +1016,18 @@ pub struct ConcurrencyPolicyParameters {
 /// agree on a version string agree on the exact parameters — promotion and
 /// rollback move versions, never mutate bodies.
 ///
-/// v1 wires versions into admission binding and decision evidence. The
-/// static floor ([`ExecutorPolicy::static_v0`]) is the behavior every
+/// v1 wires versions into admission binding and decision evidence; R0.10
+/// wave 3 adds the application loop: the retry classifier and the timeout
+/// decision point read the bound version's parameters through
+/// [`crate::durable::resolve_retry_parameters`] and
+/// [`crate::durable::resolve_timeout_bound_ms`], with the static floor's
+/// constants as the read path when the version names no override (or names
+/// an invalid one — invalid parameters fail closed to the floor).
+/// The static floor ([`ExecutorPolicy::static_v0`]) is the behavior every
 /// pre-learning run already had: the retry constants of
 /// [`crate::durable::classify_retry`], no timeout bound, no concurrency
-/// limit. Mechanical *application* of learned (non-floor) parameters to the
-/// queue's decision points is a later wave; wave 4 makes them addressable,
-/// promotable, and evident.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// limit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutorPolicy {
     /// Retry parameters — the family v1 actually emits decisions for.
     pub retry: RetryPolicyParameters,
@@ -878,13 +1053,40 @@ impl ExecutorPolicy {
                 base_delay_ms: crate::durable::BASE_RETRY_DELAY_MS,
                 max_delay_ms: crate::durable::MAX_RETRY_DELAY_MS,
                 max_attempts: 3,
+                per_class: None,
             },
             timeout: TimeoutPolicyParameters {
                 default_millis: None,
                 max_millis: None,
+                per_callee: None,
             },
             concurrency: ConcurrencyPolicyParameters { max_parallel: None },
         }
+    }
+
+    /// `true` when this policy is exactly the static floor — the read path
+    /// every decision point falls back to. Compared by value, not by
+    /// version name: a registered body identical to the floor *is* the
+    /// floor's behavior, whatever string names it.
+    pub fn is_static_floor(&self) -> bool {
+        self == &Self::static_v0()
+    }
+
+    /// The whole bundle's contract: every family's parameters validate.
+    /// Decision points call this (or the per-family equivalents) before
+    /// reading parameters into a decision — an invalid bundle steers
+    /// nothing; the floor decides instead.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        self.retry.validate()?;
+        self.timeout.validate()?;
+        if let Some(0) = self.concurrency.max_parallel {
+            return Err(RustyError::InvalidUpdate(
+                "concurrency max_parallel 0 admits no work at all — a policy that halts the \
+                 fleet is not a learning outcome, it is an outage"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     /// This policy with one family's parameters replaced by `parameters`
@@ -892,22 +1094,31 @@ impl ExecutorPolicy {
     ///
     /// This is how a promoted policy candidate — whose content is a family
     /// plus a free-form parameter value — becomes a concrete
-    /// `ExecutorPolicy`: the candidate's parameters are validated against
-    /// the family's contract and overlaid onto the policy that was active
-    /// (the floor when nothing was promoted yet). Families without a v1
-    /// parameter contract ([`DecisionFamily::WorkerPlacement`],
-    /// [`DecisionFamily::CheckpointPlacement`]) are rejected.
+    /// `ExecutorPolicy`: the candidate's parameters are parsed against the
+    /// family's contract and checked against the family's declared envelope
+    /// (R0.10 wave 3), then overlaid onto the policy that was active (the
+    /// floor when nothing was promoted yet). Out-of-envelope parameters are
+    /// rejected — a malformed candidate can never become an active policy.
+    /// Families without a parameter contract
+    /// ([`DecisionFamily::WorkerPlacement`],
+    /// [`DecisionFamily::CheckpointPlacement`]) are rejected: those families
+    /// are shadow-only, and a shadow family's parameters cannot activate.
     pub fn with_family_parameters(
         &self,
         family: DecisionFamily,
         parameters: serde_json::Value,
     ) -> crate::error::Result<Self> {
-        let mut policy = *self;
+        let mut policy = self.clone();
         match family {
             DecisionFamily::Retry => {
                 policy.retry = serde_json::from_value(parameters).map_err(|e| {
                     RustyError::InvalidUpdate(format!(
                         "retry policy parameters do not match the contract: {e}"
+                    ))
+                })?;
+                policy.retry.validate().map_err(|e| {
+                    RustyError::InvalidUpdate(format!(
+                        "retry policy parameters fall outside the envelope: {e}"
                     ))
                 })?;
             }
@@ -917,6 +1128,11 @@ impl ExecutorPolicy {
                         "timeout policy parameters do not match the contract: {e}"
                     ))
                 })?;
+                policy.timeout.validate().map_err(|e| {
+                    RustyError::InvalidUpdate(format!(
+                        "timeout policy parameters fall outside the envelope: {e}"
+                    ))
+                })?;
             }
             DecisionFamily::Concurrency => {
                 policy.concurrency = serde_json::from_value(parameters).map_err(|e| {
@@ -924,6 +1140,13 @@ impl ExecutorPolicy {
                         "concurrency policy parameters do not match the contract: {e}"
                     ))
                 })?;
+                if let Some(0) = policy.concurrency.max_parallel {
+                    return Err(RustyError::InvalidUpdate(
+                        "concurrency policy parameters fall outside the envelope: \
+                         max_parallel 0 admits no work at all"
+                            .to_owned(),
+                    ));
+                }
             }
             other => {
                 return Err(RustyError::InvalidUpdate(format!(

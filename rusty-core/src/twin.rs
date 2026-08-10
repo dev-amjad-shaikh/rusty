@@ -89,13 +89,16 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::durable::{backoff_delay_ms, retry_legal_actions, ErrorClass, MAX_RETRY_DELAY_MS};
+use crate::durable::{
+    backoff_delay_ms, backoff_delay_ms_with, resolve_retry_parameters, resolve_timeout_bound_ms,
+    retry_legal_actions, ErrorClass, MAX_RETRY_DELAY_MS,
+};
 use crate::error::{Result, RustyError};
 use crate::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use crate::llm::Usage;
 use crate::record::{
-    DecisionAction, DecisionEvent, DecisionFamily, DecisionRole, Effect, EventStatus, PayloadRef,
-    PolicyVersion, RunEventKind,
+    DecisionAction, DecisionEvent, DecisionFamily, DecisionRole, Effect, EventStatus,
+    ExecutorPolicy, PayloadRef, PolicyVersion, RunEventKind,
 };
 use crate::replay::{BranchDiff, ExactReplay, LogicalClockParams, ReplayFixture, SERVABLE_KINDS};
 
@@ -121,8 +124,11 @@ pub const TWIN_FORK_POLICY_VERSION: &str = "twin-fork";
 
 /// The timeout ladder's minimum rung, in milliseconds. Below this, ordinary
 /// work aborts early — a correctness hazard no policy may cross (the same
-/// floor Wave 1 pre-registered).
-pub const MIN_TIMEOUT_RUNG_MS: u64 = 100;
+/// floor Wave 1 pre-registered). The constant lives with the family's
+/// parameter contract ([`crate::record::MIN_TIMEOUT_RUNG_MS`]); the twin
+/// re-exports it so the evaluation harness and the production read path
+/// enforce one bound.
+pub use crate::record::MIN_TIMEOUT_RUNG_MS;
 
 /// The default timeout ladder: discrete rungs between the minimum and the
 /// lease boundary ([`MAX_RETRY_DELAY_MS`], the queue's worst-case discovery
@@ -362,6 +368,16 @@ pub trait TwinPolicy: fmt::Debug + Send + Sync {
     fn retry_delay_ms(&self, attempt: u32, draw: f64) -> u64 {
         backoff_delay_ms(attempt, draw)
     }
+
+    /// The re-queue delay with the failure class in scope (R0.10 wave 3):
+    /// learned policies tune the schedule per class
+    /// ([`ParameterizedPolicy`]); policies that do not override this keep
+    /// [`TwinPolicy::retry_delay_ms`]'s class-blind behavior. The default
+    /// delegates, so every pre-wave-3 policy is unchanged.
+    fn retry_delay_ms_for(&self, class: Option<ErrorClass>, attempt: u32, draw: f64) -> u64 {
+        let _ = class;
+        self.retry_delay_ms(attempt, draw)
+    }
 }
 
 /// The `static-v0` floor: the behavior every pre-learning run had, and the
@@ -408,6 +424,146 @@ impl TwinPolicy for StaticFloor {
                 .unwrap_or(DecisionAction::Abort),
         };
         (selected, 1.0)
+    }
+}
+
+/// The application loop as a twin policy (R0.10 wave 3): an
+/// [`ExecutorPolicy`] — the registry body a promoted candidate produced —
+/// deciding every family with its parameters, so the twin prices the
+/// exact behavior a bound run would execute.
+///
+/// Per family: **retry** applies the per-class backoff table and narrowed
+/// attempt budget ([`resolve_retry_parameters`]) — the gates stay the
+/// runtime's own (the legal set is computed before the policy sees it, so
+/// no parameter set can route around them); **timeout** applies the
+/// per-callee/default bound ([`resolve_timeout_bound_ms`]) honored by the
+/// smallest ladder rung that covers it; **placement, concurrency, and
+/// checkpoint placement decide exactly as the floor** — those families
+/// have no parameter contract ([`ExecutorPolicy::with_family_parameters`]
+/// rejects them), so a registered policy can never carry their parameters
+/// and there is nothing to apply. Every selection is deterministic
+/// (propensity 1.0): learned exploration belongs to shadow candidates
+/// with declared propensities, not to a promoted body.
+///
+/// Fail-closed at two layers, matching the production read path:
+/// construction refuses an invalid policy ([`ExecutorPolicy::validate`] —
+/// an out-of-envelope body cannot even be evaluated), and the
+/// `resolve_*` functions re-check at every decision point, so a policy
+/// that somehow reaches a decision invalid steers nothing and the floor
+/// decides.
+#[derive(Debug, Clone)]
+pub struct ParameterizedPolicy {
+    policy: ExecutorPolicy,
+    version: PolicyVersion,
+}
+
+impl ParameterizedPolicy {
+    /// A policy deciding with `policy`'s parameters, journaling under
+    /// `version` (the body the registry holds for that version —
+    /// mismatched pairs are the caller's integrity failure to make).
+    pub fn new(policy: ExecutorPolicy, version: PolicyVersion) -> Result<Self> {
+        policy.validate().map_err(|e| {
+            twin_error(format!(
+                "refusing to evaluate policy `{version}`: its parameters fall outside the \
+                 envelope ({e}) — an invalid body cannot act, in evaluation or in production"
+            ))
+        })?;
+        Ok(Self { policy, version })
+    }
+
+    /// The parameters this policy decides with.
+    pub fn policy(&self) -> &ExecutorPolicy {
+        &self.policy
+    }
+
+    /// Read one error class out of a decision's journaled features (the
+    /// retry family's `failure_class` key — absent or unparseable yields
+    /// `Unknown`, the DLQ's conservative default).
+    fn failure_class(ctx: &DecisionContext<'_>) -> ErrorClass {
+        ctx.features
+            .get("failure_class")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or(ErrorClass::Unknown)
+    }
+
+    /// Read a `u64` feature by key, when present.
+    fn u64_feature(ctx: &DecisionContext<'_>, key: &str) -> Option<u64> {
+        ctx.features.get(key).and_then(serde_json::Value::as_u64)
+    }
+}
+
+impl TwinPolicy for ParameterizedPolicy {
+    fn version(&self) -> PolicyVersion {
+        self.version.clone()
+    }
+
+    fn decide(&self, ctx: &DecisionContext<'_>, _draw: f64) -> (DecisionAction, f64) {
+        let selected = match ctx.family {
+            DecisionFamily::Retry => {
+                let class = Self::failure_class(ctx);
+                let attempt = Self::u64_feature(ctx, "attempt").unwrap_or(1) as u32;
+                let budget = Self::u64_feature(ctx, "max_attempts").unwrap_or(3) as u32;
+                let resolved = resolve_retry_parameters(&self.policy, class, budget);
+                // The policy's budget narrows the decision, never the legal
+                // set: retrying stays legal (the runtime's gates said so),
+                // the policy declines it past its learned budget.
+                if attempt < resolved.max_attempts {
+                    ctx.legal_actions
+                        .iter()
+                        .find(|action| matches!(action, DecisionAction::Retry { .. }))
+                        .cloned()
+                        .unwrap_or(DecisionAction::Abort)
+                } else {
+                    DecisionAction::Abort
+                }
+            }
+            DecisionFamily::Timeout => {
+                // The twin journals the callee identity as `node` (the node
+                // that issued the call); the production emission point
+                // journals `callee`. Both name the same identity.
+                let callee = ctx
+                    .features
+                    .get("callee")
+                    .or_else(|| ctx.features.get("node"))
+                    .and_then(serde_json::Value::as_str);
+                let bound = resolve_timeout_bound_ms(&self.policy, callee);
+                match bound {
+                    Some(bound) => ctx
+                        .legal_actions
+                        .iter()
+                        .find(|action| matches!(action, DecisionAction::SetTimeout { millis } if *millis >= bound))
+                        .cloned()
+                        .or_else(|| ctx.legal_actions.last().cloned())
+                        .unwrap_or(DecisionAction::Abort),
+                    // No bound in force: the floor's stance, the top rung.
+                    None => ctx.legal_actions.last().cloned().unwrap_or(DecisionAction::Abort),
+                }
+            }
+            // Shadow-only families decide exactly as the floor: no
+            // parameter contract exists, so there is nothing to apply.
+            DecisionFamily::Concurrency | DecisionFamily::CheckpointPlacement => ctx
+                .legal_actions
+                .last()
+                .cloned()
+                .unwrap_or(DecisionAction::Abort),
+            DecisionFamily::WorkerPlacement => ctx
+                .legal_actions
+                .first()
+                .cloned()
+                .unwrap_or(DecisionAction::Abort),
+        };
+        (selected, 1.0)
+    }
+
+    fn retry_delay_ms_for(&self, class: Option<ErrorClass>, attempt: u32, draw: f64) -> u64 {
+        let retry = &self.policy.retry;
+        if retry.validate().is_err() {
+            return backoff_delay_ms(attempt, draw);
+        }
+        let schedule = class
+            .and_then(|class| retry.per_class.as_ref()?.get(&class).copied())
+            .unwrap_or_else(|| retry.flat());
+        backoff_delay_ms_with(attempt, draw, schedule.base_delay_ms, schedule.max_delay_ms)
     }
 }
 
@@ -1647,7 +1803,7 @@ fn run_item(
                 // floored by the callee's Retry-After — the one delay the
                 // world imposes.
                 let delay = acting
-                    .retry_delay_ms(attempt, state.rng.next_f64())
+                    .retry_delay_ms_for(Some(class), attempt, state.rng.next_f64())
                     .max(observation.retry_after_ms.unwrap_or(0));
                 lane_free[lane] = lane_free[lane].max(prev_attempt_end + delay);
                 prev_attempt_end += delay;
@@ -1723,8 +1879,10 @@ fn faulted_observation(
     }
 }
 
-/// Nearest-rank percentile of an unsorted sample set.
-fn percentile(samples: &[u64], p: f64) -> u64 {
+/// Nearest-rank percentile of an unsorted sample set. `pub(crate)`: the
+/// drift detector (`crate::learn`) reads the same statistic off journaled
+/// decision features — one nearest-rank definition, shared.
+pub(crate) fn percentile(samples: &[u64], p: f64) -> u64 {
     if samples.is_empty() {
         return 0;
     }

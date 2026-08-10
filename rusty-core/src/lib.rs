@@ -209,9 +209,12 @@ pub mod prelude {
     #[cfg(feature = "postgres")]
     pub use crate::checkpoint_postgres::PostgresCheckpointer;
     pub use crate::durable::{
-        backoff_delay_ms, classify_retry, retry_decision_event, retry_legal_actions,
-        retry_selected_action, ArtifactContract, ErrorClass, RetryDecision, TaskBudget,
-        TaskEnvelope, BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS, TASK_ENVELOPE_FORMAT_VERSION,
+        backoff_delay_ms, backoff_delay_ms_with, classify_retry, classify_retry_with_policy,
+        resolve_retry_parameters, resolve_timeout_bound_ms, retry_decision_event,
+        retry_legal_actions, retry_selected_action, timeout_decision_event, timeout_legal_actions,
+        timeout_selected_action, ArtifactContract, ErrorClass, LatencyPercentiles,
+        ResolvedRetryParameters, RetryDecision, TaskBudget, TaskEnvelope, BASE_RETRY_DELAY_MS,
+        MAX_RETRY_DELAY_MS, TASK_ENVELOPE_FORMAT_VERSION,
     };
     pub use crate::effects::{
         admit_compensatable, admit_irreversible, admit_retry, admit_speculation, derive_effect_id,
@@ -227,13 +230,16 @@ pub mod prelude {
     };
     pub use crate::learn::{
         admit_promotion, canary_admits, candidate_effect_key, derive_candidate_id,
+        detect_policy_drift, distill_retry_parameters, distill_timeout_parameters,
         evaluation_effect_key, promotion_effect_id, promotion_effect_key, rollback_effect_key,
         AutoPromotion, CanaryBinding, Candidate, CandidateContent, CandidateEvaluation,
         CandidateEvaluator, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
-        CandidateStatus, EnvelopeRule, EvaluationRequest, EvaluationThresholds, EvaluationVerdict,
-        EvidenceSpan, GrantDirection, LearnError, PromotionAuthority, PromotionDecision,
-        PromotionEnvelope, PromotionReceipt, PromotionRefusal, ReplayDivergence, ReplaySummary,
-        RollbackReceipt, SurfaceKey, VersionPointer, CANARY_DRAW_DOMAIN, PROMOTION_EFFECT_KIND,
+        CandidateStatus, DriftBaseline, DriftThresholds, EnvelopeRule, EvaluationRequest,
+        EvaluationThresholds, EvaluationVerdict, EvidenceSpan, GrantDirection, LearnError,
+        PolicyDriftReport, PromotionAuthority, PromotionDecision, PromotionEnvelope,
+        PromotionReceipt, PromotionRefusal, ReplayDivergence, ReplaySummary, RetryLearningConfig,
+        RollbackReceipt, SurfaceKey, TimeoutLearningConfig, TwinCandidateEvaluator, VersionPointer,
+        CANARY_DRAW_DOMAIN, PROMOTION_EFFECT_KIND,
     };
     pub use crate::llm::{
         ChatMessage, ChatModel, ChatResponse, OpenAiCompatibleClient, Role, ToolCall, Usage,
@@ -260,11 +266,12 @@ pub mod prelude {
         RunReceipt, SigningKey, SigningKeyRotation, VerifiedRun, RECEIPT_FORMAT_VERSION,
     };
     pub use crate::record::{
-        derive_policy_version, ArtifactRef, CapsuleVersion, CheckpointHeader,
+        derive_policy_version, ArtifactRef, BackoffParameters, CapsuleVersion, CheckpointHeader,
         ConcurrencyPolicyParameters, DecisionAction, DecisionEvent, DecisionFamily,
         DecisionOutcome, DecisionRole, Effect, EffectReceipt, EventStatus, ExecutorPolicy,
         JournalRef, PayloadRef, PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind,
-        RunManifest, TimeoutPolicyParameters, CURRENT_FORMAT_VERSION,
+        RunManifest, TimeoutPolicyParameters, CURRENT_FORMAT_VERSION, POLICY_MAX_ATTEMPTS_ENVELOPE,
+        POLICY_MAX_DELAY_ENVELOPE_MS,
     };
     pub use crate::replay::{
         BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, LogicalClockParams,
@@ -277,9 +284,9 @@ pub mod prelude {
     pub use crate::tool::{Tool, ToolExecutor, ToolRegistry};
     pub use crate::twin::{
         CounterfactualBranch, CounterfactualFork, DecisionContext, FaultAnchor, FaultInjection,
-        FaultSchedule, InjectedFault, Interleaving, RecordedAnswer, StaticFloor, Twin, TwinMetrics,
-        TwinOutcome, TwinPolicy, TwinReport, TwinRunConfig, TwinWorkItem, TwinWorld,
-        UnevaluableCase, DEFAULT_CONCURRENCY_LADDER, DEFAULT_TIMEOUT_LADDER, MIN_TIMEOUT_RUNG_MS,
-        TWIN_FORK_POLICY_VERSION, TWIN_REPORT_BOUND,
+        FaultSchedule, InjectedFault, Interleaving, ParameterizedPolicy, RecordedAnswer,
+        StaticFloor, Twin, TwinMetrics, TwinOutcome, TwinPolicy, TwinReport, TwinRunConfig,
+        TwinWorkItem, TwinWorld, UnevaluableCase, DEFAULT_CONCURRENCY_LADDER,
+        DEFAULT_TIMEOUT_LADDER, MIN_TIMEOUT_RUNG_MS, TWIN_FORK_POLICY_VERSION, TWIN_REPORT_BOUND,
     };
 }
