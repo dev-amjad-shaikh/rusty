@@ -636,6 +636,37 @@
   .quality-locked { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:start; }
   .quality-locked pre { max-height:320px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
   .quality-unavailable { padding:11px 12px; border-left:3px solid #805943; background:#2a221b; }
+  .quality-dataset {
+    margin-top:12px; border:1px solid #45524b; border-radius:12px; overflow:hidden;
+    background:linear-gradient(150deg,rgba(70,105,86,.12),rgba(20,23,21,.96) 56%);
+  }
+  .quality-dataset-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:14px 17px; border-bottom:1px solid #39463f; }
+  .quality-dataset-head h3 { margin:3px 0 4px; font-size:16px; }
+  .quality-dataset-head p { margin:0; max-width:700px; }
+  .quality-dataset-kicker { color:#8fb59e; font:700 9.5px/1.2 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  .quality-dataset-mark { flex:none; padding:6px 9px; border:1px solid #557060; border-radius:999px; color:#b8d4c3; font:700 9px var(--mono); text-transform:uppercase; letter-spacing:.06em; }
+  .quality-dataset-body { padding:14px 17px 16px; }
+  .quality-dataset-empty { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; align-items:center; padding:12px; border:1px dashed #4b6355; border-radius:8px; background:rgba(12,15,13,.32); }
+  .quality-dataset-empty h4 { margin:0 0 4px; }
+  .quality-dataset-empty p { margin:0; }
+  .quality-dataset-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-bottom:10px; }
+  .quality-dataset-stats div { min-width:0; padding:8px 10px; border:1px solid #35443c; border-radius:7px; background:#171b18; }
+  .quality-dataset-stats span { display:block; color:var(--text-faint); font:700 8.5px var(--mono); text-transform:uppercase; letter-spacing:.07em; }
+  .quality-dataset-stats b { display:block; margin-top:3px; color:#d9e2da; font:12px var(--mono); overflow-wrap:anywhere; }
+  .quality-dataset-layout { display:grid; grid-template-columns:minmax(220px,.58fr) minmax(0,1.42fr); min-height:260px; border:1px solid #35443c; border-radius:8px; overflow:hidden; }
+  .quality-dataset-index { padding:10px; border-right:1px solid #35443c; background:#151815; }
+  .quality-dataset-index label { display:grid; gap:5px; color:var(--text-dim); font-size:10px; }
+  .quality-dataset-index select { width:100%; min-height:220px; margin-top:4px; background:#101310; color:var(--text); border:1px solid #3d4c44; border-radius:6px; font:11px var(--mono); }
+  .quality-dataset-index option { padding:6px 7px; }
+  .quality-dataset-detail { min-width:0; padding:11px 12px; }
+  .quality-dataset-detail h4 { margin:0 0 4px; overflow-wrap:anywhere; }
+  .quality-dataset-detail pre { margin:9px 0 0; max-height:280px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .quality-dataset-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .quality-dataset-toolbar .quality-check { margin-left:auto; max-width:540px; }
+  .quality-file-button { position:relative; overflow:hidden; }
+  .quality-file-button input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+  .quality-file-button:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+  .quality-dataset-error { margin-bottom:10px; padding:9px 11px; border:1px solid #78483a; border-radius:7px; background:#321d18; color:#efc0b4; }
   .cmp-report {
     margin-top: 10px; border: 1px solid #5a493a; border-radius: 10px; overflow: hidden;
     background: linear-gradient(135deg, #211d19 0%, #181b19 62%, #171b1e 100%);
@@ -1935,6 +1966,11 @@
     .quality-predicate { grid-template-columns:1fr; }
     .quality-boundary { margin-left:0; text-align:left; }
     .quality-rail { grid-template-columns:1fr; }
+    .quality-dataset-head, .quality-dataset-empty { display:grid; }
+    .quality-dataset-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .quality-dataset-layout { grid-template-columns:1fr; }
+    .quality-dataset-index { border-right:0; border-bottom:1px solid #35443c; }
+    .quality-dataset-toolbar .quality-check { width:100%; margin-left:0; }
     .cmp-report-head { flex-direction: column; gap: 8px; }
     .cmp-balance { grid-template-columns: 1fr; }
     .cmp-balance-side:last-child { text-align: left; }
@@ -2502,6 +2538,17 @@
             <span class="sr-only" id="quality-foundry-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
           </section>
 
+          <section class="quality-dataset" id="quality-dataset" aria-labelledby="quality-dataset-title">
+            <div class="quality-dataset-head">
+              <div><span class="quality-dataset-kicker">Portable quality library · page memory</span>
+                <h3 id="quality-dataset-title" tabindex="-1">Dataset workbench</h3>
+                <p class="muted tiny">Combine reviewed format-v1 JSONL cases, inspect the exact canonical file, and download one versioned dataset. This is not a server catalog or experiment run.</p></div>
+              <span class="quality-dataset-mark" id="quality-dataset-mark">No cases</span>
+            </div>
+            <div class="quality-dataset-body" id="quality-dataset-body"></div>
+            <span class="sr-only" id="quality-dataset-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
+
           <h2 class="section" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
           <div class="rec-compare-controls" role="group" aria-label="Runs to compare">
@@ -2736,6 +2783,8 @@ const store = {
   interruptDecision: null, // selected thread's session-only suspension review and exact resume value
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   qualityCase: null,   // page-memory evaluation case bound to one exact finalized Recorder journal
+  qualityDataset: null, // connection-bound page-memory portable format-v1 dataset assembly
+  qualityDatasetRequest: 0,
   recLoadRequest: 0,
   recReplayRequest: 0,
   recCompareRequest: 0,
@@ -4628,6 +4677,8 @@ function connectionResetWorkspace() {
   store.selectedCp = null;
   store.recorder = null;
   store.qualityCase = null;
+  store.qualityDataset = null;
+  store.qualityDatasetRequest += 1;
   store.compare = null;
   store.runProof = null;
   store.recUnsupported = false;
@@ -6230,6 +6281,7 @@ function recRender() {
   const r = store.recorder;
   runProofRender();
   qualityRender();
+  qualityLibraryRender();
   detail.style.display = "none";
   detail.innerHTML = "";
   investigation.innerHTML = "";
@@ -6766,6 +6818,15 @@ const QUALITY_PREDICATE_LIMIT = 16;
 const QUALITY_TOOL_LIMIT = 64;
 const QUALITY_TOOL_BYTES = 64 * 1024;
 const QUALITY_EXPORT_LIMIT = 128 * 1024;
+const QUALITY_LIBRARY_CASE_LIMIT = 256;
+const QUALITY_LIBRARY_BYTES = 2 * 1024 * 1024;
+const QUALITY_LIBRARY_LINE_BYTES = 256 * 1024;
+const QUALITY_LIBRARY_EXPECTATION_LIMIT = 64;
+const QUALITY_LIBRARY_DEPTH_LIMIT = 64;
+const QUALITY_LIBRARY_NODE_LIMIT = 32768;
+const QUALITY_LIBRARY_NUMBER_BYTES = 1024;
+const QUALITY_LIBRARY_CANONICAL = Symbol("qualityLibraryCanonical");
+const QUALITY_LIBRARY_CHILD_JSON = Symbol("qualityLibraryChildJson");
 
 function qualityInlineValue(payload) {
   return payload && payload.kind === "inline" &&
@@ -7027,7 +7088,8 @@ function qualityHtml(recorder, draft) {
       '<div class="quality-locked"><div><h4>Reviewed dataset case</h4>' +
       '<p class="muted tiny">Canonical <code>rusty-eval</code> JSONL · page memory only until downloaded</p>' +
       '<pre class="json">' + escapeHtml(draft.jsonl) + "</pre></div>" +
-      '<div class="quality-actions"><button class="small primary" type="button" data-quality-export>Download JSONL</button>' +
+      '<div class="quality-actions"><button class="small primary" type="button" data-quality-collect>Add to dataset workbench</button>' +
+      '<button class="small" type="button" data-quality-export>Download one-case JSONL</button>' +
       '<button class="small" type="button" data-quality-edit>Edit expectations</button>' +
       '<button class="small" type="button" data-quality-discard>Discard</button></div></div>';
   }
@@ -7207,6 +7269,13 @@ function qualityClick(event) {
     qualityRender('[data-quality-field="dataset"]');
     return;
   }
+  if (event.target.closest("[data-quality-collect]") && draft.phase === "locked") {
+    store.qualityDatasetRequest += 1;
+    qualityLibraryAccept(draft.jsonl, "reviewed case");
+    $("quality-dataset-title").focus({ preventScroll: true });
+    $("quality-dataset").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    return;
+  }
   if (event.target.closest("[data-quality-export]") && draft.phase === "locked") {
     const url = URL.createObjectURL(new Blob([draft.jsonl], { type: "application/x-ndjson" }));
     const anchor = document.createElement("a");
@@ -7242,6 +7311,555 @@ function qualitySubmit(event) {
   } catch (error) {
     draft.errors = { source: error.message || "The case could not be serialized exactly." };
     qualityRender("#quality-error-summary");
+  }
+}
+
+/* ---------------- portable evaluation dataset workbench ---------------
+ * Mirrors rusty-eval's format-v1 JSONL field order and serde defaults inside
+ * a bounded page-memory workspace. It deliberately does not imply a durable
+ * dataset catalog, evaluator execution, or promotion gate.
+ * ------------------------------------------------------------------------- */
+function qualityLibraryOwn(value, key) {
+  return Boolean(value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function qualityLibraryWellFormed(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false;
+  }
+  return true;
+}
+
+function qualityLibraryKeyCompare(left, right) {
+  let leftIndex = 0, rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftPoint = left.codePointAt(leftIndex), rightPoint = right.codePointAt(rightIndex);
+    if (leftPoint !== rightPoint) return leftPoint < rightPoint ? -1 : 1;
+    leftIndex += leftPoint > 0xffff ? 2 : 1;
+    rightIndex += rightPoint > 0xffff ? 2 : 1;
+  }
+  return left.length - right.length;
+}
+
+function qualityLibraryRustF64(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error("floating-point value is outside serde_json's finite range");
+  }
+  if (Object.is(value, -0)) return "-0.0";
+  if (value === 0) return "0.0";
+  const scientific = value.toExponential();
+  const exponent = Number(scientific.slice(scientific.indexOf("e") + 1));
+  if (exponent <= -6 || exponent >= 16) return scientific;
+  const fixed = value.toString();
+  return Number.isInteger(value) ? fixed + ".0" : fixed;
+}
+
+function qualityLibraryParseJson(raw) {
+  if (typeof raw !== "string") throw new Error("JSON line must be text");
+  let cursor = 0, nodes = 0;
+  const numberPattern = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+  const skipWhitespace = () => {
+    while (cursor < raw.length && (raw[cursor] === " " || raw[cursor] === "\t" || raw[cursor] === "\r" || raw[cursor] === "\n")) cursor += 1;
+  };
+  const markObject = (value, canonical, childJson, numberTokens) => {
+    Object.defineProperty(value, QUALITY_LIBRARY_CANONICAL, { value: canonical, enumerable: false });
+    Object.defineProperty(value, QUALITY_LIBRARY_CHILD_JSON, { value: childJson, enumerable: false });
+    if (Object.keys(numberTokens).length) {
+      Object.defineProperty(value, AGENT_NUMBER_TOKENS, { value: numberTokens, enumerable: false });
+    }
+  };
+  const parseString = () => {
+    const start = cursor;
+    cursor += 1;
+    let escaped = false;
+    while (cursor < raw.length) {
+      const character = raw[cursor];
+      cursor += 1;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') break;
+    }
+    let value;
+    try { value = JSON.parse(raw.slice(start, cursor)); }
+    catch (error) { throw new Error(`malformed string: ${error.message}`); }
+    if (!qualityLibraryWellFormed(value)) throw new Error("JSON strings must contain valid Unicode scalar values");
+    return { value, canonical: JSON.stringify(value), numberToken: null };
+  };
+  const parseValue = (depth) => {
+    nodes += 1;
+    if (nodes > QUALITY_LIBRARY_NODE_LIMIT) throw new Error(`JSON exceeds Studio's ${QUALITY_LIBRARY_NODE_LIMIT}-value review boundary`);
+    if (depth > QUALITY_LIBRARY_DEPTH_LIMIT) throw new Error(`JSON exceeds Studio's ${QUALITY_LIBRARY_DEPTH_LIMIT}-level review boundary`);
+    skipWhitespace();
+    const character = raw[cursor];
+    if (character === '"') return parseString();
+    if (character === "{") {
+      cursor += 1; skipWhitespace();
+      const value = Object.create(null), entries = [], keys = new Set();
+      const childJson = Object.create(null), numberTokens = Object.create(null);
+      if (raw[cursor] === "}") {
+        cursor += 1; markObject(value, "{}", childJson, numberTokens);
+        return { value, canonical: "{}", numberToken: null };
+      }
+      let closed = false;
+      while (cursor < raw.length) {
+        if (raw[cursor] !== '"') throw new Error("object keys must be JSON strings");
+        const keyNode = parseString(), key = keyNode.value;
+        if (keys.has(key)) throw new Error("duplicate object key");
+        keys.add(key); skipWhitespace();
+        if (raw[cursor] !== ":") throw new Error("object key is missing its colon");
+        cursor += 1;
+        const child = parseValue(depth + 1);
+        Object.defineProperty(value, key, { value: child.value, enumerable: true, configurable: true, writable: true });
+        childJson[key] = child.canonical;
+        if (child.numberToken != null) numberTokens[key] = child.numberToken;
+        entries.push([key, keyNode.canonical, child.canonical]);
+        skipWhitespace();
+        if (raw[cursor] === "}") { cursor += 1; closed = true; break; }
+        if (raw[cursor] !== ",") throw new Error("object entries must be comma-separated");
+        cursor += 1; skipWhitespace();
+      }
+      if (!closed) throw new Error("unterminated JSON object");
+      entries.sort((left, right) => qualityLibraryKeyCompare(left[0], right[0]));
+      const canonical = "{" + entries.map((entry) => entry[1] + ":" + entry[2]).join(",") + "}";
+      markObject(value, canonical, childJson, numberTokens);
+      return { value, canonical, numberToken: null };
+    }
+    if (character === "[") {
+      cursor += 1; skipWhitespace();
+      const value = [], parts = [], childJson = Object.create(null), numberTokens = Object.create(null);
+      if (raw[cursor] === "]") {
+        cursor += 1; markObject(value, "[]", childJson, numberTokens);
+        return { value, canonical: "[]", numberToken: null };
+      }
+      let closed = false;
+      while (cursor < raw.length) {
+        const child = parseValue(depth + 1), key = String(value.length);
+        value.push(child.value); parts.push(child.canonical); childJson[key] = child.canonical;
+        if (child.numberToken != null) numberTokens[key] = child.numberToken;
+        skipWhitespace();
+        if (raw[cursor] === "]") { cursor += 1; closed = true; break; }
+        if (raw[cursor] !== ",") throw new Error("array items must be comma-separated");
+        cursor += 1; skipWhitespace();
+      }
+      if (!closed) throw new Error("unterminated JSON array");
+      const canonical = "[" + parts.join(",") + "]";
+      markObject(value, canonical, childJson, numberTokens);
+      return { value, canonical, numberToken: null };
+    }
+    for (const [literal, value] of [["true", true], ["false", false], ["null", null]]) {
+      if (raw.startsWith(literal, cursor)) {
+        cursor += literal.length;
+        return { value, canonical: literal, numberToken: null };
+      }
+    }
+    numberPattern.lastIndex = cursor;
+    const match = numberPattern.exec(raw);
+    if (!match) throw new Error("expected a JSON value");
+    cursor = numberPattern.lastIndex;
+    const token = match[0];
+    if (agentUtf8Length(token) > QUALITY_LIBRARY_NUMBER_BYTES) {
+      throw new Error(`JSON number exceeds Studio's ${QUALITY_LIBRARY_NUMBER_BYTES}-byte review boundary`);
+    }
+    const value = Number(token);
+    if (!Number.isFinite(value)) throw new Error("JSON number is outside serde_json's finite range");
+    if (!/[.eE]/.test(token)) {
+      if (token === "-0") return { value, canonical: "-0.0", numberToken: token };
+      let integer;
+      try { integer = BigInt(token); } catch { throw new Error("JSON integer is invalid"); }
+      if (integer < -9223372036854775808n || integer > 18446744073709551615n) {
+        return { value, canonical: qualityLibraryRustF64(value), numberToken: token };
+      }
+      return { value, canonical: String(integer), numberToken: token };
+    }
+    return { value, canonical: qualityLibraryRustF64(value), numberToken: token };
+  };
+  const parsed = parseValue(0);
+  skipWhitespace();
+  if (cursor !== raw.length) throw new Error("unexpected trailing JSON content");
+  return parsed.value;
+}
+
+function qualityLibraryCanonicalValue(value, parent = null, key = "") {
+  if (parent && parent[QUALITY_LIBRARY_CHILD_JSON] && typeof parent[QUALITY_LIBRARY_CHILD_JSON][key] === "string") {
+    return parent[QUALITY_LIBRARY_CHILD_JSON][key];
+  }
+  if (value && typeof value === "object" && typeof value[QUALITY_LIBRARY_CANONICAL] === "string") {
+    return value[QUALITY_LIBRARY_CANONICAL];
+  }
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") return qualityLibraryRustF64(value);
+  return null;
+}
+
+function qualityLibraryNumberCheck(raw) {
+  qualityLibraryParseJson(raw);
+}
+
+function qualityLibraryDecode(bytes) {
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+}
+
+function qualityLibraryTrimLine(value) {
+  let start = 0, end = value.length;
+  const trimmable = (character) => character !== "\ufeff" && /\s/u.test(character);
+  while (start < end && trimmable(value[start])) start += 1;
+  while (end > start && trimmable(value[end - 1])) end -= 1;
+  return value.slice(start, end);
+}
+
+function qualityLibraryArray(value, name, limit = QUALITY_LIBRARY_EXPECTATION_LIMIT) {
+  if (!Array.isArray(value)) throw new Error(`${name} must be an array when present`);
+  if (value.length > limit) throw new Error(`${name} exceeds Studio's ${limit}-item review boundary`);
+  return value;
+}
+
+function qualityLibraryString(value, name, maximum = 1024) {
+  if (typeof value !== "string" || !value.length || agentUtf8Length(value) > maximum ||
+      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) {
+    throw new Error(`${name} must be non-empty text without hidden controls and within ${maximum} UTF-8 bytes`);
+  }
+  return value;
+}
+
+function qualityLibraryCase(parsed, lineNo) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.kind !== "case") {
+    throw new Error(`line ${lineNo}: expected a format-v1 case`);
+  }
+  const id = qualityLibraryString(parsed.id, `line ${lineNo} case id`);
+  if (!qualityLibraryOwn(parsed, "input")) throw new Error(`line ${lineNo}: case input is required`);
+  const input = qualityLibraryCanonicalValue(parsed.input, parsed, "input");
+  if (input == null) throw new Error(`line ${lineNo}: case input cannot be represented exactly`);
+  const expectation = qualityLibraryOwn(parsed, "expect") ? parsed.expect : {};
+  if (!expectation || typeof expectation !== "object" || Array.isArray(expectation)) {
+    throw new Error(`line ${lineNo}: expect must be an object when present`);
+  }
+  const fields = [], surfaces = [];
+  if (qualityLibraryOwn(expectation, "tool_trajectory")) {
+    const calls = qualityLibraryArray(expectation.tool_trajectory, `line ${lineNo} tool_trajectory`);
+    if (calls.length) {
+      const rendered = calls.map((call, index) => {
+        if (!call || typeof call !== "object" || Array.isArray(call)) {
+          throw new Error(`line ${lineNo}: tool_trajectory item ${index + 1} must be an object`);
+        }
+        const name = qualityLibraryString(call.name, `line ${lineNo} tool name`);
+        const hasArgs = qualityLibraryOwn(call, "args");
+        const args = hasArgs ? call.args : {};
+        if (!args || typeof args !== "object" || Array.isArray(args)) {
+          throw new Error(`line ${lineNo}: tool args must be an object when present`);
+        }
+        const argsJson = hasArgs ? qualityLibraryCanonicalValue(args, call, "args") : "{}";
+        if (argsJson == null) throw new Error(`line ${lineNo}: tool args cannot be represented exactly`);
+        return '{"name":' + JSON.stringify(name) + (Object.keys(args).length ? ',"args":' + argsJson : "") + "}";
+      });
+      fields.push('"tool_trajectory":[' + rendered.join(",") + "]");
+      surfaces.push(`trajectory ${calls.length}`);
+    }
+  }
+  if (qualityLibraryOwn(expectation, "state")) {
+    const predicates = qualityLibraryArray(expectation.state, `line ${lineNo} state`);
+    if (predicates.length) {
+      const rendered = predicates.map((predicate, index) => {
+        if (!predicate || typeof predicate !== "object" || Array.isArray(predicate) ||
+            typeof predicate.pointer !== "string" || !qualityLibraryOwn(predicate, "expected")) {
+          throw new Error(`line ${lineNo}: state predicate ${index + 1} requires pointer and expected`);
+        }
+        if (agentUtf8Length(predicate.pointer) > 4096) {
+          throw new Error(`line ${lineNo}: state pointer exceeds 4096 UTF-8 bytes`);
+        }
+        const expected = qualityLibraryCanonicalValue(predicate.expected, predicate, "expected");
+        if (expected == null) throw new Error(`line ${lineNo}: state expectation cannot be represented exactly`);
+        return '{"pointer":' + JSON.stringify(predicate.pointer) + ',"expected":' + expected + "}";
+      });
+      fields.push('"state":[' + rendered.join(",") + "]");
+      surfaces.push(`state ${predicates.length}`);
+    }
+  }
+  if (qualityLibraryOwn(expectation, "forbid_tools")) {
+    const names = qualityLibraryArray(expectation.forbid_tools, `line ${lineNo} forbid_tools`)
+      .map((name) => qualityLibraryString(name, `line ${lineNo} forbidden tool`));
+    if (names.length) {
+      fields.push('"forbid_tools":' + JSON.stringify(names));
+      surfaces.push(`forbid ${names.length}`);
+    }
+  }
+  if (qualityLibraryOwn(expectation, "max_cost_usd")) {
+    if (expectation.max_cost_usd !== null) {
+      if (typeof expectation.max_cost_usd !== "number") throw new Error(`line ${lineNo}: max_cost_usd must be a number or null`);
+      fields.push('"max_cost_usd":' + qualityLibraryRustF64(expectation.max_cost_usd));
+      surfaces.push("cost");
+    }
+  }
+  if (qualityLibraryOwn(expectation, "max_latency_ms")) {
+    if (expectation.max_latency_ms !== null) {
+      const latency = recExactUnsigned(expectation, "max_latency_ms");
+      if (latency == null || latency > 18446744073709551615n) {
+        throw new Error(`line ${lineNo}: max_latency_ms must be a u64 integer or null`);
+      }
+      fields.push('"max_latency_ms":' + String(latency));
+      surfaces.push("latency");
+    }
+  }
+  const tags = qualityLibraryOwn(parsed, "tags")
+    ? qualityLibraryArray(parsed.tags, `line ${lineNo} tags`, 64)
+      .map((tag) => qualityLibraryString(tag, `line ${lineNo} tag`, QUALITY_TEXT_LIMIT))
+    : [];
+  const expectJson = "{" + fields.join(",") + "}";
+  const tagsJson = tags.length ? ',"tags":' + JSON.stringify(tags) : "";
+  const json = '{"kind":"case","id":' + JSON.stringify(id) + ',"input":' + input +
+    ',"expect":' + expectJson + tagsJson + "}";
+  if (agentUtf8Length(json) > QUALITY_LIBRARY_LINE_BYTES) {
+    throw new Error(`line ${lineNo}: canonical case exceeds the 256 KiB review boundary`);
+  }
+  return { id, input, expectJson, tags, surfaces, json };
+}
+
+function qualityLibraryParse(text) {
+  if (typeof text !== "string" || agentUtf8Length(text) > QUALITY_LIBRARY_BYTES) {
+    throw new Error("Dataset input must be UTF-8 text no larger than 2 MiB.");
+  }
+  let header = null;
+  const cases = [], ids = new Set();
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = qualityLibraryTrimLine(lines[index]);
+    if (!raw) continue;
+    const lineNo = index + 1;
+    if (agentUtf8Length(raw) > QUALITY_LIBRARY_LINE_BYTES) {
+      throw new Error(`line ${lineNo}: line exceeds the 256 KiB review boundary`);
+    }
+    let parsed;
+    try { parsed = qualityLibraryParseJson(raw); }
+    catch (error) { throw new Error(`line ${lineNo}: malformed JSON: ${error.message}`); }
+    if (parsed && parsed.kind === "header") {
+      if (header || cases.length) throw new Error(`line ${lineNo}: header must be first`);
+      const version = recExactUnsigned(parsed, "format_version");
+      if (version !== 1n) throw new Error(`line ${lineNo}: only dataset format_version 1 is supported`);
+      header = {
+        name: qualityLibraryString(parsed.name, `line ${lineNo} dataset name`, QUALITY_TEXT_LIMIT),
+        version: qualityLibraryString(parsed.version, `line ${lineNo} dataset version`, QUALITY_TEXT_LIMIT),
+      };
+      continue;
+    }
+    if (!header) throw new Error(`line ${lineNo}: case appears before the header`);
+    if (cases.length >= QUALITY_LIBRARY_CASE_LIMIT) {
+      throw new Error(`line ${lineNo}: dataset exceeds Studio's ${QUALITY_LIBRARY_CASE_LIMIT}-case boundary`);
+    }
+    const item = qualityLibraryCase(parsed, lineNo);
+    if (ids.has(item.id)) throw new Error(`line ${lineNo}: duplicate case id \`${item.id}\``);
+    ids.add(item.id);
+    cases.push(item);
+  }
+  if (!header) throw new Error("Dataset is missing its format-v1 header.");
+  const result = { ...header, cases, selected: cases[0]?.id || "", acknowledged: false, error: "" };
+  result.jsonl = qualityLibraryJsonl(result);
+  return result;
+}
+
+function qualityLibraryJsonl(dataset) {
+  if (!dataset || !qualitySafeText(dataset.name) || !qualitySafeText(dataset.version) ||
+      !Array.isArray(dataset.cases) || dataset.cases.length > QUALITY_LIBRARY_CASE_LIMIT) {
+    throw new Error("The page-memory dataset is not exportable.");
+  }
+  const header = '{"kind":"header","format_version":1,"name":' + JSON.stringify(dataset.name) +
+    ',"version":' + JSON.stringify(dataset.version) + "}";
+  const jsonl = header + "\n" + dataset.cases.map((item) => item.json).join("\n") +
+    (dataset.cases.length ? "\n" : "");
+  if (agentUtf8Length(jsonl) > QUALITY_LIBRARY_BYTES) {
+    throw new Error("The assembled dataset exceeds the 2 MiB export boundary.");
+  }
+  return jsonl;
+}
+
+function qualityLibraryMerge(current, incoming) {
+  if (!current) return { dataset: incoming, added: incoming.cases.length, deduplicated: 0 };
+  if (current.name !== incoming.name || current.version !== incoming.version) {
+    throw new Error(`Dataset identity differs. Clear ${current.name}@${current.version} before adding ${incoming.name}@${incoming.version}.`);
+  }
+  const byId = new Map(current.cases.map((item) => [item.id, item]));
+  const additions = [];
+  let deduplicated = 0;
+  for (const item of incoming.cases) {
+    const existing = byId.get(item.id);
+    if (existing && existing.json !== item.json) {
+      throw new Error(`Case id \`${item.id}\` already exists with different input or expectations.`);
+    }
+    if (existing) deduplicated += 1;
+    else { additions.push(item); byId.set(item.id, item); }
+  }
+  if (current.cases.length + additions.length > QUALITY_LIBRARY_CASE_LIMIT) {
+    throw new Error(`The merged dataset would exceed ${QUALITY_LIBRARY_CASE_LIMIT} cases.`);
+  }
+  const dataset = {
+    name: current.name, version: current.version,
+    cases: [...current.cases, ...additions], selected: current.selected || additions[0]?.id || "",
+    acknowledged: false, error: "",
+  };
+  dataset.jsonl = qualityLibraryJsonl(dataset);
+  return { dataset, added: additions.length, deduplicated };
+}
+
+function qualityLibraryStats(dataset) {
+  const tags = new Set();
+  let expectations = 0;
+  for (const item of dataset?.cases || []) {
+    item.tags.forEach((tag) => tags.add(tag));
+    expectations += item.surfaces.length;
+  }
+  return { cases: dataset?.cases?.length || 0, tags: tags.size, expectations,
+    bytes: dataset?.jsonl ? agentUtf8Length(dataset.jsonl) : 0 };
+}
+
+function qualityLibraryHtml(dataset) {
+  if (!dataset) {
+    return '<div class="quality-dataset-empty"><div><h4>Start a portable dataset</h4>' +
+      '<p class="muted tiny">Add the reviewed case above or import one bounded <code>.jsonl</code> file. The first file establishes the exact dataset name and version.</p></div>' +
+      '<label class="small quality-file-button">Import JSONL<input type="file" data-quality-dataset-file accept=".jsonl,application/x-ndjson,application/json"></label></div>';
+  }
+  if (dataset.invalid) {
+    return '<div class="quality-dataset-error" role="alert" tabindex="-1">' + escapeHtml(dataset.error) + '</div>' +
+      '<div class="quality-dataset-empty"><div><h4>No dataset was changed</h4>' +
+      '<p class="muted tiny">Correct the source file and import it again. Studio keeps rejected content out of the page-memory ledger.</p></div>' +
+      '<label class="small quality-file-button">Import JSONL<input type="file" data-quality-dataset-file accept=".jsonl,application/x-ndjson,application/json"></label></div>';
+  }
+  const stats = qualityLibraryStats(dataset);
+  const selected = dataset.cases.find((item) => item.id === dataset.selected) || dataset.cases[0] || null;
+  const options = dataset.cases.map((item) => '<option value="' + escapeHtml(item.id) + '"' +
+    (selected && item.id === selected.id ? " selected" : "") + ">" + escapeHtml(item.id) + " · " +
+    escapeHtml(item.surfaces.length ? item.surfaces.join(" · ") : "input only") + "</option>").join("");
+  const error = dataset.error ? '<div class="quality-dataset-error" role="alert" tabindex="-1">' + escapeHtml(dataset.error) + "</div>" : "";
+  const detail = selected ? '<div class="quality-dataset-detail"><h4>' + escapeHtml(selected.id) + '</h4>' +
+    '<p class="muted tiny">Exact canonical case · ' + escapeHtml(selected.tags.length ? selected.tags.join(", ") : "no tags") +
+    '</p><pre class="json">' + escapeHtml(selected.json) + "</pre></div>" :
+    '<div class="quality-dataset-detail"><div class="empty">This dataset has no cases yet.</div></div>';
+  return error + '<div class="quality-dataset-stats"><div><span>Identity</span><b>' + escapeHtml(dataset.name + "@" + dataset.version) +
+    '</b></div><div><span>Cases</span><b>' + stats.cases + '</b></div><div><span>Expectation surfaces</span><b>' + stats.expectations +
+    '</b></div><div><span>Canonical bytes</span><b>' + stats.bytes.toLocaleString() + '</b></div></div>' +
+    '<div class="quality-dataset-layout"><div class="quality-dataset-index"><label>Case ledger<select size="8" data-quality-dataset-select' +
+    (dataset.cases.length ? "" : " disabled") + ' aria-label="Cases in the page-memory dataset">' + options + "</select></label></div>" + detail + "</div>" +
+    '<div class="quality-dataset-toolbar"><label class="small quality-file-button">Import matching JSONL<input type="file" data-quality-dataset-file accept=".jsonl,application/x-ndjson,application/json"></label>' +
+    '<button class="small" type="button" data-quality-dataset-remove' + (selected ? "" : " disabled") + '>Remove selected case</button>' +
+    '<button class="small" type="button" data-quality-dataset-clear>Clear workbench</button>' +
+    '<button class="small primary" type="button" data-quality-dataset-export' +
+      (dataset.acknowledged && dataset.cases.length ? "" : " disabled") + '>Download dataset</button>' +
+    '<label class="quality-check"><input type="checkbox" data-quality-dataset-ack' + (dataset.acknowledged ? " checked" : "") +
+      (dataset.cases.length ? "" : " disabled") + '> I reviewed every included case and understand the file contains portable inputs that may include prompts, personal data, or secrets.</label></div>';
+}
+
+function qualityLibraryRender(focusSelector = "") {
+  const body = $("quality-dataset-body");
+  if (!body) return;
+  body.innerHTML = qualityLibraryHtml(store.qualityDataset);
+  const count = store.qualityDataset?.cases?.length || 0;
+  $("quality-dataset-mark").textContent = count ? `${count} case${count === 1 ? "" : "s"}` : "No cases";
+  if (focusSelector) body.querySelector(focusSelector)?.focus({ preventScroll: true });
+}
+
+function qualityLibraryAccept(text, label = "dataset") {
+  try {
+    const incoming = qualityLibraryParse(text);
+    const current = store.qualityDataset?.invalid ? null : store.qualityDataset;
+    const merged = qualityLibraryMerge(current, incoming);
+    store.qualityDataset = merged.dataset;
+    qualityLibraryRender(merged.dataset.cases.length ? '[data-quality-dataset-select]' : '[data-quality-dataset-file]');
+    const message = `${label} accepted: ${merged.added} added` +
+      (merged.deduplicated ? `, ${merged.deduplicated} canonical duplicate${merged.deduplicated === 1 ? "" : "s"} ignored` : "") + ".";
+    $("quality-dataset-announcer").textContent = message;
+    toast(message, "ok");
+    return true;
+  } catch (error) {
+    if (store.qualityDataset) store.qualityDataset.error = error.message;
+    else store.qualityDataset = { name: "", version: "", cases: [], selected: "", acknowledged: false, jsonl: "", error: error.message, invalid: true };
+    qualityLibraryRender(".quality-dataset-error");
+    $("quality-dataset-announcer").textContent = `Dataset not accepted: ${error.message}`;
+    return false;
+  }
+}
+
+async function qualityLibraryFile(event) {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+  const request = ++store.qualityDatasetRequest;
+  if (file.size > QUALITY_LIBRARY_BYTES) {
+    const message = "Dataset file exceeds the 2 MiB import boundary.";
+    if (store.qualityDataset && !store.qualityDataset.invalid) store.qualityDataset.error = message;
+    else store.qualityDataset = { name: "", version: "", cases: [], selected: "", acknowledged: false, jsonl: "", error: message, invalid: true };
+    qualityLibraryRender(".quality-dataset-error");
+    $("quality-dataset-announcer").textContent = `Dataset not accepted: ${message}`;
+    return;
+  }
+  try {
+    const bytes = await file.arrayBuffer();
+    if (request !== store.qualityDatasetRequest) return;
+    const text = qualityLibraryDecode(bytes);
+    qualityLibraryAccept(text, file.name || "dataset file");
+  } catch (error) {
+    if (request !== store.qualityDatasetRequest) return;
+    const message = `Dataset file could not be read: ${error.message}`;
+    if (store.qualityDataset && !store.qualityDataset.invalid) store.qualityDataset.error = message;
+    else store.qualityDataset = { name: "", version: "", cases: [], selected: "", acknowledged: false, jsonl: "", error: message, invalid: true };
+    qualityLibraryRender(".quality-dataset-error");
+    $("quality-dataset-announcer").textContent = message;
+  }
+}
+
+function qualityLibraryChange(event) {
+  const dataset = store.qualityDataset;
+  if (!dataset || dataset.invalid) return;
+  if (event.target.matches("[data-quality-dataset-select]")) {
+    dataset.selected = event.target.value;
+    qualityLibraryRender(dataset.cases.length ? '[data-quality-dataset-select]' : '[data-quality-dataset-file]');
+    return;
+  }
+  if (event.target.matches("[data-quality-dataset-ack]")) {
+    dataset.acknowledged = event.target.checked;
+    dataset.error = "";
+    qualityLibraryRender('[data-quality-dataset-ack]');
+  }
+}
+
+function qualityLibraryClick(event) {
+  const dataset = store.qualityDataset;
+  if (event.target.closest("[data-quality-dataset-clear]")) {
+    if (!dataset || !window.confirm("Clear the page-memory dataset workbench? Downloaded files are not affected.")) return;
+    store.qualityDatasetRequest += 1;
+    store.qualityDataset = null;
+    qualityLibraryRender("[data-quality-dataset-file]");
+    $("quality-dataset-announcer").textContent = "Page-memory dataset cleared.";
+    return;
+  }
+  if (!dataset || dataset.invalid) return;
+  if (event.target.closest("[data-quality-dataset-remove]")) {
+    const index = dataset.cases.findIndex((item) => item.id === dataset.selected);
+    if (index < 0) return;
+    const removed = dataset.cases[index].id;
+    store.qualityDatasetRequest += 1;
+    dataset.cases.splice(index, 1);
+    dataset.selected = dataset.cases[Math.min(index, dataset.cases.length - 1)]?.id || "";
+    dataset.acknowledged = false;
+    dataset.error = "";
+    dataset.jsonl = qualityLibraryJsonl(dataset);
+    qualityLibraryRender(dataset.cases.length ? '[data-quality-dataset-select]' : '[data-quality-dataset-file]');
+    $("quality-dataset-announcer").textContent = `Case ${removed} removed. Review and acknowledge the changed dataset again.`;
+    return;
+  }
+  if (event.target.closest("[data-quality-dataset-export]")) {
+    if (!dataset.acknowledged || !dataset.cases.length) return;
+    const jsonl = qualityLibraryJsonl(dataset);
+    const url = URL.createObjectURL(new Blob([jsonl], { type: "application/x-ndjson" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = qualityFilename({ dataset: dataset.name, version: dataset.version });
+    document.body.appendChild(anchor);
+    anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    toast("Reviewed portable dataset downloaded. It was not persisted or evaluated by Rusty.", "ok");
+    $("quality-dataset-announcer").textContent = "Reviewed portable dataset downloaded.";
   }
 }
 
@@ -7311,12 +7929,14 @@ function recTotalsHtml(totals) {
 
 function recExactUnsigned(parent, key) {
   if (!parent || typeof parent !== "object") return null;
-  const token = parent[AGENT_NUMBER_TOKENS] && parent[AGENT_NUMBER_TOKENS][key];
-  if (typeof token === "string" && /^(?:0|[1-9][0-9]*)$/.test(token)) {
+  const tokens = parent[AGENT_NUMBER_TOKENS];
+  if (tokens && Object.prototype.hasOwnProperty.call(tokens, key)) {
+    const token = tokens[key];
+    if (typeof token !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(token)) return null;
     try { return BigInt(token); } catch { return null; }
   }
   const value = parent[key];
-  return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+  return Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0) ? BigInt(value) : null;
 }
 
 function recRecordedLatency(events) {
@@ -18279,6 +18899,11 @@ function init() {
   $("quality-foundry").addEventListener("submit", (event) => {
     if (event.target.id === "quality-foundry-form") qualitySubmit(event);
   });
+  $("quality-dataset").addEventListener("change", (event) => {
+    if (event.target.matches("[data-quality-dataset-file]")) qualityLibraryFile(event);
+    else qualityLibraryChange(event);
+  });
+  $("quality-dataset").addEventListener("click", qualityLibraryClick);
 
   // Replay & run comparison. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).

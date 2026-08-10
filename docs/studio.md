@@ -297,6 +297,22 @@ studio/
     partial sequence. The draft and sealed case live in page memory until downloaded and are discarded on
     journal reload, thread change, or connection change. The downloaded JSONL is portable sensitive data.
     This export does not create a durable dataset, run an evaluator or experiment, or approve a release.
+  - **Dataset workbench** — add a sealed foundry case or import a format-v1 `rusty-eval` JSONL file into
+    one connection-bound page-memory ledger. The first accepted source fixes the dataset name and version;
+    matching imports preserve case order, ignore canonically identical duplicate IDs, and reject a conflicting ID
+    or different dataset identity without partially changing the ledger. Each case exposes its complete
+    canonical JSON before download. Adding, removing, or deduplicating content invalidates the export
+    acknowledgement, so the operator must freshly review the complete case set and its portable-data risk.
+    Studio bounds this review surface to 256 cases, 2 MiB of canonical JSONL, 256 KiB per line, 64 items
+    per expectation list, 64 JSON nesting levels, 32,768 JSON values per line, and 1,024 bytes per numeric
+    token. Its single-pass importer
+    rejects invalid UTF-8, duplicate object keys, lone Unicode surrogates, and content outside the review
+    boundary. It preserves exact i64/u64 integer tokens—including legal values beyond JavaScript's
+    safe-integer range—while normalizing finite floats, nullable limits, and map order to Rust's canonical
+    `serde_json` output. A thread switch keeps the ledger available for assembling cases across
+    runs on the same server connection; connection change or page reload discards it. Download remains a
+    local portable asset: Studio does not create a server dataset, run an evaluator or experiment, or make
+    a release decision.
   - **Run comparison report** — enter a baseline and candidate run id (the baseline auto-fills from the
     loaded journal) and **Build report**. Studio calls the atomic
     `GET /runs/diff?base=…&branch=…` contract, then reconciles both independent

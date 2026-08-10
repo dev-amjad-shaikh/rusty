@@ -12,7 +12,7 @@ const html = readFileSync(path.join(here, "index.html"), "utf8");
 const match = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) throw new Error("Studio script not found");
 const src = match[1].replace(/\ninit\(\);\s*$/, "\n");
-const sandbox = { document: { getElementById() { return null; } } };
+const sandbox = { document: { getElementById() { return null; } }, TextDecoder };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__quality = {
@@ -20,9 +20,14 @@ globalThis.__quality = {
   qualityParseTags, qualityParseExpected, qualityValidate, qualityToolJson,
   qualityDatasetJsonl, qualityFilename, qualityRail, qualityHtml, qualityInput,
   qualityInvalidateAcknowledgement, qualityAddPredicate, qualityRemovePredicate,
-  qualityClearThreadBoundState,
+  qualityClearThreadBoundState, qualityLibraryNumberCheck, qualityLibraryParseJson,
+  qualityLibraryCanonicalValue, qualityLibraryRustF64, qualityLibraryDecode, qualityLibraryParse,
+  qualityLibraryJsonl, qualityLibraryMerge, qualityLibraryStats, qualityLibraryHtml,
   QUALITY_DATASET_FORMAT_VERSION, QUALITY_TAG_LIMIT, QUALITY_PREDICATE_LIMIT,
-  QUALITY_TOOL_LIMIT, QUALITY_EXPORT_LIMIT, AGENT_NUMBER_TOKENS, runProofCanonicalJson, store,
+  QUALITY_TOOL_LIMIT, QUALITY_EXPORT_LIMIT, QUALITY_LIBRARY_CASE_LIMIT,
+  QUALITY_LIBRARY_BYTES, QUALITY_LIBRARY_LINE_BYTES, QUALITY_LIBRARY_DEPTH_LIMIT,
+  QUALITY_LIBRARY_NODE_LIMIT, QUALITY_LIBRARY_NUMBER_BYTES, AGENT_NUMBER_TOKENS,
+  runProofCanonicalJson, store,
 };`, sandbox, { filename: "index.html<script>" });
 
 const Q = sandbox.__quality;
@@ -280,6 +285,172 @@ const recorder = {
   check("lifecycle: losing the selected thread clears the page-memory case", Q.store.qualityCase === null);
 }
 
+const goldenJsonl = readFileSync(path.join(here, "..", "rusty-eval", "tests", "golden", "math_tools_v1.jsonl"), "utf8");
+
+{
+  const dataset = Q.qualityLibraryParse(goldenJsonl);
+  check("dataset workbench: Rust golden format-v1 dataset parses",
+    dataset.name === "math-tools" && dataset.version === "1.0.0" && dataset.cases.length === 2);
+  check("dataset workbench: canonical output matches Rust golden field order exactly",
+    Q.qualityLibraryJsonl(dataset) === goldenJsonl);
+  eq("dataset workbench: summary counts cases, tags, and expectation surfaces",
+    Q.qualityLibraryStats(dataset), { cases: 2, tags: 2, expectations: 6, bytes: Buffer.byteLength(goldenJsonl) });
+}
+
+{
+  const unsafe = '{"kind":"header","format_version":1,"name":"exact","version":"1"}\n' +
+    '{"kind":"case","id":"u64","input":{"count":18446744073709551615},"expect":{"max_latency_ms":18446744073709551615}}\n';
+  const dataset = Q.qualityLibraryParse(unsafe);
+  check("dataset workbench: legal unsafe u64 tokens survive import and canonical export",
+    dataset.jsonl.includes('"count":18446744073709551615') &&
+    dataset.jsonl.includes('"max_latency_ms":18446744073709551615'));
+  const normalized = Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"float","version":"1"}\n' +
+    '{"kind":"case","id":"f","input":{"fixed":0.000001,"scientific":1e16},"expect":{"max_cost_usd":1,"max_latency_ms":null}}\n');
+  check("dataset workbench: serde f64 forms and nullable options match Rust canonical output",
+    normalized.jsonl.includes('"fixed":1e-6') && normalized.jsonl.includes('"scientific":1e+16') &&
+    normalized.jsonl.includes('"max_cost_usd":1.0') && !normalized.jsonl.includes("max_latency_ms"));
+  check("dataset workbench: Rust f64 threshold forms are explicit",
+    Q.qualityLibraryRustF64(0.00001) === "0.00001" && Q.qualityLibraryRustF64(0.000001) === "1e-6" &&
+    Q.qualityLibraryRustF64(1e15) === "1000000000000000.0" && Q.qualityLibraryRustF64(1e16) === "1e+16");
+  const negativeZero = Q.qualityLibraryParseJson('{"value":-0}');
+  check("dataset workbench: serde_json Value preserves negative zero as a float",
+    Q.qualityLibraryCanonicalValue(negativeZero) === '{"value":-0.0}');
+  const overflowValue = Q.qualityLibraryParseJson('{"value":18446744073709551616}');
+  check("dataset workbench: integers outside i64/u64 fall back to serde_json finite-float form",
+    Q.qualityLibraryCanonicalValue(overflowValue) === '{"value":1.8446744073709552e+19}');
+}
+
+{
+  const missingHeader = '{"kind":"case","id":"a","input":{},"expect":{}}\n';
+  const duplicate = '{"kind":"header","format_version":1,"name":"d","version":"1"}\n' +
+    '{"kind":"case","id":"a","input":{},"expect":{}}\n' +
+    '{"kind":"case","id":"a","input":{},"expect":{}}\n';
+  for (const [name, value] of [["case before header", missingHeader], ["duplicate case identity", duplicate]]) {
+    let rejected = false;
+    try { Q.qualityLibraryParse(value); } catch { rejected = true; }
+    check(`dataset workbench: ${name} is rejected atomically`, rejected);
+  }
+  const malformedDefaults = [
+    '{"kind":"case","id":"a","input":{},"expect":null}',
+    '{"kind":"case","id":"a","input":{},"expect":{"tool_trajectory":null}}',
+    '{"kind":"case","id":"a","input":{},"expect":{},"tags":null}',
+  ];
+  for (const item of malformedDefaults) {
+    let rejected = false;
+    try { Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"d","version":"1"}\n' + item + '\n'); }
+    catch { rejected = true; }
+    check("dataset workbench: explicit malformed serde-default field is not treated as omitted", rejected);
+  }
+  const nameOnly = Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"d","version":"1"}\n' +
+    '{"kind":"case","id":"named","input":{},"expect":{"tool_trajectory":[{"name":"search"}]}}\n');
+  check("dataset workbench: omitted tool arguments follow Rust default and stay omitted canonically",
+    nameOnly.jsonl.includes('{"name":"search"}') && !nameOnly.jsonl.includes('"args"'));
+  for (const token of ["-0", "1.0", "1e0", "18446744073709551616"]) {
+    let rejected = false;
+    try { Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"d","version":"1"}\n' +
+      '{"kind":"case","id":"u64","input":{},"expect":{"max_latency_ms":' + token + '}}\n'); }
+    catch { rejected = true; }
+    check(`dataset workbench: typed u64 token ${token} follows Rust grammar and range`, rejected);
+  }
+  for (const item of [
+    '{"kind":"case","id":"a","id":"b","input":{},"expect":{}}',
+    '{"kind":"case","id":"a","input":{},"expect":{"state":[],"state":[]}}',
+  ]) {
+    let rejected = false;
+    try { Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"d","version":"1"}\n' + item + '\n'); }
+    catch { rejected = true; }
+    check("dataset workbench: duplicate JSON fields fail instead of becoming last-write-wins", rejected);
+  }
+}
+
+{
+  const supplementary = String.fromCodePoint(0x10000), bmp = String.fromCodePoint(0xe000);
+  const ordered = Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"unicode","version":"1"}\n' +
+    '{"kind":"case","id":"order","input":{"' + supplementary + '":1,"' + bmp + '":2},"expect":{}}\n');
+  const caseLine = ordered.jsonl.split("\n")[1];
+  check("dataset workbench: map keys use Rust Unicode-scalar order rather than UTF-16 order",
+    caseLine.indexOf('"' + bmp + '"') < caseLine.indexOf('"' + supplementary + '"'));
+
+  let surrogateRejected = false;
+  try { Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"u","version":"1"}\n' +
+    '{"kind":"case","id":"bad","input":{"value":"\\ud800"},"expect":{}}\n'); }
+  catch { surrogateRejected = true; }
+  check("dataset workbench: lone surrogate escapes fail before portable export", surrogateRejected);
+
+  const deep = "[".repeat(Q.QUALITY_LIBRARY_DEPTH_LIMIT + 2) + "0" + "]".repeat(Q.QUALITY_LIBRARY_DEPTH_LIMIT + 2);
+  let depthRejected = false;
+  try { Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"d","version":"1"}\n' +
+    '{"kind":"case","id":"deep","input":' + deep + ',"expect":{}}\n'); }
+  catch { depthRejected = true; }
+  check("dataset workbench: deep JSON fails inside the explicit serde-safe review boundary", depthRejected);
+}
+
+{
+  const many = Array.from({ length: 12000 }, (_, index) => String(index % 10)).join(",");
+  const parsed = Q.qualityLibraryParseJson('{"values":[' + many + ']}');
+  check("dataset workbench: high-cardinality numeric JSON uses one bounded parser pass",
+    parsed.values.length === 12000 && Q.qualityLibraryCanonicalValue(parsed).startsWith('{"values":['));
+  let giantNumber = false;
+  try { Q.qualityLibraryParseJson('{"value":' + "1".repeat(Q.QUALITY_LIBRARY_NUMBER_BYTES + 1) + '}'); }
+  catch { giantNumber = true; }
+  check("dataset workbench: a single hostile numeric token is byte bounded before BigInt conversion", giantNumber);
+  let invalidUtf8 = false;
+  try { Q.qualityLibraryDecode(Uint8Array.from([0x7b, 0xff, 0x7d])); } catch { invalidUtf8 = true; }
+  check("dataset workbench: malformed UTF-8 is rejected instead of replacement-decoded", invalidUtf8);
+  const bom = Q.qualityLibraryDecode(Uint8Array.from([0xef, 0xbb, 0xbf, 0x7b, 0x7d]));
+  check("dataset workbench: a UTF-8 BOM remains visible to the Rust-compatible parser", bom.startsWith("\ufeff"));
+}
+
+{
+  const first = Q.qualityLibraryParse(goldenJsonl);
+  first.acknowledged = true;
+  const exactDuplicate = Q.qualityLibraryParse(goldenJsonl);
+  const merged = Q.qualityLibraryMerge(first, exactDuplicate);
+  check("dataset workbench: exact duplicate imports are deduplicated and invalidate acknowledgement",
+    merged.added === 0 && merged.deduplicated === 2 && !merged.dataset.acknowledged && merged.dataset.cases.length === 2);
+
+  const addedJsonl = '{"kind":"header","format_version":1,"name":"math-tools","version":"1.0.0"}\n' +
+    '{"kind":"case","id":"subtract","input":{"n":3},"expect":{},"tags":["math"]}\n';
+  const added = Q.qualityLibraryMerge(first, Q.qualityLibraryParse(addedJsonl));
+  eq("dataset workbench: same-identity additions preserve ledger order",
+    added.dataset.cases.map((item) => item.id), ["add-two-numbers", "mul-then-add", "subtract"]);
+
+  const conflictJsonl = '{"kind":"header","format_version":1,"name":"math-tools","version":"1.0.0"}\n' +
+    '{"kind":"case","id":"add-two-numbers","input":{"changed":true},"expect":{}}\n';
+  let conflicted = false;
+  try { Q.qualityLibraryMerge(first, Q.qualityLibraryParse(conflictJsonl)); } catch { conflicted = true; }
+  check("dataset workbench: conflicting case identity rejects without mutating the ledger",
+    conflicted && first.cases.length === 2 && first.cases[0].input.includes("messages"));
+
+  const otherIdentity = goldenJsonl.replace('"name":"math-tools"', '"name":"other"');
+  let identityRejected = false;
+  try { Q.qualityLibraryMerge(first, Q.qualityLibraryParse(otherIdentity)); } catch { identityRejected = true; }
+  check("dataset workbench: mixed dataset identities require an explicit clear", identityRejected);
+}
+
+{
+  const hostile = Q.qualityLibraryParse('{"kind":"header","format_version":1,"name":"safe","version":"1"}\n' +
+    '{"kind":"case","id":"<img src=x onerror=alert(1)>","input":{"prompt":"secret"},"expect":{}}\n');
+  const rendered = Q.qualityLibraryHtml(hostile);
+  check("dataset workbench: hostile case identity is escaped in ledger and exact review",
+    rendered.includes("&lt;img") && !rendered.includes("<img src=x"));
+  check("dataset workbench: export requires fresh acknowledgement and warns about portable inputs",
+    rendered.includes("Download dataset") && rendered.includes("disabled") &&
+    rendered.includes("personal data, or secrets"));
+}
+
+{
+  const header = '{"kind":"header","format_version":1,"name":"bounded","version":"1"}\n';
+  const cases = Array.from({ length: Q.QUALITY_LIBRARY_CASE_LIMIT + 1 }, (_, index) =>
+    '{"kind":"case","id":"c-' + index + '","input":{},"expect":{}}').join("\n") + "\n";
+  let tooMany = false;
+  try { Q.qualityLibraryParse(header + cases); } catch { tooMany = true; }
+  check("dataset workbench: case cardinality is bounded before DOM assembly", tooMany);
+  let tooLarge = false;
+  try { Q.qualityLibraryParse("x".repeat(Q.QUALITY_LIBRARY_BYTES + 1)); } catch { tooLarge = true; }
+  check("dataset workbench: imported files are byte bounded", tooLarge);
+}
+
 check("filename: bounded portable dataset identity",
   Q.qualityFilename({ dataset: "../../Hotel Quality", version: "2.1 rc" }) ===
   "hotel-quality@2.1-rc.jsonl");
@@ -297,6 +468,24 @@ check("responsive: fields, source evidence, predicates, and rail collapse on nar
   html.includes(".quality-fields, .quality-source, .quality-expect-grid { grid-template-columns:1fr; }") &&
   html.includes(".quality-predicate { grid-template-columns:1fr; }") &&
   html.includes(".quality-rail { grid-template-columns:1fr; }"));
+check("markup: dataset workbench is labelled, page-memory scoped, and has one live announcer",
+  html.includes('id="quality-dataset" aria-labelledby="quality-dataset-title"') &&
+  html.includes("Portable quality library · page memory") &&
+  html.includes('id="quality-dataset-announcer" role="status"'));
+check("interaction: dataset import, selection, acknowledgement, and actions are delegated",
+  html.includes('matches("[data-quality-dataset-file]")') &&
+  html.includes("qualityLibraryChange(event)") &&
+  html.includes('addEventListener("click", qualityLibraryClick)'));
+check("accessibility: hidden file inputs have a visible focus ring and final removal has a stable fallback",
+  html.includes(".quality-file-button:focus-within") &&
+  html.includes("dataset.jsonl = qualityLibraryJsonl(dataset);\n    qualityLibraryRender(dataset.cases.length ? '[data-quality-dataset-select]' : '[data-quality-dataset-file]')"));
+check("download: assembled datasets inherit their exact reviewed name and version",
+  html.includes("qualityFilename({ dataset: dataset.name, version: dataset.version })"));
+check("lifecycle: connection reset discards dataset content and invalidates pending file reads",
+  html.includes("store.qualityDataset = null;") && html.includes("store.qualityDatasetRequest += 1;"));
+check("responsive: dataset ledger collapses to one column on narrow screens",
+  html.includes(".quality-dataset-layout { grid-template-columns:1fr; }") &&
+  html.includes(".quality-dataset-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }"));
 
 if (failed) {
   console.error("\n" + failed + " failed, " + passed + " passed");
