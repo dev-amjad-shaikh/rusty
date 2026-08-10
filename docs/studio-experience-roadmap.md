@@ -163,10 +163,11 @@ Studio is a useful engineering console, not yet the complete experience describe
   effect-typed tools, memory access/scopes, approval boundary, output shape/schema binding, and exact
   token/cost/wall-time budget strings. The Extension Catalog supplies typed
   server discovery and immutable history for model/tool/memory/policy configuration artifacts. Prompt,
-  tool-contract, and singular model-settings artifacts are now selectable for a selected thread's next
-  run, with environment-bound admission and exact journal proof, but that page-memory plan is not yet part
-  of the portable assistant canvas or immutable assistant version. Credential-handle and assistant-level
-  governed runtime-binding forms remain; output and budget requirements are portable declarations rather
+  tool-contract, and singular model-settings artifacts are now selectable as an ordered assistant-level
+  preset that survives portable manifests and immutable versions. **Prepare governed run** resolves that
+  preset against the live catalog, creates a thread without running it, and hands it to the existing
+  environment-bound planner for fresh one-run acknowledgement and exact journal proof. Credential handles
+  and generic provider enforcement remain; output and budget requirements are portable declarations rather
   than generic runtime enforcement.
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
 - The selected-thread interrupt review draft is browser-session-only, while the executor's interrupt and
@@ -263,13 +264,14 @@ portable intent, descriptive metadata, and preserved advanced values. It compare
 bounding visible excerpts and explicitly describes the result as a separate assistant rather than a server-side
 version. A visual
 intent canvas now captures a versioned model identity, effect-typed tool requirements, governed-memory
-access/scopes, an approval boundary, an output contract, and exact run-budget ceilings without raw JSON.
-Rusty stores and round-trips that portable intent,
-but the registered graph—not the canvas—still chooses and enforces providers at runtime. Archive and restore
+access/scopes, an approval boundary, an output contract, exact run-budget ceilings, and an ordered governed
+runtime preset without raw JSON. Rusty stores and round-trips that portable intent. Studio can prepare a
+thread from the preset, but it does not run until the current catalog is reviewed and freshly acknowledged;
+the registered graph still chooses providers outside this admission path. Archive and restore
 now move assistants between visible lifecycle shelves after an exact active-manifest review; archived records
 retain lineage and historical evidence while server admission rejects new runs. Delete,
-typed capability discovery, credential handles, governed runtime binding, and run-manifest resolution back
-to an assistant version remain.
+typed capability discovery and governed runtime binding are delivered; credential handles and generic
+provider enforcement remain.
 
 Scope:
 
@@ -516,7 +518,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 |---:|---|---|---|
 | 1 | Recent runs in the Agent Workbench, with status and one-click Inspect | Delivered locally; durable discovery remains in order 4 | Extends the delivered first-run journey into a repeatable daily workflow without pretending the whole Studio is complete |
 | 2 | Assistant edit and duplicate, with a readable configuration summary | Partial — safe duplicate, source-bound configuration diff, and summary delivered; edit/version endpoints pending | Establishes lifecycle management as soon as the server route surface is free to extend |
-| 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract, manifest portability, visual model/tool/memory/approval/output/budget intent, typed extension discovery, and thread-scoped environment binding with journal proof delivered; credentials, generic enforcement, and portable assistant-level runtime binding remain | Replaces the current create-only form and raw configuration gap |
+| 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract, manifest portability, visual model/tool/memory/approval/output/budget intent, typed extension discovery, portable assistant-level governed presets, and thread-scoped acknowledgement with journal proof delivered; credentials and generic provider enforcement remain | Replaces the current create-only form and raw configuration gap |
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
 | 5 | Flight Recorder investigation layout and manifest/effect context | Usable foundation — causal run story, recovery boundary, effect-risk guidance, exact signed run-proof chain, and five-surface runtime bill of materials delivered; cross-run manifest drift navigation and remote/KMS attestation remain | Makes Rusty's strongest runtime advantage understandable |
 | 6 | Memory browser, context assembly, provenance, conflicts, corrections, and forgetting | Partial — browser, deterministic token-budget context preview, provenance, conflict review, selected-memory correction, exact durable consolidation launch, and task-to-summary follow-through delivered; candidate approval, expiration, and approval-gated forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |

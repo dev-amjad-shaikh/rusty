@@ -1172,6 +1172,31 @@
   .agent-intent-budget { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
   .agent-intent-budget label { min-width: 0; }
   .agent-intent-budget input { min-width: 0; }
+  .agent-intent-binding { grid-column: 1 / -1; border-color: #536544; background: #171f18; }
+  .agent-intent-binding::after { border-color: #8cac78; background: #171f18; }
+  .agent-binding-fields { display: grid; grid-template-columns: minmax(210px, .55fr) minmax(0, 1.45fr); gap: 10px; align-items: end; }
+  .agent-binding-catalog-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin: 10px 0 6px; }
+  .agent-binding-catalog-head span { color: var(--text-dim); font-size: 10.5px; }
+  .agent-binding-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 210px; padding: 7px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset); }
+  .agent-binding-option { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px; align-items: start; min-width: 0; margin: 0 !important; padding: 7px; border: 1px solid #344538; border-radius: 5px; background: #182019; }
+  .agent-binding-option input { margin-top: 2px; }
+  .agent-binding-option b, .agent-binding-option code { display: block; overflow-wrap: anywhere; }
+  .agent-binding-option b { color: #d9e5d2; font-size: 10.5px; }
+  .agent-binding-option code { margin-top: 2px; color: var(--text-faint); font-size: 9px; }
+  .agent-binding-selection { margin-top: 9px; padding: 9px; border: 1px solid #4a5b40; border-radius: 6px; background: #151c16; }
+  .agent-binding-selection > b { display: block; margin-bottom: 6px; color: #d9e5d2; font-size: 10.5px; }
+  .agent-binding-order { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; }
+  .agent-binding-order li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 7px; align-items: center; min-width: 0; padding: 5px 6px; border: 1px solid var(--border); border-radius: 5px; }
+  .agent-binding-order li > span { color: #9fb88f; font: 700 9px var(--mono); }
+  .agent-binding-order code { overflow-wrap: anywhere; font-size: 9.5px; }
+  .agent-binding-order-actions { display: flex; gap: 4px; }
+  .agent-binding-order-actions button { min-width: 28px; padding: 3px 6px; }
+  .agent-run-binding { margin: 10px 0; padding: 10px 11px; border: 1px solid #4e623f; border-radius: 7px; background: #182019; }
+  .agent-run-binding h4 { margin: 0 0 4px; color: #d9e5d2; font-size: 12px; }
+  .agent-run-binding p { margin: 0 0 7px; color: var(--text-dim); font-size: 10.5px; }
+  .agent-run-binding ol { margin: 6px 0 8px; padding-left: 22px; }
+  .agent-run-binding code { overflow-wrap: anywhere; }
+  .agent-run-binding-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .agent-intent-scopes { display: flex; gap: 5px 9px; flex-wrap: wrap; margin: 9px 0 0; padding: 8px; border: 1px solid var(--border); border-radius: 5px; }
   .agent-intent-scopes legend { padding: 0 4px; color: var(--text-dim); font-size: 10.5px; }
   .agent-intent-scopes label { flex-direction: row; gap: 4px; align-items: center; margin: 0; font-size: 10.5px; }
@@ -2159,6 +2184,9 @@
     .agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }
     .agent-intent-grid { grid-template-columns: 1fr; }
     .agent-intent-budget { grid-template-columns: 1fr; }
+    .agent-binding-fields, .agent-binding-options { grid-template-columns: 1fr; }
+    .agent-binding-order li { grid-template-columns: 24px minmax(0, 1fr); }
+    .agent-binding-order-actions { grid-column: 2; justify-self: start; }
     .agent-intent-truth { flex-direction: column; }
     .agent-review-stack { position: static; }
     .agent-change-row { grid-template-columns: 1fr; gap: 5px; }
@@ -2579,8 +2607,19 @@
                     </div>
                     <span class="field-help" id="agent-budget-help">Exact decimal strings avoid browser rounding. Blank keeps each runtime default; zero is an explicit zero budget.</span>
                   </section>
+                  <section class="agent-intent-card agent-intent-binding" aria-labelledby="agent-intent-binding-title">
+                    <div class="agent-intent-head"><b id="agent-intent-binding-title">Governed run preset</b><span class="agent-intent-state">portable · admitted later</span></div>
+                    <div class="agent-binding-fields">
+                      <label>Environment tag <input id="inp-agent-binding-environment" type="text" maxlength="64" spellcheck="false" placeholder="Deployment default" aria-describedby="agent-binding-environment-help agent-intent-truth agent-intent-lock"><span class="field-help" id="agent-binding-environment-help">The server resolves this environment when a prepared run is admitted. Blank uses the deployment default or untagged surface.</span></label>
+                      <span class="field-help">Choose prompt, tool-contract, and model-settings artifacts from the connected catalog. Selection order is preserved in the assistant manifest.</span>
+                    </div>
+                    <div class="agent-binding-catalog-head"><span id="agent-binding-catalog-status" role="status">Load the extension catalog to choose governed artifacts.</span><button type="button" class="small" id="btn-agent-binding-refresh">Load catalog</button></div>
+                    <div id="agent-binding-picker"></div>
+                    <div id="agent-binding-selection"></div>
+                    <div class="field-help" id="agent-binding-help">Studio stores at most 120 exact artifact surfaces. Creating or versioning the assistant does not resolve pointers. Prepare governed run opens the selected thread planner, where current catalog drift and a fresh one-run acknowledgement are required.</div>
+                  </section>
                 </div>
-                <div class="agent-intent-truth" id="agent-intent-truth"><b>Execution boundary</b><span>The server stores this versioned intent exactly. Today it does not bind or enforce model, tool, memory, approval, output, or budget providers from these fields; the selected graph remains authoritative.</span></div>
+                <div class="agent-intent-truth" id="agent-intent-truth"><b>Execution boundary</b><span>The server stores this versioned intent exactly. Model, tool, memory, approval, output, and budget fields remain declarations. A governed run preset becomes executable only after Studio prepares a thread and the existing admission planner rechecks the current catalog, shows exact order, and collects a fresh one-run acknowledgement.</span></div>
                 <div class="agent-intent-lock" id="agent-intent-lock" role="note" hidden></div>
               </div>
 
@@ -3205,7 +3244,8 @@ const AGENT_MANIFEST_NODE_LIMIT = 2000;
 const AGENT_CHANGE_EXCERPT_LIMIT = 180;
 const AGENT_VERSION_LIMIT = 256;
 const AGENT_VERSION_RESPONSE_LIMIT = 8 * 1024 * 1024;
-const AGENT_INTENT_FORMAT = "rusty.agent-intent/v2";
+const AGENT_INTENT_FORMAT = "rusty.agent-intent/v3";
+const AGENT_INTENT_PREVIOUS_FORMAT = "rusty.agent-intent/v2";
 const AGENT_INTENT_LEGACY_FORMAT = "rusty.agent-intent/v1";
 const AGENT_INTENT_TOOL_LIMIT = 16;
 const AGENT_INTENT_EFFECTS = new Set(["pure", "read_only", "idempotent", "compensatable", "non_idempotent"]);
@@ -3213,6 +3253,7 @@ const AGENT_INTENT_SCOPES = new Set(["run", "agent", "team", "user", "tenant"]);
 const AGENT_INTENT_MEMORY_MODES = new Set(["none", "read_only", "read_write"]);
 const AGENT_INTENT_APPROVALS = new Set(["runtime_policy", "irreversible", "external_effect"]);
 const AGENT_INTENT_OUTPUT_MODES = new Set(["runtime_default", "text", "json_object", "json_schema"]);
+const AGENT_INTENT_BINDING_LIMIT = 120;
 const AGENT_NUMBER_TOKENS = Symbol("rusty.json.number_tokens");
 const LEARN_SNAPSHOT_LIMIT = 200;
 const LEARN_RENDER_LIMIT = 100;
@@ -3317,11 +3358,13 @@ const store = {
   agentRuns: Object.create(null),       // latest full run from this browser session, keyed by assistant id
   agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
   agentCreateOpen: false, // creation form temporarily owns the guided journey
+  agentCreateInteraction: 0, // generation guard for catalog reads across close/reopen drafts
   agentCopySource: null, // source snapshot while a copy-to-draft form is open
   agentVersionSource: null, // exact active assistant snapshot while creating an immutable draft version
   agentManifestSource: null, // imported/copied config + metadata preserved while the workshop is open
   agentManifestDirty: false, // exact JSON has unapplied edits that must never be ignored
   agentIntentScopeOrder: [], // preserves imported scope order while the visual shortcut is untouched
+  agentIntentBindingOrder: [], // exact portable runtime-preset order while the catalog picker is open
   agentsUnsupported: false, // server build has no /assistants routes
   fabric: null,        // durable agent registry, selected team/member, evidence, and coordination trace
   fabricUnsupported: false, // server build has no Agent Fabric registry routes
@@ -5175,6 +5218,7 @@ function connectionResetWorkspace() {
   store.agentManifestSource = null;
   store.agentManifestDirty = false;
   store.agentIntentScopeOrder = [];
+  store.agentIntentBindingOrder = [];
   store.agents = null;
   store.agentVersions = null;
   store.agentLifecycleReview = null;
@@ -11550,7 +11594,7 @@ function agentValidateDraft(fields, graphNames) {
   const intent = agentIntentBuild(source);
   for (const [key, message] of Object.entries(intent.errors)) errors[key] = message;
   const order = ["name", "graph", "assistantId", "recursionLimit", "model", "tools", "memoryMode", "approval",
-    "outputMode", "outputSchema", "budgetTokens", "budgetCost", "budgetLatency"];
+    "outputMode", "outputSchema", "budgetTokens", "budgetCost", "budgetLatency", "binding"];
   const first = order.find((key) => errors[key]) || "";
   return { valid: !first, errors, first, intent };
 }
@@ -11792,8 +11836,8 @@ function agentConfigurationEvidenceHtml(source, graphNames, titleId) {
     ? `${evidence.intent.intent.model || "Model unbound"} · ${evidence.intent.intent.tools.length} tool${evidence.intent.intent.tools.length === 1 ? "" : "s"} · ${evidence.intent.intent.output.mode.replaceAll("_", " ")} output`
     : evidence.intent.present ? "Intent preserved, builder locked" : "No runtime intent declared";
   const intentDetail = evidence.intent.valid && evidence.intent.present
-    ? `${evidence.intent.intent.memory.access.replaceAll("_", " ")} memory · ${evidence.intent.intent.approval.replaceAll("_", " ")} approval · ${Object.values(evidence.intent.intent.budget).filter(Boolean).length} budget cap${Object.values(evidence.intent.intent.budget).filter(Boolean).length === 1 ? "" : "s"}. Portable requirement only; the graph remains authoritative.`
-    : evidence.intent.error || "Add model, tools, memory, approval, output, or budget requirements to carry a versioned intent with this assistant.";
+    ? `${evidence.intent.intent.memory.access.replaceAll("_", " ")} memory · ${evidence.intent.intent.approval.replaceAll("_", " ")} approval · ${Object.values(evidence.intent.intent.budget).filter(Boolean).length} budget cap${Object.values(evidence.intent.intent.budget).filter(Boolean).length === 1 ? "" : "s"} · ${evidence.intent.intent.binding.surfaces.length} governed binding${evidence.intent.intent.binding.surfaces.length === 1 ? "" : "s"}. Declarations remain portable; a binding preset still requires the thread admission review.`
+    : evidence.intent.error || "Add model, tools, memory, approval, output, budget, or governed binding requirements to carry a versioned intent with this assistant.";
   const preservedLabel = `${evidence.preservedFields} advanced field${evidence.preservedFields === 1 ? "" : "s"}`;
   const shapeWarning = evidence.portableError
     ? evidence.portableError
@@ -11887,6 +11931,7 @@ function agentMetadataFieldEditable(metadata, key) {
 function agentIntentEmptyDraft() {
   return { model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy",
     outputMode: "runtime_default", outputSchema: "", budgetTokens: "", budgetCost: "", budgetLatency: "",
+    bindingEnvironment: "", bindingSurfaces: [],
     intentLocked: false, intentError: "" };
 }
 
@@ -11946,6 +11991,71 @@ function agentIntentDefaultBudget() {
   return { max_tokens: "", max_cost_usd: "", max_latency_ms: "" };
 }
 
+function agentIntentDefaultBinding() {
+  return { environment: "", surfaces: [] };
+}
+
+function agentIntentBindingEnvironmentError(value) {
+  if (typeof value !== "string") return "Runtime-preset environment must be a string.";
+  return registryBindingEnvironment(value) === null
+    ? "Environment must be 1–64 UTF-8 bytes without whitespace, control characters, @, or /. Leave it blank for the deployment default."
+    : "";
+}
+
+function agentIntentBindingSurface(value) {
+  if (typeof value !== "string") return null;
+  const separator = value.indexOf(":");
+  if (separator < 1) return null;
+  const prefix = value.slice(0, separator), name = value.slice(separator + 1);
+  const family = Object.keys(REGISTRY_PREFIXES).find((key) => REGISTRY_PREFIXES[key] === prefix);
+  if (!family || !REGISTRY_ADMISSION_FAMILIES.has(family) || !name || name !== name.trim() || registryString(name, 128) === null ||
+      Array.from(name).some((character) => /\p{Cc}/u.test(character) || character === "@" || character === "/")) return null;
+  return { surface: value, family, name };
+}
+
+function agentIntentBindingError(binding) {
+  if (!agentPlainObject(binding) || Object.keys(binding).some((key) => !["environment", "surfaces"].includes(key)) ||
+      !Object.prototype.hasOwnProperty.call(binding, "environment") || !Object.prototype.hasOwnProperty.call(binding, "surfaces")) {
+    return "Stored governed run preset is outside the builder contract.";
+  }
+  const environmentError = agentIntentBindingEnvironmentError(binding.environment);
+  if (environmentError) return environmentError;
+  if (!Array.isArray(binding.surfaces) || binding.surfaces.length > AGENT_INTENT_BINDING_LIMIT ||
+      new Set(binding.surfaces).size !== binding.surfaces.length || binding.surfaces.some((surface) => !agentIntentBindingSurface(surface))) {
+    return `Choose no more than ${AGENT_INTENT_BINDING_LIMIT} unique run-admissible artifact surfaces.`;
+  }
+  const modelCount = binding.surfaces.filter((surface) => agentIntentBindingSurface(surface)?.family === "model_settings").length;
+  if (modelCount > 1) return "A governed run preset can declare only one model settings artifact.";
+  if (binding.environment && !binding.surfaces.length) return "Choose at least one artifact before declaring a governed environment.";
+  return "";
+}
+
+function agentIntentBindingCatalog(binding, registry = store.registry) {
+  const shapeError = agentIntentBindingError(binding);
+  if (shapeError) return { valid: false, binding: null, artifacts: [], error: shapeError };
+  if (!binding.surfaces.length) return { valid: true, binding: null, artifacts: [], error: "" };
+  if (!registry || registry.loading || registry.error || !Array.isArray(registry.artifacts)) {
+    return { valid: false, binding: null, artifacts: [], error: "Load the current extension catalog before preparing this governed run." };
+  }
+  const artifacts = binding.surfaces.map((surface) => registry.artifacts.find((item) => item.surface === surface)).filter(Boolean);
+  if (artifacts.length !== binding.surfaces.length) {
+    return { valid: false, binding: null, artifacts, error: "The current catalog no longer contains every stored preset artifact. Create a reviewed assistant version or remove the missing surface before running." };
+  }
+  if (artifacts.some((item) => !REGISTRY_ADMISSION_FAMILIES.has(item.family) || !Array.isArray(item.commits) || !item.commits.length)) {
+    return { valid: false, binding: null, artifacts, error: "Every preset artifact must be run-admissible and have at least one immutable commit on this server." };
+  }
+  const wire = { artifacts: artifacts.map((item) => ({ family: item.family, name: item.name })) };
+  if (binding.environment) wire.environment = binding.environment;
+  return { valid: true, binding: wire, artifacts, error: "" };
+}
+
+function agentIntentBindingPreset(config) {
+  const inspected = agentIntentInspectConfig(config);
+  return inspected.valid && inspected.present && inspected.intent.binding.surfaces.length
+    ? { environment: inspected.intent.binding.environment, surfaces: inspected.intent.binding.surfaces.slice() }
+    : null;
+}
+
 function agentIntentInspectConfig(config) {
   if (!agentPlainObject(config) || !Object.prototype.hasOwnProperty.call(config, "studio_intent")) {
     return { present: false, valid: agentPlainObject(config) || config == null, intent: null,
@@ -11955,11 +12065,13 @@ function agentIntentInspectConfig(config) {
   const fail = (message) => ({ present: true, valid: false, intent: null, error: message });
   if (!agentPlainObject(value)) return fail("Stored studio_intent is not an object.");
   const legacy = value.format === AGENT_INTENT_LEGACY_FORMAT;
+  const previous = value.format === AGENT_INTENT_PREVIOUS_FORMAT;
   const allowed = new Set(legacy
     ? ["format", "model", "tools", "memory", "approval"]
-    : ["format", "model", "tools", "memory", "approval", "output", "budget"]);
+    : previous ? ["format", "model", "tools", "memory", "approval", "output", "budget"]
+    : ["format", "model", "tools", "memory", "approval", "output", "budget", "binding"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return fail("Stored studio_intent has fields this builder does not understand.");
-  if (value.format !== AGENT_INTENT_FORMAT && !legacy) return fail(`Stored studio_intent is not ${AGENT_INTENT_FORMAT}.`);
+  if (value.format !== AGENT_INTENT_FORMAT && !previous && !legacy) return fail(`Stored studio_intent is not ${AGENT_INTENT_FORMAT}.`);
   const modelError = agentIntentModelError(value.model);
   if (modelError) return fail(modelError);
   if (!Array.isArray(value.tools) || value.tools.length > AGENT_INTENT_TOOL_LIMIT) return fail("Stored tool contracts are outside the builder contract.");
@@ -11996,15 +12108,19 @@ function agentIntentInspectConfig(config) {
       agentIntentUnsignedBudgetError(budget.max_latency_ms, "Wall-time budget")) {
     return fail("Stored run-budget intent is outside the builder contract.");
   }
+  const binding = legacy || previous ? agentIntentDefaultBinding() : value.binding;
+  const bindingError = agentIntentBindingError(binding);
+  if (bindingError) return fail(bindingError);
   if (!value.model && !value.tools.length && value.memory.access === "none" && !value.memory.scopes.length &&
       value.approval === "runtime_policy" && output.mode === "runtime_default" && !output.schema &&
-      !budget.max_tokens && !budget.max_cost_usd && !budget.max_latency_ms) {
+      !budget.max_tokens && !budget.max_cost_usd && !budget.max_latency_ms && !binding.environment && !binding.surfaces.length) {
     return fail("Stored studio_intent does not declare a requirement.");
   }
   return { present: true, valid: true, intent: { ...value, format: AGENT_INTENT_FORMAT,
     output: { mode: output.mode, schema: output.schema },
-    budget: { max_tokens: budget.max_tokens, max_cost_usd: budget.max_cost_usd, max_latency_ms: budget.max_latency_ms } },
-    legacy, error: "" };
+    budget: { max_tokens: budget.max_tokens, max_cost_usd: budget.max_cost_usd, max_latency_ms: budget.max_latency_ms },
+    binding: { environment: binding.environment, surfaces: binding.surfaces.slice() } },
+    legacy, previous, sourceFormat: value.format, error: "" };
 }
 
 function agentIntentToolsText(tools) {
@@ -12035,6 +12151,8 @@ function agentIntentDraft(config) {
     budgetTokens: inspected.intent.budget.max_tokens,
     budgetCost: inspected.intent.budget.max_cost_usd,
     budgetLatency: inspected.intent.budget.max_latency_ms,
+    bindingEnvironment: inspected.intent.binding.environment,
+    bindingSurfaces: inspected.intent.binding.surfaces.slice(),
     intentLocked: false,
     intentError: "",
   };
@@ -12053,6 +12171,8 @@ function agentIntentBuild(fields) {
   const budgetTokens = String(source.budgetTokens || "");
   const budgetCost = String(source.budgetCost || "");
   const budgetLatency = String(source.budgetLatency || "");
+  const bindingEnvironment = String(source.bindingEnvironment || "");
+  const bindingSurfaces = Array.isArray(source.bindingSurfaces) ? source.bindingSurfaces.map(String) : [];
   const errors = Object.create(null);
   const modelError = agentIntentModelError(model);
   if (modelError) errors.model = modelError;
@@ -12084,10 +12204,13 @@ function agentIntentBuild(fields) {
   if (tokenError) errors.budgetTokens = tokenError;
   if (costError) errors.budgetCost = costError;
   if (latencyError) errors.budgetLatency = latencyError;
-  const order = ["model", "tools", "memoryMode", "approval", "outputMode", "outputSchema", "budgetTokens", "budgetCost", "budgetLatency"];
+  const binding = { environment: bindingEnvironment, surfaces: bindingSurfaces.slice() };
+  const bindingError = agentIntentBindingError(binding);
+  if (bindingError) errors.binding = bindingError;
+  const order = ["model", "tools", "memoryMode", "approval", "outputMode", "outputSchema", "budgetTokens", "budgetCost", "budgetLatency", "binding"];
   const first = order.find((key) => errors[key]) || "";
   const empty = !model && !tools.length && memoryMode === "none" && !scopes.length && approval === "runtime_policy" &&
-    outputMode === "runtime_default" && !outputSchema && !budgetTokens && !budgetCost && !budgetLatency;
+    outputMode === "runtime_default" && !outputSchema && !budgetTokens && !budgetCost && !budgetLatency && !bindingEnvironment && !bindingSurfaces.length;
   const intent = first || empty ? null : {
     format: AGENT_INTENT_FORMAT,
     model,
@@ -12096,6 +12219,7 @@ function agentIntentBuild(fields) {
     approval,
     output: { mode: outputMode, schema: outputSchema },
     budget: { max_tokens: budgetTokens, max_cost_usd: budgetCost, max_latency_ms: budgetLatency },
+    binding,
   };
   return { valid: !first, empty, intent, errors, first };
 }
@@ -12376,12 +12500,13 @@ function agentChangeIntentView(config) {
       approval: { raw: null, display: "Runtime policy" },
       output: { raw: null, display: "Runtime default" },
       budget: { raw: null, display: "Runtime defaults" },
+      binding: { raw: null, display: "No governed run preset" },
     };
   }
   if (!inspected.valid) {
     const raw = agentPlainObject(config) ? config.studio_intent : config;
     const opaque = { raw, display: "Opaque intent · exact manifest" };
-    return { model: opaque, tools: opaque, memory: opaque, approval: opaque, output: opaque, budget: opaque };
+    return { model: opaque, tools: opaque, memory: opaque, approval: opaque, output: opaque, budget: opaque, binding: opaque };
   }
   const intent = inspected.intent;
   const toolNames = intent.tools.map((tool) => `${tool.name} (${tool.effect.replaceAll("_", " ")})`);
@@ -12402,18 +12527,23 @@ function agentChangeIntentView(config) {
   if (intent.budget.max_tokens) budgetParts.push(`${intent.budget.max_tokens} model tokens`);
   if (intent.budget.max_cost_usd) budgetParts.push(`$${intent.budget.max_cost_usd}`);
   if (intent.budget.max_latency_ms) budgetParts.push(`${intent.budget.max_latency_ms} ms`);
-  const intentFormat = inspected.legacy ? AGENT_INTENT_LEGACY_FORMAT : AGENT_INTENT_FORMAT;
-  const formatLabel = inspected.legacy ? "implicit v1" : "explicit v2";
+  const intentFormat = inspected.sourceFormat;
+  const outputFormatLabel = inspected.legacy ? "implicit v1" : inspected.previous ? "explicit v2" : "explicit v3";
+  const bindingFormatLabel = inspected.legacy ? "implicit v1" : inspected.previous ? "implicit v2" : "explicit v3";
   const outputDisplay = intent.output.mode === "json_schema"
     ? `${outputLabels[intent.output.mode]} · ${intent.output.schema}` : outputLabels[intent.output.mode] || intent.output.mode;
+  const bindingDisplay = intent.binding.surfaces.length
+    ? `${intent.binding.environment || "deployment default"} · ${intent.binding.surfaces.length} governed artifact${intent.binding.surfaces.length === 1 ? "" : "s"} · ${bindingFormatLabel}`
+    : `No governed run preset · ${bindingFormatLabel}`;
   return {
     model: { raw: intent.model, display: intent.model || "Unbound" },
     tools: { raw: intent.tools, display: toolNames.length ? toolNames.join(" · ") : "None" },
     memory: { raw: intent.memory, display: memory },
     approval: { raw: intent.approval, display: approvalLabels[intent.approval] || intent.approval },
-    output: { raw: { format: intentFormat, value: intent.output }, display: `${outputDisplay} · ${formatLabel}` },
-    budget: { raw: { format: intentFormat, value: intent.budget },
-      display: `${budgetParts.length ? budgetParts.join(" · ") : "Runtime defaults"} · ${formatLabel}` },
+    output: { raw: { format: intentFormat === AGENT_INTENT_LEGACY_FORMAT ? intentFormat : "explicit", value: intent.output }, display: `${outputDisplay} · ${outputFormatLabel}` },
+    budget: { raw: { format: intentFormat === AGENT_INTENT_LEGACY_FORMAT ? intentFormat : "explicit", value: intent.budget },
+      display: `${budgetParts.length ? budgetParts.join(" · ") : "Runtime defaults"} · ${outputFormatLabel}` },
+    binding: { raw: { format: intentFormat, value: intent.binding }, display: bindingDisplay },
   };
 }
 
@@ -12449,6 +12579,7 @@ function agentChangeReviewView(record, draft) {
     approval: intent.approval,
     output: intent.output,
     budget: intent.budget,
+    binding: intent.binding,
     description: hasDescription
       ? { raw: metadataMap.description, display: typeof metadataMap.description === "string" ? metadataMap.description || "Empty" : "Opaque stored value" }
       : { raw: null, display: "None" },
@@ -12467,7 +12598,7 @@ function agentChangeReview(source, draft) {
   const fields = [
     ["name", "Name"], ["assistantId", "Agent ID"], ["graph", "Behavior"], ["recursionLimit", "Step limit"],
     ["model", "Model"], ["tools", "Tools"], ["memory", "Memory"], ["approval", "Approval"],
-    ["output", "Output"], ["budget", "Run budget"],
+    ["output", "Output"], ["budget", "Run budget"], ["binding", "Governed run preset"],
     ["description", "Responsibility"], ["tags", "Tags"], ["advancedConfig", "Other config"],
     ["advancedMetadata", "Other metadata"],
   ];
@@ -12816,6 +12947,18 @@ function agentVersionDeskHtml(agent, state) {
     `<div class="agent-version-body"><ol class="agent-version-rail">${rows}</ol>${review}</div></section>`;
 }
 
+function agentRunBindingHtml(agent, runnable) {
+  const preset = agentIntentBindingPreset(agent && agent.config);
+  if (!preset) return "";
+  const live = agentIntentBindingCatalog(preset);
+  const status = live.valid ? "Current catalog contains every stored surface." : live.error;
+  return `<section class="agent-run-binding" aria-labelledby="agent-run-binding-title"><h4 id="agent-run-binding-title">Governed run preset</h4>` +
+    `<p>${escapeHtml(preset.environment || "Deployment-default environment")} · ${preset.surfaces.length} exact artifact${preset.surfaces.length === 1 ? "" : "s"}. ${escapeHtml(status)}</p>` +
+    `<ol>${preset.surfaces.map((surface) => `<li><code>${escapeHtml(registryEvidencePreview(surface))}</code></li>`).join("")}</ol>` +
+    `<div class="agent-run-binding-actions"><button type="button" class="primary" data-agent-prepare-binding="${escapeHtml(agent.assistant_id || "")}"${runnable ? "" : " disabled"}>Prepare governed run</button>` +
+    `<span class="field-help" id="agent-binding-run-status" role="status">Creates a thread without starting work, carries this task into the run form, and requires a fresh admission acknowledgement there.</span></div></section>`;
+}
+
 function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
   if (!agent) return `<div class="empty">Select an agent to inspect and test it.</div>`;
   const meta = agent.metadata || {};
@@ -12856,7 +12999,8 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
       `<div class="agent-contract-panel" aria-labelledby="agent-config-summary-title">` +
         agentConfigurationEvidenceHtml(agent, ((info && info.graphs) || []).map((graph) => graph && graph.name).filter(Boolean), "agent-config-summary-title") +
       `</div></section>` +
-    `<div class="agent-test"><h3>Try it now</h3><p>${archived ? "This agent is archived. Restore it before starting new work; prior run evidence remains below." : lifecycleKnown ? "This creates a real run. Nothing here is simulated." : "Lifecycle evidence is unavailable, so Studio will not start new work until the catalog is refreshed."}</p>${input}` +
+    `<div class="agent-test"><h3>Try it now</h3><p>${archived ? "This agent is archived. Restore it before starting new work; prior run evidence remains below." : lifecycleKnown ? (agentIntentBindingPreset(agent.config) ? "Quick Run agent starts an unbound test. Prepare governed run carries the stored preset into the thread admission desk before any work starts." : "This creates a real run. Nothing here is simulated.") : "Lifecycle evidence is unavailable, so Studio will not start new work until the catalog is refreshed."}</p>${input}` +
+    agentRunBindingHtml(agent, runnable) +
     `<div class="agent-test-actions"><button class="primary" data-agent-run="${escapeHtml(agent.assistant_id)}"${runnable ? "" : " disabled"}>Run agent</button>` +
     (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}" data-agent-open-run="${escapeHtml(testRun.run_id || "")}" data-agent-open-graph="${escapeHtml(agent.graph || "")}">Inspect latest</button>` : "") +
     `<span id="agent-test-status">${agentTestResultHtml(testRun)}</span></div>` +
@@ -13373,6 +13517,96 @@ function agentGraphNames() {
   return (((store.info && store.info.graphs) || []).map((graph) => graph && graph.name).filter(Boolean));
 }
 
+function agentBindingCatalogArtifacts() {
+  return store.registry && !store.registry.loading && !store.registry.error && Array.isArray(store.registry.artifacts)
+    ? store.registry.artifacts.filter((item) => REGISTRY_ADMISSION_FAMILIES.has(item.family)) : [];
+}
+
+function agentBindingPickerHtml() {
+  const selected = Array.isArray(store.agentIntentBindingOrder) ? store.agentIntentBindingOrder : [];
+  const locked = Boolean($("inp-agent-model")?.disabled);
+  const available = agentBindingCatalogArtifacts();
+  const shown = registryBindingRenderWindow(available, selected);
+  if (!store.registry || store.registry.loading) return `<div class="empty">${store.registry?.loading ? "Loading governed artifacts…" : "Load the extension catalog to choose governed artifacts."}</div>`;
+  if (store.registry.error) return `<div class="note tiny">The extension catalog is unavailable. Stored preset surfaces remain portable, but new surfaces cannot be selected here.</div>`;
+  if (!shown.length) return `<div class="empty">This catalog has no prompt, tool-contract, or model-settings artifacts.</div>`;
+  return `<div class="agent-binding-options">${shown.map((item) => {
+    const checked = selected.includes(item.surface), unavailable = !Array.isArray(item.commits) || !item.commits.length;
+    const label = `${item.family.replaceAll("_", " ")} · ${item.name}`;
+    return `<label class="agent-binding-option"><input type="checkbox" data-agent-binding-surface="${escapeHtml(item.surface)}"${checked ? " checked" : ""}${unavailable || locked ? " disabled" : ""} aria-describedby="agent-binding-help"><span><b>${escapeHtml(registryEvidencePreview(label))}</b><code>${escapeHtml(registryEvidencePreview(item.surface))}${unavailable ? " · no immutable commit" : ""}</code></span></label>`;
+  }).join("")}</div>`;
+}
+
+function agentBindingSelectionHtml() {
+  const selected = Array.isArray(store.agentIntentBindingOrder) ? store.agentIntentBindingOrder : [];
+  const locked = Boolean($("inp-agent-model")?.disabled), disabled = locked ? " disabled" : "";
+  if (!selected.length) return "";
+  return `<div class="agent-binding-selection"><b>Exact preset order · ${selected.length}/${AGENT_INTENT_BINDING_LIMIT}</b><ol class="agent-binding-order">${selected.map((surface, index) =>
+    `<li><span>${index + 1}</span><code>${escapeHtml(registryEvidencePreview(surface))}</code><div class="agent-binding-order-actions">` +
+      `<button type="button" class="small" data-agent-binding-move="up" data-agent-binding-target="${escapeHtml(surface)}" aria-label="Move ${escapeHtml(registryEvidencePreview(surface))} earlier"${index && !locked ? "" : " disabled"}>↑</button>` +
+      `<button type="button" class="small" data-agent-binding-move="down" data-agent-binding-target="${escapeHtml(surface)}" aria-label="Move ${escapeHtml(registryEvidencePreview(surface))} later"${index + 1 < selected.length && !locked ? "" : " disabled"}>↓</button>` +
+      `<button type="button" class="small" data-agent-binding-remove data-agent-binding-target="${escapeHtml(surface)}" aria-label="Remove ${escapeHtml(registryEvidencePreview(surface))}"${disabled}>Remove</button></div></li>`).join("")}</ol></div>`;
+}
+
+function agentRenderBindingPicker() {
+  const picker = $("agent-binding-picker"), selection = $("agent-binding-selection"), status = $("agent-binding-catalog-status"), refresh = $("btn-agent-binding-refresh");
+  if (!picker || !selection || !status || !refresh) return;
+  picker.innerHTML = agentBindingPickerHtml();
+  selection.innerHTML = agentBindingSelectionHtml();
+  if (store.registry?.loading) status.textContent = "Loading the current extension catalog…";
+  else if (store.registry?.error) status.textContent = "Catalog unavailable · stored selections remain visible";
+  else if (store.registry) status.textContent = `${agentBindingCatalogArtifacts().length} run-admissible artifact${agentBindingCatalogArtifacts().length === 1 ? "" : "s"} · current connection`;
+  else status.textContent = "Load the extension catalog to choose governed artifacts.";
+  refresh.textContent = store.registry ? "Refresh catalog" : "Load catalog";
+  refresh.disabled = Boolean(store.registry?.loading || $("inp-agent-model")?.disabled);
+}
+
+function agentBindingSetSurface(surface, selected) {
+  const item = agentIntentBindingSurface(surface);
+  if (!item) return false;
+  const order = Array.isArray(store.agentIntentBindingOrder) ? store.agentIntentBindingOrder : (store.agentIntentBindingOrder = []);
+  const index = order.indexOf(surface);
+  if (!selected) {
+    if (index >= 0) order.splice(index, 1);
+    return index >= 0;
+  }
+  if (index >= 0) return true;
+  if (order.length >= AGENT_INTENT_BINDING_LIMIT) return false;
+  if (item.family === "model_settings" && order.some((value) => agentIntentBindingSurface(value)?.family === "model_settings")) return false;
+  order.push(surface);
+  return true;
+}
+
+function agentBindingMoveSurface(surface, delta) {
+  const order = store.agentIntentBindingOrder, index = Array.isArray(order) ? order.indexOf(surface) : -1;
+  const next = index + delta;
+  if (index < 0 || next < 0 || next >= order.length) return false;
+  [order[index], order[next]] = [order[next], order[index]];
+  return true;
+}
+
+function agentBindingFocusTarget(root, surface, actionKind) {
+  const candidates = Array.from(root?.querySelectorAll("[data-agent-binding-target]") || [])
+    .filter((item) => item.getAttribute("data-agent-binding-target") === surface);
+  return candidates.find((item) => !item.disabled && (actionKind === "remove"
+    ? item.hasAttribute("data-agent-binding-remove")
+    : item.getAttribute("data-agent-binding-move") === actionKind)) ||
+    candidates.find((item) => !item.disabled && item.hasAttribute("data-agent-binding-remove")) || null;
+}
+
+async function agentBindingRefreshCatalog() {
+  const button = $("btn-agent-binding-refresh");
+  if (button) button.disabled = true;
+  const operation = connectionOperation();
+  const interaction = store.agentCreateInteraction;
+  await registryLoad(true, false);
+  if (!operation || !connectionOperationIdentityCurrent(operation) || interaction !== store.agentCreateInteraction ||
+      !store.agentCreateOpen || store.view !== "agents") return false;
+  agentRenderBindingPicker();
+  $("btn-agent-binding-refresh")?.focus({ preventScroll: true });
+  return Boolean(store.registry && !store.registry.error);
+}
+
 function agentFormFields() {
   const selectedScopes = Array.from($("agent-create-form").querySelectorAll("[data-agent-scope]:checked")).map((input) => input.getAttribute("data-agent-scope"));
   const scopes = agentIntentSelectedScopeOrder(store.agentIntentScopeOrder, selectedScopes);
@@ -13393,6 +13627,8 @@ function agentFormFields() {
     budgetTokens: $("inp-agent-budget-tokens").value,
     budgetCost: $("inp-agent-budget-cost").value,
     budgetLatency: $("inp-agent-budget-latency").value,
+    bindingEnvironment: $("inp-agent-binding-environment")?.value || "",
+    bindingSurfaces: Array.isArray(store.agentIntentBindingOrder) ? store.agentIntentBindingOrder.slice() : [],
     intentLocked: $("inp-agent-model").disabled,
   };
 }
@@ -13414,16 +13650,19 @@ function agentPopulateDraft(draft) {
   $("inp-agent-budget-tokens").value = value.budgetTokens || "";
   $("inp-agent-budget-cost").value = value.budgetCost || "";
   $("inp-agent-budget-latency").value = value.budgetLatency || "";
+  $("inp-agent-binding-environment").value = value.bindingEnvironment || "";
+  store.agentIntentBindingOrder = Array.isArray(value.bindingSurfaces) ? value.bindingSurfaces.slice() : [];
   const scopes = new Set(Array.isArray(value.scopes) ? value.scopes : []);
   store.agentIntentScopeOrder = Array.isArray(value.scopes) ? value.scopes.slice() : [];
   for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) {
     input.checked = scopes.has(input.getAttribute("data-agent-scope"));
   }
+  agentRenderBindingPicker();
 }
 
 function agentSetShortcutLocks(source) {
   const intentIds = ["inp-agent-model", "inp-agent-tools", "sel-agent-memory-mode", "sel-agent-approval", "sel-agent-output-mode",
-    "inp-agent-output-schema", "inp-agent-budget-tokens", "inp-agent-budget-cost", "inp-agent-budget-latency"];
+    "inp-agent-output-schema", "inp-agent-budget-tokens", "inp-agent-budget-cost", "inp-agent-budget-latency", "inp-agent-binding-environment"];
   const lockNote = $("agent-intent-lock");
   lockNote.textContent = "";
   lockNote.hidden = true;
@@ -13474,13 +13713,14 @@ function agentSetShortcutLocks(source) {
       input.title = message;
     }
   }
+  agentRenderBindingPicker();
 }
 
 function agentApplyDraftValidation(validation, announce, focusError) {
   const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit",
     model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval",
     outputMode: "sel-agent-output-mode", outputSchema: "inp-agent-output-schema", budgetTokens: "inp-agent-budget-tokens",
-    budgetCost: "inp-agent-budget-cost", budgetLatency: "inp-agent-budget-latency" };
+    budgetCost: "inp-agent-budget-cost", budgetLatency: "inp-agent-budget-latency", binding: "inp-agent-binding-environment" };
   for (const [key, id] of Object.entries(fields)) {
     const field = $(id);
     const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
@@ -13514,13 +13754,13 @@ function agentRevalidateEditedField(target) {
     "inp-agent-limit": "recursionLimit", "inp-agent-model": "model", "inp-agent-tools": "tools",
     "sel-agent-memory-mode": "memoryMode", "sel-agent-approval": "approval", "sel-agent-output-mode": "outputMode",
     "inp-agent-output-schema": "outputSchema", "inp-agent-budget-tokens": "budgetTokens", "inp-agent-budget-cost": "budgetCost",
-    "inp-agent-budget-latency": "budgetLatency" };
+    "inp-agent-budget-latency": "budgetLatency", "inp-agent-binding-environment": "binding" };
   const key = target && target.hasAttribute && target.hasAttribute("data-agent-scope") ? "memoryMode" : fieldKeys[target && target.id];
   if (!key) return false;
   const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit",
     model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval",
     outputMode: "sel-agent-output-mode", outputSchema: "inp-agent-output-schema", budgetTokens: "inp-agent-budget-tokens",
-    budgetCost: "inp-agent-budget-cost", budgetLatency: "inp-agent-budget-latency" };
+    budgetCost: "inp-agent-budget-cost", budgetLatency: "inp-agent-budget-latency", binding: "inp-agent-binding-environment" };
   const field = $(fields[key]);
   if (!field) return false;
   const hasValidatedError = Object.values(fields).some((id) => $(id)?.getAttribute("aria-invalid") === "true");
@@ -13710,12 +13950,13 @@ function agentExportDraft() {
 
 function agentResetCreateForm() {
   for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-model", "inp-agent-tools",
-    "inp-agent-output-schema", "inp-agent-budget-tokens", "inp-agent-budget-cost", "inp-agent-budget-latency", "inp-agent-manifest"]) $(id).value = "";
+    "inp-agent-output-schema", "inp-agent-budget-tokens", "inp-agent-budget-cost", "inp-agent-budget-latency", "inp-agent-binding-environment", "inp-agent-manifest"]) $(id).value = "";
   $("sel-agent-memory-mode").value = "none";
   $("sel-agent-approval").value = "runtime_policy";
   $("sel-agent-output-mode").value = "runtime_default";
   for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) input.checked = false;
   store.agentIntentScopeOrder = [];
+  store.agentIntentBindingOrder = [];
   store.agentVersionSource = null;
   store.agentManifestSource = null;
   store.agentManifestDirty = false;
@@ -13730,6 +13971,7 @@ function agentResetCreateForm() {
   $("agent-change-review").hidden = true;
   $("agent-change-review").innerHTML = "";
   $("inp-agent-id").disabled = false;
+  agentRenderBindingPicker();
 }
 
 function agentOpenCreate(source) {
@@ -13738,6 +13980,7 @@ function agentOpenCreate(source) {
     return false;
   }
   agentResetCreateForm();
+  store.agentCreateInteraction += 1;
   store.agentCreateOpen = true;
   store.agentCopySource = agentCopySourceSnapshot(source);
   store.agentVersionSource = null;
@@ -13774,6 +14017,7 @@ function agentOpenVersion(source) {
     return false;
   }
   agentResetCreateForm();
+  store.agentCreateInteraction += 1;
   store.agentCreateOpen = true;
   store.agentCopySource = null;
   store.agentVersionSource = agentCopySourceSnapshot(source);
@@ -13802,6 +14046,7 @@ function agentCloseCreate(returnFocus) {
   const versionSource = store.agentVersionSource;
   const source = versionSource || store.agentCopySource;
   const sourceId = source && source.assistant_id;
+  store.agentCreateInteraction += 1;
   store.agentCreateOpen = false;
   store.agentCopySource = null;
   store.agentVersionSource = null;
@@ -13918,6 +14163,93 @@ async function agentCreate() {
     }
   }
   finally { if (connectionOperationCurrent(operation) && !blocked) $("btn-agent-create").disabled = false; }
+}
+
+function agentPreparedThreadId(now = Date.now(), random = Math.random()) {
+  const tail = Math.floor(Math.max(0, Math.min(0.999999999, Number(random) || 0)) * 0x100000000).toString(36).padStart(7, "0");
+  return `studio-run-${Math.max(0, Number(now) || 0).toString(36)}-${tail}`;
+}
+
+function agentPreparedThreadReceipt(value, threadId, graph, metadata) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.thread_id !== threadId || value.graph !== graph ||
+      agentChangeEqual(value.metadata, metadata) !== true || registryTimestamp(value.created_at) !== value.created_at) return null;
+  return { ...value, thread_id: threadId, graph, metadata: { ...metadata } };
+}
+
+async function agentPrepareGovernedRun(assistantId) {
+  const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
+  const preset = agent && agentIntentBindingPreset(agent.config);
+  if (!agent || !preset || agentLifecycleState(agent) !== "active") return false;
+  const inputEl = $("inp-agent-prompt") || $("inp-agent-test");
+  let input;
+  try { input = agentBuildRunInput(agent, inputEl && inputEl.value); }
+  catch (error) { toast(error.message, "err"); inputEl?.focus({ preventScroll: true }); return false; }
+  const operation = connectionOperation();
+  if (!operation) return false;
+  const initiatingSelection = store.agents && store.agents.selected;
+  const currentView = () => {
+    const currentAgent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
+    return connectionOperationCurrent(operation) && store.view === "agents" && store.agents &&
+      store.agents.selected === initiatingSelection && initiatingSelection === assistantId && currentAgent === agent &&
+      currentAgent.graph === agent.graph && currentAgent.active_version_id === agent.active_version_id &&
+      agentChangeEqual(agentIntentBindingPreset(currentAgent.config), preset) === true;
+  };
+  const button = Array.from($("agent-detail")?.querySelectorAll("[data-agent-prepare-binding]") || [])
+    .find((item) => item.getAttribute("data-agent-prepare-binding") === assistantId);
+  const status = $("agent-binding-run-status");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "Checking the current extension catalog before creating a thread…";
+  try {
+    await registryLoad(true, false);
+    if (!currentView()) return false;
+    const checked = agentIntentBindingCatalog(preset);
+    if (!checked.valid || !checked.binding) throw new Error(checked.error || "The stored governed run preset is not ready on this server.");
+    const threadId = agentPreparedThreadId();
+    const metadata = { source: "agent_workbench", assistant_id: assistantId, governed_preset: true };
+    let thread;
+    try {
+      const raw = await apiForConnection(operation.connection, "POST", "/threads", { thread_id: threadId, graph: agent.graph, metadata });
+      if (!connectionOperationCurrent(operation)) return false;
+      thread = agentPreparedThreadReceipt(raw, threadId, agent.graph, metadata);
+      if (!thread) throw new ApiError(201, { error: "invalid_thread_receipt", message: "The created-thread receipt did not match the reviewed identity, graph, metadata, and creation evidence." });
+    } catch (error) {
+      if (!connectionOperationCurrent(operation)) return false;
+      if (error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500) {
+        throw new Error(`Studio could not prove whether thread ${threadId} was created. No run was started. Use Attach thread with this exact ID before deciding whether to repeat preparation.`);
+      }
+      throw error;
+    }
+    if (!store.threads.some((item) => item.thread_id === threadId)) store.threads.unshift(thread);
+    if (!currentView()) {
+      saveThreads();
+      renderThreads();
+      return true;
+    }
+    store.registryBindings[threadId] = {
+      enabled: true, environment: preset.environment, surfaces: preset.surfaces.slice(), acknowledged: false,
+      error: "", errorField: "", lastSubmission: null, submissionPending: false, uncertainSubmission: "",
+    };
+    saveThreads();
+    renderThreads();
+    store.selected = threadId;
+    store.view = "thread";
+    renderThreads();
+    renderMain();
+    const payload = $("inp-payload");
+    if (payload) payload.value = JSON.stringify({ assistant_id: assistantId, input }, null, 2);
+    const card = $("registry-binding-card");
+    if (card) card.open = true;
+    registryBindingRender();
+    $("registry-binding-card")?.querySelector("summary")?.focus({ preventScroll: true });
+    toast("Governed run prepared. Review the exact admission order and acknowledge this one run before starting it.", "ok");
+    return true;
+  } catch (error) {
+    if (!currentView()) return false;
+    if (status) status.textContent = error.message || "The governed run could not be prepared.";
+    if (button) { button.disabled = false; button.focus({ preventScroll: true }); }
+    toast(error.message || "The governed run could not be prepared.", "err");
+    return false;
+  }
 }
 
 async function agentRunTest(assistantId) {
@@ -21106,7 +21438,7 @@ function registryCurrent(request, connection) {
   return request === store.registryRequest && connectionOperationCurrent({ connection, epoch: connection && connection.epoch || store.connectionEpoch, threadId: null });
 }
 
-async function registryLoad(quiet) {
+async function registryLoad(quiet, loadSelection = true) {
   if (store.registry && store.registry.loading) return false;
   const request = ++store.registryRequest, connection = store.conn && { ...store.conn, epoch: store.connectionEpoch };
   if (!connection) {
@@ -21126,7 +21458,7 @@ async function registryLoad(quiet) {
     store.registry = { artifacts, selected, loading: false, error: null, history: null, detailLoading: false, detailError: null, from: "", to: "", diff: null, diffLoading: false, diffError: null };
     $("registry-side-count").textContent = `${artifacts.length} named artifact${artifacts.length === 1 ? "" : "s"} · ${artifacts.reduce((sum, item) => sum + item.commits.length, 0)} commits`;
     registryRender();
-    if (store.registry.selected) registryLoadHistory(store.registry.selected, false, false);
+    if (loadSelection && store.registry.selected) registryLoadHistory(store.registry.selected, false, false);
     return true;
   } catch (error) {
     if (!registryCurrent(request, connection)) return false;
@@ -22428,11 +22760,47 @@ function init() {
   });
   $("agent-create-form").addEventListener("change", (event) => {
     if (event.target === $("inp-agent-import") || event.target === $("inp-agent-manifest")) return;
+    const surface = event.target && event.target.getAttribute && event.target.getAttribute("data-agent-binding-surface");
+    if (surface) {
+      const changed = agentBindingSetSurface(surface, event.target.checked);
+      if (!changed && event.target.checked) {
+        event.target.checked = false;
+        toast("A preset can contain at most 120 artifacts and only one model settings surface.", "warn");
+      }
+      agentRenderBindingPicker();
+      const validation = agentValidateDraft(agentFormFields(), agentGraphNames());
+      if (Object.values(validation.errors).length || $("agent-form-error").textContent) agentApplyDraftValidation(validation, true, false);
+      agentSetManifestStatus(store.agentManifestDirty
+        ? "JSON edits are pending · apply or refresh before continuing"
+        : "Guided fields changed · refresh JSON before editing it");
+      agentRefreshContract();
+      return;
+    }
     agentSetManifestStatus(store.agentManifestDirty
       ? "JSON edits are pending · apply or refresh before continuing"
       : "Guided fields changed · refresh JSON before editing it");
     agentRevalidateEditedField(event.target);
     agentRefreshContract();
+  });
+  $("btn-agent-binding-refresh").onclick = agentBindingRefreshCatalog;
+  $("agent-create-form").addEventListener("click", (event) => {
+    const action = event.target.closest("[data-agent-binding-move],[data-agent-binding-remove]");
+    if (!action) return;
+    const surface = action.getAttribute("data-agent-binding-target");
+    const actionKind = action.hasAttribute("data-agent-binding-remove") ? "remove" : action.getAttribute("data-agent-binding-move");
+    const changed = action.hasAttribute("data-agent-binding-remove")
+      ? agentBindingSetSurface(surface, false)
+      : agentBindingMoveSurface(surface, action.getAttribute("data-agent-binding-move") === "up" ? -1 : 1);
+    if (!changed) return;
+    agentRenderBindingPicker();
+    const validation = agentValidateDraft(agentFormFields(), agentGraphNames());
+    if (Object.values(validation.errors).length || $("agent-form-error").textContent) agentApplyDraftValidation(validation, true, false);
+    agentSetManifestStatus(store.agentManifestDirty
+      ? "JSON edits are pending · apply or refresh before continuing"
+      : "Guided fields changed · refresh JSON before editing it");
+    agentRefreshContract();
+    const target = agentBindingFocusTarget($("agent-binding-selection"), surface, actionKind);
+    (target || $("inp-agent-binding-environment"))?.focus({ preventScroll: true });
   });
   $("btn-agent-import").onclick = () => $("inp-agent-import").click();
   $("inp-agent-import").addEventListener("change", async () => {
@@ -22529,6 +22897,11 @@ function init() {
     if (copy && !copy.disabled && store.agents) {
       const source = store.agents.list.find((item) => item.assistant_id === copy.getAttribute("data-agent-copy"));
       if (source) agentOpenCreate(source);
+      return;
+    }
+    const prepare = e.target.closest("[data-agent-prepare-binding]");
+    if (prepare && !prepare.disabled) {
+      agentPrepareGovernedRun(prepare.getAttribute("data-agent-prepare-binding"));
       return;
     }
     const run = e.target.closest("[data-agent-run]");

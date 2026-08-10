@@ -61,6 +61,8 @@ globalThis.__workbench = {
   agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft, agentVersionDraft, agentCopySourceSnapshot,
   agentSensitiveKey, agentSensitiveValueKeys, agentRedactedValue, agentCopyManifestText, agentCopyContextHtml,
   agentUtf8Length, agentClientIdError, agentValidateDraft, agentManifestScan, agentPortableManifest,
+  agentIntentDefaultBinding, agentIntentBindingEnvironmentError, agentIntentBindingSurface,
+  agentIntentBindingError, agentIntentBindingCatalog, agentIntentBindingPreset,
   agentIntentInspectConfig, agentIntentDraft, agentIntentBuild, agentIntentToolsText, agentIntentSelectedScopeOrder,
   agentManifestText, agentParseManifestText, agentManifestFilename, agentManifestDraft,
   agentParseJsonWithNumberKinds, agentValidateManifestNumbers, agentValidateRuntimeLimitLexemes,
@@ -75,6 +77,9 @@ globalThis.__workbench = {
   agentVersionCreateReceipt, agentVersionDraftReviewable, agentVersionActivationReceipt, agentVersionManifestEvidence,
   agentLifecycleSnapshotMatches, agentLifecycleReceipt, agentLifecycleManifestEvidence, agentLifecycleDeskHtml,
   agentVersionDeskHtml, agentVersionContextHtml, agentInvalidateVersionsForSelection,
+  agentBindingSetSurface, agentBindingMoveSurface, agentBindingFocusTarget, agentBindingRefreshCatalog,
+  agentPreparedThreadId, agentPreparedThreadReceipt,
+  agentPrepareGovernedRun,
   agentVersionsLoad, agentVersionReview, agentVersionActivate, agentSelectAssistant, agentSetLifecycleFilter, homeNavigate,
   agentInvalidateLifecycleForSelection, agentLifecycleOpen, agentLifecycleApply,
   agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
@@ -336,7 +341,7 @@ check("graph labels: built-in behaviors are understandable",
   };
   const built = W.agentIntentBuild(fields);
   check("visual intent: typed model, tool, memory, and approval surfaces form one versioned contract",
-    built.valid && built.intent.format === "rusty.agent-intent/v2" && built.intent.model === "openai/gpt-5" &&
+    built.valid && built.intent.format === "rusty.agent-intent/v3" && built.intent.model === "openai/gpt-5" &&
     built.intent.tools[1].effect === "non_idempotent" && built.intent.memory.scopes.join(",") === "agent,user" &&
     built.intent.approval === "irreversible" && built.intent.output.mode === "json_schema" &&
     built.intent.output.schema === "registry/report-v2" &&
@@ -392,7 +397,7 @@ check("graph labels: built-in behaviors are understandable",
   const config = { recursion_limit: 9, studio_intent: built.intent };
   const inspected = W.agentIntentInspectConfig(config);
   const draft = W.agentIntentDraft(config);
-  check("visual intent: stored v2 contracts hydrate every guided surface exactly",
+  check("visual intent: stored v3 contracts hydrate every guided surface exactly",
     inspected.valid && inspected.present && draft.model === fields.model && draft.tools === fields.tools &&
     draft.memoryMode === fields.memoryMode && draft.scopes.join(",") === "agent,user" && draft.approval === fields.approval &&
     draft.outputMode === fields.outputMode && draft.outputSchema === fields.outputSchema &&
@@ -403,7 +408,21 @@ check("graph labels: built-in behaviors are understandable",
     const legacyDraft = W.agentIntentDraft({ studio_intent: legacy });
     const upgraded = W.agentIntentBuild(legacyDraft);
     return !legacyDraft.intentLocked && legacyDraft.outputMode === "runtime_default" && legacyDraft.budgetTokens === "" &&
-      upgraded.valid && upgraded.intent.format === "rusty.agent-intent/v2";
+      upgraded.valid && upgraded.intent.format === "rusty.agent-intent/v3";
+  })());
+  check("visual intent: rebuilding v2 keeps output and budget explicit while disclosing only the new preset envelope", (() => {
+    const previous = { assistant_id: "previous", name: "Previous", graph: "react_agent", config: { studio_intent: {
+      format: "rusty.agent-intent/v2", model: "model", tools: [], memory: { access: "none", scopes: [] },
+      approval: "runtime_policy", output: { mode: "text", schema: "" },
+      budget: { max_tokens: "10", max_cost_usd: "", max_latency_ms: "" },
+    } } };
+    const rebuilt = W.agentBuildCreatePayload({ ...W.agentVersionDraft(previous), description: "", tags: "" }, previous);
+    const review = W.agentChangeReview(previous, rebuilt), rendered = W.agentChangeReviewHtml(previous, rebuilt, "version");
+    return review.rows.find((row) => row.key === "output").state === "unchanged" &&
+      review.rows.find((row) => row.key === "budget").state === "unchanged" &&
+      review.rows.find((row) => row.key === "binding").state === "changed" &&
+      rendered.includes("Text · explicit v2") && rendered.includes("Text · explicit v3") &&
+      rendered.includes("No governed run preset · implicit v2") && rendered.includes("No governed run preset · explicit v3");
   })());
   check("visual intent: malformed v2 output and budget envelopes lock instead of being normalized", (() => {
     const base = { format: "rusty.agent-intent/v2", model: "model", tools: [],
@@ -449,6 +468,40 @@ check("graph labels: built-in behaviors are understandable",
     return JSON.stringify(imported.config.studio_intent) === JSON.stringify(original.config.studio_intent) &&
       JSON.stringify(copied.config.studio_intent) === JSON.stringify(original.config.studio_intent);
   })());
+  check("visual intent: a governed run preset preserves exact order and resolves only current immutable artifacts", (() => {
+    const bindingFields = { ...fields, bindingEnvironment: "production",
+      bindingSurfaces: ["prompt:system", "model_settings:primary"] };
+    const built = W.agentIntentBuild(bindingFields);
+    const registry = { loading: false, error: "", artifacts: [
+      { surface: "model_settings:primary", family: "model_settings", name: "primary", commits: ["c2"] },
+      { surface: "prompt:system", family: "prompt", name: "system", commits: ["c1"] },
+    ] };
+    const checked = W.agentIntentBindingCatalog(built.intent.binding, registry);
+    return built.valid && built.intent.binding.surfaces.join(",") === "prompt:system,model_settings:primary" &&
+      checked.valid && checked.binding.environment === "production" &&
+      checked.binding.artifacts.map((item) => `${item.family}:${item.name}`).join(",") === "prompt:system,model_settings:primary" &&
+      !W.agentIntentBindingCatalog(built.intent.binding, { ...registry, artifacts: registry.artifacts.slice(0, 1) }).valid;
+  })());
+  check("visual intent: governed preset grammar rejects duplicates, multiple models, and environment without artifacts", (() => {
+    const invalid = [
+      { environment: "production", surfaces: [] },
+      { environment: "", surfaces: ["prompt:system", "prompt:system"] },
+      { environment: "", surfaces: ["model_settings:a", "model_settings:b"] },
+      { environment: "bad env", surfaces: ["prompt:system"] },
+      { environment: "", surfaces: ["policy:unsafe"] },
+      { environment: "", surfaces: ["prompt:\ud800"] },
+      { environment: "", surfaces: ["prompt:\udc00"] },
+    ];
+    return invalid.every((binding) => Boolean(W.agentIntentBindingError(binding)));
+  })());
+  check("governed run handoff: thread receipt binds exact identity, graph, metadata, and creation evidence", (() => {
+    const metadata = { source: "agent_workbench", assistant_id: "agent", governed_preset: true };
+    const receipt = { thread_id: "thread", graph: "react_agent", metadata, created_at: "2026-08-10T20:00:00Z" };
+    return Boolean(W.agentPreparedThreadReceipt(receipt, "thread", "react_agent", metadata)) &&
+      W.agentPreparedThreadReceipt({ ...receipt, metadata: { ...metadata, governed_preset: false } }, "thread", "react_agent", metadata) === null &&
+      W.agentPreparedThreadReceipt({ ...receipt, created_at: null }, "thread", "react_agent", metadata) === null &&
+      W.agentPreparedThreadReceipt({ ...receipt, created_at: "not-an-instant" }, "thread", "react_agent", metadata) === null;
+  })());
 }
 
 {
@@ -467,7 +520,7 @@ check("graph labels: built-in behaviors are understandable",
   }, source);
   const review = W.agentChangeReview(source, draft);
   check("configuration change review: a copy binds exact source and draft surfaces",
-    review.changed === 3 && review.unchanged === 11 && review.review === 0 &&
+    review.changed === 3 && review.unchanged === 12 && review.review === 0 &&
     review.rows.find((row) => row.key === "name").state === "changed" &&
     review.rows.find((row) => row.key === "assistantId").state === "changed" &&
     review.rows.find((row) => row.key === "model").state === "changed" &&
@@ -477,7 +530,7 @@ check("graph labels: built-in behaviors are understandable",
   check("configuration change review: comparison does not mutate the source record",
     source.name === "Evidence scout" && source.assistant_id === "evidence-scout" &&
     source.config.studio_intent.model === "openai/gpt-5");
-  check("configuration change review: rebuilding v1 visibly discloses both v2 default envelopes", (() => {
+  check("configuration change review: rebuilding v1 visibly discloses all v3 default envelopes", (() => {
     const legacy = { assistant_id: "legacy", name: "Legacy", graph: "react_agent", config: { studio_intent: {
       format: "rusty.agent-intent/v1", model: "legacy/model", tools: [], memory: { access: "none", scopes: [] }, approval: "irreversible",
     } } };
@@ -486,8 +539,10 @@ check("graph labels: built-in behaviors are understandable",
     const rendered = W.agentChangeReviewHtml(legacy, rebuilt, "version");
     return review.rows.find((row) => row.key === "output").state === "changed" &&
       review.rows.find((row) => row.key === "budget").state === "changed" &&
-      rendered.includes("Runtime default · implicit v1") && rendered.includes("Runtime default · explicit v2") &&
-      rendered.includes("Runtime defaults · implicit v1") && rendered.includes("Runtime defaults · explicit v2");
+      review.rows.find((row) => row.key === "binding").state === "changed" &&
+      rendered.includes("Runtime default · implicit v1") && rendered.includes("Runtime default · explicit v3") &&
+      rendered.includes("Runtime defaults · implicit v1") && rendered.includes("Runtime defaults · explicit v3") &&
+      rendered.includes("No governed run preset · implicit v1") && rendered.includes("No governed run preset · explicit v3");
   })());
   check("configuration change review: structural object order is not a false change",
     W.agentChangeEqual({ alpha: 1, nested: { one: true, two: false } },
@@ -982,6 +1037,7 @@ check("graph labels: built-in behaviors are understandable",
     "inp-agent-model": "", "inp-agent-tools": "", "sel-agent-memory-mode": "none",
     "sel-agent-approval": "runtime_policy", "sel-agent-output-mode": "runtime_default", "inp-agent-output-schema": "",
     "inp-agent-budget-tokens": "", "inp-agent-budget-cost": "", "inp-agent-budget-latency": "",
+    "inp-agent-binding-environment": "",
     "btn-agent-create": "", "agent-form-error": "", "agent-intent-lock": "", toast: "",
   })) { const next = element(value); next.id = id; uiElements.set(id, next); }
   uiElements.set("agent-create-form", { querySelectorAll() { return []; } });
@@ -1249,9 +1305,11 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes('id="inp-agent-budget-tokens"') && html.includes('id="inp-agent-budget-cost"') &&
     html.includes('id="inp-agent-budget-latency"'));
   check("visual intent canvas never claims portable requirements are already runtime-enforced",
-    html.includes("Today it does not bind or enforce model, tool, memory, approval, output, or budget providers") &&
+    html.includes("Model, tool, memory, approval, output, and budget fields remain declarations") &&
+    html.includes("becomes executable only after Studio prepares a thread") &&
     html.includes("A declared requirement, not a browser-side permission grant") &&
-    html.includes("Use an identifier or registry reference, not a URL or credential"));
+    html.includes("Use an identifier or registry reference, not a URL or credential") &&
+    html.includes('id="inp-agent-binding-environment"') && html.includes('id="agent-binding-picker"'));
   check("visual intent canvas collapses the wiring bench into one mobile column",
     html.includes(".agent-intent-grid { grid-template-columns: 1fr; }") &&
     html.includes(".agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }"));
@@ -1531,6 +1589,156 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     W.store.agentLifecycleFilter === "active" && W.store.agentLifecycleReview === null &&
     uiElements.get("agent-lifecycle-announcer").textContent === announcementBeforeRecovery &&
     sandbox.__versionToasts.length === toastCountBeforeRecovery);
+  fetchHandler = null;
+}
+
+{
+  const assistantId = "governed-agent";
+  const governed = {
+    assistant_id: assistantId, name: "Governed agent", graph: "react_agent",
+    config: { studio_intent: {
+      format: "rusty.agent-intent/v3", model: "", tools: [],
+      memory: { access: "none", scopes: [] }, approval: "runtime_policy",
+      output: { mode: "runtime_default", schema: "" },
+      budget: { max_tokens: "", max_cost_usd: "", max_latency_ms: "" },
+      binding: { environment: "production", surfaces: ["prompt:system", "model_settings:primary"] },
+    } }, created_at: "2026-08-10T20:00:00Z", active_version_id: VERSION1, version_count: 1,
+  };
+  const other = { ...governed, assistant_id: "newer-selection", name: "Newer selection" };
+  const summary = { focused: false, focus() { this.focused = true; } };
+  const card = { open: false, querySelector(selector) { return selector === "summary" ? summary : null; } };
+  const button = { disabled: false, focused: false, getAttribute() { return assistantId; }, focus() { this.focused = true; } };
+  const detail = { querySelectorAll() { return [button]; } };
+  const payload = { value: "" };
+  const status = { textContent: "" };
+  const toastElement = { textContent: "", className: "", style: {}, _timer: 0 };
+  uiElements.clear();
+  uiElements.set("agent-detail", detail);
+  uiElements.set("inp-agent-prompt", { value: "Investigate this change" });
+  uiElements.set("agent-binding-run-status", status);
+  uiElements.set("inp-payload", payload);
+  uiElements.set("registry-binding-card", card);
+  uiElements.set("registry-side-count", { textContent: "" });
+  uiElements.set("toast", toastElement);
+  vm.runInContext("renderThreads = () => {}; renderMain = () => {}; registryRender = () => {}; registryBindingRender = () => {};", sandbox);
+  W.store.conn = { baseUrl: "/api", apiKey: "tenant-governed" };
+  W.store.connectionEpoch = 20;
+  W.store.info = { graphs: [{ name: "react_agent" }] };
+  W.store.view = "agents";
+  W.store.agents = { list: [governed, other], selected: assistantId, error: null };
+  W.store.threads = [];
+  W.store.selected = null;
+  W.store.registryBindings = Object.create(null);
+  W.store.registry = { loading: false, error: "", artifacts: [
+    { surface: "prompt:system", family: "prompt", name: "system", commits: ["pc-1"] },
+    { surface: "model_settings:primary", family: "model_settings", name: "primary", commits: ["mc-1"] },
+  ] };
+  const catalogWire = { artifacts: [
+    { surface: "model_settings:primary", family: "model_settings", owner: { type: "system" },
+      commits: [{ candidate_id: "2".repeat(64), committed_at: "2026-08-10T19:00:00Z" }], created_at: "2026-08-10T19:00:00Z" },
+    { surface: "prompt:system", family: "prompt", owner: { type: "system" },
+      commits: [{ candidate_id: "1".repeat(64), committed_at: "2026-08-10T19:00:00Z" }], created_at: "2026-08-10T19:00:00Z" },
+  ] };
+  fetchCalls.length = 0;
+  fetchHandler = async (url, options) => {
+    if (url.endsWith("/registry/artifacts")) return { ok: true, status: 200, async text() { return JSON.stringify(catalogWire); } };
+    const body = JSON.parse(options.body);
+    return { ok: true, status: 201, async text() { return JSON.stringify({
+      thread_id: body.thread_id, graph: body.graph, metadata: body.metadata, created_at: "2026-08-10T20:01:00Z",
+    }); } };
+  };
+  const prepared = await W.agentPrepareGovernedRun(assistantId);
+  const created = W.store.threads[0], plan = created && W.store.registryBindings[created.thread_id];
+  check("governed run handoff: creates a thread without starting work and requires fresh exact acknowledgement",
+    prepared && fetchCalls.length === 2 && fetchCalls[0].url === "/api/registry/artifacts" &&
+    fetchCalls[1].options.method === "POST" && fetchCalls[1].url === "/api/threads" &&
+    W.store.view === "thread" && W.store.selected === created.thread_id &&
+    plan.enabled && plan.acknowledged === false && plan.environment === "production" &&
+    plan.surfaces.join(",") === "prompt:system,model_settings:primary" &&
+    JSON.parse(payload.value).assistant_id === assistantId && summary.focused);
+  const firstResult = await W.agentPrepareGovernedRun("missing-agent");
+  check("governed run handoff: missing assistant cannot create a thread", firstResult === false);
+
+  const focusButtons = [
+    { disabled: false, getAttribute(name) { return ({ "data-agent-binding-target": "prompt:system", "data-agent-binding-move": "up" })[name] ?? null; }, hasAttribute() { return false; } },
+    { disabled: false, getAttribute(name) { return ({ "data-agent-binding-target": "prompt:system", "data-agent-binding-move": "down" })[name] ?? null; }, hasAttribute() { return false; } },
+    { disabled: false, getAttribute(name) { return name === "data-agent-binding-target" ? "prompt:system" : null; }, hasAttribute(name) { return name === "data-agent-binding-remove"; } },
+  ];
+  check("governed preset authoring: keyboard reorder restores the same action instead of reversing direction",
+    W.agentBindingFocusTarget({ querySelectorAll() { return focusButtons; } }, "prompt:system", "down") === focusButtons[1]);
+
+  W.store.view = "agents";
+  W.store.agents.selected = assistantId;
+  W.store.selected = null;
+  let releaseThread;
+  fetchHandler = (url, options) => {
+    if (url.endsWith("/registry/artifacts")) return Promise.resolve({ ok: true, status: 200, async text() { return JSON.stringify(catalogWire); } });
+    return new Promise((resolve) => {
+    const body = JSON.parse(options.body);
+    releaseThread = () => resolve({ ok: true, status: 201, async text() { return JSON.stringify({
+      thread_id: body.thread_id, graph: body.graph, metadata: body.metadata, created_at: "2026-08-10T20:02:00Z",
+    }); } });
+    });
+  };
+  const pendingPrepare = W.agentPrepareGovernedRun(assistantId);
+  for (let turn = 0; turn < 30 && !releaseThread; turn += 1) await Promise.resolve();
+  W.store.agents.selected = other.assistant_id;
+  releaseThread();
+  const viewBefore = W.store.view;
+  const stalePrepared = await pendingPrepare;
+  const newestThread = W.store.threads[0];
+  check("governed run handoff: a late receipt preserves thread truth without applying a stale plan or taking selection",
+    stalePrepared === true && W.store.view === viewBefore && W.store.agents.selected === other.assistant_id &&
+    newestThread && !W.store.registryBindings[newestThread.thread_id]);
+
+  W.store.view = "agents";
+  W.store.agents = { list: [governed, other], selected: assistantId, error: null };
+  W.store.selected = null;
+  releaseThread = null;
+  fetchHandler = (url, options) => {
+    if (url.endsWith("/registry/artifacts")) return Promise.resolve({ ok: true, status: 200, async text() { return JSON.stringify(catalogWire); } });
+    return new Promise((resolve) => {
+      const body = JSON.parse(options.body);
+      releaseThread = () => resolve({ ok: true, status: 201, async text() { return JSON.stringify({
+        thread_id: body.thread_id, graph: body.graph, metadata: body.metadata, created_at: "2026-08-10T20:03:00Z",
+      }); } });
+    });
+  };
+  const pendingVersionDrift = W.agentPrepareGovernedRun(assistantId);
+  for (let turn = 0; turn < 30 && !releaseThread; turn += 1) await Promise.resolve();
+  W.store.agents.list[0] = { ...governed, active_version_id: `av-${"9".repeat(64)}` };
+  releaseThread();
+  const driftPrepared = await pendingVersionDrift, driftThread = W.store.threads[0];
+  check("governed run handoff: same-ID version drift cannot apply or navigate a stale preset",
+    driftPrepared === true && W.store.view === "agents" && !W.store.registryBindings[driftThread.thread_id]);
+
+  W.store.agents = { list: [governed, other], selected: assistantId, error: null };
+  const threadCountBeforeMalformed = W.store.threads.length;
+  fetchCalls.length = 0;
+  fetchHandler = async (url) => url.endsWith("/registry/artifacts")
+    ? { ok: true, status: 200, async text() { return JSON.stringify(catalogWire); } }
+    : { ok: true, status: 201, async text() { return JSON.stringify({ thread_id: "wrong", graph: "pipeline", metadata: {}, created_at: null }); } };
+  const malformedPrepared = await W.agentPrepareGovernedRun(assistantId);
+  check("governed run handoff: malformed success cannot fall through to existence-only reconciliation",
+    malformedPrepared === false && W.store.threads.length === threadCountBeforeMalformed && fetchCalls.length === 2 &&
+    !fetchCalls.some((call) => call.url.includes("/state")) && status.textContent.includes("receipt did not match"));
+
+  let releaseCatalog;
+  const refreshButton = { disabled: false, focused: false, focus() { this.focused = true; } };
+  uiElements.set("btn-agent-binding-refresh", refreshButton);
+  W.store.view = "agents";
+  W.store.agentCreateOpen = true;
+  W.store.agentCreateInteraction = 40;
+  W.store.registry = null;
+  fetchHandler = () => new Promise((resolve) => { releaseCatalog = () => resolve({
+    ok: true, status: 200, async text() { return JSON.stringify(catalogWire); },
+  }); });
+  const pendingCatalog = W.agentBindingRefreshCatalog();
+  await Promise.resolve();
+  W.store.agentCreateInteraction = 41;
+  releaseCatalog();
+  check("governed preset authoring: a late catalog read cannot rerender or focus a reopened draft",
+    await pendingCatalog === false && !refreshButton.focused);
   fetchHandler = null;
 }
 

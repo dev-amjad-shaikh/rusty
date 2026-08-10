@@ -53,18 +53,24 @@ studio/
   over identity or run history, give it a real task, and move directly into the resulting thread and
   trace. The configuration workshop separates fields the server executes (**Runs with**) from catalog
   metadata (**Describes**) and unknown or graph-specific fields stored without silent field loss (**Preserves**). A
-  visual wiring bench adds a typed `rusty.agent-intent/v2` requirement for model identity, tool names and
+  visual wiring bench adds a typed `rusty.agent-intent/v3` requirement for model identity, tool names and
   replay-safety effects, governed-memory access/scopes, approval boundary, output shape/schema binding, and
-  exact per-run token, USD, and wall-time budget strings. The intent is stored under
+  exact per-run token, USD, and wall-time budget strings. It can also carry an ordered, assistant-level
+  governed-run preset of prompt, tool-contract, and singular model-settings artifacts plus an optional
+  environment. The visual picker is backed by the current Extension Catalog. **Prepare governed run**
+  creates a thread without starting work, transfers the agent task into that thread, and opens the existing
+  runtime-binding planner. That planner rechecks the live catalog and requires a fresh acknowledgement for
+  the exact order before one run; the resulting `config_resolved` journal events remain the execution proof.
+  The intent is stored under
   `config.studio_intent`, survives import/export and duplication, and locks rather than rewriting an
-  unfamiliar stored shape. Valid v1 intents remain editable with safe output/budget defaults and become v2
-  only when rebuilt. Its controls are designed for identifiers and policy declarations; Studio
+  unfamiliar stored shape. Valid v1 and v2 intents remain editable with safe defaults and become v3 only
+  when rebuilt. Its controls are designed for identifiers and policy declarations; Studio
   warns operators not to paste provider credentials because the assistant record stores these values.
   Studio labels this as portable intent: the current generic assistant runner does not bind or enforce
   model, tool, memory, approval, output, or budget providers from it, so the registered graph remains
-  authoritative. When a stored agent or applied manifest becomes the source for a new draft, a live change review compares fourteen
+  authoritative except for the governed preset's deliberate prepare-and-acknowledge handoff. When a stored agent or applied manifest becomes the source for a new draft, a live change review compares fifteen
   bounded configuration surfaces: identity, enforced graph and step limit, portable model/tool/memory/approval/output/budget
-  intent, descriptive fields, and carried advanced values. Structural equality uses the stored JSON values,
+  intent, governed-run preset, descriptive fields, and carried advanced values. Structural equality uses the stored JSON values,
   while long visible text is excerpted and the exact manifest remains available. The review states that a copy
   is a separate assistant—not an active version—and that the source and its evidence remain unchanged. A
   versioned `rusty.assistant/v1` JSON manifest can be imported, reviewed, edited explicitly, and exported;
