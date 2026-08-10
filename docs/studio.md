@@ -14,6 +14,7 @@ studio/
 ├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
 ├── test-learn.mjs     ← node unit tests for the governed-learning control room
+├── test-registry.mjs  ← extension artifact, immutable lineage, and derived-diff contract tests
 ├── test-automations.mjs ← signed webhook lifecycle, event evidence, and replay-safety tests
 ├── test-navigation.mjs ← non-secret workspace/evidence link and async ownership tests
 ├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
@@ -175,6 +176,23 @@ studio/
   attribution rather than forging a duplicate.
   Candidate, version, evidence, text, and raw-record views are bounded and hostile future wire shapes
   fail closed before actions become available.
+- **Extension catalog** — a read-only operator workspace over `GET /registry/artifacts`, each selected
+  artifact's commit walk, and its server-derived two-version diff. It discovers all eight shipped
+  configuration families: prompts, executor policies, memory sets, tool permissions, tool contracts,
+  model settings, memory configuration, and middleware composition. Each artifact shows its exact
+  tenant-scoped surface, accountable provenance owner, declaration instant, and append-only candidate
+  spine. The history join keeps candidate author and lifecycle explicit; a missing join remains
+  unavailable evidence instead of becoming a fabricated author or state. Prompt versions use the
+  registry's line diff, while every JSON family uses its canonical structural leaf diff, with legal
+  64-bit JSON numbers retained exactly. Studio accepts the shipped Rust list, lineage, provenance, and
+  diff shapes without inventing browser-only protocol counts; each streamed response has an 8 MiB
+  inspection ceiling, while disclosed 200-row DOM windows and 4 KiB owner, line, path, and value previews keep rendering
+  responsive. Catalog and history are independent reads: when a concurrent append preserves the exact
+  earlier spine as a prefix, Studio reconciles and discloses the newer suffix; any other drift fails
+  closed. Malformed or cross-artifact evidence also fails closed. The catalog is
+  deliberately not a mutation or deployment surface: membership and even a promoted candidate do not,
+  by themselves, prove an environment admitted it or a run pinned it. Admission resolution and run
+  binding require their own durable evidence.
 - **Automation desk** — a server-backed operations workspace over `POST /triggers`, the tenant-scoped
   trigger registry, and each trigger's event and dead-letter routes. A three-stage signal path keeps the
   contract visible: an HMAC-signed webhook enters Rusty, one typed action targets an assistant or thread,

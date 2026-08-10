@@ -89,6 +89,13 @@ Studio is a useful engineering console, not yet the complete experience describe
 - Create an assistant through the Agent Workbench.
 - Safely duplicate an assistant, review the configuration contract, and import or export a bounded,
   versioned assistant manifest without copying run history.
+- Discover the server's named extension artifacts across prompt, policy, memory, tool, model, and
+  middleware families. The Extension Catalog exposes accountable ownership, immutable commit lineage,
+  candidate lifecycle joins, and server-derived exact version diffs while keeping environment admission
+  and run pinning explicitly outside the claim. Its compatibility boundary follows the shipped Rust
+  envelopes under one 8 MiB response ceiling; bounded DOM windows are presentation limits, not invented
+  limits on artifact, commit, or diff counts. Independent catalog/history reads disclose and reconcile
+  an exact concurrent append rather than mislabeling live snapshot drift as corruption.
 - Distinguish runnable assistant configurations from mailbox-addressed durable identities, browse
   identities by declared team label, inspect activation / mailbox / supervision evidence, and
   investigate a known coordination through its typed member state and read-only TeamTrace.
@@ -148,8 +155,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   creating a reviewed version, while archive retains the complete lineage and blocks only new work.
 - The configuration workshop covers the current persisted contract: graph, runtime step limit, catalog
   metadata, exact advanced JSON, manifest portability, and a visual portable-intent canvas for model,
-  effect-typed tools, memory access/scopes, and approval boundary. Those intent fields still lack typed
-  server discovery and runtime binding; output, budget, credential-handle, and version-registry forms remain.
+  effect-typed tools, memory access/scopes, and approval boundary. The new Extension Catalog supplies
+  typed server discovery and immutable history for model/tool/memory/policy configuration artifacts, but
+  those discovered artifacts are not yet selectable in the assistant canvas or bound into run admission.
+  Output, budget, credential-handle, and governed runtime-binding forms remain.
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
 - The selected-thread interrupt review draft is browser-session-only, while the executor's interrupt and
   resume events follow the configured server journal. There is no durable assigned human-review inbox,
