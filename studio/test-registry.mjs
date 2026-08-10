@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
+import { webcrypto } from "node:crypto";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const page = readFileSync(path.join(here, "index.html"), "utf8");
@@ -13,7 +14,7 @@ const match = page.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) throw new Error("Studio script not found");
 const src = match[1].replace(/\ninit\(\);\s*$/, "\n");
 const nodes = new Map();
-const sandbox = { document: { getElementById: (id) => nodes.get(id) || null }, TextDecoder, TextEncoder, URL, URLSearchParams };
+const sandbox = { document: { getElementById: (id) => nodes.get(id) || null }, TextDecoder, TextEncoder, URL, URLSearchParams, crypto:webcrypto };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__registry = {
@@ -23,8 +24,15 @@ globalThis.__registry = {
   registryExactValue, registryDiffContract, registryVisible, registryRenderWindow, registryErrorHtml,
   registrySummaryHtml, registryRowHtml, registryCommitHtml, registryDiffHtml,
   registryDetailHtml, registryRender, registryLoad, registryLoadHistory, registryCompare,
+  registryBindingEnvironment, registryBindingValidation, registryBindingPrepare,
+  registryBindingResolution, registryBindingEvidence, registryBindingRenderWindow,
+  registryBindingState, registryBindingAccepted, registryBindingCopy,
+  registryBindingArtifactMap, registryBindingOutput, registryBindingRunReceipt, registryBindingStreamMetadata,
+  registryBindingSubmitted, registryBindingFailed, registryBindingLoadArtifacts, registryBindingStreamCurrent, registryBindSurface,
+  runWait,
   agentParseJsonWithNumberKinds, REGISTRY_FAMILIES, REGISTRY_RENDER_LIMIT,
-  REGISTRY_COMMIT_RENDER_LIMIT, REGISTRY_DIFF_RENDER_LIMIT, store,
+  REGISTRY_COMMIT_RENDER_LIMIT, REGISTRY_DIFF_RENDER_LIMIT, REGISTRY_ADMISSION_FAMILIES,
+  REGISTRY_BINDING_RENDER_LIMIT, REGISTRY_BINDING_AUTHOR_LIMIT, REGISTRY_BACKGROUND_STATUSES, REGISTRY_TERMINAL_STATUSES, store,
 };`, sandbox, { filename: "index.html<script>" });
 
 const R = sandbox.__registry;
@@ -140,10 +148,186 @@ check("rendering: oversized server errors are visibly byte-bounded", R.registryE
   const shown = R.registryRenderWindow(many, many.at(-1).surface);
   check("rendering: the bounded catalog window retains an exact selected artifact beyond the leading rows", shown.length === R.REGISTRY_RENDER_LIMIT && shown.at(-1).surface === many.at(-1).surface);
 }
+const toolArtifact = R.registryArtifactContract(artifact({ surface:"tool_contract:search", family:"tool_contract", commits:[commit(id1)] }));
+const modelArtifact = R.registryArtifactContract(artifact({ surface:"model_settings:chat", family:"model_settings", commits:[commit(id2)] }));
+const modelArtifact2 = R.registryArtifactContract(artifact({ surface:"model_settings:backup", family:"model_settings", commits:[commit(id3)] }));
+check("binding: only the three manifest-pinnable registry families are offered", R.REGISTRY_ADMISSION_FAMILIES.size === 3 && ["prompt","tool_contract","model_settings"].every((family) => R.REGISTRY_ADMISSION_FAMILIES.has(family)) && !R.REGISTRY_ADMISSION_FAMILIES.has("policy"));
+{
+  const tagChecks = [R.registryBindingEnvironment("") === "", R.registryBindingEnvironment("prod") === "prod", R.registryBindingEnvironment("é".repeat(32)) !== null,
+    R.registryBindingEnvironment("é".repeat(33)) === null, R.registryBindingEnvironment("bad tag") === null, R.registryBindingEnvironment("bad@tag") === null,
+    R.registryBindingEnvironment("bad/tag") === null, R.registryBindingEnvironment("bad\u2028tag") === null, R.registryBindingEnvironment("bad\u0000tag") === null];
+  check("binding: environment tags mirror the Rust UTF-8 byte and separator grammar", tagChecks.every(Boolean), JSON.stringify(tagChecks));
+}
+{
+  R.store.registry = { artifacts:[parsedArtifact, toolArtifact, modelArtifact, modelArtifact2], loading:false, error:null };
+  const state = { enabled:true, environment:"prod", surfaces:[parsedArtifact.surface, toolArtifact.surface, modelArtifact.surface], acknowledged:true };
+  R.store.registryBindings = { thread:state }; R.store.threads = [{ thread_id:"thread", graph:"pipeline" }]; R.store.selected = "thread";
+  const checked = R.registryBindingValidation(state, true);
+  check("binding: exact declaration order and optional environment become the server run contract", JSON.stringify(checked.binding) === JSON.stringify({ artifacts:[{family:"prompt",name:"system"},{family:"tool_contract",name:"search"},{family:"model_settings",name:"chat"}], environment:"prod" }));
+  check("binding: fresh acknowledgement and one singular model slot fail closed",
+    !R.registryBindingValidation({ ...state, acknowledged:false }, true).binding &&
+    !R.registryBindingValidation({ ...state, surfaces:[modelArtifact.surface, modelArtifact2.surface] }, false).binding);
+  check("binding: catalog drift, declared-only artifacts, and unsupported families fail closed",
+    !R.registryBindingValidation({ ...state, surfaces:["prompt:missing"] }, false).binding &&
+    !R.registryBindingValidation({ ...state, surfaces:["policy:system"] }, false).binding &&
+    !R.registryBindingValidation({ ...state, surfaces:[R.registryArtifactContract({ surface:"prompt:empty", family:"prompt", owner:{type:"system"}, created_at:"2026-08-10T09:00:00Z" })?.surface] }, false).binding);
+  const visiblePayload = { input:{ value:1 } }, prepared = R.registryBindingPrepare(visiblePayload);
+  check("binding: reviewed plan is injected without mutating the visible run JSON", prepared && !Object.prototype.hasOwnProperty.call(visiblePayload, "registry") && prepared.payload !== visiblePayload && prepared.payload.registry.environment === "prod" && prepared.payload.input.value === 1 && prepared.plan.surfaces[2] === "model_settings:chat");
+  state.error = "";
+  check("binding: visual and raw registry declarations can never silently overwrite one another", R.registryBindingPrepare({ registry:{ artifacts:[] } }) === null && state.error.includes("already contains a registry field"));
+}
+{
+  const explicit = R.registryBindingResolution({ surface:"model_settings:chat", tag:"prod", candidate_id:id2, pointer:"canary", digest:id3, model:"gpt-5" }, "model_settings:chat", "prod");
+  check("binding evidence: exact surface, tag, candidate, pointer, digest, and model resolve", explicit?.pointer === "canary" && explicit.model === "gpt-5");
+  check("binding evidence: malformed pointer, crossed environment, missing model, and stray model fail closed",
+    !R.registryBindingResolution({ surface:"model_settings:chat", tag:"prod", candidate_id:id2, pointer:"shadow", digest:id3, model:"gpt-5" }, "model_settings:chat", "prod") &&
+    !R.registryBindingResolution({ surface:"model_settings:chat", tag:"dev", candidate_id:id2, pointer:"active", digest:id3, model:"gpt-5" }, "model_settings:chat", "prod") &&
+    !R.registryBindingResolution({ surface:"model_settings:chat", tag:"prod", candidate_id:id2, pointer:"active", digest:id3 }, "model_settings:chat", "prod") &&
+    !R.registryBindingResolution({ surface:"prompt:system", tag:"prod", candidate_id:id1, pointer:"active", digest:id2, model:"stray" }, "prompt:system", "prod"));
+}
+{
+  const bindingState = { lastSubmission:{ runId:"run-bound", threadId:"thread-bound", binding:{ environment:"prod", artifacts:[{family:"prompt",name:"system"},{family:"tool_contract",name:"search"}] }, surfaces:["prompt:system","tool_contract:search"] } };
+  const events = [
+    { id:"run-bound:0", run_id:"run-bound", thread_id:"thread-bound", seq:0, kind:"config_resolved", effect:"read_only", status:"ok", parent:null, output:{ kind:"inline", value:{ surface:"prompt:system", tag:"prod", candidate_id:id1, pointer:"active", digest:id2 } } },
+    { id:"run-bound:1", run_id:"run-bound", thread_id:"thread-bound", seq:1, kind:"config_resolved", effect:"read_only", status:"ok", parent:"run-bound:0", output:{ kind:"inline", value:{ surface:"tool_contract:search", tag:"prod", candidate_id:id2, pointer:"canary", digest:id3 } } },
+    { id:"run-bound:2", run_id:"run-bound", thread_id:"thread-bound", seq:2, kind:"super_step_start", effect:"pure", status:"ok", parent:"run-bound:1", output:{ kind:"inline", value:{} } },
+  ];
+  const verified = R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events }, bindingState);
+  check("binding evidence: complete journal proves the ordered admission chain", verified?.state === "verified" && verified.proof.length === 2 && verified.proof[1].pointer === "canary");
+  check("binding evidence: partial, reordered, extra, or crossed resolution evidence never verifies",
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:false, events }, bindingState).state === "awaiting" &&
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:[events[1],events[0],events[2]] }, bindingState).state === "invalid" &&
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:[events[0],events[1],{...events[1],id:"run-bound:2",seq:2,parent:"run-bound:1"},events[2]] }, bindingState).state === "invalid" &&
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:[events[0],{...events[1],output:{kind:"inline",value:{...events[1].output.value,surface:"tool_contract:other"}}},events[2]] }, bindingState).state === "invalid" &&
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:[events[0],{...events[1],output:events[1].output.value},events[2]] }, bindingState).state === "invalid" &&
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:[events[0],{...events[1],run_id:"run-crossed"},events[2]] }, bindingState).state === "invalid" &&
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:[events[0],{...events[1],thread_id:"thread-crossed"},events[2]] }, bindingState).state === "invalid" &&
+    R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:[events[0],{...events[1],id:"run-bound:2",seq:2,parent:"run-bound:0"},events[2]] }, bindingState).state === "invalid");
+  const artifactResolution = events[1].output.value;
+  const artifactCanonical = JSON.stringify({surface:"tool_contract:search",tag:"prod",candidate_id:id2,pointer:"canary",digest:id3});
+  const artifactSha = Array.from(new Uint8Array(await webcrypto.subtle.digest("SHA-256", new TextEncoder().encode(artifactCanonical))), (byte) => byte.toString(16).padStart(2,"0")).join("");
+  const artifactBytes = new TextEncoder().encode(artifactCanonical).length;
+  const artifactEvents = [events[0], {...events[1],output:{kind:"artifact",value:{sha256:artifactSha,bytes:artifactBytes}}}, events[2]];
+  const fixture = {format_version:1,journal:{run_id:"run-bound",thread_id:"thread-bound",events:artifactEvents,artifacts:{[artifactSha]:artifactResolution},artifact_refs:{}}};
+  const retained = await R.registryBindingArtifactMap(fixture, bindingState.lastSubmission, artifactEvents, webcrypto);
+  check("binding evidence: a verified portable journal resolves only legal hash- and byte-bound config evidence", retained && Object.keys(retained).length === 1 && R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:artifactEvents, admissionArtifacts:retained }, bindingState).state === "verified" && R.registryBindingEvidence({ runId:"run-bound", exactEnvelope:true, complete:true, events:artifactEvents, admissionArtifactsError:"fixture unavailable" }, bindingState).state === "awaiting");
+  check("binding evidence: crossed fixtures, missing hashes, byte drift, and content-address drift fail closed",
+    !await R.registryBindingArtifactMap({...fixture,journal:{...fixture.journal,run_id:"run-crossed"}}, bindingState.lastSubmission, artifactEvents, webcrypto) &&
+    !await R.registryBindingArtifactMap({...fixture,journal:{...fixture.journal,thread_id:"thread-crossed"}}, bindingState.lastSubmission, artifactEvents, webcrypto) &&
+    !await R.registryBindingArtifactMap({...fixture,journal:{...fixture.journal,events:[events[0],events[2]]}}, bindingState.lastSubmission, artifactEvents, webcrypto) &&
+    !await R.registryBindingArtifactMap({...fixture,journal:{...fixture.journal,artifacts:{}}}, bindingState.lastSubmission, artifactEvents, webcrypto) &&
+    !await R.registryBindingArtifactMap({...fixture,journal:{...fixture.journal,artifacts:{[artifactSha]:{...artifactResolution,tag:"drift"}}}}, bindingState.lastSubmission, artifactEvents, webcrypto) &&
+    !await R.registryBindingArtifactMap(fixture, bindingState.lastSubmission, [events[0],{...artifactEvents[1],output:{kind:"artifact",value:{sha256:artifactSha,bytes:1}}},events[2]], webcrypto));
+  let resolveFixture;
+  sandbox.__registryApi = () => new Promise((resolve) => { resolveFixture = resolve; });
+  Object.assign(sandbox, { __artifactFixture:fixture, __artifactEvents:artifactEvents, __artifactSubmission:bindingState.lastSubmission });
+  vm.runInContext(`apiForConnection=globalThis.__registryApi; store.conn={baseUrl:"http://artifact-tenant",apiKey:"artifact"}; store.connectionEpoch=18;
+    store.threads=[{thread_id:"thread-bound",graph:"pipeline"},{thread_id:"thread-other",graph:"pipeline"}]; store.selected="thread-bound";
+    store.registryBindings={"thread-bound":{enabled:true,environment:"prod",surfaces:[],acknowledged:false,error:"",errorField:"",lastSubmission:globalThis.__artifactSubmission,submissionPending:false,uncertainSubmission:""}};
+    store.recorder={runId:"run-bound",exactEnvelope:true,complete:true,events:globalThis.__artifactEvents,admissionArtifacts:null,admissionArtifactsLoading:false,admissionArtifactsError:""}; store.recLoadRequest+=1;`, sandbox);
+  const artifactPending = vm.runInContext("registryBindingLoadArtifacts()", sandbox);
+  vm.runInContext(`store.selected="thread-other";`, sandbox); resolveFixture(fixture); await artifactPending;
+  check("binding evidence: a stale portable-evidence read always releases the captured recorder busy state", vm.runInContext("store.recorder.admissionArtifactsLoading === false && store.recorder.admissionArtifacts === null", sandbox));
+  let artifactFocuses = 0;
+  nodes.set("registry-binding-artifact-status", { focus() { artifactFocuses += 1; } });
+  nodes.set("registry-binding-announcer", { textContent:"" });
+  sandbox.__registryApi = async () => fixture;
+  vm.runInContext(`apiForConnection=globalThis.__registryApi; store.selected="thread-bound"; store.recLoadRequest+=1;`, sandbox);
+  const loadedArtifacts = await vm.runInContext("registryBindingLoadArtifacts()", sandbox);
+  check("binding evidence focus: successful portable verification lands on the stable verified status", loadedArtifacts === true && artifactFocuses >= 2 && vm.runInContext("store.recorder.admissionArtifactsLoading === false && !!store.recorder.admissionArtifacts", sandbox));
+  const focusBeforeFailure = artifactFocuses;
+  sandbox.__registryApi = async () => ({...fixture,journal:{...fixture.journal,artifacts:{}}});
+  vm.runInContext(`apiForConnection=globalThis.__registryApi; store.recorder.admissionArtifacts=null; store.recLoadRequest+=1;`, sandbox);
+  const failedArtifacts = await vm.runInContext("registryBindingLoadArtifacts()", sandbox);
+  check("binding evidence focus: failed portable verification lands on the same retryable status", failedArtifacts === false && artifactFocuses >= focusBeforeFailure + 2 && vm.runInContext("store.recorder.admissionArtifactsLoading === false && store.recorder.admissionArtifactsError.includes('could not verify')", sandbox));
+  const defaultState = { lastSubmission:{ runId:"run-default", threadId:"thread-bound", binding:{ artifacts:[{family:"prompt",name:"system"}] }, surfaces:["prompt:system"] } };
+  const defaultEvidence = R.registryBindingEvidence({ runId:"run-default", exactEnvelope:true, complete:true, events:[{...events[0],id:"run-default:0",run_id:"run-default",output:{kind:"inline",value:{...events[0].output.value,tag:"staging"}}}] }, defaultState);
+  check("binding evidence: an omitted tag reports the deployment-selected environment without inventing it before admission", defaultEvidence?.state === "verified" && defaultEvidence.environment === "staging");
+}
+{
+  const many = Array.from({length:R.REGISTRY_BINDING_RENDER_LIMIT + 2}, (_,index) => R.registryArtifactContract(artifact({surface:`prompt:bind-${String(index).padStart(3,"0")}`,commits:[commit(index.toString(16).padStart(64,"0"))]})));
+  const shown = R.registryBindingRenderWindow(many, [many.at(-2).surface,many.at(-1).surface]);
+  check("binding rendering: bounded options retain every selected artifact beyond the leading window", shown.length === R.REGISTRY_BINDING_RENDER_LIMIT && shown.at(-2).surface === many.at(-2).surface && shown.at(-1).surface === many.at(-1).surface);
+  const selected = many.slice(0, R.REGISTRY_BINDING_AUTHOR_LIMIT).map((item) => item.surface);
+  const overbound = {enabled:true,environment:"prod",surfaces:[...selected,many[R.REGISTRY_BINDING_AUTHOR_LIMIT].surface],acknowledged:true,submissionPending:false,uncertainSubmission:""};
+  sandbox.__bindingMany = many; sandbox.__bindingSelected = selected;
+  vm.runInContext(`store.threads=[{thread_id:"thread-cap",graph:"pipeline"}]; store.selected="thread-cap"; store.registry={artifacts:globalThis.__bindingMany,loading:false,error:null};
+    store.registryBindings={"thread-cap":{enabled:true,environment:"prod",surfaces:[...globalThis.__bindingSelected],acknowledged:false,error:"",errorField:"",lastSubmission:null,submissionPending:false,uncertainSubmission:""}}; toast=()=>{};`, sandbox);
+  const rejected = R.registryBindSurface(many[R.REGISTRY_BINDING_AUTHOR_LIMIT].surface);
+  check("binding authoring: validation and Catalog handoff both stop at the fully reviewable 120-artifact ceiling", R.registryBindingValidation(overbound, true).error.includes("at most 120") && rejected === false && vm.runInContext('store.registryBindings["thread-cap"].surfaces.length', sandbox) === R.REGISTRY_BINDING_AUTHOR_LIMIT);
+}
 check("truth boundary: visible UI never turns catalog membership into serving or run evidence", page.includes("Catalog presence does not prove an environment or run used a version") && page.includes("Admission is separate"));
+check("binding markup: one accessible page-memory planner spans environment, admission, and journal proof", page.includes('id="registry-binding-card"') && page.includes("Bind governed configuration into the next run") && page.includes("only the run journal proves the resolved versions") && page.includes("cleared on connection change, thread removal, or reload"));
+check("binding integration: background, wait, and stream all pass through the same exact planner", page.includes("withRunOpts(prepared.payload)") && page.includes("withRunOpts({ ...prepared.payload })") && page.includes("JSON.stringify(prepared.payload)") && page.includes("registryBindingStreamMetadata(frame.data") && page.includes("registryBindingAccepted(runId, prepared.plan)"));
+check("binding receipts: background/wait enforce their phase and thread while stream accepts one exact metadata identity", R.registryBindingRunReceipt({run_id:"run",thread_id:"thread",status:"pending"},"thread",R.REGISTRY_BACKGROUND_STATUSES) === "run" && !R.registryBindingRunReceipt({run_id:"run",thread_id:"thread",status:"success"},"thread",R.REGISTRY_BACKGROUND_STATUSES) && R.registryBindingRunReceipt({run_id:"run",thread_id:"thread",status:"success"},"thread",R.REGISTRY_TERMINAL_STATUSES) === "run" && !R.registryBindingRunReceipt({run_id:"run",thread_id:"other",status:"success"},"thread",R.REGISTRY_TERMINAL_STATUSES) && R.registryBindingStreamMetadata({run_id:"run",thread_id:"thread"},"thread",null) === "run" && !R.registryBindingStreamMetadata({run_id:"run",thread_id:"other"},"thread",null) && !R.registryBindingStreamMetadata({run_id:"run-2",thread_id:"thread"},"thread","run"));
+check("binding artifact privacy: portable evidence is an explicit action and only verified referenced values survive", page.includes("Load portable evidence") && page.includes("retains only configuration-resolution values in page memory") && page.includes("retained[reference.sha256] = value"));
+check("binding uncertainty: pending or ambiguous work blocks even an unbound retry until deliberate abandonment", page.indexOf("if (state.submissionPending)") < page.indexOf("if (!state.enabled)") && page.includes("if (state.submissionPending || state.uncertainSubmission)") && page.includes("Abandon uncertainty and plan another run") && page.includes("stream_identity_missing"));
+check("binding identity: hostile legal environment tags are displayed through an injective visible encoding", page.includes('registryEvidencePreview(state.environment || "deployment default")') && page.includes('registryEvidencePreview(state.environment || "deployment default")}`'));
+check("binding async ownership: a catalog load may update shared truth but cannot focus a different thread's planner", page.includes("const operation = connectionOperation(currentThread()?.thread_id || null)") && page.includes("await registryLoad(true);\n    if (!connectionOperationCurrent(operation)) return;"));
+check("binding responsive: the admission braid, controls, options, and proof stack at mobile width", page.includes(".runtime-binding-signal { grid-template-columns:1fr; }") && page.includes(".runtime-binding-options { grid-template-columns:1fr;") && page.includes(".runtime-binding-proof { grid-template-columns:1fr; }"));
 check("markup: sidebar, workspace, native filters, listbox, stable status, and exact diff surface exist", page.includes('id="btn-registry-open"') && page.includes('id="registry-view"') && page.includes('role="listbox" aria-label="Extension artifacts"') && page.includes('id="registry-announcer"') && page.includes('data-registry-compare'));
 check("responsive: catalog surfaces collapse while the real structural headers remain scrollable", page.includes(".registry-layout { grid-template-columns:1fr; }") && page.includes(".registry-signal { grid-template-columns:1fr; }") && page.includes(".registry-toolbar,.registry-compare-controls { grid-template-columns:1fr; }") && page.includes(".registry-facts { grid-template-columns:1fr; }") && page.includes(".registry-structural { min-width:620px; }") && page.includes('scope="col"'));
 check("connection reset and navigation: registry requests, page state, shared route, and primary action are owned", page.includes("store.registryRequest += 1") && page.includes("store.registry = null") && page.includes('const registry = store.view === "registry"') && page.includes("registry: openRegistry") && page.includes('$("btn-registry-open").onclick = openRegistry'));
+
+/* A real direct-run flow proves the planner is not only wired by source text:
+ * the reviewed declaration reaches the POST byte shape and the accepted run
+ * becomes the exact evidence owner. */
+{
+  nodes.set("inp-payload", { value:"{}" });
+  nodes.set("th-runstatus", { innerHTML:"" });
+  sandbox.__runBody = null;
+  sandbox.__registryApi = async (_connection, method, path, body) => {
+    if (method === "POST" && path === "/threads/thread-run/runs/wait") sandbox.__runBody = body;
+    return { run_id:"run-direct", thread_id:"thread-run", status:"success", result:{} };
+  };
+  vm.runInContext(`apiForConnection = globalThis.__registryApi; showRunResult = () => {}; refreshState = () => {}; refreshHistory = () => {}; recAutoLoad = () => {}; toast = () => {}; registryBindingRender = () => {};
+    store.conn = { baseUrl:"http://tenant-run", apiKey:"run" }; store.connectionEpoch = 21;
+    store.threads = [{ thread_id:"thread-run", graph:"pipeline" }]; store.selected = "thread-run";
+    store.registry = { artifacts:[globalThis.__runArtifact], loading:false, error:null };
+    store.registryBindings = { "thread-run":{ enabled:true, environment:"prod", surfaces:["prompt:system"], acknowledged:true, error:"", errorField:"", lastSubmission:null } };`, Object.assign(sandbox, { __runArtifact:parsedArtifact }));
+  await vm.runInContext("runWait(undefined, false, false)", sandbox);
+  const accepted = vm.runInContext('store.registryBindings["thread-run"]', sandbox);
+  check("binding direct run: reviewed declaration reaches the exact POST and accepted run owns later proof", JSON.stringify(sandbox.__runBody) === JSON.stringify({registry:{artifacts:[{family:"prompt",name:"system"}],environment:"prod"}}) && accepted.lastSubmission?.runId === "run-direct" && accepted.lastSubmission?.threadId === "thread-run" && accepted.acknowledged === false && accepted.submissionPending === false);
+  const oneShotPlan = {binding:{artifacts:[{family:"prompt",name:"system"}],environment:"prod"},surfaces:["prompt:system"],threadId:"thread-run",state:accepted};
+  accepted.enabled = true; accepted.acknowledged = true;
+  R.registryBindingSubmitted(oneShotPlan); accepted.enabled = false;
+  const pendingBlocked = R.registryBindingPrepare({}) === null;
+  R.registryBindingFailed({status:504,message:"wait timed out"}, oneShotPlan);
+  const uncertainBlocked = R.registryBindingPrepare({}) === null && accepted.uncertainSubmission.includes("may have accepted");
+  accepted.uncertainSubmission = ""; accepted.submissionPending = false; accepted.enabled = true; accepted.acknowledged = true;
+  R.registryBindingSubmitted(oneShotPlan); R.registryBindingFailed({status:422,message:"rejected"}, oneShotPlan);
+  check("binding direct run: one-shot acknowledgement locks pending and ambiguous retries but releases a confirmed rejection", pendingBlocked && uncertainBlocked && !accepted.submissionPending && !accepted.uncertainSubmission && accepted.error === "rejected");
+
+  let resolveBound;
+  sandbox.__registryApi = () => new Promise((resolve) => { resolveBound = resolve; });
+  vm.runInContext(`apiForConnection = globalThis.__registryApi;
+    store.threads = [{thread_id:"thread-run",graph:"pipeline"},{thread_id:"thread-new",graph:"pipeline"}]; store.selected="thread-run";
+    store.registryBindings["thread-run"] = { enabled:true, environment:"prod", surfaces:["prompt:system"], acknowledged:true, error:"", errorField:"", lastSubmission:null, submissionPending:false, uncertainSubmission:"" };
+    store.registryBindings["thread-new"] = { enabled:false, environment:"", surfaces:[], acknowledged:false, error:"", errorField:"", lastSubmission:null, submissionPending:false, uncertainSubmission:"" };`, sandbox);
+  const deferredSuccess = vm.runInContext("runWait(undefined, false, false)", sandbox);
+  vm.runInContext(`store.selected="thread-new";`, sandbox);
+  resolveBound({run_id:"run-deferred",thread_id:"thread-run",status:"success",result:{}}); await deferredSuccess;
+  const deferredAccepted = vm.runInContext('store.registryBindings["thread-run"]', sandbox);
+  check("binding async run: exact success settles the initiating thread without taking over a newer selection", deferredAccepted.lastSubmission?.runId === "run-deferred" && !deferredAccepted.submissionPending && vm.runInContext('store.selected === "thread-new" && store.registryBindings["thread-new"].lastSubmission === null', sandbox));
+
+  let rejectBound;
+  sandbox.__registryApi = () => new Promise((_resolve, reject) => { rejectBound = reject; });
+  vm.runInContext(`apiForConnection = globalThis.__registryApi; store.selected="thread-run";
+    Object.assign(store.registryBindings["thread-run"], { acknowledged:true, lastSubmission:null, submissionPending:false, uncertainSubmission:"", error:"" });`, sandbox);
+  const deferredFailure = vm.runInContext("runWait(undefined, false, false)", sandbox);
+  vm.runInContext(`store.selected="thread-new";`, sandbox);
+  rejectBound({status:504,message:"wait timed out"}); await deferredFailure;
+  const deferredUncertain = vm.runInContext('store.registryBindings["thread-run"]', sandbox);
+  check("binding async run: ambiguous failure unlocks busy state only into the initiating thread's uncertainty gate", !deferredUncertain.submissionPending && deferredUncertain.uncertainSubmission.includes("may have accepted") && vm.runInContext('store.selected === "thread-new" && !store.registryBindings["thread-new"].uncertainSubmission', sandbox));
+
+  vm.runInContext(`store.selected="thread-run"; Object.assign(store.registryBindings["thread-run"], { acknowledged:true, submissionPending:false, uncertainSubmission:"", error:"" });`, sandbox);
+  const streamPlan = vm.runInContext(`registryBindingPrepare({}).plan`, sandbox);
+  R.registryBindingSubmitted(streamPlan);
+  sandbox.__streamController = {};
+  vm.runInContext(`store.streamAbort=globalThis.__streamController; store.selected="thread-new";`, sandbox);
+  const streamOwned = vm.runInContext(`registryBindingStreamCurrent(globalThis.__streamController, {epoch:store.connectionEpoch,connection:{...store.conn},threadId:"thread-run"}, globalThis.__streamPlan)`, Object.assign(sandbox, {__streamPlan:streamPlan}));
+  check("binding async stream: losing the initiating thread before metadata cancels ownership into a retry lock", streamOwned === false && !streamPlan.state.submissionPending && streamPlan.state.uncertainSubmission.includes("may have accepted"));
+}
 
 /* Real deferred connection and selection ownership checks. */
 nodes.set("registry-side-count", { textContent: "" });

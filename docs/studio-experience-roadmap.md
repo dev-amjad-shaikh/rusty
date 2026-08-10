@@ -95,7 +95,12 @@ Studio is a useful engineering console, not yet the complete experience describe
   and run pinning explicitly outside the claim. Its compatibility boundary follows the shipped Rust
   envelopes under one 8 MiB response ceiling; bounded DOM windows are presentation limits, not invented
   limits on artifact, commit, or diff counts. Independent catalog/history reads disclose and reconcile
-  an exact concurrent append rather than mislabeling live snapshot drift as corruption.
+  an exact concurrent append rather than mislabeling live snapshot drift as corruption. A selected local
+  thread can now turn prompt, tool-contract, and singular model-settings artifacts into one reviewed
+  environment binding shared by all three run modes, with a disclosed 120-artifact Studio authoring and
+  full-review ceiling rather than an invented server limit. Studio keeps catalog intent separate from admission
+  truth, then proves the accepted run through its exact leading `config_resolved` journal chain, including
+  active/canary pointer, immutable candidate, and manifest digest.
 - Distinguish runnable assistant configurations from mailbox-addressed durable identities, browse
   identities by declared team label, inspect activation / mailbox / supervision evidence, and
   investigate a known coordination through its typed member state and read-only TeamTrace.
@@ -155,10 +160,12 @@ Studio is a useful engineering console, not yet the complete experience describe
   creating a reviewed version, while archive retains the complete lineage and blocks only new work.
 - The configuration workshop covers the current persisted contract: graph, runtime step limit, catalog
   metadata, exact advanced JSON, manifest portability, and a visual portable-intent canvas for model,
-  effect-typed tools, memory access/scopes, and approval boundary. The new Extension Catalog supplies
-  typed server discovery and immutable history for model/tool/memory/policy configuration artifacts, but
-  those discovered artifacts are not yet selectable in the assistant canvas or bound into run admission.
-  Output, budget, credential-handle, and governed runtime-binding forms remain.
+  effect-typed tools, memory access/scopes, and approval boundary. The Extension Catalog supplies typed
+  server discovery and immutable history for model/tool/memory/policy configuration artifacts. Prompt,
+  tool-contract, and singular model-settings artifacts are now selectable for a selected thread's next
+  run, with environment-bound admission and exact journal proof, but that page-memory plan is not yet part
+  of the portable assistant canvas or immutable assistant version. Output, budget, credential-handle, and
+  assistant-level governed runtime-binding forms remain.
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
 - The selected-thread interrupt review draft is browser-session-only, while the executor's interrupt and
   resume events follow the configured server journal. There is no durable assigned human-review inbox,
@@ -506,7 +513,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 |---:|---|---|---|
 | 1 | Recent runs in the Agent Workbench, with status and one-click Inspect | Delivered locally; durable discovery remains in order 4 | Extends the delivered first-run journey into a repeatable daily workflow without pretending the whole Studio is complete |
 | 2 | Assistant edit and duplicate, with a readable configuration summary | Partial — safe duplicate, source-bound configuration diff, and summary delivered; edit/version endpoints pending | Establishes lifecycle management as soon as the server route surface is free to extend |
-| 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract, manifest portability, and visual model/tool/memory/approval intent delivered; typed discovery, immutable versions, credentials, output, budgets, and runtime binding remain | Replaces the current create-only form and raw configuration gap |
+| 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract, manifest portability, visual model/tool/memory/approval intent, typed extension discovery, and thread-scoped environment binding with journal proof delivered; credentials, output, budgets, and portable assistant-level runtime binding remain | Replaces the current create-only form and raw configuration gap |
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
 | 5 | Flight Recorder investigation layout and manifest/effect context | Usable foundation — causal run story, recovery boundary, effect-risk guidance, exact signed run-proof chain, and five-surface runtime bill of materials delivered; cross-run manifest drift navigation and remote/KMS attestation remain | Makes Rusty's strongest runtime advantage understandable |
 | 6 | Memory browser, context assembly, provenance, conflicts, corrections, and forgetting | Partial — browser, deterministic token-budget context preview, provenance, conflict review, selected-memory correction, exact durable consolidation launch, and task-to-summary follow-through delivered; candidate approval, expiration, and approval-gated forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |

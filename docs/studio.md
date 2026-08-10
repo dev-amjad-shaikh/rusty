@@ -14,7 +14,7 @@ studio/
 ├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
 ├── test-learn.mjs     ← node unit tests for the governed-learning control room
-├── test-registry.mjs  ← extension artifact, immutable lineage, and derived-diff contract tests
+├── test-registry.mjs  ← extension lineage, diff, runtime binding, and admission-evidence contract tests
 ├── test-automations.mjs ← signed webhook lifecycle, event evidence, and replay-safety tests
 ├── test-navigation.mjs ← non-secret workspace/evidence link and async ownership tests
 ├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
@@ -192,7 +192,29 @@ studio/
   closed. Malformed or cross-artifact evidence also fails closed. The catalog is
   deliberately not a mutation or deployment surface: membership and even a promoted candidate do not,
   by themselves, prove an environment admitted it or a run pinned it. Admission resolution and run
-  binding require their own durable evidence.
+  binding require their own durable evidence. From a selected local thread, the **Governed runtime
+  binding** planner turns that boundary into a run workflow. It accepts only the three families the
+  current `RunManifest` can pin (`prompt`, `tool_contract`, and one singular `model_settings` artifact),
+  mirrors the Rust `EnvironmentTag` UTF-8 and separator grammar, preserves the reviewed declaration
+  order, and injects the same exact `registry` payload into background, wait, and streamed runs. Studio
+  authors and fully displays at most 120 artifacts in one exact-order plan; this is a Studio authoring
+  ceiling, not a server protocol limit. A raw payload that already names `registry` cannot be silently
+  overwritten. The plan is page-memory and
+  local-thread scoped; changing connection, forgetting the thread, or reloading clears it. A fresh
+  acknowledgement binds one submission of the visible environment and artifact order and is cleared
+  before the network request, but it does not claim a serving
+  version: the server may admit an active or canary pointer. After an accepted run, Studio loads the
+  complete journal and verifies that its leading read-only `config_resolved` chain contains exactly one
+  event per reviewed artifact, in order, with the exact environment, candidate id, pointer slot, manifest
+  digest, and model identity where applicable. Only that journal evidence earns the **Journal-proven
+  admission** state; partial, crossed, extra, or malformed resolution evidence fails closed. A resolution
+  body larger than the journal's inline threshold stays content-addressed. Studio does not fetch the
+  portable fixture automatically: the operator must deliberately load it, after which Studio verifies
+  the exact run/thread/event join plus the referenced byte length and SHA-256, retains only those
+  configuration-resolution values in page memory, and discards unrelated fixture artifact values.
+  A lost or untrusted receipt locks that thread's plan with an explicit uncertain-run warning: because a
+  timed-out wait continues server-side, the operator must inspect server evidence or deliberately abandon
+  the uncertainty before acknowledging another possibly effectful run.
 - **Automation desk** — a server-backed operations workspace over `POST /triggers`, the tenant-scoped
   trigger registry, and each trigger's event and dead-letter routes. A three-stage signal path keeps the
   contract visible: an HMAC-signed webhook enters Rusty, one typed action targets an assistant or thread,

@@ -1973,6 +1973,7 @@
   .registry-detail-head { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; }
   .registry-detail-head h2 { margin:0; overflow-wrap:anywhere; font-size:17px; }
   .registry-detail-head p { margin:4px 0 0; color:var(--text-dim); font:10px var(--mono); overflow-wrap:anywhere; }
+  .registry-detail-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
   .registry-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin:13px 0; }
   .registry-fact { min-width:0; padding:8px 9px; border:1px solid #3d3b51; border-radius:7px; background:#191920; }
   .registry-fact b,.registry-fact span { display:block; }
@@ -2010,6 +2011,32 @@
   .registry-structural th { color:var(--text-dim); font-size:9px; text-transform:uppercase; }
   .registry-structural code { white-space:pre-wrap; overflow-wrap:anywhere; }
   .registry-error { border-left-color:var(--err); }
+  .runtime-binding { margin-top:12px; border:1px solid #514a6b; border-radius:8px; background:linear-gradient(105deg,#191923,#1d1b22); }
+  .runtime-binding > summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; cursor:pointer; color:#ddd8ef; font:600 11px var(--mono); }
+  .runtime-binding > summary::-webkit-details-marker { color:#9187cb; }
+  .runtime-binding-body { padding:0 12px 12px; border-top:1px solid #3d394f; }
+  .runtime-binding-signal { display:grid; grid-template-columns:minmax(0,1fr) 22px minmax(0,1fr) 22px minmax(0,1fr); align-items:center; gap:5px; margin:11px 0; }
+  .runtime-binding-signal > div:not(.registry-arrow) { min-width:0; padding:8px; border:1px solid #3d394f; border-radius:6px; background:#17171e; }
+  .runtime-binding-signal b,.runtime-binding-signal span { display:block; }
+  .runtime-binding-signal b { color:#cfc8e9; font-size:10px; }
+  .runtime-binding-signal span { margin-top:2px; color:var(--text-dim); font-size:9.5px; line-height:1.4; }
+  .runtime-binding-fields { display:grid; grid-template-columns:minmax(180px,.45fr) minmax(0,1fr); align-items:start; gap:9px; }
+  .runtime-binding-fields > label { color:var(--text-dim); font-size:10px; }
+  .runtime-binding-fields input[type="text"] { display:block; width:100%; margin-top:4px; padding:7px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-inset); color:var(--text); font:11px var(--mono); }
+  .runtime-binding-artifacts { min-width:0; margin:0; padding:0; border:0; }
+  .runtime-binding-artifacts legend { margin-bottom:4px; color:var(--text-dim); font-size:10px; }
+  .runtime-binding-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; max-height:230px; overflow:auto; padding:2px; }
+  .runtime-binding-option { display:grid; grid-template-columns:auto minmax(0,1fr); gap:7px; align-items:start; padding:8px; border:1px solid #3e3a50; border-radius:6px; background:#17171d; }
+  .runtime-binding-option b,.runtime-binding-option small { display:block; overflow-wrap:anywhere; }
+  .runtime-binding-option b { color:#d4cfeb; font:600 10px var(--mono); }
+  .runtime-binding-option small { margin-top:2px; color:var(--text-dim); font-size:9px; }
+  .runtime-binding-review { margin-top:10px; padding:9px 10px; border-left:3px solid #8278b4; background:#1a1921; }
+  .runtime-binding-review ol { margin:6px 0 0; padding-left:20px; }
+  .runtime-binding-review li { margin:3px 0; color:#c8c3db; font:10px var(--mono); overflow-wrap:anywhere; }
+  .runtime-binding-evidence { margin-top:10px; display:grid; gap:6px; }
+  .runtime-binding-proof { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 10px; padding:8px 9px; border:1px solid #3e4d42; border-radius:6px; background:#172019; }
+  .runtime-binding-proof code { overflow-wrap:anywhere; color:#c8dbc5; font-size:9.5px; }
+  .runtime-binding-proof small { color:var(--text-dim); font-size:9px; }
   @media (max-width: 1120px) {
     .agent-workshop { grid-template-columns: 1fr; }
     .agent-contract-panel { position: static; }
@@ -2027,6 +2054,7 @@
     .registry-layout { grid-template-columns:1fr; }
     .registry-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); max-height:340px; border-right:0; border-bottom:1px solid var(--border); }
     .registry-item { border-right:1px solid var(--border); }
+    .runtime-binding-fields { grid-template-columns:1fr; }
     .automation-layout { grid-template-columns:1fr; }
     .automation-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); max-height:340px; border-right:0; border-bottom:1px solid var(--border); }
     .automation-row { border-right:1px solid var(--border); }
@@ -2245,8 +2273,14 @@
     .registry-list { grid-template-columns:1fr; max-height:300px; }
     .registry-item { border-right:0; }
     .registry-detail-head { flex-direction:column; }
+    .registry-detail-actions { justify-content:flex-start; }
     .registry-facts { grid-template-columns:1fr; }
     .registry-structural { min-width:620px; }
+    .runtime-binding > summary { align-items:flex-start; }
+    .runtime-binding-signal { grid-template-columns:1fr; }
+    .runtime-binding-signal .registry-arrow { transform:rotate(90deg); }
+    .runtime-binding-options { grid-template-columns:1fr; max-height:300px; }
+    .runtime-binding-proof { grid-template-columns:1fr; }
     .automation-signal-path { grid-template-columns:1fr; }
     .automation-signal-path::before { top:18px; bottom:18px; left:18px; right:auto; width:1px; height:auto; }
     .automation-signal-step { padding-left:38px; border-right:0; border-bottom:1px solid #344143; }
@@ -2843,6 +2877,11 @@
               <option value="reject">reject</option>
             </select>
           </div>
+          <details class="runtime-binding" id="registry-binding-card">
+            <summary id="registry-binding-toggle"><span>Governed runtime binding</span><span id="registry-binding-summary" class="muted">Unbound</span></summary>
+            <div class="runtime-binding-body" id="registry-binding-body"><div class="empty">Open this planner to bind promoted configuration into the next run.</div></div>
+            <span class="sr-only" id="registry-binding-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </details>
         </div>
 
         <section class="card interrupt-decision" id="interrupt-card" aria-labelledby="interrupt-title" hidden></section>
@@ -3173,6 +3212,12 @@ const REGISTRY_RENDER_LIMIT = 200;
 const REGISTRY_COMMIT_RENDER_LIMIT = 200;
 const REGISTRY_DIFF_RENDER_LIMIT = 200;
 const REGISTRY_RESPONSE_LIMIT = 8 * 1024 * 1024;
+const REGISTRY_ADMISSION_FAMILIES = new Set(["prompt", "tool_contract", "model_settings"]);
+const REGISTRY_BINDING_RENDER_LIMIT = 120;
+const REGISTRY_BINDING_AUTHOR_LIMIT = 120;
+const REGISTRY_POINTER_SLOTS = new Set(["active", "canary"]);
+const REGISTRY_BACKGROUND_STATUSES = new Set(["pending", "running"]);
+const REGISTRY_TERMINAL_STATUSES = new Set(["success", "interrupted", "error", "cancelled"]);
 const AUTOMATION_TRIGGER_LIMIT = 500;
 const AUTOMATION_EVENT_LIMIT = 256;
 const AUTOMATION_RESPONSE_LIMIT = 8 * 1024 * 1024;
@@ -3296,6 +3341,7 @@ const store = {
   registryRequest: 0,  // generation guard for catalog, lineage, and diff reads
   registryUnsupported: false,
   registrySearchTimer: null,
+  registryBindings: Object.create(null), // page-memory environment/artifact plans keyed by local thread id
   automations: null,   // trigger registry, selected binding, event/dead-letter evidence, and replay review
   automationRequest: 0,
   automationMutationRequest: 0,
@@ -4792,9 +4838,14 @@ function connectionOperation(threadId = null) {
   return store.conn ? { epoch: store.connectionEpoch, connection: { ...store.conn }, threadId } : null;
 }
 
-function connectionOperationCurrent(operation) {
+function connectionOperationIdentityCurrent(operation) {
   if (!operation || operation.epoch !== store.connectionEpoch ||
       connectionIdentityChanged(operation.connection, store.conn)) return false;
+  return true;
+}
+
+function connectionOperationCurrent(operation) {
+  if (!connectionOperationIdentityCurrent(operation)) return false;
   if (operation.threadId === null) return true;
   const thread = currentThread();
   return Boolean(thread && thread.thread_id === operation.threadId);
@@ -5179,6 +5230,7 @@ function connectionResetWorkspace() {
   store.registrySearchTimer = null;
   store.registry = null;
   store.registryUnsupported = false;
+  store.registryBindings = Object.create(null);
   store.automations = null;
   store.automationsUnsupported = false;
   $("automation-compose").hidden = true;
@@ -5419,6 +5471,7 @@ async function attachThread() {
 function forgetThread(id, ev) {
   ev.stopPropagation();
   store.threads = store.threads.filter((t) => t.thread_id !== id);
+  delete store.registryBindings[id];
   if (store.selected === id) store.selected = null;
   saveThreads();
   renderThreads();
@@ -5541,6 +5594,7 @@ function renderMain() {
   $("run-result").innerHTML = `<div class="empty">No run result yet.</div>`;
   $("inp-payload").value = defaultPayload(t.graph);
   $("inp-rec-run").value = "";
+  registryBindingRender();
   store.compare = null;
   $("rec-replay-banner").innerHTML = "";
   $("rec-compare-view").innerHTML = "";
@@ -5582,6 +5636,326 @@ function withRunOpts(payload) {
   return payload;
 }
 
+/* ---------------- governed runtime binding planner -------------------
+ * A plan is page-memory and local-thread scoped. It names only artifacts
+ * the current deployment catalog declared. The server remains authoritative:
+ * environment pointers resolve at admission, and only config_resolved journal
+ * events prove which immutable candidates and pointer slots the run received.
+ * ------------------------------------------------------------------------- */
+
+function registryBindingState(threadId = currentThread()?.thread_id) {
+  if (!threadId) return null;
+  if (!store.registryBindings[threadId]) store.registryBindings[threadId] = {
+    enabled: false, environment: "", surfaces: [], acknowledged: false, error: "", errorField: "", lastSubmission: null,
+    submissionPending: false, uncertainSubmission: "",
+  };
+  return store.registryBindings[threadId];
+}
+
+function registryBindingCopy(value) { return JSON.parse(JSON.stringify(value)); }
+
+function registryBindingEnvironment(value) {
+  if (value === "") return "";
+  const tag = registryString(value, 64);
+  if (tag === null || /[\p{White_Space}\p{Cc}\/@]/u.test(tag)) return null;
+  return tag;
+}
+
+function registryBindingArtifacts(state = registryBindingState()) {
+  const catalog = store.registry && !store.registry.loading && !store.registry.error ? store.registry.artifacts : [];
+  if (!state || !Array.isArray(state.surfaces)) return [];
+  return state.surfaces.map((surface) => catalog.find((item) => item.surface === surface)).filter(Boolean);
+}
+
+function registryBindingValidation(state = registryBindingState(), requireAcknowledgement = true) {
+  if (!state) return { binding: null, artifacts: [], error: "" };
+  if (state.submissionPending) return { binding: null, artifacts: [], error: "This reviewed plan already has a submission in flight." };
+  if (state.uncertainSubmission) return { binding: null, artifacts: [], error: state.uncertainSubmission };
+  if (!state.enabled) return { binding: null, artifacts: [], error: "" };
+  if (!Array.isArray(state.surfaces) || state.surfaces.length > REGISTRY_BINDING_AUTHOR_LIMIT) return { binding: null, artifacts: [], error: `Studio authors at most ${REGISTRY_BINDING_AUTHOR_LIMIT} artifacts in one exact reviewed run binding.` };
+  if (!store.registry || store.registry.loading || store.registry.error) return { binding: null, artifacts: [], error: "Load the current extension catalog before binding a run." };
+  const environment = registryBindingEnvironment(state.environment);
+  if (environment === null) return { binding: null, artifacts: [], field: "inp-registry-binding-environment", error: "Environment must be 1–64 UTF-8 bytes without whitespace, control characters, @, or /. Leave it empty to use the deployment default or untagged surface." };
+  if (!Array.isArray(state.surfaces) || !state.surfaces.length) return { binding: null, artifacts: [], error: "Choose at least one run-admissible artifact, or turn the binding off." };
+  if (new Set(state.surfaces).size !== state.surfaces.length) return { binding: null, artifacts: [], error: "Each artifact may be bound only once." };
+  const artifacts = registryBindingArtifacts(state);
+  if (artifacts.length !== state.surfaces.length) return { binding: null, artifacts, error: "The catalog changed and no longer contains every reviewed artifact. Refresh the plan." };
+  if (artifacts.some((item) => !REGISTRY_ADMISSION_FAMILIES.has(item.family))) return { binding: null, artifacts, error: "This runtime can admit only prompt, tool contract, and model settings artifacts into the run manifest." };
+  if (artifacts.some((item) => !item.commits.length)) return { binding: null, artifacts, error: "A declared artifact without an immutable commit cannot be used in a run binding." };
+  if (artifacts.filter((item) => item.family === "model_settings").length > 1) return { binding: null, artifacts, error: "A run manifest has one model slot. Choose only one model settings artifact." };
+  if (requireAcknowledgement && !state.acknowledged) return { binding: null, artifacts, field: "chk-registry-binding-ack", error: "Review the exact environment and artifact order, then acknowledge the admission boundary." };
+  const binding = { artifacts: artifacts.map((item) => ({ family: item.family, name: item.name })) };
+  if (environment) binding.environment = environment;
+  return { binding, artifacts, error: "" };
+}
+
+function registryBindingPrepare(payload) {
+  const state = registryBindingState();
+  if (!state) return { payload, plan: null };
+  if (state.submissionPending || state.uncertainSubmission) {
+    const checked = registryBindingValidation(state, true);
+    state.error = checked.error; state.errorField = ""; registryBindingRender();
+    $("registry-binding-error")?.focus({ preventScroll:true });
+    return null;
+  }
+  if (!state.enabled) return { payload, plan: null };
+  if (Object.prototype.hasOwnProperty.call(payload, "registry")) {
+    state.error = "The run JSON already contains a registry field. Remove it before using the visual binding planner, or turn the planner off.";
+    state.errorField = "";
+    registryBindingRender();
+    $("registry-binding-error")?.focus({ preventScroll: true });
+    return null;
+  }
+  const checked = registryBindingValidation(state, true);
+  if (!checked.binding) {
+    state.error = checked.error; state.errorField = checked.field || ""; registryBindingRender();
+    $(checked.field || "registry-binding-error")?.focus({ preventScroll: true });
+    return null;
+  }
+  state.error = ""; state.errorField = "";
+  return {
+    payload: { ...payload, registry: checked.binding },
+    plan: {
+      binding: registryBindingCopy(checked.binding), surfaces: checked.artifacts.map((item) => item.surface),
+      threadId: currentThread()?.thread_id || "", state,
+    },
+  };
+}
+
+function registryBindingPlanState(plan) {
+  if (plan && plan.state) return plan.state;
+  return registryBindingState(plan && plan.threadId || undefined);
+}
+
+function registryBindingPlanVisible(plan, state = registryBindingPlanState(plan)) {
+  const thread = currentThread();
+  return Boolean(thread && state && thread.thread_id === (plan && plan.threadId || thread.thread_id) && registryBindingState() === state);
+}
+
+function registryBindingAccepted(runId, plan) {
+  const state = registryBindingPlanState(plan);
+  const threadId = plan && plan.threadId || currentThread()?.thread_id;
+  if (!state || !plan || !navigationSafeId(runId) || !navigationSafeId(threadId)) return false;
+  state.lastSubmission = { runId, threadId, binding: registryBindingCopy(plan.binding), surfaces: [...plan.surfaces] };
+  state.submissionPending = false; state.uncertainSubmission = "";
+  state.acknowledged = false;
+  state.error = ""; state.errorField = "";
+  if (registryBindingPlanVisible(plan, state)) registryBindingRender();
+  return true;
+}
+
+function registryBindingSubmitted(plan) {
+  if (!plan) return;
+  const state = registryBindingPlanState(plan);
+  if (!state) return;
+  state.acknowledged = false;
+  state.submissionPending = true; state.uncertainSubmission = "";
+  state.error = ""; state.errorField = "";
+  if (registryBindingPlanVisible(plan, state)) registryBindingRender();
+}
+
+function registryBindingFailed(error, plan, knownRunId = null) {
+  if (!plan) return;
+  const state = registryBindingPlanState(plan);
+  if (!state) return;
+  state.submissionPending = false;
+  if (!knownRunId && interruptFailureUncertain(error)) {
+    state.uncertainSubmission = "Rusty may have accepted the prior run, but Studio did not receive its exact identity. Check server-side run evidence before deliberately abandoning this lock; retrying may duplicate effects.";
+  } else {
+    state.uncertainSubmission = "";
+    state.error = knownRunId ? `Run ${shortId(knownRunId)} was accepted, but its terminal stream evidence could not be corroborated. Load that run in Recorder instead of resubmitting it.` : runProofVisibleMessage(error && error.message);
+  }
+  if (registryBindingPlanVisible(plan, state)) registryBindingRender();
+}
+
+function registryBindingRunReceipt(value, threadId, allowedStatuses) {
+  const receipt = registryObject(value);
+  return receipt && navigationSafeId(receipt.run_id) && receipt.thread_id === threadId && allowedStatuses instanceof Set && allowedStatuses.has(receipt.status)
+    ? receipt.run_id : null;
+}
+
+function registryBindingStreamMetadata(value, threadId, existingRunId) {
+  const metadata = registryObject(value);
+  if (existingRunId || !metadata || !navigationSafeId(metadata.run_id) || metadata.thread_id !== threadId) return null;
+  return metadata.run_id;
+}
+
+function registryBindingResolution(value, surface, expectedEnvironment) {
+  const item = registryObject(value);
+  const allowed = ["surface", "tag", "candidate_id", "pointer", "digest", "model"];
+  if (!registryKeys(item, allowed, ["surface", "candidate_id", "pointer", "digest"]) || item.surface !== surface || !registryCandidateId(item.candidate_id) || !runProofHex(item.digest) || !REGISTRY_POINTER_SLOTS.has(item.pointer)) return null;
+  const family = surface.slice(0, surface.indexOf(":"));
+  const tagPresent = Object.prototype.hasOwnProperty.call(item, "tag");
+  const tag = tagPresent ? registryBindingEnvironment(item.tag) : "";
+  if (tagPresent && (!item.tag || tag === null)) return null;
+  if (expectedEnvironment && tag !== expectedEnvironment) return null;
+  const modelPresent = Object.prototype.hasOwnProperty.call(item, "model");
+  if (family === "model_settings") {
+    if (!modelPresent || registryString(item.model) === null) return null;
+  } else if (modelPresent) return null;
+  return { surface, tag, candidate_id: item.candidate_id, pointer: item.pointer, digest: item.digest, model: modelPresent ? item.model : null };
+}
+
+async function registryBindingArtifactMap(value, submission, events, cryptography = globalThis.crypto) {
+  const fixture = registryObject(value), snapshot = fixture && registryObject(fixture.journal);
+  const artifacts = snapshot && registryObject(snapshot.artifacts);
+  const refs = snapshot && registryObject(Object.prototype.hasOwnProperty.call(snapshot, "artifact_refs") ? snapshot.artifact_refs : {});
+  const exactEvents = snapshot && Array.isArray(snapshot.events) && snapshot.events.length === events.length &&
+    snapshot.events.every((event, index) => runProofCanonicalJson(event) === runProofCanonicalJson(events[index]));
+  if (!fixture || fixture.format_version !== 1 || !snapshot || snapshot.run_id !== submission.runId ||
+      snapshot.thread_id !== submission.threadId || !exactEvents || !artifacts || !refs || Object.keys(refs).length ||
+      !cryptography || !cryptography.subtle) return null;
+  const retained = Object.create(null);
+  for (const event of events) {
+    if (!event || event.kind !== "config_resolved" || !event.output || event.output.kind !== "artifact") continue;
+    const reference = registryObject(event.output.value), bytes = reference && recExactUnsigned(reference, "bytes");
+    if (!registryKeys(reference, ["sha256", "bytes"], ["sha256", "bytes"]) || !runProofHex(reference.sha256) || bytes === null ||
+        !Object.prototype.hasOwnProperty.call(artifacts, reference.sha256)) return null;
+    // Journal::store_payload hashes serde_json's insertion-order encoding of
+    // the typed ConfigResolution, not the proof subsystem's sorted-key form.
+    // JSON.parse preserves that wire order for ordinary string-key objects.
+    const value = artifacts[reference.sha256], exact = JSON.stringify(value);
+    if (exact == null || BigInt(agentUtf8Length(exact)) !== bytes) return null;
+    const digest = await cryptography.subtle.digest("SHA-256", new TextEncoder().encode(exact));
+    const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (sha256 !== reference.sha256) return null;
+    retained[reference.sha256] = value;
+  }
+  return retained;
+}
+
+function registryBindingOutput(ref, recorder) {
+  const item = registryObject(ref);
+  if (!registryKeys(item, ["kind", "value"], ["kind", "value"])) return null;
+  if (item.kind === "inline") return registryObject(item.value);
+  if (item.kind !== "artifact") return null;
+  const artifact = registryObject(item.value), bytes = artifact && recExactUnsigned(artifact, "bytes");
+  if (!registryKeys(artifact, ["sha256", "bytes"], ["sha256", "bytes"]) || !runProofHex(artifact.sha256) || bytes === null) return null;
+  return recorder && registryObject(recorder.admissionArtifacts) && registryObject(recorder.admissionArtifacts[artifact.sha256]);
+}
+
+function registryBindingEvidence(recorder = store.recorder, state = registryBindingState()) {
+  const submission = state && state.lastSubmission;
+  if (!submission) return null;
+  if (!recorder || recorder.runId !== submission.runId) return { state: "awaiting", message: `Run ${shortId(submission.runId)} was accepted. Load its complete journal to prove the resolved versions.` };
+  if (recorder.error || !recorder.exactEnvelope) return { state: "invalid", message: "The loaded journal does not carry an exact envelope for the accepted bound run." };
+  if (!recorder.complete) return { state: "awaiting", message: "The bound run journal is still partial. Final evidence is not claimed yet." };
+  const expectedEnvironment = submission.binding.environment || "";
+  const resolutionEvents = recorder.events.filter((event) => event && event.kind === "config_resolved");
+  if (resolutionEvents.length !== submission.surfaces.length || recorder.events.slice(0, resolutionEvents.length).some((event, index) => event !== resolutionEvents[index])) return { state: "invalid", message: "The complete journal does not begin with exactly one configuration resolution per reviewed artifact." };
+  const proof = [];
+  let previousId = null, observedDefault = null;
+  for (let index = 0; index < resolutionEvents.length; index += 1) {
+    const event = resolutionEvents[index], seq = recExactUnsigned(event, "seq");
+    const expectedSeq = BigInt(index), expectedId = `${submission.runId}:${index}`;
+    const parent = event.parent == null ? null : event.parent;
+    if (seq !== expectedSeq || event.id !== expectedId || event.run_id !== submission.runId || event.thread_id !== submission.threadId || event.effect !== "read_only" || event.status !== "ok" || parent !== previousId) return { state: "invalid", message: "The configuration-resolution events do not form the exact run-, thread-, and sequence-bound read-only admission chain." };
+    const output = registryBindingOutput(event.output, recorder);
+    const resolution = output && registryBindingResolution(output, submission.surfaces[index], expectedEnvironment);
+    if (!resolution) {
+      if (event.output && event.output.kind === "artifact") {
+        if (recorder.admissionArtifactsError) return { state: "awaiting", message: recorder.admissionArtifactsError, needsArtifacts: true };
+        return { state: "awaiting", message: "This configuration resolution is artifact-backed. Deliberately load the portable journal to verify its exact bytes before claiming admission proof.", needsArtifacts: true };
+      }
+      return { state: "invalid", message: "A configuration-resolution event does not bind the reviewed artifact, environment, pointer, candidate, and digest contract." };
+    }
+    if (!expectedEnvironment) {
+      if (observedDefault === null) observedDefault = resolution.tag;
+      else if (observedDefault !== resolution.tag) return { state: "invalid", message: "The deployment-default environment differs across one admission chain." };
+    }
+    proof.push(resolution); previousId = event.id;
+  }
+  return { state: "verified", message: `${proof.length} immutable version${proof.length === 1 ? "" : "s"} resolved at admission.`, proof, environment: expectedEnvironment || observedDefault || "" };
+}
+
+function registryBindingEvidenceHtml(state) {
+  const evidence = registryBindingEvidence(store.recorder, state);
+  if (!evidence) return "";
+  if (evidence.state !== "verified") return `<div class="note${evidence.state === "invalid" ? " err" : ""}" id="registry-binding-artifact-status" tabindex="-1">${escapeHtml(evidence.message)}${evidence.needsArtifacts ? ` <button type="button" class="small" id="btn-registry-binding-artifacts" data-registry-binding-artifacts${store.recorder?.admissionArtifactsLoading ? " disabled" : ""}>${store.recorder?.admissionArtifactsLoading ? "Loading portable evidence…" : "Load portable evidence"}</button><small class="field-help">This deliberate read downloads the run fixture. Studio verifies the referenced bytes, retains only configuration-resolution values in page memory, and discards the other artifact values.</small>` : ""}</div>`;
+  return `<section class="runtime-binding-evidence" id="registry-binding-artifact-status" tabindex="-1" aria-label="Authoritative configuration admission evidence"><div class="note"><b>Journal-proven admission for run <code>${escapeHtml(state.lastSubmission.runId)}</code>.</b> ${escapeHtml(evidence.message)} ${evidence.environment ? `Environment <code>${escapeHtml(registryEvidencePreview(evidence.environment))}</code>.` : "Untagged surface."}</div>${evidence.proof.map((item) => `<div class="runtime-binding-proof"><code>${escapeHtml(registryEvidencePreview(item.surface))}</code><span class="registry-status promoted">${escapeHtml(item.pointer)}</span><small>candidate ${escapeHtml(item.candidate_id)}</small><small>digest ${escapeHtml(item.digest)}${item.model !== null ? ` · model ${escapeHtml(registryEvidencePreview(item.model))}` : ""}</small></div>`).join("")}</section>`;
+}
+
+async function registryBindingLoadArtifacts() {
+  const operation = connectionOperation(currentThread()?.thread_id || null), state = registryBindingState(), recorder = store.recorder;
+  const submission = state && state.lastSubmission;
+  if (!operation || !submission || !recorder || recorder.runId !== submission.runId || recorder.admissionArtifactsLoading) return false;
+  const request = store.recLoadRequest;
+  recorder.admissionArtifactsLoading = true; recorder.admissionArtifactsError = ""; registryBindingRender();
+  $("registry-binding-artifact-status")?.focus?.({ preventScroll:true });
+  const current = () => request === store.recLoadRequest && connectionOperationCurrent(operation) && store.recorder === recorder && registryBindingState()?.lastSubmission === submission;
+  try {
+    const fixture = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(recorder.runId)}/fixture`, undefined, 8 * 1024 * 1024);
+    const retained = await registryBindingArtifactMap(fixture, submission, recorder.events);
+    if (!current()) return false;
+    if (!retained) throw new Error("The portable journal did not preserve the exact run, thread, events, referenced bytes, and SHA-256 content addresses.");
+    recorder.admissionArtifacts = retained; recorder.admissionArtifactsError = "";
+    $("registry-binding-announcer").textContent = "Artifact-backed configuration evidence verified.";
+    return true;
+  } catch (error) {
+    if (!current()) return false;
+    recorder.admissionArtifacts = null;
+    recorder.admissionArtifactsError = `Studio could not verify artifact-backed admission evidence: ${runProofVisibleMessage(error.message)}`;
+    return false;
+  } finally {
+    recorder.admissionArtifactsLoading = false;
+    if (current()) { registryBindingRender(); $("registry-binding-artifact-status")?.focus?.({ preventScroll:true }); }
+  }
+}
+
+function registryBindingRenderWindow(artifacts, selected) {
+  const selectedSet = new Set(selected);
+  const selectedArtifacts = artifacts.filter((item) => selectedSet.has(item.surface)).slice(0, REGISTRY_BINDING_RENDER_LIMIT);
+  const leading = artifacts.filter((item) => !selectedSet.has(item.surface)).slice(0, REGISTRY_BINDING_RENDER_LIMIT - selectedArtifacts.length);
+  const included = new Set([...selectedArtifacts, ...leading].map((item) => item.surface));
+  return artifacts.filter((item) => included.has(item.surface));
+}
+
+function registryBindingRender() {
+  const body = $("registry-binding-body"), summary = $("registry-binding-summary");
+  if (!body || !summary) return;
+  const active = document.activeElement;
+  const ownedFocus = Boolean(active && body.contains && body.contains(active));
+  const focusId = ownedFocus && active.id || "";
+  const focusSurface = ownedFocus && active.getAttribute && active.getAttribute("data-registry-binding-surface") || "";
+  const state = registryBindingState();
+  if (!state) { summary.textContent = "Unbound"; body.innerHTML = `<div class="empty">Select a local thread before planning a governed run.</div>`; return; }
+  const available = store.registry && !store.registry.loading && !store.registry.error ? store.registry.artifacts.filter((item) => REGISTRY_ADMISSION_FAMILIES.has(item.family)) : [];
+  const shown = registryBindingRenderWindow(available, state.surfaces);
+  const review = registryBindingValidation(state, false);
+  summary.textContent = state.enabled ? `${state.surfaces.length} artifact${state.surfaces.length === 1 ? "" : "s"} · ${registryEvidencePreview(state.environment || "deployment default")}` : "Unbound";
+  const options = available.length ? shown.map((item) => {
+    const checked = state.surfaces.includes(item.surface), disabled = !item.commits.length || (!checked && state.surfaces.length >= REGISTRY_BINDING_AUTHOR_LIMIT);
+    return `<label class="runtime-binding-option"><input type="checkbox" data-registry-binding-surface="${escapeHtml(item.surface)}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}><span><b>${escapeHtml(registryEvidencePreview(item.surface))}</b><small>${item.commits.length ? `${item.commits.length} immutable commit${item.commits.length === 1 ? "" : "s"}` : "No committed version · unavailable for admission"}</small></span></label>`;
+  }).join("") : `<div class="empty">${store.registryUnsupported ? "This server build has no extension registry." : "Load the Extension Catalog to choose run-admissible artifacts."} <button class="small" type="button" data-registry-binding-load>Load catalog</button></div>`;
+  const omitted = available.length - shown.length;
+  const envInvalid = state.errorField === "inp-registry-binding-environment", ackInvalid = state.errorField === "chk-registry-binding-ack";
+  body.innerHTML = `<div class="runtime-binding-signal" role="img" aria-label="Choose an environment and named artifacts. Rusty resolves their pointers when the run is admitted. The journal then proves exact candidates, pointer slots, and manifest digests."><div><b>Plan</b><span>Name environment and artifacts.</span></div><div class="registry-arrow" aria-hidden="true">→</div><div><b>Admit</b><span>Server resolves active or canary pointers.</span></div><div class="registry-arrow" aria-hidden="true">→</div><div><b>Prove</b><span>Journal records candidate and digest.</span></div></div><label class="chk"><input type="checkbox" id="chk-registry-binding-enabled"${state.enabled ? " checked" : ""}> Bind governed configuration into the next run</label><div class="runtime-binding-fields"${state.enabled ? "" : " hidden"}><label>Environment tag <input id="inp-registry-binding-environment" type="text" maxlength="64" spellcheck="false" value="${escapeHtml(state.environment)}" aria-invalid="${envInvalid}" aria-describedby="registry-binding-environment-help registry-binding-boundary${envInvalid ? " registry-binding-error" : ""}"><span class="field-help" id="registry-binding-environment-help">Leave empty for the deployment default or untagged surface.</span></label><fieldset class="runtime-binding-artifacts"><legend>Run-admissible artifacts · prompt, tool contract, model settings</legend><div class="runtime-binding-options">${options}</div>${omitted > 0 ? `<div class="field-help">Showing a ${shown.length}-artifact window. Open an artifact in the Extension Catalog to add it directly.</div>` : ""}</fieldset></div>${state.enabled && state.surfaces.length ? `<div class="runtime-binding-review"><b>Exact declaration order</b><ol>${state.surfaces.map((surface) => `<li>${escapeHtml(registryEvidencePreview(surface))}</li>`).join("")}</ol></div>` : ""}${state.enabled ? `<label class="chk" style="margin-top:10px"><input type="checkbox" id="chk-registry-binding-ack"${state.acknowledged ? " checked" : ""} aria-invalid="${ackInvalid}" aria-describedby="registry-binding-boundary${ackInvalid ? " registry-binding-error" : ""}"> I reviewed this environment and artifact order. I understand catalog membership is not serving proof; admission may select a canary, and only the run journal proves the resolved versions.</label>` : ""}<div id="registry-binding-boundary" class="field-help">Studio authors and fully displays at most ${REGISTRY_BINDING_AUTHOR_LIMIT} artifacts in one exact-order plan. This plan lives only in page memory for this local thread. It is cleared on connection change, thread removal, or reload. Acknowledgement is one submission only and clears before network admission.</div>${state.uncertainSubmission ? `<div class="note err" role="alert">${escapeHtml(state.uncertainSubmission)} <button type="button" class="small" data-registry-binding-abandon>Abandon uncertainty and plan another run</button></div>` : ""}${state.error ? `<div class="note err" id="registry-binding-error" role="alert" tabindex="-1">${escapeHtml(state.error)}</div>` : ""}${review.error && state.enabled && !state.error && !state.uncertainSubmission ? `<div class="note">${escapeHtml(review.error)}</div>` : ""}${registryBindingEvidenceHtml(state)}`;
+  const restore = focusSurface
+    ? Array.from(body.querySelectorAll("[data-registry-binding-surface]")).find((node) => node.getAttribute("data-registry-binding-surface") === focusSurface)
+    : focusId && $(focusId);
+  if (ownedFocus) (restore || $("registry-binding-toggle"))?.focus?.({ preventScroll: true });
+  const evidence = registryBindingEvidence(store.recorder, state);
+  $("registry-binding-announcer").textContent = evidence ? evidence.message : "";
+}
+
+function registryBindSurface(surface) {
+  const thread = currentThread(), state = registryBindingState();
+  const artifact = store.registry && store.registry.artifacts.find((item) => item.surface === surface);
+  if (!thread || !state) { toast("Select a local thread before adding a runtime binding.", "warn"); return false; }
+  if (!artifact || !REGISTRY_ADMISSION_FAMILIES.has(artifact.family) || !artifact.commits.length) { toast("This artifact is not run-admissible in the current manifest contract.", "warn"); return false; }
+  if (!state.surfaces.includes(surface) && state.surfaces.length >= REGISTRY_BINDING_AUTHOR_LIMIT) { toast(`Studio authors at most ${REGISTRY_BINDING_AUTHOR_LIMIT} artifacts in one exact reviewed run binding.`, "warn"); return false; }
+  if (artifact.family === "model_settings") {
+    const existing = registryBindingArtifacts(state).find((item) => item.family === "model_settings" && item.surface !== surface);
+    if (existing) { toast(`A run can bind only one model settings artifact. Remove ${existing.surface} first.`, "warn"); return false; }
+  }
+  if (!state.surfaces.includes(surface)) state.surfaces.push(surface);
+  state.enabled = true; state.acknowledged = false; state.error = ""; state.errorField = "";
+  $("registry-binding-card").open = true; registryBindingRender();
+  Array.from($("registry-binding-body").querySelectorAll("[data-registry-binding-surface]")).find((node) => node.getAttribute("data-registry-binding-surface") === surface)?.focus({ preventScroll: true });
+  toast(`${surface} added to the next run plan. Review and acknowledge it in the selected thread.`, "ok");
+  return true;
+}
+
 /* ---------------- run: background + poll ---------------- */
 
 async function runBackground() {
@@ -5589,14 +5963,24 @@ async function runBackground() {
   const operation = connectionOperation(t.thread_id); if (!operation) return;
   const connection = operation.connection;
   const payload = readPayload(); if (payload === null) return;
+  const prepared = registryBindingPrepare(payload); if (!prepared) return;
+  registryBindingSubmitted(prepared.plan);
   try {
-    const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs`, withRunOpts(payload));
+    const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs`, withRunOpts(prepared.payload));
+    if (!connectionOperationIdentityCurrent(operation)) return;
+    const runId = registryBindingRunReceipt(res, t.thread_id, REGISTRY_BACKGROUND_STATUSES);
+    if (!runId) throw new Error("Rusty returned a run receipt outside the exact thread-bound contract. The submission may have been accepted; review server evidence before retrying.");
+    registryBindingAccepted(runId, prepared.plan);
     if (!connectionOperationCurrent(operation)) return;
-    toast(`run ${shortId(res.run_id)} started`, "ok");
-    setRunStatus(res.status, `run ${shortId(res.run_id)}`);
-    noteRunId(res.run_id);
-    pollRun(res.run_id, operation);
-  } catch (e) { if (connectionOperationCurrent(operation)) toast(e.message, "err"); }
+    toast(`run ${shortId(runId)} started`, "ok");
+    setRunStatus(res.status, `run ${shortId(runId)}`);
+    noteRunId(runId);
+    pollRun(runId, operation);
+  } catch (e) {
+    if (!connectionOperationIdentityCurrent(operation)) return;
+    registryBindingFailed(e, prepared.plan);
+    if (connectionOperationCurrent(operation)) toast(e.message, "err");
+  }
 }
 
 function pollRun(runId, sourceOperation) {
@@ -5656,19 +6040,28 @@ async function runWait(payloadOverride, reportOutcome = false, applyRunOptions =
   const connection = operation.connection;
   const payload = payloadOverride !== undefined ? payloadOverride : readPayload();
   if (payload === null) return null;
+  const prepared = payloadOverride === undefined ? registryBindingPrepare(payload) : { payload, plan: null };
+  if (!prepared) return null;
+  registryBindingSubmitted(prepared.plan);
   setRunStatus("running", "runs/wait");
   try {
-    const wirePayload = applyRunOptions ? withRunOpts({ ...payload }) : { ...payload };
+    const wirePayload = applyRunOptions ? withRunOpts({ ...prepared.payload }) : { ...prepared.payload };
     const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs/wait`, wirePayload);
-    if (!connectionOperationCurrent(operation)) return;
-    setRunStatus(res.status, `run ${shortId(res.run_id)}`);
+    if (!connectionOperationIdentityCurrent(operation)) return;
+    const runId = registryBindingRunReceipt(res, t.thread_id, REGISTRY_TERMINAL_STATUSES);
+    if (!runId) throw new Error("Rusty returned a run result outside the exact thread-bound contract. The submission may have been accepted; review server evidence before retrying.");
+    registryBindingAccepted(runId, prepared.plan);
+    if (!connectionOperationCurrent(operation)) return runOperationResult(reportOutcome, res);
+    setRunStatus(res.status, `run ${shortId(runId)}`);
     if (!reportOutcome) showRunResult(res);
     refreshState();
     refreshHistory();
-    recAutoLoad(res.run_id);
+    recAutoLoad(runId);
     return runOperationResult(reportOutcome, res);
   } catch (e) {
-    if (!connectionOperationCurrent(operation)) return null;
+    if (!connectionOperationIdentityCurrent(operation)) return null;
+    registryBindingFailed(e, prepared.plan);
+    if (!connectionOperationCurrent(operation)) return runOperationResult(reportOutcome, null, e);
     setRunStatus(null);
     toast(e.message, "err");
     return runOperationResult(reportOutcome, null, e);
@@ -5677,6 +6070,18 @@ async function runWait(payloadOverride, reportOutcome = false, applyRunOptions =
 
 function streamOperationCurrent(controller, operation) {
   return store.streamAbort === controller && connectionOperationCurrent(operation);
+}
+
+function registryBindingStreamCurrent(controller, operation, plan) {
+  const current = streamOperationCurrent(controller, operation);
+  const state = registryBindingPlanState(plan);
+  if (!current && plan && state && state.submissionPending && connectionOperationIdentityCurrent(operation)) {
+    registryBindingFailed(new ApiError(0, {
+      error:"stream_ownership_lost",
+      message:"The initiating thread stopped owning the stream before Studio received an exact run identity.",
+    }), plan);
+  }
+  return current;
 }
 
 /* ---------------- run: SSE stream via fetch + ReadableStream ----------------
@@ -5690,15 +6095,18 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
   const connection = operation.connection;
   const payload = payloadOverride !== undefined ? { ...payloadOverride } : readPayload();
   if (payload === null) return null;
-  payload.stream_mode = selectedStreamModes();
-  if (applyRunOptions) withRunOpts(payload);
+  const prepared = payloadOverride === undefined ? registryBindingPrepare(payload) : { payload, plan: null };
+  if (!prepared) return null;
+  registryBindingSubmitted(prepared.plan);
+  prepared.payload.stream_mode = selectedStreamModes();
+  if (applyRunOptions) withRunOpts(prepared.payload);
 
   abortStream();
   const ctrl = new AbortController();
   store.streamAbort = ctrl;
   store.streamRunId = null;
   clearFeed();
-  feedEvent("metadata", { note: `POST /threads/${t.thread_id}/runs/stream`, stream_mode: payload.stream_mode }, "-");
+  feedEvent("metadata", { note: `POST /threads/${t.thread_id}/runs/stream`, stream_mode: prepared.payload.stream_mode }, "-");
   setRunStatus("running", "streaming");
 
   const headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
@@ -5707,25 +6115,28 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
   let res;
   try {
     res = await fetch(connection.baseUrl + `/threads/${t.thread_id}/runs/stream`, {
-      method: "POST", headers, body: JSON.stringify(payload), signal: ctrl.signal,
+      method: "POST", headers, body: JSON.stringify(prepared.payload), signal: ctrl.signal,
     });
   } catch (e) {
-    if (!streamOperationCurrent(ctrl, operation)) return;
+    if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) return;
+    const error = new ApiError(0, { error: e.name === "AbortError" ? "aborted" : "network", message: e.message });
+    registryBindingFailed(error, prepared.plan);
     if (e.name !== "AbortError") {
       feedEvent("error", { error: "network", message: e.message }, "-");
       setRunStatus(null);
     }
-    return runOperationResult(reportOutcome, null,
-      new ApiError(0, { error: e.name === "AbortError" ? "aborted" : "network", message: e.message }));
+    return runOperationResult(reportOutcome, null, error);
   }
   if (!res.ok || !res.body) {
-    if (!streamOperationCurrent(ctrl, operation)) return;
+    if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) { res.body?.cancel?.().catch?.(() => {}); return; }
     let body = null;
     try { body = await res.json(); } catch { /* ignore */ }
-    if (!streamOperationCurrent(ctrl, operation)) return;
+    if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) return;
     feedEvent("error", body || { error: "http", message: `HTTP ${res.status}` }, "-");
     setRunStatus(null);
-    return runOperationResult(reportOutcome, null, new ApiError(res.status, body));
+    const error = new ApiError(res.status, body);
+    registryBindingFailed(error, prepared.plan);
+    return runOperationResult(reportOutcome, null, error);
   }
 
   const reader = res.body.getReader();
@@ -5737,7 +6148,7 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (!streamOperationCurrent(ctrl, operation)) return;
+      if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) { reader.cancel().catch(() => {}); return; }
       if (done) break;
       buf += decoder.decode(value, { stream: true });
       let match;
@@ -5747,6 +6158,12 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
         buf = buf.slice(match.index + match[0].length);
         const frame = parseSseFrame(raw);
         if (!frame) continue;
+        if (frame.event === "metadata") {
+          const runId = registryBindingStreamMetadata(frame.data, t.thread_id, store.streamRunId);
+          if (!runId) { reader.cancel().catch(() => {}); throw new Error("The stream metadata did not bind one exact new run to the initiating thread."); }
+          store.streamRunId = runId; noteRunId(runId);
+          registryBindingAccepted(runId, prepared.plan);
+        }
         feedEvent(frame.event, frame.data, frame.id);
         if (frame.event === "end") endData = frame.data;
       }
@@ -5756,18 +6173,50 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
     buf += decoder.decode();
     const tail = parseSseFrame(buf);
     if (tail) {
+      if (tail.event === "metadata") {
+        const runId = registryBindingStreamMetadata(tail.data, t.thread_id, store.streamRunId);
+        if (!runId) throw new Error("The stream metadata did not bind one exact new run to the initiating thread.");
+        store.streamRunId = runId; noteRunId(runId);
+        registryBindingAccepted(runId, prepared.plan);
+      }
       feedEvent(tail.event, tail.data, tail.id);
       if (tail.event === "end") endData = tail.data;
     }
   } catch (e) {
-    if (!streamOperationCurrent(ctrl, operation)) return;
+    if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) return;
     if (e.name !== "AbortError") {
       feedEvent("error", { error: "stream", message: e.message }, "-");
       streamError = new ApiError(0, { error: "stream", message: e.message });
     }
   }
 
-  if (!streamOperationCurrent(ctrl, operation)) return;
+  if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) return;
+
+  if (endData && !store.streamRunId) {
+    streamError = new ApiError(0, { error:"stream_identity_missing", message:"The stream reached a terminal frame without one exact run identity. The run may exist; do not retry until server evidence is checked." });
+    registryBindingFailed(streamError, prepared.plan);
+    endData = null;
+  }
+
+  if (endData && endData.status !== "interrupted") {
+    let terminal = null;
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const observed = await apiForConnection(connection, "GET", `/runs/${encodeURIComponent(store.streamRunId || "")}`);
+        if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) return;
+        const runId = registryBindingRunReceipt(observed, t.thread_id, REGISTRY_TERMINAL_STATUSES);
+        if (runId === store.streamRunId && observed.status === endData.status) { terminal = observed; break; }
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (!terminal) throw new Error("The terminal stream frame did not reconcile with the exact run and thread status.");
+      endData = terminal;
+    } catch (error) {
+      if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) return;
+      streamError = error instanceof ApiError ? error : new ApiError(0, { error:"stream_terminal_unverified", message:error.message });
+      registryBindingFailed(streamError, prepared.plan, store.streamRunId);
+      endData = null;
+    }
+  }
 
   if (endData) {
     setRunStatus(endData.status, "stream ended");
@@ -5786,7 +6235,7 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
       if (runId && boundaryDraft) {
         try {
           terminal = await apiForConnection(connection, "GET", `/runs/${encodeURIComponent(runId)}`);
-          if (!streamOperationCurrent(ctrl, operation) || store.interruptDecision !== boundaryDraft) return;
+          if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan) || store.interruptDecision !== boundaryDraft) return;
           const evidence = interruptBoundaryFromRun(terminal, { threadId: t.thread_id, runId, interrupt: endData.interrupt });
           if (evidence.verified) {
             endData = terminal;
@@ -5795,7 +6244,7 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
             boundaryError = evidence.boundaryError;
           }
         } catch (error) {
-          if (!streamOperationCurrent(ctrl, operation) || store.interruptDecision !== boundaryDraft) return;
+          if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan) || store.interruptDecision !== boundaryDraft) return;
           boundaryError = `Studio could not corroborate the streamed suspension: ${error.message}`;
         }
       }
@@ -5818,6 +6267,7 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
   store.streamAbort = null;
   if (!endData) {
     const error = streamError || new ApiError(0, { error: "stream_incomplete", message: "The event stream ended without a terminal frame." });
+    registryBindingFailed(error, prepared.plan, store.streamRunId);
     return runOperationResult(reportOutcome, null, error);
   }
   return runOperationResult(reportOutcome, endData);
@@ -5853,12 +6303,6 @@ function feedEvent(kind, data, id) {
   const feed = $("feed");
   const empty = feed.querySelector(".empty");
   if (empty) empty.remove();
-  // The metadata frame opens every stream and carries the run id — capture it
-  // for the Flight Recorder auto-load at stream end.
-  if (kind === "metadata" && data && typeof data === "object" && data.run_id) {
-    store.streamRunId = data.run_id;
-    noteRunId(data.run_id);
-  }
   const cls = ["metadata","updates","values","messages","error","end"].includes(kind) ? kind : "metadata";
   const div = document.createElement("div");
   div.className = `evt ${cls}`;
@@ -6691,13 +7135,17 @@ async function recLoad(runId, quiet, reconcileNavigation = true) {
   try {
     const res = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(runId)}/events`);
     if (request !== store.recLoadRequest || !connectionOperationCurrent(operation)) return;
+    const exactEnvelope = Boolean(res && res.run_id === runId && Array.isArray(res.events) && typeof res.complete === "boolean");
     store.qualityCase = null;
     store.recorder = {
       runId: res.run_id || runId,
       requestedRunId: runId,
-      exactEnvelope: Boolean(res && res.run_id === runId && Array.isArray(res.events) && typeof res.complete === "boolean"),
+      exactEnvelope,
       events: recSortEvents(res.events),
       complete: recFinalized(res.complete),
+      admissionArtifacts: null,
+      admissionArtifactsError: "",
+      admissionArtifactsLoading: false,
       selected: null,
       error: null,
     };
@@ -6747,6 +7195,7 @@ function recRender() {
   const body = $("rec-body"), detail = $("rec-detail"), scrub = $("rec-scrub");
   const investigation = $("rec-investigation");
   const r = store.recorder;
+  registryBindingRender();
   runProofRender();
   qualityRender();
   qualityLibraryRender();
@@ -20481,9 +20930,11 @@ function registryDetailHtml(state, artifact) {
   if (state.detailError) return `${registryErrorHtml(state.detailError)}<button class="small" type="button" data-registry-retry>Retry history</button>`;
   const history = state.history && state.history.surface === artifact.surface ? state.history.commits : [];
   const shownHistory = history.slice(-REGISTRY_COMMIT_RENDER_LIMIT), omitted = history.length - shownHistory.length;
+  const bindable = REGISTRY_ADMISSION_FAMILIES.has(artifact.family) && history.length;
+  const bindAction = `<div class="registry-detail-actions"><span class="registry-family">${escapeHtml(artifact.family.replaceAll("_", " "))}</span>${bindable ? `<button class="small primary" type="button" data-registry-bind="${escapeHtml(artifact.surface)}">Use in next run</button>` : ""}</div>`;
   const compare = shownHistory.length >= 2 ? `<section class="registry-compare" aria-labelledby="registry-compare-title"><h3 id="registry-compare-title" tabindex="-1">Compare committed versions</h3><p>Rusty derives this view from two immutable candidates. It is diagnostic evidence, not a stored artifact or serving claim.</p><div class="registry-compare-controls"><label>From<select id="sel-registry-from">${shownHistory.map((item, index) => `<option value="${escapeHtml(item.candidate_id)}"${item.candidate_id === state.from ? " selected" : ""}>${omitted + index + 1} · ${escapeHtml(shortId(item.candidate_id))}</option>`).join("")}</select></label><span class="registry-arrow" aria-hidden="true">→</span><label>To<select id="sel-registry-to">${shownHistory.map((item, index) => `<option value="${escapeHtml(item.candidate_id)}"${item.candidate_id === state.to ? " selected" : ""}>${omitted + index + 1} · ${escapeHtml(shortId(item.candidate_id))}</option>`).join("")}</select></label><button class="small primary" type="button" data-registry-compare${state.diffLoading ? " disabled" : ""}>${state.diffLoading ? "Comparing…" : "Compare"}</button></div>${state.diffError ? registryErrorHtml(state.diffError) : ""}${registryDiffHtml(state.diff)}</section>` : `<div class="note">${history.length ? "A second immutable commit is needed before a diff exists." : "This declared artifact has no committed versions yet."}</div>`;
   const drift = state.history && state.history.surface === artifact.surface && state.history.appended ? `<div class="note">${state.history.appended} newer commit${state.history.appended === 1 ? " was" : "s were"} appended between the catalog and history reads. Studio reconciled the exact catalog prefix to this newer authoritative spine.</div>` : "";
-  return `<div class="registry-detail-head"><div><h2 id="registry-detail-title" tabindex="-1">${escapeHtml(registryEvidencePreview(artifact.name))}</h2><p>${escapeHtml(registryEvidencePreview(artifact.surface))}</p></div><span class="registry-family">${escapeHtml(artifact.family.replaceAll("_", " "))}</span></div><div class="registry-facts"><div class="registry-fact"><b>${escapeHtml(registryEvidencePreview(registryOwnerText(artifact.owner)))}</b><span>accountable owner</span></div><div class="registry-fact"><b>${escapeHtml(artifact.created_at)}</b><span>declared at</span></div><div class="registry-fact"><b>${history.length}</b><span>immutable commits</span></div></div>${drift}<h3 class="section">Commit spine · oldest to latest</h3>${omitted ? `<div class="note">Showing the latest ${shownHistory.length} of ${history.length} validated commits.</div>` : ""}<div class="registry-lineage">${shownHistory.map((commit, index) => registryCommitHtml(commit, index, shownHistory.length)).join("") || '<div class="muted tiny">No candidate has joined this artifact.</div>'}</div>${compare}`;
+  return `<div class="registry-detail-head"><div><h2 id="registry-detail-title" tabindex="-1">${escapeHtml(registryEvidencePreview(artifact.name))}</h2><p>${escapeHtml(registryEvidencePreview(artifact.surface))}</p></div>${bindAction}</div><div class="registry-facts"><div class="registry-fact"><b>${escapeHtml(registryEvidencePreview(registryOwnerText(artifact.owner)))}</b><span>accountable owner</span></div><div class="registry-fact"><b>${escapeHtml(artifact.created_at)}</b><span>declared at</span></div><div class="registry-fact"><b>${history.length}</b><span>immutable commits</span></div></div>${drift}<h3 class="section">Commit spine · oldest to latest</h3>${omitted ? `<div class="note">Showing the latest ${shownHistory.length} of ${history.length} validated commits.</div>` : ""}<div class="registry-lineage">${shownHistory.map((commit, index) => registryCommitHtml(commit, index, shownHistory.length)).join("") || '<div class="muted tiny">No candidate has joined this artifact.</div>'}</div>${compare}`;
 }
 
 function registryFilters() {
@@ -22279,6 +22730,8 @@ function init() {
   $("registry-list").addEventListener("keydown", registryActivate);
   $("registry-detail").addEventListener("click", (event) => {
     if (event.target.closest("[data-registry-retry]")) { registryLoadHistory(store.registry && store.registry.selected, true); return; }
+    const bind = event.target.closest("[data-registry-bind]");
+    if (bind) { registryBindSurface(bind.getAttribute("data-registry-bind")); return; }
     if (event.target.closest("[data-registry-compare]")) registryCompare();
   });
   $("registry-detail").addEventListener("change", (event) => {
@@ -22289,6 +22742,60 @@ function init() {
     const focusId = event.target.id;
     registryRender();
     $(focusId)?.focus({ preventScroll: true });
+  });
+  $("registry-binding-card").addEventListener("toggle", () => { if ($("registry-binding-card").open) registryBindingRender(); });
+  $("registry-binding-body").addEventListener("click", async (event) => {
+    if (event.target.closest("[data-registry-binding-abandon]")) {
+      const state = registryBindingState(); if (!state) return;
+      state.submissionPending = false; state.uncertainSubmission = ""; state.acknowledged = false; state.error = ""; state.errorField = "";
+      registryBindingRender(); $("chk-registry-binding-ack")?.focus({ preventScroll:true }); return;
+    }
+    if (event.target.closest("[data-registry-binding-artifacts]")) { await registryBindingLoadArtifacts(); return; }
+    if (!event.target.closest("[data-registry-binding-load]")) return;
+    const operation = connectionOperation(currentThread()?.thread_id || null);
+    if (!operation) return;
+    await registryLoad(true);
+    if (!connectionOperationCurrent(operation)) return;
+    registryBindingRender();
+    $("chk-registry-binding-enabled")?.focus({ preventScroll: true });
+  });
+  $("registry-binding-body").addEventListener("input", (event) => {
+    if (event.target.id !== "inp-registry-binding-environment") return;
+    const state = registryBindingState(); if (!state) return;
+    state.environment = event.target.value; state.acknowledged = false; state.error = ""; state.errorField = "";
+    event.target.setAttribute("aria-invalid", "false");
+    event.target.setAttribute("aria-describedby", "registry-binding-environment-help registry-binding-boundary");
+    $("registry-binding-error")?.remove();
+    $("chk-registry-binding-ack") && ($("chk-registry-binding-ack").checked = false);
+    $("registry-binding-summary").textContent = `${state.surfaces.length} artifact${state.surfaces.length === 1 ? "" : "s"} · ${registryEvidencePreview(state.environment || "deployment default")}`;
+  });
+  $("registry-binding-body").addEventListener("change", (event) => {
+    const state = registryBindingState(); if (!state) return;
+    if (event.target.id === "chk-registry-binding-enabled") {
+      state.enabled = event.target.checked; state.acknowledged = false; state.error = ""; state.errorField = "";
+      registryBindingRender(); $("chk-registry-binding-enabled")?.focus({ preventScroll: true }); return;
+    }
+    if (event.target.id === "inp-registry-binding-environment") {
+      state.environment = event.target.value; state.acknowledged = false; state.error = ""; state.errorField = "";
+      registryBindingRender(); $("inp-registry-binding-environment")?.focus({ preventScroll: true }); return;
+    }
+    if (event.target.id === "chk-registry-binding-ack") {
+      state.acknowledged = event.target.checked; state.error = ""; state.errorField = "";
+      registryBindingRender(); $("chk-registry-binding-ack")?.focus({ preventScroll: true }); return;
+    }
+    const surface = event.target.getAttribute("data-registry-binding-surface");
+    if (!surface) return;
+    state.error = ""; state.errorField = "";
+    if (event.target.checked) {
+      const artifact = store.registry && store.registry.artifacts.find((item) => item.surface === surface);
+      const otherModel = artifact && artifact.family === "model_settings" && registryBindingArtifacts(state).find((item) => item.family === "model_settings" && item.surface !== surface);
+      if (otherModel) { event.target.checked = false; state.error = `A run can bind only one model settings artifact. Remove ${otherModel.surface} first.`; }
+      else if (!state.surfaces.includes(surface) && state.surfaces.length >= REGISTRY_BINDING_AUTHOR_LIMIT) { event.target.checked = false; state.error = `Studio authors at most ${REGISTRY_BINDING_AUTHOR_LIMIT} artifacts in one exact reviewed run binding.`; }
+      else if (!state.surfaces.includes(surface)) state.surfaces.push(surface);
+    } else state.surfaces = state.surfaces.filter((item) => item !== surface);
+    state.acknowledged = false;
+    const focusSurface = surface; registryBindingRender();
+    Array.from($("registry-binding-body").querySelectorAll("[data-registry-binding-surface]")).find((node) => node.getAttribute("data-registry-binding-surface") === focusSurface)?.focus({ preventScroll: true });
   });
   $("learn-detail").addEventListener("input", learnHandleEdit);
   $("learn-detail").addEventListener("change", learnHandleEdit);
