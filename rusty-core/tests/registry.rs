@@ -31,17 +31,18 @@ use serde::Serialize;
 use serde_json::json;
 
 use rusty_agent_runtime::learn::{
-    surface_for_kind, AutoPromotion, Candidate, CandidateContent, CandidateEvaluation, CandidateId,
-    CandidateKind, EnvelopeRule, EnvironmentTag, EvidenceSpan, MiddlewareLayerConfig,
-    PromotionEnvelope, PromotionReceipt, RollbackReceipt, VersionPointer,
+    surface_for_kind, AutoPromotion, CanaryBinding, Candidate, CandidateContent,
+    CandidateEvaluation, CandidateId, CandidateKind, EnvelopeRule, EnvironmentTag, EvidenceSpan,
+    MiddlewareLayerConfig, PromotionEnvelope, PromotionReceipt, RollbackReceipt, VersionPointer,
 };
 use rusty_agent_runtime::memory::{
     ContextBudget, MemoryKind, MemoryQuery, ProvenanceAuthor, MEMORY_SCHEMA_VERSION,
 };
-use rusty_agent_runtime::record::DecisionFamily;
+use rusty_agent_runtime::record::{sha256_hex, DecisionFamily, RunEventKind, RunManifest};
 use rusty_agent_runtime::registry::{
-    diff_candidates, ArtifactCommit, ArtifactRecord, LeafChange, LeafModification, RegistryDiff,
-    RegistryError, TextDiffLine,
+    diff_candidates, pointer_admission, resolution_pin, ArtifactCommit, ArtifactRecord,
+    ConfigResolution, LeafChange, LeafModification, PointerBinding, RegistryDiff, RegistryError,
+    TextDiffLine,
 };
 
 // ---------- golden-file machinery (the tests/learn.rs discipline) ----------
@@ -683,4 +684,215 @@ fn the_gate_covers_registry_kinds_through_their_envelope_rules() {
             rusty_agent_runtime::learn::PromotionRefusal::NotEvaluated { .. }
         ))
     ));
+}
+
+// ---------- admission resolution (R0.11 wave 2) ----------
+
+/// A tagged, active-slot resolution of the shared prompt artifact.
+fn prompt_resolution() -> ConfigResolution {
+    let candidate = prompt_candidate("You are a careful support agent.");
+    let (digest, model) = resolution_pin(&candidate).unwrap();
+    ConfigResolution {
+        surface: candidate.surface(),
+        tag: Some(EnvironmentTag::new("prod").unwrap()),
+        candidate_id: candidate.candidate_id,
+        pointer: PointerBinding::Active,
+        digest,
+        model,
+    }
+}
+
+#[test]
+fn golden_config_resolution_shape() {
+    assert_golden("config_resolution.json", &prompt_resolution());
+}
+
+#[test]
+fn golden_config_resolution_model_settings_shape() {
+    // The second shape the wave ships: the canary slot admitted, and the
+    // model identifier carried alongside the parameters digest (the
+    // manifest's `model` slot is an identifier, and the walk is
+    // incomplete without it).
+    let candidate = model_settings_candidate();
+    let (digest, model) = resolution_pin(&candidate).unwrap();
+    let resolution = ConfigResolution {
+        surface: candidate.surface(),
+        tag: Some(EnvironmentTag::new("staging").unwrap()),
+        candidate_id: candidate.candidate_id,
+        pointer: PointerBinding::Canary,
+        digest,
+        model,
+    };
+    assert_golden("config_resolution_model_settings.json", &resolution);
+}
+
+#[test]
+fn golden_registry_event_kinds_shape() {
+    // The wave's additive RunEventKind wire name (the
+    // `learn_event_kinds.json` discipline): pinned so no wire shape
+    // lands unpinned, appended after `signing_key_rotated` per the
+    // additive evolution rule every variant since R0.6 followed.
+    assert_golden(
+        "registry_event_kinds.json",
+        &vec![RunEventKind::ConfigResolved],
+    );
+}
+
+#[test]
+fn resolution_pin_matches_the_manifest_pin_functions() {
+    // One derivation, two homes: the journaled digest and the digest the
+    // R0.7 pin functions record must agree by construction, for every
+    // resolvable family.
+    let prompt = prompt_candidate("You are a careful support agent.");
+    let (digest, model) = resolution_pin(&prompt).unwrap();
+    let manifest = RunManifest::new().pin_prompt("system", "You are a careful support agent.");
+    assert_eq!(digest, manifest.prompts["system"]);
+    assert_eq!(digest, sha256_hex(b"You are a careful support agent."));
+    assert_eq!(model, None);
+
+    let contract = tool_contract_candidate();
+    let (digest, model) = resolution_pin(&contract).unwrap();
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer", "default": 5},
+        },
+        "required": ["query"],
+    });
+    let manifest = RunManifest::new().pin_tool_schema("web_search", &schema);
+    assert_eq!(digest, manifest.tool_schemas["web_search"]);
+    assert_eq!(model, None);
+
+    let settings = model_settings_candidate();
+    let (digest, model) = resolution_pin(&settings).unwrap();
+    let parameters = json!({"temperature": 0.2, "seed": 42, "max_tokens": 2048});
+    let manifest = RunManifest::new().pin_model("gpt-5.2-2026-06-01", &parameters);
+    assert_eq!(digest, manifest.model_params.as_deref().unwrap());
+    assert_eq!(model.as_deref(), Some("gpt-5.2-2026-06-01"));
+}
+
+#[test]
+fn resolution_pin_refuses_kinds_without_a_manifest_digest_slot() {
+    // Policies bind through the checkpoint header, tool permissions
+    // through the capsule machinery, memory configuration and middleware
+    // compositions in their own waves — a resolution request for any of
+    // them is refused, not faked.
+    let memory_scope = rusty_agent_runtime::memory::ScopeAddress::new(
+        rusty_agent_runtime::memory::MemoryScope::Agent,
+        "support-1",
+    );
+    for content in [
+        CandidateContent::Policy {
+            family: DecisionFamily::Retry,
+            parameters: json!({"max_attempts": 3}),
+        },
+        CandidateContent::MemorySet {
+            scope: memory_scope,
+            adds: Vec::new(),
+            supersedes: Vec::new(),
+        },
+        CandidateContent::ToolPermission {
+            tool: "shell".into(),
+            direction: rusty_agent_runtime::learn::GrantDirection::Narrow,
+        },
+        CandidateContent::MemoryConfiguration {
+            name: "default".into(),
+            budget: ContextBudget::new(4096),
+            default_filters: MemoryQuery::default(),
+            schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
+        },
+        CandidateContent::MiddlewareComposition {
+            name: "default".into(),
+            layers: Vec::new(),
+        },
+    ] {
+        let candidate =
+            Candidate::new(content, operator(), EvidenceSpan::default(), ts(1)).unwrap();
+        assert!(
+            matches!(
+                resolution_pin(&candidate),
+                Err(RegistryError::UnresolvableKind { .. })
+            ),
+            "{} must refuse",
+            candidate.kind().as_str()
+        );
+    }
+}
+
+#[test]
+fn pointer_admission_binds_canary_only_when_the_draw_admits() {
+    let active = CandidateId::from("a".repeat(64));
+    let canary = CandidateId::from("b".repeat(64));
+    let pointer = |fraction: f64| VersionPointer {
+        surface: prompt_candidate("p")
+            .surface()
+            .tagged(&EnvironmentTag::new("prod").unwrap()),
+        active: Some(active.clone()),
+        canary: Some(CanaryBinding {
+            candidate_id: canary.clone(),
+            fraction,
+        }),
+    };
+
+    // A full-fraction canary admits every run; the slot is journaled as
+    // the canary's, not the active version's.
+    assert_eq!(
+        pointer_admission(&pointer(1.0), "run-1"),
+        Some((canary.clone(), PointerBinding::Canary))
+    );
+    // A negligible fraction practically never admits: the active version
+    // serves. (The seeded draw's uniformity is pinned in
+    // `learn::canary_admits`' own tests; here the composition.)
+    assert_eq!(
+        pointer_admission(&pointer(f64::MIN_POSITIVE / u64::MAX as f64), "run-1"),
+        Some((active.clone(), PointerBinding::Active))
+    );
+    // The draw is deterministic: a recorded run re-derives its
+    // assignment exactly.
+    assert_eq!(
+        pointer_admission(&pointer(0.5), "run-7"),
+        pointer_admission(&pointer(0.5), "run-7")
+    );
+
+    // Without a canary the active version serves; with nothing promoted
+    // the pointer resolves nothing — admission refuses rather than
+    // guessing (registry artifacts have no static fallback).
+    let no_canary = VersionPointer {
+        surface: prompt_candidate("p").surface(),
+        active: Some(active.clone()),
+        canary: None,
+    };
+    assert_eq!(
+        pointer_admission(&no_canary, "run-1"),
+        Some((active, PointerBinding::Active))
+    );
+    assert_eq!(
+        pointer_admission(
+            &VersionPointer::new(prompt_candidate("p").surface()),
+            "run-1"
+        ),
+        None
+    );
+}
+
+#[test]
+fn config_resolution_additive_wire_evolution() {
+    // The untagged surface and a non-model family: `tag` and `model` are
+    // absent from the wire (the sparse-wire rule), and a payload without
+    // them — the shape a resolver for the untagged surface writes —
+    // deserializes with both unset.
+    let mut untagged = prompt_resolution();
+    untagged.tag = None;
+    let wire = serde_json::to_value(&untagged).unwrap();
+    assert!(wire.get("tag").is_none());
+    assert!(wire.get("model").is_none());
+    let back: ConfigResolution = serde_json::from_value(wire).unwrap();
+    assert_eq!(back, untagged);
+
+    // And the tagged, model-carrying resolution round-trips whole.
+    let tagged = prompt_resolution();
+    let back: ConfigResolution =
+        serde_json::from_str(&serde_json::to_string(&tagged).unwrap()).unwrap();
+    assert_eq!(back, tagged);
 }

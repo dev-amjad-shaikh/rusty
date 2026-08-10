@@ -165,7 +165,7 @@ use std::sync::Arc;
 use axum::Router;
 use rusty_agent_runtime::capsule::ResourceBudget;
 use rusty_agent_runtime::graph::Graph;
-use rusty_agent_runtime::learn::{CandidateEvaluator, PromotionEnvelope};
+use rusty_agent_runtime::learn::{CandidateEvaluator, EnvironmentTag, PromotionEnvelope};
 use rusty_agent_runtime::state::StateSpec;
 use tokio_util::sync::CancellationToken;
 
@@ -441,6 +441,15 @@ pub struct ServerConfig {
     /// [`ServerConfig::with_candidate_evaluator`].
     pub candidate_evaluator: Option<Arc<dyn CandidateEvaluator>>,
 
+    /// The deployment's default environment tag (R0.11 Extension Plane,
+    /// wave 2): the promotion target a run resolves against when its
+    /// registry binding declares no environment of its own. `None` (the
+    /// default) resolves the untagged surface — the pre-R0.11 behavior.
+    /// This is *declared configuration*: a run's environment is its
+    /// binding's tag or this default, never an invented per-run guess.
+    /// See [`ServerConfig::with_default_environment_tag`].
+    pub default_environment_tag: Option<EnvironmentTag>,
+
     /// Operator-authored Cedar policy files (R0.9 Rusty Capsules, wave
     /// 2), loaded for the `default` tenant at startup — the deployment's
     /// standing authorization, the way static API keys are its standing
@@ -489,6 +498,7 @@ impl Default for ServerConfig {
             tenant_task_quotas: HashMap::new(),
             promotion_envelope: PromotionEnvelope::r08_default(),
             candidate_evaluator: None,
+            default_environment_tag: None,
             capsule_policy_files: Vec::new(),
             capsule_budget_ceiling: None,
             #[cfg(feature = "capsules")]
@@ -700,6 +710,21 @@ impl ServerConfig {
     /// on evidence, and evidence requires an evaluator.
     pub fn with_candidate_evaluator(mut self, evaluator: Arc<dyn CandidateEvaluator>) -> Self {
         self.candidate_evaluator = Some(evaluator);
+        self
+    }
+
+    /// Builder-style: declare the deployment's default environment tag
+    /// (R0.11 wave 2) — the promotion target a registry-bound run
+    /// resolves against when its binding names no environment. `None`
+    /// (the default) resolves the untagged surface. The tag is validated
+    /// at construction (the same rules the wire applies), so no
+    /// deployment can declare a default its own pointers could never
+    /// carry.
+    pub fn with_default_environment_tag(mut self, tag: impl Into<String>) -> Self {
+        self.default_environment_tag = Some(
+            EnvironmentTag::new(tag.into())
+                .unwrap_or_else(|e| panic!("invalid default environment tag: {e}")),
+        );
         self
     }
 

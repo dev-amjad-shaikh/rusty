@@ -35,15 +35,31 @@
 //! Environment tags and promotion per tag compose the learn plane's
 //! pointer machinery directly ([`SurfaceKey::tagged`]); they are not
 //! re-implemented here.
+//!
+//! Wave 2 (admission resolution and pinning) adds the read half of that
+//! machinery: [`ConfigResolution`], the journaled payload of a
+//! [`RunEventKind::ConfigResolved`](crate::record::RunEventKind::ConfigResolved)
+//! event, plus the two pure functions the server's admission path is
+//! built from — [`pointer_admission`] (which candidate a pointer binds
+//! for this run: the canary when the seeded draw admits, else the active
+//! version) and [`resolution_pin`] (what the run's manifest pins for the
+//! resolved candidate). The manifest pin itself is unchanged — digests,
+//! recorded by the R0.7 `pin_prompt` / `pin_tool_schema` / `pin_model`
+//! exactly as before; this event is the digest ↔ version join the
+//! manifest alone cannot express, so the manifest's wire shape stays
+//! frozen and pre-R0.11 manifests keep deserializing.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::learn::{surface_for_kind, Candidate, CandidateId, CandidateKind, SurfaceKey};
+use crate::learn::{
+    canary_admits, surface_for_kind, Candidate, CandidateId, CandidateKind, EnvironmentTag,
+    SurfaceKey, VersionPointer,
+};
 use crate::memory::ProvenanceAuthor;
-use crate::record::canonicalize_value;
+use crate::record::{canonicalize_value, sha256_hex};
 
 // --------------------------------------------------------------------- //
 // The artifact record
@@ -492,6 +508,146 @@ fn diff_lines(base: &str, target: &str) -> Vec<TextDiffLine> {
 }
 
 // --------------------------------------------------------------------- //
+// Admission resolution (R0.11 Extension Plane, wave 2)
+// --------------------------------------------------------------------- //
+
+/// Which pointer slot admitted the candidate at resolution: the
+/// full-traffic `active` version, or the `canary` when the seeded draw
+/// ([`canary_admits`]) admitted this run. Journaled on every
+/// [`ConfigResolution`] — the difference between "the run served the
+/// promoted version" and "the run served the experiment" is exactly the
+/// evidence an audit of a canary's blast radius reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerBinding {
+    /// The pointer's full-traffic candidate.
+    Active,
+    /// The pointer's canary candidate, admitted by this run's seeded draw.
+    Canary,
+}
+
+/// A journaled admission resolution (R0.11 wave 2): the answer to one
+/// named registry artifact a run declared at submission, recorded as the
+/// output of a
+/// [`RunEventKind::ConfigResolved`](crate::record::RunEventKind::ConfigResolved)
+/// event at admission. This is the link that lets a manifest's content
+/// *digest* pin reach the *version* it resolved from — the
+/// [`CapsuleResolution`](crate::capsule::CapsuleResolution) precedent
+/// (version string → content address) applied to configuration
+/// (content digest → candidate).
+///
+/// The walk it closes: the run's signed receipt commits the manifest
+/// digest; the manifest pins `digest`; this event names the `surface`,
+/// `tag`, and `candidate_id` the digest resolved from; the candidate
+/// carries its author, evaluation, and promotion approver. Every hop is
+/// signature-covered — the resolution event sits inside the journal the
+/// receipt's head signs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConfigResolution {
+    /// The artifact resolved: its registry key, the **untagged** surface
+    /// (`prompt:system`). The tag travels separately so the two facts —
+    /// which artifact, which environment — read without string surgery.
+    pub surface: SurfaceKey,
+
+    /// The environment tag the run resolved under (`prompt:system@prod`).
+    /// Absent when the run resolved the untagged surface — either it
+    /// declared no environment and the deployment declares no default
+    /// tag, or (deliberately) the artifact is governed untagged. Absent
+    /// is a fact, never a guess: the deployment's declared default tag is
+    /// configuration, not something the run invents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<EnvironmentTag>,
+
+    /// The candidate the pointer bound — the exact version the run
+    /// pinned, reproducible at audit from this id alone (candidates are
+    /// content-addressed: the id *is* the integrity check).
+    pub candidate_id: CandidateId,
+
+    /// Which pointer slot admitted the candidate.
+    pub pointer: PointerBinding,
+
+    /// The content digest the run's manifest pins for this artifact —
+    /// exactly what `RunManifest::pin_prompt` (SHA-256 of the prompt
+    /// text), `pin_tool_schema` (canonical-JSON digest of the schema),
+    /// or `pin_model` (canonical-JSON digest of the parameters) records.
+    /// The digest ↔ version join, journaled: equal digests under
+    /// different candidate ids cannot exist (content addressing), so
+    /// this field is the receipt walk's hinge.
+    pub digest: String,
+
+    /// The model identifier the manifest pins alongside the parameters
+    /// digest — present exactly for `model_settings` resolutions (the
+    /// manifest's `model` slot is an identifier, not a digest, and the
+    /// walk is incomplete without it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// The candidate a pointer binds for `run_id`: the canary when this
+/// run's seeded draw admits, else the full-traffic version. `None` when
+/// the pointer serves nothing — for registry artifacts there is no
+/// static fallback (that floor belongs to learned policy, where the
+/// pre-registry behavior is defined); an artifact with nothing promoted
+/// is unresolvable, and admission refuses the run rather than guessing.
+///
+/// The draw reads `pointer.surface` — the *tagged* key when the
+/// promotion was tagged — so the environment is part of the draw's seed
+/// material: a canary at `staging` and a canary at `prod` are
+/// independent draws over the same run id, and a recorded run
+/// re-derives its assignment from the journaled resolution alone.
+pub fn pointer_admission(
+    pointer: &VersionPointer,
+    run_id: &str,
+) -> Option<(CandidateId, PointerBinding)> {
+    if let Some(binding) = &pointer.canary {
+        if canary_admits(binding, &pointer.surface, run_id) {
+            return Some((binding.candidate_id.clone(), PointerBinding::Canary));
+        }
+    }
+    pointer
+        .active
+        .clone()
+        .map(|candidate_id| (candidate_id, PointerBinding::Active))
+}
+
+/// What the run's manifest pins for a resolved candidate: the content
+/// digest (and, for model settings, the model identifier) the R0.7 pin
+/// slots record. Computed from the candidate's content by the same rules
+/// `RunManifest`'s pin functions apply, so the journaled `digest` and
+/// the manifest's pin can never diverge — one derivation, two homes
+/// (the header and the journal).
+///
+/// Only the three families with a digest slot in the manifest resolve in
+/// this wave: prompts, tool contracts, and model settings. Every other
+/// kind is refused ([`RegistryError::UnresolvableKind`]) — executor
+/// policies bind through the checkpoint header's `policy_version`, tool
+/// permissions through the capsule machinery, and memory configuration
+/// and middleware compositions pin in their own waves; pretending
+/// otherwise would fake coverage the manifest cannot express.
+pub fn resolution_pin(candidate: &Candidate) -> Result<(String, Option<String>), RegistryError> {
+    match &candidate.content {
+        crate::learn::CandidateContent::Prompt { prompt, .. } => {
+            Ok((sha256_hex(prompt.as_bytes()), None))
+        }
+        crate::learn::CandidateContent::ToolContract { schema, .. } => {
+            let bytes = serde_json::to_vec(&canonicalize_value(schema))
+                .map_err(|e| RegistryError::UndiffableContent(e.to_string()))?;
+            Ok((sha256_hex(&bytes), None))
+        }
+        crate::learn::CandidateContent::ModelSettings {
+            model, parameters, ..
+        } => {
+            let bytes = serde_json::to_vec(&canonicalize_value(parameters))
+                .map_err(|e| RegistryError::UndiffableContent(e.to_string()))?;
+            Ok((sha256_hex(&bytes), Some(model.clone())))
+        }
+        _ => Err(RegistryError::UnresolvableKind {
+            kind: candidate.kind(),
+        }),
+    }
+}
+
+// --------------------------------------------------------------------- //
 // Errors
 // --------------------------------------------------------------------- //
 
@@ -567,6 +723,22 @@ pub enum RegistryError {
         from: CandidateKind,
         /// The target candidate's kind.
         to: CandidateKind,
+    },
+
+    /// An admission resolution was requested for a kind with no
+    /// content-digest slot in the run manifest (R0.11 wave 2): prompts,
+    /// tool contracts, and model settings resolve; executor policies
+    /// bind through the checkpoint header's `policy_version`, tool
+    /// permissions through the capsule machinery, and memory
+    /// configuration and middleware compositions pin in their own waves.
+    #[error(
+        "`{kind}` candidates do not resolve into a run manifest at admission — wave 2 binds \
+         prompts, tool contracts, and model settings; the other families pin through their own \
+         surfaces (the checkpoint header, capsule manifests) or their own waves"
+    )]
+    UnresolvableKind {
+        /// The kind refused.
+        kind: CandidateKind,
     },
 
     /// A candidate's content could not be serialized for the structural

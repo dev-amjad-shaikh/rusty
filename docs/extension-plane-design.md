@@ -395,6 +395,39 @@ replays against its original pin and reports the exact candidate id it used; rol
 restores the prior version byte-exact; the walk receipt → manifest pin → resolution event
 → candidate → author is asserted as a test, not narrated.
 
+> **Wave 2 status: implemented (2026-08-10).** The resolution event landed as
+> written: one additive `RunEventKind::ConfigResolved` (read-only, the
+> `CapsuleResolved` precedent) journaled per artifact at admission, naming
+> the surface, the environment tag (absent for an untagged resolution —
+> never an invented one), the resolved candidate id, the pointer slot
+> (`active` / `canary`), the pinned digest, and — for `model_settings`
+> only — the model id (`ConfigResolution` in `rusty-core/src/registry.rs`,
+> goldens in `rusty-core/tests/golden/`). Runs declare the binding at
+> submission (`RunPayload.registry`: the named artifacts plus an optional
+> environment; absent is the deployment's declared
+> `ServerConfig.default_environment_tag`, absent that the untagged
+> surface). At admission each artifact resolves through its
+> environment-tagged `VersionPointer` — the active version, or the canary
+> when `canary_admits`'s seeded draw admits — and the resolved content
+> pins through the R0.7 `pin_prompt` / `pin_tool_schema` / `pin_model`
+> functions unchanged; the digest↔version join is the journaled event,
+> not a manifest change. Resolution failures are admission failures (404
+> unpromoted or drained, 422 malformed or unresolvable): the run never
+> starts. Three settled refinements: the resolver reads the tenant from
+> the internal thread id, so cron, trigger, and bridge callers resolve in
+> the submitter's namespace with no signature changes; `runs.rs` gained
+> the payload field, the admission call, and the journaling — a narrower
+> touch than a new admission decorator, and `server_store.rs` is
+> untouched (wave 1's store surface sufficed); and only the three
+> families with a manifest digest slot (prompts, tool contracts, model
+> settings) resolve this wave — the rest refuse with a typed
+> `UnresolvableKind` rather than fake coverage. Conservatism held:
+> in-flight runs keep their pins, pre-R0.11 manifests deserialize, and an
+> unbound run is byte-identical (no events, no manifest) — each asserted
+> in `rusty-server/tests/registry_admission.rs`, including the receipt →
+> manifest pin → resolution event → candidate → author walk with the
+> resolution event under the receipt's signature.
+
 **Wave 3 — the broker core.** Connection records, envelope-encrypted storage on both
 backends, handle issue/resolve/revoke/expire, scope checks at use, `ToolExecutor` and
 capsule-host connector integration, journaled uses and denials. Exit: a tool authenticates

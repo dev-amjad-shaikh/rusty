@@ -1,0 +1,8 @@
+{
+  "surface": "model_settings:primary",
+  "tag": "staging",
+  "candidate_id": "d26da7d04774b3807124a2ed693ebf5446f228e348877971383af7de34c73c20",
+  "pointer": "canary",
+  "digest": "fc103b16e59b8d0c16b4d68b6a547a8882316d7af30002f2772196f6d4b1cc84",
+  "model": "gpt-5.2-2026-06-01"
+}

@@ -552,6 +552,23 @@ pub enum RunEventKind {
     /// when" is a chained fact, and old receipts keep verifying against
     /// the key history the journal attests.
     SigningKeyRotated,
+
+    /// A registry artifact was resolved into a run at admission (R0.11
+    /// Extension Plane, wave 2): the run declared named configuration
+    /// artifacts at submission, and each one resolved through its
+    /// environment-tagged version pointer to the candidate the run then
+    /// pinned. An [`Effect::ReadOnly`] record (a registry lookup), the
+    /// [`RunEventKind::CapsuleResolved`] precedent applied to configuration. Output
+    /// carries the journaled [`crate::registry::ConfigResolution`] — the
+    /// artifact, the environment tag, the candidate id, the pointer slot
+    /// that admitted it (active or canary), and the digest the manifest
+    /// pins. This is the digest ↔ version join the manifest alone cannot
+    /// express: the manifest's wire shape stays frozen (digests only),
+    /// and "which candidate produced this pin" reads from here — the
+    /// event sits in the signature-covered journal, so the audit walk
+    /// signed receipt → manifest pin → resolution event → candidate →
+    /// author is covered end to end.
+    ConfigResolved,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

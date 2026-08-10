@@ -1,5 +1,5 @@
-//! Configuration-registry persistence (R0.11 Extension Plane, wave 1):
-//! the file layout behind the artifact store backend.
+//! Configuration-registry persistence (R0.11 Extension Plane, wave 1)
+//! and admission resolution (wave 2).
 //!
 //! One directory under `{store_path}/registry/` (`registry` is a reserved
 //! layout name, see [`crate::RESERVED_NAMES`]):
@@ -18,14 +18,33 @@
 //! (`server_registry_artifacts`), with the commit append compare-and-
 //! swapped inside one transaction, so a crash cannot leave a committed
 //! candidate whose artifact history never grew (or the inverse).
+//!
+//! Wave 2 adds no persistence of its own — resolution is a *read* over
+//! the wave-1 entities (the environment-tagged version pointer, the
+//! candidate record) whose evidence journals into the run. What lives
+//! here is the read's contract: [`RegistryRunBinding`], the run
+//! payload's declaration of the named artifacts it uses and the
+//! environment it targets, and [`resolve_admission`], the pure-over-
+//! store composition the run machinery binds with — pointer lookup,
+//! canary draw, integrity re-check, manifest pin — so every run
+//! endpoint (HTTP, cron, trigger, bridge) resolves identically.
 
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use rusty_agent_runtime::record::sha256_hex;
-use rusty_agent_runtime::registry::ArtifactRecord;
+use rusty_agent_runtime::learn::{
+    surface_for_kind, CandidateContent, CandidateKind, EnvironmentTag,
+};
+use rusty_agent_runtime::record::{sha256_hex, RunManifest};
+use rusty_agent_runtime::registry::{
+    pointer_admission, resolution_pin, ArtifactRecord, ConfigResolution,
+};
 use serde::{Deserialize, Serialize};
+
+use crate::error::ApiError;
+use crate::server_store::ServerStore;
 
 /// The artifact directory under the store root
 /// (`{store_path}/registry/artifacts`).
@@ -122,6 +141,205 @@ pub(crate) fn load_artifacts(root: &Path) -> HashMap<String, ArtifactRecord> {
         }
     }
     out
+}
+
+// --------------------------------------------------------------------- //
+// Admission resolution (R0.11 Extension Plane, wave 2)
+// --------------------------------------------------------------------- //
+
+/// One artifact a run declares it uses: `{family, name}` — the same
+/// address the registry routes speak. Deserialized inside
+/// [`RegistryRunBinding`], so an unknown family fails the request's JSON
+/// parse (a malformed binding, not a resolution miss).
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistryArtifactRef {
+    /// The registry family (the candidate kind the artifact indexes).
+    pub family: CandidateKind,
+    /// The artifact's name within the family.
+    pub name: String,
+}
+
+/// The run payload's registry declaration (R0.11 wave 2): the named
+/// artifacts the run uses, and the environment it targets. Every named
+/// artifact resolves at admission through its environment-tagged
+/// version pointer, and the resolved content is what the run's manifest
+/// pins — so a version promoted *after* the run's admission never
+/// reaches it (the conservatism every release since R0.7 has kept), and
+/// a version promoted *without redeploying* binds the next run.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistryRunBinding {
+    /// The environment tag the run targets. Absent resolves the
+    /// deployment's declared default tag
+    /// ([`crate::ServerConfig::default_environment_tag`]) — declared
+    /// configuration, never an invented per-run guess; when neither
+    /// exists, the untagged surface.
+    #[serde(default)]
+    pub environment: Option<EnvironmentTag>,
+
+    /// The artifacts the run uses. Must be non-empty — a binding naming
+    /// no artifacts carries no meaning worth resolving (the empty-scope
+    /// refusal manifests already enforce).
+    pub artifacts: Vec<RegistryArtifactRef>,
+}
+
+/// What [`resolve_admission`] produced: one [`ConfigResolution`] per
+/// declared artifact (the journal evidence, in declaration order) and
+/// the [`RunManifest`] the run pins (the checkpoint-header evidence).
+/// The two are one derivation — each resolution's `digest` is the
+/// manifest's pin for its artifact by construction — journaled and
+/// stamped by the run machinery.
+#[derive(Debug, Clone)]
+pub struct RegistryAdmission {
+    /// The per-artifact resolutions, in the binding's declaration order.
+    pub resolutions: Vec<ConfigResolution>,
+    /// The manifest the resolved content pins.
+    pub manifest: RunManifest,
+}
+
+/// Resolve a run's registry binding against the store: each declared
+/// artifact through its environment-tagged [`VersionPointer`](rusty_agent_runtime::learn::VersionPointer)
+/// to a candidate (the active version, or the canary when the run's
+/// seeded draw admits), and the resolved content into the manifest
+/// through the R0.7 pin functions, unchanged.
+///
+/// Failures are admission failures — the run never starts:
+///
+/// - `404` when an artifact's pointer does not exist or serves nothing.
+///   Registry artifacts have no static fallback (that floor belongs to
+///   learned policy); an unpromoted artifact is unresolvable, never an
+///   invented default (the capsule-resolve precedent: an unresolvable
+///   run stops the request).
+/// - `422` when the declaration is malformed (empty, a duplicate
+///   artifact, a second `model_settings` — the manifest's `model` slot
+///   is singular), when the family has no manifest digest slot
+///   ([`resolution_pin`]'s refusal), or when the registry itself reads
+///   corrupt: the pointer naming a candidate the store does not hold, a
+///   candidate surfaced somewhere else, or a candidate failing its own
+///   content address (the capsule registry's integrity rule — tampering
+///   is an admission error, never a journaled resolution).
+pub(crate) async fn resolve_admission(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    default_tag: Option<&EnvironmentTag>,
+    run_id: &str,
+    binding: &RegistryRunBinding,
+) -> Result<RegistryAdmission, ApiError> {
+    if binding.artifacts.is_empty() {
+        return Err(ApiError::unprocessable(
+            "registry binding names no artifacts — a binding exists to bind; omit the field \
+             to run unbound"
+                .to_owned(),
+        ));
+    }
+    let model_settings = binding
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.family == CandidateKind::ModelSettings)
+        .count();
+    if model_settings > 1 {
+        return Err(ApiError::unprocessable(format!(
+            "registry binding names {model_settings} `model_settings` artifacts — the \
+             manifest's `model` slot is singular; a run pins one model settings artifact"
+        )));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for artifact in &binding.artifacts {
+        if !seen.insert((artifact.family, artifact.name.clone())) {
+            return Err(ApiError::unprocessable(format!(
+                "registry binding names `{}:{}` twice — one artifact binds one version; a \
+                 second naming is a configuration error, not a second pin",
+                artifact.family.as_str(),
+                artifact.name
+            )));
+        }
+    }
+
+    // The run's environment: its own declaration, else the deployment's
+    // declared default — never an invented per-run guess.
+    let tag = binding.environment.clone().or_else(|| default_tag.cloned());
+    let internal = |e: String| ApiError::internal(format!("registry admission read: {e}"));
+    let mut resolutions = Vec::with_capacity(binding.artifacts.len());
+    let mut manifest = RunManifest::new();
+    for artifact in &binding.artifacts {
+        let surface = surface_for_kind(artifact.family, &artifact.name);
+        let target = match &tag {
+            Some(tag) => surface.tagged(tag),
+            None => surface.clone(),
+        };
+        let pointer = store
+            .get_version_pointer(tenant, target.as_str())
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "artifact `{target}` has no version pointer — nothing was ever promoted \
+                     for this environment; an unpromoted artifact is unresolvable"
+                ))
+            })?;
+        let (candidate_id, slot) = pointer_admission(&pointer, run_id).ok_or_else(|| {
+            ApiError::not_found(format!(
+                "artifact `{target}` serves nothing — its pointer has no active version and \
+                 this run's draw did not admit a canary"
+            ))
+        })?;
+        let record = store
+            .get_candidate(tenant, candidate_id.as_str())
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| {
+                ApiError::unprocessable(format!(
+                    "artifact `{target}` points at candidate `{candidate_id}`, which the store \
+                     does not hold — the registry record is corrupt; re-commit the candidate"
+                ))
+            })?;
+        // The integrity gate, run before anything pins: a candidate
+        // failing its own content address — or surfaced somewhere other
+        // than the artifact it was resolved for — is tampered evidence,
+        // refused here rather than journaled (the capsule registry's
+        // re-derivation rule).
+        record.candidate.verify_address().map_err(|e| {
+            ApiError::unprocessable(format!(
+                "artifact `{target}` resolved to a candidate failing its own content address: \
+                 {e} — the registry record is corrupt"
+            ))
+        })?;
+        if record.candidate.surface() != surface {
+            return Err(ApiError::unprocessable(format!(
+                "artifact `{target}` resolved to a candidate surfacing at `{}` — the registry \
+                 record is corrupt; the pointer and the candidate disagree",
+                record.candidate.surface()
+            )));
+        }
+        let (digest, model) = resolution_pin(&record.candidate)
+            .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+        // The manifest pin, through the R0.7 functions unchanged — the
+        // resolved *content* is what pins, so the journaled digest above
+        // and the header's pin are one derivation.
+        manifest = match &record.candidate.content {
+            CandidateContent::Prompt { name, prompt } => {
+                manifest.pin_prompt(name.clone(), prompt.as_str())
+            }
+            CandidateContent::ToolContract { tool, schema } => {
+                manifest.pin_tool_schema(tool.clone(), schema)
+            }
+            CandidateContent::ModelSettings {
+                model, parameters, ..
+            } => manifest.pin_model(model.clone(), parameters),
+            _ => unreachable!("resolution_pin refused every other kind"),
+        };
+        resolutions.push(ConfigResolution {
+            surface,
+            tag: tag.clone(),
+            candidate_id,
+            pointer: slot,
+            digest,
+            model,
+        });
+    }
+    Ok(RegistryAdmission {
+        resolutions,
+        manifest,
+    })
 }
 
 #[cfg(test)]

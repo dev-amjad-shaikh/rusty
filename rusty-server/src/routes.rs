@@ -192,6 +192,7 @@ pub(crate) fn router_with_shutdown(
         queue_cap: config.max_concurrent_runs_per_thread.max(1),
         log_capacity: config.event_log_capacity.max(16),
         shutdown: shutdown.clone(),
+        default_environment_tag: config.default_environment_tag.clone(),
     };
     let outbox_relay_interval = config.outbox_relay_interval;
     #[cfg(feature = "capsules")]

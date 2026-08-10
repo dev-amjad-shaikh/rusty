@@ -104,13 +104,17 @@
 //!   active-version pointer with byte-exact rollback. Every transition
 //!   journals through the `CandidateCreated` / `CandidateEvaluated` /
 //!   `CandidatePromoted` / `CandidateRolledBack` event kinds.
-//! - **The configuration registry** ([`registry`], R0.11 wave 1): the
+//! - **The configuration registry** ([`registry`], R0.11): the
 //!   prompt/configuration registry — named, owned [`registry::ArtifactRecord`]s
 //!   indexing the candidate pipeline (a commit *is* a candidate, never a fork
 //!   of it), environment tags on surface keys ([`learn::EnvironmentTag`]) so
 //!   one deployment promotes per environment through the unchanged pointer
-//!   machinery, and [`registry::diff_candidates`] views computed on read,
-//!   never stored. The store backends and endpoints live in
+//!   machinery, [`registry::diff_candidates`] views computed on read,
+//!   never stored, and admission-time resolution (wave 2): a run's named
+//!   artifacts bind through the tagged version pointer to a candidate
+//!   ([`registry::pointer_admission`]) whose content the manifest pins by
+//!   digest, the digest ↔ version join journaled as
+//!   [`registry::ConfigResolution`]. The store backends and endpoints live in
 //!   `rusty-agent-server`; these are the pure contracts both sides agree on.
 //! - **WASM nodes** (`wasm_node`, feature `wasm`): sandboxed WebAssembly
 //!   modules run as graph nodes via Wasmtime.
@@ -284,8 +288,9 @@ pub mod prelude {
         POLICY_MAX_DELAY_ENVELOPE_MS,
     };
     pub use crate::registry::{
-        diff_candidates, ArtifactCommit, ArtifactRecord, LeafChange, LeafModification,
-        RegistryDiff, RegistryError, TextDiffLine, MAX_ARTIFACT_NAME_LEN,
+        diff_candidates, pointer_admission, resolution_pin, ArtifactCommit, ArtifactRecord,
+        ConfigResolution, LeafChange, LeafModification, PointerBinding, RegistryDiff,
+        RegistryError, TextDiffLine, MAX_ARTIFACT_NAME_LEN,
     };
     pub use crate::replay::{
         BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, LogicalClockParams,

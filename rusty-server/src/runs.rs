@@ -39,7 +39,8 @@ use futures::FutureExt;
 use rusty_agent_runtime::checkpoint::Checkpointer;
 use rusty_agent_runtime::error::RustyError;
 use rusty_agent_runtime::executor::{ExecutionOutcome, Executor, GraphEvent, RunConfig};
-use rusty_agent_runtime::journal::{Clock, Journal};
+use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
+use rusty_agent_runtime::record::{Effect, RunEventKind};
 use rusty_agent_runtime::state::State;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -122,6 +123,17 @@ pub struct RunPayload {
     /// `config.recursion_limit` applies when the payload does not set one.
     #[serde(default)]
     pub assistant_id: Option<String>,
+
+    /// The run's registry declaration (R0.11 Extension Plane, wave 2):
+    /// the named configuration artifacts the run uses and the
+    /// environment it targets. At admission each artifact resolves
+    /// through its environment-tagged version pointer and the resolved
+    /// content pins the run's manifest, with one `config_resolved` event
+    /// per artifact journaled ahead of the run's own events. Absent is
+    /// the pre-R0.11 behavior, byte-identically: no resolution, no
+    /// manifest, no new events.
+    #[serde(default)]
+    pub registry: Option<crate::registry::RegistryRunBinding>,
 }
 
 /// How a second run on a busy thread is handled.
@@ -287,6 +299,8 @@ pub(crate) struct RunSnapshot {
     pub graph: String,
     pub attempt: usize,
     pub payload: RunPayload,
+    /// The registry binding resolved at admission (R0.11 wave 2).
+    pub admission: Option<crate::registry::RegistryAdmission>,
     pub sink: FrameSink,
     pub checkpoint_ids: Arc<StdMutex<Vec<String>>>,
     /// This run's own cancellation token (R0.7 wave 2): a child of the
@@ -330,6 +344,9 @@ pub struct RunHandle {
     pub(crate) status: RunStatus,
     /// Original run payload.
     pub(crate) payload: RunPayload,
+    /// The registry binding resolved at admission (R0.11 wave 2) — `None`
+    /// for an unbound run, which behaves byte-identically to before.
+    pub(crate) admission: Option<crate::registry::RegistryAdmission>,
     sink: FrameSink,
     terminal: watch::Sender<Option<Value>>,
     checkpoint_ids: Arc<StdMutex<Vec<String>>>,
@@ -481,6 +498,7 @@ impl RunManager {
             graph: h.graph.clone(),
             attempt: h.attempt,
             payload: h.payload.clone(),
+            admission: h.admission.clone(),
             sink: h.sink.clone(),
             checkpoint_ids: Arc::clone(&h.checkpoint_ids),
             cancel: h.cancel.clone(),
@@ -687,6 +705,10 @@ pub(crate) struct RunDeps {
     /// The server's drain control (R0.6 wave 2c): threaded into every run's
     /// executor, which observes it at super-step boundaries.
     pub shutdown: tokio_util::sync::CancellationToken,
+    /// The deployment's default environment tag (R0.11 wave 2): the
+    /// promotion target a registry-bound run resolves against when its
+    /// binding names no environment (`None`: the untagged surface).
+    pub default_environment_tag: Option<rusty_agent_runtime::learn::EnvironmentTag>,
 }
 
 /// The result of successfully scheduling a run: everything an endpoint
@@ -722,6 +744,27 @@ pub(crate) async fn schedule(
         )));
     }
     let run_id = uuid::Uuid::new_v4().to_string();
+    // Registry admission (R0.11 wave 2): the binding resolves now, at
+    // admission — a promotion landing afterwards never reaches this run
+    // (the conservatism checkpoint pinning has kept since R0.7), and a
+    // queued run binds at admission, not at dequeue. The tenant comes
+    // from the internal thread id, so every entry point (HTTP, cron,
+    // trigger, bridge) resolves in the submitter's namespace without
+    // threading the request context through. A resolution failure is an
+    // admission failure: the run never enters the manager.
+    let admission = match &payload.registry {
+        Some(binding) => Some(
+            crate::registry::resolve_admission(
+                &deps.server_store,
+                crate::auth::tenant_of_internal(thread_id),
+                deps.default_environment_tag.as_ref(),
+                &run_id,
+                binding,
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let (bcast_tx, _bcast_rx) = broadcast::channel(256);
     let (terminal_tx, terminal_rx) = watch::channel(None);
     let handle = RunHandle {
@@ -732,6 +775,7 @@ pub(crate) async fn schedule(
         attempt: 0, // assigned by RunManager::insert
         status: RunStatus::Pending,
         payload,
+        admission,
         sink: FrameSink::new(deps.log_capacity, bcast_tx),
         terminal: terminal_tx,
         checkpoint_ids: Arc::new(StdMutex::new(Vec::new())),
@@ -836,6 +880,29 @@ async fn execute(deps: RunDeps, run_id: String) {
         // super-step boundary — a point where a checkpoint was just
         // persisted — instead of being torn down mid-step.
         .with_cancellation(snap.cancel.clone());
+    // Registry admission (R0.11 wave 2): the binding resolved at schedule
+    // time becomes evidence now, ahead of the run's own events — one
+    // `config_resolved` per artifact (chained: each resolution's parent
+    // is the previous, so the admission reads as one causal unit) — and
+    // the resolved manifest stamps every checkpoint header, which is how
+    // the receipt reads it back. Resolution decides nothing about what
+    // will run, so the events are read-only (the `CapsuleResolved`
+    // precedent); a serialization failure here is a bug, not a runtime
+    // condition — the payload type is the server's own.
+    if let Some(admission) = &snap.admission {
+        let mut parent = None;
+        for resolution in &admission.resolutions {
+            let output =
+                serde_json::to_value(resolution).expect("ConfigResolution always serializes");
+            let mut draft =
+                EventDraft::new(RunEventKind::ConfigResolved, Effect::ReadOnly).output(output);
+            if let Some(parent) = parent {
+                draft = draft.parent(parent);
+            }
+            parent = Some(journal.record(draft));
+        }
+        config = config.with_manifest(admission.manifest.clone());
+    }
     if let Some(command) = &snap.payload.command {
         if let Some(resume) = &command.resume {
             config = config.with_resume(resume.clone());
