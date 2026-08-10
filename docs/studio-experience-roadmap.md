@@ -178,7 +178,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   control room. Memory-set and automatic/correction-driven distillation, before/after case analysis,
   envelope discovery, assigned or signed approval identities, drift/canary monitoring, and complete
   runtime activation proof remain.
-- Triggers, crons, credentials, artifacts, deployments, and fleet operations are not unified.
+- Signed webhook triggers now have a server-backed Automation Desk for guided creation, reversible
+  pause/resume, bounded event and dead-letter evidence, deliberate replay, and run-investigation handoff.
+  Crons, shared trigger/cron policy, credential handles, artifacts, deployments, and fleet operations are
+  not yet unified; trigger deletion also remains deliberately absent from Studio.
 - Authentication identifies a tenant API key, not an attributed human or service principal with scoped roles and auditable authority.
 - Local Studio now defaults access keys to a session-only boundary and requires explicit warning-backed
   consent before device-local persistence. A deployed Studio still needs the server-side session or
@@ -408,6 +411,13 @@ Exit criteria:
 
 **Outcome:** publish, monitor, govern, and roll back agent systems across environments.
 
+Status: **first automation slice delivered**. The signed-webhook Automation Desk uses the durable trigger
+registry and event log directly. It creates assistant/thread bindings with exact templates and debounce,
+conceals page-memory signing secrets, pauses or resumes delivery, separates ordinary event evidence from
+dead letters, and gates immediate replay behind an exact event review. Network-uncertain replay is never
+blindly repeated. Cron operations, environment/deployment resources, fleet health, shared credential handles,
+and evaluation-gated rollout still require the platform contracts below.
+
 Scope:
 
 - Local, development, staging, and production environments.
@@ -449,7 +459,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison plus exact-pair page-memory verdict docket and bounded review export delivered; durable reviews/datasets, evaluators, experiment execution, statistical reports, and version-attributed quality gates still need platform APIs | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |
 | 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
-| 14 | Environment, deployment, and fleet surfaces | Not started | Builds operations on stable identity, version, quality, and audit concepts |
+| 14 | Environment, deployment, and fleet surfaces | First automation slice delivered — signed webhook creation, pause/resume, event/dead-letter evidence, safe replay, and run handoff; cron, environments, deployments, fleet health, and shared credential contracts remain | Builds operations on stable identity, version, quality, and audit concepts |
 
 If a required server contract is actively changing, work proceeds on the highest-value independent Studio slice rather than inventing a temporary API or blocking visible progress.
 

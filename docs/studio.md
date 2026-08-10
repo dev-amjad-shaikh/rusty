@@ -14,6 +14,7 @@ studio/
 ├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
 ├── test-learn.mjs     ← node unit tests for the governed-learning control room
+├── test-automations.mjs ← signed webhook lifecycle, event evidence, and replay-safety tests
 ├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
 ├── test-connection.mjs ← node unit tests for connection profiles, secrets, and compatibility evidence
 └── test-all.mjs       ← discovers and runs every Studio test suite
@@ -157,6 +158,24 @@ studio/
   attribution rather than forging a duplicate.
   Candidate, version, evidence, text, and raw-record views are bounded and hostile future wire shapes
   fail closed before actions become available.
+- **Automation desk** — a server-backed operations workspace over `POST /triggers`, the tenant-scoped
+  trigger registry, and each trigger's event and dead-letter routes. A three-stage signal path keeps the
+  contract visible: an HMAC-signed webhook enters Rusty, one typed action targets an assistant or thread,
+  and a bounded durable event record captures payload hash, status, run identity, and replay lineage.
+  The guided composer supports `start_run`, `send_message`, and `resume_thread`, exact JSON templates with
+  `{{event.*}}` placeholders, optional 1–300,000 ms debounce, a caller-supplied or server-generated signing
+  secret, and a stable client ID used to reconcile lost creation receipts. Studio loads the secret-bearing
+  registry only when the desk is opened, keeps returned secrets in page memory, conceals them by default,
+  never writes them to browser storage, and renders at most 500 matching rows while keeping a selected record
+  inside that window. Pause and resume are reversible exact-record updates; deletion
+  is deliberately absent. Event and dead-letter reads are capped at 8 MiB and validated against the selected
+  trigger before rendering. Because those endpoints do not share a revision, a crossed live update preserves
+  both independently valid views with an explicit refresh warning rather than inventing atomic agreement.
+  **Review replay** shows the exact event ID, payload hash, target, and action and
+  requires acknowledgement because replay immediately bypasses signature and debounce. A transport-lost
+  replay is never retried automatically: the desk locks the action and directs the operator to refresh for a
+  new `replayed_from` record. Events with a run identity can open that exact journal in Flight Recorder after
+  its thread identity is corroborated from the server event envelope.
 - **Threads panel (local-only)** — the server API (as of v0.4) has **no list-threads endpoint**, so threads you create or
   attach are remembered in your browser, isolated by server and access boundary. **Attach by id** re-connects a thread the
   server already knows, and offers to re-create it with the same id when the in-memory thread registry has
@@ -538,6 +557,19 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   migration and damaged-secret cleanup warnings, blocked-storage containment, tenant-scoped recall,
   read-only compatibility classification, recorder/stream request ownership, concurrent-request isolation,
   failed-switch rollback, informed storage consent, responsive layout, and complete interaction wiring.
+- `node studio/test-automations.mjs` — focused contract and interaction coverage for exact trigger/action
+  bindings, UTF-8 and u64 wire boundaries, status-dependent event evidence, full-log/dead-letter agreement,
+  stable create reconciliation, pause/resume receipts, deliberate replay acknowledgement plus durable-record
+  corroboration, non-idempotent retry locks, run-handoff ownership, connection/selection races, secret
+  concealment, keyboard focus, hostile rendering, and the 500-row responsive DOM window.
+- Live against `cargo run -p rusty-agent-server --example server_demo`: created a real thread-bound signed
+  webhook automation, sent an HMAC-authenticated event, observed debounce produce one durable coalesced run,
+  and refreshed Studio to the exact `1 / 1` event/action counters. Pause and resume changed the authoritative
+  lifecycle without losing its evidence. A deliberate replay returned the compact server acknowledgement,
+  was corroborated against the full retained event, and appeared as a second event with exact lineage. The
+  desktop and 390 × 844 layouts had no horizontal overflow, and the browser logged no warnings or errors.
+  `cargo test -p rusty-agent-server --test triggers` independently passed all 8 webhook, action, debounce,
+  dead-letter/replay, lifecycle, signature, and tenant-isolation cases.
 - Live against `cargo run -p rusty-agent-server --example server_demo`: created and reused a local profile,
   verified `rusty-server v0.8.0` with two registered behaviors, and confirmed all six feature families.
   Switching to an incompatible `/missing` endpoint produced a recovery-focused identity error while the

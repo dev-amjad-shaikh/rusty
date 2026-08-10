@@ -500,6 +500,73 @@
   .task-item .tkid { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); word-break: break-all; }
   .task-item .tmeta { color: var(--text-dim); font-size: 11px; font-family: var(--mono); }
 
+  /* ---------- automation desk ---------- */
+  .automation-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
+  .automation-head h1 { margin:0 0 4px; }
+  .automation-head p { margin:0; max-width:760px; color:var(--text-dim); font-size:12px; line-height:1.5; }
+  .automation-head-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+  .automation-signal-path { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border:1px solid #3f4f52; border-radius:9px; overflow:hidden; background:#171c1c; margin-bottom:14px; }
+  .automation-signal-path::before { content:""; position:absolute; top:25px; left:16%; right:16%; height:1px; background:linear-gradient(90deg,#6aa2a6,#d0a260,#879d78); }
+  .automation-signal-step { position:relative; z-index:1; min-width:0; padding:13px 14px; border-right:1px solid #344143; }
+  .automation-signal-step:last-child { border-right:0; }
+  .automation-signal-step::before { content:""; display:block; width:9px; height:9px; margin-bottom:7px; border:3px solid #171c1c; border-radius:50%; background:var(--signal,#6aa2a6); box-shadow:0 0 0 1px var(--signal,#6aa2a6); }
+  .automation-signal-step:nth-child(2) { --signal:#d0a260; }
+  .automation-signal-step:nth-child(3) { --signal:#879d78; }
+  .automation-signal-step b,.automation-signal-step span { display:block; }
+  .automation-signal-step b { color:#e6dfd1; font-size:11px; }
+  .automation-signal-step span { margin-top:2px; color:var(--text-faint); font-size:10px; line-height:1.4; }
+  .automation-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+  .automation-summary div { padding:10px 11px; border:1px solid var(--border); border-radius:7px; background:var(--bg-raised); }
+  .automation-summary b,.automation-summary span { display:block; }
+  .automation-summary b { color:#e5d8c5; font:700 18px var(--mono); }
+  .automation-summary span { margin-top:2px; color:var(--text-faint); font-size:10px; }
+  .automation-toolbar { display:grid; grid-template-columns:minmax(220px,1fr) minmax(145px,.35fr) auto; align-items:end; gap:8px; margin-bottom:10px; }
+  .automation-toolbar label,.automation-form label { display:grid; gap:4px; color:var(--text-dim); font-size:10.5px; }
+  .automation-layout { display:grid; grid-template-columns:minmax(280px,.72fr) minmax(0,1.28fr); min-height:420px; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .automation-list { border-right:1px solid var(--border); background:#181714; max-height:720px; overflow:auto; }
+  .automation-row { width:100%; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 10px; padding:11px 12px; border:0; border-bottom:1px solid var(--border); border-radius:0; background:transparent; color:inherit; text-align:left; }
+  .automation-row:hover { background:#22201b; }
+  .automation-row[aria-selected="true"] { background:#29251e; box-shadow:inset 3px 0 #6aa2a6; }
+  .automation-row b { min-width:0; overflow:hidden; color:#e3d9ca; text-overflow:ellipsis; white-space:nowrap; }
+  .automation-row code { grid-column:1/-1; overflow-wrap:anywhere; color:var(--text-faint); font-size:9.5px; }
+  .automation-row small { color:var(--text-dim); }
+  .automation-detail { min-width:0; padding:15px; }
+  .automation-detail-head { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; }
+  .automation-detail-head h2 { margin:0 0 3px; font-size:17px; overflow-wrap:anywhere; }
+  .automation-detail-actions { display:flex; gap:7px; flex-wrap:wrap; justify-content:flex-end; }
+  .automation-kv { display:grid; grid-template-columns:110px minmax(0,1fr); gap:4px 11px; margin:12px 0; }
+  .automation-kv dt { color:var(--text-faint); font:700 9.5px var(--mono); letter-spacing:.45px; text-transform:uppercase; }
+  .automation-kv dd { margin:0; min-width:0; overflow-wrap:anywhere; color:#d7cec0; font:11px var(--mono); }
+  .automation-secret { margin:12px 0; padding:10px; border:1px solid #594a31; border-radius:7px; background:#211e17; }
+  .automation-secret-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .automation-secret b { color:#e2ca99; font-size:11px; }
+  .automation-secret p { margin:3px 0 8px; color:var(--text-dim); font-size:10px; }
+  .automation-secret code { display:block; min-height:28px; padding:7px 8px; border-radius:5px; background:#151512; overflow-wrap:anywhere; color:#d8ccb7; }
+  .automation-events-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:16px 0 7px; }
+  .automation-events-head h3 { margin:0; font-size:13px; }
+  .automation-event-list { display:grid; gap:7px; }
+  .automation-event { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:7px 10px; align-items:center; padding:9px 10px; border:1px solid var(--border); border-radius:7px; background:#191815; }
+  .automation-event code { min-width:0; overflow-wrap:anywhere; color:var(--text-faint); font-size:9.5px; }
+  .automation-event span:last-child { color:var(--text-dim); font-size:10px; }
+  .automation-event-actions { grid-column:1/-1; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .automation-event-payload { grid-column:1/-1; margin:0; max-height:180px; overflow:auto; }
+  .automation-compose { margin-bottom:14px; border-color:#4d4937; background:linear-gradient(145deg,#25221b,#1a1916); }
+  .automation-compose[hidden] { display:none; }
+  .automation-compose-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px; }
+  .automation-compose-head h2 { margin:0 0 3px; font-size:16px; }
+  .automation-compose-head p { margin:0; color:var(--text-dim); font-size:10.5px; }
+  .automation-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .automation-form .wide,.automation-form-actions,.automation-form-error { grid-column:1/-1; }
+  .automation-form textarea { min-height:115px; resize:vertical; font-family:var(--mono); }
+  .automation-form-actions { display:flex; justify-content:flex-end; gap:8px; align-items:center; flex-wrap:wrap; }
+  .automation-form-error { border-left-color:var(--err); }
+  .automation-replay { margin-top:10px; padding:11px; border:1px solid #5a472f; border-radius:7px; background:#241f17; }
+  .automation-replay h4 { margin:0 0 4px; }
+  .automation-replay p { margin:0 0 8px; color:var(--text-dim); font-size:10.5px; }
+  .automation-replay label { display:flex; align-items:flex-start; gap:7px; color:#d8cab4; font-size:10.5px; line-height:1.4; }
+  .automation-replay label input { width:auto; margin-top:1px; }
+  .automation-replay-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:9px; }
+
   /* ---------- recorder replay banner & run comparison -------- */
   .rec-banner {
     border: 1px solid var(--border-hi); border-left-width: 3px; border-radius: 6px;
@@ -1583,6 +1650,9 @@
     .learn-layout { grid-template-columns: 1fr; }
     .learn-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: auto; max-height: 360px; border-right: 0; border-bottom: 1px solid var(--border); }
     .learn-item { border-right: 1px solid var(--border); }
+    .automation-layout { grid-template-columns:1fr; }
+    .automation-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); max-height:340px; border-right:0; border-bottom:1px solid var(--border); }
+    .automation-row { border-right:1px solid var(--border); }
   }
   @media (max-width: 900px) {
     .connection-body { grid-template-columns: 220px minmax(0, 1fr); }
@@ -1615,6 +1685,10 @@
     .learn-action-choices { grid-template-columns: 1fr; }
     .learn-foundry-body { grid-template-columns: 1fr; }
     .learn-foundry-form { border-right: 0; border-bottom: 1px solid var(--border); }
+    .automation-head { flex-direction:column; }
+    .automation-head-actions { justify-content:flex-start; }
+    .automation-toolbar { grid-template-columns:minmax(0,1fr) minmax(145px,.45fr); }
+    .automation-toolbar button { grid-column:1/-1; justify-self:start; }
     .learn-seal-plate { position: static; }
     .memory-correction-body { grid-template-columns: 1fr; }
     .memory-correction-form { border-right: 0; border-bottom: 1px solid #544824; }
@@ -1775,6 +1849,22 @@
     .learn-kv { grid-template-columns: 1fr; gap: 2px; }
     .learn-kv .v { margin-bottom: 7px; }
     .learn-version { grid-template-columns: 1fr; gap: 2px; }
+    .automation-signal-path { grid-template-columns:1fr; }
+    .automation-signal-path::before { top:18px; bottom:18px; left:18px; right:auto; width:1px; height:auto; }
+    .automation-signal-step { padding-left:38px; border-right:0; border-bottom:1px solid #344143; }
+    .automation-signal-step:last-child { border-bottom:0; }
+    .automation-signal-step::before { position:absolute; left:13px; top:14px; }
+    .automation-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .automation-toolbar,.automation-form { grid-template-columns:1fr; }
+    .automation-toolbar button,.automation-form .wide,.automation-form-actions,.automation-form-error { grid-column:auto; }
+    .automation-list { grid-template-columns:1fr; max-height:300px; }
+    .automation-row { border-right:0; }
+    .automation-detail-head { flex-direction:column; }
+    .automation-detail-actions { justify-content:flex-start; }
+    .automation-kv { grid-template-columns:1fr; gap:2px; }
+    .automation-kv dd { margin-bottom:6px; }
+    .automation-event { grid-template-columns:auto minmax(0,1fr); }
+    .automation-event > span:last-of-type { grid-column:1/-1; }
     .rec-story-head { flex-direction: column; gap: 8px; }
     .rec-story-spine { grid-template-columns: 1fr; }
     .rec-story-step { padding-top: 10px; padding-left: 27px; }
@@ -1905,6 +1995,10 @@
       <h2 class="section">Learning</h2>
       <button class="small primary" id="btn-learn-open" style="width:100%">Open learning control room</button>
       <div class="muted tiny" id="learn-side-count" style="margin:6px 2px 0">Connect to review proposed changes.</div>
+
+      <h2 class="section">Automations</h2>
+      <button class="small primary" id="btn-automations-open" style="width:100%">Open automation desk</button>
+      <div class="muted tiny" id="automations-side-count" style="margin:6px 2px 0">Connect to inspect signed webhook bindings.</div>
 
       <h2 class="section">Graphs</h2>
       <div id="graph-list"><div class="empty">Connect to a server.</div></div>
@@ -2367,6 +2461,56 @@
 
       </div>
 
+      <div id="automations-view" style="display:none" aria-labelledby="automations-title">
+        <div class="automation-head">
+          <div>
+            <h1 id="automations-title" tabindex="-1">Automation desk</h1>
+            <p>Turn a signed external event into a bounded agent action, then follow its durable event evidence and failed deliveries without leaving Studio.</p>
+          </div>
+          <div class="automation-head-actions">
+            <span class="muted tiny" id="automations-statusline" role="status" aria-live="polite"></span>
+            <button class="small primary" id="btn-automation-create" type="button" aria-expanded="false" aria-controls="automation-compose">Create automation</button>
+            <button class="small" id="btn-automations-refresh" type="button">Refresh</button>
+          </div>
+        </div>
+
+      <div class="automation-signal-path" role="img" aria-label="An HMAC over the exact webhook body identifies one trigger and tenant; Rusty starts an assistant run, resumes a thread, or sends thread input; durable evidence records status, payload hash, run identity, and replay lineage">
+          <div class="automation-signal-step"><b>Signed ingress</b><span>HMAC over the exact webhook body identifies the trigger and tenant.</span></div>
+          <div class="automation-signal-step"><b>Bound action</b><span>Start an assistant run, resume a paused thread, or send thread input.</span></div>
+          <div class="automation-signal-step"><b>Durable evidence</b><span>Every accepted event records status, payload hash, run identity, and replay lineage.</span></div>
+        </div>
+
+        <section class="card automation-compose" id="automation-compose" aria-labelledby="automation-compose-title" hidden>
+          <div class="automation-compose-head"><div><h2 id="automation-compose-title" tabindex="-1">Create signed webhook automation</h2><p>Review the target and rendered input contract before Rusty creates a new secret-bearing binding.</p></div><button class="small" id="btn-automation-create-close" type="button">Close</button></div>
+          <form class="automation-form" id="automation-form" novalidate>
+            <label>Name<input id="inp-automation-name" type="text" maxlength="128" autocomplete="off" placeholder="Support escalation intake"></label>
+            <label>Automation ID · optional<input id="inp-automation-id" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="Generated by Rusty"></label>
+            <label>Action<select id="sel-automation-action"><option value="start_run">Start a new assistant run</option><option value="send_message">Send input to a thread</option><option value="resume_thread">Resume an interrupted thread</option></select></label>
+            <label>Target ID<input id="inp-automation-target" type="text" maxlength="256" autocomplete="off" spellcheck="false" list="automation-targets" aria-describedby="automation-target-help"><span class="field-help" id="automation-target-help">Choose an active assistant for a new run.</span><datalist id="automation-targets"></datalist></label>
+            <label>Debounce milliseconds · optional<input id="inp-automation-debounce" type="number" min="1" max="300000" step="1" inputmode="numeric" placeholder="Fire every event"></label>
+            <label>Webhook secret · optional<input id="inp-automation-secret" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" aria-describedby="automation-secret-help" placeholder="Let Rusty generate one"><span class="field-help" id="automation-secret-help">16–4,096 UTF-8 bytes. It stays in page memory and is never saved by Studio.</span></label>
+            <label class="wide">Input template · exact JSON<textarea id="inp-automation-template" maxlength="32768" spellcheck="false" aria-describedby="automation-template-help">{
+  "event": "{{event}}"
+}</textarea><span class="field-help" id="automation-template-help"><code>{{event.path}}</code> keeps a whole value’s JSON type; embedded placeholders interpolate text. The exact visible JSON is sent.</span></label>
+            <label class="wide"><span><input id="chk-automation-review" type="checkbox"> I reviewed the target, action, template, debounce, and secret boundary. Creating this automation exposes a signed webhook endpoint.</span></label>
+            <div class="note automation-form-error" id="automation-form-error" role="alert" tabindex="-1" hidden></div>
+            <div class="automation-form-actions"><span class="muted tiny">New automations start enabled.</span><button class="primary" id="btn-automation-submit" type="submit">Create signed automation</button></div>
+          </form>
+        </section>
+
+        <div class="automation-summary" id="automation-summary" aria-label="Automation summary"></div>
+        <div class="automation-toolbar" role="search" aria-label="Filter automations">
+          <label>Find automation<input id="inp-automation-search" type="search" autocomplete="off" placeholder="Name, ID, target, or action"></label>
+          <label>Lifecycle<select id="sel-automation-state"><option value="all">All</option><option value="enabled">Enabled</option><option value="paused">Paused</option></select></label>
+          <button class="small" id="btn-automation-clear" type="button">Clear filters</button>
+        </div>
+        <div class="automation-layout">
+          <div class="automation-list" id="automation-list" role="listbox" aria-label="Signed webhook automations" aria-describedby="automations-statusline"><div class="empty">Open the desk to load automations.</div></div>
+          <section class="automation-detail" id="automation-detail" aria-live="off"><div class="empty">Select an automation to inspect its target and event evidence.</div></section>
+        </div>
+        <span class="sr-only" id="automation-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+      </div>
+
       <div id="tasks-view" style="display:none" aria-labelledby="tasks-title">
         <div class="card">
           <h2 class="section" id="tasks-title" tabindex="-1" style="margin-top:0">
@@ -2472,6 +2616,13 @@ const LEARN_REPLAY_LIMIT = 8;
 const LEARN_REPLAY_TEXT_LIMIT = 2048;
 const LEARN_CANDIDATE_CONTENT_LIMIT = 32768;
 const LEARN_EVIDENCE_LIMIT = 8;
+const AUTOMATION_TRIGGER_LIMIT = 500;
+const AUTOMATION_EVENT_LIMIT = 256;
+const AUTOMATION_RESPONSE_LIMIT = 8 * 1024 * 1024;
+const AUTOMATION_TEMPLATE_LIMIT = 32768;
+const AUTOMATION_PREVIEW_LIMIT = 16384;
+const AUTOMATION_ACTIONS = new Set(["start_run", "resume_thread", "send_message"]);
+const AUTOMATION_EVENT_STATUSES = new Set(["pending", "executed", "failed", "coalesced"]);
 const AGENT_RESERVED_IDS = new Set([
   "agent_leases", "agents", "assistants", "coordinations", "crons", "journals", "learn", "memory",
   "memory_artifacts", "outbox", "store", "tasks", "threads", "trigger_events", "triggers", "latest",
@@ -2507,7 +2658,7 @@ const store = {
   runProofRequest: 0,  // generation guard for receipt / fixture / verify / public-key reads
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, evidenceState }
-  view: "home",        // "home" | "thread" | "tasks" | "agents" | "fabric" | "memory" | "learn" — active workspace
+  view: "home",        // active Studio workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
   taskRequest: 0,      // generation guard: task catalogs never cross connection boundaries
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
@@ -2562,6 +2713,10 @@ const store = {
   learnRequest: 0,     // generation guard for candidate/version reads and lifecycle actions
   learnSearchTimer: null,
   learnFoundry: null,  // connection-scoped immutable-proposal draft and content-address seal
+  automations: null,   // trigger registry, selected binding, event/dead-letter evidence, and replay review
+  automationRequest: 0,
+  automationMutationRequest: 0,
+  automationsUnsupported: false,
 };
 
 /* ---------------- persistence ---------------- */
@@ -4029,6 +4184,8 @@ function connectionResetWorkspace() {
   store.memoryRequest += 1;
   store.fabricRequest += 1;
   store.learnRequest += 1;
+  store.automationRequest += 1;
+  store.automationMutationRequest += 1;
   clearTimeout(store.memorySearchTimer);
   store.memorySearchTimer = null;
   clearTimeout(store.memoryLifecycleTimer);
@@ -4095,6 +4252,14 @@ function connectionResetWorkspace() {
   store.learn = null;
   store.learnUnsupported = false;
   store.learnFoundry = null;
+  store.automations = null;
+  store.automationsUnsupported = false;
+  $("automation-compose").hidden = true;
+  $("btn-automation-create").setAttribute("aria-expanded", "false");
+  $("btn-automation-submit").disabled = false;
+  $("btn-automation-submit").textContent = "Create signed automation";
+  $("automation-form").reset();
+  $("inp-automation-template").value = '{\n  "event": "{{event}}"\n}';
   $("agent-create-panel").style.display = "none";
   $("btn-agent-create").disabled = false;
   $("btn-rec-replay").disabled = false;
@@ -4172,6 +4337,7 @@ async function connect(options = {}) {
   agentsLoad(true);
   fabricLoad(true);
   learnLoad(true);
+  automationUpdateSidebar();
   renderMain();
   connectionRender();
   $("connection-announcer").textContent = `${profile.name} connected. Checking workspace compatibility.`;
@@ -4366,6 +4532,7 @@ function renderMain() {
   const fabric = store.view === "fabric";
   const memory = store.view === "memory";
   const learn = store.view === "learn";
+  const automations = store.view === "automations";
   if (!fabric) {
     clearTimeout(store.fabricLeaseTimer);
     store.fabricLeaseTimer = null;
@@ -4384,9 +4551,10 @@ function renderMain() {
   $("fabric-view").style.display = fabric ? "block" : "none";
   $("memory-view").style.display = memory ? "block" : "none";
   $("learn-view").style.display = learn ? "block" : "none";
+  $("automations-view").style.display = automations ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !t ? "block" : "none";
-  $("thread-view").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && t ? "block" : "none";
+  $("main-empty").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !automations && !t ? "block" : "none";
+  $("thread-view").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !automations && t ? "block" : "none";
   if (home) {
     stopPoll();
     abortStream();
@@ -16058,6 +16226,765 @@ function openLearn() {
   $("learn-title").focus({ preventScroll: true });
 }
 
+/* ---------------- Automation desk (event-driven triggers) -------------
+ * The server owns trigger records, HMAC secrets, the bounded event log,
+ * and replay execution. Studio keeps only connection-scoped page state,
+ * conceals secrets by default, and never treats an uncertain replay as safe
+ * to repeat. Pure helpers are covered by studio/test-automations.mjs.
+ * ------------------------------------------------------------------------- */
+
+function automationObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function automationSafeId(value) {
+  const id = typeof value === "string" ? value : "";
+  return id && agentUtf8Length(id) <= 256 && !id.includes("/") && !id.includes("\\") &&
+    !/^\.+$/.test(id) && !AGENT_RESERVED_IDS.has(id) ? id : "";
+}
+
+function automationTimestamp(value) {
+  return typeof value === "string" && memoryAssemblyTimestamp(value).value === value ? value : "";
+}
+
+function automationTarget(value) {
+  const target = automationObject(value);
+  const kind = target && target.kind;
+  const id = target && automationSafeId(target.id);
+  if (!id || !new Set(["assistant", "thread"]).has(kind) || Object.keys(target).some((key) => !["kind", "id"].includes(key))) return null;
+  return { kind, id };
+}
+
+function automationExactValue(value) {
+  try { return runProofExactJson(value); } catch { return null; }
+}
+
+function automationTriggerContract(value) {
+  const trigger = automationObject(value), target = trigger && automationTarget(trigger.target);
+  const events = trigger && recExactUnsigned(trigger, "events_received");
+  const runs = trigger && recExactUnsigned(trigger, "runs_fired");
+  const debounce = trigger && trigger.debounce_ms;
+  const debounceValid = debounce == null || (recExactUnsigned(trigger, "debounce_ms") !== null &&
+    recExactUnsigned(trigger, "debounce_ms") >= 1n && recExactUnsigned(trigger, "debounce_ms") <= 300000n);
+  const ok = trigger && automationSafeId(trigger.trigger_id) && typeof trigger.name === "string" &&
+    trigger.name.trim() && agentUtf8Length(trigger.name) <= 128 && target && AUTOMATION_ACTIONS.has(trigger.action) &&
+    ((trigger.action === "start_run" && target.kind === "assistant") ||
+      (["resume_thread", "send_message"].includes(trigger.action) && target.kind === "thread")) &&
+    automationExactValue(trigger.input_template) !== null && typeof trigger.enabled === "boolean" &&
+    typeof trigger.secret === "string" && agentUtf8Length(trigger.secret) >= 16 &&
+    debounceValid && automationTimestamp(trigger.created_at) && events !== null && runs !== null &&
+    events <= 18446744073709551615n && runs <= 18446744073709551615n;
+  return ok ? { trigger, target, events, runs } : null;
+}
+
+function automationEventContract(value, trigger) {
+  const event = automationObject(value);
+  const optionalId = (item) => item == null || Boolean(automationSafeId(item));
+  const runId = event && automationSafeId(event.run_id);
+  const noRun = event && event.run_id == null;
+  const noError = event && event.error == null;
+  const noReplay = event && event.replayed_from == null;
+  const statusShape = event && (
+    (event.status === "pending" && noRun && noError && noReplay) ||
+    (event.status === "executed" && runId && noError) ||
+    (event.status === "coalesced" && runId && noError && noReplay) ||
+    (event.status === "failed" && noRun && typeof event.error === "string")
+  );
+  const ok = event && automationSafeId(event.event_id) && event.trigger_id === trigger.trigger_id &&
+    typeof event.payload_hash === "string" && /^[a-f0-9]{64}$/.test(event.payload_hash) &&
+    automationExactValue(event.payload) !== null && event.action === trigger.action &&
+    AUTOMATION_EVENT_STATUSES.has(event.status) && statusShape && optionalId(event.run_id) &&
+    (event.error == null || typeof event.error === "string") &&
+    optionalId(event.replayed_from) && event.replayed_from !== event.event_id && automationTimestamp(event.created_at);
+  return ok ? event : null;
+}
+
+function automationReplayAck(value, originalEventId) {
+  const ack = automationObject(value);
+  if (!ack || Object.keys(ack).some((key) => !["event_id", "status", "run_id", "replayed_from"].includes(key)) ||
+      !automationSafeId(ack.event_id) || ack.event_id === originalEventId || ack.status !== "executed" ||
+      !automationSafeId(ack.run_id) || ack.replayed_from !== originalEventId) return null;
+  return ack;
+}
+
+function automationReplayCorroborated(events, ack, trigger, original) {
+  const record = (Array.isArray(events) ? events : []).find((item) => item.event_id === ack.event_id);
+  return record && automationEventContract(record, trigger) && record.status === ack.status &&
+    record.run_id === ack.run_id && record.replayed_from === ack.replayed_from && original &&
+    automationExactValue(record.payload) === automationExactValue(original.payload) ? record : null;
+}
+
+function automationRunJournalThread(value, runId) {
+  const envelope = automationObject(value);
+  if (!envelope || envelope.run_id !== runId || typeof envelope.complete !== "boolean" ||
+      !Array.isArray(envelope.events) || envelope.events.length === 0) return "";
+  const threads = new Set();
+  for (const event of envelope.events) {
+    const record = automationObject(event);
+    const threadId = record && automationSafeId(record.thread_id);
+    if (!record || record.run_id !== runId || !threadId) return "";
+    threads.add(threadId);
+  }
+  return threads.size === 1 ? threads.values().next().value : "";
+}
+
+function automationJsonText(value, maximum = AUTOMATION_PREVIEW_LIMIT) {
+  const exact = automationExactValue(value);
+  if (exact == null) return "[unreadable JSON evidence]";
+  const limit = Math.max(200, Number(maximum) || AUTOMATION_PREVIEW_LIMIT);
+  return automationBoundedText(exact, limit, "\n… exact JSON view truncated");
+}
+
+function automationBoundedText(value, maximumBytes, marker) {
+  const text = String(value == null ? "" : value);
+  const limit = Math.max(64, Number(maximumBytes) || 1000);
+  if (agentUtf8Length(text) <= limit) return text;
+  const suffix = String(marker || "… truncated");
+  const budget = Math.max(0, limit - agentUtf8Length(suffix));
+  let rendered = "", bytes = 0;
+  for (const character of text) {
+    const width = agentUtf8Length(character);
+    if (bytes + width > budget) break;
+    rendered += character; bytes += width;
+  }
+  return rendered + suffix;
+}
+
+function automationListContract(value) {
+  if (!Array.isArray(value)) return null;
+  const list = [], seen = new Set();
+  for (const item of value) {
+    const checked = automationTriggerContract(item);
+    if (!checked || seen.has(checked.trigger.trigger_id)) return null;
+    seen.add(checked.trigger.trigger_id); list.push(checked.trigger);
+  }
+  return list;
+}
+
+function automationRenderWindow(value, selectedId) {
+  const list = Array.isArray(value) ? value : [];
+  if (list.length <= AUTOMATION_TRIGGER_LIMIT) return list;
+  const leading = list.slice(0, AUTOMATION_TRIGGER_LIMIT);
+  const selected = selectedId && list.find((item) => item.trigger_id === selectedId);
+  if (selected && !leading.some((item) => item.trigger_id === selectedId)) leading[leading.length - 1] = selected;
+  return leading;
+}
+
+function automationEventsContract(value, trigger) {
+  if (!Array.isArray(value) || value.length > AUTOMATION_EVENT_LIMIT) return null;
+  const events = [], seen = new Set();
+  for (const item of value) {
+    const event = automationEventContract(item, trigger);
+    if (!event || seen.has(event.event_id)) return null;
+    seen.add(event.event_id); events.push(event);
+  }
+  return events;
+}
+
+function automationDeadLettersAgree(events, deadLetter) {
+  if (!Array.isArray(events) || !Array.isArray(deadLetter)) return false;
+  const failedEvents = events.filter((item) => item.status === "failed");
+  return failedEvents.length === deadLetter.length && deadLetter.every((failed) =>
+    failed.status === "failed" && failedEvents.some((item) => item.event_id === failed.event_id &&
+      automationExactValue(item) === automationExactValue(failed)));
+}
+
+function automationCreateDraft(values) {
+  const input = values || {};
+  const errors = Object.create(null);
+  const name = typeof input.name === "string" ? input.name : "";
+  const requestedId = typeof input.triggerId === "string" ? input.triggerId : "";
+  const action = String(input.action || "");
+  const targetId = typeof input.targetId === "string" ? input.targetId : "";
+  const secret = typeof input.secret === "string" ? input.secret : "";
+  const rawTemplate = typeof input.rawTemplate === "string" ? input.rawTemplate : "";
+  let template = null;
+  if (!name.trim() || agentUtf8Length(name) > 128) errors.name = "Name must contain text and stay within 128 UTF-8 bytes.";
+  if (requestedId && !automationSafeId(requestedId)) errors.triggerId = "Automation ID must be a safe non-reserved path identity no longer than 256 UTF-8 bytes.";
+  if (!AUTOMATION_ACTIONS.has(action)) errors.action = "Choose one supported action.";
+  if (!automationSafeId(targetId)) errors.targetId = "Enter a safe assistant or thread ID no longer than 256 UTF-8 bytes.";
+  if (secret && (agentUtf8Length(secret) < 16 || agentUtf8Length(secret) > 4096)) errors.secret = "Use 16–4,096 UTF-8 bytes, or leave it empty for a generated secret.";
+  if (!rawTemplate || agentUtf8Length(rawTemplate) > AUTOMATION_TEMPLATE_LIMIT) errors.rawTemplate = "Input template must be valid JSON no larger than 32 KiB.";
+  else {
+    try { template = agentParseJsonWithNumberKinds(rawTemplate); }
+    catch { errors.rawTemplate = "Input template must be valid JSON."; }
+  }
+  let debounceMs = null;
+  if (String(input.debounceMs == null ? "" : input.debounceMs) !== "") {
+    debounceMs = memoryAssemblyUnsigned(input.debounceMs, 1, 300000);
+    if (debounceMs == null) errors.debounceMs = "Debounce must be a whole number from 1 through 300,000 milliseconds.";
+  }
+  if (!input.acknowledged) errors.acknowledged = "Review and acknowledge the signed endpoint, target, action, template, and secret boundary.";
+  const first = ["name", "triggerId", "action", "targetId", "debounceMs", "secret", "rawTemplate", "acknowledged"].find((field) => errors[field]) || "";
+  const target = { kind: action === "start_run" ? "assistant" : "thread", id: targetId };
+  return { value: first ? null : { name, triggerId: requestedId, action, target, secret, debounceMs, template, rawTemplate }, errors, first };
+}
+
+function automationCreateBody(draft, triggerId) {
+  const fields = [
+    `"name":${JSON.stringify(draft.name)}`,
+    `"target":${JSON.stringify(draft.target)}`,
+    `"action":${JSON.stringify(draft.action)}`,
+    `"input_template":${draft.rawTemplate}`,
+    `"enabled":true`,
+    `"trigger_id":${JSON.stringify(triggerId)}`,
+  ];
+  if (draft.secret) fields.push(`"secret":${JSON.stringify(draft.secret)}`);
+  if (draft.debounceMs != null) fields.push(`"debounce_ms":${draft.debounceMs}`);
+  return `{${fields.join(",")}}`;
+}
+
+function automationCreateReceipt(value, draft, triggerId) {
+  const checked = automationTriggerContract(value);
+  if (!checked) return null;
+  const trigger = checked.trigger;
+  const exactTemplate = automationExactValue(draft.template);
+  const actualTemplate = automationExactValue(trigger.input_template);
+  const ok = trigger.trigger_id === triggerId && trigger.name === draft.name &&
+    trigger.target.kind === draft.target.kind && trigger.target.id === draft.target.id &&
+    trigger.action === draft.action && actualTemplate === exactTemplate && trigger.enabled === true &&
+    (trigger.debounce_ms ?? null) === draft.debounceMs && checked.events === 0n && checked.runs === 0n &&
+    (draft.secret ? trigger.secret === draft.secret : agentUtf8Length(trigger.secret) >= 16);
+  return ok ? trigger : null;
+}
+
+function automationLifecycleReceipt(value, expected, enabled) {
+  const checked = automationTriggerContract(value);
+  if (!checked || checked.trigger.enabled !== enabled) return null;
+  const actual = checked.trigger, fields = ["trigger_id", "name", "action", "secret", "created_at"];
+  if (fields.some((field) => actual[field] !== expected[field]) || actual.target.kind !== expected.target.kind ||
+      actual.target.id !== expected.target.id || (actual.debounce_ms ?? null) !== (expected.debounce_ms ?? null) ||
+      automationExactValue(actual.input_template) !== automationExactValue(expected.input_template)) return null;
+  return actual;
+}
+
+function automationEventBadge(status) {
+  const tone = ({ pending: "pending", executed: "success", failed: "error", coalesced: "interrupted" })[status] || "pending";
+  return `<span class="badge ${tone}">${escapeHtml(status || "unknown")}</span>`;
+}
+
+function automationActionLabel(action) {
+  return ({ start_run: "Start assistant run", send_message: "Send thread input", resume_thread: "Resume thread" })[action] || action || "Unknown action";
+}
+
+function automationCounter(record, field) {
+  const value = recExactUnsigned(record, field);
+  return value == null ? "—" : value.toString();
+}
+
+function automationErrorHtml(error) {
+  const status = error && error.status;
+  const body = error && error.body;
+  if (status === 404 && !(body && body.error)) {
+    return `<div class="note">This server build has no trigger registry routes. Use a Rusty build with event-driven triggers, then reconnect.</div>`;
+  }
+  return `<div class="note">${escapeHtml(error && error.message || "Automation evidence is unavailable.")}</div>`;
+}
+
+function automationRequestCurrent(request, connection) {
+  return request === store.automationRequest && !connectionIdentityChanged(connection, store.conn);
+}
+
+function automationUpdateSidebar() {
+  const el = $("automations-side-count");
+  if (!el) return;
+  if (!store.conn) { el.textContent = "Connect to inspect signed webhook bindings."; return; }
+  if (!store.automations) { el.textContent = "Open the desk to load server automations."; return; }
+  if (store.automations.loading) { el.textContent = "Loading server automations…"; return; }
+  if (store.automations.error) { el.textContent = store.automationsUnsupported ? "Automation routes unavailable." : "Automation registry needs attention."; return; }
+  const enabled = store.automations.list.filter((item) => item.enabled).length;
+  el.textContent = `${enabled} enabled · ${store.automations.list.length - enabled} paused.`;
+}
+
+async function automationsLoad(quiet = false) {
+  const request = ++store.automationRequest;
+  const connection = store.conn && { ...store.conn };
+  if (!connection) {
+    store.automations = { list: [], selected: "", events: [], deadLetter: [], loading: false,
+      error: new Error("Connect to a verified Rusty server before opening automations."), query: "", filter: "all", eventMode: "events", revealed: new Set(), replay: null };
+    automationsRender(); automationUpdateSidebar(); return false;
+  }
+  const prior = store.automations;
+  store.automations = { list: prior && prior.list || [], selected: prior && prior.selected || "",
+    events: prior && prior.events || [], deadLetter: prior && prior.deadLetter || [], loading: true, error: null,
+    query: prior && prior.query || "", filter: prior && prior.filter || "all", eventMode: prior && prior.eventMode || "events", revealed: prior && prior.revealed || new Set(), replay: null };
+  automationsRender(); automationUpdateSidebar();
+  try {
+    const response = await apiForConnection(connection, "GET", "/triggers", undefined, AUTOMATION_RESPONSE_LIMIT);
+    if (!automationRequestCurrent(request, connection)) return false;
+    const list = automationListContract(response);
+    if (!list) throw new Error("Rusty returned a trigger catalog outside the bounded trigger contract.");
+    const keep = store.automations.selected;
+    store.automations.list = list;
+    store.automations.selected = keep && list.some((item) => item.trigger_id === keep) ? keep : "";
+    store.automations.events = [];
+    store.automations.deadLetter = [];
+    store.automations.loading = false;
+    store.automations.error = null;
+    store.automationsUnsupported = false;
+    automationsRender(); automationUpdateSidebar();
+    if (store.automations.selected) await automationLoadEvidence(store.automations.selected, true);
+    return true;
+  } catch (error) {
+    if (!automationRequestCurrent(request, connection)) return false;
+    store.automations.loading = false;
+    store.automations.error = error;
+    store.automationsUnsupported = error.status === 404 && !(error.body && error.body.error);
+    automationsRender(); automationUpdateSidebar();
+    if (!quiet && !store.automationsUnsupported) toast(error.message, "err");
+    return false;
+  }
+}
+
+async function automationLoadEvidence(triggerId, quiet = false, preserveReplay = false) {
+  if (!store.automations || !store.conn) return false;
+  const trigger = store.automations.list.find((item) => item.trigger_id === triggerId);
+  if (!trigger) return false;
+  const request = ++store.automationRequest, connection = { ...store.conn };
+  store.automations.selected = triggerId; store.automations.evidenceLoading = true;
+  store.automations.evidenceError = null; store.automations.evidenceDrift = false;
+  if (!preserveReplay) store.automations.replay = null;
+  automationsRender();
+  try {
+    const [triggerRaw, eventsRaw, deadRaw] = await Promise.all([
+      apiForConnection(connection, "GET", `/triggers/${encodeURIComponent(triggerId)}`, undefined, AUTOMATION_RESPONSE_LIMIT),
+      apiForConnection(connection, "GET", `/triggers/${encodeURIComponent(triggerId)}/events`, undefined, AUTOMATION_RESPONSE_LIMIT),
+      apiForConnection(connection, "GET", `/triggers/${encodeURIComponent(triggerId)}/dead-letter`, undefined, AUTOMATION_RESPONSE_LIMIT),
+    ]);
+    if (!automationRequestCurrent(request, connection) || !store.automations || store.automations.selected !== triggerId) return false;
+    const current = automationTriggerContract(triggerRaw);
+    const refreshed = current && current.trigger.trigger_id === triggerId ? current.trigger : null;
+    const events = refreshed && automationEventsContract(eventsRaw, refreshed);
+    const deadLetter = refreshed && automationEventsContract(deadRaw, refreshed);
+    if (!refreshed || !events || !deadLetter) {
+      throw new Error("Rusty returned trigger events outside the bounded event-evidence contract.");
+    }
+    store.automations.list = store.automations.list.map((item) => item.trigger_id === triggerId ? refreshed : item);
+    store.automations.events = events;
+    store.automations.deadLetter = deadLetter;
+    store.automations.evidenceDrift = !automationDeadLettersAgree(events, deadLetter);
+    store.automations.evidenceLoading = false;
+    store.automations.evidenceError = null;
+    store.automations.observedAt = new Date().toISOString();
+    automationUpdateSidebar(); automationsRender();
+    return true;
+  } catch (error) {
+    if (!automationRequestCurrent(request, connection) || !store.automations || store.automations.selected !== triggerId) return false;
+    store.automations.events = [];
+    store.automations.deadLetter = [];
+    store.automations.evidenceDrift = false;
+    store.automations.evidenceLoading = false;
+    store.automations.evidenceError = error;
+    automationsRender();
+    if (!quiet) toast(error.message, "err");
+    return false;
+  }
+}
+
+function automationVisibleList(state) {
+  const query = String(state && state.query || "").trim().toLowerCase();
+  const filter = state && state.filter || "all";
+  return (state && state.list || []).filter((trigger) => {
+    if (filter === "enabled" && !trigger.enabled) return false;
+    if (filter === "paused" && trigger.enabled) return false;
+    if (!query) return true;
+    return [trigger.name, trigger.trigger_id, trigger.action, trigger.target.id].some((item) => String(item).toLowerCase().includes(query));
+  });
+}
+
+function automationSummaryHtml(state) {
+  const list = state && state.list || [];
+  const enabled = list.filter((item) => item.enabled).length;
+  const received = list.reduce((sum, item) => sum + (recExactUnsigned(item, "events_received") || 0n), 0n);
+  const fired = list.reduce((sum, item) => sum + (recExactUnsigned(item, "runs_fired") || 0n), 0n);
+  const dead = state && state.selected ? (state.deadLetter || []).length : null;
+  return `<div><b>${list.length}</b><span>registered bindings</span></div><div><b>${enabled}</b><span>accepting webhooks</span></div>` +
+    `<div><b>${escapeHtml(`${received} / ${fired}`)}</b><span>events / run actions</span></div><div><b>${dead == null ? "—" : dead}</b><span>${dead == null ? "select for dead letters" : "selected dead letters"}</span></div>`;
+}
+
+function automationRowHtml(trigger, selected, focusable = selected) {
+  return `<button class="automation-row" type="button" role="option" tabindex="${focusable ? 0 : -1}" aria-selected="${selected}" data-automation-id="${escapeHtml(trigger.trigger_id)}">` +
+    `<b>${escapeHtml(trigger.name)}</b>${trigger.enabled ? '<span class="badge success">enabled</span>' : '<span class="badge interrupted">paused</span>'}` +
+    `<small>${escapeHtml(automationActionLabel(trigger.action))} → ${escapeHtml(trigger.target.id)}</small>` +
+    `<code>${escapeHtml(trigger.trigger_id)} · ${escapeHtml(automationCounter(trigger, "events_received"))} event(s) · ${escapeHtml(automationCounter(trigger, "runs_fired"))} run(s)</code></button>`;
+}
+
+function automationWebhookUrl(trigger) {
+  const base = store.conn && String(store.conn.baseUrl || "").replace(/\/+$/, "");
+  return `${base}/triggers/${encodeURIComponent(trigger.trigger_id)}/webhook`;
+}
+
+function automationEventHtml(event, trigger, replay) {
+  const preview = automationJsonText(event.payload, AUTOMATION_PREVIEW_LIMIT);
+  const errorPreview = event.error == null ? "" : automationBoundedText(event.error, 1000, "… error preview truncated");
+  const selected = replay && replay.eventId === event.event_id;
+  const replayBox = selected ? `<form class="automation-replay" data-automation-replay-form="${escapeHtml(event.event_id)}" aria-busy="${replay.submitting}"><h4>Replay stored event</h4>` +
+    `<p>This immediately executes the stored payload, bypassing signature and debounce. If the response is lost, do not repeat until refreshed evidence proves whether a replay event was recorded.</p>` +
+    `<label><input type="checkbox" data-automation-replay-ack${replay.acknowledged ? " checked" : ""}${replay.submitting ? " disabled" : ""}> I reviewed event ${escapeHtml(event.event_id)}, payload hash ${escapeHtml(event.payload_hash)}, target ${escapeHtml(trigger.target.id)}, and action ${escapeHtml(trigger.action)}.</label>` +
+    (replay.error ? `<div class="note" role="alert" tabindex="-1" data-automation-replay-error="${escapeHtml(event.event_id)}">${escapeHtml(replay.error)}</div>` : "") +
+    `<div class="automation-replay-actions"><button class="small" type="button" data-automation-replay-cancel${replay.submitting ? " disabled" : ""}>Cancel</button><button class="small primary" type="submit" data-automation-replay-submit="${escapeHtml(event.event_id)}"${!replay.acknowledged || replay.submitting || replay.ambiguous ? " disabled" : ""}>${replay.submitting ? "Replaying…" : "Replay exact event"}</button>` +
+    `<span class="muted tiny" role="status" tabindex="-1" data-automation-replay-status="${escapeHtml(event.event_id)}">${replay.submitting ? "Replay request in progress; do not repeat." : ""}</span></div></form>` : "";
+  return `<article class="automation-event" aria-label="${escapeHtml(`Event ${event.event_id}, ${event.status}`)}">${automationEventBadge(event.status)}` +
+    `<code>${escapeHtml(event.event_id)} · ${escapeHtml(event.payload_hash)}</code><span>${escapeHtml(event.created_at)}</span>` +
+    `<pre class="json automation-event-payload">${escapeHtml(preview)}</pre><div class="automation-event-actions">` +
+    (event.run_id ? `<button class="small" type="button" data-automation-run="${escapeHtml(event.run_id)}" data-automation-run-event="${escapeHtml(event.event_id)}">Inspect run ${escapeHtml(shortId(event.run_id))}</button>` : "") +
+    `<button class="small" type="button" data-automation-replay="${escapeHtml(event.event_id)}"${!trigger.enabled || (replay && replay.submitting) ? " disabled" : ""}>Review replay</button>` +
+    (event.replayed_from ? `<span class="muted tiny">replayed from ${escapeHtml(event.replayed_from)}</span>` : "") +
+    (errorPreview ? `<span class="muted tiny">${escapeHtml(errorPreview)}</span>` : "") +
+    `</div>${replayBox}</article>`;
+}
+
+function automationDetailHtml(state, trigger) {
+  if (!trigger) return `<div class="empty">Select an automation to inspect its target and event evidence.</div>`;
+  const revealed = state.revealed && state.revealed.has(trigger.trigger_id);
+  const endpoint = automationWebhookUrl(trigger);
+  const deadMode = state.eventMode === "dead";
+  const filteredEvents = deadMode ? state.deadLetter : state.events;
+  let evidence;
+  if (state.evidenceLoading) evidence = `<div class="empty">Loading event and dead-letter evidence…</div>`;
+  else if (state.evidenceError) evidence = automationErrorHtml(state.evidenceError);
+  else if (!filteredEvents.length) evidence = `<div class="empty">${deadMode ? "No failed events are in this dead-letter view." : "No webhook events have been recorded for this automation."}</div>`;
+  else evidence = `<div class="automation-event-list">${filteredEvents.map((event) => automationEventHtml(event, trigger, state.replay)).join("")}</div>`;
+  return `<div class="automation-detail-head"><div><h2 id="automation-detail-title" tabindex="-1">${escapeHtml(trigger.name)}</h2>` +
+    `<span class="muted tiny">${escapeHtml(trigger.trigger_id)} · created ${escapeHtml(trigger.created_at)}</span></div><div class="automation-detail-actions">` +
+    `<button class="small" type="button" data-automation-toggle="${escapeHtml(trigger.trigger_id)}">${trigger.enabled ? "Pause webhook" : "Resume webhook"}</button>` +
+    `<button class="small" type="button" data-automation-refresh="${escapeHtml(trigger.trigger_id)}">Refresh evidence</button></div></div>` +
+    `<dl class="automation-kv"><dt>Lifecycle</dt><dd>${trigger.enabled ? "Enabled · accepts signed events" : "Paused · webhook and replay are blocked"}</dd>` +
+    `<dt>Action</dt><dd>${escapeHtml(automationActionLabel(trigger.action))}</dd><dt>Target</dt><dd>${escapeHtml(`${trigger.target.kind}:${trigger.target.id}`)}</dd>` +
+    `<dt>Debounce</dt><dd>${trigger.debounce_ms == null ? "None · every event executes" : `${escapeHtml(automationCounter(trigger, "debounce_ms"))} ms · burst events coalesce`}</dd>` +
+    `<dt>Received / runs</dt><dd>${escapeHtml(automationCounter(trigger, "events_received"))} / ${escapeHtml(automationCounter(trigger, "runs_fired"))}</dd>` +
+    `<dt>Observed</dt><dd>${escapeHtml(state.observedAt || "event evidence not loaded")}</dd></dl>` +
+    `<div class="automation-secret"><div class="automation-secret-head"><div><b>Webhook endpoint and signing secret</b><p>Configure the sender with this URL and <code>X-Rusty-Signature: sha256=&lt;HMAC&gt;</code>. Studio never saves the secret.</p></div>` +
+    `<button class="small" type="button" data-automation-secret-toggle="${escapeHtml(trigger.trigger_id)}" aria-pressed="${revealed}">${revealed ? "Conceal" : "Reveal"}</button></div>` +
+    `<span class="muted tiny">Endpoint</span><code>${escapeHtml(endpoint)}</code><span class="muted tiny" style="display:block;margin-top:8px">Signing secret</span>` +
+    `<code>${revealed ? escapeHtml(trigger.secret) : "••••••••••••••••"}</code><div class="automation-detail-actions" style="margin-top:7px;justify-content:flex-start">` +
+    `<button class="small" type="button" data-automation-copy-endpoint="${escapeHtml(trigger.trigger_id)}">Copy endpoint</button>` +
+    `<button class="small" type="button" data-automation-copy-secret="${escapeHtml(trigger.trigger_id)}">Copy secret</button></div>` +
+    `<details style="margin-top:9px"><summary>Inspect input template</summary><pre class="json">${escapeHtml(automationJsonText(trigger.input_template, AUTOMATION_PREVIEW_LIMIT))}</pre></details></div>` +
+    `<div class="automation-events-head"><h3>${deadMode ? "Dead-letter evidence" : "Event evidence"}</h3><div class="automation-detail-actions" role="group" aria-label="Automation event evidence view">` +
+    `<button class="small" type="button" data-automation-event-mode="events" aria-pressed="${!deadMode}">All events (${state.events.length})</button>` +
+    `<button class="small" type="button" data-automation-event-mode="dead" aria-pressed="${deadMode}">Dead letters (${state.deadLetter.length})</button></div></div>` +
+    `<div class="muted tiny" style="margin-bottom:7px">Payload previews are bounded to 16 KiB; the server retains at most 256 events per automation.</div>` +
+    (state.evidenceDrift ? `<div class="note" role="status">Event and dead-letter reads crossed a live server update. Each view is independently valid, but they do not share a revision; refresh before comparing them.</div>` : "") + evidence;
+}
+
+function automationFocusIdentity() {
+  const active = document.activeElement;
+  if (!active || !active.closest || !active.closest("#automations-view")) return null;
+  for (const attr of ["data-automation-id", "data-automation-toggle", "data-automation-refresh", "data-automation-replay", "data-automation-replay-submit", "data-automation-run"]) {
+    if (active.hasAttribute && active.hasAttribute(attr)) return { attr, value: active.getAttribute(attr) };
+  }
+  return active.id ? { id: active.id } : null;
+}
+
+function automationRestoreFocus(identity) {
+  if (!identity || store.view !== "automations") return false;
+  const target = identity.id ? $(identity.id) : $("automations-view").querySelector(`[${identity.attr}="${CSS.escape(identity.value)}"]`);
+  const fallback = $("inp-automation-search") || $("automations-title");
+  (target && !target.disabled ? target : fallback)?.focus({ preventScroll: true });
+  return Boolean(target && !target.disabled);
+}
+
+function automationsRender() {
+  const state = store.automations;
+  const focus = typeof document !== "undefined" ? automationFocusIdentity() : null;
+  $("automation-summary").innerHTML = automationSummaryHtml(state);
+  if (!state) {
+    $("automations-statusline").textContent = "";
+    $("automation-list").innerHTML = `<div class="empty">Open the desk to load automations.</div>`;
+    $("automation-detail").innerHTML = `<div class="empty">Select an automation to inspect its target and event evidence.</div>`;
+    return;
+  }
+  $("inp-automation-search").value = state.query || "";
+  $("sel-automation-state").value = state.filter || "all";
+  if (state.loading) {
+    $("automations-statusline").textContent = "Loading server registry…";
+    $("automation-list").innerHTML = `<div class="empty">Loading signed webhook bindings…</div>`;
+  } else if (state.error) {
+    $("automations-statusline").textContent = "Registry unavailable";
+    $("automation-list").innerHTML = automationErrorHtml(state.error);
+  } else {
+    const visible = automationVisibleList(state);
+    const rendered = automationRenderWindow(visible, state.selected);
+    $("automations-statusline").textContent = visible.length > rendered.length
+      ? `${rendered.length} rendered · ${visible.length} match · ${state.list.length} server record(s)`
+      : `${visible.length} shown · ${state.list.length} server record(s)`;
+    const selectedVisible = visible.some((trigger) => trigger.trigger_id === state.selected);
+    $("automation-list").innerHTML = rendered.length ? rendered.map((trigger, index) => automationRowHtml(trigger,
+      trigger.trigger_id === state.selected, trigger.trigger_id === state.selected || (!selectedVisible && index === 0))).join("") :
+      `<div class="empty">No automations match these filters. Clear filters or create a signed binding.</div>`;
+  }
+  const selected = state.list.find((item) => item.trigger_id === state.selected);
+  $("automation-detail").innerHTML = automationDetailHtml(state, selected);
+  if (focus) automationRestoreFocus(focus);
+}
+
+function automationPopulateTargets() {
+  const action = $("sel-automation-action").value;
+  const list = $("automation-targets");
+  const values = action === "start_run"
+    ? ((store.agents && store.agents.list) || []).filter((item) => agentLifecycleState(item) === "active").map((item) => ({ id: item.assistant_id, label: item.name }))
+    : store.threads.map((item) => ({ id: item.thread_id, label: item.graph || "thread" }));
+  list.innerHTML = values.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label || item.id)}</option>`).join("");
+  $("automation-target-help").textContent = action === "start_run"
+    ? "Choose an active assistant for a new run."
+    : action === "resume_thread" ? "Choose a browser-known thread currently waiting at an interrupt boundary." : "Choose a browser-known thread that should receive this rendered input.";
+}
+
+function automationCreateOpen() {
+  const panel = $("automation-compose"), open = !panel.hidden;
+  panel.hidden = open;
+  $("btn-automation-create").setAttribute("aria-expanded", String(!open));
+  if (!open) { automationPopulateTargets(); $("automation-compose-title").focus({ preventScroll: true }); }
+  else $("btn-automation-create").focus({ preventScroll: true });
+}
+
+function automationFormValues() {
+  return { name: $("inp-automation-name").value, triggerId: $("inp-automation-id").value,
+    action: $("sel-automation-action").value, targetId: $("inp-automation-target").value,
+    debounceMs: $("inp-automation-debounce").value, secret: $("inp-automation-secret").value,
+    rawTemplate: $("inp-automation-template").value, acknowledged: $("chk-automation-review").checked };
+}
+
+function automationDescriptionToken(node, token, add) {
+  const values = new Set(String(node.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+  if (add) values.add(token); else values.delete(token);
+  if (values.size) node.setAttribute("aria-describedby", [...values].join(" "));
+  else node.removeAttribute("aria-describedby");
+}
+
+function automationShowFormError(result, message = "") {
+  const error = $("automation-form-error");
+  const text = message || (result && result.first && result.errors[result.first]) || "Review the marked automation fields.";
+  error.textContent = text; error.hidden = false; error.focus({ preventScroll: true });
+  const mapping = { name: "inp-automation-name", triggerId: "inp-automation-id", action: "sel-automation-action", targetId: "inp-automation-target", debounceMs: "inp-automation-debounce", secret: "inp-automation-secret", rawTemplate: "inp-automation-template", acknowledged: "chk-automation-review" };
+  for (const [field, id] of Object.entries(mapping)) {
+    const node = $(id), invalid = Boolean(result && result.errors[field]);
+    node.setAttribute("aria-invalid", String(invalid));
+    automationDescriptionToken(node, "automation-form-error", invalid && field === result.first);
+  }
+}
+
+function automationGeneratedId() {
+  const cryptoApi = typeof crypto !== "undefined" ? crypto : null;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") return `hook-${cryptoApi.randomUUID()}`;
+  return `hook-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function automationAcceptCreated(trigger, message, foreground = true) {
+  const state = store.automations;
+  if (!state) return;
+  state.list = [trigger, ...state.list.filter((item) => item.trigger_id !== trigger.trigger_id)];
+  if (foreground) {
+    state.selected = trigger.trigger_id;
+    state.events = []; state.deadLetter = []; state.replay = null;
+    state.revealed.add(trigger.trigger_id);
+    $("automation-compose").hidden = true;
+    $("btn-automation-create").setAttribute("aria-expanded", "false");
+    $("automation-form").reset();
+    $("inp-automation-template").value = '{\n  "event": "{{event}}"\n}';
+  }
+  automationUpdateSidebar(); automationsRender();
+  if (foreground) {
+    $("automation-announcer").textContent = `${trigger.name} created and selected. Its signing secret is revealed for setup and remains page-memory only.`;
+    toast(message, "ok");
+    $("automation-detail-title")?.focus({ preventScroll: true });
+    automationLoadEvidence(trigger.trigger_id, true);
+  }
+}
+
+async function automationCreateSubmit() {
+  const validation = automationCreateDraft(automationFormValues());
+  if (!validation.value) { automationShowFormError(validation); return; }
+  const operation = connectionOperation(); if (!operation || !store.automations) return;
+  const initiatingView = store.view;
+  const draft = validation.value;
+  const triggerId = draft.triggerId || automationGeneratedId();
+  $("inp-automation-id").value = triggerId;
+  const bodyText = automationCreateBody(draft, triggerId);
+  const interaction = { state: store.automations, view: initiatingView, selected: store.automations.selected,
+    query: store.automations.query, filter: store.automations.filter, form: JSON.stringify(automationFormValues()) };
+  const button = $("btn-automation-submit"); button.disabled = true; button.textContent = "Creating…";
+  $("automation-form-error").hidden = true;
+  let originalError = null, response = null;
+  try {
+    response = await apiForConnection(operation.connection, "POST", "/triggers", undefined, AUTOMATION_RESPONSE_LIMIT, bodyText);
+  } catch (error) { originalError = error; }
+  if (!connectionOperationCurrent(operation)) return;
+  let receipt = response && automationCreateReceipt(response, draft, triggerId);
+  if (!receipt) {
+    try {
+      const stored = await apiForConnection(operation.connection, "GET", `/triggers/${encodeURIComponent(triggerId)}`, undefined, AUTOMATION_RESPONSE_LIMIT);
+      if (!connectionOperationCurrent(operation)) return;
+      receipt = automationCreateReceipt(stored, draft, triggerId);
+    } catch {}
+  }
+  button.disabled = false; button.textContent = "Create signed automation";
+  if (receipt) {
+    const foreground = store.automations === interaction.state && store.view === interaction.view &&
+      store.automations.selected === interaction.selected && store.automations.query === interaction.query &&
+      store.automations.filter === interaction.filter && JSON.stringify(automationFormValues()) === interaction.form;
+    automationAcceptCreated(receipt, originalError ? "Automation creation was reconciled from durable server state." : "Signed automation created.", foreground);
+    return;
+  }
+  const ambiguous = originalError && (originalError.status === 0 || originalError.status >= 500);
+  automationShowFormError(validation, ambiguous
+    ? `The creation outcome is uncertain. Studio found no exact matching record at ${triggerId}. Retry only with this unchanged ID and reviewed payload.`
+    : originalError ? originalError.message : "Rusty returned a record that did not match the reviewed automation. No success claim was made.");
+}
+
+function automationReplaceRecord(record) {
+  if (!store.automations) return;
+  store.automations.list = store.automations.list.map((item) => item.trigger_id === record.trigger_id ? record : item);
+  automationUpdateSidebar(); automationsRender();
+}
+
+async function automationToggle(triggerId) {
+  const state = store.automations, expected = state && state.list.find((item) => item.trigger_id === triggerId);
+  const operation = connectionOperation(); if (!expected || !operation) return;
+  const desired = !expected.enabled, request = ++store.automationMutationRequest, initiatingView = store.view;
+  let error = null, receipt = null;
+  try {
+    const response = await apiForConnection(operation.connection, "PATCH", `/triggers/${encodeURIComponent(triggerId)}`, { enabled: desired }, AUTOMATION_RESPONSE_LIMIT);
+    if (request !== store.automationMutationRequest || !connectionOperationCurrent(operation)) return;
+    receipt = automationLifecycleReceipt(response, expected, desired);
+  } catch (caught) { error = caught; }
+  if (request !== store.automationMutationRequest || !connectionOperationCurrent(operation)) return;
+  if (!receipt) {
+    try {
+      const stored = await apiForConnection(operation.connection, "GET", `/triggers/${encodeURIComponent(triggerId)}`, undefined, AUTOMATION_RESPONSE_LIMIT);
+      if (request !== store.automationMutationRequest || !connectionOperationCurrent(operation)) return;
+      receipt = automationLifecycleReceipt(stored, expected, desired);
+    } catch {}
+  }
+  if (!receipt) { toast(error ? error.message : "Rusty returned a lifecycle receipt that did not match the reviewed automation.", "err"); return; }
+  automationReplaceRecord(receipt);
+  if (store.view === initiatingView) {
+    $("automation-announcer").textContent = `${receipt.name} ${desired ? "resumed" : "paused"}.`;
+    toast(`${receipt.name} ${desired ? "resumed" : "paused"}.`, desired ? "ok" : "warn");
+  }
+}
+
+function automationReplayOpen(eventId) {
+  if (!store.automations) return;
+  store.automations.replay = { eventId, acknowledged: false, submitting: false, ambiguous: false, error: "" };
+  automationsRender();
+  $("automation-detail").querySelector(`[data-automation-replay-ack]`)?.focus({ preventScroll: true });
+}
+
+async function automationReplaySubmit(eventId) {
+  const state = store.automations, trigger = state && state.list.find((item) => item.trigger_id === state.selected);
+  const event = state && [...state.events, ...state.deadLetter].find((item) => item.event_id === eventId);
+  const review = state && state.replay, operation = connectionOperation();
+  if (!trigger || !event || !review || review.eventId !== eventId || !review.acknowledged || review.ambiguous || !operation) return;
+  const existingEventIds = new Set(state.events.map((item) => item.event_id));
+  review.submitting = true; review.error = ""; automationsRender();
+  $("automation-detail")?.querySelector(`[data-automation-replay-status="${CSS.escape(eventId)}"]`)?.focus({ preventScroll: true });
+  try {
+    const response = await apiForConnection(operation.connection, "POST", `/triggers/${encodeURIComponent(trigger.trigger_id)}/events/${encodeURIComponent(eventId)}/replay`, undefined, AUTOMATION_RESPONSE_LIMIT);
+    if (!connectionOperationCurrent(operation) || !store.automations || store.automations.replay !== review) return;
+    const accepted = automationReplayAck(response, eventId);
+    if (!accepted) {
+      review.submitting = false; review.ambiguous = true;
+      review.error = "Rusty returned an untrusted replay acknowledgement. The action may have executed; refresh evidence and corroborate replay lineage before any further replay.";
+      automationsRender();
+      $("automation-detail")?.querySelector(`[data-automation-replay-error="${CSS.escape(eventId)}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    const refreshed = await automationLoadEvidence(trigger.trigger_id, true, true);
+    if (!connectionOperationCurrent(operation) || !store.automations || store.automations.replay !== review) return;
+    const recorded = refreshed && automationReplayCorroborated(state.events, accepted, trigger, event);
+    if (!recorded) {
+      review.submitting = false; review.ambiguous = true;
+      review.error = `Rusty acknowledged replay event ${accepted.event_id}, but Studio could not corroborate its full durable event record. Refresh evidence before any further replay.`;
+      automationsRender();
+      $("automation-detail")?.querySelector(`[data-automation-replay-error="${CSS.escape(eventId)}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    state.replay = null; automationsRender();
+    if (store.view !== "automations") return;
+    $("automation-announcer").textContent = `Replay of event ${eventId} was corroborated as ${recorded.event_id} with status ${recorded.status}.`;
+    toast("Stored event replayed and corroborated.", "ok");
+    $("automation-detail")?.querySelector(`[data-automation-replay="${CSS.escape(eventId)}"]`)?.focus({ preventScroll: true });
+  } catch (error) {
+    if (!connectionOperationCurrent(operation) || !store.automations || store.automations.replay !== review) return;
+    if (Number(error.status) === 502 && error.body && error.body.error === "action_failed") {
+      const refreshed = await automationLoadEvidence(trigger.trigger_id, true, true);
+      if (!connectionOperationCurrent(operation) || !store.automations || store.automations.replay !== review) return;
+      const recorded = refreshed && state.events.filter((item) => !existingEventIds.has(item.event_id) &&
+        item.replayed_from === eventId && item.status === "failed" &&
+        automationExactValue(item.payload) === automationExactValue(event.payload));
+      if (recorded && recorded.length === 1) {
+        state.replay = null; automationsRender();
+        if (store.view === "automations") {
+          $("automation-announcer").textContent = `Replay was recorded as ${recorded[0].event_id}, but the bound action failed and remains in dead-letter evidence.`;
+          toast("Replay recorded; the action failed again.", "warn");
+          $("automation-detail")?.querySelector(`[data-automation-replay="${CSS.escape(eventId)}"]`)?.focus({ preventScroll: true });
+        }
+        return;
+      }
+    }
+    review.submitting = false;
+    const status = Number(error.status);
+    review.ambiguous = ![400, 401, 403, 404, 409, 422].includes(status);
+    review.error = review.ambiguous
+      ? "Replay outcome is uncertain. Refresh event evidence and look for a new record whose replayed_from matches this event before attempting anything else."
+      : error.message;
+    automationsRender();
+    $("automation-detail")?.querySelector(`[data-automation-replay-error="${CSS.escape(eventId)}"]`)?.focus({ preventScroll: true });
+  }
+}
+
+async function automationInspectRun(runId, eventId) {
+  const state = store.automations;
+  const triggerId = state && state.selected;
+  const trigger = state && state.list.find((item) => item.trigger_id === triggerId);
+  const selectedEvent = state && [...state.events, ...state.deadLetter].find((item) => item.event_id === eventId && item.run_id === runId);
+  const operation = connectionOperation();
+  if (!operation || !state || !trigger || !selectedEvent || store.view !== "automations") return;
+  const request = ++store.automationRequest;
+  let destinationThread = "";
+  try {
+    const response = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(runId)}/events`, undefined, AUTOMATION_RESPONSE_LIMIT);
+    if (!automationRequestCurrent(request, operation.connection) || store.automations !== state || store.view !== "automations" ||
+        state.selected !== triggerId || ![...state.events, ...state.deadLetter].some((item) => item.event_id === eventId && item.run_id === runId)) return;
+    const threadId = automationRunJournalThread(response, runId);
+    if (!threadId) throw new Error("The run journal did not bind every event to one exact run and thread identity.");
+    destinationThread = threadId;
+    if (!store.threads.some((thread) => thread.thread_id === threadId)) {
+      const assistant = trigger && trigger.target.kind === "assistant" && store.agents && store.agents.list.find((item) => item.assistant_id === trigger.target.id);
+      store.threads.unshift({ thread_id: threadId, graph: assistant && assistant.graph || "?", created_at: null, metadata: { source: "automation_event" } });
+    }
+    store.selected = threadId; store.view = "thread"; saveThreads(); renderThreads(); renderMain();
+    await recLoad(runId, true);
+    if (!connectionOperationCurrent(operation) || store.view !== "thread" || store.selected !== threadId ||
+        !store.recorder || store.recorder.requestedRunId !== runId) return;
+    $("flight-recorder-title")?.focus({ preventScroll: true });
+    $("flight-recorder-card")?.scrollIntoView({ block: "start" });
+  } catch (error) {
+    const stillOwned = destinationThread
+      ? store.view === "thread" && store.selected === destinationThread
+      : automationRequestCurrent(request, operation.connection) && store.automations === state &&
+        store.view === "automations" && state.selected === triggerId;
+    if (connectionOperationCurrent(operation) && stillOwned) toast(error.message, "err");
+  }
+}
+
+async function automationCopyText(value, label) {
+  try {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") throw new Error("Clipboard access is unavailable.");
+    await navigator.clipboard.writeText(value);
+    $("automation-announcer").textContent = `${label} copied. Clear clipboard history if this is a shared device.`;
+    toast(`${label} copied.`, "ok");
+  } catch (error) { toast(error.message, "err"); }
+}
+
+function openAutomations() {
+  store.view = "automations"; renderMain(); $("main").scrollTop = 0;
+  if (!store.automations || (!store.automations.loading && store.automations.error)) automationsLoad(false);
+  $("automations-title").focus({ preventScroll: true });
+}
+
 /* ---------------- durable tasks (R0.6) ----------------
  * Control-plane view over the task queue: GET /tasks?status=… (the list
  * payload doubles as the detail source — GET /tasks/{id} returns the same
@@ -16887,6 +17814,108 @@ function init() {
     if (event.target.id !== "learn-foundry-form") return;
     event.preventDefault();
     learnFoundrySubmit();
+  });
+
+  // Automations: server-backed signed webhook bindings, page-memory secret
+  // reveal, bounded event evidence, and deliberate non-idempotent replay.
+  $("btn-automations-open").onclick = openAutomations;
+  $("btn-automations-refresh").onclick = () => automationsLoad(false);
+  $("btn-automation-create").onclick = automationCreateOpen;
+  $("btn-automation-create-close").onclick = automationCreateOpen;
+  $("sel-automation-action").addEventListener("change", automationPopulateTargets);
+  $("automation-form").addEventListener("input", () => {
+    for (const node of $("automation-form").querySelectorAll("[aria-invalid], [aria-describedby]")) {
+      node.removeAttribute("aria-invalid"); automationDescriptionToken(node, "automation-form-error", false);
+    }
+    $("automation-form-error").hidden = true;
+  });
+  $("automation-form").addEventListener("submit", (event) => {
+    event.preventDefault(); automationCreateSubmit();
+  });
+  $("inp-automation-search").addEventListener("input", (event) => {
+    if (!store.automations) return;
+    store.automations.query = event.target.value; automationsRender();
+  });
+  $("sel-automation-state").addEventListener("change", (event) => {
+    if (!store.automations) return;
+    store.automations.filter = new Set(["all", "enabled", "paused"]).has(event.target.value) ? event.target.value : "all";
+    automationsRender();
+  });
+  $("btn-automation-clear").onclick = () => {
+    if (!store.automations) return;
+    store.automations.query = ""; store.automations.filter = "all"; automationsRender();
+    $("inp-automation-search").focus({ preventScroll: true });
+  };
+  const automationActivate = (event) => {
+    const row = event.target.closest("[data-automation-id]");
+    if (!row || !store.automations) return;
+    const id = row.getAttribute("data-automation-id");
+    if (event.type === "click") { automationLoadEvidence(id, false); return; }
+    const rows = Array.from($("automation-list").querySelectorAll("[data-automation-id]"));
+    const index = rows.indexOf(row);
+    let next = null;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") next = rows[(index + 1) % rows.length];
+    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = rows[(index - 1 + rows.length) % rows.length];
+    else if (event.key === "Home") next = rows[0];
+    else if (event.key === "End") next = rows[rows.length - 1];
+    else if (["Enter", " "].includes(event.key)) { event.preventDefault(); automationLoadEvidence(id, false); return; }
+    if (next) {
+      event.preventDefault(); next.focus({ preventScroll: true });
+      automationLoadEvidence(next.getAttribute("data-automation-id"), true);
+    }
+  };
+  $("automation-list").addEventListener("click", automationActivate);
+  $("automation-list").addEventListener("keydown", automationActivate);
+  $("automation-detail").addEventListener("change", (event) => {
+    if (!event.target.matches("[data-automation-replay-ack]") || !store.automations || !store.automations.replay) return;
+    store.automations.replay.acknowledged = event.target.checked; automationsRender();
+    $("automation-detail").querySelector("[data-automation-replay-ack]")?.focus({ preventScroll: true });
+  });
+  $("automation-detail").addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-automation-replay-form]");
+    if (!form) return;
+    event.preventDefault(); automationReplaySubmit(form.getAttribute("data-automation-replay-form"));
+  });
+  $("automation-detail").addEventListener("click", (event) => {
+    const mode = event.target.closest("[data-automation-event-mode]");
+    if (mode && store.automations) {
+      store.automations.eventMode = mode.getAttribute("data-automation-event-mode") === "dead" ? "dead" : "events";
+      automationsRender();
+      $("automation-detail").querySelector(`[data-automation-event-mode="${store.automations.eventMode}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    const toggle = event.target.closest("[data-automation-toggle]");
+    if (toggle) { automationToggle(toggle.getAttribute("data-automation-toggle")); return; }
+    const refresh = event.target.closest("[data-automation-refresh]");
+    if (refresh) { automationLoadEvidence(refresh.getAttribute("data-automation-refresh"), false); return; }
+    const reveal = event.target.closest("[data-automation-secret-toggle]");
+    if (reveal && store.automations) {
+      const id = reveal.getAttribute("data-automation-secret-toggle");
+      if (store.automations.revealed.has(id)) store.automations.revealed.delete(id); else store.automations.revealed.add(id);
+      automationsRender();
+      $("automation-detail").querySelector(`[data-automation-secret-toggle="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    const endpoint = event.target.closest("[data-automation-copy-endpoint]");
+    if (endpoint && store.automations) {
+      const trigger = store.automations.list.find((item) => item.trigger_id === endpoint.getAttribute("data-automation-copy-endpoint"));
+      if (trigger) automationCopyText(automationWebhookUrl(trigger), "Webhook endpoint");
+      return;
+    }
+    const secret = event.target.closest("[data-automation-copy-secret]");
+    if (secret && store.automations) {
+      const trigger = store.automations.list.find((item) => item.trigger_id === secret.getAttribute("data-automation-copy-secret"));
+      if (trigger) automationCopyText(trigger.secret, "Signing secret");
+      return;
+    }
+    const replay = event.target.closest("[data-automation-replay]");
+    if (replay) { automationReplayOpen(replay.getAttribute("data-automation-replay")); return; }
+    if (event.target.closest("[data-automation-replay-cancel]")) {
+      if (store.automations) store.automations.replay = null;
+      automationsRender(); return;
+    }
+    const run = event.target.closest("[data-automation-run]");
+    if (run) automationInspectRun(run.getAttribute("data-automation-run"), run.getAttribute("data-automation-run-event"));
   });
 
   // Durable tasks: open the tenant-wide queue view, filter, refresh, and
