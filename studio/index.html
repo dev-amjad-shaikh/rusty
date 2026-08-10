@@ -742,6 +742,54 @@
   .quality-report-evidence pre { margin:3px 0 0; max-height:210px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
   .quality-report-judge { margin-top:9px; padding:9px 10px; border:1px solid #554c65; background:#211d29; }
   .quality-report-assertion p,.quality-report-judge,.quality-report-detail .note { overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
+  .quality-regression { margin-top:14px; border:1px solid #45545e; border-radius:9px; overflow:hidden; background:linear-gradient(145deg,#131a1f,#111417 64%,#17151a); }
+  .quality-regression-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:14px 17px; border-bottom:1px solid #45545e; }
+  .quality-regression-head h3 { margin:3px 0 4px; font-size:16px; }
+  .quality-regression-head p { margin:0; max-width:780px; }
+  .quality-regression-kicker { color:#8eb2c1; font:700 9.5px/1.2 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  .quality-regression-mark { flex:none; padding:6px 9px; border:1px solid #647986; border-radius:3px; color:#c4dce5; font:700 9px var(--mono); text-transform:uppercase; letter-spacing:.06em; transform:rotate(-1deg); }
+  .quality-regression-body { padding:14px 17px 16px; }
+  .quality-regression-sources { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .quality-regression-source { min-width:0; padding:11px; border:1px solid #384852; background:#12191d; }
+  .quality-regression-source h4 { margin:0 0 4px; }
+  .quality-regression-source p { margin:0 0 9px; overflow-wrap:anywhere; }
+  .quality-regression-source-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .quality-regression-config { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; padding:10px; border:1px solid #33434c; background:#10171a; }
+  .quality-regression-config label { display:grid; gap:4px; min-width:0; color:var(--text-dim); font-size:10px; }
+  .quality-regression-config input { min-width:0; width:100%; }
+  .quality-regression-config .field-error { grid-column:1/-1; }
+  .quality-regression-error { margin-top:9px; padding:9px 11px; border:1px solid #78483a; border-radius:7px; background:#321d18; color:#efc0b4; overflow-wrap:anywhere; }
+  .quality-regression-verdict { display:grid; grid-template-columns:minmax(170px,.42fr) minmax(0,1.58fr); gap:12px; margin-top:10px; padding:12px; border:1px solid #42545c; background:#11191d; }
+  .quality-regression-stamp { display:grid; place-items:center; min-height:96px; padding:12px; border:3px double #6c8793; color:#c7e0e8; font:700 12px/1.35 var(--mono); text-align:center; text-transform:uppercase; letter-spacing:.06em; transform:rotate(-1deg); }
+  .quality-regression-stamp.regression { border-color:#9a5e57; color:#efc3bc; }
+  .quality-regression-stamp.insufficient { border-color:#8a754c; color:#e5d19b; }
+  .quality-regression-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border:1px solid #35454d; }
+  .quality-regression-metric { min-width:0; padding:9px; border-right:1px solid #35454d; }
+  .quality-regression-metric:last-child { border-right:0; }
+  .quality-regression-metric b,.quality-regression-metric span { display:block; overflow-wrap:anywhere; }
+  .quality-regression-metric b { color:#d8e3e7; font:650 14px/1.25 var(--mono); }
+  .quality-regression-metric span { color:var(--text-faint); font:700 8px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .quality-regression-verdict p { margin:9px 0 0; }
+  .quality-regression-grid { display:grid; grid-template-columns:minmax(270px,.72fr) minmax(0,1.28fr); gap:10px; margin-top:10px; }
+  .quality-regression-matrix { width:100%; border-collapse:collapse; table-layout:fixed; background:#11181c; }
+  .quality-regression-matrix caption { padding:8px 10px; color:var(--text-dim); font-size:10px; text-align:left; }
+  .quality-regression-matrix th { padding:7px; color:var(--text-faint); font:700 8px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.06em; }
+  .quality-regression-matrix td { border:1px solid #34444c; padding:0; }
+  .quality-regression-cell { display:grid; width:100%; min-height:74px; place-content:center; gap:3px; border:0; border-radius:0; background:#152025; color:#dce6e9; text-align:center; }
+  .quality-regression-cell:hover,.quality-regression-cell[aria-pressed="true"] { background:#223139; box-shadow:inset 0 0 0 2px #7795a1; }
+  .quality-regression-cell.regression { background:#261a1b; color:#efc3bc; }
+  .quality-regression-cell.improvement { background:#17231c; color:#c9dfc6; }
+  .quality-regression-cell b { font:700 20px/1 var(--mono); }
+  .quality-regression-cell span { font-size:9px; }
+  .quality-regression-ledger { min-width:0; border:1px solid #34444c; background:#11181c; }
+  .quality-regression-ledger-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:7px; padding:8px 10px; border-bottom:1px solid #34444c; }
+  .quality-regression-ledger-head h4 { margin:0; }
+  .quality-regression-pairs { max-height:330px; overflow:auto; }
+  .quality-regression-pair { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; padding:8px 10px; border-bottom:1px solid #2c3940; align-items:center; }
+  .quality-regression-pair:last-child { border-bottom:0; }
+  .quality-regression-pair code { min-width:0; overflow-wrap:anywhere; }
+  .quality-regression-pair span { white-space:nowrap; }
+  .quality-regression-boundary { margin-top:10px; padding:9px 11px; border-left:3px solid #6d8189; background:#151e22; color:#b9c9cf; font-size:10.5px; line-height:1.45; }
   .cmp-report {
     margin-top: 10px; border: 1px solid #5a493a; border-radius: 10px; overflow: hidden;
     background: linear-gradient(135deg, #211d19 0%, #181b19 62%, #171b1e 100%);
@@ -2060,6 +2108,13 @@
     .quality-report-index { max-height:280px; border-right:0; border-bottom:1px solid #4b4559; }
     .quality-report-evidence { grid-template-columns:1fr; }
     .quality-report-run-head span { white-space:normal; }
+    .quality-regression-head { display:grid; }
+    .quality-regression-sources,.quality-regression-config,.quality-regression-verdict,.quality-regression-grid { grid-template-columns:1fr; }
+    .quality-regression-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .quality-regression-metric { border-bottom:1px solid #35454d; }
+    .quality-regression-metric:nth-child(2n) { border-right:0; }
+    .quality-regression-pair { grid-template-columns:minmax(0,1fr) auto; }
+    .quality-regression-pair span:last-child { grid-column:1/-1; white-space:normal; }
     .cmp-report-head { flex-direction: column; gap: 8px; }
     .cmp-balance { grid-template-columns: 1fr; }
     .cmp-balance-side:last-child { text-align: left; }
@@ -2657,6 +2712,16 @@
             <div class="quality-report-body" id="quality-report-body"></div>
             <span class="sr-only" id="quality-report-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
           </section>
+          <section class="quality-regression" id="quality-regression" aria-labelledby="quality-regression-title">
+            <div class="quality-regression-head">
+              <div><span class="quality-regression-kicker">Matched statistical evidence · connection-bound page memory</span>
+                <h3 id="quality-regression-title" tabindex="-1">Matched Regression Lab</h3>
+                <p class="muted tiny">Pair exact baseline and candidate runs by case and repetition, then recompute Rusty’s one-sided exact pass-rate test. Studio exposes evidence; it does not run experiments, approve a release, or apply a gate policy.</p></div>
+              <span class="quality-regression-mark" id="quality-regression-mark">Awaiting pair</span>
+            </div>
+            <div class="quality-regression-body" id="quality-regression-body"></div>
+            <span class="sr-only" id="quality-regression-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
 
           <h2 class="section" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
@@ -2898,6 +2963,9 @@ const store = {
   qualityGateRequest: 0,
   qualityReport: null,  // connection-bound page-memory rusty-eval experiment report inspection
   qualityReportRequest: 0,
+  qualityRegression: null, // connection-bound page-memory paired statistical evidence
+  qualityRegressionRequest: 0,
+  qualityRegressionSideRequest: { baseline: 0, candidate: 0 },
   recLoadRequest: 0,
   recReplayRequest: 0,
   recCompareRequest: 0,
@@ -4796,6 +4864,10 @@ function connectionResetWorkspace() {
   store.qualityGateRequest += 1;
   store.qualityReport = null;
   store.qualityReportRequest += 1;
+  store.qualityRegression = null;
+  store.qualityRegressionRequest += 1;
+  store.qualityRegressionSideRequest.baseline += 1;
+  store.qualityRegressionSideRequest.candidate += 1;
   store.compare = null;
   store.runProof = null;
   store.recUnsupported = false;
@@ -6401,6 +6473,7 @@ function recRender() {
   qualityLibraryRender();
   if (!store.qualityGate || !$("quality-gate-form")) qualityGateRender();
   qualityReportRender();
+  qualityRegressionRender();
   detail.style.display = "none";
   detail.innerHTML = "";
   investigation.innerHTML = "";
@@ -8778,6 +8851,303 @@ function qualityReportClick(event) {
   }
   const runTarget = event.target.closest("[data-quality-report-run]");
   if (runTarget) { report.selectedRun = runTarget.getAttribute("data-quality-report-run"); qualityReportRender("#quality-report-run-title"); }
+}
+
+/* ---------------- matched regression lab -----------------------------
+ * Recomputes rusty-eval's one-sided exact McNemar pass-rate test over two
+ * internally reconciled ExperimentReport v1 artifacts. Evidence stays in
+ * page memory; the result is neither a gate decision nor server attestation.
+ * ------------------------------------------------------------------------- */
+const QUALITY_REGRESSION_PAIR_WINDOW = 200;
+const QUALITY_REGRESSION_FILTERS = ["all", "both_passed", "regression", "improvement", "both_failed"];
+
+function qualityRegressionDraft() {
+  return { baseline: null, candidate: null, significance: "0.05", minimumDrop: "0.05", minimumPairs: "30",
+    result: null, error: "", errorField: "", sourceError: "", filter: "all" };
+}
+
+function qualityRegressionEnsure() {
+  if (!store.qualityRegression) store.qualityRegression = qualityRegressionDraft();
+  return store.qualityRegression;
+}
+
+function qualityRegressionConfig(draft) {
+  const capture = (field, action) => {
+    try { return action(); }
+    catch (error) { error.qualityRegressionField = field; throw error; }
+  };
+  const exact = (field) => capture(field, () => {
+    const value = String(draft[field] ?? "");
+    if (value !== value.trim()) throw new Error("Statistical policy numbers cannot contain surrounding whitespace.");
+    return value;
+  });
+  const significanceToken = capture("significance", () => qualityGateF64(exact("significance"), "Significance level", false, "rate"));
+  const dropToken = capture("minimumDrop", () => qualityGateF64(exact("minimumDrop"), "Minimum pass-rate drop", false, "rate"));
+  const minimumPairs = capture("minimumPairs", () => qualityGateU64(exact("minimumPairs"), "Minimum matched pairs", false, false));
+  const significance = Number(significanceToken), minimumDrop = Number(dropToken);
+  if (!(significance > 0 && significance < 1)) {
+    const error = new Error("Significance level must be strictly between 0 and 1."); error.qualityRegressionField = "significance"; throw error;
+  }
+  return { significance, significanceToken, minimumDrop, minimumDropToken: dropToken, minimumPairs };
+}
+
+function qualityRegressionOutcomes(report, label) {
+  if (!report || report.invalid) throw new Error(`${label} report is missing.`);
+  if (!report.consistent || qualityReportReconcile(report).length || BigInt(report.runsPerCase) === 0n || BigInt(report.maxConcurrency) === 0n) {
+    throw new Error(`${label} report has unresolved internal reconciliation issues.`);
+  }
+  const cases = new Map();
+  for (const item of report.cases) {
+    const runs = new Map();
+    for (const run of item.runs) runs.set(run.repetition, run.passed);
+    cases.set(item.id, runs);
+  }
+  return cases;
+}
+
+function qualityRegressionLogBinomialMass(trials, successes) {
+  const factors = Math.min(successes, trials - successes);
+  let logChoose = 0;
+  for (let index = 1; index <= factors; index += 1) {
+    logChoose += Math.log(trials - factors + index) - Math.log(index);
+  }
+  return logChoose - trials * Math.LN2;
+}
+
+function qualityRegressionLogTail(discordant, regressions) {
+  if (discordant === 0 || regressions === 0) return 0;
+  const mode = Math.floor(discordant / 2), maximumIndex = Math.max(regressions, mode);
+  const maximumMass = qualityRegressionLogBinomialMass(discordant, maximumIndex);
+  let mass = qualityRegressionLogBinomialMass(discordant, regressions), scaled = 0;
+  for (let index = regressions; index <= discordant; index += 1) {
+    scaled += Math.exp(mass - maximumMass);
+    if (index < discordant) mass += Math.log(discordant - index) - Math.log(index + 1);
+  }
+  return Math.min(0, maximumMass + Math.log(scaled));
+}
+
+function qualityRegressionAtOrBelow(actual, threshold) {
+  if (actual <= threshold) return true;
+  const scale = Math.max(Math.abs(actual), Math.abs(threshold), 1);
+  return actual - threshold <= 16 * Number.EPSILON * scale;
+}
+
+function qualityRegressionCompute(draft) {
+  const config = qualityRegressionConfig(draft);
+  const baseline = draft.baseline, candidate = draft.candidate;
+  const baselineCases = qualityRegressionOutcomes(baseline, "Baseline");
+  const candidateCases = qualityRegressionOutcomes(candidate, "Candidate");
+  if (baseline.datasetName !== candidate.datasetName || baseline.datasetVersion !== candidate.datasetVersion) {
+    throw new Error("Reports must use the same dataset name and version.");
+  }
+  if (baseline.runsPerCase !== candidate.runsPerCase) throw new Error("Reports must use the same repetitions-per-case contract.");
+  if (baselineCases.size !== candidateCases.size) throw new Error("Reports do not contain identical case identities.");
+  const pairs = [];
+  for (const [caseId, baselineRuns] of baselineCases) {
+    const candidateRuns = candidateCases.get(caseId);
+    if (!candidateRuns || baselineRuns.size !== candidateRuns.size) throw new Error(`Candidate report is missing matched runs for ${qualityReportIdentityText(caseId)}.`);
+    for (const [repetition, baselinePassed] of baselineRuns) {
+      if (!candidateRuns.has(repetition)) throw new Error(`Candidate report is missing paired run ${qualityReportIdentityText(caseId)}#${repetition}.`);
+      const candidatePassed = candidateRuns.get(repetition);
+      const kind = baselinePassed ? (candidatePassed ? "both_passed" : "regression") :
+        (candidatePassed ? "improvement" : "both_failed");
+      pairs.push({ caseId, repetition, baselinePassed, candidatePassed, kind });
+    }
+  }
+  for (const caseId of candidateCases.keys()) if (!baselineCases.has(caseId)) {
+    throw new Error(`Baseline report is missing matched case ${qualityReportIdentityText(caseId)}.`);
+  }
+  pairs.sort((left, right) => qualityLibraryKeyCompare(left.caseId, right.caseId) ||
+    (BigInt(left.repetition) < BigInt(right.repetition) ? -1 : BigInt(left.repetition) > BigInt(right.repetition) ? 1 : 0));
+  const count = (kind) => pairs.filter((pair) => pair.kind === kind).length;
+  const bothPassed = count("both_passed"), bothFailed = count("both_failed");
+  const regressions = count("regression"), improvements = count("improvement"), total = pairs.length;
+  const baselinePassRate = total ? (bothPassed + regressions) / total : 0;
+  const candidatePassRate = total ? (bothPassed + improvements) / total : 0;
+  const passRateDrop = total ? (regressions - improvements) / total : 0;
+  const effectThresholdMet = regressions > improvements && passRateDrop >= config.minimumDrop;
+  const enoughPairs = BigInt(total) >= BigInt(config.minimumPairs);
+  const logPValue = enoughPairs ? qualityRegressionLogTail(regressions + improvements, regressions) : null;
+  const pValue = logPValue == null ? null : logPValue >= 0 ? 1 : Math.max(Number.MIN_VALUE, Math.exp(logPValue));
+  const significanceThresholdMet = logPValue == null ? false : qualityRegressionAtOrBelow(logPValue, Math.log(config.significance));
+  const decision = !enoughPairs ? "insufficient_evidence" : effectThresholdMet && significanceThresholdMet ? "regression" : "no_regression";
+  return { baseline, candidate, config, pairs, bothPassed, bothFailed, regressions, improvements, total,
+    baselinePassRate, candidatePassRate, passRateDrop, pValue, logPValue, effectThresholdMet, significanceThresholdMet, decision };
+}
+
+function qualityRegressionRefresh(draft) {
+  draft.result = null; draft.error = ""; draft.errorField = "";
+  try { qualityRegressionConfig(draft); }
+  catch (error) {
+    draft.error = error.message; draft.errorField = error.qualityRegressionField || ""; return;
+  }
+  if (!draft.baseline || !draft.candidate) return;
+  try { draft.result = qualityRegressionCompute(draft); }
+  catch (error) { draft.error = error.message; draft.errorField = error.qualityRegressionField || ""; }
+}
+
+function qualityRegressionPercent(value, signed = false) {
+  const sign = signed && value > 0 ? "+" : "";
+  return sign + (value * 100).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1") + "%";
+}
+
+function qualityRegressionPValue(value) {
+  if (value == null) return "not computed";
+  if (value === 1) return "1";
+  return value < 0.0001 ? value.toExponential(3) : value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function qualityRegressionSourceHtml(draft, side) {
+  const report = draft[side], label = side === "baseline" ? "Baseline" : "Candidate";
+  const explorer = store.qualityReport && !store.qualityReport.invalid && store.qualityReport.consistent;
+  return `<section class="quality-regression-source" aria-labelledby="quality-regression-${side}-title">` +
+    `<h4 id="quality-regression-${side}-title">${label} report</h4>` +
+    (report ? `<p class="tiny"><b>${escapeHtml(qualityReportIdentityText(report.name))}</b><br>${escapeHtml(qualityReportIdentityText(report.datasetName))}@${escapeHtml(qualityReportIdentityText(report.datasetVersion))} · ${escapeHtml(report.summary.runs)} runs</p>` :
+      `<p class="muted tiny">Choose one internally reconciled format-v1 experiment report.</p>`) +
+    `<div class="quality-regression-source-actions"><label class="small quality-file-button">${report ? "Replace" : "Import"} ${label.toLowerCase()}` +
+      `<input type="file" data-quality-regression-file="${side}" accept="application/json,.json"></label>` +
+      `<button class="small" type="button" data-quality-regression-use="${side}"${explorer ? "" : " disabled"}>Use Explorer report</button>` +
+      (report ? `<button class="small" type="button" data-quality-regression-clear="${side}">Remove</button>` : "") + `</div></section>`;
+}
+
+function qualityRegressionPairLabel(kind) {
+  return ({ both_passed: "both passed", regression: "candidate regressed", improvement: "candidate improved", both_failed: "both failed" })[kind] || kind;
+}
+
+function qualityRegressionResultHtml(draft, result) {
+  const verdict = result.decision === "regression" ? "Regression evidence" : result.decision === "insufficient_evidence" ? "Insufficient evidence" : "No regression detected";
+  const explanation = result.decision === "regression" ? "Both the practical pass-rate drop and one-sided significance threshold were met." :
+    result.decision === "insufficient_evidence" ? `The ${result.total} matched pairs do not meet the configured minimum of ${result.config.minimumPairs}. No p-value or release interpretation is available.` :
+    "The configured practical-effect and statistical-significance conditions were not both met.";
+  const visible = result.pairs.filter((pair) => draft.filter === "all" || pair.kind === draft.filter);
+  const shown = visible.slice(0, QUALITY_REGRESSION_PAIR_WINDOW);
+  const matrix = [["both_passed", result.bothPassed], ["regression", result.regressions], ["improvement", result.improvements], ["both_failed", result.bothFailed]];
+  return `<div class="quality-regression-verdict"><div class="quality-regression-stamp ${escapeHtml(result.decision.replace("_evidence", ""))}">${escapeHtml(verdict)}</div>` +
+    `<div><div class="quality-regression-metrics" aria-label="Matched regression statistics">` +
+      [[result.total, "matched pairs"], [qualityRegressionPercent(result.passRateDrop), "baseline − candidate"], [qualityRegressionPValue(result.pValue), "one-sided p-value"], [`α ${result.config.significanceToken}`, "significance policy"]]
+      .map(([value, label]) => `<div class="quality-regression-metric"><b>${escapeHtml(String(value))}</b><span>${escapeHtml(label)}</span></div>`).join("") + `</div>` +
+      `<p class="muted tiny">${escapeHtml(explanation)} Baseline ${escapeHtml(qualityRegressionPercent(result.baselinePassRate))}; candidate ${escapeHtml(qualityRegressionPercent(result.candidatePassRate))}.</p></div></div>` +
+    `<div class="quality-regression-grid"><table class="quality-regression-matrix"><caption>Exact paired outcome matrix. Choose a cell to filter the evidence ledger.</caption>` +
+      `<thead><tr><th scope="col">Baseline ↓ / candidate →</th><th scope="col">Pass</th><th scope="col">Fail</th></tr></thead><tbody>` +
+      `<tr><th scope="row">Pass</th><td>${qualityRegressionCellHtml(draft, matrix[0])}</td><td>${qualityRegressionCellHtml(draft, matrix[1])}</td></tr>` +
+      `<tr><th scope="row">Fail</th><td>${qualityRegressionCellHtml(draft, matrix[2])}</td><td>${qualityRegressionCellHtml(draft, matrix[3])}</td></tr></tbody></table>` +
+      `<section class="quality-regression-ledger" aria-labelledby="quality-regression-ledger-title"><div class="quality-regression-ledger-head">` +
+        `<h4 id="quality-regression-ledger-title" tabindex="-1">${draft.filter === "all" ? "All matched runs" : qualityRegressionPairLabel(draft.filter)}</h4>` +
+        `<button class="small" type="button" data-quality-regression-filter="all" aria-pressed="${draft.filter === "all"}">Show all ${result.total}</button></div>` +
+        `<div class="quality-regression-pairs" role="list" aria-label="Matched run evidence">` +
+          (shown.length ? shown.map((pair) => `<div class="quality-regression-pair" role="listitem"><code>${escapeHtml(qualityReportIdentityText(pair.caseId))}#${escapeHtml(pair.repetition)}</code>` +
+            `<span>baseline ${pair.baselinePassed ? "pass" : "fail"} → candidate ${pair.candidatePassed ? "pass" : "fail"}</span><span>${escapeHtml(qualityRegressionPairLabel(pair.kind))}</span></div>`).join("") :
+            `<div class="empty">No pairs are in this outcome cell.</div>`) + `</div>` +
+        (visible.length > shown.length ? `<p class="muted tiny">Showing ${shown.length} of ${visible.length} matched runs; all ${result.total} pairs were included in the computation.</p>` : "") + `</section></div>`;
+}
+
+function qualityRegressionCellHtml(draft, [kind, value]) {
+  const tone = kind === "regression" ? " regression" : kind === "improvement" ? " improvement" : "";
+  return `<button class="quality-regression-cell${tone}" type="button" data-quality-regression-filter="${kind}" aria-pressed="${draft.filter === kind}" aria-label="${escapeHtml(qualityRegressionPairLabel(kind))}: ${value} matched runs"><b>${value}</b><span>${escapeHtml(qualityRegressionPairLabel(kind))}</span></button>`;
+}
+
+function qualityRegressionHtml(value) {
+  const draft = value || qualityRegressionDraft(), result = draft.result;
+  const configError = draft.error ? `<div class="quality-regression-error" id="quality-regression-error" role="alert" tabindex="-1">${escapeHtml(draft.error)}</div>` : "";
+  const sourceError = draft.sourceError ? `<div class="quality-regression-error" id="quality-regression-source-error" role="alert" tabindex="-1">${escapeHtml(draft.sourceError)}</div>` : "";
+  const input = (field, label, inputmode) => {
+    const invalid = draft.errorField === field;
+    return `<label>${label}<input data-quality-regression-field="${field}" value="${escapeHtml(draft[field])}" inputmode="${inputmode}"` +
+      ` aria-invalid="${invalid}" aria-describedby="quality-regression-policy-help${invalid ? " quality-regression-error" : ""}"></label>`;
+  };
+  return `<div class="quality-regression-sources">${qualityRegressionSourceHtml(draft, "baseline")}${qualityRegressionSourceHtml(draft, "candidate")}</div>` +
+    `<form class="quality-regression-config" aria-labelledby="quality-regression-policy-title"><strong id="quality-regression-policy-title" class="sr-only">Statistical comparison policy</strong>` +
+      input("significance", "One-sided significance level", "decimal") +
+      input("minimumDrop", "Minimum practical pass-rate drop", "decimal") +
+      input("minimumPairs", "Minimum matched pairs", "numeric") +
+      `<span class="muted tiny" id="quality-regression-policy-help">Defaults mirror <code>StatisticalRegressionConfig</code>: α 0.05, five-point practical drop, 30 exact pairs.</span></form>` +
+    sourceError + configError + (result ? qualityRegressionResultHtml(draft, result) : !draft.error && !draft.sourceError ?
+      `<div class="quality-regression-boundary">Import both internally reconciled reports. Dataset identity, repetitions, and every <code>(case_id, repetition)</code> key must match exactly before Studio computes evidence.</div>` : "") +
+    `<div class="quality-regression-boundary"><b>Decision boundary.</b> This browser recomputation is connection-bound page memory and is discarded on connection change or reload. It is not a durable <code>StatisticalRegressionReport</code>, external attestation, Release Gate decision, or approval.</div>`;
+}
+
+function qualityRegressionRender(focusSelector = "", selection = null) {
+  const body = $("quality-regression-body"); if (!body) return;
+  body.innerHTML = qualityRegressionHtml(store.qualityRegression);
+  const draft = store.qualityRegression;
+  $("quality-regression-mark").textContent = !draft?.result ? (draft?.error || draft?.sourceError ? "Pair blocked" : "Awaiting pair") :
+    draft.result.decision === "regression" ? "Regression" : draft.result.decision === "insufficient_evidence" ? "Insufficient" : "No regression";
+  if (focusSelector) {
+    const target = body.querySelector(focusSelector); target?.focus({ preventScroll: true });
+    if (target && target.matches("input") && Number.isInteger(selection?.start)) {
+      const start = Math.min(selection.start, target.value.length), end = Math.min(selection.end ?? start, target.value.length);
+      target.setSelectionRange(start, end);
+    }
+  }
+}
+
+function qualityRegressionOperationCurrent(lifecycle, side, request, view, selected, epoch) {
+  return lifecycle === store.qualityRegressionRequest && request === store.qualityRegressionSideRequest[side] &&
+    view === store.view && selected === store.selected && epoch === store.connectionEpoch;
+}
+
+async function qualityRegressionFile(event) {
+  const input = event.target, side = input.getAttribute("data-quality-regression-file");
+  const file = input.files && input.files[0]; input.value = "";
+  if (!file || !["baseline", "candidate"].includes(side)) return;
+  const draft = qualityRegressionEnsure(), lifecycle = store.qualityRegressionRequest;
+  const request = ++store.qualityRegressionSideRequest[side];
+  const view = store.view, selected = store.selected, epoch = store.connectionEpoch;
+  if (file.size > QUALITY_REPORT_BYTES) {
+    draft.sourceError = `${side === "baseline" ? "Baseline" : "Candidate"} report exceeds the 2 MiB import boundary.`;
+    qualityRegressionRefresh(draft);
+    qualityRegressionRender("#quality-regression-source-error"); return;
+  }
+  try {
+    const bytes = await file.arrayBuffer();
+    if (!qualityRegressionOperationCurrent(lifecycle, side, request, view, selected, epoch)) return;
+    const report = qualityReportParse(qualityLibraryDecode(bytes));
+    if (!qualityRegressionOperationCurrent(lifecycle, side, request, view, selected, epoch)) return;
+    draft[side] = report; draft.sourceError = ""; qualityRegressionRefresh(draft);
+    qualityRegressionRender(draft.error ? "#quality-regression-error" : `[data-quality-regression-field="significance"]`);
+    $("quality-regression-announcer").textContent = `${side === "baseline" ? "Baseline" : "Candidate"} report ${qualityReportIdentityText(report.name)} loaded. ${draft.result ? "Matched statistical evidence recomputed." : draft.error || "Choose the other report."}`;
+  } catch (error) {
+    if (!qualityRegressionOperationCurrent(lifecycle, side, request, view, selected, epoch)) return;
+    draft.sourceError = `${side === "baseline" ? "Baseline" : "Candidate"} report not accepted: ${error.message}`;
+    qualityRegressionRefresh(draft);
+    qualityRegressionRender("#quality-regression-source-error"); $("quality-regression-announcer").textContent = draft.sourceError;
+  }
+}
+
+function qualityRegressionControl(event) {
+  const field = event.target.getAttribute("data-quality-regression-field");
+  if (!field || !["significance", "minimumDrop", "minimumPairs"].includes(field)) return;
+  const draft = qualityRegressionEnsure(); draft[field] = event.target.value;
+  if (event.isComposing) return;
+  const selection = { start: event.target.selectionStart, end: event.target.selectionEnd };
+  qualityRegressionRefresh(draft); qualityRegressionRender(`[data-quality-regression-field="${field}"]`, selection);
+  $("quality-regression-announcer").textContent = draft.result ? "Matched statistical evidence recomputed under the updated policy." : draft.error || "Comparison policy updated.";
+}
+
+function qualityRegressionClick(event) {
+  const draft = qualityRegressionEnsure();
+  const use = event.target.closest("[data-quality-regression-use]");
+  if (use) {
+    const side = use.getAttribute("data-quality-regression-use"), explorer = store.qualityReport;
+    if (!explorer || explorer.invalid || !explorer.consistent || !["baseline", "candidate"].includes(side)) return;
+    store.qualityRegressionSideRequest[side] += 1;
+    draft[side] = qualityReportParse(explorer.raw); draft.sourceError = ""; qualityRegressionRefresh(draft);
+    qualityRegressionRender(draft.error ? "#quality-regression-error" : `[data-quality-regression-file="${side === "baseline" ? "candidate" : "baseline"}"]`);
+    $("quality-regression-announcer").textContent = `Explorer report copied into the ${side} slot. ${draft.result ? "Matched statistical evidence recomputed." : "Choose the other report."}`; return;
+  }
+  const clear = event.target.closest("[data-quality-regression-clear]");
+  if (clear) {
+    const side = clear.getAttribute("data-quality-regression-clear"); if (!['baseline', 'candidate'].includes(side)) return;
+    store.qualityRegressionSideRequest[side] += 1; draft[side] = null; draft.sourceError = ""; qualityRegressionRefresh(draft);
+    qualityRegressionRender(`[data-quality-regression-file="${side}"]`);
+    $("quality-regression-announcer").textContent = `${side === "baseline" ? "Baseline" : "Candidate"} report removed from page memory.`; return;
+  }
+  const filter = event.target.closest("[data-quality-regression-filter]");
+  if (filter && draft.result) {
+    const value = filter.getAttribute("data-quality-regression-filter"); if (!QUALITY_REGRESSION_FILTERS.includes(value)) return;
+    draft.filter = value; qualityRegressionRender(`[data-quality-regression-filter="${value}"]`);
+    $("quality-regression-announcer").textContent = `${value === "all" ? "All matched runs" : qualityRegressionPairLabel(value)} shown.`;
+  }
 }
 
 /* ---------------- recorder: exact replay & run comparison --------------
@@ -19835,6 +20205,14 @@ function init() {
   $("quality-report").addEventListener("input", qualityReportControl);
   $("quality-report").addEventListener("compositionend", qualityReportControl);
   $("quality-report").addEventListener("click", qualityReportClick);
+  $("quality-regression").addEventListener("change", (event) => {
+    if (event.target.matches("[data-quality-regression-file]")) qualityRegressionFile(event);
+    else qualityRegressionControl(event);
+  });
+  $("quality-regression").addEventListener("input", qualityRegressionControl);
+  $("quality-regression").addEventListener("compositionend", qualityRegressionControl);
+  $("quality-regression").addEventListener("click", qualityRegressionClick);
+  $("quality-regression").addEventListener("submit", (event) => event.preventDefault());
 
   // Replay & run comparison. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).

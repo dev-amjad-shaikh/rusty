@@ -28,6 +28,9 @@ globalThis.__quality = {
   qualityGateFilename, qualityGateApplyField, qualityGateOperationCurrent,
   qualityReportParse, qualityReportCases, qualityReportExcerpt,
   qualityReportHtml, qualityReportOperationCurrent, qualityReportFile, qualityReportControl, qualityReportClick,
+  qualityRegressionDraft, qualityRegressionConfig, qualityRegressionLogTail,
+  qualityRegressionCompute, qualityRegressionRefresh, qualityRegressionHtml,
+  qualityRegressionOperationCurrent, qualityRegressionFile, qualityRegressionControl, qualityRegressionClick,
   QUALITY_DATASET_FORMAT_VERSION, QUALITY_TAG_LIMIT, QUALITY_PREDICATE_LIMIT,
   QUALITY_TOOL_LIMIT, QUALITY_EXPORT_LIMIT, QUALITY_LIBRARY_CASE_LIMIT,
   QUALITY_LIBRARY_BYTES, QUALITY_LIBRARY_LINE_BYTES, QUALITY_LIBRARY_DEPTH_LIMIT,
@@ -36,6 +39,7 @@ globalThis.__quality = {
   QUALITY_GATE_MAP_BYTES, QUALITY_GATE_NUMBER_BYTES,
   QUALITY_REPORT_BYTES, QUALITY_REPORT_CASE_LIMIT, QUALITY_REPORT_RUN_LIMIT,
   QUALITY_REPORT_ASSERTION_LIMIT, QUALITY_REPORT_VALUE_BYTES,
+  QUALITY_REGRESSION_PAIR_WINDOW,
   runProofCanonicalJson, store,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -824,6 +828,217 @@ const experimentReportText = JSON.stringify(experimentReportValue);
   sandbox.document.getElementById = () => null;
 }
 
+function matchedReport(name, outcomes, runsPerCase) {
+  if (!outcomes.length || outcomes.length % runsPerCase) throw new Error("fixture outcomes must fill complete cases");
+  const cases = [];
+  for (let offset = 0; offset < outcomes.length; offset += runsPerCase) {
+    const slice = outcomes.slice(offset, offset + runsPerCase);
+    cases.push({
+      case_id: `case-${offset / runsPerCase}`, pass_rate: slice.filter(Boolean).length / slice.length,
+      runs: slice.map((passed, repetition) => ({
+        repetition, status: passed ? { status: "done" } : { status: "failed", error: "fixture failure" },
+        passed, assertions: [], tool_calls: 0, latency_ms: 1, cost_usd: 0, total_tokens: 0,
+      })),
+    });
+  }
+  const passed = outcomes.filter(Boolean).length;
+  return Q.qualityReportParse(JSON.stringify({
+    format_version: 1, name, dataset_name: "matched-support", dataset_version: "v1",
+    runs_per_case: runsPerCase, max_concurrency: 1, cases,
+    summary: { cases: cases.length, runs: outcomes.length, runs_passed: passed,
+      run_pass_rate: passed / outcomes.length,
+      case_pass_rate: cases.reduce((sum, item) => sum + item.pass_rate, 0) / cases.length,
+      assertions: [], latency_ms: { min: 1, p50: 1, p95: 1, max: 1, mean: 1.0 },
+      total_cost_usd: 0, total_tokens: 0 },
+  }));
+}
+
+{
+  const baseline = matchedReport("baseline", Array(30).fill(true), 30);
+  const candidate = matchedReport("candidate", Array(30).fill(false), 30);
+  const draft = { ...Q.qualityRegressionDraft(), baseline, candidate };
+  const result = Q.qualityRegressionCompute(draft);
+  check("matched regression: exact paired loss meets practical and statistical thresholds",
+    result.total === 30 && result.regressions === 30 && result.improvements === 0 &&
+    result.passRateDrop === 1 && result.effectThresholdMet && result.significanceThresholdMet &&
+    result.decision === "regression" && Math.abs(result.pValue - 2 ** -30) < 1e-18);
+  draft.minimumPairs = "31";
+  const insufficient = Q.qualityRegressionCompute(draft);
+  check("matched regression: underpowered evidence has no p-value or regression claim",
+    insufficient.decision === "insufficient_evidence" && insufficient.pValue === null && !insufficient.significanceThresholdMet);
+}
+
+{
+  const baselineOutcomes = Array.from({ length: 40 }, (_, index) => index % 2 === 0);
+  const candidateOutcomes = baselineOutcomes.map((passed) => !passed);
+  const balanced = Q.qualityRegressionCompute({ ...Q.qualityRegressionDraft(), minimumPairs: "1",
+    baseline: matchedReport("balanced-base", baselineOutcomes, 40),
+    candidate: matchedReport("balanced-candidate", candidateOutcomes, 40) });
+  check("matched regression: balanced discordance is not mislabeled as regression",
+    balanced.regressions === 20 && balanced.improvements === 20 && balanced.passRateDrop === 0 &&
+    balanced.pValue > 0.5 && balanced.decision === "no_regression");
+
+  const baseline = [...Array(6).fill(true), ...Array(94).fill(false)];
+  const candidate = [true, ...Array(99).fill(false)];
+  const threshold = Q.qualityRegressionCompute({ ...Q.qualityRegressionDraft(), minimumPairs: "1",
+    baseline: matchedReport("effect-base", baseline, 50), candidate: matchedReport("effect-candidate", candidate, 50) });
+  check("matched regression: Rust golden exact tail and inclusive five-point effect agree",
+    threshold.regressions === 5 && threshold.improvements === 0 && threshold.passRateDrop === 0.05 &&
+    Math.abs(threshold.pValue - 0.03125) < 1e-14 && threshold.decision === "regression");
+  const stricter = Q.qualityRegressionCompute({ ...Q.qualityRegressionDraft(), minimumPairs: "1", minimumDrop: "0.051",
+    baseline: matchedReport("effect-base", baseline, 50), candidate: matchedReport("effect-candidate", candidate, 50) });
+  check("matched regression: significance alone cannot satisfy the practical-effect policy",
+    stricter.significanceThresholdMet && !stricter.effectThresholdMet && stricter.decision === "no_regression");
+}
+
+{
+  const baseline = matchedReport("large-base", Array(1100).fill(true), 55);
+  const candidate = matchedReport("large-candidate", Array(1100).fill(false), 55);
+  const result = Q.qualityRegressionCompute({ ...Q.qualityRegressionDraft(), significance: "1e-320", baseline, candidate });
+  check("matched regression: subnormal exact tail stays nonzero and compares in log space",
+    result.pValue === Number.MIN_VALUE && result.significanceThresholdMet && result.decision === "regression");
+  const rendered = Q.qualityRegressionHtml({ ...Q.qualityRegressionDraft(), baseline, candidate, result, filter: "regression", error: "" });
+  check("matched regression: the complete computation uses a bounded visible pair window",
+    rendered.includes(`Showing ${Q.QUALITY_REGRESSION_PAIR_WINDOW} of 1100 matched runs`) &&
+    (rendered.match(/role="listitem"/g) || []).length === Q.QUALITY_REGRESSION_PAIR_WINDOW);
+}
+
+{
+  const baseline = matchedReport("baseline", [true, false, true, false], 2);
+  const candidate = matchedReport("candidate", [true, true, false, false], 2);
+  const draft = { ...Q.qualityRegressionDraft(), minimumPairs: "1", baseline, candidate };
+  Q.qualityRegressionRefresh(draft);
+  const rendered = Q.qualityRegressionHtml(draft);
+  check("matched regression: outcome matrix and ledger expose all four exact pair classes",
+    draft.result.bothPassed === 1 && draft.result.regressions === 1 && draft.result.improvements === 1 && draft.result.bothFailed === 1 &&
+    rendered.includes('<table class="quality-regression-matrix">') && rendered.includes("candidate regressed") && rendered.includes("candidate improved"));
+  check("matched regression: evidence names both artifacts and keeps the release boundary explicit",
+    rendered.includes("baseline") && rendered.includes("candidate") && rendered.includes("not a durable") && rendered.includes("Release Gate decision"));
+  check("matched regression: matrix actions carry specific accessible names and pressed state",
+    rendered.includes('aria-label="candidate regressed: 1 matched runs"') && rendered.includes('aria-pressed="false"'));
+
+  const hostileBase = matchedReport("<baseline>", [true], 1);
+  hostileBase.name = '<img src=x onerror="alert(1)">';
+  const hostileCandidate = matchedReport("candidate", [false], 1);
+  hostileCandidate.cases[0].id = '<script>bad()</script>\u202E';
+  const hostileDraft = { ...Q.qualityRegressionDraft(), minimumPairs: "1", baseline: hostileBase, candidate: hostileCandidate };
+  hostileBase.cases[0].id = hostileCandidate.cases[0].id;
+  Q.qualityRegressionRefresh(hostileDraft);
+  const hostileHtml = Q.qualityRegressionHtml(hostileDraft);
+  check("matched regression: hostile artifact and pair identities are escaped and controls exposed visibly",
+    !hostileHtml.includes("<img src=x") && !hostileHtml.includes("<script>bad") && !hostileHtml.includes("\u202E") &&
+    hostileHtml.includes("&lt;img") && hostileHtml.includes("&lt;script&gt;") && hostileHtml.includes("\\u{202E}"));
+}
+
+{
+  const baseline = matchedReport("baseline", [true, false], 2);
+  const differentDataset = matchedReport("candidate", [true, false], 2);
+  differentDataset.datasetVersion = "v2";
+  let mismatch = "";
+  try { Q.qualityRegressionCompute({ ...Q.qualityRegressionDraft(), baseline, candidate: differentDataset }); }
+  catch (error) { mismatch = error.message; }
+  check("matched regression: dataset drift fails before pairing", mismatch.includes("same dataset"));
+
+  const missing = matchedReport("candidate", [true, false], 2); missing.cases[0].id = "different-case";
+  let missingError = "";
+  try { Q.qualityRegressionCompute({ ...Q.qualityRegressionDraft(), baseline, candidate: missing }); }
+  catch (error) { missingError = error.message; }
+  check("matched regression: case-key drift cannot be silently discarded", missingError.includes("missing matched"));
+
+  const driftValue = structuredClone(experimentReportValue); driftValue.summary.runs_passed = 4;
+  const drift = Q.qualityReportParse(JSON.stringify(driftValue));
+  let driftError = "";
+  try { Q.qualityRegressionCompute({ ...Q.qualityRegressionDraft(), baseline: drift, candidate: drift }); }
+  catch (error) { driftError = error.message; }
+  check("matched regression: internally unreconciled inputs fail closed", driftError.includes("reconciliation issues"));
+
+  for (const [field, value] of [["significance", "0"], ["significance", "1"], ["minimumDrop", "1.1"], ["minimumPairs", "0"], ["minimumPairs", "1.0"], ["minimumPairs", " 30"]]) {
+    let rejected = false;
+    try { Q.qualityRegressionConfig({ ...Q.qualityRegressionDraft(), [field]: value }); } catch { rejected = true; }
+    check(`matched regression: invalid ${field} token ${value} fails closed`, rejected);
+  }
+  const invalidDraft = { ...Q.qualityRegressionDraft(), baseline, candidate: baseline, significance: "0" };
+  Q.qualityRegressionRefresh(invalidDraft);
+  const invalidHtml = Q.qualityRegressionHtml(invalidDraft);
+  check("matched regression: policy errors identify and describe the exact invalid control",
+    invalidDraft.errorField === "significance" && invalidHtml.includes('data-quality-regression-field="significance" value="0" inputmode="decimal" aria-invalid="true"') &&
+    invalidHtml.includes('aria-describedby="quality-regression-policy-help quality-regression-error"'));
+
+  const emptyInvalidDraft = { ...Q.qualityRegressionDraft(), significance: "0" };
+  Q.qualityRegressionRefresh(emptyInvalidDraft);
+  check("matched regression: policy validation remains active before reports are loaded",
+    emptyInvalidDraft.errorField === "significance" && Q.qualityRegressionHtml(emptyInvalidDraft).includes('aria-invalid="true"'));
+}
+
+{
+  const nodes = new Map([
+    ["quality-regression-body", { innerHTML: "", querySelector() { return { focus() {}, matches() { return false; } }; } }],
+    ["quality-regression-mark", { textContent: "" }],
+    ["quality-regression-announcer", { textContent: "" }],
+  ]);
+  sandbox.document.getElementById = (id) => nodes.get(id) || null;
+  Q.store.view = "thread"; Q.store.selected = "thread-a"; Q.store.connectionEpoch = 12;
+  const prior = matchedReport("prior", [true], 1);
+  Q.store.qualityRegression = { ...Q.qualityRegressionDraft(), baseline: prior };
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const operation = Q.qualityRegressionFile({ target: { value: "chosen", getAttribute() { return "candidate"; },
+    files: [{ size: 8, arrayBuffer: () => pending }] } });
+  Q.store.selected = "thread-b";
+  release(new TextEncoder().encode(experimentReportText).buffer);
+  await operation;
+  check("matched regression: deferred report reads cannot cross the initiating thread workspace",
+    Q.store.qualityRegression.baseline === prior && Q.store.qualityRegression.candidate === null);
+
+  Q.store.selected = "thread-a";
+  const explorerChoice = matchedReport("explorer-choice", [true], 1); Q.store.qualityReport = explorerChoice;
+  let releaseOlder;
+  const olderRead = new Promise((resolve) => { releaseOlder = resolve; });
+  const olderOperation = Q.qualityRegressionFile({ target: { value: "chosen", getAttribute() { return "candidate"; },
+    files: [{ size: 8, arrayBuffer: () => olderRead }] } });
+  Q.qualityRegressionClick({ target: { closest(selector) {
+    return selector === "[data-quality-regression-use]" ? { getAttribute() { return "candidate"; } } : null;
+  } } });
+  releaseOlder(new TextEncoder().encode(experimentReportText).buffer);
+  await olderOperation;
+  check("matched regression: a newer Explorer choice owns its slot over a delayed file read",
+    Q.store.qualityRegression.candidate?.name === "explorer-choice");
+
+  const hostileAnnouncement = structuredClone(experimentReportValue); hostileAnnouncement.name = "bad\u202Ename";
+  await Q.qualityRegressionFile({ target: { value: "chosen", getAttribute() { return "baseline"; },
+    files: [{ size: 8, arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(hostileAnnouncement)).buffer }] } });
+  check("matched regression: live import announcements expose bidi controls visibly",
+    !nodes.get("quality-regression-announcer").textContent.includes("\u202E") &&
+    nodes.get("quality-regression-announcer").textContent.includes("\\u{202E}"));
+
+  Q.store.qualityRegression.significance = "0";
+  Q.qualityRegressionRefresh(Q.store.qualityRegression);
+  await Q.qualityRegressionFile({ target: { value: "chosen", getAttribute() { return "candidate"; },
+    files: [{ size: Q.QUALITY_REPORT_BYTES + 1, arrayBuffer: async () => new ArrayBuffer(0) }] } });
+  const sourceFailureHtml = Q.qualityRegressionHtml(Q.store.qualityRegression);
+  check("matched regression: source and policy failures retain separate truthful associations",
+    Q.store.qualityRegression.errorField === "significance" && sourceFailureHtml.includes('id="quality-regression-source-error"') &&
+    sourceFailureHtml.includes("exceeds the 2 MiB import boundary") && sourceFailureHtml.includes('aria-invalid="true"') &&
+    sourceFailureHtml.includes('aria-describedby="quality-regression-policy-help quality-regression-error"'));
+
+  const baseline = matchedReport("control-base", [true], 1), candidate = matchedReport("control-candidate", [false], 1);
+  Q.store.selected = "thread-a";
+  Q.store.qualityRegression = { ...Q.qualityRegressionDraft(), minimumPairs: "1", baseline, candidate };
+  Q.qualityRegressionRefresh(Q.store.qualityRegression);
+  let restoredSelection = null, focusCount = 0;
+  const inputNode = { value: "0.01", focus() { focusCount += 1; }, matches(selector) { return selector === "input"; },
+    setSelectionRange(start, end) { restoredSelection = [start, end]; } };
+  nodes.get("quality-regression-body").querySelector = () => inputNode;
+  Q.qualityRegressionControl({ type: "input", isComposing: true, target: { value: "0.0", selectionStart: 3, selectionEnd: 3,
+    getAttribute() { return "significance"; } } });
+  check("matched regression: IME composition does not replace the active policy input", focusCount === 0 && restoredSelection === null);
+  Q.qualityRegressionControl({ type: "input", target: { value: "0.01", selectionStart: 4, selectionEnd: 4,
+    getAttribute() { return "significance"; } } });
+  check("matched regression: semantic policy edits recompute immediately and preserve caret",
+    Q.store.qualityRegression.result?.config.significance === 0.01 && restoredSelection?.[0] === 4 && restoredSelection?.[1] === 4);
+  sandbox.document.getElementById = () => null;
+}
+
 check("experiment report markup: labelled read-only boundary and one stable live announcer",
   html.includes('id="quality-report" aria-labelledby="quality-report-title"') &&
   html.includes("Studio did not execute this experiment") &&
@@ -842,7 +1057,28 @@ check("experiment report responsive: summary, index, run, and assertion evidence
   html.includes(".quality-report-run-head { display:flex; flex-wrap:wrap;") &&
   html.includes(".quality-report-evidence { grid-template-columns:1fr; }") &&
   html.includes(".quality-report-identity { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
-  html.includes(".quality-report-assertion p,.quality-report-judge,.quality-report-detail .note { overflow-wrap:anywhere;"));
+    html.includes(".quality-report-assertion p,.quality-report-judge,.quality-report-detail .note { overflow-wrap:anywhere;"));
+check("matched regression markup: labelled evidence boundary and one stable live announcer",
+  html.includes('id="quality-regression" aria-labelledby="quality-regression-title"') &&
+  html.includes("Studio exposes evidence; it does not run experiments, approve a release, or apply a gate policy") &&
+  html.includes('id="quality-regression-announcer" role="status"'));
+check("matched regression interaction: exact imports, policy edits, matrix filters, and current report handoff are delegated",
+  html.includes('matches("[data-quality-regression-file]")') &&
+  html.includes('addEventListener("input", qualityRegressionControl)') &&
+  html.includes('addEventListener("compositionend", qualityRegressionControl)') &&
+  html.includes('addEventListener("click", qualityRegressionClick)') &&
+  html.includes('data-quality-regression-use="${side}"'));
+check("matched regression lifecycle: connection reset clears both reports and invalidates pending reads",
+  html.includes("store.qualityRegression = null;") && html.includes("store.qualityRegressionRequest += 1;") &&
+  html.includes("store.qualityRegressionSideRequest.baseline += 1;") && html.includes("store.qualityRegressionSideRequest.candidate += 1;"));
+check("matched regression accessibility: matrix is a native table and policy help is associated",
+  html.includes('<table class="quality-regression-matrix">') &&
+  html.includes('scope="col"') && html.includes('scope="row"') &&
+  html.includes('aria-describedby="quality-regression-policy-help${invalid ? " quality-regression-error" : ""}"'));
+check("matched regression responsive: sources, policy, verdict, ledger, and metrics collapse on narrow screens",
+  html.includes(".quality-regression-sources,.quality-regression-config,.quality-regression-verdict,.quality-regression-grid { grid-template-columns:1fr; }") &&
+  html.includes(".quality-regression-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
+  html.includes(".quality-regression-pair { grid-template-columns:minmax(0,1fr) auto; }"));
 
 check("release gate filename: portable and purpose-specific",
   Q.qualityGateFilename("../../Production Approval") === "production-approval.gate.json");

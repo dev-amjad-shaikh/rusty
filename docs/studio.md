@@ -341,6 +341,20 @@ studio/
     same connection, while a connection change or reload discards it. The Explorer did not execute the
     experiment, attest an external provider, evaluate an unknown future field, decide a release gate, or
     promote an agent.
+  - **Matched Regression Lab** — import two internally reconciled format-v1 experiment reports, or copy
+    the current Explorer report into either slot, and pair every run by exact `(case_id, repetition)`.
+    Dataset name/version, repetitions-per-case, case inventory, and run keys must match; Studio never drops
+    an unmatched run. The four-cell outcome matrix distinguishes both-pass, baseline-pass/candidate-fail,
+    baseline-fail/candidate-pass, and both-fail evidence, with a bounded 200-row visible ledger while every
+    matched pair remains in the calculation. The configurable significance level, minimum practical
+    pass-rate drop, and minimum pair count mirror `StatisticalRegressionConfig`; Studio recomputes the
+    one-sided exact McNemar upper tail in log space, including nonzero subnormal p-values and the explicit
+    insufficient-evidence state. Both input artifacts remain bounded by the Explorer's 2 MiB, 256-case,
+    and 64-runs-per-case limits. A rejected or mismatched replacement preserves the other report, and
+    deferred reads cannot cross a connection/thread workspace. The comparison survives thread changes on
+    the same connection but is discarded on connection change or reload. It is browser-computed evidence,
+    not a durable `StatisticalRegressionReport`, experiment execution, external attestation, release-gate
+    decision, approval, or promotion.
   - **Run comparison report** — enter a baseline and candidate run id (the baseline auto-fills from the
     loaded journal) and **Build report**. Studio calls the atomic
     `GET /runs/diff?base=…&branch=…` contract, then reconciles both independent

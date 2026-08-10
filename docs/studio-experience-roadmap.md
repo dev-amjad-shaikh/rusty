@@ -162,8 +162,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   durable team definitions, creation/editing lifecycle, server-side coordination discovery,
   supervisor and recovery controls, richer active-member evidence, and coordinated replay remain.
 - The general-purpose dataset remains portable page memory, and imported experiment reports are now
-  inspectable locally; execution, progress, durable discovery, statistical comparison, and gate decisions
-  remain library/platform work. Governed learning-candidate evaluation is server-backed in Studio.
+  inspectable and exactly pair-comparable locally. The Matched Regression Lab recomputes Rusty's practical
+  and one-sided significance evidence, while execution, progress, durable discovery, durable statistical
+  reports, and gate decisions remain library/platform work. Governed learning-candidate evaluation is
+  server-backed in Studio.
 - Memory records and structural conflicts have a human-readable audit workspace. Selected-memory
   corrections now append attributed records through an immutable original → correction → result
   path, with candidacy, finalized-run adoption, receipt validation, reconciliation, and exact retry.
@@ -334,7 +336,7 @@ Exit criteria:
 
 **Outcome:** prove that a proposed agent version is better before promotion.
 
-Status: **comparison, review, portable-dataset, report-inspection, and release-policy foundation delivered**. The Flight Recorder now turns two persisted run journals
+Status: **comparison, review, portable-dataset, report-inspection, matched-regression, and release-policy foundation delivered**. The Flight Recorder now turns two persisted run journals
 into an evidence-led baseline-versus-candidate report: atomic structural divergence, state-channel
 changes, exact resource totals, reconciled finalized/live journal signals, repeat-risk, and a deliberate
 no-winner boundary when no quality evaluator exists. Matching finalized evidence unlocks a human verdict
@@ -342,8 +344,8 @@ docket with a fixed task-outcome/correctness/safety rubric, explicit pairwise ju
 fresh edit acknowledgement, and a bounded page-memory review-packet export. Reload or workspace switch
 discards the docket. The packet does not automatically include raw event payloads, exports reviewer notes
 exactly as entered, and declares that it is neither durable nor a promotion gate. Durable datasets,
-review assignment and disagreement handling, evaluators, experiment execution, statistical reports,
-gates, and feedback queues still require the platform resources below.
+review assignment and disagreement handling, evaluators, experiment execution, durable statistical
+reports, gates, and feedback queues still require the platform resources below.
 One finalized exact journal can also become a reviewed format-v1 `rusty-eval` JSONL case: the first-node
 state is frozen and fully disclosed as portable input, observed tool calls remain an opt-in ordered
 subsequence expectation (extra calls stay legal), and operators can add explicit
@@ -367,15 +369,19 @@ and token evidence, recomputes the carried aggregates from case/run detail, and 
 repetition, assertion, and judge evidence. Aggregate drift remains visible rather than becoming a false
 pass; future serde-compatible fields are disclosed but not interpreted. The Explorer is read-only and
 does not claim execution, external-provider attestation, a gate decision, or promotion. Durable report
-discovery, version attribution, experiment execution/progress, statistical comparison, and enforced gate
-decisions still need platform APIs.
+discovery, version attribution, experiment execution/progress, durable statistical-report storage, and
+enforced gate decisions still need platform APIs. The Matched Regression Lab closes the local paired
+pass-rate comparison gap: two reconciled reports must share the exact dataset, repetition contract, and
+run-key set before Studio exposes the four paired outcomes, practical drop, exact one-sided p-value, and
+an explicit insufficient-evidence state. The result remains connection-bound browser evidence rather than
+a durable `StatisticalRegressionReport`, release gate, approval, or promotion.
 
 Scope:
 
 - Dataset creation from manual cases, files, and production traces.
 - Rule, trajectory, model-judge, safety, latency, and cost evaluators.
 - Baseline-versus-candidate experiments with bounded parallel execution.
-- Statistical regression, failure clusters, case drill-down, and confidence explanations.
+- Durable statistical reports, failure clusters, richer paired-case drill-down, and confidence explanations.
 - Annotation queues, pairwise review, corrections, disagreement resolution, and promotion to dataset.
 - Durable review inbox for interrupted runs, low-confidence outputs, failed gates, and learning approvals, including assignment, reservation, authority, deadline, decision, and safe resume.
 - Reusable release gates with a readable pass/fail explanation.
@@ -485,7 +491,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
-| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, portable multi-case Dataset Workbench, exact aggregate-reconciling Experiment Report Explorer, and release-policy authoring delivered; durable reviews/dataset catalogs/report discovery, evaluators, experiment execution, statistical comparison, and version-attributed gate decisions still need platform APIs | Converts the existing quality library into a product workflow |
+| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, portable multi-case Dataset Workbench, exact aggregate-reconciling Experiment Report Explorer, paired statistical regression evidence, and release-policy authoring delivered; durable reviews/dataset catalogs/report discovery, evaluators, experiment execution, durable statistical reports, and version-attributed gate decisions still need platform APIs | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Policy authoring foundation delivered; durable reports, queues, gate decisions, and promotion enforcement need platform APIs | Closes the human quality loop |
 | 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
 | 14 | Environment, deployment, and fleet surfaces | First automation slice delivered — signed webhook creation, pause/resume, event/dead-letter evidence, safe replay, and run handoff; cron, environments, deployments, fleet health, and shared credential contracts remain | Builds operations on stable identity, version, quality, and audit concepts |
