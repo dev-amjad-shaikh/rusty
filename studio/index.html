@@ -600,6 +600,42 @@
   }
   .rec-compare-controls label { flex: 1; min-width: 180px; display: grid; gap: 4px; color: var(--text-dim); font-size: 10.5px; }
   .rec-compare-controls label input { min-width: 0; width: 100%; }
+  .quality-foundry {
+    margin-top:18px; border:1px solid #4e4435; border-radius:12px; overflow:hidden;
+    background:linear-gradient(145deg, rgba(190,91,52,.08), rgba(23,21,18,.94) 52%);
+  }
+  .quality-foundry-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:16px 18px; border-bottom:1px solid #40382d; }
+  .quality-foundry-kicker { color:var(--accent); font:700 10px/1.2 var(--mono); letter-spacing:.13em; text-transform:uppercase; }
+  .quality-foundry-head h3 { margin:4px 0 5px; font-size:18px; }
+  .quality-foundry-head p { margin:0; max-width:720px; }
+  .quality-seal { flex:none; min-width:88px; padding:9px; border:1px solid #7b5a3d; border-radius:50%; color:#d6ae78; text-align:center; font:700 9px/1.3 var(--mono); letter-spacing:.08em; text-transform:uppercase; transform:rotate(3deg); }
+  .quality-foundry-body { padding:16px 18px 18px; }
+  .quality-rail { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; margin-bottom:14px; border:1px solid #40382d; border-radius:8px; overflow:hidden; background:#40382d; }
+  .quality-rail > div { padding:10px 12px; background:#211e19; }
+  .quality-rail span { display:block; color:var(--text-dim); font:700 9px/1.2 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+  .quality-rail b { display:block; margin-top:4px; font-size:12px; overflow-wrap:anywhere; }
+  .quality-foundry-form { display:grid; gap:14px; }
+  .quality-fields { display:grid; grid-template-columns:1.3fr .8fr 1fr; gap:10px; }
+  .quality-fields label, .quality-expect-grid label { display:grid; gap:5px; color:var(--text-dim); font-size:11px; }
+  .quality-fields input, .quality-expect-grid input, .quality-predicate input { width:100%; min-width:0; }
+  .quality-source { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(220px,.8fr); gap:12px; }
+  .quality-source > div, .quality-expect { padding:12px; border:1px solid #40382d; border-radius:8px; background:rgba(10,9,8,.36); }
+  .quality-source h4, .quality-expect h4 { margin:0 0 7px; font-size:12px; }
+  .quality-source pre { margin:0; max-height:210px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .quality-tool-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .quality-tool-list code { padding:4px 6px; border:1px solid #514638; border-radius:5px; }
+  .quality-expect-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .quality-check { display:flex !important; align-items:flex-start; grid-column:1/-1; gap:8px !important; color:var(--text) !important; }
+  .quality-check input { width:auto; margin-top:2px; }
+  .quality-predicates { display:grid; gap:8px; }
+  .quality-predicate { display:grid; grid-template-columns:minmax(130px,.7fr) minmax(180px,1.3fr) auto; gap:8px; align-items:start; }
+  .quality-predicate label { display:grid; gap:4px; color:var(--text-dim); font-size:10px; }
+  .quality-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .quality-boundary { margin-left:auto; max-width:520px; text-align:right; }
+  .quality-error { padding:10px 12px; border:1px solid #78483a; border-radius:7px; background:#321d18; color:#efc0b4; }
+  .quality-locked { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:start; }
+  .quality-locked pre { max-height:320px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .quality-unavailable { padding:11px 12px; border-left:3px solid #805943; background:#2a221b; }
   .cmp-report {
     margin-top: 10px; border: 1px solid #5a493a; border-radius: 10px; overflow: hidden;
     background: linear-gradient(135deg, #211d19 0%, #181b19 62%, #171b1e 100%);
@@ -1893,6 +1929,12 @@
     .rec-story-step { padding-top: 10px; padding-left: 27px; }
     .rec-story-step::before { top: 13px; left: 10px; }
     .rec-controls input, .rec-compare-controls input { min-width: 100%; }
+    .quality-foundry-head, .quality-locked { display:grid; }
+    .quality-seal { justify-self:start; }
+    .quality-fields, .quality-source, .quality-expect-grid { grid-template-columns:1fr; }
+    .quality-predicate { grid-template-columns:1fr; }
+    .quality-boundary { margin-left:0; text-align:left; }
+    .quality-rail { grid-template-columns:1fr; }
     .cmp-report-head { flex-direction: column; gap: 8px; }
     .cmp-balance { grid-template-columns: 1fr; }
     .cmp-balance-side:last-child { text-align: left; }
@@ -2447,6 +2489,19 @@
             </div>
           </section>
 
+          <section class="quality-foundry" id="quality-foundry" aria-labelledby="quality-foundry-title">
+            <div class="quality-foundry-head">
+              <div><span class="quality-foundry-kicker">Quality plane · evidence to regression</span>
+                <h3 id="quality-foundry-title" tabindex="-1">Evaluation case foundry</h3>
+                <p class="muted">Turn one exact finalized journal into a reviewed, versioned <code>rusty-eval</code> JSONL case. Studio never invents the expected answer.</p></div>
+              <div class="quality-seal" aria-hidden="true">Awaiting<br>journal</div>
+            </div>
+            <div class="quality-foundry-body" id="quality-foundry-body">
+              <div class="quality-unavailable">Load a complete journal with an inline first-node state to begin.</div>
+            </div>
+            <span class="sr-only" id="quality-foundry-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
+
           <h2 class="section" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
           <div class="rec-compare-controls" role="group" aria-label="Runs to compare">
@@ -2680,6 +2735,7 @@ const store = {
   streamAbort: null,   // AbortController for an active SSE fetch
   interruptDecision: null, // selected thread's session-only suspension review and exact resume value
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
+  qualityCase: null,   // page-memory evaluation case bound to one exact finalized Recorder journal
   recLoadRequest: 0,
   recReplayRequest: 0,
   recCompareRequest: 0,
@@ -4571,6 +4627,7 @@ function connectionResetWorkspace() {
   store.history = [];
   store.selectedCp = null;
   store.recorder = null;
+  store.qualityCase = null;
   store.compare = null;
   store.runProof = null;
   store.recUnsupported = false;
@@ -4941,13 +4998,17 @@ function renderMain() {
     learnLoad(true);
     return;
   }
-  if (!t) return;
+  if (!t) {
+    qualityClearThreadBoundState();
+    return;
+  }
 
   stopPoll();
   abortStream();
   store.history = [];
   store.selectedCp = null;
   store.recorder = null;
+  store.qualityCase = null;
   store.recLoadRequest += 1;
   store.runProof = null;
   store.runProofRequest += 1;
@@ -6111,6 +6172,7 @@ async function recLoad(runId, quiet, reconcileNavigation = true) {
   try {
     const res = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(runId)}/events`);
     if (request !== store.recLoadRequest || !connectionOperationCurrent(operation)) return;
+    store.qualityCase = null;
     store.recorder = {
       runId: res.run_id || runId,
       requestedRunId: runId,
@@ -6128,6 +6190,7 @@ async function recLoad(runId, quiet, reconcileNavigation = true) {
     if (!$("inp-cmp-base").value.trim()) $("inp-cmp-base").value = store.recorder.runId;
   } catch (e) {
     if (request !== store.recLoadRequest || !connectionOperationCurrent(operation)) return;
+    store.qualityCase = null;
     // A 404 with a non-JSON body means a server build without the route at
     // all (the Flight Recorder server API is a later R0.5 wave); a JSON 404
     // means the run is genuinely unknown — surface that one.
@@ -6166,6 +6229,7 @@ function recRender() {
   const investigation = $("rec-investigation");
   const r = store.recorder;
   runProofRender();
+  qualityRender();
   detail.style.display = "none";
   detail.innerHTML = "";
   investigation.innerHTML = "";
@@ -6687,6 +6751,497 @@ async function runProofVerify() {
     state.rejected = stage === "verify" && Number(error && error.status) === 422 &&
       error.body && error.body.error === "receipt_verification_failed";
     runProofRender(".run-proof-error");
+  }
+}
+
+/* ---------------- recorder: evaluation case foundry --------------------
+ * A local authoring bridge to rusty-eval's versioned JSONL dataset contract.
+ * Only exact finalized Recorder evidence can seed a case. Observed behavior
+ * remains evidence until a person deliberately selects it as an expectation.
+ * ------------------------------------------------------------------------- */
+const QUALITY_DATASET_FORMAT_VERSION = 1;
+const QUALITY_TEXT_LIMIT = 256;
+const QUALITY_TAG_LIMIT = 24;
+const QUALITY_PREDICATE_LIMIT = 16;
+const QUALITY_TOOL_LIMIT = 64;
+const QUALITY_TOOL_BYTES = 64 * 1024;
+const QUALITY_EXPORT_LIMIT = 128 * 1024;
+
+function qualityInlineValue(payload) {
+  return payload && payload.kind === "inline" &&
+    Object.prototype.hasOwnProperty.call(payload, "value") ? payload.value : undefined;
+}
+
+function qualitySafeText(value, maximum = QUALITY_TEXT_LIMIT) {
+  return typeof value === "string" && value.length > 0 && agentUtf8Length(value) <= maximum &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function qualitySource(recorder) {
+  if (!recorder || recorder.error || recorder.exactEnvelope !== true || recorder.complete !== true ||
+      recorder.requestedRunId !== recorder.runId || !Array.isArray(recorder.events) ||
+      recorder.events.length === 0 || !recorder.proofEvidence) {
+    return { ready: false, reason: "Load a complete, exact journal before creating an evaluation case." };
+  }
+  const runId = recorder.runId, threadId = recorder.proofEvidence.threadId;
+  if (!qualitySafeText(runId, 1024) || !qualitySafeText(threadId, 1024)) {
+    return { ready: false, reason: "The journal identity is not safe to carry into a dataset review." };
+  }
+  const ordered = [];
+  const sequences = new Set();
+  for (const event of recorder.events) {
+    const seq = recExactUnsigned(event, "seq");
+    const key = seq === null ? "" : String(seq);
+    if (!event || event.run_id !== runId || event.thread_id !== threadId || seq === null ||
+        seq > 18446744073709551615n || sequences.has(key) || event.id !== runId + ":" + key) {
+      return { ready: false, reason: "The journal does not carry one unique exact u64 sequence and deterministic event identity for every row." };
+    }
+    sequences.add(key);
+    ordered.push({ event, seq });
+  }
+  ordered.sort((left, right) => left.seq < right.seq ? -1 : left.seq > right.seq ? 1 : 0);
+  const events = ordered.map((item) => item.event);
+  const firstInput = events.find((event) => event && event.kind === "node_input" &&
+    event.run_id === runId && event.thread_id === threadId);
+  const input = firstInput && qualityInlineValue(firstInput.input);
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ready: false, reason: "This journal has no inline first-node state object. Artifact-backed inputs cannot be promoted in Studio." };
+  }
+  const inputJson = runProofCanonicalJson(input);
+  if (inputJson == null) {
+    return { ready: false, reason: "The first-node state cannot be represented without changing its JSON evidence." };
+  }
+  if (agentUtf8Length(inputJson) > 64 * 1024) {
+    return { ready: false, reason: "The first-node state is larger than the 64 KiB case-authoring boundary." };
+  }
+  const tools = [];
+  let toolsExact = true;
+  let toolBytes = 2; // JSON array framing; commas and escaped fields are added below.
+  const toolEvents = events.filter((item) => item && item.kind === "tool_call");
+  if (toolEvents.length > QUALITY_TOOL_LIMIT) toolsExact = false;
+  for (const event of toolEvents.slice(0, QUALITY_TOOL_LIMIT)) {
+    const request = qualityInlineValue(event.input);
+    const argumentsJson = request && runProofCanonicalJson(request.arguments);
+    if (!request || typeof request !== "object" || Array.isArray(request) ||
+        !qualitySafeText(request.tool) || !Object.prototype.hasOwnProperty.call(request, "arguments") ||
+        argumentsJson == null) {
+      toolsExact = false;
+      break;
+    }
+    const tool = { name: request.tool, arguments: request.arguments };
+    const encoded = qualityToolJson(tool);
+    toolBytes += (tools.length ? 1 : 0) + agentUtf8Length(encoded);
+    if (toolBytes > QUALITY_TOOL_BYTES) {
+      toolsExact = false;
+      break;
+    }
+    tools.push(tool);
+  }
+  const observedCost = events.reduce((sum, event) =>
+    typeof event?.cost_usd === "number" && Number.isFinite(event.cost_usd) && event.cost_usd >= 0
+      ? sum + event.cost_usd : sum, 0);
+  return {
+    ready: true, recorder, runId, threadId, input, inputJson,
+    tools: toolsExact ? tools : null,
+    toolEvents: toolEvents.length,
+    observedCost,
+  };
+}
+
+function qualityDefaultId(runId) {
+  const stem = String(runId || "run").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "").slice(0, 72) || "run";
+  return "regression-" + stem;
+}
+
+function qualityDraft(source) {
+  const sourceTag = source.runId.length <= 240 && !source.runId.includes(",")
+    ? ",source-run:" + source.runId : "";
+  return {
+    source, phase: "draft", dataset: "regression", version: "1.0.0",
+    caseId: qualityDefaultId(source.runId), tags: "regression" + sourceTag,
+    useTools: false,
+    forbidTools: "", maxCost: "", maxLatency: "",
+    predicates: [], acknowledged: false, errors: {}, jsonl: "",
+  };
+}
+
+function qualityParseTags(raw) {
+  const tags = String(raw || "").split(",").map((value) => value.trim()).filter(Boolean);
+  const unique = [...new Set(tags)];
+  if (unique.length > QUALITY_TAG_LIMIT || unique.some((tag) => !qualitySafeText(tag))) return null;
+  return unique;
+}
+
+function qualityParseExpected(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { error: "Enter the exact expected JSON value." };
+  if (agentUtf8Length(text) > 16 * 1024) return { error: "Expected JSON must be at most 16 KiB." };
+  try { agentValidateManifestNumbers(text); }
+  catch (error) { return { error: error.message }; }
+  try {
+    const value = agentParseJsonWithNumberKinds(text);
+    if (runProofCanonicalJson(value) == null) return { error: "Expected value cannot be represented exactly." };
+    return { value };
+  } catch (error) {
+    return { error: "Expected value is not valid JSON: " + error.message };
+  }
+}
+
+function qualityValidate(draft, currentSource = qualitySource(store.recorder)) {
+  const errors = Object.create(null);
+  if (!draft || draft.phase !== "draft" || !draft.source || !currentSource.ready ||
+      currentSource.recorder !== draft.source.recorder || currentSource.runId !== draft.source.runId ||
+      currentSource.threadId !== draft.source.threadId || currentSource.inputJson !== draft.source.inputJson) {
+    errors.source = "The loaded journal changed. Discard this draft and review the new finalized evidence.";
+    return { ok: false, errors };
+  }
+  if (!qualitySafeText(draft.dataset)) errors.dataset = "Dataset name is required and must be at most 256 UTF-8 bytes without control characters.";
+  if (!qualitySafeText(draft.version)) errors.version = "Dataset version is required and must be at most 256 UTF-8 bytes without control characters.";
+  if (!qualitySafeText(draft.caseId)) errors.caseId = "Case ID is required and must be at most 256 UTF-8 bytes without control characters.";
+  const tags = qualityParseTags(draft.tags);
+  if (!tags) errors.tags = "Use at most 24 unique comma-separated tags, each no more than 256 UTF-8 bytes.";
+  if (draft.useTools && (!Array.isArray(draft.source.tools) || draft.source.tools.length === 0)) {
+    errors.tools = "An exact observed tool trajectory is unavailable for this journal.";
+  }
+  const forbidden = qualityParseTags(draft.forbidTools);
+  if (!forbidden) errors.forbidTools = "Forbidden tools must use the same bounded comma-separated name format.";
+  if (draft.maxCost !== "") {
+    const cost = Number(draft.maxCost);
+    if (!Number.isFinite(cost) || cost < 0 || String(cost) !== String(draft.maxCost).trim()) {
+      errors.maxCost = "Maximum cost must be a canonical non-negative JSON number.";
+    }
+  }
+  if (draft.maxLatency !== "") {
+    const latency = Number(draft.maxLatency);
+    if (!Number.isSafeInteger(latency) || latency < 0 || String(latency) !== String(draft.maxLatency).trim()) {
+      errors.maxLatency = "Maximum latency must be a browser-safe non-negative whole number.";
+    }
+  }
+  if (!Array.isArray(draft.predicates) || draft.predicates.length > QUALITY_PREDICATE_LIMIT) {
+    errors.predicates = "Use at most 16 final-state checks.";
+  } else {
+    draft.predicates.forEach((predicate, index) => {
+      const key = "predicate-" + index;
+      if (typeof predicate.pointer !== "string" || agentUtf8Length(predicate.pointer) > 1024 ||
+          (predicate.pointer !== "" && !predicate.pointer.startsWith("/"))) {
+        errors[key] = "JSON Pointer must be empty for the whole state or begin with /.";
+        return;
+      }
+      const parsed = qualityParseExpected(predicate.expected);
+      if (parsed.error) errors[key] = parsed.error;
+    });
+  }
+  if (!draft.acknowledged) errors.acknowledged = "Confirm the source input and every selected expectation.";
+  return { ok: Object.keys(errors).length === 0, errors, tags, forbidden };
+}
+
+function qualityToolJson(tool) {
+  return '{"name":' + JSON.stringify(tool.name) + ',"args":{"":' +
+    runProofCanonicalJson(tool.arguments) + "}}";
+}
+
+function qualityDatasetJsonl(draft) {
+  const validation = qualityValidate(draft);
+  if (!validation.ok) throw new Error("The evaluation case is not ready to seal.");
+  const expectation = [];
+  if (draft.useTools) {
+    expectation.push('"tool_trajectory":[' + draft.source.tools.map(qualityToolJson).join(",") + "]");
+  }
+  if (draft.predicates.length) {
+    const state = draft.predicates.map((predicate) => {
+      const parsed = qualityParseExpected(predicate.expected);
+      return '{"pointer":' + JSON.stringify(predicate.pointer) + ',"expected":' +
+        runProofCanonicalJson(parsed.value) + "}";
+    });
+    expectation.push('"state":[' + state.join(",") + "]");
+  }
+  if (validation.forbidden.length) {
+    expectation.push('"forbid_tools":' + runProofCanonicalJson(validation.forbidden));
+  }
+  if (draft.maxCost !== "") expectation.push('"max_cost_usd":' + draft.maxCost);
+  if (draft.maxLatency !== "") expectation.push('"max_latency_ms":' + draft.maxLatency);
+  const header = '{"kind":"header","format_version":' + QUALITY_DATASET_FORMAT_VERSION +
+    ',"name":' + JSON.stringify(draft.dataset) + ',"version":' + JSON.stringify(draft.version) + "}";
+  const tags = validation.tags.length ? ',"tags":' + runProofCanonicalJson(validation.tags) : "";
+  const item = '{"kind":"case","id":' + JSON.stringify(draft.caseId) +
+    ',"input":' + draft.source.inputJson + ',"expect":{' + expectation.join(",") + "}" + tags + "}";
+  const jsonl = header + "\n" + item + "\n";
+  if (agentUtf8Length(jsonl) > QUALITY_EXPORT_LIMIT) {
+    throw new Error("The generated dataset exceeds the 128 KiB export boundary.");
+  }
+  return jsonl;
+}
+
+function qualityFilename(draft) {
+  const stem = String(draft.dataset || "dataset").toLowerCase().normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "").slice(0, 80) || "dataset";
+  const version = String(draft.version || "v1").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 40) || "v1";
+  return stem + "@" + version + ".jsonl";
+}
+
+function qualityClearThreadBoundState() {
+  store.qualityCase = null;
+}
+
+function qualityFieldError(draft, key) {
+  const error = draft?.errors?.[key];
+  return error ? '<span class="field-error" id="quality-error-' + escapeHtml(key) + '">' +
+    escapeHtml(error) + "</span>" : "";
+}
+
+function qualityInvalid(draft, key) {
+  return draft?.errors?.[key] ? ' aria-invalid="true" aria-describedby="quality-error-' +
+    escapeHtml(key) + '"' : "";
+}
+
+function qualityRail(source, phase) {
+  const tools = source.tools === null ? "trajectory unavailable" :
+    source.tools.length + " exact tool call" + (source.tools.length === 1 ? "" : "s");
+  return '<div class="quality-rail" aria-label="Evaluation case evidence path">' +
+    '<div><span>1 · recorded</span><b title="' + escapeHtml(source.runId) + '">' +
+      escapeHtml(shortId(source.runId)) + " · finalized</b></div>" +
+    "<div><span>2 · extracted</span><b>first-node state · " + escapeHtml(tools) + "</b></div>" +
+    "<div><span>3 · " + (phase === "locked" ? "sealed" : "review") + "</span><b>" +
+      (phase === "locked" ? "versioned JSONL ready" : "expectations require judgment") +
+    "</b></div></div>";
+}
+
+function qualityHtml(recorder, draft) {
+  const source = qualitySource(recorder);
+  if (!source.ready) {
+    return '<div class="quality-unavailable"><b>Case authoring is unavailable.</b> ' +
+      escapeHtml(source.reason) + "</div>";
+  }
+  if (!draft || draft.source.recorder !== recorder) {
+    return qualityRail(source, "ready") +
+      '<div class="quality-source"><div><h4>Exact source is ready</h4>' +
+      '<p class="muted tiny">Rusty found one complete journal and an inline first-node state. Starting a draft freezes that source in page memory; reloading the journal invalidates it.</p></div>' +
+      '<div><h4>Decision boundary</h4><p class="muted tiny">Observed output is not automatically correct. You choose every executable expectation before export.</p></div></div>' +
+      '<div class="quality-actions" style="margin-top:12px"><button class="small primary" type="button" data-quality-start>Build regression case</button>' +
+      '<span class="muted tiny">No server write · no evaluator run · no release approval</span></div>';
+  }
+  if (draft.phase === "locked") {
+    return qualityRail(draft.source, "locked") +
+      '<div class="quality-locked"><div><h4>Reviewed dataset case</h4>' +
+      '<p class="muted tiny">Canonical <code>rusty-eval</code> JSONL · page memory only until downloaded</p>' +
+      '<pre class="json">' + escapeHtml(draft.jsonl) + "</pre></div>" +
+      '<div class="quality-actions"><button class="small primary" type="button" data-quality-export>Download JSONL</button>' +
+      '<button class="small" type="button" data-quality-edit>Edit expectations</button>' +
+      '<button class="small" type="button" data-quality-discard>Discard</button></div></div>';
+  }
+  const errorSummary = Object.keys(draft.errors || {}).length
+    ? '<div class="quality-error" id="quality-error-summary" role="alert" tabindex="-1"><b>Case not sealed.</b> Correct the marked fields; nothing was exported.</div>'
+    : "";
+  const toolNames = Array.isArray(draft.source.tools) ? draft.source.tools.map((tool) => tool.name) : [];
+  const toolEvidence = draft.source.tools === null
+    ? '<p class="quality-error">The tool sequence is unavailable because its complete evidence is malformed or exceeds the 64-call / 64-KiB authoring boundary. Studio will not infer a partial trajectory.</p>'
+    : toolNames.length
+      ? '<div class="quality-tool-list">' + toolNames.map((name, index) =>
+          "<code>" + (index + 1) + ". " + escapeHtml(name) + "</code>").join("") + "</div>"
+      : '<p class="muted tiny">No tool calls were recorded. This does not automatically mean tools should be forbidden.</p>';
+  const predicates = draft.predicates.map((predicate, index) => {
+    const key = "predicate-" + index;
+    return '<div class="quality-predicate" data-quality-predicate="' + index + '">' +
+      '<label>Final-state JSON Pointer<input data-quality-predicate-field="pointer" value="' +
+        escapeHtml(predicate.pointer) + '" placeholder="/messages/2/content"' + qualityInvalid(draft, key) + "></label>" +
+      '<label>Expected JSON value<input data-quality-predicate-field="expected" value="' +
+        escapeHtml(predicate.expected) + '" placeholder="&quot;approved&quot;"' + qualityInvalid(draft, key) + ">" +
+        qualityFieldError(draft, key) + "</label>" +
+      '<button class="small" type="button" data-quality-remove="' + index +
+        '" aria-label="Remove final-state check ' + (index + 1) + '">Remove</button></div>';
+  }).join("");
+  return qualityRail(draft.source, "draft") +
+    '<form class="quality-foundry-form" id="quality-foundry-form" novalidate>' + errorSummary +
+    (draft.errors.source ? '<div class="quality-error">' + escapeHtml(draft.errors.source) + "</div>" : "") +
+    '<div class="quality-fields"><label>Dataset name<input data-quality-field="dataset" maxlength="' +
+      QUALITY_TEXT_LIMIT + '" value="' + escapeHtml(draft.dataset) + '"' + qualityInvalid(draft, "dataset") + ">" +
+      qualityFieldError(draft, "dataset") + "</label>" +
+    '<label>Version<input data-quality-field="version" maxlength="' + QUALITY_TEXT_LIMIT + '" value="' +
+      escapeHtml(draft.version) + '" spellcheck="false"' + qualityInvalid(draft, "version") + ">" +
+      qualityFieldError(draft, "version") + "</label>" +
+    '<label>Stable case ID<input data-quality-field="caseId" maxlength="' + QUALITY_TEXT_LIMIT + '" value="' +
+      escapeHtml(draft.caseId) + '" spellcheck="false"' + qualityInvalid(draft, "caseId") + ">" +
+      qualityFieldError(draft, "caseId") + "</label></div>" +
+    '<label class="tiny">Tags · comma separated<input data-quality-field="tags" value="' +
+      escapeHtml(draft.tags) + '"' + qualityInvalid(draft, "tags") + ">" +
+      qualityFieldError(draft, "tags") + "</label>" +
+    '<div class="quality-source"><div><h4>Frozen run input · first node state</h4>' +
+      '<p class="muted tiny">Full exact input below. The downloaded case includes it verbatim and may contain prompts, personal data, or secrets; review before sharing.</p>' +
+      '<pre class="json">' + escapeHtml(draft.source.inputJson) +
+      "</pre></div><div><h4>Observed tool evidence</h4>" + toolEvidence + "</div></div>" +
+    '<section class="quality-expect" aria-labelledby="quality-expect-title"><h4 id="quality-expect-title">Executable expectations</h4>' +
+    '<div class="quality-expect-grid"><label class="quality-check"><input type="checkbox" data-quality-field="useTools"' +
+      (draft.useTools ? " checked" : "") + (draft.source.tools === null || !draft.source.tools.length ? " disabled" : "") +
+      "> Require the observed tool calls as an ordered subsequence with exact arguments; extra calls before, between, or after remain allowed</label>" + qualityFieldError(draft, "tools") +
+    '<label>Forbidden tools · comma separated<input data-quality-field="forbidTools" value="' +
+      escapeHtml(draft.forbidTools) + '" placeholder="delete_user, send_payment"' +
+      qualityInvalid(draft, "forbidTools") + ">" + qualityFieldError(draft, "forbidTools") + "</label>" +
+    '<label>Maximum recorded cost · USD<input data-quality-field="maxCost" inputmode="decimal" value="' +
+      escapeHtml(draft.maxCost) + '" placeholder="' + escapeHtml(String(draft.source.observedCost || "")) + '"' +
+      qualityInvalid(draft, "maxCost") + ">" + qualityFieldError(draft, "maxCost") + "</label>" +
+    '<label>Maximum wall latency · ms<input data-quality-field="maxLatency" inputmode="numeric" value="' +
+      escapeHtml(draft.maxLatency) + '" placeholder="optional"' + qualityInvalid(draft, "maxLatency") + ">" +
+      qualityFieldError(draft, "maxLatency") + "</label><div></div></div>" +
+    '<div class="quality-predicates"><div class="quality-actions"><b>Final-state checks</b>' +
+      '<button class="small" type="button" data-quality-add' +
+      (draft.predicates.length >= QUALITY_PREDICATE_LIMIT ? " disabled" : "") +
+      ">Add JSON Pointer check</button></div>" + predicates + "</div>" +
+      qualityFieldError(draft, "predicates") + "</section>" +
+    '<label class="quality-check"><input type="checkbox" data-quality-field="acknowledged"' +
+      (draft.acknowledged ? " checked" : "") + qualityInvalid(draft, "acknowledged") + "><span>" +
+      "I reviewed the full frozen input—including its portable-data risk—and every selected expectation. Observed behavior is not treated as correct unless I explicitly selected it." +
+      qualityFieldError(draft, "acknowledged") + "</span></label>" +
+    '<div class="quality-actions"><button class="small primary" type="submit">Seal versioned case</button>' +
+      '<button class="small" type="button" data-quality-discard>Discard</button>' +
+      '<span class="quality-boundary muted tiny">Exports one canonical dataset header and one case. It does not persist a dataset, execute an experiment, or pass a release gate.</span></div></form>';
+}
+
+function qualityRender(focusSelector = "") {
+  const body = $("quality-foundry-body");
+  if (!body) return;
+  body.innerHTML = qualityHtml(store.recorder, store.qualityCase);
+  const ready = qualitySource(store.recorder).ready;
+  const seal = $("quality-foundry")?.querySelector(".quality-seal");
+  if (seal) {
+    seal.innerHTML = store.qualityCase?.phase === "locked" ? "Case<br>sealed" :
+      ready ? "Evidence<br>ready" : "Awaiting<br>journal";
+  }
+  if (focusSelector) body.querySelector(focusSelector)?.focus({ preventScroll: true });
+}
+
+function qualityStart() {
+  const source = qualitySource(store.recorder);
+  if (!source.ready) return;
+  store.qualityCase = qualityDraft(source);
+  qualityRender('[data-quality-field="dataset"]');
+  $("quality-foundry-announcer").textContent =
+    "Evaluation case draft opened from the exact finalized journal.";
+}
+
+function qualityInvalidateAcknowledgement(draft) {
+  if (!draft || draft.acknowledged !== true) return false;
+  draft.acknowledged = false;
+  const checkbox = $("quality-foundry-body")?.querySelector('[data-quality-field="acknowledged"]');
+  if (checkbox) checkbox.checked = false;
+  const announcer = $("quality-foundry-announcer");
+  if (announcer) {
+    announcer.textContent = "The case changed. Review it and acknowledge again before sealing.";
+  }
+  return true;
+}
+
+function qualityAddPredicate(draft) {
+  if (!draft || draft.phase !== "draft" || !Array.isArray(draft.predicates) ||
+      draft.predicates.length >= QUALITY_PREDICATE_LIMIT) return false;
+  qualityInvalidateAcknowledgement(draft);
+  draft.predicates.push({ pointer: "", expected: "" });
+  return true;
+}
+
+function qualityRemovePredicate(draft, index) {
+  if (!draft || draft.phase !== "draft" || !Array.isArray(draft.predicates) ||
+      !Number.isInteger(index) || index < 0 || index >= draft.predicates.length) return false;
+  qualityInvalidateAcknowledgement(draft);
+  draft.predicates.splice(index, 1);
+  return true;
+}
+
+function qualityInput(event) {
+  const draft = store.qualityCase;
+  if (!draft || draft.phase !== "draft") return;
+  const target = event.target;
+  const field = target.getAttribute("data-quality-field");
+  if (field && Object.prototype.hasOwnProperty.call(draft, field)) {
+    const next = target.type === "checkbox" ? target.checked : target.value;
+    if (field === "acknowledged") {
+      draft.acknowledged = next;
+      return;
+    }
+    if (draft[field] !== next) qualityInvalidateAcknowledgement(draft);
+    draft[field] = next;
+    return;
+  }
+  const row = target.closest("[data-quality-predicate]");
+  const predicateField = target.getAttribute("data-quality-predicate-field");
+  const index = row ? Number(row.getAttribute("data-quality-predicate")) : -1;
+  if (predicateField && Number.isInteger(index) && draft.predicates[index]) {
+    if (draft.predicates[index][predicateField] !== target.value) {
+      qualityInvalidateAcknowledgement(draft);
+    }
+    draft.predicates[index][predicateField] = target.value;
+  }
+}
+
+function qualityClick(event) {
+  const draft = store.qualityCase;
+  if (event.target.closest("[data-quality-start]")) {
+    qualityStart();
+    return;
+  }
+  if (event.target.closest("[data-quality-discard]")) {
+    store.qualityCase = null;
+    qualityRender("[data-quality-start]");
+    $("quality-foundry-announcer").textContent = "Evaluation case draft discarded.";
+    return;
+  }
+  if (!draft) return;
+  if (event.target.closest("[data-quality-add]") && draft.phase === "draft") {
+    if (!qualityAddPredicate(draft)) return;
+    qualityRender('[data-quality-predicate="' + (draft.predicates.length - 1) + '"] input');
+    return;
+  }
+  const remove = event.target.closest("[data-quality-remove]");
+  if (remove && draft.phase === "draft") {
+    const index = Number(remove.getAttribute("data-quality-remove"));
+    if (!qualityRemovePredicate(draft, index)) return;
+    qualityRender("[data-quality-add]");
+    return;
+  }
+  if (event.target.closest("[data-quality-edit]") && draft.phase === "locked") {
+    draft.phase = "draft";
+    draft.jsonl = "";
+    draft.acknowledged = false;
+    draft.errors = {};
+    qualityRender('[data-quality-field="dataset"]');
+    return;
+  }
+  if (event.target.closest("[data-quality-export]") && draft.phase === "locked") {
+    const url = URL.createObjectURL(new Blob([draft.jsonl], { type: "application/x-ndjson" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = qualityFilename(draft);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    toast("Versioned evaluation case downloaded with the full frozen run input. Treat it as potentially sensitive portable data.", "ok");
+    $("quality-foundry-announcer").textContent = "Versioned evaluation case downloaded.";
+  }
+}
+
+function qualitySubmit(event) {
+  event.preventDefault();
+  const draft = store.qualityCase;
+  if (!draft || draft.phase !== "draft") return;
+  const validation = qualityValidate(draft);
+  draft.errors = validation.errors;
+  if (!validation.ok) {
+    qualityRender("#quality-error-summary");
+    return;
+  }
+  try {
+    draft.jsonl = qualityDatasetJsonl(draft);
+    draft.phase = "locked";
+    draft.errors = {};
+    qualityRender();
+    $("quality-foundry-title").focus({ preventScroll: true });
+    $("quality-foundry-announcer").textContent =
+      "Evaluation case sealed in page memory and ready to download.";
+  } catch (error) {
+    draft.errors = { source: error.message || "The case could not be serialized exactly." };
+    qualityRender("#quality-error-summary");
   }
 }
 
@@ -17717,6 +18272,12 @@ function init() {
   $("rec-investigation").addEventListener("click", recClick);
   $("run-proof").addEventListener("click", (event) => {
     if (event.target.closest("[data-run-proof-action]")) runProofVerify();
+  });
+  $("quality-foundry").addEventListener("input", qualityInput);
+  $("quality-foundry").addEventListener("change", qualityInput);
+  $("quality-foundry").addEventListener("click", qualityClick);
+  $("quality-foundry").addEventListener("submit", (event) => {
+    if (event.target.id === "quality-foundry-form") qualitySubmit(event);
   });
 
   // Replay & run comparison. The banner's divergence seq is a jump link into

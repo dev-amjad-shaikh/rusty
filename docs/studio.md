@@ -282,6 +282,21 @@ studio/
     as a jump link into the loaded timeline). Failures are shown distinctly: unknown run (404), no
     persisted journal (409), graph not registered (422), and route-missing (older server build, non-JSON
     404) each get their own note.
+  - **Evaluation case foundry** — a complete exact journal with an inline first-node state can seed one
+    versioned `rusty-eval` JSONL case. Studio freezes the first node's state as the case input and shows
+    canonical tool-call evidence, but selects no expected behavior automatically. The operator may
+    deliberately require the observed tool calls as an ordered subsequence with exact whole-argument
+    matchers; the evaluator still permits extra calls before, between, or after them. Operators can also
+    add final-state JSON Pointer checks, forbid named tools, and set cost or latency ceilings. The full
+    frozen input is shown because it is exported verbatim and may contain prompts, personal data, or
+    secrets. Every semantic edit invalidates the acknowledgement; a fresh acknowledgement binds the
+    visible input and selected expectations to the still-loaded Recorder object before Studio seals the
+    canonical format-v1 header and case. Unsafe integer wire tokens remain exact; artifact-backed input,
+    lossy numbers, oversized evidence, and a refreshed journal fail closed. Malformed tool evidence or a
+    trajectory beyond 64 calls / 64 KiB disables only that optional shortcut rather than inferring a
+    partial sequence. The draft and sealed case live in page memory until downloaded and are discarded on
+    journal reload, thread change, or connection change. The downloaded JSONL is portable sensitive data.
+    This export does not create a durable dataset, run an evaluator or experiment, or approve a release.
   - **Run comparison report** — enter a baseline and candidate run id (the baseline auto-fills from the
     loaded journal) and **Build report**. Studio calls the atomic
     `GET /runs/diff?base=…&branch=…` contract, then reconciles both independent
