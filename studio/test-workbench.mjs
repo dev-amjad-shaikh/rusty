@@ -59,11 +59,13 @@ globalThis.__workbench = {
   agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft, agentCopySourceSnapshot,
   agentSensitiveKey, agentSensitiveValueKeys, agentRedactedValue, agentCopyManifestText, agentCopyContextHtml,
   agentUtf8Length, agentClientIdError, agentValidateDraft, agentManifestScan, agentPortableManifest,
+  agentIntentInspectConfig, agentIntentDraft, agentIntentBuild, agentIntentToolsText, agentIntentSelectedScopeOrder,
   agentManifestText, agentParseManifestText, agentManifestFilename, agentManifestDraft,
   agentParseJsonWithNumberKinds, agentValidateManifestNumbers, agentValidateRuntimeLimitLexemes,
   agentRuntimeLimitValue, agentRuntimeLimitRoundTrips, agentStoredNumbersRoundTrip, agentManifestActionError,
   agentReadManifestFile,
   agentConfigurationEvidence, agentConfigurationEvidenceHtml, agentImportContextHtml,
+  agentApplyDraftValidation, agentRevalidateEditedField, agentSetShortcutLocks,
   agentCopyIdentityConflict, agentBuildCreatePayload,
   agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
   agentOpenCreate, agentCreate, store,
@@ -278,6 +280,93 @@ check("graph labels: built-in behaviors are understandable",
     W.agentValidateDraft({ name: "A", graph: "react_agent" }, []).errors.graph.includes("no registered behaviors"));
   check("configuration validation: whitespace identity is rejected rather than silently replaced",
     W.agentValidateDraft({ name: "A", graph: "react_agent", assistantId: "   " }, ["react_agent"]).errors.assistantId.includes("whitespace"));
+}
+
+{
+  const fields = {
+    model: "openai/gpt-5",
+    tools: "search | read_only\npublish | non_idempotent",
+    memoryMode: "read_write",
+    scopes: ["agent", "user"],
+    approval: "irreversible",
+  };
+  const built = W.agentIntentBuild(fields);
+  check("visual intent: typed model, tool, memory, and approval surfaces form one versioned contract",
+    built.valid && built.intent.format === "rusty.agent-intent/v1" && built.intent.model === "openai/gpt-5" &&
+    built.intent.tools[1].effect === "non_idempotent" && built.intent.memory.scopes.join(",") === "agent,user" &&
+    built.intent.approval === "irreversible");
+  check("visual intent: the untouched canvas does not invent a stored requirement",
+    W.agentIntentBuild({ model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy" }).empty);
+  check("visual intent: tool contracts use a canonical exact effect grammar", (() => {
+    const malformed = [
+      "search|read_only", "search | unknown", "search | read_only\nsearch | pure", "bad tool | pure",
+    ];
+    return malformed.every((tools) => !W.agentIntentBuild({ ...fields, tools }).valid);
+  })());
+  check("visual intent: tool text is byte-bounded before line parsing",
+    W.agentIntentBuild({ ...fields, tools: "x".repeat(4097) }).errors.tools.includes("4 KiB"));
+  check("visual intent: memory scopes cannot imply access the operator did not choose",
+    W.agentIntentBuild({ ...fields, memoryMode: "none" }).errors.memoryMode.includes("read access"));
+  check("visual intent: declared memory access requires an explicit allowed scope",
+    W.agentIntentBuild({ ...fields, memoryMode: "read_only", scopes: [] }).errors.memoryMode.includes("at least one") &&
+    W.agentIntentDraft({ studio_intent: { format: "rusty.agent-intent/v1", model: "model", tools: [],
+      memory: { access: "read_write", scopes: [] }, approval: "runtime_policy" } }).intentLocked);
+  check("visual intent: model identities reject hidden controls and invisible normalization",
+    !W.agentIntentBuild({ ...fields, model: " model " }).valid &&
+    !W.agentIntentBuild({ ...fields, model: "model\tname" }).valid &&
+    !W.agentIntentBuild({ ...fields, model: "model\u202Ename" }).valid &&
+    !W.agentIntentBuild({ ...fields, model: "model\u200Bname" }).valid);
+  check("visual intent: URL credentials and token-shaped model values fail before persistence",
+    !W.agentIntentBuild({ ...fields, model: "https://user:password@host/model" }).valid &&
+    !W.agentIntentBuild({ ...fields, model: "sk-1234567890abcdef" }).valid);
+  check("visual intent: ordinary registry names with security-adjacent prefixes remain usable",
+    W.agentIntentBuild({ ...fields, model: "api-speech-preview" }).valid &&
+    W.agentIntentBuild({ ...fields, model: "token-embedding-model" }).valid);
+  check("visual intent: imported invisible or credential-shaped model bindings lock instead of rendering a shortcut", (() => {
+    const base = { format: "rusty.agent-intent/v1", tools: [], memory: { access: "none", scopes: [] }, approval: "irreversible" };
+    return ["model\u202Ename", "model\u200Bname", "https://user:password@host/model", "sk-1234567890abcdef"]
+      .every((model) => W.agentIntentDraft({ studio_intent: { ...base, model } }).intentLocked);
+  })());
+  const config = { recursion_limit: 9, studio_intent: built.intent };
+  const inspected = W.agentIntentInspectConfig(config);
+  const draft = W.agentIntentDraft(config);
+  check("visual intent: stored v1 contracts hydrate every guided surface exactly",
+    inspected.valid && inspected.present && draft.model === fields.model && draft.tools === fields.tools &&
+    draft.memoryMode === fields.memoryMode && draft.scopes.join(",") === "agent,user" && draft.approval === fields.approval);
+  check("visual intent: imported scope order survives fixed checkbox display order",
+    W.agentIntentSelectedScopeOrder(["tenant", "run"], ["run", "tenant"]).join(",") === "tenant,run");
+  const payload = W.agentBuildCreatePayload({
+    name: "Builder", graph: "react_agent", assistantId: "", recursionLimit: "9", description: "", tags: "", ...fields,
+  }, null);
+  eq("visual intent: assistant creation stores the reviewed intent under config without changing runtime fields",
+    payload.config, config);
+  const opaque = { recursion_limit: 4, studio_intent: { format: "vendor.intent/v2", token: "keep-exact" } };
+  const opaqueDraft = W.agentIntentDraft(opaque);
+  const preserved = W.agentBuildCreatePayload({
+    name: "Opaque", graph: "react_agent", assistantId: "", recursionLimit: "4", description: "", tags: "",
+    ...opaqueDraft,
+  }, { config: opaque });
+  check("visual intent: unknown stored contracts lock the shortcut and remain byte-for-byte structural values",
+    opaqueDraft.intentLocked && JSON.stringify(preserved.config.studio_intent) === JSON.stringify(opaque.studio_intent));
+  const explicitEmpty = { format: "rusty.agent-intent/v1", model: "", tools: [], memory: { access: "none", scopes: [] }, approval: "runtime_policy" };
+  check("visual intent: a present no-op envelope is locked and preserved rather than silently deleted", (() => {
+    const locked = W.agentIntentDraft({ studio_intent: explicitEmpty });
+    const kept = W.agentBuildCreatePayload({ name: "Empty", graph: "react_agent", recursionLimit: "", description: "", tags: "", ...locked },
+      { config: { studio_intent: explicitEmpty } });
+    return locked.intentLocked && JSON.stringify(kept.config.studio_intent) === JSON.stringify(explicitEmpty);
+  })());
+  check("visual intent: exact non-DOM scope and tool order survives export, import, rebuild, and duplicate", (() => {
+    const sourceFields = { ...fields, tools: "publish | non_idempotent\nsearch | read_only", scopes: ["tenant", "run"] };
+    const original = W.agentBuildCreatePayload({ name: "Portable", graph: "react_agent", recursionLimit: "8", description: "", tags: "", ...sourceFields }, null);
+    const manifest = W.agentPortableManifest({ ...original, assistant_id: "portable" });
+    const parsed = W.agentParseManifestText(W.agentManifestText(manifest, false), ["react_agent"]);
+    const importedDraft = W.agentManifestDraft(parsed);
+    const imported = W.agentBuildCreatePayload({ ...importedDraft, description: "", tags: "" }, parsed);
+    const copyDraft = W.agentCopyDraft({ ...original, assistant_id: "portable" });
+    const copied = W.agentBuildCreatePayload({ ...copyDraft, name: "Copy", description: "", tags: "" }, { ...original, assistant_id: "portable" });
+    return JSON.stringify(imported.config.studio_intent) === JSON.stringify(original.config.studio_intent) &&
+      JSON.stringify(copied.config.studio_intent) === JSON.stringify(original.config.studio_intent);
+  })());
 }
 
 {
@@ -570,6 +659,8 @@ check("graph labels: built-in behaviors are understandable",
     return {
       value, disabled: false, style: {}, className: "", textContent: "", focused: false,
       focus() { this.focused = true; },
+      getAttribute(name) { return this[name] ?? null; },
+      hasAttribute(name) { return this[name] !== undefined; },
       setAttribute(name, next) { this[name] = next; },
       removeAttribute(name) { delete this[name]; },
     };
@@ -579,8 +670,11 @@ check("graph labels: built-in behaviors are understandable",
     "inp-agent-name": "Copy draft", "sel-agent-graph": "react_agent",
     "inp-agent-id": agent.assistant_id, "inp-agent-limit": "12",
     "inp-agent-description": "Collect evidence", "inp-agent-tags": "research",
-    "btn-agent-create": "", "agent-form-error": "", toast: "",
-  })) uiElements.set(id, element(value));
+    "inp-agent-model": "", "inp-agent-tools": "", "sel-agent-memory-mode": "none",
+    "sel-agent-approval": "runtime_policy",
+    "btn-agent-create": "", "agent-form-error": "", "agent-intent-lock": "", toast: "",
+  })) { const next = element(value); next.id = id; uiElements.set(id, next); }
+  uiElements.set("agent-create-form", { querySelectorAll() { return []; } });
   W.store.info = info;
   const legacyFloat = W.agentParseJsonWithNumberKinds(
     '{"assistant_id":"legacy-float","name":"Legacy float","graph":"pipeline","config":{"recursion_limit":12.0}}');
@@ -610,6 +704,53 @@ check("graph labels: built-in behaviors are understandable",
     uiElements.get("inp-agent-id").value === "research-copy" &&
     uiElements.get("btn-agent-create").disabled === false &&
     uiElements.get("toast").textContent === "assistant already exists");
+  const toolField = uiElements.get("inp-agent-tools");
+  toolField["aria-describedby"] = "agent-tools-help agent-intent-truth agent-intent-lock";
+  const tooManyTools = Array.from({ length: 17 }, (_, index) => `tool${index} | pure`).join("\n");
+  toolField.value = tooManyTools;
+  W.agentApplyDraftValidation(W.agentValidateDraft({
+    name: "Draft", graph: "react_agent", model: "", tools: tooManyTools, memoryMode: "none", scopes: [], approval: "runtime_policy",
+  }, ["react_agent"]), true);
+  const retainedError = uiElements.get("agent-form-error").textContent;
+  toolField.value = "bad";
+  check("visual intent interaction: a different invalid edit updates its announced validation state",
+    toolField["aria-invalid"] === "true" && W.agentRevalidateEditedField(toolField) === false &&
+    retainedError.includes("no more than") && uiElements.get("agent-form-error").textContent.includes("canonical") &&
+    uiElements.get("agent-form-error").textContent !== retainedError && toolField["aria-describedby"].includes("agent-form-error"));
+  toolField.value = "search | read_only";
+  check("visual intent interaction: correcting the validated field clears stale invalid state atomically",
+    W.agentRevalidateEditedField(toolField) && toolField["aria-invalid"] === undefined &&
+    uiElements.get("agent-form-error").textContent === "" && !toolField["aria-describedby"].includes("agent-form-error") &&
+    toolField["aria-describedby"].includes("agent-tools-help"));
+  const nameField = uiElements.get("inp-agent-name");
+  nameField.value = "";
+  toolField.value = "bad";
+  W.agentApplyDraftValidation(W.agentValidateDraft({
+    name: "", graph: "react_agent", model: "", tools: "bad", memoryMode: "none", scopes: [], approval: "runtime_policy",
+  }, ["react_agent"]), true);
+  check("visual intent interaction: shared validation describes only the first invalid control",
+    nameField["aria-invalid"] === "true" && nameField["aria-describedby"].includes("agent-form-error") &&
+    toolField["aria-invalid"] === "true" && !toolField["aria-describedby"].includes("agent-form-error") &&
+    uiElements.get("agent-form-error").textContent.includes("Enter an agent name"));
+  nameField.value = "Recovered draft";
+  check("visual intent interaction: correcting the first error advances its announcement to the next control",
+    W.agentRevalidateEditedField(nameField) && nameField["aria-invalid"] === undefined &&
+    !String(nameField["aria-describedby"] || "").includes("agent-form-error") &&
+    toolField["aria-invalid"] === "true" && toolField["aria-describedby"].includes("agent-form-error") &&
+    uiElements.get("agent-form-error").textContent.includes("canonical"));
+  toolField.value = "search | read_only";
+  check("visual intent interaction: correcting the final error clears the shared announcement",
+    W.agentRevalidateEditedField(toolField) && toolField["aria-invalid"] === undefined &&
+    !toolField["aria-describedby"].includes("agent-form-error") &&
+    uiElements.get("agent-form-error").textContent === "");
+  W.agentSetShortcutLocks({ config: { studio_intent: { format: "vendor/v2" } } });
+  check("visual intent interaction: unknown stored contracts expose a visible described lock reason",
+    uiElements.get("inp-agent-model").disabled && !uiElements.get("agent-intent-lock").hidden &&
+    uiElements.get("agent-intent-lock").textContent.includes("exact JSON editor"));
+  W.agentSetShortcutLocks(null);
+  check("visual intent interaction: a fresh draft clears the lock note and re-enables controls",
+    !uiElements.get("inp-agent-model").disabled && uiElements.get("agent-intent-lock").hidden &&
+    uiElements.get("agent-intent-lock").textContent === "");
 }
 
 check("route-missing error explains the required server capability",
@@ -758,6 +899,19 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes('id="agent-form-error" role="alert"') &&
     html.includes('id="agent-manifest-status" role="status"') &&
     html.includes('id="agent-contract-preview" aria-labelledby="agent-contract-title"'));
+  check("visual intent canvas exposes model, tools, memory, and approval as labelled native controls",
+    html.includes('id="agent-intent-model-title"') && html.includes('id="inp-agent-model"') &&
+    html.includes('id="inp-agent-tools" maxlength="4096"') && html.includes('id="sel-agent-memory-mode"') &&
+    html.includes('data-agent-scope="tenant"') && html.includes('id="sel-agent-approval"'));
+  check("visual intent canvas never claims portable requirements are already runtime-enforced",
+    html.includes("Today it does not bind model, tool, memory, or approval providers") &&
+    html.includes("A declared requirement, not a browser-side permission grant") &&
+    html.includes("Use an identifier or registry reference, not a URL or credential"));
+  check("visual intent canvas collapses the wiring bench into one mobile column",
+    html.includes(".agent-intent-grid { grid-template-columns: 1fr; }") &&
+    html.includes(".agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }"));
+  check("visual intent validation associates the focused field with the announced error",
+    html.includes('describedBy.add("agent-form-error")') && html.includes('id="agent-form-error" role="alert"'));
   check("configuration workshop carries responsive and reduced-motion quality hooks",
     html.includes(".agent-workshop { grid-template-columns: 1fr;") &&
     html.includes('@media (prefers-reduced-motion: reduce)'));

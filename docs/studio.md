@@ -39,6 +39,13 @@ studio/
   over identity or run history, give it a real task, and move directly into the resulting thread and
   trace. The configuration workshop separates fields the server executes (**Runs with**) from catalog
   metadata (**Describes**) and unknown or graph-specific fields stored without silent field loss (**Preserves**). A
+  visual wiring bench adds a typed `rusty.agent-intent/v1` requirement for model identity, tool names and
+  replay-safety effects, governed-memory access/scopes, and approval boundary. The intent is stored under
+  `config.studio_intent`, survives import/export and duplication, and locks rather than rewriting an
+  unfamiliar stored shape. Its controls are designed for identifiers and policy declarations; Studio
+  warns operators not to paste provider credentials because the assistant record stores these values.
+  Studio labels this as portable intent: the current generic assistant runner does not bind providers,
+  tools, memory, or approval enforcement from it, so the registered graph remains authoritative. A
   versioned `rusty.assistant/v1` JSON manifest can be imported, reviewed, edited explicitly, and exported;
   imports reject unknown top-level fields rather than silently losing them, and secret-looking values
   stay hidden in the evidence preview. A bounded, connection-scoped browser ledger preserves only safe

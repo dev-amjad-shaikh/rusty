@@ -777,6 +777,25 @@
   .agent-form-section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
   .agent-form-section b { color: #eef7ff; font-size: 12.5px; }
   .agent-form-section span { color: var(--text-dim); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .7px; }
+  .agent-intent-shell { grid-column: 1 / -1; position: relative; margin: 2px 0 4px; padding-top: 22px; }
+  .agent-intent-shell::before { content: ""; position: absolute; top: 9px; left: 12.5%; right: 12.5%; height: 1px; background: #4e687b; }
+  .agent-intent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .agent-intent-card { position: relative; min-width: 0; padding: 12px; border: 1px solid #344b5d; border-radius: 7px; background: #151d23; }
+  .agent-intent-card::before { content: ""; position: absolute; top: -18px; left: 50%; width: 1px; height: 17px; background: #4e687b; }
+  .agent-intent-card::after { content: ""; position: absolute; top: -21px; left: calc(50% - 3px); width: 7px; height: 7px; border: 1px solid #6fa8dc; border-radius: 50%; background: #151d23; }
+  .agent-intent-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 9px; }
+  .agent-intent-head b { color: #eef7ff; font-size: 12px; }
+  .agent-intent-state { color: #d4bf82; font: 700 8.5px var(--mono); letter-spacing: .55px; text-transform: uppercase; }
+  .agent-intent-card label { margin-top: 7px; }
+  .agent-intent-card label:first-of-type { margin-top: 0; }
+  .agent-intent-card textarea { min-height: 76px; }
+  .agent-intent-card .field-help { line-height: 1.4; }
+  .agent-intent-scopes { display: flex; gap: 5px 9px; flex-wrap: wrap; margin: 9px 0 0; padding: 8px; border: 1px solid var(--border); border-radius: 5px; }
+  .agent-intent-scopes legend { padding: 0 4px; color: var(--text-dim); font-size: 10.5px; }
+  .agent-intent-scopes label { flex-direction: row; gap: 4px; align-items: center; margin: 0; font-size: 10.5px; }
+  .agent-intent-truth { display: flex; gap: 8px; align-items: flex-start; margin-top: 9px; padding: 8px 10px; border-left: 2px solid #b9a061; background: #252318; color: #bdb392; font-size: 10.5px; line-height: 1.4; }
+  .agent-intent-truth b { flex: 0 0 auto; color: #e5ce93; font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .55px; }
+  .agent-intent-lock { margin-top: 8px; padding: 8px 10px; border: 1px solid #705548; border-radius: 5px; background: #2a1e1a; color: #e8c1b1; font-size: 10.5px; line-height: 1.4; }
   .agent-workshop .field-help { color: #9a9080; }
   .agent-manifest-tools { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .agent-manifest-tools .field-help { flex: 1 1 220px; }
@@ -1588,6 +1607,10 @@
     .agent-advanced-grid { grid-template-columns: 1fr; }
     .agent-advanced-grid .wide { grid-column: auto; }
     .agent-form-section, .agent-manifest-tools { grid-column: auto; }
+    .agent-intent-shell { grid-column: auto; padding-top: 0; }
+    .agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }
+    .agent-intent-grid { grid-template-columns: 1fr; }
+    .agent-intent-truth { flex-direction: column; }
     .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-run-row { grid-template-columns: 1fr; }
     .agent-run-row button { justify-self: start; }
@@ -1866,7 +1889,32 @@
               <label>Behavior <select id="sel-agent-graph" aria-describedby="agent-graph-help"></select><span class="field-help" id="agent-graph-help">A registered graph binding enforced on every assistant run.</span></label>
               <label>Step limit <input id="inp-agent-limit" type="number" min="0" step="1" inputmode="numeric" placeholder="Runtime default" aria-describedby="agent-limit-help"><span class="field-help" id="agent-limit-help">The only assistant config field the current server applies as a run default. Zero allows no graph steps.</span></label>
 
-              <div class="agent-form-section"><span>03 · Portability</span><b>Keep the exact configuration reviewable.</b></div>
+              <div class="agent-form-section"><span>03 · Intent</span><b>What runtime capabilities should this agent require?</b></div>
+              <div class="agent-intent-shell" aria-describedby="agent-intent-truth">
+                <div class="agent-intent-grid">
+                  <section class="agent-intent-card" aria-labelledby="agent-intent-model-title">
+                    <div class="agent-intent-head"><b id="agent-intent-model-title">Model</b><span class="agent-intent-state">portable intent</span></div>
+                    <label>Model binding <input id="inp-agent-model" type="text" maxlength="256" spellcheck="false" placeholder="provider/model or registry ref" aria-describedby="agent-model-help agent-intent-truth agent-intent-lock"><span class="field-help" id="agent-model-help">Use an identifier or registry reference, not a URL or credential. Secrets belong in a broker.</span></label>
+                  </section>
+                  <section class="agent-intent-card" aria-labelledby="agent-intent-tools-title">
+                    <div class="agent-intent-head"><b id="agent-intent-tools-title">Tools</b><span class="agent-intent-state">portable intent</span></div>
+                    <label>Tool contracts <textarea id="inp-agent-tools" maxlength="4096" spellcheck="false" placeholder="search | read_only&#10;publish | non_idempotent" aria-describedby="agent-tools-help agent-intent-truth agent-intent-lock"></textarea><span class="field-help" id="agent-tools-help">One <code>name | effect</code> per line. Effects use Rusty's replay-safety taxonomy.</span></label>
+                  </section>
+                  <section class="agent-intent-card" aria-labelledby="agent-intent-memory-title">
+                    <div class="agent-intent-head"><b id="agent-intent-memory-title">Memory</b><span class="agent-intent-state">portable intent</span></div>
+                    <label>Memory access <select id="sel-agent-memory-mode" aria-describedby="agent-intent-truth agent-intent-lock"><option value="none">No declared memory</option><option value="read_only">Read only</option><option value="read_write">Read and write</option></select></label>
+                    <fieldset class="agent-intent-scopes" aria-describedby="agent-intent-truth agent-intent-lock"><legend>Allowed scopes</legend><label><input type="checkbox" data-agent-scope="run"> Run</label><label><input type="checkbox" data-agent-scope="agent"> Agent</label><label><input type="checkbox" data-agent-scope="team"> Team</label><label><input type="checkbox" data-agent-scope="user"> User</label><label><input type="checkbox" data-agent-scope="tenant"> Tenant</label></fieldset>
+                  </section>
+                  <section class="agent-intent-card" aria-labelledby="agent-intent-guard-title">
+                    <div class="agent-intent-head"><b id="agent-intent-guard-title">Guardrail</b><span class="agent-intent-state">portable intent</span></div>
+                    <label>Required approval boundary <select id="sel-agent-approval" aria-describedby="agent-approval-help agent-intent-truth agent-intent-lock"><option value="runtime_policy">Use runtime policy</option><option value="irreversible">Before irreversible effects</option><option value="external_effect">Before every external effect</option></select><span class="field-help" id="agent-approval-help">A declared requirement, not a browser-side permission grant.</span></label>
+                  </section>
+                </div>
+                <div class="agent-intent-truth" id="agent-intent-truth"><b>Execution boundary</b><span>The server stores this versioned intent exactly. Today it does not bind model, tool, memory, or approval providers from these fields; the selected graph remains authoritative.</span></div>
+                <div class="agent-intent-lock" id="agent-intent-lock" role="note" hidden></div>
+              </div>
+
+              <div class="agent-form-section"><span>04 · Portability</span><b>Keep the exact configuration reviewable.</b></div>
               <div class="agent-manifest-tools">
                 <button type="button" class="small" id="btn-agent-import">Import manifest</button>
                 <button type="button" class="small" id="btn-agent-export-draft">Export draft</button>
@@ -2325,6 +2373,12 @@ const AGENT_MANIFEST_FORMAT = "rusty.assistant/v1";
 const AGENT_MANIFEST_TEXT_LIMIT = 65536;
 const AGENT_MANIFEST_DEPTH_LIMIT = 16;
 const AGENT_MANIFEST_NODE_LIMIT = 2000;
+const AGENT_INTENT_FORMAT = "rusty.agent-intent/v1";
+const AGENT_INTENT_TOOL_LIMIT = 16;
+const AGENT_INTENT_EFFECTS = new Set(["pure", "read_only", "idempotent", "compensatable", "non_idempotent"]);
+const AGENT_INTENT_SCOPES = new Set(["run", "agent", "team", "user", "tenant"]);
+const AGENT_INTENT_MEMORY_MODES = new Set(["none", "read_only", "read_write"]);
+const AGENT_INTENT_APPROVALS = new Set(["runtime_policy", "irreversible", "external_effect"]);
 const AGENT_NUMBER_TOKENS = Symbol("rusty.json.number_tokens");
 const LEARN_SNAPSHOT_LIMIT = 200;
 const LEARN_RENDER_LIMIT = 100;
@@ -2385,6 +2439,7 @@ const store = {
   agentCopySource: null, // source snapshot while a copy-to-draft form is open
   agentManifestSource: null, // imported/copied config + metadata preserved while the workshop is open
   agentManifestDirty: false, // exact JSON has unapplied edits that must never be ignored
+  agentIntentScopeOrder: [], // preserves imported scope order while the visual shortcut is untouched
   agentsUnsupported: false, // server build has no /assistants routes
   fabric: null,        // durable agent registry, selected team/member, evidence, and coordination trace
   fabricUnsupported: false, // server build has no Agent Fabric registry routes
@@ -3884,6 +3939,7 @@ function connectionResetWorkspace() {
   store.agentCopySource = null;
   store.agentManifestSource = null;
   store.agentManifestDirty = false;
+  store.agentIntentScopeOrder = [];
   store.agents = null;
   store.agentsUnsupported = false;
   store.agentFocusRecord = null;
@@ -3939,7 +3995,10 @@ function connectionResetWorkspace() {
   $("btn-rec-replay").disabled = false;
   $("btn-rec-compare").disabled = false;
   $("sel-agent-graph").innerHTML = "";
-  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
+  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-model", "inp-agent-tools", "inp-agent-manifest"]) $(id).value = "";
+  $("sel-agent-memory-mode").value = "none";
+  $("sel-agent-approval").value = "runtime_policy";
+  for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) input.checked = false;
 }
 
 async function connect(options = {}) {
@@ -6992,9 +7051,11 @@ function agentValidateDraft(fields, graphNames) {
       errors.recursionLimit = "Step limit must be a non-negative whole number.";
     }
   }
-  const order = ["name", "graph", "assistantId", "recursionLimit"];
+  const intent = agentIntentBuild(source);
+  for (const [key, message] of Object.entries(intent.errors)) errors[key] = message;
+  const order = ["name", "graph", "assistantId", "recursionLimit", "model", "tools", "memoryMode", "approval"];
   const first = order.find((key) => errors[key]) || "";
-  return { valid: !first, errors, first };
+  return { valid: !first, errors, first, intent };
 }
 
 function agentManifestScan(value) {
@@ -7192,6 +7253,7 @@ function agentConfigurationEvidence(source, graphNames) {
     !["description", "tags"].includes(key) || !agentMetadataFieldEditable(metadata, key)).length
     : Object.prototype.hasOwnProperty.call(record, "metadata") && record.metadata != null ? 1 : 0;
   const tags = agentTags(record);
+  const intent = agentIntentInspectConfig(record.config);
   let sensitivePaths = [];
   let portableError = "";
   try { sensitivePaths = agentManifestScan(agentPortableManifest(record)).sensitivePaths; }
@@ -7210,6 +7272,7 @@ function agentConfigurationEvidence(source, graphNames) {
     lockedRuntimeLimit: Boolean(limit !== null && !Number.isSafeInteger(limit)),
     unsupportedDescription: Boolean(metadata && !agentMetadataFieldEditable(metadata, "description")),
     unsupportedTags: Boolean(metadata && !agentMetadataFieldEditable(metadata, "tags")),
+    intent,
     sensitivePaths,
     portableError,
   };
@@ -7228,6 +7291,12 @@ function agentConfigurationEvidenceHtml(source, graphNames, titleId) {
   const descriptionValue = evidence.name || "Name this agent";
   const descriptionDetail = evidence.description
     ? evidence.description : evidence.tags.length ? `Cataloged as ${evidence.tags.join(", ")}` : "Responsibility and tags help people find it; they are not runtime instructions.";
+  const intentValue = evidence.intent.valid && evidence.intent.present
+    ? `${evidence.intent.intent.model || "Model unbound"} · ${evidence.intent.intent.tools.length} tool${evidence.intent.intent.tools.length === 1 ? "" : "s"}`
+    : evidence.intent.present ? "Intent preserved, builder locked" : "No runtime intent declared";
+  const intentDetail = evidence.intent.valid && evidence.intent.present
+    ? `${evidence.intent.intent.memory.access.replaceAll("_", " ")} memory · ${evidence.intent.intent.approval.replaceAll("_", " ")} approval. Portable requirement only; the graph remains authoritative.`
+    : evidence.intent.error || "Add model, tools, memory, or an approval boundary to carry a versioned requirement with this assistant.";
   const preservedLabel = `${evidence.preservedFields} advanced field${evidence.preservedFields === 1 ? "" : "s"}`;
   const shapeWarning = evidence.portableError
     ? evidence.portableError
@@ -7239,6 +7308,8 @@ function agentConfigurationEvidenceHtml(source, graphNames, titleId) {
         ? "The server applies this stored step limit, but it is outside the browser-safe editing range. The guided shortcut stays locked."
       : evidence.unsupportedDescription || evidence.unsupportedTags
         ? "A descriptive shortcut has an unsupported stored shape. It is preserved exactly and stays locked."
+      : !evidence.intent.valid
+        ? `${evidence.intent.error} The exact value is preserved and its visual controls stay locked.`
       : "";
   const secretWarning = evidence.sensitivePaths.length
     ? `${evidence.sensitivePaths.length} secret-looking path${evidence.sensitivePaths.length === 1 ? "" : "s"} hidden in this preview.` : "";
@@ -7253,6 +7324,9 @@ function agentConfigurationEvidenceHtml(source, graphNames, titleId) {
       `<div class="agent-contract-step describes"><span class="agent-contract-node" aria-hidden="true"></span>` +
         `<span class="agent-contract-label">Describes</span><strong class="agent-contract-value">${escapeHtml(descriptionValue)}</strong>` +
         `<span class="agent-contract-detail">${escapeHtml(descriptionDetail)}</span></div>` +
+      `<div class="agent-contract-step describes"><span class="agent-contract-node" aria-hidden="true"></span>` +
+        `<span class="agent-contract-label">Requires</span><strong class="agent-contract-value">${escapeHtml(intentValue)}</strong>` +
+        `<span class="agent-contract-detail">${escapeHtml(intentDetail)}</span></div>` +
       `<div class="agent-contract-step preserves"><span class="agent-contract-node" aria-hidden="true"></span>` +
         `<span class="agent-contract-label">Preserves</span><strong class="agent-contract-value">${escapeHtml(preservedLabel)}</strong>` +
         `<span class="agent-contract-detail">Stored as reviewed for clients or graph-specific use; the server makes no generic runtime claim.</span></div>` +
@@ -7313,6 +7387,136 @@ function agentMetadataFieldEditable(metadata, key) {
   return true;
 }
 
+function agentIntentEmptyDraft() {
+  return { model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy", intentLocked: false, intentError: "" };
+}
+
+function agentIntentControlFree(value) {
+  return typeof value === "string" && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
+}
+
+function agentIntentModelError(value) {
+  if (typeof value !== "string") return "Model binding must be a string.";
+  if (!value) return "";
+  if (!agentIntentControlFree(value) || value !== value.trim() || agentUtf8Length(value) > 256) {
+    return "Model binding must be 256 UTF-8 bytes or fewer, contain no hidden controls, and have no surrounding whitespace.";
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/@:-]*$/.test(value) || value.includes("://") || /[^/]+:[^/]+@/.test(value) ||
+      /^sk-[A-Za-z0-9_-]{16,}$/i.test(value)) {
+    return "Use a model identifier or registry reference, not a URL, credential, or secret token.";
+  }
+  return "";
+}
+
+function agentIntentInspectConfig(config) {
+  if (!agentPlainObject(config) || !Object.prototype.hasOwnProperty.call(config, "studio_intent")) {
+    return { present: false, valid: agentPlainObject(config) || config == null, intent: null,
+      error: config == null || agentPlainObject(config) ? "" : "The non-object config is preserved exactly." };
+  }
+  const value = config.studio_intent;
+  const fail = (message) => ({ present: true, valid: false, intent: null, error: message });
+  if (!agentPlainObject(value)) return fail("Stored studio_intent is not an object.");
+  const allowed = new Set(["format", "model", "tools", "memory", "approval"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return fail("Stored studio_intent has fields this builder does not understand.");
+  if (value.format !== AGENT_INTENT_FORMAT) return fail(`Stored studio_intent is not ${AGENT_INTENT_FORMAT}.`);
+  const modelError = agentIntentModelError(value.model);
+  if (modelError) return fail(modelError);
+  if (!Array.isArray(value.tools) || value.tools.length > AGENT_INTENT_TOOL_LIMIT) return fail("Stored tool contracts are outside the builder contract.");
+  const names = new Set();
+  for (const tool of value.tools) {
+    if (!agentPlainObject(tool) || Object.keys(tool).some((key) => !["name", "effect"].includes(key)) ||
+        typeof tool.name !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(tool.name) ||
+        typeof tool.effect !== "string" || !AGENT_INTENT_EFFECTS.has(tool.effect) || names.has(tool.name)) {
+      return fail("Stored tool contracts are outside the builder contract.");
+    }
+    names.add(tool.name);
+  }
+  if (!agentPlainObject(value.memory) || Object.keys(value.memory).some((key) => !["access", "scopes"].includes(key)) ||
+      !AGENT_INTENT_MEMORY_MODES.has(value.memory.access) || !Array.isArray(value.memory.scopes) ||
+      value.memory.scopes.some((scope) => typeof scope !== "string" || !AGENT_INTENT_SCOPES.has(scope)) ||
+      new Set(value.memory.scopes).size !== value.memory.scopes.length ||
+      (value.memory.access === "none" && value.memory.scopes.length) ||
+      (value.memory.access !== "none" && !value.memory.scopes.length)) {
+    return fail("Stored memory intent is outside the builder contract.");
+  }
+  if (!AGENT_INTENT_APPROVALS.has(value.approval)) return fail("Stored approval intent is outside the builder contract.");
+  if (!value.model && !value.tools.length && value.memory.access === "none" && !value.memory.scopes.length && value.approval === "runtime_policy") {
+    return fail("Stored studio_intent does not declare a requirement.");
+  }
+  return { present: true, valid: true, intent: value, error: "" };
+}
+
+function agentIntentToolsText(tools) {
+  return Array.isArray(tools) ? tools.map((tool) => `${tool.name} | ${tool.effect}`).join("\n") : "";
+}
+
+function agentIntentSelectedScopeOrder(preferred, selected) {
+  const selectedScopes = Array.isArray(selected) ? selected.map(String) : [];
+  const selectedSet = new Set(selectedScopes);
+  const scopes = (Array.isArray(preferred) ? preferred : []).map(String).filter((scope, index, values) =>
+    selectedSet.has(scope) && values.indexOf(scope) === index);
+  for (const scope of selectedScopes) if (!scopes.includes(scope)) scopes.push(scope);
+  return scopes;
+}
+
+function agentIntentDraft(config) {
+  const inspected = agentIntentInspectConfig(config);
+  if (!inspected.present) return { ...agentIntentEmptyDraft(), intentLocked: !inspected.valid, intentError: inspected.error };
+  if (!inspected.valid) return { ...agentIntentEmptyDraft(), intentLocked: true, intentError: inspected.error };
+  return {
+    model: inspected.intent.model,
+    tools: agentIntentToolsText(inspected.intent.tools),
+    memoryMode: inspected.intent.memory.access,
+    scopes: inspected.intent.memory.scopes.slice(),
+    approval: inspected.intent.approval,
+    intentLocked: false,
+    intentError: "",
+  };
+}
+
+function agentIntentBuild(fields) {
+  const source = fields && typeof fields === "object" ? fields : {};
+  if (source.intentLocked) return { valid: true, empty: true, intent: null, errors: Object.create(null), first: "" };
+  const model = String(source.model || "");
+  const toolsText = String(source.tools || "");
+  const memoryMode = String(source.memoryMode || "none");
+  const scopes = Array.isArray(source.scopes) ? source.scopes.map(String) : [];
+  const approval = String(source.approval || "runtime_policy");
+  const errors = Object.create(null);
+  const modelError = agentIntentModelError(model);
+  if (modelError) errors.model = modelError;
+  const lines = toolsText ? toolsText.split("\n") : [];
+  const tools = [];
+  const names = new Set();
+  if (agentUtf8Length(toolsText) > 4096) errors.tools = "Tool contracts must be 4 KiB or fewer.";
+  else if (lines.length > AGENT_INTENT_TOOL_LIMIT) errors.tools = `Declare no more than ${AGENT_INTENT_TOOL_LIMIT} tool contracts.`;
+  if (!errors.tools) {
+    for (const line of lines) {
+      const match = line.match(/^([A-Za-z0-9._:-]{1,128}) \| (pure|read_only|idempotent|compensatable|non_idempotent)$/);
+      if (!match) { errors.tools = "Use one canonical `name | effect` contract per line."; break; }
+      if (names.has(match[1])) { errors.tools = `Tool \`${match[1]}\` is declared more than once.`; break; }
+      names.add(match[1]);
+      tools.push({ name: match[1], effect: match[2] });
+    }
+  }
+  if (!AGENT_INTENT_MEMORY_MODES.has(memoryMode)) errors.memoryMode = "Choose a supported memory access mode.";
+  if (new Set(scopes).size !== scopes.length || scopes.some((scope) => !AGENT_INTENT_SCOPES.has(scope))) errors.memoryMode = "Choose only supported memory scopes.";
+  if (memoryMode === "none" && scopes.length) errors.memoryMode = "Choose read access before declaring memory scopes.";
+  if (memoryMode !== "none" && !scopes.length) errors.memoryMode = "Choose at least one allowed memory scope.";
+  if (!AGENT_INTENT_APPROVALS.has(approval)) errors.approval = "Choose a supported approval boundary.";
+  const order = ["model", "tools", "memoryMode", "approval"];
+  const first = order.find((key) => errors[key]) || "";
+  const empty = !model && !tools.length && memoryMode === "none" && !scopes.length && approval === "runtime_policy";
+  const intent = first || empty ? null : {
+    format: AGENT_INTENT_FORMAT,
+    model,
+    tools,
+    memory: { access: memoryMode, scopes: scopes.slice() },
+    approval,
+  };
+  return { valid: !first, empty, intent, errors, first };
+}
+
 function agentCopyDraft(agent) {
   const source = agent && typeof agent === "object" ? agent : {};
   const config = agentCopyableMap(source.config);
@@ -7325,6 +7529,7 @@ function agentCopyDraft(agent) {
     recursionLimit: limit === null || !Number.isSafeInteger(limit) ? "" : String(limit),
     description: agentMetadataFieldEditable(metadata, "description") ? String(metadata.description || "") : "",
     tags: agentMetadataFieldEditable(metadata, "tags") ? agentTags(source).join(", ") : "",
+    ...agentIntentDraft(source.config),
   };
 }
 
@@ -7340,6 +7545,7 @@ function agentManifestDraft(manifest) {
     recursionLimit: limit === null || !Number.isSafeInteger(limit) ? "" : String(limit),
     description: agentMetadataFieldEditable(metadata, "description") ? String(metadata.description || "") : "",
     tags: agentMetadataFieldEditable(metadata, "tags") ? agentTags(source).join(", ") : "",
+    ...agentIntentDraft(source.config),
   };
 }
 
@@ -7460,6 +7666,17 @@ function agentBuildCreatePayload(fields, source) {
     }
   } else if ((config == null) && Number.isSafeInteger(limit) && limit >= 0 && rawLimit) {
     config = { recursion_limit: limit };
+  }
+  const sourceIntent = agentIntentInspectConfig(hasSourceConfig ? source.config : undefined);
+  if (sourceIntent.valid && !fields.intentLocked) {
+    const builtIntent = agentIntentBuild(fields);
+    if (!builtIntent.valid) throw new Error(builtIntent.errors[builtIntent.first]);
+    if (!builtIntent.empty) {
+      if (config == null) config = {};
+      if (agentPlainObject(config)) config.studio_intent = builtIntent.intent;
+    } else if (agentPlainObject(config)) {
+      delete config.studio_intent;
+    }
   }
   if (agentPlainObject(metadata)) {
     const sourceMetadata = hasSourceMetadata && agentPlainObject(source.metadata) ? source.metadata : null;
@@ -7664,6 +7881,8 @@ function agentGraphNames() {
 }
 
 function agentFormFields() {
+  const selectedScopes = Array.from($("agent-create-form").querySelectorAll("[data-agent-scope]:checked")).map((input) => input.getAttribute("data-agent-scope"));
+  const scopes = agentIntentSelectedScopeOrder(store.agentIntentScopeOrder, selectedScopes);
   return {
     name: $("inp-agent-name").value,
     graph: $("sel-agent-graph").value,
@@ -7671,6 +7890,12 @@ function agentFormFields() {
     recursionLimit: $("inp-agent-limit").value,
     description: $("inp-agent-description").value,
     tags: $("inp-agent-tags").value,
+    model: $("inp-agent-model").value,
+    tools: $("inp-agent-tools").value,
+    memoryMode: $("sel-agent-memory-mode").value,
+    scopes,
+    approval: $("sel-agent-approval").value,
+    intentLocked: $("inp-agent-model").disabled,
   };
 }
 
@@ -7682,12 +7907,29 @@ function agentPopulateDraft(draft) {
   $("inp-agent-limit").value = value.recursionLimit || "";
   $("inp-agent-description").value = value.description || "";
   $("inp-agent-tags").value = value.tags || "";
+  $("inp-agent-model").value = value.model || "";
+  $("inp-agent-tools").value = value.tools || "";
+  $("sel-agent-memory-mode").value = value.memoryMode || "none";
+  $("sel-agent-approval").value = value.approval || "runtime_policy";
+  const scopes = new Set(Array.isArray(value.scopes) ? value.scopes : []);
+  store.agentIntentScopeOrder = Array.isArray(value.scopes) ? value.scopes.slice() : [];
+  for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) {
+    input.checked = scopes.has(input.getAttribute("data-agent-scope"));
+  }
 }
 
 function agentSetShortcutLocks(source) {
-  for (const id of ["inp-agent-limit", "inp-agent-description", "inp-agent-tags"]) {
+  const intentIds = ["inp-agent-model", "inp-agent-tools", "sel-agent-memory-mode", "sel-agent-approval"];
+  const lockNote = $("agent-intent-lock");
+  lockNote.textContent = "";
+  lockNote.hidden = true;
+  for (const id of ["inp-agent-limit", "inp-agent-description", "inp-agent-tags", ...intentIds]) {
     $(id).disabled = false;
     $(id).removeAttribute("title");
+  }
+  for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) {
+    input.disabled = false;
+    input.removeAttribute("title");
   }
   const hasStoredLimit = source && agentPlainObject(source.config) &&
     Object.prototype.hasOwnProperty.call(source.config, "recursion_limit");
@@ -7717,13 +7959,35 @@ function agentSetShortcutLocks(source) {
       $("inp-agent-tags").title = "This manifest has non-text tags that will be preserved exactly.";
     }
   }
+  const inspectedIntent = agentIntentInspectConfig(source && source.config);
+  if (source && !inspectedIntent.valid) {
+    const message = `${inspectedIntent.error} Use the exact JSON editor to change it.`;
+    lockNote.textContent = message;
+    lockNote.hidden = false;
+    for (const id of intentIds) { $(id).disabled = true; $(id).title = message; }
+    for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) {
+      input.disabled = true;
+      input.title = message;
+    }
+  }
 }
 
 function agentApplyDraftValidation(validation, announce) {
-  const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit" };
+  const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit",
+    model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval" };
   for (const [key, id] of Object.entries(fields)) {
-    if (validation && validation.errors[key]) $(id).setAttribute("aria-invalid", "true");
-    else $(id).removeAttribute("aria-invalid");
+    const field = $(id);
+    const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+    if (validation && validation.errors[key]) {
+      field.setAttribute("aria-invalid", "true");
+      if (key === validation.first) describedBy.add("agent-form-error");
+      else describedBy.delete("agent-form-error");
+    } else {
+      field.removeAttribute("aria-invalid");
+      describedBy.delete("agent-form-error");
+    }
+    if (describedBy.size) field.setAttribute("aria-describedby", [...describedBy].join(" "));
+    else field.removeAttribute("aria-describedby");
   }
   const message = validation && validation.first ? validation.errors[validation.first] : "";
   $("agent-form-error").textContent = announce ? message : "";
@@ -7737,6 +8001,39 @@ function agentApplyDraftValidation(validation, announce) {
     }
   }
   return !message;
+}
+
+function agentRevalidateEditedField(target) {
+  const fieldKeys = { "inp-agent-name": "name", "sel-agent-graph": "graph", "inp-agent-id": "assistantId",
+    "inp-agent-limit": "recursionLimit", "inp-agent-model": "model", "inp-agent-tools": "tools",
+    "sel-agent-memory-mode": "memoryMode", "sel-agent-approval": "approval" };
+  const key = target && target.hasAttribute && target.hasAttribute("data-agent-scope") ? "memoryMode" : fieldKeys[target && target.id];
+  if (!key) return false;
+  const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit",
+    model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval" };
+  const field = $(fields[key]);
+  if (!field || field.getAttribute("aria-invalid") !== "true") return false;
+  const validation = agentValidateDraft(agentFormFields(), agentGraphNames());
+  if (validation.errors[key]) {
+    const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+    if (describedBy.has("agent-form-error")) $("agent-form-error").textContent = validation.errors[key];
+    return false;
+  }
+  field.removeAttribute("aria-invalid");
+  const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+  describedBy.delete("agent-form-error");
+  if (describedBy.size) field.setAttribute("aria-describedby", [...describedBy].join(" "));
+  else field.removeAttribute("aria-describedby");
+  if (validation.first && fields[validation.first]) {
+    const nextField = $(fields[validation.first]);
+    const nextDescribedBy = new Set(String(nextField.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+    nextDescribedBy.add("agent-form-error");
+    nextField.setAttribute("aria-describedby", [...nextDescribedBy].join(" "));
+    $("agent-form-error").textContent = validation.errors[validation.first];
+  } else {
+    $("agent-form-error").textContent = "";
+  }
+  return true;
 }
 
 function agentManifestActionError(dirty) {
@@ -7898,7 +8195,11 @@ function agentExportDraft() {
 }
 
 function agentResetCreateForm() {
-  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-manifest"]) $(id).value = "";
+  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-model", "inp-agent-tools", "inp-agent-manifest"]) $(id).value = "";
+  $("sel-agent-memory-mode").value = "none";
+  $("sel-agent-approval").value = "runtime_policy";
+  for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) input.checked = false;
+  store.agentIntentScopeOrder = [];
   store.agentManifestSource = null;
   store.agentManifestDirty = false;
   agentSetShortcutLocks(null);
@@ -15008,7 +15309,6 @@ function init() {
   $("btn-agent-create-cancel").onclick = () => agentCloseCreate();
   $("agent-create-form").addEventListener("input", (event) => {
     if (event.target === $("inp-agent-import")) return;
-    $("agent-form-error").textContent = "";
     if (event.target === $("inp-agent-manifest")) {
       store.agentManifestDirty = true;
       $("inp-agent-manifest").setAttribute("aria-invalid", "true");
@@ -15018,6 +15318,7 @@ function init() {
     agentSetManifestStatus(store.agentManifestDirty
       ? "JSON edits are pending · apply or refresh before continuing"
       : "Guided fields changed · refresh JSON before editing it");
+    agentRevalidateEditedField(event.target);
     agentRefreshContract();
   });
   $("agent-create-form").addEventListener("change", (event) => {
@@ -15025,6 +15326,7 @@ function init() {
     agentSetManifestStatus(store.agentManifestDirty
       ? "JSON edits are pending · apply or refresh before continuing"
       : "Guided fields changed · refresh JSON before editing it");
+    agentRevalidateEditedField(event.target);
     agentRefreshContract();
   });
   $("btn-agent-import").onclick = () => $("inp-agent-import").click();
