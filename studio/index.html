@@ -45,6 +45,22 @@
   }
   header .brand { font-weight: 700; letter-spacing: .4px; }
   header .brand span { color: var(--accent); }
+  .view-link-control { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .view-link-control button {
+    display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+    border-color: #62552f; background: #262217; color: #e2d5a7;
+  }
+  .view-link-control button::before {
+    content: ""; width: 8px; height: 8px; flex: 0 0 8px;
+    border: 1px solid var(--accent); transform: rotate(45deg);
+    box-shadow: 5px -5px 0 -2px var(--bg-panel), 5px -5px 0 -1px var(--accent-dim);
+  }
+  .view-link-control small { max-width: 180px; color: var(--text-faint); font: 9.5px var(--mono); line-height: 1.25; }
+  .view-link-message {
+    margin: 12px 16px 0; padding: 10px 12px; border: 1px solid #62552f;
+    background: #262217; color: #e2d5a7; font: 11px var(--mono); line-height: 1.45;
+  }
+  .view-link-message[data-tone="error"] { border-color: #74413d; background: #2a1b19; color: #edb7b2; }
   #conn-status { font-size: 12.5px; color: var(--text-dim); }
   #conn-status b { color: var(--text); font-weight: 600; }
   .connection-chip {
@@ -1702,7 +1718,14 @@
   }
   @media (max-width: 680px) {
     header { padding: 8px 10px; }
-    .connection-chip { min-width: 0; width: min(72vw, 430px); }
+    header .brand { font-size: 0; }
+    header .brand::first-letter { font-size: 14px; }
+    .view-link-control { margin-left: 0; }
+    .view-link-control button { padding: 6px 8px; font-size: 0; }
+    .view-link-control button::before { margin-right: 0; }
+    .view-link-control button::after { content: "Link"; font-size: 9px; text-transform: uppercase; letter-spacing: .6px; }
+    .view-link-control small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .connection-chip { min-width: 0; width: min(74vw, 430px); }
     .connection-chip-action { display: none; }
     .connection-dialog { width: calc(100vw - 12px); max-height: calc(100vh - 12px); }
     .connection-shell { max-height: calc(100vh - 12px); }
@@ -1925,6 +1948,11 @@
 <div id="app">
   <header>
     <div class="brand">Rusty <span>Studio</span></div>
+    <div class="view-link-control">
+      <button class="small" id="btn-copy-view-link" type="button" aria-describedby="view-link-status">Copy evidence link</button>
+      <small id="view-link-status">Workspace only · no server address, key, prompt, or payload</small>
+      <span class="sr-only" id="view-link-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+    </div>
     <button class="connection-chip" id="btn-connection-open" type="button" aria-haspopup="dialog" aria-controls="connection-dialog">
       <span class="connection-chip-dot" aria-hidden="true"></span>
       <span class="connection-chip-copy"><b id="conn-profile">Choose a server</b><small id="conn-status">Not connected · local-first</small></span>
@@ -2023,6 +2051,7 @@
     </aside>
 
     <main id="main">
+      <div id="view-link-message" class="view-link-message" role="note" hidden></div>
       <div id="home-view" aria-labelledby="home-title"><div class="empty">Loading the Studio mission board.</div></div>
       <div class="empty" id="main-empty" style="display:none">Choose a Studio workspace or a local thread.</div>
 
@@ -2659,6 +2688,12 @@ const store = {
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, evidenceState }
   view: "home",        // active Studio workspace
+  navigationPending: null, // parsed non-secret workspace/evidence target waiting for local or server truth
+  navigationRequest: 0, // generation guard for an in-flight shared run handoff
+  navigationCopyRequest: 0, // generation guard for clipboard completion after workspace changes
+  navigationError: "", // bounded visible startup/deep-link diagnosis
+  navigationManaged: false, // address bar follows Studio only after opening or copying a Studio route
+  navigationFocusTarget: "", // deferred destination while the modal Connection Hub owns focus
   tasks: null,         // { list, selected, error } for the durable-tasks view
   taskRequest: 0,      // generation guard: task catalogs never cross connection boundaries
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
@@ -2718,6 +2753,324 @@ const store = {
   automationMutationRequest: 0,
   automationsUnsupported: false,
 };
+
+/* ---------------- shareable evidence navigation ----------------
+ * Links carry only a workspace and bounded durable identifiers. They never
+ * carry a server address, access key, prompts, state, payloads, or secrets.
+ * The connected deployment remains the authority: a run link first proves
+ * one exact thread from the server journal before Studio opens Recorder.
+ * ------------------------------------------------------------------------- */
+
+const NAVIGATION_VIEWS = new Set(["home", "agents", "thread", "fabric", "memory", "learn", "automations", "tasks"]);
+const NAVIGATION_KEYS = ["studio", "agent", "thread", "run", "automation"];
+
+function navigationSafeId(value) {
+  const id = typeof value === "string" ? value : "";
+  if (!id || agentUtf8Length(id) > 256 || /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/.test(id)) return "";
+  return id;
+}
+
+function navigationParseSearch(search) {
+  const raw = typeof search === "string" ? search : "";
+  const managed = /(?:^|[?&])studio(?:=|&|$)/.test(raw);
+  if (agentUtf8Length(raw) > 4096) return { route: null, error: "The shared Studio link is larger than the 4 KiB navigation boundary.", managed };
+  let params;
+  try { params = new URLSearchParams(raw); }
+  catch { return { route: null, error: "The shared Studio link could not be parsed.", managed }; }
+  for (const key of NAVIGATION_KEYS) {
+    if (params.getAll(key).length > 1) return { route: null, error: `The shared Studio link repeats \`${key}\`.`, managed };
+  }
+  const view = params.get("studio");
+  if (view == null) return { route: null, error: "", managed: false };
+  const unknown = [...params.keys()].find((key) => !NAVIGATION_KEYS.includes(key));
+  if (unknown) return { route: null, error: `The shared Studio link contains an unsupported \`${unknown}\` field.`, managed: true };
+  if (!NAVIGATION_VIEWS.has(view)) return { route: null, error: "The shared Studio link names an unsupported workspace.", managed: true };
+  const values = Object.fromEntries(["agent", "thread", "run", "automation"].map((key) => [key, params.get(key)]));
+  for (const [key, value] of Object.entries(values)) {
+    if (value != null && !navigationSafeId(value)) return { route: null, error: `The shared Studio link has an unsafe or oversized \`${key}\` identity.`, managed: true };
+  }
+  const allowed = view === "agents" ? new Set(["agent"])
+    : view === "thread" ? new Set(["thread", "run"])
+      : view === "automations" ? new Set(["automation"])
+        : new Set();
+  const unexpected = Object.entries(values).find(([key, value]) => value != null && !allowed.has(key));
+  if (unexpected) return { route: null, error: `The shared Studio link cannot target \`${unexpected[0]}\` inside the ${view} workspace.`, managed: true };
+  if (view === "thread" && !values.thread && !values.run) {
+    return { route: null, error: "A shared run workspace needs a thread or run identity.", managed: true };
+  }
+  return { route: { view, ...Object.fromEntries(Object.entries(values).filter(([, value]) => value != null)) }, error: "", managed: true };
+}
+
+function navigationBuildUrl(route, href) {
+  const candidate = new URLSearchParams();
+  if (route && route.view) candidate.set("studio", route.view);
+  for (const key of ["agent", "thread", "run", "automation"]) {
+    if (route && route[key]) candidate.set(key, route[key]);
+  }
+  const parsed = navigationParseSearch(`?${candidate.toString()}`);
+  if (!parsed.route) throw new Error(parsed.error || "The Studio view cannot be shared safely.");
+  const url = new URL(href);
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("studio", parsed.route.view);
+  for (const key of ["agent", "thread", "run", "automation"]) {
+    if (parsed.route[key]) url.searchParams.set(key, parsed.route[key]);
+  }
+  return url.href;
+}
+
+function navigationRouteForStore(state) {
+  const view = NAVIGATION_VIEWS.has(state && state.view) ? state.view : "home";
+  const route = { view };
+  if (view === "agents" && navigationSafeId(state.agents && state.agents.selected)) route.agent = state.agents.selected;
+  if (view === "automations" && navigationSafeId(state.automations && state.automations.selected)) route.automation = state.automations.selected;
+  if (view === "thread" && navigationSafeId(state.selected)) {
+    route.thread = state.selected;
+    const recorder = state.recorder;
+    if (recorder && recorder.exactEnvelope && navigationSafeId(recorder.runId) &&
+        automationRunJournalThread({ run_id: recorder.runId, complete: recorder.complete, events: recorder.events }, recorder.runId) === state.selected) {
+      route.run = recorder.runId;
+    }
+  }
+  return route;
+}
+
+function navigationRecorderThread(recorder, runId) {
+  return recorder && !recorder.error && recorder.exactEnvelope === true && recorder.runId === runId
+    ? automationRunJournalThread({ run_id: recorder.runId, complete: recorder.complete, events: recorder.events }, runId)
+    : null;
+}
+
+function navigationStatus(message, announce = false) {
+  const text = String(message || "");
+  const visible = $("view-link-status");
+  if (visible) visible.textContent = text || "Workspace only · no server address, key, prompt, or payload";
+  if (announce) $("view-link-announcer").textContent = text;
+}
+
+function navigationRouteMessage(message = "", tone = "wait") {
+  const panel = $("view-link-message");
+  if (!panel) return;
+  panel.textContent = String(message || "");
+  panel.dataset.tone = tone;
+  panel.hidden = !message;
+}
+
+function navigationCancelPending(nextView, nextId = "") {
+  const pending = store.navigationPending;
+  if (!pending) return false;
+  const expectedId = pending.agent || pending.thread || pending.automation || "";
+  if (pending.view === nextView && (!expectedId || nextId === expectedId)) return false;
+  store.navigationRequest += 1;
+  store.navigationPending = null;
+  store.navigationError = "";
+  navigationStatus("Workspace only · no server address, key, prompt, or payload");
+  navigationRouteMessage();
+  return true;
+}
+
+function navigationPrepareLocation() {
+  const parsed = navigationParseSearch(location.search);
+  store.navigationPending = parsed.route;
+  store.navigationError = parsed.error;
+  store.navigationManaged = parsed.managed === true;
+  if (parsed.managed) {
+    try {
+      const sanitized = parsed.route ? navigationBuildUrl(parsed.route, location.href) : (() => {
+        const url = new URL(location.href); url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return url.href;
+      })();
+      if (sanitized !== location.href) history.replaceState({ studioRoute: parsed.route || null }, "", sanitized);
+    } catch { /* route diagnostics remain visible even when address replacement is unavailable */ }
+  }
+  if (parsed.route) store.view = parsed.route.view;
+  if (parsed.error) {
+    navigationStatus(parsed.error, true);
+    navigationRouteMessage(parsed.error, "error");
+  } else if (parsed.route) {
+    navigationRouteMessage("Opening shared Studio evidence…");
+  } else navigationRouteMessage();
+  return parsed;
+}
+
+async function navigationCopyCurrent() {
+  try {
+    if (store.navigationPending) throw new Error("Wait for the shared evidence to open before copying its link.");
+    const request = ++store.navigationCopyRequest;
+    const operation = connectionOperation();
+    const route = navigationRouteForStore(store);
+    const url = navigationBuildUrl(route, location.href);
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") throw new Error("Clipboard access is unavailable in this browser context.");
+    await navigator.clipboard.writeText(url);
+    const current = navigationRouteForStore(store);
+    const connectionChanged = operation ? !connectionOperationCurrent(operation) : Boolean(store.conn);
+    if (request !== store.navigationCopyRequest || connectionChanged || store.navigationPending || JSON.stringify(current) !== JSON.stringify(route)) {
+      throw new Error("The workspace changed while the link was being copied. Copy it again for the current evidence.");
+    }
+    try { history.replaceState({ studioRoute: route }, "", url); store.navigationManaged = true; } catch { /* the copied URL remains valid */ }
+    const target = route.run ? `run ${shortId(route.run)}` : route.agent ? `agent ${shortId(route.agent)}`
+      : route.automation ? `automation ${shortId(route.automation)}` : `${route.view} workspace`;
+    navigationStatus(`Copied ${target} link · identifiers only`, true);
+    toast("Evidence link copied without connection details or content.", "ok");
+  } catch (error) {
+    navigationStatus(error.message, true);
+    toast(error.message, "err");
+  }
+}
+
+function navigationFinish(message, focusTarget) {
+  store.navigationPending = null;
+  store.navigationError = "";
+  navigationReplaceManagedAddress();
+  navigationStatus(message, true);
+  navigationRouteMessage();
+  if (focusTarget && $("connection-dialog")?.open) store.navigationFocusTarget = focusTarget;
+  else if (focusTarget) $(focusTarget)?.focus({ preventScroll: true });
+  return true;
+}
+
+function navigationReconcileRecorderRoute() {
+  const route = store.navigationPending;
+  if (!route || route.view !== "thread" || !route.run) return false;
+  const threadId = navigationRecorderThread(store.recorder, route.run);
+  if (!threadId || (route.thread && route.thread !== threadId)) return false;
+  if (!store.threads.some((thread) => thread.thread_id === threadId)) {
+    store.threads.unshift({ thread_id: threadId, graph: "?", created_at: null, metadata: { source: "shared_run_evidence" } });
+  }
+  store.selected = threadId;
+  store.view = "thread";
+  saveThreads(); renderThreads(); renderMain();
+  $("flight-recorder-card")?.scrollIntoView({ block: "start" });
+  return navigationFinish(`Opened exact run ${shortId(route.run)} · ${shortId(threadId)}`, "flight-recorder-title");
+}
+
+function navigationReplaceManagedAddress() {
+  if (!store.navigationManaged || store.navigationPending) return false;
+  try {
+    const route = navigationRouteForStore(store);
+    const url = navigationBuildUrl(route, location.href);
+    if (url !== location.href) history.replaceState({ studioRoute: route }, "", url);
+    return true;
+  } catch { return false; }
+}
+
+async function navigationOpenSharedRun(route) {
+  if (!store.conn) {
+    const message = "Connect to the intended Rusty server to open this run evidence.";
+    navigationStatus(message, true);
+    navigationRouteMessage(message);
+    return false;
+  }
+  const request = ++store.navigationRequest;
+  const operation = connectionOperation();
+  const checking = `Checking run ${shortId(route.run)} against the connected server…`;
+  navigationStatus(checking, true);
+  navigationRouteMessage(checking);
+  try {
+    const envelope = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(route.run)}/events`, undefined, AUTOMATION_RESPONSE_LIMIT);
+    if (request !== store.navigationRequest || !connectionOperationCurrent(operation) || store.navigationPending !== route) return false;
+    const threadId = automationRunJournalThread(envelope, route.run);
+    if (!threadId || (route.thread && route.thread !== threadId)) {
+      throw new Error("The connected server did not return one exact thread for this shared run.");
+    }
+    if (!store.threads.some((thread) => thread.thread_id === threadId)) {
+      store.threads.unshift({ thread_id: threadId, graph: "?", created_at: null, metadata: { source: "shared_run_evidence" } });
+    }
+    store.selected = threadId;
+    store.view = "thread";
+    saveThreads(); renderThreads(); renderMain();
+    $("inp-rec-run").value = route.run;
+    await recLoad(route.run, true, false);
+    if (request !== store.navigationRequest || !connectionOperationCurrent(operation) ||
+        store.view !== "thread" || store.selected !== threadId || store.navigationPending !== route) return false;
+    const recorderThread = navigationRecorderThread(store.recorder, route.run);
+    if (recorderThread !== threadId) {
+      throw new Error("Recorder could not corroborate the same exact run and thread after the shared handoff.");
+    }
+    $("flight-recorder-card")?.scrollIntoView({ block: "start" });
+    return navigationFinish(`Opened exact run ${shortId(route.run)} · ${shortId(threadId)}`, "flight-recorder-title");
+  } catch (error) {
+    if (request !== store.navigationRequest || !connectionOperationCurrent(operation) || store.navigationPending !== route) return false;
+    store.navigationError = error.message;
+    navigationStatus(error.message, true);
+    navigationRouteMessage(error.message, "error");
+    return false;
+  }
+}
+
+async function navigationApplyPending(options = {}) {
+  const route = store.navigationPending;
+  if (!route) return false;
+  if (route.view === "thread" && route.run) return navigationOpenSharedRun(route);
+  if (route.view === "thread") {
+    const thread = store.threads.find((item) => item.thread_id === route.thread);
+    if (!thread) {
+      const message = store.conn
+        ? "This thread is not in this browser's connection-scoped recall. Attach it by ID to continue."
+        : "Connect to the intended server; thread recall is isolated by connection.";
+      navigationStatus(message, true);
+      navigationRouteMessage(message, "error");
+      return false;
+    }
+    store.selected = thread.thread_id; store.view = "thread";
+    saveThreads(); renderThreads(); renderMain();
+    return navigationFinish(`Opened remembered thread ${shortId(thread.thread_id)}`, options.focus === false ? null : "thread-head");
+  }
+  if (route.view === "agents") {
+    store.view = "agents"; renderMain();
+    if (!route.agent) return navigationFinish("Opened the agent workbench", options.focus === false ? null : "agents-title");
+    if (!store.conn || !store.agents || store.agents.loading) {
+      const message = "Connect and load the assistant catalog to open this exact agent.";
+      navigationStatus(message, true);
+      navigationRouteMessage(message);
+      return false;
+    }
+    const record = store.agents.list.find((item) => item.assistant_id === route.agent);
+    if (!record) {
+      const message = "The connected assistant catalog does not contain this shared agent.";
+      navigationStatus(message, true); navigationRouteMessage(message, "error"); return false;
+    }
+    if (agentLifecycleState(record) !== "active") {
+      store.agentLifecycleFilter = "all";
+      if ($("sel-agent-lifecycle")) $("sel-agent-lifecycle").value = "all";
+    }
+    agentSelectAssistant(route.agent); agentsRender();
+    return navigationFinish(`Opened agent ${shortId(route.agent)}`, options.focus === false ? null : "agents-title");
+  }
+  if (route.view === "automations") {
+    store.view = "automations"; renderMain();
+    if (!route.automation) return navigationFinish("Opened the automation desk", options.focus === false ? null : "automations-title");
+    if (!store.conn || !store.automations || store.automations.loading) {
+      const message = "Connect and load the automation registry to open this exact binding.";
+      navigationStatus(message, true);
+      navigationRouteMessage(message);
+      if (store.conn && !store.automations) automationsLoad(true);
+      return false;
+    }
+    if (!store.automations.list.some((item) => item.trigger_id === route.automation)) {
+      const message = "The connected automation registry does not contain this shared binding.";
+      navigationStatus(message, true);
+      navigationRouteMessage(message, "error");
+      return false;
+    }
+    await automationLoadEvidence(route.automation, true);
+    if (store.navigationPending !== route || !store.automations || store.automations.selected !== route.automation) return false;
+    return navigationFinish(`Opened automation ${shortId(route.automation)}`, options.focus === false ? null : "automations-title");
+  }
+  const open = { home: openHome, fabric: openFabric, memory: openMemory, learn: openLearn, tasks: openTasks }[route.view];
+  if (!open) return false;
+  open(options.focus !== false);
+  return navigationFinish(`Opened the ${route.view} workspace`, null);
+}
+
+function navigationActivateLocation(options = {}) {
+  store.navigationRequest += 1;
+  const parsed = navigationPrepareLocation();
+  if (!parsed.route) return false;
+  navigationApplyPending(options);
+  return true;
+}
 
 /* ---------------- persistence ---------------- */
 
@@ -3821,6 +4174,7 @@ function homeRender() {
 }
 
 function openHome(focus = true) {
+  navigationCancelPending("home");
   store.view = "home";
   renderMain();
   $("main").scrollTop = 0;
@@ -4137,7 +4491,10 @@ function connectionClose() {
   connectionConcealSecret();
   const dialog = $("connection-dialog");
   if (dialog.open) dialog.close();
-  $("btn-connection-open").focus({ preventScroll: true });
+  const target = store.navigationFocusTarget;
+  store.navigationFocusTarget = "";
+  if (target && $(target)) $(target).focus({ preventScroll: true });
+  else $("btn-connection-open").focus({ preventScroll: true });
 }
 
 function connectionFormValues() {
@@ -4339,6 +4696,7 @@ async function connect(options = {}) {
   learnLoad(true);
   automationUpdateSidebar();
   renderMain();
+  navigationApplyPending({ focus: false });
   connectionRender();
   $("connection-announcer").textContent = `${profile.name} connected. Checking workspace compatibility.`;
   if (!secretSaved && apiKey) {
@@ -4513,6 +4871,7 @@ function renderThreads() {
       `<button class="forget" title="remove from local list (server thread is untouched)">✕ forget</button></div>`;
     div.querySelector(".forget").onclick = (ev) => forgetThread(t.thread_id, ev);
     div.onclick = () => {
+      navigationCancelPending("thread", t.thread_id);
       store.selected = t.thread_id;
       store.view = "thread"; // leave the tasks view when a thread is picked
       saveThreads();
@@ -4526,6 +4885,7 @@ function renderThreads() {
 /* ---------------- main panel ---------------- */
 
 function renderMain() {
+  navigationReplaceManagedAddress();
   const home = store.view === "home";
   const tasks = store.view === "tasks";
   const agents = store.view === "agents";
@@ -5739,7 +6099,7 @@ function recDetailHtml(ev) {
   return html;
 }
 
-async function recLoad(runId, quiet) {
+async function recLoad(runId, quiet, reconcileNavigation = true) {
   runId = (runId || "").trim();
   if (!runId) { if (!quiet) toast("Enter a run id.", "err"); return; }
   const operation = connectionOperation(currentThread()?.thread_id || null); if (!operation) return;
@@ -5784,6 +6144,7 @@ async function recLoad(runId, quiet) {
     if (!quiet && !noRoute) toast(e.message, "err");
   }
   recRender();
+  if (reconcileNavigation) navigationReconcileRecorderRoute();
 }
 
 /* Remember the latest run id (auto-fill) and quietly refresh the timeline
@@ -8614,6 +8975,7 @@ async function agentsLoad(quiet) {
   agentsUpdateSidebar();
   if (store.view === "agents") agentsRender();
   else if (store.view === "home") homeRender();
+  if (store.navigationPending && store.navigationPending.view === "agents") navigationApplyPending({ focus: false });
 }
 
 function agentReplaceCatalogRecord(record) {
@@ -8646,12 +9008,14 @@ function agentInvalidateLifecycleForSelection(assistantId, activeVersionId, life
 }
 
 function agentSelectAssistant(assistantId) {
+  navigationCancelPending("agents", assistantId);
   if (!store.agents || store.agents.selected === assistantId) return false;
   store.agentLifecycleInteraction += 1;
   agentInvalidateVersionsForSelection(assistantId);
   agentInvalidateLifecycleForSelection(assistantId);
   store.agents.selected = assistantId;
   agentsRender();
+  navigationReplaceManagedAddress();
   return true;
 }
 
@@ -9691,6 +10055,7 @@ async function agentRunTest(assistantId) {
 }
 
 async function agentOpenThread(threadId, runId, graph) {
+  navigationCancelPending("thread", threadId);
   if (!store.threads.some((thread) => thread.thread_id === threadId)) {
     if (!graph) return;
     store.threads.unshift({
@@ -9720,6 +10085,7 @@ async function agentOpenThread(threadId, runId, graph) {
 }
 
 function openAgents() {
+  navigationCancelPending("agents");
   store.view = "agents";
   renderMain();
   $("main").scrollTop = 0;
@@ -12112,6 +12478,7 @@ async function fabricLoadCoordination(rawId, options = {}) {
 }
 
 function openFabric() {
+  navigationCancelPending("fabric");
   store.view = "fabric";
   renderMain();
   $("main").scrollTop = 0;
@@ -14720,6 +15087,7 @@ function memoryClearFilters() {
 }
 
 function openMemory() {
+  navigationCancelPending("memory");
   store.view = "memory";
   renderMain();
   $("main").scrollTop = 0;
@@ -16220,6 +16588,7 @@ function learnHandleEdit(event) {
 }
 
 function openLearn() {
+  navigationCancelPending("learn");
   store.view = "learn";
   renderMain();
   $("main").scrollTop = 0;
@@ -16524,6 +16893,7 @@ async function automationsLoad(quiet = false) {
     store.automationsUnsupported = false;
     automationsRender(); automationUpdateSidebar();
     if (store.automations.selected) await automationLoadEvidence(store.automations.selected, true);
+    if (store.navigationPending && store.navigationPending.view === "automations") await navigationApplyPending({ focus: false });
     return true;
   } catch (error) {
     if (!automationRequestCurrent(request, connection)) return false;
@@ -16537,6 +16907,7 @@ async function automationsLoad(quiet = false) {
 }
 
 async function automationLoadEvidence(triggerId, quiet = false, preserveReplay = false) {
+  navigationCancelPending("automations", triggerId);
   if (!store.automations || !store.conn) return false;
   const trigger = store.automations.list.find((item) => item.trigger_id === triggerId);
   if (!trigger) return false;
@@ -16567,6 +16938,7 @@ async function automationLoadEvidence(triggerId, quiet = false, preserveReplay =
     store.automations.evidenceError = null;
     store.automations.observedAt = new Date().toISOString();
     automationUpdateSidebar(); automationsRender();
+    navigationReplaceManagedAddress();
     return true;
   } catch (error) {
     if (!automationRequestCurrent(request, connection) || !store.automations || store.automations.selected !== triggerId) return false;
@@ -16980,6 +17352,7 @@ async function automationCopyText(value, label) {
 }
 
 function openAutomations() {
+  navigationCancelPending("automations");
   store.view = "automations"; renderMain(); $("main").scrollTop = 0;
   if (!store.automations || (!store.automations.loading && store.automations.error)) automationsLoad(false);
   $("automations-title").focus({ preventScroll: true });
@@ -17242,6 +17615,7 @@ async function taskCancel(taskId) {
 }
 
 function openTasks() {
+  navigationCancelPending("tasks");
   store.view = "tasks";
   renderMain();
   $("main").scrollTop = 0;
@@ -17249,6 +17623,7 @@ function openTasks() {
 }
 
 function init() {
+  navigationPrepareLocation();
   loadConnectionProfiles();
   const startupConnection = loadConn();
   const startupProfile = store.connectionProfiles.find((profile) =>
@@ -17258,6 +17633,8 @@ function init() {
   if (startupConnection && startupConnection.apiKey && !$("inp-key").value) $("inp-key").value = startupConnection.apiKey;
 
   $("btn-connection-open").onclick = connectionOpen;
+  $("btn-copy-view-link").onclick = navigationCopyCurrent;
+  window.addEventListener("popstate", () => navigationActivateLocation({ focus: true }));
   $("btn-connection-close").onclick = connectionClose;
   $("btn-connection-new").onclick = () => connectionNewDraft();
   $("connection-profile-list").addEventListener("click", (event) => {
@@ -17940,7 +18317,7 @@ function init() {
     // A saved profile is only a reconnect candidate. It becomes active after
     // the same identity handshake as a manually selected profile.
     connect({ preserveProfileStorage: startupConnection.preserveProfileStorage });
-  }
+  } else navigationApplyPending({ focus: false });
 }
 
 init();

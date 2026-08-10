@@ -15,6 +15,7 @@ studio/
 ├── test-memory.mjs    ← node unit tests for governed-memory inspection
 ├── test-learn.mjs     ← node unit tests for the governed-learning control room
 ├── test-automations.mjs ← signed webhook lifecycle, event evidence, and replay-safety tests
+├── test-navigation.mjs ← non-secret workspace/evidence link and async ownership tests
 ├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
 ├── test-connection.mjs ← node unit tests for connection profiles, secrets, and compatibility evidence
 └── test-all.mjs       ← discovers and runs every Studio test suite
@@ -34,6 +35,17 @@ studio/
   `rusty-server` identity, version, persistence kind, and registered behaviors, then performs bounded,
   read-only compatibility checks for assistants, durable agents, tasks, governed memory, governed
   learning, and capsules. Failed switches preserve the active workspace and explain how to recover.
+- **Evidence links** — the header's **Copy evidence link** action creates a URL for the current workspace
+  and, where available, its selected agent, automation, remembered thread, or exact Recorder run. The URL
+  contains only bounded identifiers: it strips server addresses, URL credentials, access keys, prompts,
+  state, payloads, fragments, and every unknown query field; malformed incoming Studio routes are scrubbed
+  from the address while their recovery guidance stays visible. Opening an agent or automation target waits for the connected catalog.
+  Opening a run first loads the connected server's bounded event envelope and requires every event to name
+  the requested run and one exact thread before attaching that thread. Flight Recorder's own read must then
+  corroborate that same run/thread pair before Studio calls the link opened; after a transient second-read
+  failure, a successful manual Recorder refresh completes the same pending handoff. A late
+  response from another connection or an abandoned link cannot take over the newer workspace. Thread-only
+  links remain subject to connection-scoped browser recall because Rusty still has no thread-list route.
 - **Graphs panel** — one card per registered graph, with a **New thread** button (`POST /threads`).
 - **Agent workbench** — a user-facing catalog for durable assistants. Create an agent from a registered
   behavior, inspect its runtime configuration and readiness, copy an existing agent without carrying
@@ -562,6 +574,17 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   stable create reconciliation, pause/resume receipts, deliberate replay acknowledgement plus durable-record
   corroboration, non-idempotent retry locks, run-handoff ownership, connection/selection races, secret
   concealment, keyboard focus, hostile rendering, and the 500-row responsive DOM window.
+- `node studio/test-navigation.mjs` — focused link contracts over strict workspace/target pairing,
+  duplicate/control/bidi/byte rejection, content-free URL construction, exact run/thread binding,
+  crossed Recorder rereads and recovery, query scrubbing, clipboard/connection-generation ownership,
+  same-workspace abandoned-route cancellation, retained-agent filter truth, modal-safe destination focus,
+  and responsive accessible copy controls.
+- Live against `cargo run -p rusty-agent-server --example server_demo`: copied a Home link, moved to the
+  Agent Workbench, reloaded its URL-addressed workspace, and confirmed a 390 × 844 layout with no horizontal
+  overflow. A direct link to a real completed pipeline run stayed in a connect-to-open state until the
+  intended server was verified, then attached the one thread proven by its 12-event envelope and focused
+  Flight Recorder after the Connection Hub closed. The resulting URL contained the thread and run IDs but
+  no server address, access key, prompt, state, or payload.
 - Live against `cargo run -p rusty-agent-server --example server_demo`: created a real thread-bound signed
   webhook automation, sent an HMAC-authenticated event, observed debounce produce one durable coalesced run,
   and refreshed Studio to the exact `1 / 1` event/action counters. Pause and resume changed the authoritative

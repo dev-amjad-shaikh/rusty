@@ -202,8 +202,11 @@ Status: **usable foundation delivered**. The guided path and evidence-led Home m
 including honest local/server signals and direct continuation into recent agent or team evidence.
 The Connection Hub now delivers guided onboarding, bounded non-secret server profiles, session-only
 secrets by default, explicit device-local opt-in, verified server identity, safe compatibility evidence,
-and recovery-preserving connection switching. A deployed credential boundary and a versioned server
-capability contract remain.
+and recovery-preserving connection switching. Workspace and evidence navigation is now URL-addressable
+without putting connection details or content in the link. Studio can reopen workspace-only views, exact
+catalog agents and automations, remembered threads, and server-corroborated run journals. Run links prove
+one thread from the bounded event envelope before opening Recorder; thread-only links remain browser-recall-bound.
+A deployed credential boundary and a versioned server capability contract remain.
 
 Connection and session requirements:
 
@@ -474,7 +477,8 @@ Target architecture:
 - Feature modules aligned to workspace surfaces, with a shared API client, state model, router, design tokens, and test utilities.
 - A versioned capabilities document exposed by `GET /info`, covering supported routes, feature-contract versions, optional evaluators, authentication mode, and service limits. The current information response is insufficient for reliable negotiation and must be extended before Studio relies on it.
 - Generated or hand-validated wire types pinned to server contracts.
-- URL-addressable agent, version, thread, run, experiment, candidate, and deployment views.
+- URL-addressable views are delivered for workspaces, catalog agents and automations, remembered threads,
+  and server-corroborated runs. Version, experiment, candidate, and deployment routes remain.
 - Local preferences separated from durable platform state; browser storage never masquerades as the source of truth.
 - Progressive loading, cancellable requests, bounded polling/stream reconnect, and explicit stale-data indicators.
 - Sensitive values redacted by default. Local Studio keeps them in memory unless the user explicitly chooses persistence after a warning; deployed Studio uses a server-side session or equivalent credential boundary.
