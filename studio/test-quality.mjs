@@ -23,10 +23,15 @@ globalThis.__quality = {
   qualityClearThreadBoundState, qualityLibraryNumberCheck, qualityLibraryParseJson,
   qualityLibraryCanonicalValue, qualityLibraryRustF64, qualityLibraryDecode, qualityLibraryParse,
   qualityLibraryJsonl, qualityLibraryMerge, qualityLibraryStats, qualityLibraryHtml,
+  qualityGateDraft, qualityGateU64, qualityGateF64, qualityGateMap,
+  qualityGateCanonical, qualityGateValidate, qualityGateParse, qualityGateHtml,
+  qualityGateFilename, qualityGateApplyField, qualityGateOperationCurrent,
   QUALITY_DATASET_FORMAT_VERSION, QUALITY_TAG_LIMIT, QUALITY_PREDICATE_LIMIT,
   QUALITY_TOOL_LIMIT, QUALITY_EXPORT_LIMIT, QUALITY_LIBRARY_CASE_LIMIT,
   QUALITY_LIBRARY_BYTES, QUALITY_LIBRARY_LINE_BYTES, QUALITY_LIBRARY_DEPTH_LIMIT,
   QUALITY_LIBRARY_NODE_LIMIT, QUALITY_LIBRARY_NUMBER_BYTES, AGENT_NUMBER_TOKENS,
+  QUALITY_GATE_BYTES, QUALITY_GATE_MAP_LIMIT, QUALITY_GATE_TEXT_BYTES,
+  QUALITY_GATE_MAP_BYTES, QUALITY_GATE_NUMBER_BYTES,
   runProofCanonicalJson, store,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -450,6 +455,165 @@ const goldenJsonl = readFileSync(path.join(here, "..", "rusty-eval", "tests", "g
   try { Q.qualityLibraryParse("x".repeat(Q.QUALITY_LIBRARY_BYTES + 1)); } catch { tooLarge = true; }
   check("dataset workbench: imported files are byte bounded", tooLarge);
 }
+
+const strictGate = Q.qualityGateDraft();
+const strictGateValidation = Q.qualityGateValidate(strictGate);
+
+{
+  check("release gate: strict starting point is a valid comparison-aware policy",
+    strictGateValidation.ok && strictGateValidation.policy.minimumRuns === "1" &&
+    strictGateValidation.policy.maximumRegressions === "0" &&
+    strictGateValidation.policy.forbidRemovedCases === true);
+  check("release gate: typed f64 values serialize exactly like serde_json",
+    strictGateValidation.json.includes('"minimum_run_pass_rate": 1.0') &&
+    strictGateValidation.json.includes('"max_pass_rate_drop": 0.05') &&
+    strictGateValidation.json.includes('"max_latency_p95_ratio": 1.25'));
+  const imported = Q.qualityGateParse(strictGateValidation.json);
+  check("release gate: canonical format-v1 policy imports and re-exports byte-identically",
+    Q.qualityGateValidate(imported).json === strictGateValidation.json && !imported.acknowledged);
+}
+
+{
+  const draft = Q.qualityGateDraft();
+  draft.assertionRates = '{"safe":1,"grounded":0.95}';
+  draft.tagRates = '{"smoke":1}';
+  draft.maximumTotalCostUsd = "0.01";
+  draft.maximumCostRatio = "1.1";
+  const validated = Q.qualityGateValidate(draft);
+  check("release gate: candidate and comparison requirements remain distinct and complete",
+    validated.ok && validated.json.includes('"grounded": 0.95') &&
+    validated.json.includes('"safe": 1.0') && validated.json.includes('"smoke": 1.0') &&
+    validated.json.includes('"maximum_cost_ratio": 1.1'));
+  check("release gate: BTreeMap keys use Rust Unicode-scalar order",
+    (() => {
+      const supplementary = String.fromCodePoint(0x10000), bmp = String.fromCodePoint(0xe000);
+      draft.assertionRates = '{"' + supplementary + '":1,"' + bmp + '":1}';
+      const json = Q.qualityGateValidate(draft).json;
+      return json.indexOf('"' + bmp + '"') < json.indexOf('"' + supplementary + '"');
+    })());
+}
+
+{
+  const empty = Q.qualityGateDraft();
+  empty.minimumRuns = ""; empty.minimumRunPassRate = ""; empty.minimumCasePassRate = "";
+  empty.maximumRegressions = ""; empty.forbidRemovedCases = false;
+  check("release gate: thresholds alone never masquerade as an executable check",
+    !Q.qualityGateValidate(empty).ok && Boolean(Q.qualityGateValidate(empty).errors.checks));
+  for (const [field, value] of [["minimumRuns", "0"], ["minimumRunPassRate", "1.01"],
+    ["maximumTotalCostUsd", "-0.01"], ["maxLatencyP95Ratio", "NaN"]]) {
+    const invalid = Q.qualityGateDraft(); invalid[field] = value;
+    check(`release gate: invalid ${field} fails closed`, !Q.qualityGateValidate(invalid).ok);
+  }
+  const repeated = Q.qualityGateDraft(); repeated.assertionRates = '{"safe":1,"safe":0.9}';
+  check("release gate: duplicate named floors fail instead of silently overwriting",
+    Boolean(Q.qualityGateValidate(repeated).errors.assertionRates));
+}
+
+{
+  const exactKeys = Q.qualityGateDraft();
+  exactKeys.assertionRates = '{" pass ":1,"a=b":0.9}';
+  const validated = Q.qualityGateValidate(exactKeys);
+  const roundTrip = Q.qualityGateValidate(Q.qualityGateParse(validated.json));
+  check("release gate: legal whitespace and equals signs in Rust map keys round-trip exactly",
+    validated.ok && validated.json.includes('" pass ": 1.0') &&
+    validated.json.includes('"a=b": 0.9') && roundTrip.json === validated.json);
+}
+
+{
+  const nullable = JSON.parse(strictGateValidation.json);
+  nullable.minimum_runs = null;
+  nullable.minimum_run_pass_rate = null;
+  nullable.maximum_regressions = null;
+  nullable.forbid_removed_cases = false;
+  nullable.minimum_case_pass_rate = 0.9;
+  const parsed = Q.qualityGateParse(JSON.stringify(nullable));
+  const json = Q.qualityGateValidate(parsed).json;
+  check("release gate: Rust Option nulls remain omitted checks, not coercible zeros",
+    parsed.minimumRuns === "" && parsed.maximumRegressions === "" &&
+    json.includes('"minimum_runs": null') && json.includes('"minimum_case_pass_rate": 0.9'));
+
+  const unsafe = strictGateValidation.json.replace('"minimum_runs": 1',
+    '"minimum_runs": 18446744073709551615');
+  const unsafeParsed = Q.qualityGateParse(unsafe);
+  check("release gate: legal unsafe u64 policy limits survive browser import exactly",
+    Q.qualityGateValidate(unsafeParsed).json.includes('"minimum_runs": 18446744073709551615'));
+  for (const token of ["-0", "1.0", "1e0", "18446744073709551616"]) {
+    let rejected = false;
+    try { Q.qualityGateParse(strictGateValidation.json.replace('"minimum_runs": 1', '"minimum_runs": ' + token)); }
+    catch { rejected = true; }
+    check(`release gate: typed u64 token ${token} follows Rust grammar and range`, rejected);
+  }
+}
+
+{
+  const adversarial = [
+    strictGateValidation.json.replace('"name": "production",', '"name": "production",\n  "future": true,'),
+    strictGateValidation.json.replace('  "minimum_runs": 1,\n', ""),
+    strictGateValidation.json.replace('"name": "production"', '"name": "a", "name": "b"'),
+    strictGateValidation.json.replace('"forbid_removed_cases": true', '"forbid_removed_cases": "true"'),
+    strictGateValidation.json.replace('"max_pass_rate_drop": 0.05,', '"max_pass_rate_drop": 0.05,\n    "future": 1,'),
+  ];
+  for (const value of adversarial) {
+    let rejected = false;
+    try { Q.qualityGateParse(value); } catch { rejected = true; }
+    check("release gate: unknown, missing, duplicate, and wrong-type policy fields fail closed", rejected);
+  }
+}
+
+{
+  const hostile = Q.qualityGateDraft();
+  hostile.name = '<img src=x onerror="alert(1)">';
+  const rendered = Q.qualityGateHtml(hostile);
+  check("release gate: hostile policy identity is escaped in fields and exact preview",
+    rendered.includes("&lt;img") && !rendered.includes("<img src=x"));
+  check("release gate: download requires fresh review and states the non-approval boundary",
+    rendered.includes("Download reviewed policy") && rendered.includes("disabled") &&
+    rendered.includes("not an experiment result, release approval, or promotion"));
+
+  hostile.acknowledged = true;
+  Q.store.qualityGateRequest = 0;
+  Q.qualityGateApplyField(hostile, "minimumRuns", "20", false, "text");
+  check("release gate: every semantic edit invalidates acknowledgement and pending import ownership",
+    hostile.minimumRuns === "20" && hostile.acknowledged === false && Q.store.qualityGateRequest === 1);
+  Q.store.view = "thread"; Q.store.selected = "thread-a"; Q.store.qualityGateRequest = 7;
+  check("release gate: deferred file import is bound to the initiating workspace",
+    Q.qualityGateOperationCurrent(7, "thread", "thread-a") &&
+    !Q.qualityGateOperationCurrent(7, "thread", "thread-b"));
+}
+
+{
+  const bounded = Q.qualityGateDraft();
+  bounded.assertionRates = "{" + Array.from({ length: Q.QUALITY_GATE_MAP_LIMIT + 1 }, (_, i) => `"a-${i}":1`).join(",") + "}";
+  check("release gate: named-floor cardinality is bounded before DOM or export assembly",
+    !Q.qualityGateValidate(bounded).ok);
+  const hugeMap = Q.qualityGateDraft(); hugeMap.assertionRates = " ".repeat(Q.QUALITY_GATE_MAP_BYTES + 1);
+  check("release gate: raw map editor bytes are bounded before parsing", !Q.qualityGateValidate(hugeMap).ok);
+  const hugeNumber = Q.qualityGateDraft(); hugeNumber.maximumTotalCostUsd = "1".repeat(Q.QUALITY_GATE_NUMBER_BYTES + 1);
+  check("release gate: raw numeric tokens are bounded before conversion", !Q.qualityGateValidate(hugeNumber).ok);
+  let oversized = false;
+  try { Q.qualityGateParse("x".repeat(Q.QUALITY_GATE_BYTES + 1)); } catch { oversized = true; }
+  check("release gate: imported policy bytes are bounded before parsing", oversized);
+}
+
+check("release gate filename: portable and purpose-specific",
+  Q.qualityGateFilename("../../Production Approval") === "production-approval.gate.json");
+check("release gate markup: labelled evidence-contract surface and stable live announcer",
+  html.includes('id="quality-gate" aria-labelledby="quality-gate-title"') &&
+  html.includes('id="quality-gate-announcer" role="status"') &&
+  html.includes("Release evidence contract · connection-bound page memory") &&
+  html.includes("a connection change or page reload discards it unless downloaded"));
+check("release gate interaction: edit, import, reset, and download are delegated",
+  html.includes('addEventListener("input", qualityGateInput)') &&
+  html.includes('matches("[data-quality-gate-file]")') &&
+  html.includes("qualityGateClick(event)") &&
+  html.includes('addEventListener("submit", (event) => event.preventDefault())'));
+check("release gate lifecycle: connection reset discards policy and invalidates pending file reads",
+  html.includes("store.qualityGate = null;") && html.includes("store.qualityGateRequest += 1;"));
+check("release gate accessibility: field errors are programmatically associated",
+  html.includes('aria-describedby="quality-gate-error-') &&
+  html.includes('field.setAttribute("aria-invalid", "true")'));
+check("release gate responsive: evidence columns stack on narrow screens",
+  html.includes(".quality-gate-contract, .quality-gate-preview, .quality-gate-fields { grid-template-columns:1fr; }"));
 
 check("filename: bounded portable dataset identity",
   Q.qualityFilename({ dataset: "../../Hotel Quality", version: "2.1 rc" }) ===

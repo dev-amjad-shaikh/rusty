@@ -667,6 +667,34 @@
   .quality-file-button input { position:absolute; inset:0; opacity:0; cursor:pointer; }
   .quality-file-button:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
   .quality-dataset-error { margin-bottom:10px; padding:9px 11px; border:1px solid #78483a; border-radius:7px; background:#321d18; color:#efc0b4; }
+  .quality-gate { margin-top:14px; border:1px solid #3c5058; border-radius:9px; overflow:hidden; background:linear-gradient(145deg,#171d20,#111516); }
+  .quality-gate-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:14px 17px; border-bottom:1px solid #3c5058; }
+  .quality-gate-head h3 { margin:3px 0 4px; font-size:16px; }
+  .quality-gate-head p { margin:0; max-width:720px; }
+  .quality-gate-kicker { color:#8eb9c6; font:700 9.5px/1.2 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  .quality-gate-mark { flex:none; padding:6px 9px; border:1px solid #56727b; border-radius:3px; color:#b9d5dc; font:700 9px var(--mono); text-transform:uppercase; letter-spacing:.06em; transform:rotate(-1deg); }
+  .quality-gate-body { padding:14px 17px 16px; }
+  .quality-gate-form { display:grid; gap:12px; }
+  .quality-gate-contract { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .quality-gate-panel { min-width:0; padding:12px; border:1px solid #354a52; border-radius:8px; background:rgba(9,14,16,.48); }
+  .quality-gate-panel h4 { margin:0 0 3px; font-size:12px; }
+  .quality-gate-panel > p { margin:0 0 10px; }
+  .quality-gate-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .quality-gate-fields label { display:grid; gap:4px; color:var(--text-dim); font-size:10px; }
+  .quality-gate-fields input, .quality-gate-fields textarea { width:100%; min-width:0; }
+  .quality-gate-fields textarea { min-height:78px; resize:vertical; font:11px/1.45 var(--mono); }
+  .quality-gate-wide { grid-column:1/-1; }
+  .quality-gate-check { display:flex !important; align-items:flex-start; gap:8px !important; color:var(--text) !important; }
+  .quality-gate-check input { width:auto; margin-top:2px; }
+  .quality-gate-preview { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(210px,.65fr); gap:10px; }
+  .quality-gate-preview pre { margin:0; max-height:420px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .quality-gate-explain { padding:11px; border-left:3px solid #648995; background:#162126; }
+  .quality-gate-explain h4 { margin:0 0 7px; }
+  .quality-gate-explain ul { margin:0; padding-left:17px; }
+  .quality-gate-explain li + li { margin-top:5px; }
+  .quality-gate-error { padding:9px 11px; border:1px solid #78483a; border-radius:7px; background:#321d18; color:#efc0b4; }
+  .quality-gate-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .quality-gate-actions .quality-gate-check { margin-left:auto; max-width:590px; }
   .cmp-report {
     margin-top: 10px; border: 1px solid #5a493a; border-radius: 10px; overflow: hidden;
     background: linear-gradient(135deg, #211d19 0%, #181b19 62%, #171b1e 100%);
@@ -1971,6 +1999,10 @@
     .quality-dataset-layout { grid-template-columns:1fr; }
     .quality-dataset-index { border-right:0; border-bottom:1px solid #35443c; }
     .quality-dataset-toolbar .quality-check { width:100%; margin-left:0; }
+    .quality-gate-head { display:grid; }
+    .quality-gate-contract, .quality-gate-preview, .quality-gate-fields { grid-template-columns:1fr; }
+    .quality-gate-wide { grid-column:auto; }
+    .quality-gate-actions .quality-gate-check { width:100%; margin-left:0; }
     .cmp-report-head { flex-direction: column; gap: 8px; }
     .cmp-balance { grid-template-columns: 1fr; }
     .cmp-balance-side:last-child { text-align: left; }
@@ -2548,6 +2580,16 @@
             <div class="quality-dataset-body" id="quality-dataset-body"></div>
             <span class="sr-only" id="quality-dataset-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
           </section>
+          <section class="quality-gate" id="quality-gate" aria-labelledby="quality-gate-title">
+            <div class="quality-gate-head">
+              <div><span class="quality-gate-kicker">Release evidence contract · connection-bound page memory</span>
+                <h3 id="quality-gate-title" tabindex="-1">Release Gate Designer</h3>
+                <p class="muted tiny">Define what candidate evidence must prove and what a baseline comparison may not regress. Studio authors the exact <code>rusty-eval</code> policy; it does not run or approve a release. The draft survives thread changes on this connection, but a connection change or page reload discards it unless downloaded.</p></div>
+              <span class="quality-gate-mark" id="quality-gate-mark">Draft</span>
+            </div>
+            <div class="quality-gate-body" id="quality-gate-body"></div>
+            <span class="sr-only" id="quality-gate-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
 
           <h2 class="section" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
@@ -2785,6 +2827,8 @@ const store = {
   qualityCase: null,   // page-memory evaluation case bound to one exact finalized Recorder journal
   qualityDataset: null, // connection-bound page-memory portable format-v1 dataset assembly
   qualityDatasetRequest: 0,
+  qualityGate: null,    // connection-bound page-memory rusty-eval gate policy authoring
+  qualityGateRequest: 0,
   recLoadRequest: 0,
   recReplayRequest: 0,
   recCompareRequest: 0,
@@ -4679,6 +4723,8 @@ function connectionResetWorkspace() {
   store.qualityCase = null;
   store.qualityDataset = null;
   store.qualityDatasetRequest += 1;
+  store.qualityGate = null;
+  store.qualityGateRequest += 1;
   store.compare = null;
   store.runProof = null;
   store.recUnsupported = false;
@@ -6282,6 +6328,7 @@ function recRender() {
   runProofRender();
   qualityRender();
   qualityLibraryRender();
+  if (!store.qualityGate || !$("quality-gate-form")) qualityGateRender();
   detail.style.display = "none";
   detail.innerHTML = "";
   investigation.innerHTML = "";
@@ -7860,6 +7907,374 @@ function qualityLibraryClick(event) {
     anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
     toast("Reviewed portable dataset downloaded. It was not persisted or evaluated by Rusty.", "ok");
     $("quality-dataset-announcer").textContent = "Reviewed portable dataset downloaded.";
+  }
+}
+
+/* ---------------- portable release gate designer ----------------------
+ * Authors the exact version-1 rusty-eval GatePolicy JSON artifact inside a
+ * bounded page-memory review. It never evaluates reports or approves a
+ * release; those decisions require durable experiment evidence.
+ * ------------------------------------------------------------------------- */
+const QUALITY_GATE_BYTES = 64 * 1024;
+const QUALITY_GATE_MAP_LIMIT = 64;
+const QUALITY_GATE_TEXT_BYTES = 4096;
+const QUALITY_GATE_MAP_BYTES = 32 * 1024;
+const QUALITY_GATE_NUMBER_BYTES = 1024;
+const QUALITY_GATE_U64_MAX = 18446744073709551615n;
+const QUALITY_GATE_FIELDS = [
+  "name", "minimumRuns", "minimumRunPassRate", "minimumCasePassRate",
+  "assertionRates", "tagRates", "maximumTotalCostUsd", "maximumCostRatio",
+  "maximumRegressions", "forbidRemovedCases", "maxPassRateDrop", "maxLatencyP95Ratio",
+];
+
+function qualityGateDraft() {
+  return {
+    name: "production", minimumRuns: "1", minimumRunPassRate: "1",
+    minimumCasePassRate: "1", assertionRates: "{}", tagRates: "{}",
+    maximumTotalCostUsd: "", maximumCostRatio: "", maximumRegressions: "0",
+    forbidRemovedCases: true, maxPassRateDrop: "0.05", maxLatencyP95Ratio: "1.25",
+    acknowledged: false, error: "",
+  };
+}
+
+function qualityGateText(value, label) {
+  if (typeof value !== "string" || !value.trim() || !qualityLibraryWellFormed(value) ||
+      agentUtf8Length(value) > QUALITY_GATE_TEXT_BYTES || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) {
+    throw new Error(`${label} must be non-empty visible text within ${QUALITY_GATE_TEXT_BYTES} UTF-8 bytes`);
+  }
+  return value;
+}
+
+function qualityGateU64(raw, label, optional, allowZero) {
+  const value = String(raw ?? "").trim();
+  if (!value && optional) return null;
+  if (!/^(?:0|[1-9][0-9]*)$/.test(value)) throw new Error(`${label} must be a whole unsigned integer`);
+  let parsed;
+  try { parsed = BigInt(value); } catch { throw new Error(`${label} is outside the supported integer range`); }
+  if (parsed > QUALITY_GATE_U64_MAX) throw new Error(`${label} exceeds the 64-bit policy range`);
+  if (!allowZero && parsed === 0n) throw new Error(`${label} must be greater than zero`);
+  return String(parsed);
+}
+
+function qualityGateF64(raw, label, optional, kind = "non_negative") {
+  const token = String(raw ?? "").trim();
+  if (!token && optional) return null;
+  if (agentUtf8Length(token) > QUALITY_GATE_NUMBER_BYTES) throw new Error(`${label} exceeds Studio's numeric-token boundary`);
+  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token)) {
+    throw new Error(`${label} must be a finite JSON number`);
+  }
+  const value = Number(token);
+  if (!Number.isFinite(value)) throw new Error(`${label} must be finite`);
+  if (kind === "rate" && !(value >= 0 && value <= 1)) throw new Error(`${label} must be between 0 and 1`);
+  if (kind === "non_negative" && !(value >= 0)) throw new Error(`${label} must be non-negative`);
+  return qualityLibraryRustF64(value);
+}
+
+function qualityGateMap(raw, label) {
+  const source = String(raw || "{}");
+  if (agentUtf8Length(source) > QUALITY_GATE_MAP_BYTES) throw new Error(`${label} exceeds Studio's 32 KiB authoring boundary`);
+  let value;
+  try { value = qualityLibraryParseJson(source); }
+  catch (error) { throw new Error(`${label} must be an exact JSON object: ${error.message}`); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be a JSON object`);
+  const keys = Object.keys(value);
+  if (keys.length > QUALITY_GATE_MAP_LIMIT) throw new Error(`${label} exceeds Studio's ${QUALITY_GATE_MAP_LIMIT}-entry review boundary`);
+  const result = Object.create(null);
+  for (const key of keys) {
+    qualityGateText(key, `${label} name`);
+    result[key] = qualityGateF64(qualityLibraryCanonicalValue(value[key], value, key), `${label} \`${key}\``, false, "rate");
+  }
+  return result;
+}
+
+function qualityGatePrettyMap(map) {
+  const keys = Object.keys(map).sort(qualityLibraryKeyCompare);
+  if (!keys.length) return "{}";
+  return "{\n" + keys.map((key) => "    " + JSON.stringify(key) + ": " + map[key]).join(",\n") + "\n  }";
+}
+
+function qualityGateCanonical(policy) {
+  const lines = [
+    '  "format_version": 1',
+    '  "name": ' + JSON.stringify(policy.name),
+    '  "minimum_runs": ' + (policy.minimumRuns ?? "null"),
+    '  "minimum_run_pass_rate": ' + (policy.minimumRunPassRate ?? "null"),
+    '  "minimum_case_pass_rate": ' + (policy.minimumCasePassRate ?? "null"),
+    '  "minimum_assertion_pass_rates": ' + qualityGatePrettyMap(policy.assertionRates),
+    '  "minimum_tag_pass_rates": ' + qualityGatePrettyMap(policy.tagRates),
+    '  "maximum_total_cost_usd": ' + (policy.maximumTotalCostUsd ?? "null"),
+    '  "maximum_cost_ratio": ' + (policy.maximumCostRatio ?? "null"),
+    '  "maximum_regressions": ' + (policy.maximumRegressions ?? "null"),
+    '  "forbid_removed_cases": ' + String(policy.forbidRemovedCases),
+    '  "comparison_thresholds": {\n' +
+      '    "max_pass_rate_drop": ' + policy.maxPassRateDrop + ',\n' +
+      '    "max_latency_p95_ratio": ' + policy.maxLatencyP95Ratio + "\n  }",
+  ];
+  return "{\n" + lines.join(",\n") + "\n}";
+}
+
+function qualityGateValidate(draft) {
+  const errors = Object.create(null), policy = Object.create(null);
+  const capture = (key, work) => { try { policy[key] = work(); } catch (error) { errors[key] = error.message; } };
+  capture("name", () => qualityGateText(draft?.name, "Policy name"));
+  capture("minimumRuns", () => qualityGateU64(draft?.minimumRuns, "Minimum runs", true, false));
+  capture("minimumRunPassRate", () => qualityGateF64(draft?.minimumRunPassRate, "Minimum run pass rate", true, "rate"));
+  capture("minimumCasePassRate", () => qualityGateF64(draft?.minimumCasePassRate, "Minimum case pass rate", true, "rate"));
+  capture("assertionRates", () => qualityGateMap(draft?.assertionRates, "Assertion rates"));
+  capture("tagRates", () => qualityGateMap(draft?.tagRates, "Tag rates"));
+  capture("maximumTotalCostUsd", () => qualityGateF64(draft?.maximumTotalCostUsd, "Maximum total cost", true));
+  capture("maximumCostRatio", () => qualityGateF64(draft?.maximumCostRatio, "Maximum cost ratio", true));
+  capture("maximumRegressions", () => qualityGateU64(draft?.maximumRegressions, "Maximum regressions", true, true));
+  policy.forbidRemovedCases = draft?.forbidRemovedCases === true;
+  capture("maxPassRateDrop", () => qualityGateF64(draft?.maxPassRateDrop, "Maximum pass-rate drop", false, "rate"));
+  capture("maxLatencyP95Ratio", () => qualityGateF64(draft?.maxLatencyP95Ratio, "Maximum p95 latency ratio", false));
+  if (!Object.keys(errors).length) {
+    const checks = [policy.minimumRuns, policy.minimumRunPassRate, policy.minimumCasePassRate,
+      Object.keys(policy.assertionRates).length, Object.keys(policy.tagRates).length,
+      policy.maximumTotalCostUsd, policy.maximumCostRatio, policy.maximumRegressions,
+      policy.forbidRemovedCases].some((value) => value !== null && value !== false && value !== 0);
+    if (!checks) errors.checks = "Configure at least one candidate or comparison check.";
+  }
+  let json = "";
+  if (!Object.keys(errors).length) {
+    json = qualityGateCanonical(policy);
+    if (agentUtf8Length(json) > QUALITY_GATE_BYTES) errors.policy = "Canonical policy exceeds Studio's 64 KiB review boundary.";
+  }
+  return { ok: !Object.keys(errors).length, errors, policy: !Object.keys(errors).length ? policy : null, json: !Object.keys(errors).length ? json : "" };
+}
+
+function qualityGateFieldError(validation, key) {
+  const error = validation.errors[key] || "";
+  return '<span class="field-error" id="quality-gate-error-' + key + '"' + (error ? "" : " hidden") + '>' + escapeHtml(error) + "</span>";
+}
+
+function qualityGateInvalid(validation, key) {
+  return validation.errors[key] ? ' aria-invalid="true" aria-describedby="quality-gate-error-' + key + '"' : "";
+}
+
+function qualityGateExplanation(validation) {
+  if (!validation.ok) return '<h4>Evidence contract incomplete</h4><p class="muted tiny">Correct the marked fields. No portable policy is ready.</p>';
+  const policy = validation.policy, candidate = [], comparison = [];
+  if (policy.minimumRuns != null) candidate.push(`at least ${policy.minimumRuns} runs`);
+  if (policy.minimumRunPassRate != null) candidate.push(`run pass rate ≥ ${policy.minimumRunPassRate}`);
+  if (policy.minimumCasePassRate != null) candidate.push(`case pass rate ≥ ${policy.minimumCasePassRate}`);
+  if (Object.keys(policy.assertionRates).length) candidate.push(`${Object.keys(policy.assertionRates).length} assertion floor(s)`);
+  if (Object.keys(policy.tagRates).length) candidate.push(`${Object.keys(policy.tagRates).length} tag floor(s)`);
+  if (policy.maximumTotalCostUsd != null) candidate.push(`total cost ≤ $${policy.maximumTotalCostUsd}`);
+  if (policy.maximumCostRatio != null) comparison.push(`cost ratio ≤ ${policy.maximumCostRatio}`);
+  if (policy.maximumRegressions != null) comparison.push(`regressions ≤ ${policy.maximumRegressions}`);
+  if (policy.forbidRemovedCases) comparison.push("no removed baseline cases");
+  return '<h4>What this policy requires</h4><ul class="tiny"><li><b>Candidate:</b> ' +
+    escapeHtml(candidate.join(" · ") || "no absolute checks") + '</li><li><b>Comparison:</b> ' +
+    escapeHtml(comparison.join(" · ") || "not required") +
+    '</li><li><b>Decision boundary:</b> only <code>rusty-eval</code> can recompute this policy against complete experiment reports.</li></ul>';
+}
+
+function qualityGateHtml(draft) {
+  const validation = qualityGateValidate(draft), value = (key) => escapeHtml(String(draft[key] ?? ""));
+  const input = (key, label, help = "") => '<label>' + label + '<input data-quality-gate-field="' + key + '" value="' + value(key) + '"' +
+    ' maxlength="' + (key === "name" ? QUALITY_GATE_TEXT_BYTES : QUALITY_GATE_NUMBER_BYTES) + '"' + qualityGateInvalid(validation, key) + '>' +
+    (help ? '<span class="muted">' + help + "</span>" : "") + qualityGateFieldError(validation, key) + "</label>";
+  return '<form class="quality-gate-form" id="quality-gate-form" novalidate>' +
+    '<div class="quality-gate-error" id="quality-gate-error-summary" role="alert" tabindex="-1"' +
+      (validation.ok ? " hidden" : "") + '>' + escapeHtml(validation.errors.checks || validation.errors.policy || draft.error || "Correct the marked policy fields.") + '</div>' +
+    '<div class="quality-gate-contract"><section class="quality-gate-panel" aria-labelledby="quality-gate-candidate-title">' +
+      '<h4 id="quality-gate-candidate-title">Candidate evidence</h4><p class="muted tiny">Requirements one experiment report must satisfy on its own.</p>' +
+      '<div class="quality-gate-fields">' + input("name", "Policy name") + input("minimumRuns", "Minimum runs", "blank disables") +
+      input("minimumRunPassRate", "Minimum run pass rate", "0–1 · blank disables") +
+      input("minimumCasePassRate", "Minimum mean case pass rate", "0–1 · blank disables") +
+      input("maximumTotalCostUsd", "Maximum total cost · USD", "blank disables") +
+      '<label class="quality-gate-wide">Assertion floors · exact JSON object of <code>name: rate</code><textarea maxlength="32768" data-quality-gate-field="assertionRates"' +
+        qualityGateInvalid(validation, "assertionRates") + '>' + value("assertionRates") + '</textarea>' + qualityGateFieldError(validation, "assertionRates") + '</label>' +
+      '<label class="quality-gate-wide">Tag floors · exact JSON object of <code>tag: rate</code><textarea maxlength="32768" data-quality-gate-field="tagRates"' +
+        qualityGateInvalid(validation, "tagRates") + '>' + value("tagRates") + '</textarea>' + qualityGateFieldError(validation, "tagRates") + '</label></div></section>' +
+    '<section class="quality-gate-panel" aria-labelledby="quality-gate-comparison-title"><h4 id="quality-gate-comparison-title">Baseline comparison</h4>' +
+      '<p class="muted tiny">These checks require matching baseline and candidate reports. Thresholds classify regressions; they do not add a check alone.</p>' +
+      '<div class="quality-gate-fields">' + input("maximumCostRatio", "Maximum candidate / baseline cost", "blank disables") +
+      input("maximumRegressions", "Maximum threshold breaches", "blank disables") +
+      input("maxPassRateDrop", "Regression pass-rate drop", "required · 0–1") +
+      input("maxLatencyP95Ratio", "Regression p95 latency ratio", "required · ≥ 0") +
+      '<label class="quality-gate-check quality-gate-wide"><input type="checkbox" data-quality-gate-field="forbidRemovedCases"' +
+        (draft.forbidRemovedCases ? " checked" : "") + '> Block when the candidate removes a baseline case.</label></div></section></div>' +
+    '<div class="quality-gate-preview"><div><p class="tiny muted">Exact canonical GatePolicy · format version 1 · ' +
+      (validation.ok ? agentUtf8Length(validation.json).toLocaleString() + " UTF-8 bytes" : "not ready") +
+      '</p><pre class="json" id="quality-gate-preview-json">' + escapeHtml(validation.ok ? validation.json : "No valid policy preview.") +
+      '</pre></div><aside class="quality-gate-explain" id="quality-gate-explain">' + qualityGateExplanation(validation) + '</aside></div>' +
+    '<div class="quality-gate-actions"><button class="small" type="button" data-quality-gate-strict>Restore strict starting point</button>' +
+      '<label class="small quality-file-button">Import policy JSON<input type="file" data-quality-gate-file accept="application/json,.json"></label>' +
+      '<button class="small primary" type="button" data-quality-gate-export' +
+        (validation.ok && draft.acknowledged ? "" : " disabled") + '>Download reviewed policy</button>' +
+      '<label class="quality-gate-check"><input type="checkbox" data-quality-gate-field="acknowledged"' +
+        (draft.acknowledged ? " checked" : "") + (validation.ok ? "" : " disabled") +
+        '> I reviewed the exact policy above and understand it defines checks; it is not an experiment result, release approval, or promotion.</label></div></form>';
+}
+
+function qualityGateRender(focusSelector = "") {
+  const body = $("quality-gate-body");
+  if (!body) return;
+  if (!store.qualityGate) store.qualityGate = qualityGateDraft();
+  body.innerHTML = qualityGateHtml(store.qualityGate);
+  const validation = qualityGateValidate(store.qualityGate);
+  $("quality-gate-mark").textContent = validation.ok ? (store.qualityGate.acknowledged ? "Reviewed" : "Ready to review") : "Incomplete";
+  if (focusSelector) body.querySelector(focusSelector)?.focus({ preventScroll: true });
+}
+
+function qualityGateSync() {
+  const draft = store.qualityGate, body = $("quality-gate-body");
+  if (!draft || !body) return;
+  const validation = qualityGateValidate(draft), summary = $("quality-gate-error-summary");
+  summary.hidden = validation.ok && !draft.error;
+  summary.textContent = validation.errors.checks || validation.errors.policy || draft.error || "Correct the marked policy fields.";
+  const preview = $("quality-gate-preview-json");
+  preview.textContent = validation.ok ? validation.json : "No valid policy preview.";
+  preview.previousElementSibling.innerHTML = 'Exact canonical GatePolicy · format version 1 · ' +
+    (validation.ok ? agentUtf8Length(validation.json).toLocaleString() + " UTF-8 bytes" : "not ready");
+  $("quality-gate-explain").innerHTML = qualityGateExplanation(validation);
+  for (const key of QUALITY_GATE_FIELDS) {
+    const field = body.querySelector('[data-quality-gate-field="' + key + '"]');
+    const error = $("quality-gate-error-" + key), message = validation.errors[key] || "";
+    if (error) { error.textContent = message; error.hidden = !message; }
+    if (field) {
+      if (message) { field.setAttribute("aria-invalid", "true"); field.setAttribute("aria-describedby", "quality-gate-error-" + key); }
+      else { field.removeAttribute("aria-invalid"); field.removeAttribute("aria-describedby"); }
+    }
+  }
+  const ack = body.querySelector('[data-quality-gate-field="acknowledged"]');
+  if (!validation.ok) draft.acknowledged = false;
+  ack.checked = draft.acknowledged; ack.disabled = !validation.ok;
+  body.querySelector("[data-quality-gate-export]").disabled = !validation.ok || !draft.acknowledged;
+  $("quality-gate-mark").textContent = validation.ok ? (draft.acknowledged ? "Reviewed" : "Ready to review") : "Incomplete";
+}
+
+function qualityGateInput(event) {
+  const field = event.target.getAttribute("data-quality-gate-field"), draft = store.qualityGate;
+  if (!field || !draft) return;
+  qualityGateApplyField(draft, field, event.target.value, event.target.checked, event.target.type);
+  qualityGateSync();
+}
+
+function qualityGateApplyField(draft, field, value, checked, type) {
+  if (!draft || !field) return false;
+  store.qualityGateRequest += 1;
+  if (field === "acknowledged") draft.acknowledged = Boolean(checked);
+  else {
+    draft[field] = type === "checkbox" ? Boolean(checked) : value;
+    draft.acknowledged = false;
+    draft.error = "";
+  }
+  return true;
+}
+
+function qualityGateOperationCurrent(request, view, selected) {
+  return request === store.qualityGateRequest && view === store.view && selected === store.selected;
+}
+
+function qualityGateMapText(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  const keys = Object.keys(value).sort(qualityLibraryKeyCompare);
+  if (keys.length > QUALITY_GATE_MAP_LIMIT) throw new Error(`${label} exceeds Studio's ${QUALITY_GATE_MAP_LIMIT}-entry review boundary`);
+  const map = Object.create(null);
+  for (const key of keys) {
+    qualityGateText(key, `${label} name`);
+    map[key] = qualityGateF64(qualityLibraryCanonicalValue(value[key], value, key), `${label} \`${key}\``, false, "rate");
+  }
+  return qualityGatePrettyMap(map);
+}
+
+function qualityGateParse(text) {
+  if (typeof text !== "string" || agentUtf8Length(text) > QUALITY_GATE_BYTES) throw new Error("Policy JSON must be no larger than 64 KiB.");
+  let value;
+  try { value = qualityLibraryParseJson(text); } catch (error) { throw new Error("Policy is not valid exact JSON: " + error.message); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Gate policy must be a JSON object.");
+  const required = ["format_version", "name", "minimum_runs", "minimum_run_pass_rate", "minimum_case_pass_rate",
+    "minimum_assertion_pass_rates", "minimum_tag_pass_rates", "maximum_total_cost_usd", "maximum_cost_ratio",
+    "maximum_regressions", "forbid_removed_cases", "comparison_thresholds"];
+  const unknown = Object.keys(value).filter((key) => !required.includes(key));
+  const missing = required.filter((key) => !qualityLibraryOwn(value, key));
+  if (unknown.length) throw new Error(`Gate policy contains unknown field \`${unknown[0]}\`.`);
+  if (missing.length) throw new Error(`Gate policy is missing field \`${missing[0]}\`.`);
+  if (recExactUnsigned(value, "format_version") !== 1n) throw new Error("Only gate policy format_version 1 is supported.");
+  const optionU64 = (key, label, allowZero) => value[key] === null ? "" : qualityGateU64(
+    value[AGENT_NUMBER_TOKENS]?.[key] ?? value[key], label, false, allowZero);
+  const optionF64 = (key, label, kind = "non_negative") => value[key] === null ? "" : qualityGateF64(
+    qualityLibraryCanonicalValue(value[key], value, key), label, false, kind);
+  const thresholds = value.comparison_thresholds;
+  if (!thresholds || typeof thresholds !== "object" || Array.isArray(thresholds)) throw new Error("comparison_thresholds must be an object.");
+  const thresholdKeys = ["max_pass_rate_drop", "max_latency_p95_ratio"];
+  const thresholdUnknown = Object.keys(thresholds).filter((key) => !thresholdKeys.includes(key));
+  const thresholdMissing = thresholdKeys.filter((key) => !qualityLibraryOwn(thresholds, key));
+  if (thresholdUnknown.length || thresholdMissing.length) throw new Error("comparison_thresholds must contain exactly pass-rate drop and p95 latency ratio.");
+  if (typeof value.forbid_removed_cases !== "boolean") throw new Error("forbid_removed_cases must be a boolean.");
+  const draft = {
+    name: qualityGateText(value.name, "Policy name"),
+    minimumRuns: optionU64("minimum_runs", "Minimum runs", false),
+    minimumRunPassRate: optionF64("minimum_run_pass_rate", "Minimum run pass rate", "rate"),
+    minimumCasePassRate: optionF64("minimum_case_pass_rate", "Minimum case pass rate", "rate"),
+    assertionRates: qualityGateMapText(value.minimum_assertion_pass_rates, "Assertion rates"),
+    tagRates: qualityGateMapText(value.minimum_tag_pass_rates, "Tag rates"),
+    maximumTotalCostUsd: optionF64("maximum_total_cost_usd", "Maximum total cost"),
+    maximumCostRatio: optionF64("maximum_cost_ratio", "Maximum cost ratio"),
+    maximumRegressions: optionU64("maximum_regressions", "Maximum regressions", true),
+    forbidRemovedCases: value.forbid_removed_cases,
+    maxPassRateDrop: qualityGateF64(qualityLibraryCanonicalValue(thresholds.max_pass_rate_drop, thresholds, "max_pass_rate_drop"), "Maximum pass-rate drop", false, "rate"),
+    maxLatencyP95Ratio: qualityGateF64(qualityLibraryCanonicalValue(thresholds.max_latency_p95_ratio, thresholds, "max_latency_p95_ratio"), "Maximum p95 latency ratio", false),
+    acknowledged: false, error: "",
+  };
+  const validation = qualityGateValidate(draft);
+  if (!validation.ok) throw new Error(Object.values(validation.errors)[0]);
+  return draft;
+}
+
+function qualityGateFilename(name) {
+  const stem = String(name || "release-gate").toLowerCase().normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "").slice(0, 80) || "release-gate";
+  return stem + ".gate.json";
+}
+
+async function qualityGateFile(event) {
+  const input = event.target, file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+  const request = ++store.qualityGateRequest, view = store.view, selected = store.selected;
+  if (file.size > QUALITY_GATE_BYTES) {
+    store.qualityGate.error = "Policy file exceeds the 64 KiB import boundary.";
+    qualityGateSync(); $("quality-gate-error-summary").focus({ preventScroll: true }); return;
+  }
+  try {
+    const bytes = await file.arrayBuffer();
+    if (!qualityGateOperationCurrent(request, view, selected)) return;
+    const draft = qualityGateParse(qualityLibraryDecode(bytes));
+    if (!qualityGateOperationCurrent(request, view, selected)) return;
+    store.qualityGate = draft;
+    qualityGateRender('[data-quality-gate-field="name"]');
+    $("quality-gate-announcer").textContent = `Policy ${draft.name} imported for exact review.`;
+  } catch (error) {
+    if (!qualityGateOperationCurrent(request, view, selected)) return;
+    store.qualityGate.error = "Policy not accepted: " + error.message;
+    store.qualityGate.acknowledged = false;
+    qualityGateSync(); $("quality-gate-error-summary").focus({ preventScroll: true });
+    $("quality-gate-announcer").textContent = store.qualityGate.error;
+  }
+}
+
+function qualityGateClick(event) {
+  if (event.target.closest("[data-quality-gate-strict]")) {
+    store.qualityGateRequest += 1;
+    store.qualityGate = qualityGateDraft();
+    qualityGateRender('[data-quality-gate-field="name"]');
+    $("quality-gate-announcer").textContent = "Strict release-gate starting point restored. Review is required.";
+    return;
+  }
+  if (event.target.closest("[data-quality-gate-export]")) {
+    const draft = store.qualityGate, validation = qualityGateValidate(draft);
+    if (!validation.ok || !draft.acknowledged) return;
+    const url = URL.createObjectURL(new Blob([validation.json], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = qualityGateFilename(draft.name);
+    document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    toast("Reviewed release-gate policy downloaded. No experiment or release decision was executed.", "ok");
+    $("quality-gate-announcer").textContent = "Reviewed release-gate policy downloaded.";
   }
 }
 
@@ -18904,6 +19319,13 @@ function init() {
     else qualityLibraryChange(event);
   });
   $("quality-dataset").addEventListener("click", qualityLibraryClick);
+  $("quality-gate").addEventListener("input", qualityGateInput);
+  $("quality-gate").addEventListener("change", (event) => {
+    if (event.target.matches("[data-quality-gate-file]")) qualityGateFile(event);
+    else qualityGateInput(event);
+  });
+  $("quality-gate").addEventListener("click", qualityGateClick);
+  $("quality-gate").addEventListener("submit", (event) => event.preventDefault());
 
   // Replay & run comparison. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).

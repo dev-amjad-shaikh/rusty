@@ -313,6 +313,19 @@ studio/
     runs on the same server connection; connection change or page reload discards it. Download remains a
     local portable asset: Studio does not create a server dataset, run an evaluator or experiment, or make
     a release decision.
+  - **Release Gate Designer** — author or import the complete version-1 `rusty-eval` `GatePolicy` as a
+    readable evidence contract. Candidate requirements cover minimum run and case evidence, named
+    assertion/tag pass-rate floors, and total recorded cost. Baseline-comparison requirements cover cost
+    growth, threshold-breach count, and removed cases; the pass-rate-drop and p95-latency thresholds are
+    shown separately because they classify comparison regressions but do not create a check by themselves.
+    Studio preserves legal 64-bit integer limits beyond JavaScript's safe range, uses Rust's finite-float
+    spelling and Unicode map order, requires every version-1 field, and rejects unknown, duplicate,
+    malformed, lossy, or over-64-KiB policies before review. The exact canonical JSON remains visible,
+    every semantic edit invalidates acknowledgement, and an in-flight file import is bound to the initiating
+    connection/thread workspace. An accepted draft survives thread changes on the same connection; a connection
+    change or page reload discards it unless downloaded. Download creates only a portable policy file. It does not
+    run an experiment, recompute a decision, approve a release, or promote an agent; those outcomes require
+    complete baseline/candidate reports and durable server-side quality resources.
   - **Run comparison report** — enter a baseline and candidate run id (the baseline auto-fills from the
     loaded journal) and **Build report**. Studio calls the atomic
     `GET /runs/diff?base=…&branch=…` contract, then reconciles both independent

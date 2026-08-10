@@ -333,7 +333,7 @@ Exit criteria:
 
 **Outcome:** prove that a proposed agent version is better before promotion.
 
-Status: **comparison, review, and portable-dataset foundation delivered**. The Flight Recorder now turns two persisted run journals
+Status: **comparison, review, portable-dataset, and release-policy foundation delivered**. The Flight Recorder now turns two persisted run journals
 into an evidence-led baseline-versus-candidate report: atomic structural divergence, state-channel
 changes, exact resource totals, reconciled finalized/live journal signals, repeat-risk, and a deliberate
 no-winner boundary when no quality evaluator exists. Matching finalized evidence unlocks a human verdict
@@ -353,6 +353,13 @@ It preserves ordering, deduplicates canonically identical cases, rejects identit
 the full canonical case selected for review, and requires fresh acknowledgement after every content
 change. Its download remains portable sensitive data; server-side dataset discovery, shared lifecycle,
 evaluation execution, and release policy are deliberately not implied.
+A Release Gate Designer now exposes the library's version-1 gate policy as a two-sided evidence contract:
+absolute candidate requirements and baseline-comparison protections. It supports strict bounded
+import/export, exact Rust integer/float/map canonicalization, readable configured-check summaries, and
+fresh acknowledgement of the complete policy. The page-memory draft survives thread changes on one connection,
+but a connection change or reload discards it unless downloaded. It remains a portable policy authoring surface, not an
+experiment result, release approval, or promotion action; Studio cannot recompute or enforce the policy
+until durable report and gate-decision contracts are available on the connected server.
 
 Scope:
 
@@ -469,8 +476,8 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
-| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, and a portable multi-case Dataset Workbench delivered; durable reviews/dataset catalogs, evaluators, experiment execution, statistical reports, and version-attributed quality gates still need platform APIs | Converts the existing quality library into a product workflow |
-| 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |
+| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, portable multi-case Dataset Workbench, and exact release-policy authoring delivered; durable reviews/dataset catalogs, evaluators, experiment execution, statistical reports, and version-attributed gate decisions still need platform APIs | Converts the existing quality library into a product workflow |
+| 12 | Failure clusters, annotation queues, and release gates | Policy authoring foundation delivered; durable reports, queues, gate decisions, and promotion enforcement need platform APIs | Closes the human quality loop |
 | 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
 | 14 | Environment, deployment, and fleet surfaces | First automation slice delivered — signed webhook creation, pause/resume, event/dead-letter evidence, safe replay, and run handoff; cron, environments, deployments, fleet health, and shared credential contracts remain | Builds operations on stable identity, version, quality, and audit concepts |
 
