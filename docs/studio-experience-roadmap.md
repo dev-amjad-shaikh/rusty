@@ -123,6 +123,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   into the bounded provenance ledger.
 - Investigate Flight Recorder evidence through a causal run story: journal finding, recorded error event
   or unresolved pause, recovery boundary, effect risk, and direct links into the technical timeline.
+- Review a selected run's interrupt at an explicit human decision boundary: bounded request preview,
+  corroborated run/thread/checkpoint identities, schema-led approve/deny or custom exact response,
+  checkpoint-bound resume, super-step re-execution warning, competing-run gate, wait or live-event resume,
+  and distinct handling for confirmed rejection versus an uncertain terminal response.
 - Exact-replay eligible deterministic journals and compare forked branches. Journals containing model, tool, remote, WASM, or resume effects are not yet accepted by exact replay.
 - Inspect and cancel durable tasks.
 - Use the core flow on desktop and mobile with keyboard support.
@@ -134,6 +138,9 @@ Studio is a useful engineering console, not yet the complete experience describe
   metadata, exact advanced JSON, and manifest portability. Model, tool, memory, output, guardrail, and
   budget configuration still lack typed server discovery and first-class runtime forms.
 - Thread and run discovery is browser-local; there is no durable server-side run desk.
+- The selected-thread interrupt review draft is browser-session-only, while the executor's interrupt and
+  resume events follow the configured server journal. There is no durable assigned human-review inbox,
+  authority model, reservation, deadline, decision audit record, or cross-thread discovery yet.
 - Assistant configuration and durable identity are explained together, but there is no lifecycle link
   that binds an assistant version to a registered durable identity.
 - The Team Observatory provides inventory, all four typed coordination launches, read-only coordination
@@ -396,7 +403,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
 | 5 | Flight Recorder investigation layout and manifest/effect context | Partial — causal run story, recovery boundary, and effect-risk guidance delivered; immutable configuration-manifest resolution still pending | Makes Rusty's strongest runtime advantage understandable |
 | 6 | Memory browser, context assembly, provenance, conflicts, corrections, and forgetting | Partial — browser, deterministic token-budget context preview, provenance, conflict review, selected-memory correction, exact durable consolidation launch, and task-to-summary follow-through delivered; candidate approval, expiration, and approval-gated forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
-| 7 | Durable interrupt and human-review inbox | Not started | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
+| 7 | Durable interrupt and human-review inbox | Partial — selected-thread decision boundary delivered with corroborated checkpoint identity, exact response preview, checkpoint-bound resume, suspension/re-execution evidence, and duplicate-resistant uncertain handling; durable discovery, assignment, authority, deadline, and audit remain | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |

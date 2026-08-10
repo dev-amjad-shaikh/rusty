@@ -213,7 +213,7 @@
   /* ---------- main thread panel ---------- */
   #thread-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
   #thread-head .tid { font-family: var(--mono); font-size: 15px; font-weight: 600; }
-  .run-controls textarea, .resume-box textarea {
+  .run-controls textarea, .interrupt-custom textarea {
     width: 100%; min-height: 88px; resize: vertical;
     background: var(--bg-inset); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px;
@@ -225,6 +225,40 @@
     background: var(--bg-inset); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 4px 6px; font-size: 12px;
   }
+  .interrupt-decision { padding: 0; overflow: hidden; border-color: #704a35; background: #201a15; }
+  .interrupt-decision[hidden] { display: none; }
+  .interrupt-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 14px 16px 12px; border-bottom: 1px solid #5b4131; }
+  .interrupt-head h2 { margin: 0; color: #eccbb5; font-size: 17px; }
+  .interrupt-head p { margin: 4px 0 0; max-width: 760px; color: var(--text-dim); font-size: 11.5px; }
+  .interrupt-boundary { display: inline-flex; align-items: center; gap: 7px; margin-top: 8px; color: #d8aa8d; font: 9.5px var(--mono); text-transform: uppercase; letter-spacing: .55px; }
+  .interrupt-boundary::before { content: ""; width: 8px; height: 8px; border: 1px solid var(--interrupt); transform: rotate(45deg); }
+  .interrupt-path { display: grid; grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr) 30px minmax(0, 1fr); gap: 5px; padding: 12px 16px 0; }
+  .interrupt-stage { min-width: 0; padding: 9px 10px; border: 1px solid #514638; border-radius: 7px; background: var(--bg-inset); }
+  .interrupt-stage.boundary { border-color: #704a35; background: #2a1d17; }
+  .interrupt-stage.response { border-color: #53654b; background: #182019; }
+  .interrupt-stage b { display: block; color: var(--text); font-size: 11.5px; }
+  .interrupt-stage span { display: block; margin-top: 3px; color: var(--text-dim); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .interrupt-joint { align-self: center; color: #d19873; font: 700 17px var(--mono); text-align: center; }
+  .interrupt-body { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); }
+  .interrupt-request { min-width: 0; padding: 14px 16px 16px; border-right: 1px solid #5b4131; }
+  .interrupt-request h3, .interrupt-response h3 { margin: 0 0 7px; font-size: 13px; }
+  .interrupt-question { margin: 0 0 10px; color: #f0ddd0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  .interrupt-payload { max-height: 210px; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .interrupt-response { min-width: 0; padding: 14px 16px 16px; background: rgba(12, 15, 11, .36); }
+  .interrupt-choice-set { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
+  .interrupt-choice-set button { min-width: 0; }
+  .interrupt-choice-set button[aria-pressed="true"] { border-color: #8f7841; background: #382f1d; color: #f3e2b1; }
+  .interrupt-custom[hidden] { display: none; }
+  .interrupt-custom label { display: block; color: var(--text-dim); font-size: 10.5px; }
+  .interrupt-custom textarea { display: block; margin-top: 4px; min-height: 96px; }
+  .interrupt-custom textarea[aria-invalid="true"] { border-color: var(--err); }
+  .interrupt-preview { margin-top: 10px; padding: 9px 10px; border: 1px solid #45503e; border-radius: 7px; background: #171d17; }
+  .interrupt-preview b { display: block; margin-bottom: 5px; color: #b9cbaa; font-size: 10.5px; }
+  .interrupt-preview code { display: block; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; }
+  .interrupt-warning { margin: 10px 0 0; border-left-color: var(--interrupt); }
+  .interrupt-error { margin: 10px 0 0; border-left-color: var(--err); }
+  .interrupt-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 11px; flex-wrap: wrap; }
+  .interrupt-actions .resume { border-color: #5d7553; background: #263422; color: #d7e7cd; }
 
   /* ---------- event feed ---------- */
   #feed { max-height: 380px; overflow-y: auto; }
@@ -1359,6 +1393,8 @@
     .memory-assembly-body { grid-template-columns: 1fr; }
     .memory-assembly-form { border-right: 0; border-bottom: 1px solid #56422c; }
     .memory-follow-head { flex-direction: column; }
+    .interrupt-body { grid-template-columns: 1fr; }
+    .interrupt-request { border-right: 0; border-bottom: 1px solid #5b4131; }
   }
   @media (max-width: 680px) {
     header { padding: 8px 10px; }
@@ -1403,6 +1439,10 @@
     .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-run-row { grid-template-columns: 1fr; }
     .agent-run-row button { justify-self: start; }
+    .interrupt-head { flex-direction: column; }
+    .interrupt-path { grid-template-columns: 1fr; }
+    .interrupt-joint { transform: rotate(90deg); }
+    .interrupt-choice-set { grid-template-columns: 1fr; }
     .memory-head { flex-direction: column; }
     .memory-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .memory-toolbar { grid-template-columns: 1fr; }
@@ -1932,22 +1972,7 @@
           </div>
         </div>
 
-        <div class="card" id="interrupt-card" style="display:none">
-          <h2 class="section" style="margin-top:0; color:var(--interrupt)">Interrupted — human in the loop</h2>
-          <div class="muted tiny">Interrupt payload from the run:</div>
-          <pre class="json" id="interrupt-payload"></pre>
-          <div class="resume-box">
-            <div class="muted tiny" style="margin-bottom:4px">
-              Resume value (JSON if it parses, otherwise sent as a string):
-            </div>
-            <textarea id="inp-resume" spellcheck="false" placeholder='{"approved": true}'></textarea>
-            <div class="row" style="display:flex; gap:8px; margin-top:8px">
-              <button class="primary" id="btn-resume-wait">Resume (wait)</button>
-              <button class="primary" id="btn-resume-stream">Resume (stream)</button>
-              <button class="small" id="btn-resume-dismiss">dismiss</button>
-            </div>
-          </div>
-        </div>
+        <section class="card interrupt-decision" id="interrupt-card" aria-labelledby="interrupt-title" hidden></section>
 
         <div class="card">
           <h2 class="section" style="margin-top:0">Event feed</h2>
@@ -1956,7 +1981,7 @@
 
         <div class="card">
           <h2 class="section" style="margin-top:0">Run result</h2>
-          <div id="run-result"><div class="empty">No run result yet.</div></div>
+            <div id="run-result" tabindex="-1"><div class="empty">No run result yet.</div></div>
         </div>
 
         <div class="card" id="flight-recorder-card">
@@ -2148,6 +2173,7 @@ const store = {
   pollTimer: null,     // background-run poll timer
   pollRequest: 0,      // generation guard for an in-flight background poll
   streamAbort: null,   // AbortController for an active SSE fetch
+  interruptDecision: null, // selected thread's session-only suspension review and exact resume value
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   recReplayRequest: 0,
   recCompareRequest: 0,
@@ -3672,6 +3698,7 @@ function connectionResetWorkspace() {
   store.tasksUnsupported = false;
   stopPoll();
   abortStream();
+  store.interruptDecision = null;
   store.streamRunId = null;
   store.history = [];
   store.selectedCp = null;
@@ -4033,7 +4060,7 @@ function renderMain() {
   store.history = [];
   store.selectedCp = null;
   store.recorder = null;
-  hideInterrupt();
+  hideInterrupt(false);
   $("th-id").textContent = t.thread_id;
   $("th-graph").textContent = t.graph;
   $("th-graph").className = "badge pending";
@@ -4141,25 +4168,39 @@ function stopPoll() {
 
 /* ---------------- run: wait ---------------- */
 
-async function runWait(payloadOverride) {
-  const t = currentThread(); if (!t) return;
-  const operation = connectionOperation(t.thread_id); if (!operation) return;
+function interruptFailureUncertain(error) {
+  const status = Number(error && error.status) || 0;
+  if (status === 503 && error && error.body && error.body.error === "shutting_down") return false;
+  return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function runOperationResult(reportOutcome, result, error = null) {
+  if (reportOutcome) return error ? { ok: false, error } : { ok: true, result };
+  return error ? null : result;
+}
+
+async function runWait(payloadOverride, reportOutcome = false, applyRunOptions = true) {
+  const t = currentThread(); if (!t) return null;
+  const operation = connectionOperation(t.thread_id); if (!operation) return null;
   const connection = operation.connection;
   const payload = payloadOverride !== undefined ? payloadOverride : readPayload();
-  if (payload === null) return;
+  if (payload === null) return null;
   setRunStatus("running", "runs/wait");
   try {
-    const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs/wait`, withRunOpts({ ...payload }));
+    const wirePayload = applyRunOptions ? withRunOpts({ ...payload }) : { ...payload };
+    const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs/wait`, wirePayload);
     if (!connectionOperationCurrent(operation)) return;
     setRunStatus(res.status, `run ${shortId(res.run_id)}`);
-    showRunResult(res);
+    if (!reportOutcome) showRunResult(res);
     refreshState();
     refreshHistory();
     recAutoLoad(res.run_id);
+    return runOperationResult(reportOutcome, res);
   } catch (e) {
-    if (!connectionOperationCurrent(operation)) return;
+    if (!connectionOperationCurrent(operation)) return null;
     setRunStatus(null);
     toast(e.message, "err");
+    return runOperationResult(reportOutcome, null, e);
   }
 }
 
@@ -4172,14 +4213,14 @@ function streamOperationCurrent(controller, operation) {
  * fetch response body. Frames: id / event / data lines, blank-line delimited.
  * ------------------------------------------------------------------------- */
 
-async function runStream(payloadOverride) {
-  const t = currentThread(); if (!t) return;
-  const operation = connectionOperation(t.thread_id); if (!operation) return;
+async function runStream(payloadOverride, reportOutcome = false, applyRunOptions = true) {
+  const t = currentThread(); if (!t) return null;
+  const operation = connectionOperation(t.thread_id); if (!operation) return null;
   const connection = operation.connection;
   const payload = payloadOverride !== undefined ? { ...payloadOverride } : readPayload();
-  if (payload === null) return;
+  if (payload === null) return null;
   payload.stream_mode = selectedStreamModes();
-  withRunOpts(payload);
+  if (applyRunOptions) withRunOpts(payload);
 
   abortStream();
   const ctrl = new AbortController();
@@ -4203,7 +4244,8 @@ async function runStream(payloadOverride) {
       feedEvent("error", { error: "network", message: e.message }, "-");
       setRunStatus(null);
     }
-    return;
+    return runOperationResult(reportOutcome, null,
+      new ApiError(0, { error: e.name === "AbortError" ? "aborted" : "network", message: e.message }));
   }
   if (!res.ok || !res.body) {
     if (!streamOperationCurrent(ctrl, operation)) return;
@@ -4212,7 +4254,7 @@ async function runStream(payloadOverride) {
     if (!streamOperationCurrent(ctrl, operation)) return;
     feedEvent("error", body || { error: "http", message: `HTTP ${res.status}` }, "-");
     setRunStatus(null);
-    return;
+    return runOperationResult(reportOutcome, null, new ApiError(res.status, body));
   }
 
   const reader = res.body.getReader();
@@ -4220,6 +4262,7 @@ async function runStream(payloadOverride) {
   let buf = "";
   let endData = null;
 
+  let streamError = null;
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -4247,21 +4290,66 @@ async function runStream(payloadOverride) {
     }
   } catch (e) {
     if (!streamOperationCurrent(ctrl, operation)) return;
-    if (e.name !== "AbortError") feedEvent("error", { error: "stream", message: e.message }, "-");
+    if (e.name !== "AbortError") {
+      feedEvent("error", { error: "stream", message: e.message }, "-");
+      streamError = new ApiError(0, { error: "stream", message: e.message });
+    }
   }
 
   if (!streamOperationCurrent(ctrl, operation)) return;
-  store.streamAbort = null;
 
   if (endData) {
     setRunStatus(endData.status, "stream ended");
-    if (endData.status === "interrupted") showInterrupt(endData.interrupt);
+    if (endData.status === "interrupted") {
+      const runId = store.streamRunId;
+      let terminal = null;
+      let boundaryError = runId ? "" : "The stream ended without a run identity, so Studio cannot bind a resume to this suspension boundary.";
+      const shown = showInterrupt(endData.interrupt,
+        { threadId: t.thread_id, runId, boundaryError }, { replace: reportOutcome });
+      const boundaryDraft = shown ? store.interruptDecision : null;
+      if (runId && boundaryDraft) {
+        boundaryDraft.submitting = true;
+        interruptRender();
+        $("interrupt-title")?.focus({ preventScroll: true });
+      }
+      if (runId && boundaryDraft) {
+        try {
+          terminal = await apiForConnection(connection, "GET", `/runs/${encodeURIComponent(runId)}`);
+          if (!streamOperationCurrent(ctrl, operation) || store.interruptDecision !== boundaryDraft) return;
+          const evidence = interruptBoundaryFromRun(terminal, { threadId: t.thread_id, runId, interrupt: endData.interrupt });
+          if (evidence.verified) {
+            endData = terminal;
+            showRunResult(terminal, { replaceInterrupt: true });
+          } else {
+            boundaryError = evidence.boundaryError;
+          }
+        } catch (error) {
+          if (!streamOperationCurrent(ctrl, operation) || store.interruptDecision !== boundaryDraft) return;
+          boundaryError = `Studio could not corroborate the streamed suspension: ${error.message}`;
+        }
+      }
+      if (!terminal || !interruptBoundaryFromRun(terminal, { threadId: t.thread_id, runId, interrupt: endData.interrupt }).verified) {
+        if (boundaryDraft && store.interruptDecision === boundaryDraft) {
+          boundaryDraft.boundaryError = boundaryError;
+          boundaryDraft.submitting = false;
+          interruptRender();
+          $("interrupt-error")?.focus({ preventScroll: true });
+        }
+        endData = { ...endData, run_id: runId || "", thread_id: t.thread_id, boundary_error: boundaryError };
+      }
+    }
   } else {
     setRunStatus(null);
   }
   refreshState();
   refreshHistory();
   if (store.streamRunId) recAutoLoad(store.streamRunId);
+  store.streamAbort = null;
+  if (!endData) {
+    const error = streamError || new ApiError(0, { error: "stream_incomplete", message: "The event stream ended without a terminal frame." });
+    return runOperationResult(reportOutcome, null, error);
+  }
+  return runOperationResult(reportOutcome, endData);
 }
 
 function abortStream() {
@@ -4313,34 +4401,294 @@ function feedEvent(kind, data, id) {
 
 /* ---------------- run result & interrupt ---------------- */
 
-function showRunResult(res) {
+function showRunResult(res, options = {}) {
   const el = $("run-result");
   el.innerHTML = `${badge(res.status)}<pre class="json">${escapeHtml(pretty(res))}</pre>`;
-  if (res.status === "interrupted") showInterrupt(res.interrupt);
+  if (res.status === "interrupted") {
+    const evidence = interruptBoundaryFromRun(res, { threadId: currentThread()?.thread_id, runId: res.run_id, interrupt: res.interrupt });
+    showInterrupt(res.interrupt, evidence, { replace: Boolean(options.replaceInterrupt) });
+  }
 }
 
-function showInterrupt(value) {
-  $("interrupt-card").style.display = "block";
-  $("interrupt-payload").textContent = pretty(value);
-  $("interrupt-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+const INTERRUPT_RESPONSE_LIMIT = 32768;
+const INTERRUPT_PAYLOAD_LIMIT = 12000;
+
+function interruptText(value, maximum = 400) {
+  const text = typeof value === "string" ? value : "";
+  return text.length <= maximum ? text : `${text.slice(0, Math.max(0, maximum - 1))}…`;
 }
 
-function hideInterrupt() {
-  $("interrupt-card").style.display = "none";
-  $("inp-resume").value = "";
+function interruptQuestion(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "The run paused and is waiting for an explicit response.";
+  for (const key of ["question", "prompt", "message", "title"]) {
+    if (typeof value[key] === "string" && value[key].trim()) return interruptText(value[key], 600);
+  }
+  return "The run paused and is waiting for an explicit response.";
 }
 
-function resumeValue() {
-  const raw = $("inp-resume").value.trim();
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return raw; }   // plain string fallback
+function interruptApprovalLike(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const kind = String(value.type || value.kind || "").toLowerCase();
+  const expected = value.expected_response || value.response_schema || value.schema;
+  return ["approval", "approve", "confirmation", "consent"].includes(kind) ||
+    Boolean(expected && typeof expected === "object" && !Array.isArray(expected) && (
+      typeof expected.approved === "boolean" || expected.approved === "boolean" ||
+      (expected.type === "object" && expected.properties && expected.properties.approved &&
+        expected.properties.approved.type === "boolean" && Array.isArray(expected.required) && expected.required.includes("approved"))));
 }
 
-function resume(wait) {
-  const v = resumeValue();
-  const payload = { command: { resume: v } };
-  hideInterrupt();
-  if (wait) runWait(payload); else runStream(payload);
+function interruptCanonical(value) {
+  if (Array.isArray(value)) return value.map(interruptCanonical);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, interruptCanonical(value[key])]));
+}
+
+function interruptJsonEqual(left, right) {
+  try { return JSON.stringify(interruptCanonical(left)) === JSON.stringify(interruptCanonical(right)); }
+  catch { return false; }
+}
+
+function interruptBoundaryFromRun(run, expected = {}) {
+  const threadId = typeof run?.thread_id === "string" ? run.thread_id : "";
+  const runId = typeof run?.run_id === "string" ? run.run_id : "";
+  const checkpointId = typeof run?.checkpoint_id === "string" ? run.checkpoint_id : "";
+  const mismatch = !run || run.status !== "interrupted" || !threadId || !runId || !checkpointId ||
+    (expected.threadId && threadId !== expected.threadId) ||
+    (expected.runId && runId !== expected.runId) ||
+    (Object.prototype.hasOwnProperty.call(expected, "interrupt") && !interruptJsonEqual(run.interrupt, expected.interrupt));
+  return {
+    threadId: expected.threadId || threadId,
+    runId: expected.runId || runId,
+    checkpointId: mismatch ? "" : checkpointId,
+    verified: !mismatch,
+    boundaryError: mismatch ? "The terminal run record did not match this interrupt's run, thread, request, and checkpoint evidence. Refresh the suspension boundary before responding." : "",
+  };
+}
+
+function interruptResumePayload(draft, value) {
+  if (!draft || !draft.verified || !draft.checkpointId) return null;
+  return { command: { resume: value }, checkpoint: { checkpoint_id: draft.checkpointId } };
+}
+
+function interruptParseResponse(mode, raw) {
+  if (mode === "approve") return { valid: true, value: { approved: true }, kind: "JSON object", error: "" };
+  if (mode === "deny") return { valid: true, value: { approved: false }, kind: "JSON object", error: "" };
+  if (!["json", "string"].includes(mode)) return { valid: false, value: null, kind: "", error: "Choose a response shape." };
+  const text = typeof raw === "string" ? raw : "";
+  if (agentUtf8Length(text) > INTERRUPT_RESPONSE_LIMIT) {
+    return { valid: false, value: null, kind: "", error: "The response must be 32 KiB or smaller." };
+  }
+  if (mode === "string") return { valid: true, value: text, kind: "exact string", error: "" };
+  if (!text.length) return { valid: false, value: null, kind: "", error: "Enter a JSON response. Type null for JSON null, or choose Exact string." };
+  try {
+    const value = JSON.parse(text);
+    try { agentValidateManifestNumbers(text); }
+    catch { return { valid: false, value: null, kind: "", error: "JSON numbers must be finite and exactly representable by this browser." }; }
+    return { valid: true, value, kind: "JSON value", error: "" };
+  } catch { return { valid: false, value: null, kind: "", error: "Enter valid JSON, or choose Exact string to preserve these characters literally." }; }
+}
+
+function interruptResponsePreview(result) {
+  if (!result || !result.valid) return "No valid response is ready.";
+  const rendered = typeof result.value === "string" ? result.value : pretty(result.value);
+  return `${result.kind}\n${interruptText(rendered, 2000)}`;
+}
+
+function interruptDraft(value, context = {}) {
+  const approval = interruptApprovalLike(value);
+  return {
+    payload: value,
+    question: interruptQuestion(value),
+    approval,
+    mode: approval ? "approve" : "json",
+    customRaw: "",
+    threadId: String(context.threadId || ""),
+    runId: typeof context.runId === "string" ? context.runId : "",
+    checkpointId: typeof context.checkpointId === "string" ? context.checkpointId : "",
+    verified: context.verified === true,
+    boundaryError: typeof context.boundaryError === "string" ? context.boundaryError : "",
+    returnFocus: typeof context.returnFocus === "string" ? context.returnFocus : "",
+    submitting: false,
+    locked: false,
+    error: "",
+    fieldError: "",
+  };
+}
+
+function interruptPayloadText(value) {
+  try { return memoryJsonText(value, INTERRUPT_PAYLOAD_LIMIT); }
+  catch { return "Interrupt payload could not be rendered safely."; }
+}
+
+function interruptRenderHtml(draft) {
+  const response = interruptParseResponse(draft.mode, draft.customRaw);
+  const disabled = draft.submitting || draft.locked || !draft.verified;
+  const visibleError = draft.error || draft.boundaryError;
+  const status = visibleError ? `<div class="note interrupt-error" id="interrupt-error" role="alert" tabindex="-1"><b>${draft.locked ? "Resume outcome is uncertain" : !draft.verified ? "Suspension boundary not verified" : "Decision not ready"}</b><br>${escapeHtml(visibleError)}</div>` : "";
+  const customInvalid = draft.fieldError ? ` aria-invalid="true" aria-describedby="interrupt-custom-error"` : "";
+  const runLabel = draft.runId ? shortId(draft.runId) : "selected run";
+  const checkpointLabel = draft.checkpointId ? shortId(draft.checkpointId) : "server suspension boundary";
+  return `<div class="interrupt-head"><div><h2 id="interrupt-title" tabindex="-1">Human decision boundary</h2>` +
+    `<p>The run is suspended. Review the bounded request preview and the exact response value before Rusty resumes execution.</p>` +
+    `<span class="interrupt-boundary">Paused execution · checkpoint-bound response · browser review is session-only</span></div></div>` +
+    `<div class="interrupt-path" role="list" aria-label="Interrupt and resume path">` +
+      `<div class="interrupt-stage" role="listitem"><b>01 · Interrupted run</b><span>${escapeHtml(runLabel)} · thread ${escapeHtml(shortId(draft.threadId || "unknown"))}</span></div>` +
+      `<div class="interrupt-joint" aria-hidden="true">→</div>` +
+      `<div class="interrupt-stage boundary" role="listitem"><b>02 · Suspension checkpoint</b><span>${escapeHtml(checkpointLabel)} · active step will re-execute</span></div>` +
+      `<div class="interrupt-joint" aria-hidden="true">◇</div>` +
+      `<div class="interrupt-stage response" role="listitem"><b>03 · Reviewed response</b><span>${escapeHtml(response.valid ? response.kind : "response required")}</span></div></div>` +
+    status + `<div class="interrupt-body"><section class="interrupt-request" aria-labelledby="interrupt-request-title">` +
+      `<h3 id="interrupt-request-title">What the run is asking</h3><p class="interrupt-question">${escapeHtml(draft.question)}</p>` +
+      `<details ${draft.question.startsWith("The run paused") ? "open" : ""}><summary>Bounded interrupt payload preview</summary><pre class="json interrupt-payload">${escapeHtml(interruptPayloadText(draft.payload))}</pre></details>` +
+      `<div class="note interrupt-warning"><b>Resume boundary</b><br>The suspended super-step and its active siblings execute again. Review tool/effect safeguards before approving work that may have external consequences.</div>` +
+    `</section><form class="interrupt-response" id="interrupt-response-form"><h3>Choose the exact response</h3>` +
+      `<div class="interrupt-choice-set" role="group" aria-label="Resume response shape">` +
+        (draft.approval ? `<button class="small" type="button" data-interrupt-mode="approve" aria-pressed="${draft.mode === "approve"}" ${disabled ? "disabled" : ""}>Approve</button>` +
+          `<button class="small" type="button" data-interrupt-mode="deny" aria-pressed="${draft.mode === "deny"}" ${disabled ? "disabled" : ""}>Deny</button>` : "") +
+        `<button class="small" type="button" data-interrupt-mode="json" aria-pressed="${draft.mode === "json"}" ${disabled ? "disabled" : ""}>JSON value</button>` +
+        `<button class="small" type="button" data-interrupt-mode="string" aria-pressed="${draft.mode === "string"}" ${disabled ? "disabled" : ""}>Exact string</button></div>` +
+      (draft.approval ? `<p class="muted tiny">Approve and Deny use Rusty's common <code>{"approved": boolean}</code> convention. Choose JSON value or Exact string when this graph expects another contract.</p>` : "") +
+      `<div class="interrupt-custom" ${["json", "string"].includes(draft.mode) ? "" : "hidden"}><label for="inp-resume">${draft.mode === "string" ? "Exact string, including leading or trailing spaces" : "JSON value"}` +
+        `<textarea id="inp-resume" spellcheck="false" autocomplete="off" ${disabled ? "disabled" : ""}${customInvalid} placeholder='{"approved": true}'>${escapeHtml(draft.customRaw)}</textarea>` +
+        (draft.fieldError ? `<span class="field-error" id="interrupt-custom-error">${escapeHtml(draft.fieldError)}</span>` : "") + `</label></div>` +
+      `<div class="interrupt-preview" aria-live="polite"><b>Value Rusty will receive as command.resume</b><code id="interrupt-response-preview">${escapeHtml(interruptResponsePreview(response))}</code></div>` +
+      `<div class="interrupt-actions">` +
+        (draft.locked ? `<button class="small" type="button" data-interrupt-refresh>Refresh state and history</button>` : !draft.verified ?
+          (draft.runId ? `<button class="small" type="button" data-interrupt-refresh-boundary ${draft.submitting ? "disabled" : ""}>${draft.submitting ? "Corroborating…" : "Refresh suspension boundary"}</button>` :
+            `<span class="muted tiny">This stream supplied no run identity. Resume is unavailable; inspect the event feed and run the workflow again.</span>`) :
+          `<button class="small resume" type="submit" data-interrupt-resume="stream" ${draft.submitting ? "disabled" : ""}>Resume with live events</button>` +
+          `<button class="primary" type="submit" data-interrupt-resume="wait" ${draft.submitting ? "disabled" : ""}>Resume and wait</button>`) +
+      `</div></form></div>`;
+}
+
+function interruptRender() {
+  const card = $("interrupt-card");
+  const draft = store.interruptDecision;
+  card.hidden = !draft;
+  card.setAttribute("aria-busy", draft && draft.submitting ? "true" : "false");
+  card.innerHTML = draft ? interruptRenderHtml(draft) : "";
+  for (const id of ["btn-run", "btn-run-wait", "btn-run-stream", "btn-replay"]) $(id).disabled = Boolean(draft);
+}
+
+function showInterrupt(value, evidence = {}, options = {}) {
+  const active = document.activeElement;
+  const thread = currentThread();
+  const existing = store.interruptDecision;
+  if (existing && !options.replace && (existing.runId !== evidence.runId || existing.checkpointId !== evidence.checkpointId)) {
+    toast("Resolve the open decision before starting or reviewing another interrupted run in this thread.", "warn");
+    return false;
+  }
+  store.interruptDecision = interruptDraft(value, {
+    threadId: evidence.threadId || (thread && thread.thread_id),
+    runId: evidence.runId,
+    checkpointId: evidence.checkpointId,
+    verified: evidence.verified,
+    boundaryError: evidence.boundaryError,
+    returnFocus: active && active.id,
+  });
+  interruptRender();
+  $("interrupt-title")?.focus({ preventScroll: true });
+  $("interrupt-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return true;
+}
+
+function hideInterrupt(restoreFocus = true) {
+  const draft = store.interruptDecision;
+  store.interruptDecision = null;
+  interruptRender();
+  if (!restoreFocus) return;
+  const target = draft && draft.returnFocus && $(draft.returnFocus);
+  (target || $("run-result") || $("thread-head"))?.focus({ preventScroll: true });
+  if (draft) toast("Decision review hidden; the thread remains suspended until it receives a resume value.", "warn");
+}
+
+function interruptSetMode(mode) {
+  const draft = store.interruptDecision;
+  if (!draft || draft.submitting || draft.locked || !["approve", "deny", "json", "string"].includes(mode) ||
+      (["approve", "deny"].includes(mode) && !draft.approval)) return;
+  draft.mode = mode;
+  draft.error = "";
+  draft.fieldError = "";
+  interruptRender();
+  const target = $("interrupt-card").querySelector(`[data-interrupt-mode="${mode}"]`);
+  target?.focus({ preventScroll: true });
+}
+
+function interruptEditCustom(event) {
+  const draft = store.interruptDecision;
+  if (!draft || draft.submitting || draft.locked || event.target.id !== "inp-resume") return;
+  draft.customRaw = event.target.value;
+  draft.error = "";
+  draft.fieldError = "";
+  event.target.removeAttribute("aria-invalid");
+  event.target.removeAttribute("aria-describedby");
+  $("interrupt-custom-error")?.remove();
+  const preview = $("interrupt-response-preview");
+  if (preview) preview.textContent = interruptResponsePreview(interruptParseResponse(draft.mode, draft.customRaw));
+}
+
+async function interruptRefreshBoundary() {
+  const draft = store.interruptDecision;
+  if (!draft || draft.submitting || draft.locked || draft.verified || !draft.runId) return;
+  const operation = connectionOperation(draft.threadId);
+  if (!operation) return;
+  draft.submitting = true;
+  draft.boundaryError = "";
+  interruptRender();
+  $("interrupt-title")?.focus({ preventScroll: true });
+  try {
+    const terminal = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(draft.runId)}`);
+    if (!connectionOperationCurrent(operation) || store.interruptDecision !== draft) return;
+    const evidence = interruptBoundaryFromRun(terminal, { threadId: draft.threadId, runId: draft.runId, interrupt: draft.payload });
+    draft.checkpointId = evidence.checkpointId;
+    draft.verified = evidence.verified;
+    draft.boundaryError = evidence.boundaryError;
+  } catch (error) {
+    if (!connectionOperationCurrent(operation) || store.interruptDecision !== draft) return;
+    draft.boundaryError = `Studio could not corroborate the suspension boundary: ${error.message}`;
+  }
+  draft.submitting = false;
+  interruptRender();
+  const readyTarget = ["json", "string"].includes(draft.mode)
+    ? $("inp-resume")
+    : $("interrupt-card").querySelector(`[data-interrupt-mode="${draft.mode}"]`);
+  (draft.verified ? readyTarget : $("interrupt-error"))?.focus({ preventScroll: true });
+}
+
+async function resume(wait) {
+  const draft = store.interruptDecision;
+  if (!draft || draft.submitting || draft.locked || !draft.verified || !store.conn || currentThread()?.thread_id !== draft.threadId) return;
+  const response = interruptParseResponse(draft.mode, draft.customRaw);
+  if (!response.valid) {
+    draft.error = "Review the highlighted response before resuming the run.";
+    draft.fieldError = response.error;
+    interruptRender();
+    $("inp-resume")?.focus({ preventScroll: true });
+    return;
+  }
+  draft.submitting = true;
+  draft.error = "";
+  draft.fieldError = "";
+  interruptRender();
+  $("interrupt-title")?.focus({ preventScroll: true });
+  const payload = interruptResumePayload(draft, response.value);
+  if (!payload) return;
+  const outcome = wait ? await runWait(payload, true, false) : await runStream(payload, true, false);
+  if (store.interruptDecision !== draft) return;
+  if (outcome && outcome.ok) {
+    showRunResult(outcome.result, { replaceInterrupt: true });
+    if (store.interruptDecision !== draft) return;
+    hideInterrupt(false);
+    $("run-result")?.focus({ preventScroll: true });
+    return;
+  }
+  draft.submitting = false;
+  draft.locked = interruptFailureUncertain(outcome && outcome.error);
+  draft.error = draft.locked
+    ? "Studio did not receive a terminal resume receipt. The exact reviewed response is locked because the server may already have accepted it. Inspect refreshed state and history before taking another action; Studio will not submit it twice."
+    : `Rusty rejected this resume before acceptance: ${outcome?.error?.message || "request rejected"}. The reviewed response remains editable and can be retried.`;
+  interruptRender();
+  $("interrupt-error")?.focus({ preventScroll: true });
 }
 
 /* ---------------- state viewer ---------------- */
@@ -4422,7 +4770,7 @@ async function refreshHistory() {
 function updateHistSelection() {
   const cp = store.selectedCp;
   $("btn-fork").disabled = !cp;
-  $("btn-replay").disabled = !cp;
+  $("btn-replay").disabled = !cp || Boolean(store.interruptDecision);
   $("hist-sel-label").textContent = cp && cp.checkpoint
     ? `selected: step ${cp.checkpoint.step} · ${shortId(cp.checkpoint.checkpoint_id)}`
     : "select a checkpoint";
@@ -13483,9 +13831,23 @@ function init() {
   $("btn-run").onclick = runBackground;
   $("btn-run-wait").onclick = () => runWait();
   $("btn-run-stream").onclick = () => runStream();
-  $("btn-resume-wait").onclick = () => resume(true);
-  $("btn-resume-stream").onclick = () => resume(false);
-  $("btn-resume-dismiss").onclick = hideInterrupt;
+  $("interrupt-card").addEventListener("input", interruptEditCustom);
+  $("interrupt-card").addEventListener("click", (event) => {
+    const mode = event.target.closest("[data-interrupt-mode]");
+    if (mode) { interruptSetMode(mode.getAttribute("data-interrupt-mode")); return; }
+    if (event.target.closest("[data-interrupt-refresh]")) {
+      refreshState();
+      refreshHistory();
+      toast("Refreshing the thread boundary; the reviewed response remains locked.", "warn");
+      return;
+    }
+    if (event.target.closest("[data-interrupt-refresh-boundary]")) interruptRefreshBoundary();
+  });
+  $("interrupt-card").addEventListener("submit", (event) => {
+    if (event.target.id !== "interrupt-response-form") return;
+    event.preventDefault();
+    resume(event.submitter?.getAttribute("data-interrupt-resume") !== "stream");
+  });
   $("btn-refresh-state").onclick = refreshState;
   $("btn-refresh-history").onclick = refreshHistory;
   $("btn-fork").onclick = forkAtSelected;

@@ -153,9 +153,17 @@ studio/
   - **Older-server fallback** — if a fork call 404s with a non-JSON body (an `rusty-agent-server` older
     than v0.3 has no `/fork` route), the Studio falls back to its original client-side composition
     (new thread + `POST /threads/{new}/state`) and says so in the toast.
-  - **Interrupt / resume helper** — when any run ends `interrupted`, the interrupt payload is shown with a
-    resume input; the value is sent back as `{"command": {"resume": <value>}}` (parsed as JSON when
-    possible, otherwise sent as a plain string), via *wait* or *stream*.
+  - **Human decision boundary** — when a run ends `interrupted`, Studio keeps a bounded request preview
+    beside its corroborated run, thread, and suspension-checkpoint identities. Only requests with an
+    explicit approval discriminator or boolean response schema offer **Approve** / **Deny** shortcuts;
+    every request supports a custom JSON value or an exact string. The outgoing `command.resume` value is
+    visible before either **Resume and wait** or **Resume with live events**, and the request pins that
+    value to the reviewed checkpoint. The boundary also warns that the suspended super-step and active
+    siblings re-execute. Studio disables competing run launches while the decision is open. A confirmed
+    rejection remains editable; an unconfirmed response locks the reviewed value instead of submitting it
+    twice. Only the browser review draft is session-only: the executor journals interrupt and resume
+    evidence according to the server's configured durable store. This is a selected-thread decision
+    surface, not a durable assigned review inbox.
   - **Flight Recorder timeline** — `GET /runs/{run_id}/events` (R0.5) rendered as a scrubbable timeline of
     the run's journaled evidence: one lane per node (plus a run-wide lane for super-step boundaries,
     routing decisions, and checkpoint writes), event chips colored by `kind`, and super-step grouping
@@ -274,10 +282,12 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
    `seq` order. With the R0.5 replay endpoints on the server, **Replay** re-drives the run and shows the
    verified banner; for compare, run the same thread twice with different inputs and diff the two run
    ids — the shared prefix dims and the fork point is marked.
-7. **Interrupt/resume** (needs a graph that interrupts — the demo graphs don't; see
+7. **Human decision boundary** (needs a graph that interrupts — the demo graphs don't; see
    [`docs/server-quickstart.md`](../docs/server-quickstart.md) for a graph with `ctx.interrupt()`): when a
-   run ends interrupted, the interrupt payload card appears; type `{"approved": true}`, click
-   **Resume (wait)**, and the run continues from the interrupted node.
+   run ends interrupted, review the bounded request preview and corroborated suspension checkpoint. The
+   quickstart payload has no response schema, so choose **JSON value**, enter `{"approved": true}`, verify
+   the exact outgoing value, then click **Resume and wait**. The decision remains visible until Rusty
+   confirms the resumed run.
 
 ## Limitations (by design or by server version)
 
