@@ -198,6 +198,34 @@ impl RngSource {
     pub fn uuid_string(&self) -> String {
         self.uuid().to_string()
     }
+
+    /// A uniform draw from `[0, 1)` with 53 bits of mantissa (R0.10 wave 2).
+    ///
+    /// The runtime's decision points consume entropy beyond id minting:
+    /// backoff jitter, the digital twin's fault schedules and schedule
+    /// randomization, and stochastic shadow policies exploring by seeded
+    /// draw. Sourcing those draws through the same seam as ids keeps a
+    /// seeded run's *entire* draw sequence reproducible — a twin run
+    /// reproduces exactly from its seed and fixture. The system mode derives
+    /// its draw from OS entropy via [`RngSource::uuid`], the same source the
+    /// system mode already trusts for ids.
+    pub fn next_f64(&self) -> f64 {
+        let bits = match self {
+            RngSource::System => {
+                let bytes = self.uuid().into_bytes();
+                u64::from_le_bytes(bytes[..8].try_into().expect("a uuid is 16 bytes"))
+            }
+            RngSource::Seeded(seeded) => {
+                use rand::RngCore as _;
+                seeded
+                    .rng
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .next_u64()
+            }
+        };
+        (bits >> 11) as f64 / 9_007_199_254_740_992.0
+    }
 }
 
 /// A shared ChaCha8 stream behind a mutex (interior mutability lets the

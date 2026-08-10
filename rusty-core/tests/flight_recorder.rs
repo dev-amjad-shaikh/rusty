@@ -117,6 +117,7 @@ fn sample_decision_event() -> DecisionEvent {
         selected: DecisionAction::Retry { attempt: 2 },
         propensity: 0.8,
         policy_version: PolicyVersion::new("static-v0"),
+        role: None,
         outcome: Some(DecisionOutcome::Success),
         decided_at: fixed_time(),
     }

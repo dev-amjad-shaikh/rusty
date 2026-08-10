@@ -1364,6 +1364,7 @@ fn emit_timeout_decision(journal: &Journal, seq: u64, samples: &[u64], bound_ms:
         selected: DecisionAction::SetTimeout { millis: bound_ms },
         propensity: 1.0,
         policy_version: PolicyVersion::default(),
+        role: None,
         outcome: None,
         decided_at: Utc::now(),
     };
@@ -1399,6 +1400,7 @@ fn emit_placement_decision(journal: &Journal, seq: u64, queue_depth: u64, worker
         },
         propensity: 1.0,
         policy_version: PolicyVersion::default(),
+        role: None,
         outcome: None,
         decided_at: Utc::now(),
     };
@@ -1433,6 +1435,7 @@ fn emit_concurrency_decision(
         selected: DecisionAction::SetConcurrency { limit: cap },
         propensity: 1.0,
         policy_version: PolicyVersion::default(),
+        role: None,
         outcome: None,
         decided_at: Utc::now(),
     };

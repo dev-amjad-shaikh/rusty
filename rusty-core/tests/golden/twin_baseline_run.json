@@ -1,0 +1,26 @@
+{
+  "event_count": 18,
+  "head_hash": "115689edf59ca163432f2c8bd8e6ec9f5045f5bf20fe59a6c5f9d76704cde271",
+  "metrics": {
+    "attempts": 4,
+    "completed": 4,
+    "cost_usd": 0.003,
+    "dead_lettered": 0,
+    "failed": 0,
+    "item_latency_p50_ms": 100,
+    "item_latency_p95_ms": 1600,
+    "items": 4,
+    "wall_time_ms": 1650
+  },
+  "report": {
+    "bound": "the twin evaluates only decisions that change when/whether effects execute — retry counts, backoff delays, timeout bounds, placement among equivalent workers, concurrency caps, checkpoint cadence — never what effects return; a decision that would change an effect's input is unevaluable and was excluded or refused",
+    "decisions": 10,
+    "evaluable_decisions": 10,
+    "excluded": [],
+    "faults_declared": 0,
+    "faults_fired": 0,
+    "run_id": "twin:run-twin:000000000000002a",
+    "seed": 42,
+    "shadow_divergences": []
+  }
+}

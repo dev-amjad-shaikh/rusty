@@ -81,7 +81,11 @@ pub const FIXTURE_FORMAT_VERSION: u32 = 1;
 /// whose recorded responses replace live execution. Super-step boundaries,
 /// node inputs/outputs, routing decisions, interrupts, and checkpoint writes
 /// are *re-derived* by the executor, never served.
-const SERVABLE_KINDS: [RunEventKind; 4] = [
+///
+/// Public so the digital twin (`crate::twin`) decomposes a recorded run into
+/// the same effect set replay serves — one servable-kind vocabulary, shared
+/// by replay and the twin, rather than two lists that can drift.
+pub const SERVABLE_KINDS: [RunEventKind; 4] = [
     RunEventKind::ModelCall,
     RunEventKind::ToolCall,
     RunEventKind::RemoteCall,

@@ -324,6 +324,9 @@ pub fn retry_decision_event(
         selected: retry_selected_action(decision, attempt),
         propensity: 1.0,
         policy_version: policy_version.clone(),
+        // Acting by construction: the v1 emission point records the decision
+        // that executed. The twin's shadow pairs mark roles explicitly.
+        role: None,
         outcome,
         decided_at,
     }

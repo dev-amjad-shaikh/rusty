@@ -694,6 +694,29 @@ pub enum DecisionOutcome {
     Cancelled,
 }
 
+/// The role a [`DecisionEvent`] played in its run (R0.10 wave 2, the runtime
+/// digital twin).
+///
+/// Additive to the R0.8 contract: absent from the wire when `None`, so every
+/// pre-twin decision — all of which were made by the policy whose action
+/// executed — keeps its exact shape. The twin is the first emitter that
+/// records *two* decisions at one decision point (the shadow pair), which is
+/// what makes the marker necessary: without it, off-policy evaluation cannot
+/// tell the decision that bound the world from the one that merely scored
+/// the same features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionRole {
+    /// The decision whose selected action executed (the floor's, in a twin
+    /// shadow run).
+    Acting,
+    /// A candidate policy's decision over the same features, journaled for
+    /// off-policy evidence but never executed. Well-posed evidence requires
+    /// the shadow's true propensity; a shadow exploring by seeded draw is a
+    /// stochastic policy with known propensities by construction.
+    Shadow,
+}
+
 /// One executor policy decision with everything offline learning needs to
 /// evaluate it.
 ///
@@ -746,6 +769,13 @@ pub struct DecisionEvent {
 
     /// The policy that made the decision.
     pub policy_version: PolicyVersion,
+
+    /// Whether this decision's action executed or only scored the features
+    /// (R0.10 wave 2 shadow pairs; see [`DecisionRole`]). `None` — every
+    /// decision recorded before the twin — means acting: the only decisions
+    /// that existed were the ones that bound the world.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<DecisionRole>,
 
     /// The result of the decision, `None` until completion.
     pub outcome: Option<DecisionOutcome>,
@@ -1365,6 +1395,7 @@ mod tests {
             selected: DecisionAction::Retry { attempt: 1 },
             propensity: 0.75,
             policy_version: PolicyVersion::default(),
+            role: None,
             outcome: None,
             decided_at: DateTime::<Utc>::from_timestamp_millis(1_000).unwrap(),
         };

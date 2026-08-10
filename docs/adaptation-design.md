@@ -432,6 +432,39 @@ deterministically (same seed, same journal hash); a counterfactual branch over o
 retry decision produces a journaled branch diff; a shadow policy's decisions journal with
 propensities alongside the floor's, and the pair reproduces exactly under re-run.
 
+> **Wave 2 status: implemented (2026-08-09).** The twin landed as
+> `rusty-core/src/twin.rs` with additive seams only: `DecisionRole` on
+> `DecisionEvent` (absent from the wire when unset, so the R0.8 contract is
+> byte-stable), `RngSource::next_f64` for seeded draws beyond id minting, and
+> `replay::SERVABLE_KINDS` made public so replay and the twin share one
+> servable-kind vocabulary. All four mechanisms are in: `FaultSchedule`
+> (attempt, decision-point, window, and worker anchors over the four
+> injectable faults — crash-as-`Unknown` at the lease boundary, callee
+> timeout, rate limit with `Retry-After` floor, resource exhaustion), seeded
+> schedule randomization of each super-step's parallel task set (journaled
+> order stays canonical; admission waits and per-node latencies follow the
+> drawn order), counterfactual forks validated against the recomputed legal
+> set — illegal forks and forks at decisions the run never reaches are
+> refused with a typed `UnevaluableCase` — with
+> `CounterfactualFork::then_act_with` landing R0.5's deferred hybrid replay,
+> and shadow policies whose decisions journal as `PolicyDecision` pairs
+> (`acting`/`shadow` roles, true propensities, seeded-draw exploration)
+> alongside the floor's. Every `TwinReport` carries the validity bound as a
+> required field (open question 5, resolved as leaned), plus fired/declared
+> fault counts and shadow divergences. Determinism is the test bar and it
+> holds: same seed + fixture ⇒ byte-identical journals across repeated runs
+> and across process invocations (a checked-in golden pins head hash,
+> metrics, and report). Two modeling decisions, stated in the module docs
+> and here: the twin's scheduler is synchronous and simulated (the fork is
+> journal-level — `BranchDiff` evidence, as specified — rather than
+> `Checkpointer::fork_thread`, because the twin re-drives the journaled
+> effect set rather than the graph executor; checkpoint-cadence evaluation
+> stays with the R0.5 checkpoint machinery), and a recorded error classifies
+> `Unknown` on re-observation (the recording is all the twin knows). Wave
+> 3's twin-backed `CandidateEvaluator` consumes `Twin::run`,
+> `Twin::run_interleavings`, `Twin::counterfactual`, and the shadow-pair
+> evidence directly.
+
 **Wave 3 — the learned families through the policy plane.** Retry and timeout land (the
 recommendation, subject to Wave 1): the application loop reads bound policy parameters at
 the decision points, the timeout emission point is added, the twin-backed

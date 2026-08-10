@@ -1,0 +1,28 @@
+{
+  "seed": 7,
+  "injections": [
+    {
+      "anchor": "on_attempt",
+      "effect_seq": 3,
+      "attempt": 2,
+      "fault": "callee_timeout"
+    },
+    {
+      "anchor": "at_decision",
+      "decision_seq": 5,
+      "fault": "worker_crash"
+    },
+    {
+      "anchor": "window",
+      "from_seq": 10,
+      "to_seq": 14,
+      "fault": "rate_limited",
+      "retry_after_ms": 1500
+    },
+    {
+      "anchor": "on_worker",
+      "worker": "worker-1",
+      "fault": "resource_exhausted"
+    }
+  ]
+}

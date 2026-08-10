@@ -74,6 +74,16 @@
 //!   remote, and WASM calls are served from the journal instead of executed —
 //!   plus branch diffs between journal snapshots and portable
 //!   [`replay::ReplayFixture`] bundles for CI.
+//! - **The runtime digital twin** ([`twin`], R0.10 wave 2): deterministic
+//!   re-execution of recorded runs that answers what plain replay cannot —
+//!   seeded [`twin::FaultSchedule`]s landing at decision points and the
+//!   effect boundary, seeded schedule randomization of each super-step's
+//!   parallel task set, counterfactual branches over one changed decision
+//!   compared as [`replay::BranchDiff`] evidence, and shadow policies whose
+//!   decisions journal with roles and propensities alongside the acting
+//!   floor's. Bounded by the honest edge: only decisions that change *when
+//!   and whether* effects execute are evaluable, and every
+//!   [`twin::TwinReport`] says so.
 //! - **Governed memory** ([`memory`], R0.8 wave 1): the record model
 //!   ([`memory::MemoryRecord`] — content-addressed, scoped, attributed,
 //!   superseding, expiring), structured retrieval with a token-bounded
@@ -171,6 +181,7 @@ pub mod replay;
 pub mod state;
 pub mod team_trace;
 pub mod tool;
+pub mod twin;
 #[cfg(feature = "wasm")]
 pub mod wasm_node;
 
@@ -251,9 +262,9 @@ pub mod prelude {
     pub use crate::record::{
         derive_policy_version, ArtifactRef, CapsuleVersion, CheckpointHeader,
         ConcurrencyPolicyParameters, DecisionAction, DecisionEvent, DecisionFamily,
-        DecisionOutcome, Effect, EffectReceipt, EventStatus, ExecutorPolicy, JournalRef,
-        PayloadRef, PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind, RunManifest,
-        TimeoutPolicyParameters, CURRENT_FORMAT_VERSION,
+        DecisionOutcome, DecisionRole, Effect, EffectReceipt, EventStatus, ExecutorPolicy,
+        JournalRef, PayloadRef, PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind,
+        RunManifest, TimeoutPolicyParameters, CURRENT_FORMAT_VERSION,
     };
     pub use crate::replay::{
         BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, LogicalClockParams,
@@ -264,4 +275,11 @@ pub mod prelude {
     pub use crate::state::{Reducer, State, StateSpec};
     pub use crate::team_trace::{TeamTrace, TeamTraceNode};
     pub use crate::tool::{Tool, ToolExecutor, ToolRegistry};
+    pub use crate::twin::{
+        CounterfactualBranch, CounterfactualFork, DecisionContext, FaultAnchor, FaultInjection,
+        FaultSchedule, InjectedFault, Interleaving, RecordedAnswer, StaticFloor, Twin, TwinMetrics,
+        TwinOutcome, TwinPolicy, TwinReport, TwinRunConfig, TwinWorkItem, TwinWorld,
+        UnevaluableCase, DEFAULT_CONCURRENCY_LADDER, DEFAULT_TIMEOUT_LADDER, MIN_TIMEOUT_RUNG_MS,
+        TWIN_FORK_POLICY_VERSION, TWIN_REPORT_BOUND,
+    };
 }
