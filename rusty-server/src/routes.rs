@@ -23,14 +23,17 @@ use rusty_agent_runtime::capsule::{CapsuleDenial, CapsuleOverlay, ResourceBudget
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
-use rusty_agent_runtime::durable::{retry_decision_event, RetryDecision};
+use rusty_agent_runtime::durable::{
+    resolve_retry_parameters, resolve_timeout_bound_ms, retry_decision_event,
+    timeout_decision_event, ResolvedRetryParameters, RetryDecision,
+};
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
-    admit_promotion, candidate_effect_key, evaluation_effect_key, promotion_effect_key,
-    rollback_effect_key, Candidate, CandidateContent, CandidateOverlay, CandidateRecord,
-    CandidateStatus, EvaluationRequest, LearnError, PromotionReceipt, PromotionRefusal,
-    RollbackReceipt, VersionPointer,
+    admit_promotion, candidate_effect_key, detect_policy_drift, evaluation_effect_key,
+    promotion_effect_key, rollback_effect_key, Candidate, CandidateContent, CandidateOverlay,
+    CandidateRecord, CandidateStatus, DriftBaseline, DriftThresholds, EvaluationRequest,
+    LearnError, PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
@@ -40,8 +43,8 @@ use rusty_agent_runtime::memory::{
     MemoryScope, MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
 use rusty_agent_runtime::record::{
-    derive_policy_version, sha256_hex, CapsuleVersion, Effect, EffectReceipt, ExecutorPolicy,
-    JournalRef, PayloadRef, PolicyVersion, RunEventKind,
+    derive_policy_version, sha256_hex, CapsuleVersion, DecisionEvent, Effect, EffectReceipt,
+    ExecutorPolicy, JournalRef, PayloadRef, PolicyVersion, RunEventKind,
 };
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
@@ -368,6 +371,9 @@ pub(crate) fn router_with_shutdown(
         .route("/policy/activations", post(activate_policy))
         .route("/policy/active", get(get_active_policy))
         .route("/policy/epochs", get(list_policy_epochs))
+        // The drift check (R0.10 wave 4): the promoted version's production
+        // decisions measured against the twin baseline it was promoted on.
+        .route("/policy/drift", get(get_policy_drift))
         // The capsule registry (R0.9 wave 1): immutable, content-addressed
         // capsule manifests; the `(name, version)` pin resolution that
         // journals one `CapsuleResolved` event per pin into the resolving
@@ -2870,6 +2876,18 @@ async fn claim_task(
         tasks::validate_pool(pool).map_err(ApiError::bad_request)?;
     }
 
+    // R0.10 wave 4: the claim path's lease bound follows the tenant's
+    // active policy — queue scheduling is deployment-scoped, so a run's
+    // admission pin does not govern queue timing here (the fail path's
+    // retry decision does honor it — see `fail_task`). A resolution failure
+    // fails closed to the static floor: no bound, the pre-wave-4 lease.
+    let timeout_record = policy::active_policy_record(&state.server_store, tenant.tenant())
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "active policy unreadable; claiming on the static floor");
+            policy::static_floor_record()
+        });
+    let now = Utc::now();
     let claimed = state
         .server_store
         .claim_task(
@@ -2879,14 +2897,18 @@ async fn claim_task(
                 pools: &pools,
                 pool_limits: &state.config.task_pool_limits,
                 worker_version: payload.worker_version.as_deref(),
+                timeout_policy: &timeout_record.policy,
             },
             payload.lease_ms,
-            Utc::now(),
+            now,
         )
         .await
         .map_err(internal_err)?;
     Ok(match claimed {
-        Some(task) => Json(json!({ "task": task.wire() })).into_response(),
+        Some(task) => {
+            journal_timeout_decision(&state, &tenant, &task, &timeout_record, now).await;
+            Json(json!({ "task": task.wire() })).into_response()
+        }
         None => StatusCode::NO_CONTENT.into_response(),
     })
 }
@@ -3681,6 +3703,7 @@ async fn journal_policy_decision(
     task: &TaskRecord,
     error_class: rusty_agent_runtime::durable::ErrorClass,
     retryable: bool,
+    max_attempts: u32,
     decided_at: DateTime<Utc>,
 ) {
     let Some(run_id) = task.run_id.clone() else {
@@ -3693,6 +3716,7 @@ async fn journal_policy_decision(
         task,
         error_class,
         retryable,
+        max_attempts,
         decided_at,
     )
     .await
@@ -3714,7 +3738,13 @@ async fn journal_policy_decision(
 /// `failed` without a schedule → `fail` — so the event is evidence of
 /// the decision that was made, never a new decision. The declared
 /// effect defaults from the worker's `retryable` flag the way the gate
-/// itself does (`retryable: true` asserts idempotency).
+/// itself does (`retryable: true` asserts idempotency). `max_attempts` is
+/// the *effective* budget the acting policy resolved to (R0.10 wave 4) —
+/// the dead-letter boundary the decision actually applied, so drift
+/// detection reads the same boundary the classifier enforced. Under the
+/// floor it equals the task's declared budget, byte-for-byte the pre-wave-4
+/// features.
+#[allow(clippy::too_many_arguments)]
 async fn try_journal_policy_decision(
     state: &AppState,
     tenant: &TenantContext,
@@ -3722,6 +3752,7 @@ async fn try_journal_policy_decision(
     task: &TaskRecord,
     error_class: rusty_agent_runtime::durable::ErrorClass,
     retryable: bool,
+    max_attempts: u32,
     decided_at: DateTime<Utc>,
 ) -> Result<(), String> {
     let decision = match (&task.status, task.next_attempt_at) {
@@ -3779,10 +3810,196 @@ async fn try_journal_policy_decision(
         effect,
         error_class,
         task.attempt,
-        task.max_attempts,
+        max_attempts,
         None,
         &decision,
         &policy_version,
+        decided_at,
+    );
+    let draft = EventDraft::new(RunEventKind::PolicyDecision, Effect::Pure).output(
+        serde_json::to_value(&event).map_err(|e| format!("serialize decision event: {e}"))?,
+    );
+    let parent = journal.events().last().map(|event| event.id.clone());
+    let draft = match parent {
+        Some(parent) => draft.parent(parent),
+        None => draft,
+    };
+    journal.record(draft);
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(|e| format!("persist journal: {e}"))
+}
+
+/// Resolve the executor policy a task settlement acts under (R0.10 wave
+/// 4).
+///
+/// Run-linked tasks honor the version the owning run bound at admission —
+/// the same checkpoint-header lookup [`try_journal_policy_decision`]
+/// records — so a mid-run policy activation never retcons an in-flight
+/// run's decisions. Unlinked tasks (plain queue work) follow the tenant's
+/// active policy: queue scheduling is deployment-scoped, and the claim
+/// path's lease bound does the same. Every failure to resolve — no
+/// checkpoint yet, an unregistered version, a registry read error — fails
+/// closed to the static floor, byte-for-byte the pre-wave-4 behavior.
+async fn acting_executor_policy(
+    state: &AppState,
+    tenant: &TenantContext,
+    task: &TaskRecord,
+) -> ExecutorPolicy {
+    if let Some(run_id) = &task.run_id {
+        // The thread the run belongs to: the task's own linkage when the
+        // enqueuer supplied it, else resolved through the run's persisted
+        // journal — the same resolution the decision journaler performs.
+        let thread_id = match task.thread_id.clone() {
+            Some(thread_id) => Some(thread_id),
+            None => state
+                .server_store
+                .get_journal(run_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|snapshot| snapshot.thread_id),
+        };
+        let version = match thread_id {
+            Some(thread_id) => state
+                .checkpointer
+                .get_latest(&tenant.scope(&thread_id))
+                .await
+                .ok()
+                .flatten()
+                .map(|checkpoint| checkpoint.header.policy_version)
+                .unwrap_or_default(),
+            // Run-linked but the run's pin is not resolvable (a live run
+            // whose journal is not yet persisted): fail closed to the
+            // floor, matching what the journaler records in that case.
+            None => return ExecutorPolicy::static_v0(),
+        };
+        if version.as_str() == PolicyVersion::STATIC_V0 {
+            return ExecutorPolicy::static_v0();
+        }
+        return match state
+            .server_store
+            .get_policy(tenant.tenant(), version.as_str())
+            .await
+        {
+            Ok(Some(record)) => record.policy,
+            Ok(None) => {
+                tracing::warn!(
+                    version = %version.as_str(),
+                    "acting policy version is not registered; acting on the static floor"
+                );
+                ExecutorPolicy::static_v0()
+            }
+            Err(error) => {
+                tracing::warn!(%error, "policy registry read failed; acting on the static floor");
+                ExecutorPolicy::static_v0()
+            }
+        };
+    }
+    match policy::active_policy_record(&state.server_store, tenant.tenant()).await {
+        Ok(record) => record.policy,
+        Err(error) => {
+            tracing::warn!(%error, "active policy unreadable; acting on the static floor");
+            ExecutorPolicy::static_v0()
+        }
+    }
+}
+
+/// Timeout decision evidence (R0.10 wave 4): when the acting policy
+/// declared a bound for the claimed task's kind — the bound the store
+/// narrowed the lease to — that decision is journaled into the task's run
+/// as a `policy_decision` event, best-effort, the
+/// [`journal_policy_decision`] discipline. The static floor declares no
+/// bound, so floor claims journal nothing — exactly the pre-wave-4
+/// evidence shape.
+async fn journal_timeout_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    task: &TaskRecord,
+    record: &PolicyRecord,
+    decided_at: DateTime<Utc>,
+) {
+    let Some(run_id) = task.run_id.clone() else {
+        return;
+    };
+    let Some(bound) = resolve_timeout_bound_ms(&record.policy, Some(&task.kind)) else {
+        return;
+    };
+    if let Err(error) = try_journal_timeout_decision(
+        state,
+        tenant,
+        &run_id,
+        task,
+        bound,
+        &record.version,
+        decided_at,
+    )
+    .await
+    {
+        tracing::warn!(
+            %run_id,
+            task_id = %task.task_id,
+            %error,
+            "timeout decision is settled in the lease; journaling skipped"
+        );
+    }
+}
+
+/// The fallible body of [`journal_timeout_decision`], mirroring
+/// [`try_journal_policy_decision`]: ownership proof first, integrity
+/// re-check on load, append, persist. The recorded bound is the one the
+/// claim just applied — evidence of the decision that was made, never a
+/// new decision. The declared effect defaults to the conservative
+/// non-idempotent spelling: at claim time the worker has made no re-drive
+/// judgment yet.
+async fn try_journal_timeout_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    task: &TaskRecord,
+    bound: u64,
+    policy_version: &PolicyVersion,
+    decided_at: DateTime<Utc>,
+) -> Result<(), String> {
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(|e| format!("load journal: {e}"))?
+    else {
+        return Err("run has no persisted journal yet".to_string());
+    };
+    let thread_id = snapshot.thread_id.clone();
+    let internal_thread_id = tenant.scope(&thread_id);
+    let owned = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(|e| format!("resolve thread: {e}"))?
+        .is_some();
+    if !owned {
+        return Err("run does not resolve in this tenant".to_string());
+    }
+    let journal = Journal::from_snapshot(snapshot, Clock::System)
+        .map_err(|e| format!("journal failed its integrity check: {e}"))?;
+    let seq = journal
+        .events()
+        .iter()
+        .filter(|event| event.kind == RunEventKind::PolicyDecision)
+        .count() as u64;
+    let event = timeout_decision_event(
+        run_id,
+        thread_id,
+        seq,
+        Some(&task.kind),
+        task.effect.unwrap_or(Effect::NonIdempotent),
+        task.attempt,
+        None,
+        Some(bound),
+        &rusty_agent_runtime::twin::DEFAULT_TIMEOUT_LADDER,
+        policy_version,
         decided_at,
     );
     let draft = EventDraft::new(RunEventKind::PolicyDecision, Effect::Pure).output(
@@ -5236,6 +5453,131 @@ async fn list_policy_epochs(
     Ok(Json(json!({ "epochs": epochs })))
 }
 
+#[derive(Debug, Deserialize)]
+struct PolicyDriftQuery {
+    /// The version to check; the tenant's active version when absent.
+    version: Option<String>,
+}
+
+/// `GET /policy/drift` — the drift check (R0.10 wave 4): the promoted
+/// version's production decision evidence measured against the twin
+/// baseline it was promoted on, answered by core's
+/// [`detect_policy_drift`] under the default thresholds. The baseline is
+/// promotion provenance, so it exists only for candidate-derived versions:
+/// the static floor (`422` — never promoted, nothing to drift from),
+/// API-registered bodies (`422` — no twin evaluation), and versions whose
+/// candidate evaluation predates twin reports (`422`) have no baseline to
+/// measure against. Decisions are gathered from the journals of every run
+/// the tenant's tasks link to; `detect_policy_drift` itself filters to the
+/// version's acting decisions.
+async fn get_policy_drift(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<PolicyDriftQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let version = match query.version {
+        Some(version) => {
+            // The floor check comes first: an explicit `static-v0` earns the
+            // same 422 the resolved floor does, not the validator's
+            // reserved-name 400.
+            if version != PolicyVersion::STATIC_V0 {
+                policy::validate_policy_version(&version).map_err(ApiError::bad_request)?;
+            }
+            PolicyVersion::new(version)
+        }
+        None => state
+            .server_store
+            .list_policy_activations(tenant.tenant())
+            .await
+            .map_err(internal_err)?
+            .last()
+            .map(|activation| activation.version.clone())
+            .unwrap_or_default(),
+    };
+    if version.as_str() == PolicyVersion::STATIC_V0 {
+        return Err(ApiError::unprocessable(
+            "the static floor was never promoted; there is no promotion baseline to drift from"
+                .to_string(),
+        ));
+    }
+    let record = state
+        .server_store
+        .get_policy(tenant.tenant(), version.as_str())
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "policy version `{}` is not registered",
+                version.as_str()
+            ))
+        })?;
+    let PolicySource::Candidate { candidate_id } = &record.source else {
+        return Err(ApiError::unprocessable(format!(
+            "policy version `{}` was registered through the API; only candidate-derived \
+             versions carry a promotion baseline",
+            version.as_str()
+        )));
+    };
+    let baseline = state
+        .server_store
+        .get_candidate(tenant.tenant(), candidate_id)
+        .await
+        .map_err(internal_err)?
+        .and_then(|record| record.evaluation)
+        .and_then(|evaluation| DriftBaseline::from_twin_report(&evaluation.baseline_report))
+        .ok_or_else(|| {
+            ApiError::unprocessable(format!(
+                "policy version `{}` carries no twin baseline — its candidate was never \
+                 twin-evaluated",
+                version.as_str()
+            ))
+        })?;
+    // The evidence sweep: every run a tenant task links to contributes its
+    // journaled `policy_decision` events. Runs without a persisted journal
+    // yet simply have no evidence to contribute.
+    let tasks = state
+        .server_store
+        .list_tasks(tenant.tenant(), None)
+        .await
+        .map_err(internal_err)?;
+    let mut run_ids: Vec<String> = tasks
+        .iter()
+        .filter_map(|task| task.run_id.clone())
+        .collect();
+    run_ids.sort();
+    run_ids.dedup();
+    let mut decisions = Vec::new();
+    for run_id in run_ids {
+        let Some(snapshot) = state
+            .server_store
+            .get_journal(&run_id)
+            .await
+            .map_err(internal_err)?
+        else {
+            continue;
+        };
+        for event in &snapshot.events {
+            if event.kind != RunEventKind::PolicyDecision {
+                continue;
+            }
+            let Some(PayloadRef::Inline(value)) = &event.output else {
+                continue;
+            };
+            match serde_json::from_value::<DecisionEvent>(value.clone()) {
+                Ok(decision) => decisions.push(decision),
+                // A hand-edited or future-shaped event is skipped, never
+                // fatal — the same posture as the journal's own replay
+                // lookups.
+                Err(error) => {
+                    tracing::warn!(%run_id, %error, "skipping undecodable policy decision event")
+                }
+            }
+        }
+    }
+    let report = detect_policy_drift(&decisions, &version, &baseline, &DriftThresholds::default());
+    Ok(Json(json!({ "report": report })))
+}
+
 // --------------------------------------------------------------------- //
 // The capsule registry (R0.9 Rusty Capsules, wave 1)
 //
@@ -6019,6 +6361,21 @@ async fn fail_task(
         tasks::parse_error_class(&payload.error_class).map_err(ApiError::bad_request)?;
     tasks::validate_label("message", &payload.message, 4096).map_err(ApiError::bad_request)?;
     let now = Utc::now();
+    // R0.10 wave 4: the acting policy's retry parameters for this failure
+    // class are resolved here — the registry and the run's admission pin
+    // live at this layer — and the store applies them verbatim. Run-linked
+    // tasks honor the version the run bound at admission; unlinked tasks
+    // follow the tenant's active policy; every resolution failure fails
+    // closed to the static floor, byte-for-byte the pre-wave-4 decision.
+    let resolved = match state.server_store.get_task(tenant.tenant(), &task_id).await {
+        Ok(Some(task)) => {
+            let policy = acting_executor_policy(&state, &tenant, &task).await;
+            resolve_retry_parameters(&policy, error_class, task.max_attempts)
+        }
+        // Unused — the store answers unknown-task/lease-lost below without
+        // consulting the parameters.
+        _ => ResolvedRetryParameters::floor(0),
+    };
     let outcome = state
         .server_store
         .fail_task(
@@ -6033,6 +6390,7 @@ async fn fail_task(
                     tokens: payload.tokens,
                     cost_usd: payload.cost_usd,
                 },
+                retry: resolved,
             },
             now,
         )
@@ -6046,7 +6404,16 @@ async fn fail_task(
     // memory-journaler discipline). Cancellation is control flow, not a
     // policy decision, so it journals nothing.
     if error_class != rusty_agent_runtime::durable::ErrorClass::Cancelled {
-        journal_policy_decision(&state, &tenant, &task, error_class, payload.retryable, now).await;
+        journal_policy_decision(
+            &state,
+            &tenant,
+            &task,
+            error_class,
+            payload.retryable,
+            resolved.max_attempts,
+            now,
+        )
+        .await;
     }
     // Supervision trigger (R0.7 wave 2): a failed mailbox turn is a
     // supervision signal — the declared policy decides restart vs

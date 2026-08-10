@@ -31,6 +31,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
+use rusty_agent_runtime::durable::resolve_timeout_bound_ms;
 use rusty_agent_runtime::journal::{FileArtifactStore, JournalSnapshot};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
 use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
@@ -207,6 +208,11 @@ pub(crate) trait ServerStore: Send + Sync {
     /// pools from starving each other, not a hard invariant — overshoot
     /// self-corrects on the next claim round, and no task is ever leased
     /// twice (the row lock, which *is* exact, guarantees that).
+    ///
+    /// The handed-out lease is `lease_ms` narrowed to the acting policy's
+    /// timeout bound for the task's kind when it declares one (R0.10 wave 4,
+    /// `scope.timeout_policy`; see [`tasks::ClaimScope`]). The static floor
+    /// declares no bound, leaving the lease at the worker's request.
     async fn claim_task(
         &self,
         tenant: &str,
@@ -238,8 +244,10 @@ pub(crate) trait ServerStore: Send + Sync {
     ) -> StoreResult<MutationOutcome>;
     /// Record a failed attempt on the task held by `worker_id`: requeue with
     /// backoff, dead-letter, or fail outright — decided by core's shared
-    /// [`classify_retry`](rusty_agent_runtime::durable::classify_retry)
-    /// policy inside [`crate::tasks::TaskRecord::fail`].
+    /// [`classify_retry_with_policy`](rusty_agent_runtime::durable::classify_retry_with_policy)
+    /// classifier against the acting policy's resolved parameters
+    /// ([`tasks::FailureReport::retry`]) inside
+    /// [`crate::tasks::TaskRecord::fail`].
     async fn fail_task(
         &self,
         tenant: &str,
@@ -918,6 +926,21 @@ fn io_err(context: &str) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{context}: {e}")
 }
 
+/// The lease a claim hands out under the acting executor policy (R0.10
+/// wave 4): the worker's requested visibility timeout, narrowed to the
+/// policy's timeout bound for the task's kind when it declares one — the
+/// bound is a ceiling on how long one attempt may run unobserved, and the
+/// lease is exactly that observation window. The static floor (and any
+/// policy body that fails validation) resolves to `None`, so the lease is
+/// the worker's request, byte-for-byte the pre-wave-4 behavior.
+fn policy_lease_ms(
+    policy: &rusty_agent_runtime::record::ExecutorPolicy,
+    kind: &str,
+    lease_ms: u64,
+) -> u64 {
+    resolve_timeout_bound_ms(policy, Some(kind)).map_or(lease_ms, |bound| lease_ms.min(bound))
+}
+
 /// Blob bytes live outside the capsule registry files
 /// (`capsules/*.json`) because the registry records stay small enough to
 /// load wholesale, while a wasm module is megabytes the list path should
@@ -1480,6 +1503,10 @@ impl ServerStore for JsonFileStore {
             .get(&task_id)
             .cloned()
             .expect("claim candidate came from the task index");
+        // R0.10 wave 4: the acting policy's timeout bound for this kind
+        // narrows the handed-out lease; the static floor declares no bound
+        // and the lease is the worker's request, unchanged.
+        let lease_ms = policy_lease_ms(scope.timeout_policy, &task.kind, lease_ms);
         task.claim(worker_id, lease_ms, now);
         tasks::persist(&self.root, &task)
             .await
@@ -1530,6 +1557,7 @@ impl ServerStore for JsonFileStore {
                 &report.message,
                 report.retryable,
                 report.cost,
+                &report.retry,
                 now,
             );
         })
@@ -3435,8 +3463,11 @@ mod postgres {
     /// R0.7: mailbox traffic (`recipient` set) is excluded — it drains only
     /// through the turn-serialized agent claim
     /// ([`AGENT_CLAIM_SELECT_SQL`]), never through a pool.
+    ///
+    /// R0.10 wave 4: `kind` is selected so the claim can narrow the lease
+    /// to the acting policy's timeout bound for the task's kind.
     pub(crate) const CLAIM_SELECT_SQL: &str = "
-        SELECT task_id, attempt FROM server_tasks
+        SELECT task_id, attempt, kind FROM server_tasks
         WHERE tenant = $1
           AND pool = ANY($2)
           AND recipient IS NULL
@@ -5011,6 +5042,14 @@ mod postgres {
                 tx.rollback().await.map_err(db_err("claim task"))?;
                 return Ok(None);
             };
+            // R0.10 wave 4: the acting policy's timeout bound for this kind
+            // narrows the handed-out lease; the static floor declares no
+            // bound and the lease is the worker's request, unchanged.
+            let lease_ms = super::policy_lease_ms(
+                scope.timeout_policy,
+                candidate.get::<String, _>("kind").as_str(),
+                lease_ms,
+            );
             let expires_at =
                 now + chrono::Duration::milliseconds(lease_ms.min(i64::MAX as u64) as i64);
             let updated = sqlx::query(CLAIM_UPDATE_SQL)
@@ -5105,12 +5144,14 @@ mod postgres {
             }
             // Retry / dead-letter / fail-outright, computed by the same
             // record logic the file backend runs — core's shared
-            // `classify_retry` (one decision, one test surface).
+            // `classify_retry_with_policy` against the acting policy's
+            // resolved parameters (one decision, one test surface).
             task.fail(
                 report.error_class,
                 &report.message,
                 report.retryable,
                 report.cost,
+                &report.retry,
                 now,
             );
             let tokens = task.tokens.as_ref().map(record_to_payload).transpose()?;

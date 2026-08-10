@@ -538,6 +538,31 @@ completion parity; the evaluation — fixtures, verdict, thresholds, overhead me
 the published section. The test then activates `static-v0` and asserts the floor's behavior
 returns, byte-exact.
 
+> **Wave 4 status: implemented (2026-08-09).** The wave-3 deferral is
+> closed: promoted retry parameters thread through the server's
+> production fail path (`FailureReport.retry`, resolved by the route
+> handler against the acting policy — the run's admission pin for
+> run-linked tasks, the tenant's active policy for unlinked work — and
+> applied by `TaskRecord::fail` through `classify_retry_with_policy` on
+> both store backends), the claim path narrows handed-out leases to the
+> acting policy's timeout bound for the task's kind and journals the
+> bound as a family-2 `policy_decision` event, and the drift check is
+> served at `GET /policy/drift` over the version's journaled production
+> decisions against its promotion baseline (`422` for the floor and for
+> API-registered bodies: no promotion baseline, nothing to drift from).
+> Two modeling decisions, stated plainly: the claim path's lease bound
+> follows the tenant's active policy (queue scheduling is
+> deployment-scoped) while the fail path's retry decision honors the
+> run's admission pin; and byte-exactness excludes the sampled delays —
+> server jitter draws from OS entropy and the delay is by design never
+> journaled, so the exact surface is journaled decision content and
+> bounds. The release proof (`tests/adaptation_release.rs`, published in
+> `docs/benchmarks.md`) walks the whole loop — floor traffic, twin
+> evidence, distillation, twin-gated promotion, promoted traffic inside
+> the learned bounds at completion parity, the telemetry ledger (a 325.2
+> ms per-item margin against a 233 µs per-item charge), and byte-exact
+> reversion to `static-v0`.
+
 ## Open questions
 
 Flagged before Wave 1 lands:

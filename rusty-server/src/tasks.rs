@@ -12,7 +12,10 @@
 //! elapsed whole-task deadlines instead of re-leasing. The retry policy is
 //! not local: failed attempts are
 //! classified into core's shared [`ErrorClass`] taxonomy and decided by
-//! core's [`classify_retry`] — the same function the worker SDK runs — so
+//! core's [`classify_retry_with_policy`] — the same classifier the worker
+//! SDK runs — against the acting executor policy's resolved retry
+//! parameters (R0.10 wave 4; the static floor resolves to exactly the
+//! pre-wave-4 constants), so
 //! server and workers can never disagree about a retry (see
 //! `docs/durable-work-design.md`). The guarantee is *effectively once*: a
 //! task may be delivered more than once (lease expiry reclaims it), so
@@ -44,8 +47,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
-use rusty_agent_runtime::durable::{classify_retry, ErrorClass, RetryDecision};
+use rusty_agent_runtime::durable::{
+    classify_retry_with_policy, ErrorClass, ResolvedRetryParameters, RetryDecision,
+};
 use rusty_agent_runtime::llm::Usage;
+use rusty_agent_runtime::record::ExecutorPolicy;
 use rusty_agent_runtime::record::{Effect, EffectReceipt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -102,7 +108,8 @@ pub(crate) const MAX_LEASE_MS: u64 = 3_600_000;
 /// `Failed` covers both failure resting states, distinguished by
 /// `next_attempt_at`: set = a retry is scheduled (claimable once it
 /// passes); null = the shared retry policy
-/// ([`classify_retry`]) failed the task outright — a non-retryable class or
+/// ([`classify_retry_with_policy`]) failed the task outright — a
+/// non-retryable class or
 /// work the worker declared unsafe to re-drive. Terminal failure that a
 /// human can act on is `Dead` (the DLQ, `RetryDecision::Dead`); the DLQ
 /// never holds outright fails, per the design's "DLQ is for actionable
@@ -312,6 +319,14 @@ pub(crate) struct FailureReport {
     /// The cost evidence the worker reported with the failure (R0.7 wave
     /// 3); see [`TaskRecord::tokens`].
     pub cost: SettlementCost,
+    /// The retry parameters the acting executor policy resolves to for this
+    /// failure class (R0.10 wave 4), computed by the route handler before
+    /// the store call — the policy registry and run-version pin live at that
+    /// layer, so the store just applies the decision. Under the static floor
+    /// (or anything that fails closed) this equals
+    /// [`ResolvedRetryParameters::floor`] of the task's budget, which is
+    /// byte-for-byte the pre-wave-4 behavior.
+    pub retry: ResolvedRetryParameters,
 }
 
 /// A worker's report of a successful settle: the result payload, the effect
@@ -524,7 +539,8 @@ impl TaskRecord {
     }
 
     /// Record a failed attempt, deciding through core's shared
-    /// [`classify_retry`] policy. Caller checked [`Self::leased_to`].
+    /// [`classify_retry_with_policy`] classifier against the caller-resolved
+    /// [`ResolvedRetryParameters`]. Caller checked [`Self::leased_to`].
     ///
     /// The effect gate's input: the task's declared [`Effect`] when the
     /// enqueuer supplied one (a declared non-repeatable effect is never
@@ -535,15 +551,17 @@ impl TaskRecord {
     /// [`Effect::NonIdempotent`]).
     ///
     /// The decision lands as: `Retry` → [`TaskStatus::Failed`] with
-    /// `next_attempt_at` set (backoff + full jitter, cap 5 min); `Dead` →
-    /// [`TaskStatus::Dead`] (the DLQ); `Fail` → [`TaskStatus::Failed`] with
-    /// `next_attempt_at` null — terminal, but *not* dead-lettered.
+    /// `next_attempt_at` set (backoff + full jitter, capped at the resolved
+    /// parameters' ceiling); `Dead` → [`TaskStatus::Dead`] (the DLQ);
+    /// `Fail` → [`TaskStatus::Failed`] with `next_attempt_at` null —
+    /// terminal, but *not* dead-lettered.
     pub(crate) fn fail(
         &mut self,
         error_class: ErrorClass,
         message: &str,
         retryable: bool,
         cost: SettlementCost,
+        retry: &ResolvedRetryParameters,
         now: DateTime<Utc>,
     ) {
         let effect = self.effect.unwrap_or(if retryable {
@@ -551,13 +569,10 @@ impl TaskRecord {
         } else {
             Effect::NonIdempotent
         });
-        match classify_retry(
-            effect,
-            error_class,
-            self.attempt,
-            self.max_attempts,
-            uniform(),
-        ) {
+        // The attempt budget the classifier sees is the *resolved* one: a
+        // promoted policy may narrow the task's declared budget, and the
+        // dead-letter boundary must sit where the acting policy puts it.
+        match classify_retry_with_policy(effect, error_class, self.attempt, retry, uniform()) {
             RetryDecision::Retry { after_ms } => {
                 self.status = TaskStatus::Failed;
                 self.next_attempt_at =
@@ -703,6 +718,15 @@ pub(crate) struct ClaimScope<'a> {
     /// pin ([`TaskRecord::worker_version`]); `None` claims unpinned work
     /// only.
     pub worker_version: Option<&'a str>,
+    /// The acting executor policy (R0.10 wave 4): the store narrows the
+    /// handed-out lease to the policy's timeout bound for the task's kind
+    /// when it declares one
+    /// ([`rusty_agent_runtime::durable::resolve_timeout_bound_ms`]). Queue
+    /// scheduling is deployment-scoped, so the claim path follows the
+    /// tenant's active policy rather than any run's admission pin. Under
+    /// the static floor every bound is `None` and the lease is untouched —
+    /// byte-for-byte the pre-wave-4 behavior.
+    pub timeout_policy: &'a ExecutorPolicy,
 }
 
 /// A tenant's queue pressure (R0.6 wave 3): the three gauges tenant quotas
@@ -755,7 +779,8 @@ pub(crate) struct PoolStat {
     pub oldest_visible_at: Option<DateTime<Utc>>,
 }
 
-/// A `[0, 1)` jitter sample for [`classify_retry`], from OS entropy via the
+/// A `[0, 1)` jitter sample for [`classify_retry_with_policy`], from OS
+/// entropy via the
 /// already-linked `uuid` crate. The design's seeded-`RngSource` determinism
 /// story applies to runs; queue-side retry scheduling just needs the
 /// decorrelation full jitter provides.
@@ -943,6 +968,13 @@ mod tests {
         )
     }
 
+    /// The retry parameters the fail path resolved implicitly before R0.10
+    /// wave 4 — every test in this module exercises pre-promotion floor
+    /// behavior.
+    fn floor() -> ResolvedRetryParameters {
+        ResolvedRetryParameters::floor(DEFAULT_MAX_ATTEMPTS)
+    }
+
     #[test]
     fn status_wire_spellings_round_trip() {
         for (status, s) in [
@@ -976,6 +1008,7 @@ mod tests {
             "charged twice maybe",
             false,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Failed);
@@ -996,6 +1029,7 @@ mod tests {
             "bad schema",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Failed);
@@ -1016,6 +1050,7 @@ mod tests {
                     "hiccup",
                     true,
                     SettlementCost::NONE,
+                    &ResolvedRetryParameters::floor(MAX_ATTEMPTS_LIMIT),
                     t0,
                 );
                 assert_eq!(task.status, TaskStatus::Failed);
@@ -1042,6 +1077,7 @@ mod tests {
             "third strike",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Dead);
@@ -1062,6 +1098,7 @@ mod tests {
             "maybe it fired",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Failed);
@@ -1078,6 +1115,7 @@ mod tests {
             "hiccup",
             false,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Failed);
@@ -1174,6 +1212,7 @@ mod tests {
             "upstream timed out",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Failed);
@@ -1188,7 +1227,14 @@ mod tests {
         task.claim("w-1", 60_000, at);
         assert_eq!(task.attempt, 2);
         assert!(task.next_attempt_at.is_none(), "claim clears the schedule");
-        task.fail(ErrorClass::Timeout, "again", true, SettlementCost::NONE, at);
+        task.fail(
+            ErrorClass::Timeout,
+            "again",
+            true,
+            SettlementCost::NONE,
+            &floor(),
+            at,
+        );
         assert_eq!(task.status, TaskStatus::Failed);
         let at = task.next_attempt_at.unwrap();
         task.claim("w-2", 60_000, at);
@@ -1198,6 +1244,7 @@ mod tests {
             "third strike",
             true,
             SettlementCost::NONE,
+            &floor(),
             at,
         );
         assert_eq!(task.status, TaskStatus::Dead);
@@ -1248,6 +1295,7 @@ mod tests {
             "hiccup",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Failed);
@@ -1282,6 +1330,7 @@ mod tests {
             "cancelled by control plane",
             false,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Cancelled);
@@ -1306,6 +1355,7 @@ mod tests {
             "third strike",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
 
@@ -1316,6 +1366,7 @@ mod tests {
             "bad schema",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
 
@@ -1348,6 +1399,7 @@ mod tests {
             "interrupted",
             true,
             SettlementCost::NONE,
+            &floor(),
             t0,
         );
         assert_eq!(task.status, TaskStatus::Cancelled);
@@ -1434,6 +1486,7 @@ mod tests {
             "it broke",
             true,
             SettlementCost::NONE,
+            &floor(),
             Utc::now(),
         );
         let raw = serde_json::to_string(&task).unwrap();
@@ -1549,7 +1602,7 @@ mod tests {
         // survive on the record, not only in a journal.
         let mut task = record();
         task.claim("w-1", 60_000, t0);
-        task.fail(ErrorClass::Unknown, "gave up", false, cost, t0);
+        task.fail(ErrorClass::Unknown, "gave up", false, cost, &floor(), t0);
         assert_eq!(task.tokens, Some(usage));
         assert_eq!(task.cost_usd, Some(0.0042));
 

@@ -47,6 +47,11 @@ use crate::threads::ThreadRecord;
 
 use rusty_agent_runtime::journal::{Clock, Journal};
 
+// The bridge executor acts on the static floor (see `drain_capsule_pool`)
+// — needed with and without the `capsules` feature.
+use rusty_agent_runtime::durable::ResolvedRetryParameters;
+use rusty_agent_runtime::record::ExecutorPolicy;
+
 #[cfg(feature = "capsules")]
 use rusty_agent_runtime::capsule::{any_grant_of_kind, CapabilityKind, CapsuleDenial};
 #[cfg(feature = "capsules")]
@@ -615,6 +620,10 @@ fn spawn_capsule_drainer(state: Arc<AppState>, tenant: String) {
 
 async fn drain_capsule_pool(state: &Arc<AppState>, tenant: &str) -> Result<(), String> {
     let pools = [A2A_CAPSULE_POOL.to_string()];
+    // The bridge executor is a fixed, server-internal worker: it claims and
+    // settles on the static floor (no tenant policy lookup), the pre-R0.10
+    // behavior for this out-of-band path.
+    let floor = ExecutorPolicy::static_v0();
     loop {
         let claimed = state
             .server_store
@@ -625,6 +634,7 @@ async fn drain_capsule_pool(state: &Arc<AppState>, tenant: &str) -> Result<(), S
                     pools: &pools,
                     pool_limits: &state.config.task_pool_limits,
                     worker_version: None,
+                    timeout_policy: &floor,
                 },
                 A2A_EXECUTOR_LEASE_MS,
                 Utc::now(),
@@ -658,6 +668,10 @@ async fn execute_capsule_task(state: &Arc<AppState>, tenant: &str, task: &TaskRe
                     message,
                     retryable: false,
                     cost: tasks::SettlementCost::default(),
+                    // Permanent failure (`retryable: false` → Fail): the
+                    // resolved parameters are inert, and the bridge executor
+                    // acts on the static floor regardless.
+                    retry: ResolvedRetryParameters::floor(task.max_attempts),
                 },
                 Utc::now(),
             )
@@ -853,6 +867,7 @@ async fn execute_capsule_task(state: &Arc<AppState>, tenant: &str, task: &TaskRe
                     .to_string(),
                 retryable: false,
                 cost: tasks::SettlementCost::default(),
+                retry: ResolvedRetryParameters::floor(task.max_attempts),
             },
             Utc::now(),
         )

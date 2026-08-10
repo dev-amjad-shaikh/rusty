@@ -837,3 +837,160 @@ its own row.
 > does not trigger — but the bar, the fixtures, and the overhead
 > measurement are committed and re-runnable, so any future row closes by
 > re-measurement, not redesign.**
+
+## Adaptation release proof — a promoted policy in production, net of telemetry (2026-08-09)
+
+Wave 1 established that headroom *exists*; wave 3 that the twin gate can
+price a candidate. This section publishes the release gate itself: **a
+retry policy distilled from twin evidence, promoted through the full
+pipeline, measurably improves production traffic net of the telemetry the
+improvement costs, at completion parity — and activating `static-v0`
+restores the floor byte-for-byte.** The whole proof is one integration
+test (`rusty-server/tests/adaptation_release.rs`), so the numbers below
+reproduce on any machine that can run the suite; the twin half is
+deterministic by construction, the production half is the real queue,
+store, registry, and journal.
+
+**Reproduce:**
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# The whole gate, ~5 s; the measurements print on stderr:
+cargo test -p rusty-agent-server --test adaptation_release -- --nocapture
+```
+
+### Method
+
+**The workload.** Five recorded fixtures, each one idempotent `search`
+tool call (100 ms, $0.001), behind a committed fault schedule
+(`FaultSchedule`, seed 42) that rate-limits the call's first two attempts
+with a 50 ms `Retry-After`; attempt 3 lands in the recorded world and
+completes. The same schedule plays in both worlds: injected into the
+digital twin (the evaluation half) and scripted into the test's worker
+(the production half — real `POST /tasks` → claim → fail → retry →
+complete against the JSON-file store).
+
+**The loop, end to end.** Floor traffic runs first and journals its
+`policy_decision` events under `static-v0`. The twin re-executes every
+fixture under the floor with the fault schedule; its journaled retry
+decisions — outcomes annotated from the item terminals, the
+application-code boundary the distiller's contract documents — distill a
+per-class schedule via `distill_retry_parameters` (`rate_limited`: 100 ms
+base, 30 s cap, budget 5; the flat schedule stays the floor's). The
+distilled parameters become a `policy` candidate, evaluate through the
+server-configured `TwinCandidateEvaluator` (every fixture twice, floor arm
+vs candidate arm, wall time the target metric, non-inferior completion
+enforced per fixture), and promote through the R0.8 default envelope
+(approval-ruled; a scoped `ApprovalToken` admits). The registry activates
+the derived version; new production traffic binds it at admission and the
+fail path decides through `classify_retry_with_policy` against it —
+attempt-1 delays bounded to [0, 100] ms and attempt-2 to [0, 200] ms,
+bounds the floor's 1 s base cannot produce on most draws. The drift check
+(`GET /policy/drift`) reads the version's journaled production decisions
+against its promotion baseline. Finally `static-v0` is re-activated and
+the workload replays: the journaled decisions are asserted byte-identical
+to chapter one's after normalizing the volatile fields (event id, run and
+thread linkage, decision instant). Server jitter draws from OS entropy, so
+byte-exactness covers journaled decision content and bounds — never the
+sampled delays, which are by design not journaled.
+
+**The ledger.** Telemetry is charged the way wave 1 charged it, per run:
+the journaled decision bytes read off the wire, and the emission path
+(event construction, serialization, draft, journal record with the hash
+chain — the work a settlement pays beyond settling) timed in-process over
+10 000 iterations inside the same test, so the verdict row is
+self-contained. This is an untimed-test mean on a debug build, not a
+Criterion-tuned figure — wave 1's 9.99 µs row remains the tuned reference
+for the same path; the proof's assertion uses its own measured number.
+
+### Environment
+
+| | |
+|---|---|
+| CPU | Apple M2 Max (12 cores: 8 performance + 4 efficiency) |
+| RAM | 96 GB |
+| OS | macOS 26.5.1 (Build 25F80), arm64 |
+| Rust | rustc 1.97.1 (8bab26f4f 2026-07-14) |
+| Date of run | 2026-08-09 |
+| Crate version | R0.10 wave 4, unreleased, on top of `rusty-agent-runtime` 0.9.0 |
+| Load | single-user machine, no other heavy processes |
+
+### Results
+
+**The twin gate** (deterministic; aggregates over the 5 fixtures, per arm):
+
+| Arm | Mean wall / item | p95 latency / item | Attempts | Completion | Dead-lettered | Cost |
+|---|---|---|---|---|---|---|
+| floor | 2,130 ms | 2,130 ms | 15 | 100 % | 0 | $0.005 |
+| candidate | 504 ms | 504 ms | 15 | 100 % | 0 | $0.005 |
+
+Margin: **1,626 ms over 5 fixtures (325.2 ms per item), 4.2× mean wall
+time, at identical completion, attempts, and cost** — the floor pays two
+jittered backoff draws (means 500 ms and 1,000 ms) where the promoted
+schedule pays 50 ms and 100 ms means on the same faults. The verdict the
+gate read: `regressed: false`, `delta: +1,626 ms` on `wall_time_ms`, all 5
+fixtures matched with no divergences.
+
+**Production traffic** (same fault schedule, real queue): under the
+promoted version, attempt-1 and attempt-2 scheduling delays landed inside
+the learned [0, 100] ms and [0, 200] ms bounds (floor bounds: [0, 1,000]
+and [0, 2,000] ms), the journaled decisions named the derived policy
+version with the narrowed effective budget (`max_attempts: 3` —
+`min(learned 5, task 3)`), and attempt 3 completed: completion parity with
+the floor chapter. The drift check answered `drifted: false` over the
+version's production decisions (below the 8-decision evidence minimum,
+which itself declares nothing), and refused the floor with `422` after
+reversion — the floor was never promoted, so there is no baseline.
+
+**Telemetry, charged per item** (2 retry decisions per item):
+
+| Term | Measured |
+|---|---|
+| Emission path (construction + serialization + draft + journal record) | 116 µs / decision (untimed-test mean, 10,000 iterations) |
+| Journaled decision bytes | 491 bytes / decision |
+| Charge per item (2 decisions) | 233 µs + 982 bytes |
+| Twin margin per item | 325.2 ms |
+| Margin ÷ telemetry | ≈ 1.4 × 10³ |
+
+**The floor's return.** After activating `static-v0`, new traffic binds
+the floor at admission, delays re-enter the floor's bounds, completion is
+unchanged, and the journaled decision events equal chapter one's
+byte-for-byte on the normalized comparison surface (legal sets, selected
+actions, features, propensities, version).
+
+### Interpretation
+
+- **The wedge wave 1 priced is harvestable by the pipeline's own
+  machinery.** Nothing in the loop was scripted to succeed: the distiller
+  earned its per-class entry from twin outcomes at the declared 2 s
+  margin, the twin gate priced the candidate against the floor on
+  identical seeds and fault schedules, the envelope held the family at
+  human approval, and the production fail path resolved exactly the
+  schedule the twin priced. The 4.2× wall-time win is the same shape as
+  wave 1's retry row — most of the floor's remaining delay was backoff
+  the world never asked for (the `Retry-After` floor was 50 ms).
+- **Telemetry is three orders of magnitude below the margin it
+  measures.** Even charging the untimed (hence conservative — 12× wave
+  1's Criterion figure) emission cost, instrumentation would have to get
+  ~10³× more expensive, or the workload's margin ~10³× thinner, to close
+  this row. The honest caveat stands the other way too: thin-margin
+  workloads (wave 1's LLM-bound retry row at 2.4 %) need the tuned
+  overhead figure, not this test's, before their own promotion.
+- **Byte-exact reversion is the release's safety property, not a
+  courtesy.** The promoted body changed decisions only where its
+  parameters differ; with `static-v0` re-activated every gate, bound, and
+  journaled feature returned to the floor's exact shape. Reversibility is
+  what makes the approval envelope's bar safe to lower in a future wave.
+
+### Verdict
+
+> **The R0.10 release gate passes: a retry policy distilled from twin
+> evidence and promoted through the full pipeline improved production
+> traffic 4.2× on mean wall time — a 325.2 ms per-item margin against a
+> 233 µs per-item telemetry charge (≈ 1.4 × 10³×) — at identical
+> completion, attempts, and cost, with the evaluation published above and
+> reproducible end to end; and `static-v0`'s re-activation restored the
+> floor byte-for-byte. The bar for the next candidate does not move: twin
+> evidence, envelope admission, margin net of telemetry, completion
+> parity, byte-exact reversion.**

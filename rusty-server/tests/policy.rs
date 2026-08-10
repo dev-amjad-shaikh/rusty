@@ -705,8 +705,233 @@ async fn failed_tasks_journal_the_policy_decision() {
 }
 
 // --------------------------------------------------------------------- //
-// The promotion / rollback hooks
+// The promoted policy in production (R0.10 wave 4)
 // --------------------------------------------------------------------- //
+
+#[tokio::test]
+async fn claims_narrow_the_lease_to_the_acting_timeout_bound() {
+    let (app, store) = app();
+    // An API-registered policy whose timeout family bounds `call_tool`
+    // kinds to 5 s (the full parameter set, as the family overlay requires
+    // — here only `per_callee` is declared).
+    let policy = ExecutorPolicy::static_v0()
+        .with_family_parameters(
+            DecisionFamily::Timeout,
+            json!({"per_callee": {"call_tool": 5_000}}),
+        )
+        .unwrap();
+    let version = register(&app, &policy).await;
+    activate(&app, &version).await;
+
+    // The claim's lease narrows to the bound (30 s requested, 5 s handed
+    // out), and the decision is journaled into the task's run — the
+    // family-2 telemetry row, emitted only because a bound is in force.
+    let run_id = run_pipeline(&app).await;
+    let task_id = enqueue(&app, json!({"run_id": run_id})).await;
+    let before = Utc::now();
+    let task = claim_one(&app, "w1").await;
+    assert_eq!(task["task_id"], json!(task_id));
+    let expires =
+        DateTime::parse_from_rfc3339(task["lease"]["expires_at"].as_str().unwrap()).unwrap();
+    let lease_ms = (expires.with_timezone(&Utc) - before).num_milliseconds();
+    assert!(
+        (0..=5_100).contains(&lease_ms),
+        "the lease narrowed to the 5 s bound, got {lease_ms} ms"
+    );
+    let decisions: Vec<Value> = events_of(&app, &run_id)
+        .await
+        .into_iter()
+        .filter(|event| event["kind"] == json!("policy_decision"))
+        .map(|event| event["output"]["value"].clone())
+        .collect();
+    assert_eq!(decisions.len(), 1, "one bound claim, one timeout decision");
+    let out = &decisions[0];
+    assert_eq!(out["family"], json!("timeout"));
+    assert_eq!(out["policy_version"], json!(version));
+    assert_eq!(out["features"]["callee"], json!("call_tool"));
+    assert_eq!(out["features"]["bound_ms"], json!(5_000));
+    assert_eq!(
+        out["selected"],
+        json!({"action": "set_timeout", "millis": 5_000})
+    );
+
+    // A kind the policy does not name keeps the worker's requested lease —
+    // and journals nothing. The first task settles as cancelled (control
+    // flow — it journals no policy decision), clearing the queue.
+    fail_task(&app, &task_id, "w1", "cancelled", false).await;
+    let task_id = enqueue(&app, json!({"run_id": run_id, "kind": "unbound_kind"})).await;
+    let before = Utc::now();
+    let task = claim_one(&app, "w2").await;
+    assert_eq!(task["task_id"], json!(task_id));
+    assert_eq!(task["kind"], json!("unbound_kind"));
+    let expires =
+        DateTime::parse_from_rfc3339(task["lease"]["expires_at"].as_str().unwrap()).unwrap();
+    let lease_ms = (expires.with_timezone(&Utc) - before).num_milliseconds();
+    assert!(
+        lease_ms > 29_000,
+        "no declared bound, no narrowing: {lease_ms} ms"
+    );
+    let count = events_of(&app, &run_id)
+        .await
+        .into_iter()
+        .filter(|event| event["kind"] == json!("policy_decision"))
+        .count();
+    assert_eq!(count, 1, "unbounded kinds journal nothing");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn the_drift_check_requires_a_promotion_baseline() {
+    let (app, store) = app();
+
+    // The floor — resolved (nothing activated) and named explicitly —
+    // refuses: it was never promoted, so there is no baseline.
+    let (status, _) = call(&app, "GET", "/policy/drift", None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call(&app, "GET", "/policy/drift?version=static-v0", None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // An unknown version 404s; a reserved-or-invalid name 400s.
+    let (status, _) = call(
+        &app,
+        "GET",
+        "/policy/drift?version=policy-000000000000",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(&app, "GET", "/policy/drift?version=bad%20name", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // An API-registered body carries no twin evaluation: 422, and the
+    // message says why.
+    let version = register(&app, &policy_with_max_attempts(5)).await;
+    let (status, v) = call(
+        &app,
+        "GET",
+        &format!("/policy/drift?version={version}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "expected 422: {v}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn the_drift_check_is_tenant_scoped() {
+    let store = temp_store();
+    let app = app_with(store.clone(), |config| {
+        config
+            .with_tenant_key("acme", "acme-secret")
+            .with_tenant_key("globex", "globex-secret")
+    });
+    let acme = Some(("x-api-key", "acme-secret"));
+    let globex = Some(("x-api-key", "globex-secret"));
+
+    // A candidate-derived version in acme (the scripted evaluator clears
+    // the evaluation; the approval token admits the promotion).
+    let run_id = {
+        let (status, v) = call_as(
+            &app,
+            acme,
+            "POST",
+            "/threads",
+            Some(json!({"graph": "pipeline"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "thread failed: {v}");
+        let thread_id = v["thread_id"].as_str().unwrap().to_string();
+        let (status, v) = call_as(
+            &app,
+            acme,
+            "POST",
+            &format!("/threads/{thread_id}/runs/wait"),
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "run failed: {v}");
+        v["run_id"].as_str().unwrap().to_string()
+    };
+    let candidate = policy_candidate(5);
+    let (status, v) = call_as(
+        &app,
+        acme,
+        "POST",
+        "/learn/candidates",
+        Some(json!({
+            "candidate": serde_json::to_value(&candidate).unwrap(),
+            "run_id": run_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create failed: {v}");
+    let candidate_id = v["candidate_id"].as_str().unwrap().to_string();
+    let (status, v) = call_as(
+        &app,
+        acme,
+        "POST",
+        &format!("/learn/candidates/{candidate_id}/evaluate"),
+        Some(json!({
+            "request": {
+                "dataset_version": "support-v3",
+                "target_metric": "run_pass_rate",
+                "thresholds": {"max_pass_rate_drop": 0.05, "max_latency_p95_ratio": 1.25},
+                "replay_evidence": [],
+            },
+            "run_id": run_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "evaluate failed: {v}");
+    let token = ApprovalToken::approve(promotion_effect_id(&candidate), "ops:amjad");
+    let (status, v) = call_as(
+        &app,
+        acme,
+        "POST",
+        &format!("/learn/candidates/{candidate_id}/promote"),
+        Some(json!({
+            "run_id": run_id,
+            "approval": serde_json::to_value(&token).unwrap(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "promote failed: {v}");
+    let version = {
+        let (status, v) = call_as(&app, acme, "GET", "/policy/active", None).await;
+        assert_eq!(status, StatusCode::OK);
+        v["version"].as_str().unwrap().to_string()
+    };
+    assert_ne!(version, "static-v0", "the promotion moved the pointer");
+
+    // The scripted evaluator's reports carry no twin aggregate, so acme's
+    // own check answers 422 — no baseline — while globex cannot see the
+    // version at all: 404, indistinguishable from unregistered.
+    let (status, _) = call_as(&app, acme, "GET", "/policy/drift", None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call_as(
+        &app,
+        globex,
+        "GET",
+        &format!("/policy/drift?version={version}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "cross-tenant drift check");
+    let (status, _) = call_as(&app, globex, "GET", "/policy/drift", None).await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "globex is on the floor"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
 
 #[tokio::test]
 async fn policy_promotion_activates_the_learned_version_and_rollback_reverts() {
