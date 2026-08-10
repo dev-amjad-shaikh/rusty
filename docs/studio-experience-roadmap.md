@@ -218,7 +218,11 @@ Exit criteria:
 **Outcome:** create and safely manage a real agent configuration.
 
 Status: **partially delivered**. Creation, safe duplication, a readable configuration contract, bounded
-manifest import/export, validation, and real-run handoff work against the current assistant API. A visual
+manifest import/export, validation, and real-run handoff work against the current assistant API. Copies and
+applied manifests now carry a live, source-bound change review across identity, enforced runtime fields,
+portable intent, descriptive metadata, and preserved advanced values. It compares structural values while
+bounding visible excerpts and explicitly describes the result as a separate assistant rather than a server-side
+version. A visual
 intent canvas now captures a versioned model identity, effect-typed tool requirements, governed-memory
 access/scopes, and an approval boundary without raw JSON. Rusty stores and round-trips that portable intent,
 but the registered graph—not the canvas—still chooses and enforces providers at runtime. Editing, immutable
@@ -424,7 +428,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | Order | Vertical slice | Status | Why now |
 |---:|---|---|---|
 | 1 | Recent runs in the Agent Workbench, with status and one-click Inspect | Delivered locally; durable discovery remains in order 4 | Extends the delivered first-run journey into a repeatable daily workflow without pretending the whole Studio is complete |
-| 2 | Assistant edit and duplicate, with a readable configuration summary | Partial — safe duplicate and summary delivered; edit/version endpoints pending | Establishes lifecycle management as soon as the server route surface is free to extend |
+| 2 | Assistant edit and duplicate, with a readable configuration summary | Partial — safe duplicate, source-bound configuration diff, and summary delivered; edit/version endpoints pending | Establishes lifecycle management as soon as the server route surface is free to extend |
 | 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract, manifest portability, and visual model/tool/memory/approval intent delivered; typed discovery, immutable versions, credentials, output, budgets, and runtime binding remain | Replaces the current create-only form and raw configuration gap |
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
 | 5 | Flight Recorder investigation layout and manifest/effect context | Usable foundation — causal run story, recovery boundary, effect-risk guidance, exact signed run-proof chain, and five-surface runtime bill of materials delivered; cross-run manifest drift navigation and remote/KMS attestation remain | Makes Rusty's strongest runtime advantage understandable |

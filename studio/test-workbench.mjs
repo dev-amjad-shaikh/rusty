@@ -67,6 +67,8 @@ globalThis.__workbench = {
   agentConfigurationEvidence, agentConfigurationEvidenceHtml, agentImportContextHtml,
   agentApplyDraftValidation, agentRevalidateEditedField, agentSetShortcutLocks,
   agentCopyIdentityConflict, agentBuildCreatePayload,
+  agentChangeFingerprint, agentChangeEqual, agentChangeExcerpt, agentChangeAdvanced,
+  agentChangeIntentView, agentChangeReviewView, agentChangeReview, agentChangeReviewHtml,
   agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
   agentOpenCreate, agentCreate, store,
 };`, sandbox, { filename: "index.html<script>" });
@@ -367,6 +369,75 @@ check("graph labels: built-in behaviors are understandable",
     return JSON.stringify(imported.config.studio_intent) === JSON.stringify(original.config.studio_intent) &&
       JSON.stringify(copied.config.studio_intent) === JSON.stringify(original.config.studio_intent);
   })());
+}
+
+{
+  const intent = W.agentIntentBuild({
+    model: "openai/gpt-5", tools: "search | read_only\npublish | non_idempotent",
+    memoryMode: "read_write", scopes: ["agent", "user"], approval: "irreversible",
+  }).intent;
+  const source = {
+    assistant_id: "evidence-scout", name: "Evidence scout", graph: "react_agent",
+    config: { recursion_limit: 12, studio_intent: intent, runtime: { mode: "careful", retries: 2 } },
+    metadata: { description: "Collect defensible evidence", tags: ["research", "production"], owner: "quality" },
+  };
+  const copy = W.agentCopyDraft(source);
+  const draft = W.agentBuildCreatePayload({
+    ...copy, name: "Evidence scout · canary", assistantId: "evidence-scout-canary", model: "openai/gpt-5.1",
+  }, source);
+  const review = W.agentChangeReview(source, draft);
+  check("configuration change review: a copy binds exact source and draft surfaces",
+    review.changed === 3 && review.unchanged === 9 && review.review === 0 &&
+    review.rows.find((row) => row.key === "name").state === "changed" &&
+    review.rows.find((row) => row.key === "assistantId").state === "changed" &&
+    review.rows.find((row) => row.key === "model").state === "changed" &&
+    review.rows.find((row) => row.key === "advancedConfig").state === "unchanged");
+  check("configuration change review: comparison does not mutate the source record",
+    source.name === "Evidence scout" && source.assistant_id === "evidence-scout" &&
+    source.config.studio_intent.model === "openai/gpt-5");
+  check("configuration change review: structural object order is not a false change",
+    W.agentChangeEqual({ alpha: 1, nested: { one: true, two: false } },
+      { nested: { two: false, one: true }, alpha: 1 }) === true);
+  check("configuration change review: exact raw integer tokens remain distinguishable", (() => {
+    const left = W.agentParseJsonWithNumberKinds('{"value":9007199254740992}');
+    const same = W.agentParseJsonWithNumberKinds('{"value":9007199254740992}');
+    const adjacent = W.agentParseJsonWithNumberKinds('{"value":9007199254740993}');
+    return W.agentChangeEqual(W.agentChangeAdvanced(left, []).raw, W.agentChangeAdvanced(same, []).raw) === true &&
+      W.agentChangeEqual(W.agentChangeAdvanced(left, []).raw, W.agentChangeAdvanced(adjacent, []).raw) === false;
+  })());
+  check("configuration change review: lossless server number provenance is not a false change", (() => {
+    const parsedSource = W.agentParseJsonWithNumberKinds(
+      '{"assistant_id":"source","name":"Source","graph":"pipeline","config":{"recursion_limit":12}}');
+    const plainDraft = { assistant_id: "copy", name: "Source", graph: "pipeline", config: { recursion_limit: 12 } };
+    return W.agentChangeReview(parsedSource, plainDraft).rows
+      .find((row) => row.key === "recursionLimit").state === "unchanged";
+  })());
+  const htmlReview = W.agentChangeReviewHtml(
+    { ...source, name: 'Source <script>alert("x")</script>' }, draft, "copy");
+  check("configuration change review: hostile values are escaped and lifecycle truth stays explicit",
+    htmlReview.includes("&lt;script&gt;") && !htmlReview.includes('<script>alert("x")</script>') &&
+    htmlReview.includes("separate assistant") && htmlReview.includes("not a new active version") &&
+    htmlReview.includes('role="list"') && htmlReview.includes('role="listitem"'));
+  check("configuration change review: long visible values are bounded without weakening exact comparison",
+    W.agentChangeExcerpt("x".repeat(400)).length < 220 && W.agentChangeExcerpt("x".repeat(400)).includes("[excerpt]") &&
+    W.agentChangeEqual("x".repeat(400), "x".repeat(399) + "y") === false);
+  const opaqueIntent = { format: "vendor.intent/v2", credential: "must-not-render" };
+  const opaqueSource = { assistant_id: "opaque", name: "Opaque", graph: "pipeline", config: { studio_intent: opaqueIntent } };
+  const opaqueDraft = W.agentBuildCreatePayload({
+    ...W.agentCopyDraft(opaqueSource), name: "Opaque copy", assistantId: "opaque-copy",
+  }, opaqueSource);
+  const opaqueHtml = W.agentChangeReviewHtml(opaqueSource, opaqueDraft, "copy");
+  check("configuration change review: opaque intent stays comparable without exposing stored contents",
+    W.agentChangeReview(opaqueSource, opaqueDraft).rows.find((row) => row.key === "model").state === "unchanged" &&
+    opaqueHtml.includes("Opaque intent · exact manifest") && !opaqueHtml.includes("must-not-render"));
+  const tooDeep = {};
+  let cursor = tooDeep;
+  for (let index = 0; index < 18; index++) { cursor.next = {}; cursor = cursor.next; }
+  const bounded = W.agentChangeReview(
+    { assistant_id: "deep", name: "Deep", graph: "pipeline", config: { extension: tooDeep } },
+    { assistant_id: "deep-copy", name: "Deep", graph: "pipeline", config: { extension: tooDeep } });
+  check("configuration change review: over-bound structures degrade to explicit review instead of throwing",
+    bounded.rows.find((row) => row.key === "advancedConfig").state === "review");
 }
 
 {
@@ -912,6 +983,15 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes(".agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }"));
   check("visual intent validation associates the focused field with the announced error",
     html.includes('describedBy.add("agent-form-error")') && html.includes('id="agent-form-error" role="alert"'));
+  check("configuration change review has a labelled source-bound decision surface",
+    html.includes('class="agent-review-stack" aria-label="Configuration review"') &&
+    html.includes('id="agent-change-review" aria-labelledby="agent-change-title" hidden') &&
+    html.includes('class="agent-change-list" role="list"') &&
+    html.includes("store.agentCopySource || store.agentManifestSource"));
+  check("configuration change review stacks before mobile text becomes unreadable",
+    html.includes(".agent-change-row { grid-template-columns: 1fr; gap: 5px; }") &&
+    html.includes(".agent-change-values { grid-template-columns: 1fr; }") &&
+    html.includes(".agent-review-stack { position: static; }"));
   check("configuration workshop carries responsive and reduced-motion quality hooks",
     html.includes(".agent-workshop { grid-template-columns: 1fr;") &&
     html.includes('@media (prefers-reduced-motion: reduce)'));

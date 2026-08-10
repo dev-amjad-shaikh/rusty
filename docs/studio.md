@@ -45,7 +45,12 @@ studio/
   unfamiliar stored shape. Its controls are designed for identifiers and policy declarations; Studio
   warns operators not to paste provider credentials because the assistant record stores these values.
   Studio labels this as portable intent: the current generic assistant runner does not bind providers,
-  tools, memory, or approval enforcement from it, so the registered graph remains authoritative. A
+  tools, memory, or approval enforcement from it, so the registered graph remains authoritative. When a
+  stored agent or applied manifest becomes the source for a new draft, a live change review compares twelve
+  bounded configuration surfaces: identity, enforced graph and step limit, portable model/tool/memory/approval
+  intent, descriptive fields, and carried advanced values. Structural equality uses the stored JSON values,
+  while long visible text is excerpted and the exact manifest remains available. The review states that a copy
+  is a separate assistant—not an active version—and that the source and its evidence remain unchanged. A
   versioned `rusty.assistant/v1` JSON manifest can be imported, reviewed, edited explicitly, and exported;
   imports reject unknown top-level fields rather than silently losing them, and secret-looking values
   stay hidden in the evidence preview. A bounded, connection-scoped browser ledger preserves only safe

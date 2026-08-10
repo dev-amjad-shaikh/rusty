@@ -771,7 +771,7 @@
   .agent-advanced summary, .run-evidence summary { color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
   .agent-advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 10px; }
   .agent-advanced-grid .wide { grid-column: 1 / -1; }
-  .agent-workshop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 340px); gap: 18px; align-items: start; }
+  .agent-workshop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 400px); gap: 18px; align-items: start; }
   .agent-workshop .agent-form { min-width: 0; }
   .agent-form-section { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); }
   .agent-form-section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
@@ -801,7 +801,35 @@
   .agent-manifest-tools .field-help { flex: 1 1 220px; }
   .agent-manifest-editor { width: 100%; min-height: 210px !important; font-family: var(--mono) !important; font-size: 11.5px !important; tab-size: 2; }
   .agent-manifest-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-  .agent-contract-panel { position: sticky; top: 0; min-width: 0; border: 1px solid #405d74; border-radius: 8px; overflow: hidden; background: #151d23; }
+  .agent-review-stack { position: sticky; top: 0; display: grid; gap: 10px; min-width: 0; }
+  .agent-contract-panel { min-width: 0; border: 1px solid #405d74; border-radius: 8px; overflow: hidden; background: #151d23; }
+  .agent-change-panel { min-width: 0; border: 1px solid #6a5a32; border-radius: 8px; overflow: hidden; background: #1d1c17; }
+  .agent-change-panel[hidden] { display: none; }
+  .agent-change-head { padding: 12px 14px 11px; border-bottom: 1px solid #4b422a; background: #242119; }
+  .agent-change-kicker { color: #d4bf82; font: 700 9.5px var(--mono); letter-spacing: .8px; text-transform: uppercase; }
+  .agent-change-head h3 { margin: 3px 0 2px; color: #f1ead8; font-size: 15px; }
+  .agent-change-head p { margin: 0; color: #aaa18a; font-size: 10.5px; line-height: 1.4; }
+  .agent-change-counts { display: flex; gap: 7px; flex-wrap: wrap; padding: 9px 14px; border-bottom: 1px solid #403923; }
+  .agent-change-counts span { padding: 3px 7px; border: 1px solid #51482d; border-radius: 999px; color: #b9ae91; font: 9.5px var(--mono); }
+  .agent-change-counts .changed { border-color: #8b6f32; color: #efd28a; background: #302919; }
+  .agent-change-list { display: grid; }
+  .agent-change-row { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 8px; padding: 9px 12px; border-bottom: 1px solid #353120; }
+  .agent-change-row:last-child { border-bottom: 0; }
+  .agent-change-row.changed { background: #252116; }
+  .agent-change-row.review { background: #261c18; }
+  .agent-change-label { min-width: 0; }
+  .agent-change-label b { display: block; color: #d8d1be; font-size: 10.5px; overflow-wrap: anywhere; }
+  .agent-change-state { display: inline-block; margin-top: 3px; color: #837c69; font: 700 8px var(--mono); letter-spacing: .5px; text-transform: uppercase; }
+  .agent-change-row.changed .agent-change-state { color: #e5c775; }
+  .agent-change-row.review .agent-change-state { color: #e7ad92; }
+  .agent-change-values { display: grid; grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); gap: 5px; align-items: start; min-width: 0; }
+  .agent-change-value { min-width: 0; }
+  .agent-change-value span { display: block; margin-bottom: 2px; color: #817a68; font: 8px var(--mono); letter-spacing: .5px; text-transform: uppercase; }
+  .agent-change-value code { display: block; color: #bdb6a4; font: 9.5px/1.4 var(--mono); white-space: normal; overflow-wrap: anywhere; }
+  .agent-change-row.changed .agent-change-value.after code { color: #f0dfad; }
+  .agent-change-arrow { padding-top: 15px; color: #786f55; font: 10px var(--mono); text-align: center; }
+  .agent-change-foot { padding: 9px 14px; border-top: 1px solid #4b422a; color: #958d78; font-size: 10px; line-height: 1.4; background: #211f19; }
+  .agent-change-unavailable { margin: 0; padding: 12px 14px; color: #d4bf82; font-size: 10.5px; line-height: 1.4; }
   .agent-contract-head { padding: 12px 14px; border-bottom: 1px solid #314858; }
   .agent-contract-kicker { color: #91b9dc; font: 700 9.5px var(--mono); letter-spacing: .8px; text-transform: uppercase; }
   .agent-contract-head h3 { margin: 3px 0 2px; color: #eef7ff; font-size: 15px; }
@@ -1611,6 +1639,10 @@
     .agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }
     .agent-intent-grid { grid-template-columns: 1fr; }
     .agent-intent-truth { flex-direction: column; }
+    .agent-review-stack { position: static; }
+    .agent-change-row { grid-template-columns: 1fr; gap: 5px; }
+    .agent-change-values { grid-template-columns: 1fr; }
+    .agent-change-arrow { padding-top: 0; transform: rotate(90deg); }
     .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-run-row { grid-template-columns: 1fr; }
     .agent-run-row button { justify-self: start; }
@@ -1940,7 +1972,10 @@
                 <button type="submit" class="primary" id="btn-agent-create">Create and continue</button>
               </div>
             </form>
-            <section class="agent-contract-panel" id="agent-contract-preview" aria-labelledby="agent-contract-title"></section>
+            <aside class="agent-review-stack" aria-label="Configuration review">
+              <section class="agent-change-panel" id="agent-change-review" aria-labelledby="agent-change-title" hidden></section>
+              <section class="agent-contract-panel" id="agent-contract-preview" aria-labelledby="agent-contract-title"></section>
+            </aside>
           </div>
         </div>
 
@@ -2373,6 +2408,7 @@ const AGENT_MANIFEST_FORMAT = "rusty.assistant/v1";
 const AGENT_MANIFEST_TEXT_LIMIT = 65536;
 const AGENT_MANIFEST_DEPTH_LIMIT = 16;
 const AGENT_MANIFEST_NODE_LIMIT = 2000;
+const AGENT_CHANGE_EXCERPT_LIMIT = 180;
 const AGENT_INTENT_FORMAT = "rusty.agent-intent/v1";
 const AGENT_INTENT_TOOL_LIMIT = 16;
 const AGENT_INTENT_EFFECTS = new Set(["pure", "read_only", "idempotent", "compensatable", "non_idempotent"]);
@@ -7707,6 +7743,184 @@ function agentBuildCreatePayload(fields, source) {
   return payload;
 }
 
+function agentChangeFingerprint(value, state, depth) {
+  const tracker = state || { nodes: 0 };
+  const level = Number(depth) || 0;
+  tracker.nodes += 1;
+  if (tracker.nodes > AGENT_MANIFEST_NODE_LIMIT || level > AGENT_MANIFEST_DEPTH_LIMIT) {
+    throw new Error("comparison boundary exceeded");
+  }
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return `string:${JSON.stringify(value)}`;
+  if (typeof value === "boolean") return `boolean:${value}`;
+  if (typeof value === "number") return `number:${JSON.stringify(value)}`;
+  if (Array.isArray(value)) {
+    return `array:[${value.map((item) => agentChangeFingerprint(item, tracker, level + 1)).join(",")}]`;
+  }
+  if (!agentPlainObject(value)) return `opaque:${Object.prototype.toString.call(value)}`;
+  const numberTokens = value[AGENT_NUMBER_TOKENS];
+  return `object:{${Object.keys(value).sort().map((key) => {
+    const exactToken = numberTokens && Object.prototype.hasOwnProperty.call(numberTokens, key) && typeof value[key] === "number" &&
+      typeof numberTokens[key] === "string" && JSON.stringify(value[key]) !== numberTokens[key] ? numberTokens[key] : null;
+    const token = exactToken
+      ? `number-token:${JSON.stringify(exactToken)}`
+      : agentChangeFingerprint(value[key], tracker, level + 1);
+    return `${JSON.stringify(key)}:${token}`;
+  }).join(",")}}`;
+}
+
+function agentChangeEqual(before, after) {
+  try {
+    return agentChangeFingerprint(before) === agentChangeFingerprint(after);
+  } catch { return null; }
+}
+
+function agentChangeExcerpt(value) {
+  const characters = Array.from(String(value == null ? "" : value));
+  if (characters.length <= AGENT_CHANGE_EXCERPT_LIMIT) return characters.join("") || "None";
+  return `${characters.slice(0, AGENT_CHANGE_EXCERPT_LIMIT).join("")}… [excerpt]`;
+}
+
+function agentChangeAdvanced(value, excluded) {
+  if (value == null) return { raw: null, display: "None" };
+  if (!agentPlainObject(value)) return { raw: { shape: "opaque", value }, display: "Opaque stored value" };
+  const blocked = new Set(excluded || []);
+  const tokens = value[AGENT_NUMBER_TOKENS];
+  const entries = Object.keys(value).filter((key) => !blocked.has(key)).sort().map((key) => [
+    key,
+    value[key],
+    tokens && Object.prototype.hasOwnProperty.call(tokens, key) && typeof value[key] === "number" &&
+      typeof tokens[key] === "string" && JSON.stringify(value[key]) !== tokens[key] ? tokens[key] : null,
+  ]);
+  return {
+    raw: entries,
+    display: entries.length ? `${entries.length} carried field${entries.length === 1 ? "" : "s"}` : "None",
+  };
+}
+
+function agentChangeIntentView(config) {
+  const inspected = agentIntentInspectConfig(config);
+  if (!inspected.present) {
+    return {
+      model: { raw: null, display: "Not declared" },
+      tools: { raw: null, display: "Not declared" },
+      memory: { raw: null, display: "Not declared" },
+      approval: { raw: null, display: "Runtime policy" },
+    };
+  }
+  if (!inspected.valid) {
+    const raw = agentPlainObject(config) ? config.studio_intent : config;
+    const opaque = { raw, display: "Opaque intent · exact manifest" };
+    return { model: opaque, tools: opaque, memory: opaque, approval: opaque };
+  }
+  const intent = inspected.intent;
+  const toolNames = intent.tools.map((tool) => `${tool.name} (${tool.effect.replaceAll("_", " ")})`);
+  const memory = intent.memory.access === "none" ? "No declared memory"
+    : `${intent.memory.access.replaceAll("_", " ")} · ${intent.memory.scopes.join(", ")}`;
+  const approvalLabels = {
+    runtime_policy: "Runtime policy",
+    irreversible: "Before irreversible effects",
+    external_effect: "Before every external effect",
+  };
+  return {
+    model: { raw: intent.model, display: intent.model || "Unbound" },
+    tools: { raw: intent.tools, display: toolNames.length ? toolNames.join(" · ") : "None" },
+    memory: { raw: intent.memory, display: memory },
+    approval: { raw: intent.approval, display: approvalLabels[intent.approval] || intent.approval },
+  };
+}
+
+function agentChangeReviewView(record, draft) {
+  const source = record && typeof record === "object" ? record : {};
+  const config = Object.prototype.hasOwnProperty.call(source, "config") ? source.config : null;
+  const metadata = Object.prototype.hasOwnProperty.call(source, "metadata") ? source.metadata : null;
+  const configMap = agentPlainObject(config) ? config : null;
+  const metadataMap = agentPlainObject(metadata) ? metadata : null;
+  const hasLimit = Boolean(configMap && Object.prototype.hasOwnProperty.call(configMap, "recursion_limit"));
+  const limit = hasLimit ? agentRuntimeLimitValue(configMap) : null;
+  const storedLimitToken = hasLimit && configMap[AGENT_NUMBER_TOKENS] &&
+    Object.prototype.hasOwnProperty.call(configMap[AGENT_NUMBER_TOKENS], "recursion_limit")
+    ? configMap[AGENT_NUMBER_TOKENS].recursion_limit : null;
+  const limitToken = typeof storedLimitToken === "string" && JSON.stringify(configMap.recursion_limit) !== storedLimitToken
+    ? storedLimitToken : null;
+  const hasDescription = Boolean(metadataMap && Object.prototype.hasOwnProperty.call(metadataMap, "description"));
+  const hasTags = Boolean(metadataMap && Object.prototype.hasOwnProperty.call(metadataMap, "tags"));
+  const intent = agentChangeIntentView(config);
+  return {
+    name: { raw: source.name ?? null, display: source.name || "Unnamed" },
+    assistantId: Object.prototype.hasOwnProperty.call(source, "assistant_id") && source.assistant_id
+      ? { raw: source.assistant_id, display: source.assistant_id }
+      : draft ? { raw: { generated_on_create: true }, display: "Generated on create" }
+      : { raw: null, display: "No identity" },
+    graph: { raw: source.graph ?? null, display: source.graph ? `${agentGraphLabel(source.graph)} · ${source.graph}` : "Not selected" },
+    recursionLimit: hasLimit
+      ? { raw: { value: configMap.recursion_limit, token: limitToken }, display: limit === null ? "Opaque stored value" : `${limit} steps` }
+      : { raw: null, display: "Server default" },
+    model: intent.model,
+    tools: intent.tools,
+    memory: intent.memory,
+    approval: intent.approval,
+    description: hasDescription
+      ? { raw: metadataMap.description, display: typeof metadataMap.description === "string" ? metadataMap.description || "Empty" : "Opaque stored value" }
+      : { raw: null, display: "None" },
+    tags: hasTags
+      ? { raw: metadataMap.tags, display: agentTags(source).length ? agentTags(source).join(", ") : "Empty" }
+      : { raw: null, display: "None" },
+    advancedConfig: agentChangeAdvanced(config, ["recursion_limit", "studio_intent"]),
+    advancedMetadata: agentChangeAdvanced(metadata, ["description", "tags"]),
+  };
+}
+
+function agentChangeReview(source, draft) {
+  if (!source || typeof source !== "object") return null;
+  const before = agentChangeReviewView(source, false);
+  const after = agentChangeReviewView(draft, true);
+  const fields = [
+    ["name", "Name"], ["assistantId", "Agent ID"], ["graph", "Behavior"], ["recursionLimit", "Step limit"],
+    ["model", "Model"], ["tools", "Tools"], ["memory", "Memory"], ["approval", "Approval"],
+    ["description", "Responsibility"], ["tags", "Tags"], ["advancedConfig", "Other config"],
+    ["advancedMetadata", "Other metadata"],
+  ];
+  const rows = fields.map(([key, label]) => {
+    const equal = agentChangeEqual(before[key].raw, after[key].raw);
+    return { key, label, before: before[key].display, after: after[key].display,
+      state: equal === null ? "review" : equal ? "unchanged" : "changed" };
+  });
+  return {
+    rows,
+    changed: rows.filter((row) => row.state === "changed").length,
+    unchanged: rows.filter((row) => row.state === "unchanged").length,
+    review: rows.filter((row) => row.state === "review").length,
+  };
+}
+
+function agentChangeReviewHtml(source, draft, origin) {
+  const comparison = agentChangeReview(source, draft);
+  if (!comparison) return "";
+  const mode = origin === "copy" ? "Source agent → separate assistant"
+    : "Applied manifest → new assistant";
+  const boundary = origin === "copy"
+    ? "This creates a separate assistant. It is not a new active version, and the source remains unchanged."
+    : "Nothing has changed on the server. This review covers the new assistant that will be created.";
+  const rows = comparison.rows.map((row) => {
+    const stateLabel = row.state === "changed" ? "changed" : row.state === "review" ? "needs exact-manifest review" : "unchanged";
+    const arrow = row.state === "unchanged" ? "=" : row.state === "review" ? "?" : "→";
+    return `<article class="agent-change-row ${row.state}" role="listitem" aria-label="${escapeHtml(`${row.label}: ${stateLabel}`)}">` +
+      `<div class="agent-change-label"><b>${escapeHtml(row.label)}</b><span class="agent-change-state">${escapeHtml(stateLabel)}</span></div>` +
+      `<div class="agent-change-values"><div class="agent-change-value before"><span>Source</span><code>${escapeHtml(agentChangeExcerpt(row.before))}</code></div>` +
+      `<span class="agent-change-arrow" aria-hidden="true">${arrow}</span>` +
+      `<div class="agent-change-value after"><span>Draft</span><code>${escapeHtml(agentChangeExcerpt(row.after))}</code></div></div></article>`;
+  }).join("");
+  return `<div class="agent-change-head"><span class="agent-change-kicker">${escapeHtml(mode)}</span>` +
+    `<h3 id="agent-change-title">Review the change set</h3><p>${escapeHtml(boundary)}</p></div>` +
+    `<div class="agent-change-counts" aria-label="Change summary"><span class="changed">${comparison.changed} changed</span>` +
+      `<span>${comparison.unchanged} unchanged</span>` +
+      (comparison.review ? `<span>${comparison.review} needs review</span>` : "") + `</div>` +
+    `<div class="agent-change-list" role="list">${rows}</div>` +
+    `<div class="agent-change-foot">Comparison uses exact structural values. Long visible text is excerpted; the exact portable manifest remains available below.</div>`;
+}
+
 function agentErrorHtml(status, body) {
   if (status === 404 && (!body || !body.message)) {
     return `<div class="note tiny">This server has no <code>/assistants</code> routes. Upgrade the server to use the agent workbench.</div>`;
@@ -8064,9 +8278,26 @@ function agentDraftRecord() {
 
 function agentRefreshContract() {
   let record;
+  let draftError = "";
   try { record = agentDraftRecord(); }
-  catch { record = { name: $("inp-agent-name").value, graph: $("sel-agent-graph").value }; }
+  catch (error) {
+    draftError = error && error.message ? error.message : "Complete the draft before comparing it.";
+    record = { name: $("inp-agent-name").value, graph: $("sel-agent-graph").value };
+  }
   $("agent-contract-preview").innerHTML = agentConfigurationEvidenceHtml(record, agentGraphNames(), "agent-contract-title");
+  const review = $("agent-change-review");
+  const baseline = store.agentCopySource || store.agentManifestSource;
+  if (!baseline) {
+    review.hidden = true;
+    review.innerHTML = "";
+  } else {
+    review.hidden = false;
+    review.innerHTML = draftError
+      ? `<div class="agent-change-head"><span class="agent-change-kicker">Change review paused</span>` +
+        `<h3 id="agent-change-title">Complete the draft to compare it</h3></div>` +
+        `<p class="agent-change-unavailable">${escapeHtml(draftError)}</p>`
+      : agentChangeReviewHtml(baseline, record, store.agentCopySource ? "copy" : "manifest");
+  }
 }
 
 function agentSetManifestStatus(message) {
@@ -8210,6 +8441,8 @@ function agentResetCreateForm() {
   agentSetManifestStatus(AGENT_MANIFEST_FORMAT);
   $("agent-copy-context").hidden = true;
   $("agent-copy-context").innerHTML = "";
+  $("agent-change-review").hidden = true;
+  $("agent-change-review").innerHTML = "";
 }
 
 function agentOpenCreate(source) {
