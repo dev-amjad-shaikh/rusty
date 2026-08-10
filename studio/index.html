@@ -500,6 +500,54 @@
   .cmp-finding p { margin: 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.5; }
   .cmp-finding code { color: #d8bd7b; }
   .cmp-decision-boundary { margin: 0 18px 16px; padding: 9px 11px; border-left: 3px solid #6f8062; background: #192019; color: #b9c8b1; font-size: 10.5px; line-height: 1.45; }
+  .cmp-review {
+    position: relative; margin: 0 18px 16px; border: 1px solid #5b4938; border-radius: 9px;
+    background: linear-gradient(145deg, rgba(49,38,29,.92), rgba(25,25,21,.96)); overflow: hidden;
+  }
+  .cmp-review::before { content: ""; position: absolute; inset: 0 auto 0 50%; width: 1px; background: rgba(199,151,103,.08); pointer-events: none; }
+  .cmp-review-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; padding: 13px 14px; border-bottom: 1px solid #44372c; }
+  .cmp-review-kicker { color: #d19a71; font: 700 9.5px var(--mono); letter-spacing: .8px; text-transform: uppercase; }
+  .cmp-review-head h4 { margin: 3px 0 2px; color: #efe5d8; font-size: 15px; }
+  .cmp-review-head p { max-width: 680px; margin: 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.45; }
+  .cmp-review-state { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #6c5a42; border-radius: 999px; color: #e1c391; font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .55px; }
+  .cmp-review-state.locked { border-color: #58704f; color: #bdd6ae; }
+  .cmp-review-form { position: relative; z-index: 1; padding: 13px 14px 14px; }
+  .cmp-review-meta { display: grid; grid-template-columns: minmax(180px,.7fr) minmax(260px,1.3fr); gap: 10px; }
+  .cmp-review label, .cmp-review legend { color: var(--text-dim); font-size: 10.5px; }
+  .cmp-review label { display: grid; gap: 4px; }
+  .cmp-review input[type="text"], .cmp-review textarea, .cmp-review select {
+    width: 100%; border: 1px solid #504438; border-radius: 6px; padding: 6px 8px;
+    background: #171714; color: var(--text); font: 11.5px var(--sans);
+  }
+  .cmp-review textarea { min-height: 70px; resize: vertical; line-height: 1.4; }
+  .cmp-review :is(input,textarea,select)[aria-invalid="true"] { border-color: var(--err); }
+  .cmp-review-rubric { margin: 12px 0; border: 1px solid #46392e; border-radius: 7px; overflow: hidden; }
+  .cmp-review-rubric-head, .cmp-review-rubric-row { display: grid; grid-template-columns: minmax(76px,.55fr) minmax(150px,1fr) minmax(76px,.55fr); align-items: center; gap: 8px; padding: 8px 10px; }
+  .cmp-review-rubric-head { background: rgba(12,13,12,.38); color: var(--text-faint); font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .55px; }
+  .cmp-review-rubric-head span:last-child { text-align: right; }
+  .cmp-review-rubric-row { border-top: 1px solid #3d332a; }
+  .cmp-review-rubric-row label { min-width: 0; }
+  .cmp-review-rubric-row label:last-child select { text-align: right; }
+  .cmp-review-mobile-side { display: none; }
+  .cmp-review-criterion { text-align: center; }
+  .cmp-review-criterion b, .cmp-review-criterion span { display: block; }
+  .cmp-review-criterion b { color: #e2d8ca; font-size: 11px; }
+  .cmp-review-criterion span { margin-top: 2px; color: var(--text-faint); font-size: 9.5px; }
+  .cmp-review-verdict { margin: 0; padding: 0; border: 0; }
+  .cmp-review-verdict-options { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; margin-top: 6px; }
+  .cmp-review-verdict-options label { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 6px; border: 1px solid #4a3e33; border-radius: 6px; background: #1b1a17; color: #d8cfc2; text-align: center; cursor: pointer; }
+  .cmp-review-verdict-options label:has(input:checked) { border-color: #b17c57; background: #31251d; color: #f1dfc8; }
+  .cmp-review-verdict-options input { accent-color: #b9784f; }
+  .cmp-review-ack { display: flex !important; grid-template-columns: none; align-items: flex-start; gap: 7px !important; margin-top: 11px; color: #c8bba9 !important; line-height: 1.4; }
+  .cmp-review-ack input { margin-top: 2px; accent-color: #9ab184; }
+  .cmp-review-actions { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  .cmp-review-errors { margin-bottom: 10px; padding: 8px 10px; border-left: 3px solid var(--err); background: #2a1c1a; color: #e8c3bd; font-size: 10.5px; }
+  .cmp-review-locked { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(150px,.45fr) minmax(0,1fr); gap: 14px; padding: 14px; }
+  .cmp-review-verdict-stamp { display: grid; place-items: center; min-height: 94px; padding: 12px; border: 1px double #817052; color: #ebd5b4; font: 700 12px var(--mono); text-align: center; text-transform: uppercase; letter-spacing: .7px; transform: rotate(-1deg); }
+  .cmp-review-summary { color: var(--text-dim); font-size: 10.5px; line-height: 1.55; }
+  .cmp-review-summary b { color: #e5dbcd; }
+  .cmp-review-unavailable { position: relative; z-index: 1; padding: 13px 14px; color: #d6c6a6; font-size: 10.5px; line-height: 1.5; }
+  .cmp-review .field-error { color: #e9aaa1; font-size: 9.5px; }
   .cmp-evidence { margin-top: 9px; border-top: 1px solid var(--border); }
   .cmp-evidence summary { padding: 9px 4px; color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
   .cmp-grid { display: grid; grid-template-columns: minmax(0,1fr) 92px minmax(0,1fr); font-size: 11px; }
@@ -1586,6 +1634,14 @@
     .cmp-balance-pivot { border: 0; border-top: 1px solid #443a31; border-bottom: 1px solid #443a31; min-height: 38px; }
     .cmp-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .cmp-report-grid { grid-template-columns: 1fr; }
+    .cmp-review-meta, .cmp-review-locked { grid-template-columns: 1fr; }
+    .cmp-review-verdict-options { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .cmp-review-head { flex-direction: column; }
+    .cmp-review-rubric-head { display: none; }
+    .cmp-review-rubric-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+    .cmp-review-rubric-row .cmp-review-criterion { grid-column: 1 / -1; grid-row: 1; }
+    .cmp-review-rubric-row label { grid-row: 2; }
+    .cmp-review-mobile-side { display: block; color: var(--text-faint); font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .5px; }
   }
 
   :is(button, input, select, textarea, summary):focus-visible {
@@ -5630,6 +5686,157 @@ function recComparisonReportHtml(report) {
     `</section>`;
 }
 
+const REC_REVIEW_CRITERIA = Object.freeze([
+  Object.freeze({ key: "task_outcome", label: "Task outcome", hint: "Did it solve the requested task?" }),
+  Object.freeze({ key: "correctness", label: "Correctness", hint: "Is the answer accurate and grounded?" }),
+  Object.freeze({ key: "safety", label: "Safety", hint: "Did it respect constraints and risk?" }),
+]);
+const REC_REVIEW_VERDICTS = Object.freeze({
+  baseline_preferred: "Baseline preferred",
+  candidate_preferred: "Candidate preferred",
+  tie: "Tie",
+  inconclusive: "Inconclusive",
+});
+const REC_REVIEWER_LIMIT = 128;
+const REC_REVIEW_NOTES_LIMIT = 2048;
+
+function recReviewGeneratedId(cryptography = globalThis.crypto, now = Date.now(), entropy = Math.random()) {
+  if (cryptography && typeof cryptography.randomUUID === "function") return `review-${cryptography.randomUUID()}`;
+  return `review-${Number(now).toString(36)}-${Math.floor(Number(entropy) * 0x100000000).toString(36).padStart(7, "0")}`;
+}
+
+function recReviewDraft(report, id = recReviewGeneratedId()) {
+  const value = report || {};
+  return {
+    reviewId: id, baseId: String(value.baseId || ""), branchId: String(value.branchId || ""),
+    reviewer: "", notes: "", verdict: "", acknowledged: false, locked: false, recordedAt: "", errors: {},
+    scores: Object.fromEntries(REC_REVIEW_CRITERIA.map((criterion) => [criterion.key, { baseline: "", candidate: "" }])),
+  };
+}
+
+function recReviewTextValid(value, limit, multiline = false) {
+  const text = String(value == null ? "" : value);
+  const controls = multiline ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/;
+  return agentUtf8Length(text) <= limit && !controls.test(text);
+}
+
+function recReviewValidate(review, report, inputsCurrent = true) {
+  const value = review && typeof review === "object" ? review : {};
+  const evidence = report && report.evidenceState;
+  const errors = {};
+  if (!report || evidence?.state !== "finalized" || evidence.usableEvents !== true) {
+    errors.evidence = "Human review requires two matching, finalized journals.";
+  } else if (value.baseId !== report.baseId || value.branchId !== report.branchId || !inputsCurrent) {
+    errors.evidence = "The compared run identities changed. Build a fresh report before recording a verdict.";
+  }
+  const reviewer = String(value.reviewer || "");
+  if (!reviewer || reviewer !== reviewer.trim() || !recReviewTextValid(reviewer, REC_REVIEWER_LIMIT)) {
+    errors.reviewer = "Enter an exact reviewer identity using 1–128 UTF-8 bytes, with no surrounding whitespace or control characters.";
+  }
+  const notes = String(value.notes || "");
+  if (!recReviewTextValid(notes, REC_REVIEW_NOTES_LIMIT, true)) {
+    errors.notes = "Notes must be at most 2,048 UTF-8 bytes and contain no hidden control characters.";
+  }
+  for (const criterion of REC_REVIEW_CRITERIA) {
+    const scores = value.scores && value.scores[criterion.key];
+    for (const side of ["baseline", "candidate"]) {
+      const score = scores && scores[side];
+      if (!/^[1-5]$/.test(String(score || ""))) errors[`score-${criterion.key}-${side}`] = `Score ${criterion.label.toLowerCase()} for the ${side}.`;
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(REC_REVIEW_VERDICTS, value.verdict)) errors.verdict = "Choose an explicit verdict.";
+  if (value.acknowledged !== true) errors.acknowledged = "Confirm that you reviewed the task outcomes and this exact finalized run pair.";
+  return { ok: Object.keys(errors).length === 0, errors };
+}
+
+function recReviewPacket(review, report) {
+  const validation = recReviewValidate(review, report, true);
+  if (!validation.ok || review.locked !== true || !review.recordedAt) throw new Error("Only a recorded review can be exported.");
+  return {
+    format: "rusty.studio.run_review", version: 1,
+    review_id: review.reviewId, recorded_at: review.recordedAt,
+    reviewer: review.reviewer, verdict: review.verdict,
+    run_pair: { baseline_run_id: report.baseId, candidate_run_id: report.branchId },
+    evidence: {
+      journal_state: "finalized", logically_identical: report.identical,
+      first_divergent_seq: report.divergence === null ? null : String(report.divergence),
+      changed_steps: report.changedSteps, changed_channels: report.changedChannels,
+      metrics: report.metrics.map((metric) => ({ label: metric.label, baseline: metric.base, candidate: metric.candidate, delta: metric.delta })),
+      operational_signals: { baseline: report.baseSignals, candidate: report.branchSignals },
+    },
+    rubric: REC_REVIEW_CRITERIA.map((criterion) => ({
+      criterion: criterion.key, baseline_score: Number(review.scores[criterion.key].baseline),
+      candidate_score: Number(review.scores[criterion.key].candidate),
+    })),
+    notes: review.notes,
+    boundary: { storage: "page_memory", durable: false, promotion_gate: false,
+      lost_on_reload_or_thread_switch: true, raw_event_payloads_automatically_included: false,
+      reviewer_notes_exported_verbatim: true },
+  };
+}
+
+function recReviewFilename(review) {
+  const safe = String(review.reviewId || "packet").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^\.+/, "").slice(0, 128) || "packet";
+  return `rusty-run-review-${safe}.json`;
+}
+
+function recReviewErrorHtml(review, field) {
+  const message = review && review.errors && review.errors[field];
+  return message ? `<span class="field-error" id="cmp-review-error-${escapeHtml(field)}">${escapeHtml(message)}</span>` : "";
+}
+
+function recReviewInvalid(review, field) {
+  return review && review.errors && review.errors[field]
+    ? ` aria-invalid="true" aria-describedby="cmp-review-error-${escapeHtml(field)}"` : "";
+}
+
+function recReviewHtml(report, review) {
+  const evidenceReady = report?.evidenceState?.state === "finalized" && report.evidenceState.usableEvents === true;
+  const value = review || recReviewDraft(report, "review-preview");
+  const header = `<div class="cmp-review-head"><div><span class="cmp-review-kicker">Human decision · exact run pair</span>` +
+    `<h4 id="cmp-review-title" tabindex="-1">Verdict docket</h4><p>Score a fixed rubric, then record an explicit human judgment. This page-memory review is lost on reload or thread switch; it is not a durable approval or release gate.</p></div>` +
+    `<span class="cmp-review-state${value.locked ? " locked" : ""}">${value.locked ? "recorded" : evidenceReady ? "session draft" : "unavailable"}</span></div>`;
+  if (!evidenceReady) {
+    return `<section class="cmp-review" aria-labelledby="cmp-review-title">${header}<div class="cmp-review-unavailable"><b>Review is unavailable.</b> Wait for both runs to finish, then rebuild the comparison so the verdict binds to matching finalized journals.</div></section>`;
+  }
+  if (value.locked) {
+    const scoreLine = REC_REVIEW_CRITERIA.map((criterion) => `${criterion.label}: ${value.scores[criterion.key].baseline} / ${value.scores[criterion.key].candidate}`).join(" · ");
+    return `<section class="cmp-review" aria-labelledby="cmp-review-title">${header}<div class="cmp-review-locked">` +
+      `<div class="cmp-review-verdict-stamp">${escapeHtml(REC_REVIEW_VERDICTS[value.verdict] || value.verdict)}</div>` +
+      `<div class="cmp-review-summary"><b>Reviewer:</b> ${escapeHtml(value.reviewer)}<br><b>Baseline / candidate scores:</b> ${escapeHtml(scoreLine)}` +
+      (value.notes ? `<br><b>Notes:</b> ${escapeHtml(value.notes)}` : "") +
+      `<br><span class="muted tiny">Recorded ${escapeHtml(value.recordedAt)} · page memory only · raw event payloads are not added automatically; notes export exactly as entered</span>` +
+      `<div class="cmp-review-actions"><button class="small" type="button" data-rec-review-edit>Edit review</button>` +
+      `<button class="small primary" type="button" data-rec-review-export>Export review packet</button></div></div></div>` +
+      `<div class="sr-only" id="cmp-review-announcer" aria-live="polite"></div></section>`;
+  }
+  const summary = Object.keys(value.errors || {}).length
+    ? `<div class="cmp-review-errors" id="cmp-review-error-summary" role="alert" tabindex="-1"><b>Review not recorded.</b> Correct the marked fields; no judgment has been locked or exported.</div>` : "";
+  const scoreLabels = ["poor", "weak", "acceptable", "strong", "excellent"];
+  const scoreOptions = (selected) => `<option value="">—</option>${[1,2,3,4,5].map((score) => `<option value="${score}"${String(selected) === String(score) ? " selected" : ""}>${score} · ${scoreLabels[score - 1]}</option>`).join("")}`;
+  const rubric = REC_REVIEW_CRITERIA.map((criterion) => {
+    const scores = value.scores[criterion.key];
+    const baselineField = `score-${criterion.key}-baseline`, candidateField = `score-${criterion.key}-candidate`;
+    return `<div class="cmp-review-rubric-row"><label><span class="cmp-review-mobile-side" aria-hidden="true">Baseline</span><span class="sr-only">Baseline ${escapeHtml(criterion.label)} score</span>` +
+      `<select data-rec-review-score="${criterion.key}" data-rec-review-side="baseline"${recReviewInvalid(value, baselineField)}>${scoreOptions(scores.baseline)}</select>${recReviewErrorHtml(value, baselineField)}</label>` +
+      `<div class="cmp-review-criterion"><b>${escapeHtml(criterion.label)}</b><span>${escapeHtml(criterion.hint)}</span></div>` +
+      `<label><span class="cmp-review-mobile-side" aria-hidden="true">Candidate</span><span class="sr-only">Candidate ${escapeHtml(criterion.label)} score</span>` +
+      `<select data-rec-review-score="${criterion.key}" data-rec-review-side="candidate"${recReviewInvalid(value, candidateField)}>${scoreOptions(scores.candidate)}</select>${recReviewErrorHtml(value, candidateField)}</label></div>`;
+  }).join("");
+  const verdicts = Object.entries(REC_REVIEW_VERDICTS).map(([key, label]) =>
+    `<label><input type="radio" name="cmp-review-verdict" data-rec-review-verdict value="${key}"${value.verdict === key ? " checked" : ""}>${escapeHtml(label)}</label>`).join("");
+  return `<section class="cmp-review" aria-labelledby="cmp-review-title">${header}<form id="cmp-review-form" class="cmp-review-form" novalidate>` + summary +
+    (value.errors.evidence ? `<div class="cmp-review-errors">${escapeHtml(value.errors.evidence)}</div>` : "") +
+    `<div class="cmp-review-meta"><label>Reviewer identity<input type="text" data-rec-review-field="reviewer" maxlength="128" autocomplete="name" value="${escapeHtml(value.reviewer)}"${recReviewInvalid(value, "reviewer")}>${recReviewErrorHtml(value, "reviewer")}</label>` +
+    `<label>Decision notes · optional<textarea data-rec-review-field="notes" maxlength="2048"${recReviewInvalid(value, "notes")} placeholder="What task outcome made this judgment defensible?">${escapeHtml(value.notes)}</textarea><span class="tiny">Exported exactly as entered. Do not paste secrets or raw event payloads.</span>${recReviewErrorHtml(value, "notes")}</label></div>` +
+    `<div class="cmp-review-rubric" role="group" aria-label="Baseline and candidate quality scores from 1 to 5"><div class="cmp-review-rubric-head"><span>Baseline · 1–5</span><span style="text-align:center">Review criterion</span><span>Candidate · 1–5</span></div>${rubric}</div>` +
+    `<fieldset class="cmp-review-verdict"${recReviewInvalid(value, "verdict")}><legend>Human verdict</legend><div class="cmp-review-verdict-options">${verdicts}</div>${recReviewErrorHtml(value, "verdict")}</fieldset>` +
+    `<label class="cmp-review-ack"><input type="checkbox" data-rec-review-field="acknowledged"${value.acknowledged ? " checked" : ""}${recReviewInvalid(value, "acknowledged")}>` +
+      `<span>I reviewed the actual task outcomes and the exact finalized baseline/candidate run pair. Scores support—but do not automatically determine—my verdict.${recReviewErrorHtml(value, "acknowledged")}</span></label>` +
+    `<div class="cmp-review-actions"><button class="small primary" type="submit">Record page-memory verdict</button><span class="muted tiny">Nothing is written to the Rusty server; reload or thread switch discards this draft.</span></div>` +
+    `<div class="sr-only" id="cmp-review-announcer" aria-live="polite"></div></form></section>`;
+}
+
 /* Align two branches' events by seq against a BranchDiff. Rows are
  * {seq, base, branch, cls} with cls "same" (identical prefix — rendered
  * dimmed), "divergent" (both sides present at/after the fork), "removed"
@@ -5687,12 +5894,12 @@ function recCmpEventHtml(ev, cls) {
 /* The full compare view: run-id headers with per-branch totals, then both
  * timelines aligned by seq — identical prefix dimmed, the fork point marked,
  * added/removed events highlighted on their side. */
-function recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff, evidenceState) {
+function recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff, evidenceState, review) {
   const rows = recCompareRows(baseEvents, branchEvents, diff);
   const d = diff || {};
   const report = recComparisonReport(baseId, branchId, baseEvents, branchEvents, d, evidenceState);
   const firstBreak = rows.find((row) => row.cls !== "same" && (typeof row.seq === "number" || typeof row.seq === "bigint"));
-  let html = recComparisonReportHtml(report) +
+  let html = recComparisonReportHtml(report) + recReviewHtml(report, review) +
     `<details class="cmp-evidence"><summary>Inspect aligned event evidence · ${escapeHtml(String(rows.length))} row(s)</summary>` +
     `<div class="cmp-grid" role="table" aria-label="Aligned baseline and candidate event evidence">` +
     `<div class="cmp-row" role="row"><div class="cmp-col-head" role="columnheader" title="${escapeHtml(baseId)}">baseline ${escapeHtml(shortId(baseId))}</div>` +
@@ -5726,6 +5933,81 @@ function recCompareOperationCurrent(request, operation) {
 
 function recCompareInputsCurrent(baseId, branchId) {
   return $("inp-cmp-base").value.trim() === baseId && $("inp-cmp-branch").value.trim() === branchId;
+}
+
+function recRenderComparison(focusSelector = "") {
+  const value = store.compare;
+  const view = $("rec-compare-view");
+  if (!value || !view) return;
+  view.innerHTML = (value.note || "") + recCompareHtml(value.baseId, value.branchId, value.baseEvents,
+    value.branchEvents, value.diff, value.evidenceState, value.review);
+  if (focusSelector) view.querySelector(focusSelector)?.focus({ preventScroll: true });
+}
+
+function recReviewInput(event) {
+  const review = store.compare && store.compare.review;
+  if (!review || review.locked) return;
+  const target = event.target;
+  const criterion = target.getAttribute("data-rec-review-score");
+  const side = target.getAttribute("data-rec-review-side");
+  if (criterion && side && review.scores[criterion] && ["baseline", "candidate"].includes(side)) {
+    review.scores[criterion][side] = target.value;
+  } else if (target.hasAttribute("data-rec-review-verdict")) {
+    review.verdict = target.value;
+  } else {
+    const field = target.getAttribute("data-rec-review-field");
+    if (field === "reviewer" || field === "notes") review[field] = target.value;
+    if (field === "acknowledged") review.acknowledged = target.checked;
+  }
+  // A validation result remains visible and programmatically attached until
+  // the operator submits again; editing alone is not proof that it is fixed.
+}
+
+function recReviewSubmit() {
+  const value = store.compare;
+  if (!value || !value.review || value.review.locked) return;
+  const report = recComparisonReport(value.baseId, value.branchId, value.baseEvents, value.branchEvents, value.diff, value.evidenceState);
+  const validation = recReviewValidate(value.review, report, recCompareInputsCurrent(value.baseId, value.branchId));
+  value.review.errors = validation.errors;
+  if (!validation.ok) {
+    recRenderComparison("#cmp-review-error-summary");
+    return;
+  }
+  value.review.locked = true;
+  value.review.recordedAt = new Date().toISOString();
+  recRenderComparison("#cmp-review-title");
+  toast("Page-memory verdict recorded for this exact run pair.", "ok");
+}
+
+function recReviewEdit() {
+  const review = store.compare && store.compare.review;
+  if (!review || !review.locked) return;
+  review.locked = false;
+  review.recordedAt = "";
+  review.acknowledged = false;
+  review.errors = {};
+  recRenderComparison('[data-rec-review-field="reviewer"]');
+}
+
+function recReviewExport() {
+  const value = store.compare;
+  if (!value || !value.review) return;
+  try {
+    const report = recComparisonReport(value.baseId, value.branchId, value.baseEvents, value.branchEvents, value.diff, value.evidenceState);
+    const raw = JSON.stringify(recReviewPacket(value.review, report), null, 2) + "\n";
+    const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = recReviewFilename(value.review);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    toast("Review packet exported. Notes were included exactly as entered; run payloads were not added automatically.", "ok");
+    $("cmp-review-announcer").textContent = "Review packet exported.";
+  } catch (error) {
+    toast(error.message || "The review packet could not be exported.", "err");
+  }
 }
 
 /* Re-drive the loaded run from its persisted journal (POST /runs/replay) and
@@ -5821,7 +6103,6 @@ async function recCompare() {
   }
   const partial = evidenceState.state === "partial";
   const mismatch = evidenceState.state === "mismatch";
-  store.compare = { baseId, branchId, baseEvents, branchEvents, diff, partial, evidenceState };
   const note = partial
     ? `<div class="note tiny">Full timelines unavailable (GET /runs/{id}/events failed) — ` +
       `showing only the divergence region carried by the diff.</div>`
@@ -5829,7 +6110,10 @@ async function recCompare() {
       ? "A timeline response did not match the requested run identity or exact response contract."
       : "A journal advanced between the atomic diff and the timeline reads."} ` +
       `The report uses the atomic diff; aligned rows show only its carried divergence region.</div>` : "";
-  view.innerHTML = note + recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff, evidenceState);
+  const report = recComparisonReport(baseId, branchId, baseEvents, branchEvents, diff, evidenceState);
+  store.compare = { baseId, branchId, baseEvents, branchEvents, diff, partial, evidenceState, note,
+    review: recReviewDraft(report) };
+  recRenderComparison();
   $("cmp-report-title")?.focus({ preventScroll: true });
   if (recCompareOperationCurrent(request, operation)) $("btn-rec-compare").disabled = false;
 }
@@ -14153,6 +14437,17 @@ function init() {
   const cmpEnter = (e) => { if (e.key === "Enter") recCompare(); };
   $("inp-cmp-base").addEventListener("keydown", cmpEnter);
   $("inp-cmp-branch").addEventListener("keydown", cmpEnter);
+  $("rec-compare-view").addEventListener("input", recReviewInput);
+  $("rec-compare-view").addEventListener("change", recReviewInput);
+  $("rec-compare-view").addEventListener("submit", (event) => {
+    if (event.target.id !== "cmp-review-form") return;
+    event.preventDefault();
+    recReviewSubmit();
+  });
+  $("rec-compare-view").addEventListener("click", (event) => {
+    if (event.target.closest("[data-rec-review-edit]")) { recReviewEdit(); return; }
+    if (event.target.closest("[data-rec-review-export]")) recReviewExport();
+  });
   $("rec-replay-banner").addEventListener("click", (e) => {
     const target = e.target.closest("[data-jump-seq]");
     if (!target) return;

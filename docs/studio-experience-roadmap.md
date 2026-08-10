@@ -299,11 +299,16 @@ Exit criteria:
 
 **Outcome:** prove that a proposed agent version is better before promotion.
 
-Status: **comparison foundation delivered**. The Flight Recorder now turns two persisted run journals
+Status: **comparison and page-memory review foundation delivered**. The Flight Recorder now turns two persisted run journals
 into an evidence-led baseline-versus-candidate report: atomic structural divergence, state-channel
 changes, exact resource totals, reconciled finalized/live journal signals, repeat-risk, and a deliberate
-no-winner boundary when no quality evaluator exists. Durable datasets, evaluators, experiment execution,
-statistical reports, gates, and feedback queues still require the platform resources below.
+no-winner boundary when no quality evaluator exists. Matching finalized evidence unlocks a human verdict
+docket with a fixed task-outcome/correctness/safety rubric, explicit pairwise judgment, exact run binding,
+fresh edit acknowledgement, and a bounded page-memory review-packet export. Reload or workspace switch
+discards the docket. The packet does not automatically include raw event payloads, exports reviewer notes
+exactly as entered, and declares that it is neither durable nor a promotion gate. Durable datasets,
+review assignment and disagreement handling, evaluators, experiment execution, statistical reports,
+gates, and feedback queues still require the platform resources below.
 
 Scope:
 
@@ -413,7 +418,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
-| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison report delivered; durable datasets, evaluators, experiment execution, statistical reports, and version-attributed quality verdicts still need platform APIs | Converts the existing quality library into a product workflow |
+| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison plus exact-pair page-memory verdict docket and bounded review export delivered; durable reviews/datasets, evaluators, experiment execution, statistical reports, and version-attributed quality gates still need platform APIs | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Platform API needed | Closes the human quality loop |
 | 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
 | 14 | Environment, deployment, and fleet surfaces | Not started | Builds operations on stable identity, version, quality, and audit concepts |

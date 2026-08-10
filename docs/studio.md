@@ -200,7 +200,16 @@ studio/
     (The count is evidence rows, not deduplicated external-effect invocations.) It never
     calls a candidate better without evaluated task outcomes. The aligned technical timelines remain
     available under **Inspect aligned event evidence**, with the shared prefix dimmed and added/removed
-    work highlighted.
+    work highlighted. When both journals are finalized and still match the atomic diff, the report also
+    opens a **Verdict docket**. A reviewer scores task outcome, correctness, and safety for both runs,
+    chooses an explicit baseline/candidate/tie/inconclusive judgment, and acknowledges the exact run
+    pair. Recording locks that docket only in page memory; reload, thread switch, or connection switch
+    discards it, and editing requires a fresh acknowledgement. The bounded JSON export carries the run identities, displayed comparison summary,
+    rubric scores, reviewer, verdict, notes, and an explicit `durable: false` / `promotion_gate: false`
+    boundary. It does not automatically include raw journal inputs or outputs. Reviewer notes are exported
+    exactly as entered, so the UI warns against pasting secrets or raw event payloads. Studio does not persist these reviews, assign
+    reviewers, reconcile disagreements, or treat the packet as release approval—those remain platform
+    work rather than claims hidden in browser storage.
 - **Status badges** — `pending` / `running` / `success` / `interrupted` / `error`, mapped from the wire
   values returned by `GET /runs/{run_id}`, `runs/wait`, and SSE `end` frames.
 - **Durable tasks view (R0.6)** — **Open task queue** in the sidebar swaps the main panel to the

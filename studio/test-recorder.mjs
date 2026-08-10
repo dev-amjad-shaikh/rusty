@@ -31,6 +31,8 @@ globalThis.__rec = {
   recReplayBannerHtml, recApiErrorBannerHtml, recTotalsHtml,
   recExactUnsigned, recRecordedLatency, recComparisonEvidenceState, recJournalSignals,
   recComparisonMetric, recComparisonLatencyMetric, recComparisonReport, recComparisonMetricHtml, recComparisonReportHtml,
+  recReviewGeneratedId, recReviewDraft, recReviewTextValid, recReviewValidate, recReviewPacket,
+  recReviewFilename, recReviewHtml, recReviewInput, REC_REVIEW_CRITERIA, REC_REVIEW_VERDICTS, store,
   recCompareRows, recCmpEventHtml, recCompareHtml, recCompareInputsCurrent, AGENT_NUMBER_TOKENS,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -537,6 +539,97 @@ const CMP_DIFF = {
 }
 
 {
+  const state = { state: "finalized", label: "finalized evidence", usableEvents: true };
+  const report = R.recComparisonReport("base-review", "candidate-review", CMP_BASE, CMP_BRANCH, CMP_DIFF, state);
+  const review = R.recReviewDraft(report, "review-fixed");
+  check("human review: draft binds exact run identities and a fixed three-part rubric",
+    review.baseId === "base-review" && review.branchId === "candidate-review" &&
+    R.REC_REVIEW_CRITERIA.map((criterion) => criterion.key).join(",") === "task_outcome,correctness,safety");
+  const empty = R.recReviewValidate(review, report, true);
+  check("human review: incomplete judgments fail every required decision family",
+    !empty.ok && empty.errors.reviewer && empty.errors.verdict && empty.errors.acknowledged &&
+    empty.errors["score-correctness-baseline"]);
+  review.reviewer = "A. Reviewer";
+  review.notes = "Reviewer pasted <secret-event-payload> here.";
+  review.verdict = "candidate_preferred";
+  review.acknowledged = true;
+  for (const criterion of R.REC_REVIEW_CRITERIA) review.scores[criterion.key] = { baseline: "3", candidate: "5" };
+  check("human review: an exact completed rubric is recordable", R.recReviewValidate(review, report, true).ok);
+  check("human review: stale inputs and non-final evidence cannot be recorded",
+    !R.recReviewValidate(review, report, false).ok &&
+    !R.recReviewValidate(review, { ...report, evidenceState: { state: "live", usableEvents: true } }, true).ok);
+  review.locked = true;
+  review.recordedAt = "2026-08-10T00:30:00.000Z";
+  const packet = R.recReviewPacket(review, report);
+  check("human review packet: exact pair, explicit verdict, fixed scores, and honest boundary survive export",
+    packet.format === "rusty.studio.run_review" && packet.version === 1 &&
+    packet.run_pair.baseline_run_id === "base-review" && packet.run_pair.candidate_run_id === "candidate-review" &&
+    packet.verdict === "candidate_preferred" && packet.rubric.length === 3 &&
+    packet.boundary.storage === "page_memory" && packet.boundary.durable === false &&
+    packet.boundary.promotion_gate === false && packet.boundary.lost_on_reload_or_thread_switch === true &&
+    packet.boundary.raw_event_payloads_automatically_included === false && packet.boundary.reviewer_notes_exported_verbatim === true);
+  check("human review packet: no journal payload is automatic, while reviewer notes remain exact and visibly warned",
+    packet.notes === "Reviewer pasted <secret-event-payload> here." && packet.evidence.metrics.length === 4 &&
+    packet.evidence.first_divergent_seq === "4");
+  check("human review packet: export filename cannot inherit hostile path syntax",
+    R.recReviewFilename({ reviewId: "../../bad review" }) === "rusty-run-review--..-bad-review.json");
+}
+
+{
+  const state = { state: "finalized", label: "finalized evidence", usableEvents: true };
+  const report = R.recComparisonReport("base", "candidate", CMP_BASE, CMP_BRANCH, CMP_DIFF, state);
+  const review = R.recReviewDraft(report, "review-html");
+  review.reviewer = '\"><img src=x onerror=alert(1)>';
+  review.notes = "<script>alert(2)</script>";
+  review.errors = { reviewer: "Reviewer <required>", acknowledged: "Acknowledge" };
+  const draftHtml = R.recReviewHtml(report, review);
+  check("human review html: hostile reviewer, notes, and errors are escaped",
+    !draftHtml.includes("<img") && !draftHtml.includes("<script") && !draftHtml.includes("Reviewer <required>") &&
+    draftHtml.includes("&lt;img") && draftHtml.includes("Reviewer &lt;required&gt;"));
+  check("human review html: every score and repeated verdict action has a distinct accessible identity",
+    draftHtml.includes("Baseline Task outcome score") && draftHtml.includes("Candidate Safety score") &&
+    draftHtml.includes('name="cmp-review-verdict"') && draftHtml.includes("Baseline preferred") &&
+    draftHtml.includes("Inconclusive"));
+  check("human review html: notes disclose exact export while page-memory lifetime stays explicit",
+    draftHtml.includes("Exported exactly as entered") && draftHtml.includes("Do not paste secrets") &&
+    draftHtml.includes("lost on reload or thread switch"));
+  check("human review html: acknowledgement errors are programmatically attached",
+    draftHtml.includes('aria-invalid="true" aria-describedby="cmp-review-error-acknowledged"') &&
+    draftHtml.includes('id="cmp-review-error-acknowledged"'));
+  R.store.compare = { review };
+  R.recReviewInput({ target: {
+    value: "Corrected reviewer", checked: false,
+    getAttribute: (name) => name === "data-rec-review-field" ? "reviewer" : null,
+    hasAttribute: () => false,
+  } });
+  check("human review interaction: editing preserves the validated error and its association until resubmit",
+    review.reviewer === "Corrected reviewer" && review.errors.reviewer === "Reviewer <required>" &&
+    R.recReviewHtml(report, review).includes('aria-describedby="cmp-review-error-reviewer"'));
+  review.reviewer = "Reviewer";
+  review.notes = "Reviewed.";
+  review.verdict = "tie";
+  review.acknowledged = true;
+  review.locked = true;
+  review.recordedAt = "2026-08-10T00:30:00.000Z";
+  review.errors = {};
+  for (const criterion of R.REC_REVIEW_CRITERIA) review.scores[criterion.key] = { baseline: "4", candidate: "4" };
+  const lockedHtml = R.recReviewHtml(report, review);
+  check("human review html: locked docket keeps edit and bounded export controls explicit",
+    lockedHtml.includes("Tie") && lockedHtml.includes("Edit review") && lockedHtml.includes("Export review packet") &&
+    lockedHtml.includes("page memory only") && lockedHtml.includes("notes export exactly as entered"));
+  const unavailable = R.recReviewHtml({ ...report, evidenceState: { state: "partial", usableEvents: false } }, review);
+  check("human review html: partial evidence cannot expose a record action",
+    unavailable.includes("Review is unavailable") && !unavailable.includes("Record page-memory verdict"));
+}
+
+{
+  check("human review validation: visible exact values are never silently trimmed or control-normalized",
+    !R.recReviewTextValid("reviewer\t", 128) && R.recReviewTextValid("line one\nline two", 2048, true));
+  const generated = R.recReviewGeneratedId(null, 1000, 0.5);
+  check("human review identity: bounded fallback remains filename-safe", /^review-[a-z0-9]+-[a-z0-9]+$/.test(generated));
+}
+
+{
   const rows = R.recCompareRows(CMP_BASE, CMP_BRANCH, CMP_DIFF);
   eq("compare rows: one row per seq in the union",
     rows.map((r) => r.seq), [0, 1, 2, 3, 4, 5, 6]);
@@ -635,7 +728,18 @@ check("comparison interaction: semantic run labels, atomic revision reconciliati
 check("comparison responsive: decision balance, metrics, and findings collapse deliberately",
   html.includes(".cmp-balance { grid-template-columns: 1fr; }") &&
   html.includes(".cmp-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }") &&
-  html.includes(".cmp-report-grid { grid-template-columns: 1fr; }"));
+  html.includes(".cmp-report-grid { grid-template-columns: 1fr; }") &&
+  html.includes(".cmp-review-meta, .cmp-review-locked { grid-template-columns: 1fr; }") &&
+  html.includes(".cmp-review-rubric-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }") &&
+  html.includes(".cmp-review-rubric-row .cmp-review-criterion { grid-column: 1 / -1; grid-row: 1; }"));
+check("human review interaction: delegated editing, explicit record, edit, and export actions are wired",
+  html.includes('$("rec-compare-view").addEventListener("input", recReviewInput)') &&
+  html.includes('event.target.id !== "cmp-review-form"') &&
+  html.includes('event.target.closest("[data-rec-review-edit]")') &&
+  html.includes('event.target.closest("[data-rec-review-export]")'));
+check("human review lifecycle: every new comparison creates a fresh page-memory exact-pair docket",
+  html.includes("review: recReviewDraft(report)") && html.includes("recCompareInputsCurrent(value.baseId, value.branchId)") &&
+  !html.includes("localStorage.setItem(\"ags:run-review"));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
