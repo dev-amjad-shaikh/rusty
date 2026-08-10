@@ -143,8 +143,9 @@ Studio is a useful engineering console, not yet the complete experience describe
 
 ### Material gaps
 
-- Immutable assistant versions, reviewed activation, and rollback are delivered. Archive, restore, and
-  deletion remain absent; direct in-place editing is intentionally replaced by creating a reviewed version.
+- Immutable assistant versions, reviewed activation and rollback, plus reversible archive and restore are
+  delivered. Deletion remains deliberately absent; direct in-place editing is intentionally replaced by
+  creating a reviewed version, while archive retains the complete lineage and blocks only new work.
 - The configuration workshop covers the current persisted contract: graph, runtime step limit, catalog
   metadata, exact advanced JSON, manifest portability, and a visual portable-intent canvas for model,
   effect-typed tools, memory access/scopes, and approval boundary. Those intent fields still lack typed
@@ -219,7 +220,7 @@ Exit criteria:
 **Outcome:** create and safely manage a real agent configuration.
 
 Status: **partially delivered**. Creation, safe duplication, immutable content-addressed versions, reviewed
-activation and rollback, a readable configuration contract, bounded manifest import/export, validation,
+activation and rollback, reversible archive/restore, a readable configuration contract, bounded manifest import/export, validation,
 and real-run handoff work against the current assistant API. Creating from an active configuration stages a
 non-serving child version; a separate visual diff precedes the atomic active-pointer move. Stale creation or
 activation requests fail closed, unregistered historical behaviors cannot be activated, and previous versions
@@ -231,7 +232,9 @@ bounding visible excerpts and explicitly describes the result as a separate assi
 version. A visual
 intent canvas now captures a versioned model identity, effect-typed tool requirements, governed-memory
 access/scopes, and an approval boundary without raw JSON. Rusty stores and round-trips that portable intent,
-but the registered graph—not the canvas—still chooses and enforces providers at runtime. Archive/delete,
+but the registered graph—not the canvas—still chooses and enforces providers at runtime. Archive and restore
+now move assistants between visible lifecycle shelves after an exact active-manifest review; archived records
+retain lineage and historical evidence while server admission rejects new runs. Delete,
 typed capability discovery, credential handles, governed runtime binding, and run-manifest resolution back
 to an assistant version remain.
 
@@ -246,7 +249,7 @@ Scope:
 
 Platform dependencies:
 
-- Assistant archive/delete endpoints and a run-to-assistant-version resolution contract.
+- Assistant deletion and a run-to-assistant-version resolution contract.
 - Model/provider and tool/capability discovery contracts.
 - A governed configuration registry built on the versioned run manifest.
 - Credential handles rather than raw secrets in assistant configuration.

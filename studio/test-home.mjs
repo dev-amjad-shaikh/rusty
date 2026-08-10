@@ -126,6 +126,17 @@ function connectedState() {
 
 {
   const state = connectedState();
+  state.agents.list = [{ assistant_id: "unavailable", graph: "react_agent", archived_at: "08/10/2026" }];
+  const unavailable = H.homeSnapshot(state);
+  const markup = H.homeHtml(unavailable);
+  check("home lifecycle: an unclassifiable record is discoverable and never becomes a create-first recommendation",
+    unavailable.assistant_count === 0 && unavailable.assistant_archived_count === 0 &&
+    unavailable.assistant_unavailable_count === 1 && unavailable.next.action === "unavailable-agents" &&
+    markup.includes("Review unavailable agents") && markup.includes("Active / archived / unavailable agents"));
+}
+
+{
+  const state = connectedState();
   state.agents.list = [{ assistant_id: "assistant-1", graph: "react_agent" }];
   state.agentRunHistory["assistant-1"] = [{
     record_id: "agent-run", run_id: "agent-run", thread_id: "thread-1", graph: "react_agent",

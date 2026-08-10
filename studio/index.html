@@ -710,12 +710,13 @@
   .journey-step.attention .step-index { border-color: var(--err); color: #eac5c0; }
   .journey-step.attention strong { color: #eac5c0; }
   .agent-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
-  .agent-toolbar input, .agent-form input, .agent-form select, .agent-form textarea,
+  .agent-toolbar input, .agent-toolbar select, .agent-form input, .agent-form select, .agent-form textarea,
   .agent-test textarea {
     background: var(--bg-inset); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 7px 9px; font-family: var(--sans); font-size: 12.5px;
   }
   .agent-toolbar input { flex: 1; min-width: 180px; }
+  .agent-toolbar select { min-width: 126px; }
   .agent-layout { display: grid; grid-template-columns: minmax(260px, 360px) minmax(420px, 1fr); gap: 14px; }
   .agent-list { display: flex; flex-direction: column; gap: 7px; }
   .agent-item {
@@ -724,6 +725,8 @@
   }
   .agent-item:hover { border-color: var(--border-hi); }
   .agent-item.selected { border-color: #547da1; box-shadow: inset 3px 0 0 #6fa8dc; }
+  .agent-item.archived { border-style: dashed; background: #17191b; }
+  .agent-lifecycle-mark { color: #d4b979; font: 700 8.5px var(--mono); letter-spacing: .55px; text-transform: uppercase; }
   .agent-item:focus-visible { outline: 2px solid #6fa8dc; outline-offset: 2px; }
   .agent-item-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .agent-name { font-weight: 650; color: #f0eadf; }
@@ -765,6 +768,13 @@
   .agent-version-review > p { color: #9aa9b4; font-size: 10.5px; line-height: 1.45; }
   .agent-version-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 10px; }
   .agent-version-empty { margin: 0; color: #9aa9b4; font-size: 11px; line-height: 1.5; }
+  .agent-lifecycle-desk { margin: 16px 0; border: 1px solid #5b5037; border-radius: 9px; background: #1d1b17; padding: 13px 14px; }
+  .agent-lifecycle-desk h3 { margin: 0; color: #f1e4bd; font-size: 14px; }
+  .agent-lifecycle-desk p { color: #b5aa8f; font-size: 11px; line-height: 1.5; }
+  .agent-lifecycle-facts { display: grid; grid-template-columns: 110px minmax(0,1fr); gap: 6px 12px; margin: 10px 0; }
+  .agent-lifecycle-facts span:nth-child(odd) { color: #8f8879; font-size: 9.5px; text-transform: uppercase; letter-spacing: .6px; }
+  .agent-lifecycle-facts code { color: #ded4bb; font-size: 10px; overflow-wrap: anywhere; }
+  .agent-lifecycle-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .agent-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
   .agent-form label, .agent-test label { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim); font-size: 11.5px; }
   .field-help { color: var(--text-faint); font-size: 10.5px; font-weight: 400; }
@@ -1668,6 +1678,10 @@
     .agent-version-head code { max-width: none; text-align: left; }
     .agent-version-item { grid-template-columns: 1fr; }
     .agent-version-item button { justify-self: start; }
+    .agent-toolbar { align-items: stretch; flex-wrap: wrap; }
+    .agent-toolbar input { flex-basis: 100%; min-width: 100%; }
+    .agent-toolbar select { flex: 1; }
+    .agent-lifecycle-facts { grid-template-columns: 1fr; gap: 2px; }
     .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-run-row { grid-template-columns: 1fr; }
     .agent-run-row button { justify-self: start; }
@@ -1930,6 +1944,7 @@
         <div class="agent-journey" id="agent-journey" aria-live="polite"></div>
         <div class="sr-only" id="agent-run-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
         <div class="sr-only" id="agent-version-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+        <div class="sr-only" id="agent-lifecycle-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
         <div class="card" id="agent-create-panel" role="region" aria-labelledby="agent-create-title" style="display:none">
           <h2 class="section" id="agent-create-title" style="margin-top:0">Configure an agent</h2>
@@ -2008,6 +2023,8 @@
         <div class="agent-summary" id="agent-summary"></div>
         <div class="agent-toolbar">
           <input id="inp-agent-search" type="search" placeholder="Search agents by name, graph, ID, or tag…">
+          <label class="sr-only" for="sel-agent-lifecycle">Agent lifecycle</label>
+          <select id="sel-agent-lifecycle" aria-label="Agent lifecycle"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select>
           <button class="small" id="btn-agents-refresh">Refresh</button>
           <span class="muted tiny" id="agents-statusline"></span>
         </div>
@@ -2498,6 +2515,10 @@ const store = {
   agentRequest: 0,     // generation guard: assistant catalogs never cross connection boundaries
   agentVersionRequest: 0, // generation guard for version history, exact review, and activation
   agentVersions: null, // selected assistant's server history and page-memory activation review
+  agentLifecycleRequest: 0, // generation guard for exact archive/restore review and mutation
+  agentLifecycleInteraction: 0, // user selection/filter ownership during receipt reconciliation
+  agentLifecycleReview: null, // selected assistant's page-memory lifecycle decision
+  agentLifecycleFilter: "active",
   agentFocusRecord: null, // remembered run row that should receive focus after Home navigation
   agentRuns: Object.create(null),       // latest full run from this browser session, keyed by assistant id
   agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
@@ -3460,6 +3481,9 @@ function homeSnapshot(state) {
   const source = state && typeof state === "object" ? state : {};
   const connected = Boolean(source.conn && source.info);
   const assistants = Array.isArray(source.agents && source.agents.list) ? source.agents.list : [];
+  const activeAssistants = assistants.filter((assistant) => agentLifecycleState(assistant) === "active");
+  const archivedAssistants = assistants.filter((assistant) => agentLifecycleState(assistant) === "archived").length;
+  const unavailableAssistants = assistants.length - activeAssistants.length - archivedAssistants;
   const agentEvidence = homeServerEvidence(source.agents, source.agentsUnsupported, connected);
   const agentRuns = Object.entries(source.agentRunHistory || {})
     .slice(0, AGENT_RUN_GLOBAL_ASSISTANT_LIMIT).flatMap(([assistantId, runs]) =>
@@ -3498,7 +3522,9 @@ function homeSnapshot(state) {
     graph_count: connected && Array.isArray(source.info.graphs) ? source.info.graphs.length : 0,
     assistant_known: agentEvidence.known,
     assistant_loading: agentEvidence.loading,
-    assistant_count: agentEvidence.known ? assistants.length : null,
+    assistant_count: agentEvidence.known ? activeAssistants.length : null,
+    assistant_archived_count: agentEvidence.known ? archivedAssistants : null,
+    assistant_unavailable_count: agentEvidence.known ? unavailableAssistants : null,
     assistant_note: homeEvidenceNote(agentEvidence, "server catalog", "loading server catalog", "agent catalog unavailable"),
     team_known: teamEvidence.known,
     team_loading: teamEvidence.loading,
@@ -3524,6 +3550,8 @@ function homeSnapshot(state) {
 function homePrimaryAction(snapshot) {
   if (!snapshot.connected) return { action: "connect", label: "Connect local Rusty", hint: "Start with a server you control." };
   if (!snapshot.assistant_known) return { action: "agents", label: "Check agent catalog", hint: snapshot.assistant_loading ? "Waiting for current server evidence." : "The catalog needs a successful refresh." };
+  if (!snapshot.assistant_count && snapshot.assistant_unavailable_count) return { action: "unavailable-agents", label: "Review unavailable agents", hint: "Inspect lifecycle evidence that Studio cannot safely classify." };
+  if (!snapshot.assistant_count && snapshot.assistant_archived_count) return { action: "archived-agents", label: "Restore an archived agent", hint: "Return a retained configuration to active work." };
   if (!snapshot.assistant_count) return { action: "create-agent", label: "Shape your first agent", hint: "Create a real runnable configuration." };
   if (!snapshot.run_count) return { action: "agents", label: "Run a real task", hint: "Test an agent and keep its evidence." };
   if (snapshot.attention_count) return { action: "attention", label: "Investigate attention", hint: `${snapshot.attention_count} remembered run${snapshot.attention_count === 1 ? " needs" : "s need"} review.` };
@@ -3547,7 +3575,8 @@ function homeStageHtml(name, detail, tone) {
 
 function homeHtml(snapshot) {
   const connected = snapshot.connected;
-  const shaped = (snapshot.assistant_count || 0) + snapshot.blueprint_count > 0;
+  const shaped = (snapshot.assistant_count || 0) + (snapshot.assistant_archived_count || 0) +
+    (snapshot.assistant_unavailable_count || 0) + snapshot.blueprint_count > 0;
   const ran = snapshot.run_count > 0;
   const understood = ran && snapshot.attention_count === 0;
   const improved = snapshot.memory_records > 0 || snapshot.candidate_count > 0;
@@ -3580,7 +3609,7 @@ function homeHtml(snapshot) {
     : "open ledger to load server truth";
   const memoryStage = snapshot.memory_known ? `${snapshot.memory_records} memory` : "memory not loaded";
   const candidateStage = snapshot.candidate_known ? `${snapshot.candidate_count} candidates` : snapshot.candidate_note;
-  const agentStage = snapshot.assistant_known ? `${snapshot.assistant_count} agents` : snapshot.assistant_note;
+  const agentStage = snapshot.assistant_known ? `${snapshot.assistant_count} active${snapshot.assistant_archived_count ? ` · ${snapshot.assistant_archived_count} archived` : ""}${snapshot.assistant_unavailable_count ? ` · ${snapshot.assistant_unavailable_count} unavailable` : ""}` : snapshot.assistant_note;
   return `<section class="home-hero"><div><span class="home-kicker">Rusty Studio · evidence-led workspace</span>` +
     `<h1 id="home-title" tabindex="-1">Build the system. Keep the proof beside it.</h1>` +
     `<p>Move from a real configuration to a real run, causal evidence, governed memory, and reversible learning without copying identifiers between tools.</p></div>` +
@@ -3595,7 +3624,7 @@ function homeHtml(snapshot) {
     `</ol>` +
     `<div class="home-grid"><section class="card home-panel" aria-labelledby="home-system-title"><div class="home-panel-head"><h2 id="home-system-title">System signals</h2><span>current connection</span></div>` +
       `<div class="home-signals">` +
-        `<button class="home-signal" type="button" data-home-action="agents"><b>${snapshot.assistant_known ? snapshot.assistant_count : "—"}</b><span>Agent configurations</span><small>${connected ? snapshot.assistant_note : "connect to discover"}</small></button>` +
+        `<button class="home-signal" type="button" data-home-action="${snapshot.assistant_unavailable_count ? "unavailable-agents" : "agents"}"><b>${snapshot.assistant_known ? `${snapshot.assistant_count} / ${snapshot.assistant_archived_count} / ${snapshot.assistant_unavailable_count}` : "—"}</b><span>Active / archived / unavailable agents</span><small>${connected ? snapshot.assistant_note : "connect to discover"}</small></button>` +
         `<button class="home-signal" type="button" data-home-action="fabric"><b>${snapshot.team_known ? snapshot.team_count : "—"} / ${snapshot.blueprint_count}</b><span>Teams / blueprints</span><small>${escapeHtml(snapshot.team_note)} / browser structure</small></button>` +
         `<button class="home-signal" type="button" data-home-action="continue"><b>${snapshot.run_count}</b><span>Remembered runs</span><small>${snapshot.attention_count} need attention · browser recall</small></button>` +
         `<button class="home-signal" type="button" data-home-action="memory"><b>${memoryValue}</b><span>Governed memory</span><small>${escapeHtml(memoryNote)}</small></button>` +
@@ -3646,6 +3675,8 @@ function openHome(focus = true) {
 function homeNavigate(action, id, owner) {
   if (action === "connect") { connectionOpen(); return; }
   if (action === "create-agent") { openAgents(); agentOpenCreate(); return; }
+  if (action === "archived-agents") { store.agentLifecycleFilter = "archived"; $("sel-agent-lifecycle").value = "archived"; openAgents(); return; }
+  if (action === "unavailable-agents") { store.agentLifecycleFilter = "all"; $("sel-agent-lifecycle").value = "all"; openAgents(); return; }
   if (action === "agents") { openAgents(); return; }
   if (action === "fabric") { openFabric(); return; }
   if (action === "memory") { openMemory(); return; }
@@ -3993,6 +4024,7 @@ function connectionResetWorkspace() {
   store.connectionEpoch += 1;
   store.agentRequest += 1;
   store.agentVersionRequest += 1;
+  store.agentLifecycleRequest += 1;
   store.taskRequest += 1;
   store.memoryRequest += 1;
   store.fabricRequest += 1;
@@ -4011,6 +4043,9 @@ function connectionResetWorkspace() {
   store.agentIntentScopeOrder = [];
   store.agents = null;
   store.agentVersions = null;
+  store.agentLifecycleReview = null;
+  store.agentLifecycleFilter = "active";
+  if ($("sel-agent-lifecycle")) $("sel-agent-lifecycle").value = "active";
   store.agentsUnsupported = false;
   store.agentFocusRecord = null;
   store.tasks = null;
@@ -6803,11 +6838,39 @@ function agentSearchItems(items, query) {
       .some((value) => String(value || "").toLowerCase().includes(q)));
 }
 
+function agentArchivedAt(agent) {
+  if (!agent || typeof agent.archived_at !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/.exec(agent.archived_at);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  const instant = new Date(0);
+  instant.setUTCFullYear(year, month - 1, day);
+  instant.setUTCHours(hour, minute, second, 0);
+  if (instant.getUTCFullYear() !== year || instant.getUTCMonth() !== month - 1 ||
+      instant.getUTCDate() !== day || instant.getUTCHours() !== hour ||
+      instant.getUTCMinutes() !== minute || instant.getUTCSeconds() !== second) return null;
+  return agent.archived_at;
+}
+
+function agentLifecycleState(agent) {
+  if (!agent || typeof agent !== "object") return "unknown";
+  if (!Object.prototype.hasOwnProperty.call(agent, "archived_at")) return "active";
+  return agentArchivedAt(agent) ? "archived" : "unknown";
+}
+
+function agentLifecycleItems(items, lifecycle) {
+  const list = Array.isArray(items) ? items : [];
+  if (lifecycle === "archived") return list.filter((agent) => agentLifecycleState(agent) === "archived");
+  if (lifecycle === "all") return list.slice();
+  return list.filter((agent) => agentLifecycleState(agent) === "active");
+}
+
 function agentReadiness(agent, info, testRun) {
   const graphNames = new Set((((info && info.graphs) || []).map((g) => g && g.name).filter(Boolean)));
+  const lifecycle = agentLifecycleState(agent);
   const steps = [
     { key: "defined", label: "Defined", ready: Boolean(agent && agent.assistant_id && String(agent.name || "").trim()) },
-    { key: "runnable", label: "Runnable", ready: Boolean(agent && graphNames.has(agent.graph)) },
+    { key: "runnable", label: lifecycle === "archived" ? "Archived" : lifecycle === "unknown" ? "Lifecycle unavailable" : "Runnable", ready: Boolean(agent && lifecycle === "active" && graphNames.has(agent.graph)) },
     { key: "tested", label: "Tested", ready: Boolean(testRun && testRun.status === "success") },
   ];
   return { steps, ready: steps.filter((step) => step.ready).length, total: steps.length };
@@ -6825,8 +6888,11 @@ function agentReadinessHtml(readiness, labels) {
 function agentCardHtml(agent, readiness) {
   const meta = (agent && agent.metadata) || {};
   const description = meta.description || "No responsibility statement yet.";
+  const lifecycle = agentLifecycleState(agent);
   return `<div class="agent-item-head"><span class="agent-name">${escapeHtml(agent && agent.name || "Unnamed agent")}</span>` +
-    `<span class="agent-graph">${escapeHtml(agent && agent.graph || "unknown graph")}</span></div>` +
+    (lifecycle === "archived" ? `<span class="agent-lifecycle-mark">Archived</span>` :
+      lifecycle === "unknown" ? `<span class="agent-lifecycle-mark">Lifecycle unavailable</span>` :
+      `<span class="agent-graph">${escapeHtml(agent && agent.graph || "unknown graph")}</span>`) + `</div>` +
     `<div class="agent-desc">${escapeHtml(description)}</div>` +
     `<div class="agent-id">${escapeHtml(agent && agent.assistant_id || "")}</div>` +
     agentReadinessHtml(readiness, false);
@@ -8034,8 +8100,74 @@ function agentVersionAssistant(value, assistantId) {
       typeof value.created_at !== "string" || !agentVersionIdValid(value.active_version_id) ||
       !Number.isInteger(value.version_count) || value.version_count < 1 || value.version_count > AGENT_VERSION_LIMIT ||
       !Object.prototype.hasOwnProperty.call(value, "config") || !Object.prototype.hasOwnProperty.call(value, "metadata") ||
+      agentLifecycleState(value) === "unknown" ||
       !agentStoredNumbersRoundTrip(value.config) || !agentStoredNumbersRoundTrip(value.metadata)) return null;
   return agentCopyableValue(value);
+}
+
+function agentLifecycleSnapshotMatches(value, expected) {
+  if (!value || !expected || value.assistant_id !== expected.assistant_id ||
+      value.name !== expected.name || value.graph !== expected.graph ||
+      value.created_at !== expected.created_at || value.active_version_id !== expected.active_version_id ||
+      value.version_count !== expected.version_count || agentLifecycleState(value) !== agentLifecycleState(expected) ||
+      agentChangeEqual(value.config, expected.config) !== true ||
+      agentChangeEqual(value.metadata, expected.metadata) !== true) return false;
+  return true;
+}
+
+function agentLifecycleReceipt(value, assistantId, reviewed, action) {
+  if (!agentPlainObject(value) || typeof value.changed !== "boolean" ||
+      value.lifecycle !== (action === "archive" ? "archived" : "active")) return null;
+  const assistant = agentVersionAssistant(value.assistant, assistantId);
+  const lifecycle = agentLifecycleState(assistant);
+  if (!assistant || lifecycle !== (action === "archive" ? "archived" : "active") ||
+      assistant.active_version_id !== reviewed.active_version_id ||
+      assistant.version_count !== reviewed.version_count || assistant.name !== reviewed.name ||
+      assistant.graph !== reviewed.graph || assistant.created_at !== reviewed.created_at ||
+      agentChangeEqual(assistant.config, reviewed.config) !== true ||
+      agentChangeEqual(assistant.metadata, reviewed.metadata) !== true) return null;
+  return { changed: value.changed, assistant };
+}
+
+function agentLifecycleManifestEvidence(record) {
+  try {
+    const text = agentManifestText(agentVersionReviewManifest(record), false);
+    if (agentUtf8Length(text) > AGENT_MANIFEST_TEXT_LIMIT) throw new Error("manifest exceeds review boundary");
+    return { ready: true, html: `<div class="agent-version-manifests"><p>This is the complete stored configuration, including any credentials that were placed in it. Expand only in a trusted setting.</p>` +
+      `<details class="agent-copy-manifest"><summary>Review complete active manifest</summary>` +
+      `<pre class="json">${escapeHtml(text)}</pre></details></div>` };
+  } catch {
+    return { ready: false, html: `<div class="note tiny">This assistant is outside Studio's exact review boundary. Its lifecycle cannot be changed here.</div>` };
+  }
+}
+
+function agentLifecycleDeskHtml(agent, review) {
+  if (!review || review.assistantId !== (agent && agent.assistant_id)) return "";
+  const action = review.action === "restore" ? "restore" : "archive";
+  const archived = action === "archive";
+  const title = archived ? "Archive review" : "Restore review";
+  if (review.loading) return `<section class="agent-lifecycle-desk" aria-labelledby="agent-lifecycle-title" aria-busy="true">` +
+    `<h3 id="agent-lifecycle-title" tabindex="-1">${title}</h3><p>Loading the exact active configuration and lifecycle boundary…</p></section>`;
+  if (review.error) return `<section class="agent-lifecycle-desk" aria-labelledby="agent-lifecycle-title">` +
+    `<h3 id="agent-lifecycle-title" tabindex="-1">${title}</h3>${agentErrorHtml(review.error.status, review.error.body)}` +
+    `<div class="agent-lifecycle-actions"><button type="button" data-agent-lifecycle-cancel>Close</button>` +
+    `<button type="button" data-agent-lifecycle-retry>Retry review</button></div></section>`;
+  const snapshot = review.snapshot;
+  if (!snapshot) return "";
+  const evidence = agentLifecycleManifestEvidence(snapshot);
+  return `<section class="agent-lifecycle-desk" aria-labelledby="agent-lifecycle-title"${review.submitting ? ` aria-busy="true"` : ""}>` +
+    `<h3 id="agent-lifecycle-title" tabindex="-1">${title}</h3>` +
+    `<p>${archived
+      ? "New runs will stop at admission. Immutable versions, configuration, and historical run evidence remain available, and restore reverses this decision."
+      : "This agent will return to the active catalog and may start new runs against the exact active version reviewed here."}</p>` +
+    `<div class="agent-lifecycle-facts"><span>Agent</span><code>${escapeHtml(snapshot.assistant_id)}</code>` +
+      `<span>Active version</span><code>${escapeHtml(snapshot.active_version_id)}</code>` +
+      `<span>Versions retained</span><code>${escapeHtml(snapshot.version_count)}</code>` +
+      `<span>Current state</span><code>${archived ? "active" : `archived ${escapeHtml(agentVersionTime(snapshot.archived_at))}`}</code></div>` +
+    evidence.html +
+    `<div class="agent-lifecycle-actions"><button type="button" data-agent-lifecycle-cancel${review.submitting ? " disabled" : ""}>Cancel</button>` +
+      `<button class="${archived ? "danger" : "primary"}" type="button" data-agent-lifecycle-apply${review.submitting || !evidence.ready ? " disabled" : ""}>` +
+      (review.submitting ? (archived ? "Archiving…" : "Restoring…") : (archived ? "Archive agent" : "Restore agent")) + `</button></div></section>`;
 }
 
 function agentVersionEnvelope(value, assistantId) {
@@ -8219,7 +8351,11 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
   if (!agent) return `<div class="empty">Select an agent to inspect and test it.</div>`;
   const meta = agent.metadata || {};
   const conversational = agent.graph === "react_agent";
+  const lifecycle = agentLifecycleState(agent);
+  const archived = lifecycle === "archived";
+  const lifecycleKnown = lifecycle !== "unknown";
   const runnable = readiness.steps[1] && readiness.steps[1].ready;
+  const graphAvailable = (((info && info.graphs) || []).map((graph) => graph && graph.name).filter(Boolean)).includes(agent.graph);
   const input = conversational
     ? `<label>Give it a task<textarea class="agent-prompt" id="inp-agent-prompt" spellcheck="true" placeholder="Ask for an outcome, not implementation details.">${escapeHtml(agentDefaultInput(agent.graph).messages[0].content)}</textarea></label>`
     : `<label>Starting data (JSON)<textarea id="inp-agent-test" spellcheck="false">${escapeHtml(pretty(agentDefaultInput(agent.graph)))}</textarea><span class="field-help">This workflow accepts structured input.</span></label>`;
@@ -8229,9 +8365,11 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
       `<button class="small" type="button" data-agent-versions="${escapeHtml(agent.assistant_id || "")}"` +
       `${agentVersionIdValid(agent.active_version_id) ? "" : ` disabled title="Upgrade the server to manage immutable versions"`}>Version history</button>` +
       `<button class="small" type="button" data-agent-version-create="${escapeHtml(agent.assistant_id || "")}"` +
-      `${agentVersionIdValid(agent.active_version_id) && runnable ? "" : ` disabled title="A version-capable server and registered graph are required"`}>Create version</button>` +
+      `${agentVersionIdValid(agent.active_version_id) && graphAvailable && !archived ? "" : ` disabled title="An active agent, version-capable server, and registered graph are required"`}>Create version</button>` +
       `<button class="small" type="button" data-agent-copy="${escapeHtml(agent.assistant_id || "")}"` +
-      `${runnable ? "" : ` disabled title="Register this graph before copying the agent"`}>Copy agent</button>` +
+      `${graphAvailable ? "" : ` disabled title="Register this graph before copying the agent"`}>Copy agent</button>` +
+      `<button class="small${archived ? "" : " danger"}" type="button" data-agent-lifecycle="${archived ? "restore" : "archive"}"` +
+      `${agentVersionIdValid(agent.active_version_id) && lifecycleKnown ? "" : ` disabled title="Lifecycle evidence is unavailable; refresh or upgrade the server"`}>${lifecycleKnown ? (archived ? "Restore" : "Archive") : "Lifecycle unavailable"}</button>` +
       `<span class="badge ${readiness.ready === readiness.total ? "success" : "pending"}">${readiness.ready}/${readiness.total} ready</span></div></div>` +
     agentReadinessHtml(readiness, true) +
     `<div class="agent-kv">` +
@@ -8239,15 +8377,17 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
       `<span class="k">Graph</span><span class="v">${escapeHtml(agent.graph || "—")}</span>` +
       `<span class="k">Active version</span><span class="v">${escapeHtml(agent.active_version_id || "Server does not expose versions")}</span>` +
       `<span class="k">Versions</span><span class="v">${Number.isInteger(agent.version_count) ? escapeHtml(agent.version_count) : "—"}</span>` +
+      `<span class="k">Lifecycle</span><span class="v">${archived ? `Archived ${escapeHtml(agentVersionTime(agent.archived_at))}` : lifecycleKnown ? "Active" : "Unavailable — refresh the catalog"}</span>` +
       `<span class="k">Created</span><span class="v">${escapeHtml(agent.created_at || "—")}</span>` +
     `</div>` +
+    agentLifecycleDeskHtml(agent, store.agentLifecycleReview) +
     agentVersionDeskHtml(agent, store.agentVersions) +
     `<section class="agent-config-summary" aria-labelledby="agent-config-summary-heading"><h3 id="agent-config-summary-heading">Configuration contract</h3>` +
       `<p>See which fields execute, which fields describe, and which fields are only stored.</p>` +
       `<div class="agent-contract-panel" aria-labelledby="agent-config-summary-title">` +
         agentConfigurationEvidenceHtml(agent, ((info && info.graphs) || []).map((graph) => graph && graph.name).filter(Boolean), "agent-config-summary-title") +
       `</div></section>` +
-    `<div class="agent-test"><h3>Try it now</h3><p>This creates a real run. Nothing here is simulated.</p>${input}` +
+    `<div class="agent-test"><h3>Try it now</h3><p>${archived ? "This agent is archived. Restore it before starting new work; prior run evidence remains below." : lifecycleKnown ? "This creates a real run. Nothing here is simulated." : "Lifecycle evidence is unavailable, so Studio will not start new work until the catalog is refreshed."}</p>${input}` +
     `<div class="agent-test-actions"><button class="primary" data-agent-run="${escapeHtml(agent.assistant_id)}"${runnable ? "" : " disabled"}>Run agent</button>` +
     (testRun && testRun.thread_id ? `<button data-agent-open-thread="${escapeHtml(testRun.thread_id)}" data-agent-open-run="${escapeHtml(testRun.run_id || "")}" data-agent-open-graph="${escapeHtml(agent.graph || "")}">Inspect latest</button>` : "") +
     `<span id="agent-test-status">${agentTestResultHtml(testRun)}</span></div>` +
@@ -8262,8 +8402,11 @@ function agentsUpdateSidebar() {
   const el = $("agent-side-count");
   if (!store.conn) { el.textContent = "Connect to load assistant configurations."; return; }
   if (store.agentsUnsupported) { el.textContent = "Assistant API unavailable on this server."; return; }
-  const count = store.agents && store.agents.list ? store.agents.list.length : 0;
-  el.textContent = `${count} assistant configuration${count === 1 ? "" : "s"}`;
+  const list = store.agents && store.agents.list || [];
+  const active = list.filter((agent) => agentLifecycleState(agent) === "active").length;
+  const archived = list.filter((agent) => agentLifecycleState(agent) === "archived").length;
+  const unavailable = list.length - active - archived;
+  el.textContent = `${active} active assistant${active === 1 ? "" : "s"}${archived ? ` · ${archived} archived` : ""}${unavailable ? ` · ${unavailable} unavailable` : ""}`;
 }
 
 async function agentsLoad(quiet) {
@@ -8282,11 +8425,17 @@ async function agentsLoad(quiet) {
     store.agents.error = null;
     store.agents.loading = false;
     store.agentsUnsupported = false;
-    if (!store.agents.list.some((a) => a.assistant_id === store.agents.selected)) {
-      store.agents.selected = store.agents.list[0] ? store.agents.list[0].assistant_id : null;
+    const lifecycle = agentLifecycleItems(store.agents.list, store.agentLifecycleFilter);
+    if (!lifecycle.some((a) => a.assistant_id === store.agents.selected)) {
+      store.agents.selected = lifecycle[0] ? lifecycle[0].assistant_id : null;
     }
     const selected = store.agents.list.find((item) => item.assistant_id === store.agents.selected);
     agentInvalidateVersionsForSelection(selected && selected.assistant_id, selected && selected.active_version_id);
+    agentInvalidateLifecycleForSelection(
+      selected && selected.assistant_id,
+      selected && selected.active_version_id,
+      selected && agentLifecycleState(selected),
+    );
   } catch (e) {
     if (!current()) return;
     store.agents.loading = false;
@@ -8317,12 +8466,189 @@ function agentInvalidateVersionsForSelection(assistantId, activeVersionId) {
   return true;
 }
 
+function agentInvalidateLifecycleForSelection(assistantId, activeVersionId, lifecycleState) {
+  const review = store.agentLifecycleReview;
+  if (!review) return false;
+  const reviewedLifecycle = review.snapshot ? agentLifecycleState(review.snapshot) : null;
+  if (review.assistantId === assistantId && (!activeVersionId || review.activeVersionId === activeVersionId) &&
+      (!review.snapshot || reviewedLifecycle === lifecycleState)) return false;
+  store.agentLifecycleRequest += 1;
+  store.agentLifecycleReview = null;
+  return true;
+}
+
 function agentSelectAssistant(assistantId) {
   if (!store.agents || store.agents.selected === assistantId) return false;
+  store.agentLifecycleInteraction += 1;
   agentInvalidateVersionsForSelection(assistantId);
+  agentInvalidateLifecycleForSelection(assistantId);
   store.agents.selected = assistantId;
   agentsRender();
   return true;
+}
+
+function agentSetLifecycleFilter(value, focus) {
+  const lifecycle = ["active", "archived", "all"].includes(value) ? value : "active";
+  if (lifecycle !== store.agentLifecycleFilter) store.agentLifecycleInteraction += 1;
+  store.agentLifecycleFilter = lifecycle;
+  if (!store.agents) return;
+  const visible = agentLifecycleItems(store.agents.list, lifecycle);
+  if (!visible.some((agent) => agent.assistant_id === store.agents.selected)) {
+    const next = visible[0] && visible[0].assistant_id || null;
+    agentInvalidateVersionsForSelection(next);
+    agentInvalidateLifecycleForSelection(next);
+    store.agents.selected = next;
+  }
+  agentsRender();
+  if (focus) $("inp-agent-search")?.focus({ preventScroll: true });
+}
+
+async function agentLifecycleOpen(assistantId, action) {
+  const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
+  const intended = action === "restore" ? "restore" : "archive";
+  if (!agent || !agentVersionIdValid(agent.active_version_id) ||
+      agentLifecycleState(agent) !== (intended === "restore" ? "archived" : "active")) return false;
+  const operation = connectionOperation(); if (!operation) return false;
+  const request = ++store.agentLifecycleRequest;
+  const activeVersionId = agent.active_version_id;
+  const current = () => request === store.agentLifecycleRequest && connectionOperationCurrent(operation) &&
+    store.agents && store.agents.selected === assistantId && store.agentLifecycleReview &&
+    store.agentLifecycleReview.assistantId === assistantId &&
+    store.agentLifecycleReview.activeVersionId === activeVersionId;
+  store.agentLifecycleReview = {
+    assistantId, action: intended, activeVersionId, loading: true,
+    snapshot: null, error: null, submitting: false,
+  };
+  agentsRender();
+  $("agent-lifecycle-title")?.focus({ preventScroll: true });
+  try {
+    const raw = await apiForConnection(
+      operation.connection,
+      "GET",
+      `/assistants/${encodeURIComponent(assistantId)}`,
+      undefined,
+      AGENT_VERSION_RESPONSE_LIMIT,
+    );
+    if (!current()) return false;
+    const snapshot = agentVersionAssistant(raw, assistantId);
+    if (!snapshot || !agentLifecycleSnapshotMatches(snapshot, agent)) {
+      throw new ApiError(0, { error: "lifecycle_drift", message: "The assistant changed while this lifecycle review opened. Refresh the catalog and review again." });
+    }
+    store.agentLifecycleReview = {
+      ...store.agentLifecycleReview, loading: false, snapshot, error: null,
+    };
+    agentsRender();
+    $("agent-lifecycle-title")?.focus({ preventScroll: true });
+    $("agent-lifecycle-announcer").textContent = `${intended === "archive" ? "Archive" : "Restore"} review loaded for ${snapshot.name}.`;
+    return true;
+  } catch (error) {
+    if (!current()) return false;
+    const routeMissing = error.status === 404 && !(error.body && error.body.error);
+    store.agentLifecycleReview = {
+      ...store.agentLifecycleReview, loading: false,
+      error: { status: error.status || 0, body: routeMissing
+        ? { message: "This server build does not support assistant archive and restore yet." }
+        : (error.body || { message: error.message }) },
+    };
+    agentsRender();
+    $("agent-lifecycle-title")?.focus({ preventScroll: true });
+    return false;
+  }
+}
+
+function agentLifecycleCancel() {
+  if (!store.agentLifecycleReview || store.agentLifecycleReview.submitting) return;
+  store.agentLifecycleRequest += 1;
+  store.agentLifecycleReview = null;
+  agentsRender();
+  $("agent-detail").querySelector("[data-agent-lifecycle]")?.focus({ preventScroll: true });
+}
+
+async function agentLifecycleApply() {
+  const review = store.agentLifecycleReview;
+  const snapshot = review && review.snapshot;
+  if (!review || !snapshot || review.submitting) return false;
+  const operation = connectionOperation(); if (!operation) return false;
+  const request = ++store.agentLifecycleRequest;
+  const initiatingInteraction = store.agentLifecycleInteraction;
+  const initiatingView = store.view;
+  const abandonStaleWorkspace = () => {
+    if (request === store.agentLifecycleRequest && store.agentLifecycleReview === review &&
+        (store.view !== initiatingView || store.agentLifecycleInteraction !== initiatingInteraction)) {
+      store.agentLifecycleRequest += 1;
+      store.agentLifecycleReview = null;
+    }
+  };
+  const current = () => request === store.agentLifecycleRequest && connectionOperationCurrent(operation) &&
+    store.view === initiatingView && store.agentLifecycleInteraction === initiatingInteraction &&
+    store.agents && store.agents.selected === review.assistantId && store.agentLifecycleReview === review;
+  review.submitting = true;
+  agentsRender();
+  try {
+    const raw = await apiForConnection(
+      operation.connection,
+      "POST",
+      `/assistants/${encodeURIComponent(review.assistantId)}/${review.action}`,
+      { expected_active_version_id: snapshot.active_version_id },
+      AGENT_VERSION_RESPONSE_LIMIT,
+    );
+    if (!connectionOperationCurrent(operation)) return false;
+    const receipt = agentLifecycleReceipt(raw, review.assistantId, snapshot, review.action);
+    if (!receipt) throw new ApiError(0, { error: "invalid_receipt", message: "The lifecycle receipt did not match the exact assistant reviewed." });
+    agentReplaceCatalogRecord(receipt.assistant);
+    abandonStaleWorkspace();
+    if (!current()) {
+      agentsUpdateSidebar();
+      if (store.view === "agents") agentsRenderPreservingFocus();
+      else if (store.view === "home") homeRender();
+      return true;
+    }
+    store.agentLifecycleReview = null;
+    const archived = review.action === "archive";
+    store.agentLifecycleFilter = archived ? "archived" : "active";
+    $("sel-agent-lifecycle").value = store.agentLifecycleFilter;
+    agentsRender();
+    $("agent-detail").querySelector("[data-agent-lifecycle]")?.focus({ preventScroll: true });
+    const verb = archived ? "archived" : "restored";
+    $("agent-lifecycle-announcer").textContent = `${receipt.assistant.name} ${verb}.`;
+    toast(`${receipt.assistant.name} ${verb}. ${archived ? "History and versions are retained." : "New runs are available again."}`, "ok");
+    agentsUpdateSidebar();
+    if (store.view === "home") homeRender();
+    return true;
+  } catch (error) {
+    const ownedWorkspace = current();
+    abandonStaleWorkspace();
+    if (!connectionOperationCurrent(operation)) return false;
+    if (!ownedWorkspace) {
+      await agentsLoad(true);
+      return false;
+    }
+    review.submitting = false;
+    const definitive = [400, 404, 409, 422].includes(Number(error.status));
+    await agentsLoad(true);
+    if (!connectionOperationCurrent(operation) || !store.agents || store.view !== initiatingView ||
+        store.agentLifecycleInteraction !== initiatingInteraction) return false;
+    const observed = store.agents.list.find((item) => item.assistant_id === review.assistantId);
+    const archived = review.action === "archive";
+    if (observed && agentLifecycleState(observed) === (archived ? "archived" : "active")) {
+      store.agentLifecycleReview = null;
+      store.agentLifecycleFilter = archived ? "archived" : "active";
+      store.agents.selected = observed.assistant_id;
+      $("sel-agent-lifecycle").value = store.agentLifecycleFilter;
+      agentsRender();
+      $("agent-detail").querySelector("[data-agent-lifecycle]")?.focus({ preventScroll: true });
+      const verb = archived ? "archived" : "restored";
+      const versionNote = observed.active_version_id === snapshot.active_version_id
+        ? "" : " The active version also changed while the result was being reconciled.";
+      $("agent-lifecycle-announcer").textContent = `${observed.name} ${verb}, confirmed after refresh.${versionNote}`;
+      toast(`${observed.name} ${verb}. Server state confirmed after refresh.${versionNote}`, "ok");
+      agentsUpdateSidebar();
+      if (store.view === "home") homeRender();
+      return true;
+    }
+    toast(error.message, definitive ? "err" : "warn");
+    return false;
+  }
 }
 
 async function agentVersionsLoad(assistantId, focus) {
@@ -8475,10 +8801,41 @@ async function agentVersionActivate(assistantId, versionId) {
   }
 }
 
+function agentWorkspaceFocusIdentity() {
+  const view = $("agents-view");
+  const active = document.activeElement;
+  if (!view || !active || !view.contains(active)) return null;
+  if (active.id) return { id: active.id, attribute: "", value: "" };
+  for (const attribute of ["data-assistant-id", "data-agent-lifecycle", "data-agent-run-record", "data-agent-version-review"]) {
+    const value = active.getAttribute && active.getAttribute(attribute);
+    if (value !== null && value !== undefined) return { id: "", attribute, value };
+  }
+  return { id: "agents-title", attribute: "", value: "" };
+}
+
+function agentWorkspaceRestoreFocus(identity) {
+  if (!identity) return;
+  let target = identity.id ? $(identity.id) : null;
+  if (!target && identity.attribute) {
+    target = Array.from($("agents-view")?.querySelectorAll(`[${identity.attribute}]`) || [])
+      .find((item) => item.getAttribute(identity.attribute) === identity.value) || null;
+  }
+  (target || $("inp-agent-search") || $("agents-title"))?.focus({ preventScroll: true });
+}
+
+function agentsRenderPreservingFocus() {
+  const identity = agentWorkspaceFocusIdentity();
+  agentsRender();
+  agentWorkspaceRestoreFocus(identity);
+}
+
 function agentsRender() {
   if (!store.agents) store.agents = { list: [], selected: null, error: null };
   const state = store.agents;
   const list = state.list || [];
+  const active = list.filter((agent) => agentLifecycleState(agent) === "active").length;
+  const archived = list.filter((agent) => agentLifecycleState(agent) === "archived").length;
+  const unavailable = list.length - active - archived;
   const tested = list.filter((agent) => Boolean(agentSuccessfulRun(agent.assistant_id))).length;
   const runnable = list.filter((agent) => agentReadiness(agent, store.info, agentSuccessfulRun(agent.assistant_id)).steps[1].ready).length;
   const recentRuns = list.reduce((total, agent) => total + agentRunsFor(agent.assistant_id).length, 0);
@@ -8488,29 +8845,38 @@ function agentsRender() {
   const selectedHistory = selected ? agentRunsFor(selected.assistant_id) : [];
   $("agent-journey").innerHTML = agentJourneyHtml(selected, selectedRun, store.agentCreateOpen);
   $("agent-summary").innerHTML =
-    `<div><b>${list.length}</b><span>Assistant configurations</span></div>` +
+    `<div><b>${active}</b><span>Active agents</span></div>` +
+    `<div><b>${archived}</b><span>Archived safely${unavailable ? ` · ${unavailable} unavailable` : ""}</span></div>` +
     `<div><b>${runnable}</b><span>Runnable now</span></div>` +
-    `<div><b>${tested}</b><span>Tested here</span></div>` +
-    `<div><b>${recentRuns}</b><span>Recent runs</span></div>`;
-  $("agents-statusline").textContent = state.error ? "load failed" : `${list.length} total`;
+    `<div><b>${tested}/${recentRuns}</b><span>Tested / recent runs</span></div>`;
+  const lifecycle = store.agentLifecycleFilter || "active";
+  const lifecycleList = agentLifecycleItems(list, lifecycle);
+  $("agents-statusline").textContent = state.error ? "load failed" : `${lifecycleList.length} shown · ${list.length} total`;
   if (state.error) {
     $("agent-list").innerHTML = agentErrorHtml(state.error.status, state.error.body);
     $("agent-detail").innerHTML = `<div class="empty">Agent details unavailable.</div>`;
     return;
   }
-  const filtered = agentSearchItems(list, $("inp-agent-search").value);
+  const filtered = agentSearchItems(lifecycleList, $("inp-agent-search").value);
   const listEl = $("agent-list");
   if (!filtered.length) {
-    listEl.innerHTML = `<div class="empty">${list.length ? "No assistants match this search." : "No assistant configurations yet — create the first one."}</div>`;
+    const empty = !list.length ? "No assistant configurations yet — create the first one."
+      : lifecycle === "archived" ? "No archived agents. Archive is reversible and keeps every version and run."
+      : lifecycle === "active" ? (unavailable
+        ? `${unavailable} agent lifecycle record${unavailable === 1 ? " is" : "s are"} unavailable. Open All to inspect without enabling new work.`
+        : "No active agents match this view. Open Archived to restore one.")
+      : "No assistants match this search.";
+    listEl.innerHTML = `<div class="empty">${empty}</div>`;
   } else {
     listEl.innerHTML = "";
     for (const agent of filtered) {
+      const lifecycleState = agentLifecycleState(agent);
       const item = document.createElement("div");
-      item.className = "agent-item" + (agent.assistant_id === state.selected ? " selected" : "");
+      item.className = "agent-item" + (lifecycleState === "archived" ? " archived" : "") + (agent.assistant_id === state.selected ? " selected" : "");
       item.setAttribute("data-assistant-id", agent.assistant_id);
       item.setAttribute("role", "button");
       item.setAttribute("tabindex", "0");
-      item.setAttribute("aria-label", `Open ${agent.name || "unnamed agent"}`);
+      item.setAttribute("aria-label", `Open ${agent.name || "unnamed agent"}${lifecycleState === "archived" ? ", archived" : lifecycleState === "unknown" ? ", lifecycle unavailable" : ""}`);
       if (agent.assistant_id === state.selected) item.setAttribute("aria-current", "true");
       item.innerHTML = agentCardHtml(agent, agentReadiness(agent, store.info, agentSuccessfulRun(agent.assistant_id)));
       listEl.appendChild(item);
@@ -9082,6 +9448,13 @@ async function agentCreate() {
 async function agentRunTest(assistantId) {
   const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
   if (!agent) return;
+  const lifecycle = agentLifecycleState(agent);
+  if (lifecycle !== "active") {
+    toast(lifecycle === "archived" ? "This agent is archived. Restore it before starting a new run." :
+      "Lifecycle evidence is unavailable. Refresh the agent catalog before starting a new run.", "warn");
+    $("agent-detail").querySelector("[data-agent-lifecycle]")?.focus({ preventScroll: true });
+    return;
+  }
   const operation = connectionOperation(); if (!operation) return;
   const startedMs = Date.now();
   const startedAt = new Date(startedMs).toISOString();
@@ -16082,6 +16455,7 @@ function init() {
   $("btn-agents-open").onclick = openAgents;
   $("btn-agents-refresh").onclick = () => agentsLoad(false);
   $("inp-agent-search").addEventListener("input", agentsRender);
+  $("sel-agent-lifecycle").addEventListener("change", (event) => agentSetLifecycleFilter(event.target.value, true));
   $("btn-agent-create-open").onclick = () => agentOpenCreate();
   $("btn-agent-create-cancel").onclick = () => agentCloseCreate();
   $("agent-create-form").addEventListener("input", (event) => {
@@ -16145,6 +16519,18 @@ function init() {
     agentSelectAssistant(item.getAttribute("data-assistant-id"));
   });
   $("agent-detail").addEventListener("click", (e) => {
+    const lifecycle = e.target.closest("[data-agent-lifecycle]");
+    if (lifecycle && !lifecycle.disabled) {
+      agentLifecycleOpen(store.agents.selected, lifecycle.getAttribute("data-agent-lifecycle"));
+      return;
+    }
+    if (e.target.closest("[data-agent-lifecycle-cancel]")) { agentLifecycleCancel(); return; }
+    if (e.target.closest("[data-agent-lifecycle-retry]")) {
+      const review = store.agentLifecycleReview;
+      if (review) agentLifecycleOpen(review.assistantId, review.action);
+      return;
+    }
+    if (e.target.closest("[data-agent-lifecycle-apply]")) { agentLifecycleApply(); return; }
     const versions = e.target.closest("[data-agent-versions]");
     if (versions && !versions.disabled) {
       agentVersionsLoad(versions.getAttribute("data-agent-versions"), true);

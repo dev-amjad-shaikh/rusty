@@ -55,8 +55,8 @@ use crate::agents::{
 };
 use crate::assistants::{
     valid_version_id, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord,
-    AssistantVersionView, AssistantView, CreateVersionOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT,
-    ASSISTANT_VERSION_BYTES_LIMIT,
+    AssistantVersionView, AssistantView, CreateVersionOutcome, SetLifecycleOutcome,
+    ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT,
 };
 use crate::auth::TenantContext;
 use crate::capsules::{CapsuleRecord, CapsuleWrite};
@@ -277,6 +277,14 @@ pub(crate) fn router_with_shutdown(
         .route("/receipt_keys/journal", get(get_receipt_keys_journal))
         .route("/assistants", post(create_assistant).get(list_assistants))
         .route("/assistants/{assistant_id}", get(get_assistant))
+        .route(
+            "/assistants/{assistant_id}/archive",
+            post(archive_assistant),
+        )
+        .route(
+            "/assistants/{assistant_id}/restore",
+            post(restore_assistant),
+        )
         .route(
             "/assistants/{assistant_id}/versions",
             post(create_assistant_version).get(list_assistant_versions),
@@ -945,6 +953,15 @@ async fn schedule_for_thread(
             .await
             .map_err(internal_err)?
             .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+        if assistant.archived_at.is_some() {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "assistant_archived",
+                format!(
+                    "assistant `{assistant_id}` is archived; restore it before starting new work"
+                ),
+            ));
+        }
         if assistant.graph != record.graph {
             return Err(ApiError::bad_request(format!(
                 "assistant `{assistant_id}` is bound to graph `{}` but thread `{thread_id}` uses `{}`",
@@ -2021,6 +2038,73 @@ async fn get_assistant(
         .map_err(internal_err)?
         .map(|record| Json(record.view(assistant_id.clone())))
         .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct AssistantLifecyclePayload {
+    expected_active_version_id: String,
+}
+
+async fn archive_assistant(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<AssistantLifecyclePayload>,
+) -> Result<Json<Value>, ApiError> {
+    set_assistant_lifecycle(state, tenant, assistant_id, payload, true).await
+}
+
+async fn restore_assistant(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<AssistantLifecyclePayload>,
+) -> Result<Json<Value>, ApiError> {
+    set_assistant_lifecycle(state, tenant, assistant_id, payload, false).await
+}
+
+async fn set_assistant_lifecycle(
+    state: Arc<AppState>,
+    tenant: TenantContext,
+    assistant_id: String,
+    payload: AssistantLifecyclePayload,
+    archived: bool,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&payload.expected_active_version_id) {
+        return Err(ApiError::bad_request(
+            "`expected_active_version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    let outcome = state
+        .server_store
+        .set_assistant_archived(
+            &tenant.scope(&assistant_id),
+            &payload.expected_active_version_id,
+            archived,
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    let (changed, record) = match outcome {
+        SetLifecycleOutcome::Changed { record } => (true, record),
+        SetLifecycleOutcome::Already { record } => (false, record),
+        SetLifecycleOutcome::AssistantNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant `{assistant_id}` not found"
+            )))
+        }
+        SetLifecycleOutcome::Stale { active_version_id } => {
+            return Err(ApiError::conflict(format!(
+                "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before changing lifecycle"
+            )))
+        }
+    };
+    Ok(Json(json!({
+        "assistant": record.view(assistant_id),
+        "changed": changed,
+        "lifecycle": if archived { "archived" } else { "active" },
+    })))
 }
 
 #[derive(Debug, Deserialize)]

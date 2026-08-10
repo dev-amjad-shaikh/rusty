@@ -65,7 +65,13 @@ studio/
   fresh review instead of overwriting it. A historical version whose graph is no longer registered cannot be
   activated. Pre-version assistants from older releases remain readable when their original body exceeds the
   new size boundary, but cannot add a lineage until migrated to a bounded configuration. New runs use the
-  active snapshot; historical and in-flight runs are not rewritten. A bounded,
+  active snapshot; historical and in-flight runs are not rewritten. The catalog also has a reversible
+  lifecycle shelf. **Archive** first reloads and displays the exact active manifest, then atomically retires
+  the assistant against that reviewed version. An archived assistant keeps every immutable version and all
+  historical run evidence, but the server rejects new runs until **Restore** completes the same guarded
+  review in reverse. Active, archived, and combined filters keep retained configurations discoverable; Home
+  routes directly to restoration when a server has only archived assistants. This is not deletion.
+  A bounded,
   connection-scoped browser ledger preserves only safe
   run metadata (identity, status, timing, and stable error category); prompts and result payloads are
   deliberately not stored.
@@ -514,7 +520,8 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   Workbench suite covers configuration validation, the Runs with / Describes / Preserves contract,
   versioned manifest round-trips, preservation of unusual JSON shapes, lossy-number and unknown-field rejection,
   secret redaction, file/depth/cardinality bounds, portable filenames, duplication, real-run inputs, and
-  accessible interaction markup. The governed
+  accessible interaction markup, reversible lifecycle filtering, exact archive/restore receipts,
+  serving admission, and cross-selection race containment. The governed
   memory suite covers immutable content handling, every frozen provenance-author variant, active /
   candidate / expired / superseded classification, combined search and filters, conflict isolation,
   evidence attribution, accessible conflict actions, HTML escaping, defensive future-wire fallbacks,

@@ -83,6 +83,8 @@ pub(crate) struct AssistantView {
     pub created_at: DateTime<Utc>,
     pub active_version_id: String,
     pub version_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,6 +131,14 @@ pub(crate) enum ActivateVersionOutcome {
     Stale { active_version_id: String },
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum SetLifecycleOutcome {
+    Changed { record: AssistantRecord },
+    Already { record: AssistantRecord },
+    AssistantNotFound,
+    Stale { active_version_id: String },
+}
+
 /// One assistant: a named alias for a graph with default config metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AssistantRecord {
@@ -151,6 +161,10 @@ pub(crate) struct AssistantRecord {
     /// from the ordinary catalog wire shape.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub versions: Vec<AssistantVersionRecord>,
+    /// Reversible catalog lifecycle. Archived assistants keep their complete
+    /// configuration lineage and historical runs, but cannot start new work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 impl AssistantRecord {
@@ -179,6 +193,7 @@ impl AssistantRecord {
             created_at,
             active_version_id: Some(initial.version_id.clone()),
             versions: vec![initial],
+            archived_at: None,
         }
     }
 
@@ -384,6 +399,7 @@ impl AssistantRecord {
             created_at: self.created_at,
             active_version_id: self.active_version_id(),
             version_count: self.versions.len().max(1),
+            archived_at: self.archived_at,
         }
     }
 }

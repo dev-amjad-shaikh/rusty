@@ -44,7 +44,7 @@ use crate::agents::{
 };
 use crate::assistants::{
     self, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord, CreateVersionOutcome,
-    ASSISTANT_VERSION_LIMIT,
+    SetLifecycleOutcome, ASSISTANT_VERSION_LIMIT,
 };
 #[cfg(feature = "capsules")]
 use crate::capsule_policy::{
@@ -99,6 +99,15 @@ pub(crate) trait ServerStore: Send + Sync {
         version_id: &str,
         expected_active_version_id: &str,
     ) -> StoreResult<ActivateVersionOutcome>;
+    /// Reversibly archive or restore an assistant when the caller still
+    /// observes the exact active immutable version.
+    async fn set_assistant_archived(
+        &self,
+        assistant_id: &str,
+        expected_active_version_id: &str,
+        archived: bool,
+        changed_at: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<SetLifecycleOutcome>;
 
     /// Insert a new cron; `false` (no write) when the id exists.
     async fn create_cron(&self, record: &CronRecord) -> StoreResult<bool>;
@@ -1043,6 +1052,35 @@ impl ServerStore for JsonFileStore {
             .map_err(io_err("activate assistant version"))?;
         map.insert(assistant_id.to_string(), next.clone());
         Ok(ActivateVersionOutcome::Activated { record: next })
+    }
+
+    async fn set_assistant_archived(
+        &self,
+        assistant_id: &str,
+        expected_active_version_id: &str,
+        archived: bool,
+        changed_at: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<SetLifecycleOutcome> {
+        let mut map = self.assistants.lock().await;
+        let Some(current) = map.get(assistant_id) else {
+            return Ok(SetLifecycleOutcome::AssistantNotFound);
+        };
+        let mut next = current.clone();
+        let active = next.active_version_id();
+        if active != expected_active_version_id {
+            return Ok(SetLifecycleOutcome::Stale {
+                active_version_id: active,
+            });
+        }
+        if next.archived_at.is_some() == archived {
+            return Ok(SetLifecycleOutcome::Already { record: next });
+        }
+        next.archived_at = archived.then_some(changed_at);
+        assistants::persist(&self.root, &next)
+            .await
+            .map_err(io_err("persist assistant lifecycle"))?;
+        map.insert(assistant_id.to_string(), next.clone());
+        Ok(SetLifecycleOutcome::Changed { record: next })
     }
 
     async fn create_cron(&self, record: &CronRecord) -> StoreResult<bool> {
@@ -2644,8 +2682,8 @@ mod postgres {
     };
     use crate::assistants::{
         ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord, AssistantView,
-        CreateVersionOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT,
-        ASSISTANT_VERSION_LIMIT,
+        CreateVersionOutcome, SetLifecycleOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT,
+        ASSISTANT_VERSION_BYTES_LIMIT, ASSISTANT_VERSION_LIMIT,
     };
     #[cfg(feature = "capsules")]
     use crate::capsule_policy::{
@@ -4530,6 +4568,58 @@ mod postgres {
                 .await
                 .map_err(db_err("commit assistant activation transaction"))?;
             Ok(ActivateVersionOutcome::Activated { record })
+        }
+
+        async fn set_assistant_archived(
+            &self,
+            assistant_id: &str,
+            expected_active_version_id: &str,
+            archived: bool,
+            changed_at: chrono::DateTime<chrono::Utc>,
+        ) -> StoreResult<SetLifecycleOutcome> {
+            let pool = self.pool().await?;
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin assistant lifecycle transaction"))?;
+            let row = sqlx::query(SELECT_ASSISTANT_FOR_UPDATE_SQL)
+                .bind(assistant_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("lock assistant for lifecycle"))?;
+            let Some(row) = row else {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit missing assistant lifecycle transaction"))?;
+                return Ok(SetLifecycleOutcome::AssistantNotFound);
+            };
+            let mut record = assistant_from_payload(row.get::<Value, _>("payload"))?;
+            let active = record.active_version_id();
+            if active != expected_active_version_id {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit stale assistant lifecycle transaction"))?;
+                return Ok(SetLifecycleOutcome::Stale {
+                    active_version_id: active,
+                });
+            }
+            if record.archived_at.is_some() == archived {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit unchanged assistant lifecycle transaction"))?;
+                return Ok(SetLifecycleOutcome::Already { record });
+            }
+            record.archived_at = archived.then_some(changed_at);
+            sqlx::query(UPDATE_ASSISTANT_SQL)
+                .bind(assistant_id)
+                .bind(record_to_payload(&record)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("update assistant lifecycle"))?;
+            tx.commit()
+                .await
+                .map_err(db_err("commit assistant lifecycle transaction"))?;
+            Ok(SetLifecycleOutcome::Changed { record })
         }
 
         async fn create_cron(&self, record: &CronRecord) -> StoreResult<bool> {

@@ -55,7 +55,7 @@ globalThis.__workbench = {
   connectionRunScope,
   agentParseRunEnvelope, agentPruneRunEnvelope, loadAgentRunHistory, saveAgentRunHistory,
   agentTags, agentSearchItems, agentReadiness, agentReadinessHtml,
-  agentCardHtml, agentGraphLabel, agentDefaultInput, agentBuildRunInput,
+  agentArchivedAt, agentLifecycleState, agentLifecycleItems, agentCardHtml, agentGraphLabel, agentDefaultInput, agentBuildRunInput,
   agentRunTone, agentErrorCategory, agentNormalizeRunRecord, agentMergeRunHistory,
   agentDurationLabel, agentRunTimeLabel, agentRunHistoryHtml,
   agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft, agentVersionDraft, agentCopySourceSnapshot,
@@ -73,8 +73,10 @@ globalThis.__workbench = {
   agentChangeIntentView, agentChangeReviewView, agentChangeReview, agentChangeReviewHtml,
   agentVersionIdValid, agentVersionAssistant, agentVersionEnvelope, agentVersionExact,
   agentVersionCreateReceipt, agentVersionDraftReviewable, agentVersionActivationReceipt, agentVersionManifestEvidence,
+  agentLifecycleSnapshotMatches, agentLifecycleReceipt, agentLifecycleManifestEvidence, agentLifecycleDeskHtml,
   agentVersionDeskHtml, agentVersionContextHtml, agentInvalidateVersionsForSelection,
-  agentVersionsLoad, agentVersionReview, agentVersionActivate, agentSelectAssistant, homeNavigate,
+  agentVersionsLoad, agentVersionReview, agentVersionActivate, agentSelectAssistant, agentSetLifecycleFilter, homeNavigate,
+  agentInvalidateLifecycleForSelection, agentLifecycleOpen, agentLifecycleApply,
   agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
   agentOpenCreate, agentOpenVersion, agentCreate, store,
 };`, sandbox, { filename: "index.html<script>" });
@@ -179,6 +181,32 @@ check("search: graph is searchable", W.agentSearchItems([agent], "react_agent").
 check("search: id is searchable", W.agentSearchItems([agent], "research-co").length === 1);
 check("search: tags are searchable", W.agentSearchItems([agent], "production").length === 1);
 check("search: non-match is excluded", W.agentSearchItems([agent], "billing").length === 0);
+
+{
+  const archived = { ...agent, assistant_id: "archived-scout", archived_at: "2026-08-10T04:00:00Z" };
+  eq("lifecycle shelf: active filter excludes archived records", W.agentLifecycleItems([agent, archived], "active").map((item) => item.assistant_id), [agent.assistant_id]);
+  eq("lifecycle shelf: archived and all filters preserve exact records", [
+    W.agentLifecycleItems([agent, archived], "archived").map((item) => item.assistant_id),
+    W.agentLifecycleItems([agent, archived], "all").map((item) => item.assistant_id),
+  ], [[archived.assistant_id], [agent.assistant_id, archived.assistant_id]]);
+  const malformed = { ...agent, assistant_id: "malformed-lifecycle", archived_at: "yesterday" };
+  const permissiveDate = { ...agent, assistant_id: "permissive-date", archived_at: "08/10/2026" };
+  check("lifecycle shelf: malformed and non-RFC3339 timestamps become unavailable, never active",
+    W.agentLifecycleState(malformed) === "unknown" && W.agentLifecycleState(permissiveDate) === "unknown" &&
+    W.agentLifecycleItems([malformed, permissiveDate], "active").length === 0 &&
+    W.agentLifecycleItems([malformed, permissiveDate], "archived").length === 0 &&
+    W.agentLifecycleItems([malformed, permissiveDate], "all").length === 2);
+  const unavailableReadiness = W.agentReadiness(malformed, info, null);
+  check("lifecycle shelf: unavailable evidence fails run readiness with a visible diagnosis",
+    unavailableReadiness.steps[1].label === "Lifecycle unavailable" && !unavailableReadiness.steps[1].ready &&
+    W.agentCardHtml(malformed, unavailableReadiness).includes("Lifecycle unavailable"));
+  const archivedReadiness = W.agentReadiness(archived, info, { status: "success" });
+  check("lifecycle shelf: archive blocks runnable readiness without erasing prior test evidence",
+    archivedReadiness.steps[1].label === "Archived" && !archivedReadiness.steps[1].ready && archivedReadiness.steps[2].ready);
+  const card = W.agentCardHtml(archived, archivedReadiness);
+  check("lifecycle shelf: archived catalog identity is visible and hostile content stays escaped",
+    card.includes("Archived") && card.includes("archived-scout") && card.includes("&lt;Coordinator&gt;"));
+}
 
 {
   const readiness = W.agentReadiness(agent, info, null);
@@ -559,6 +587,38 @@ check("graph labels: built-in behaviors are understandable",
   check("assistant versions: draft copy explains the non-serving boundary",
     versionContext.includes("immutable draft") && versionContext.includes("Unchanged until activation") &&
     versionContext.includes(VERSION1));
+
+  const archived = { ...active, archived_at: "2026-08-10T04:00:00Z" };
+  check("assistant lifecycle: exact review snapshot binds identity, active version, body, and lifecycle",
+    W.agentLifecycleSnapshotMatches({ ...active }, active) &&
+    !W.agentLifecycleSnapshotMatches({ ...active, metadata: { owner: "other" } }, active) &&
+    !W.agentLifecycleSnapshotMatches(archived, active));
+  const archiveReceipt = W.agentLifecycleReceipt({ changed: true, lifecycle: "archived", assistant: archived }, assistantId, active, "archive");
+  const restoreReceipt = W.agentLifecycleReceipt({ changed: true, lifecycle: "active", assistant: active }, assistantId, archived, "restore");
+  check("assistant lifecycle: receipts bind the reviewed version and requested terminal state",
+    archiveReceipt && restoreReceipt && archiveReceipt.assistant.archived_at &&
+    W.agentLifecycleReceipt({ changed: true, lifecycle: "active", assistant: archived }, assistantId, active, "archive") === null &&
+    W.agentLifecycleReceipt({ changed: true, lifecycle: "archived", assistant: { ...archived, active_version_id: v2 } }, assistantId, active, "archive") === null);
+  check("assistant lifecycle: receipts reject permissive and malformed archive timestamps",
+    W.agentLifecycleReceipt({ changed: true, lifecycle: "archived", assistant: { ...active, archived_at: "0" } }, assistantId, active, "archive") === null &&
+    W.agentLifecycleReceipt({ changed: true, lifecycle: "archived", assistant: { ...active, archived_at: "2026-02-30T04:00:00Z" } }, assistantId, active, "archive") === null);
+  const lifecycleEvidence = W.agentLifecycleManifestEvidence(active);
+  check("assistant lifecycle: decision desk carries the complete exact manifest within bounds",
+    lifecycleEvidence.ready && lifecycleEvidence.html.includes("Review complete active manifest") &&
+    lifecycleEvidence.html.includes('&quot;description&quot;: &quot;Collect and synthesize evidence&quot;'));
+  const lifecycleDesk = W.agentLifecycleDeskHtml(active, {
+    assistantId, activeVersionId: VERSION1, action: "archive", loading: false,
+    snapshot: active, error: null, submitting: false,
+  });
+  check("assistant lifecycle: archive review states retention, serving effect, and deliberate action",
+    lifecycleDesk.includes("New runs will stop at admission") && lifecycleDesk.includes("Versions retained") &&
+    lifecycleDesk.includes("Archive agent") && lifecycleDesk.includes(VERSION1) && lifecycleDesk.includes('id="agent-lifecycle-title"'));
+  const restoreDesk = W.agentLifecycleDeskHtml(archived, {
+    assistantId, activeVersionId: VERSION1, action: "restore", loading: false,
+    snapshot: archived, error: null, submitting: false,
+  });
+  check("assistant lifecycle: restore review exposes archived evidence and reversibility",
+    restoreDesk.includes("Restore review") && restoreDesk.includes("Restore agent") && restoreDesk.includes("archived"));
 }
 
 {
@@ -1041,6 +1101,13 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
   check("detail exposes immutable version identity and lifecycle entry points",
     detail.includes(VERSION1) && detail.includes('data-agent-versions="research-coordinator"') &&
     detail.includes('data-agent-version-create="research-coordinator"') && detail.includes(">Version history</button>"));
+  const archivedAgent = { ...agent, archived_at: "2026-08-10T04:00:00Z" };
+  const archivedDetail = W.agentDetailHtml(archivedAgent,
+    W.agentReadiness(archivedAgent, info, run), run, history, info);
+  check("detail keeps archived evidence inspectable while disabling new work and offering restore",
+    archivedDetail.includes('data-agent-lifecycle="restore"') && archivedDetail.includes(">Restore</button>") &&
+    archivedDetail.includes("Restore it before starting new work") &&
+    archivedDetail.includes('data-agent-run="research-coordinator" disabled') && archivedDetail.includes("Recent runs"));
   check("detail makes configuration portable and explains its runtime contract",
     detail.includes('data-agent-export="research-coordinator"') && detail.includes(">Export manifest</button>") &&
     detail.includes('aria-labelledby="agent-config-summary-heading"') &&
@@ -1122,6 +1189,12 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes(".agent-version-head { flex-direction: column; }") &&
     html.includes(".agent-version-item { grid-template-columns: 1fr; }") &&
     html.includes('data-agent-version-activate="'));
+  check("assistant lifecycle shelf is filtered, announced, and mobile-safe",
+    html.includes('id="sel-agent-lifecycle" aria-label="Agent lifecycle"') &&
+    html.includes('id="agent-lifecycle-announcer" role="status" aria-live="polite"') &&
+    html.includes('action === "unavailable-agents"') && html.includes("Open All to inspect without enabling new work") &&
+    html.includes(".agent-toolbar input { flex-basis: 100%; min-width: 100%; }") &&
+    html.includes(".agent-lifecycle-facts { grid-template-columns: 1fr; gap: 2px; }"));
   check("configuration workshop carries responsive and reduced-motion quality hooks",
     html.includes(".agent-workshop { grid-template-columns: 1fr;") &&
     html.includes('@media (prefers-reduced-motion: reduce)'));
@@ -1194,6 +1267,187 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
   check("assistant versions: deferred activation cannot mutate catalog or announce after selected-agent ownership changes",
     W.store.agents.selected === otherId && W.store.agents.list[0].active_version_id === v1 &&
     W.store.agentVersions === null && sandbox.__versionToasts.length === 0);
+
+  uiElements.set("agent-lifecycle-title", { focus() {} });
+  uiElements.set("agent-lifecycle-announcer", { textContent: "" });
+  uiElements.set("sel-agent-lifecycle", { value: "active" });
+  uiElements.set("agent-side-count", { textContent: "" });
+  uiElements.set("agent-detail", { querySelector() { return { focus() {} }; } });
+  sandbox.__versionToasts.length = 0;
+  W.store.agents = { list: [current, other], selected: assistantId, error: null };
+  W.store.agentLifecycleReview = null;
+  release = null;
+  fetchHandler = () => new Promise((resolve) => { release = resolve; });
+  const pendingLifecycleReview = W.agentLifecycleOpen(assistantId, "archive");
+  await Promise.resolve();
+  W.homeNavigate("agent-run", "", otherId);
+  release({ ok: true, status: 200, async text() { return JSON.stringify(current); } });
+  await pendingLifecycleReview;
+  check("assistant lifecycle: deferred exact review cannot return into another selected agent",
+    W.store.agents.selected === otherId && W.store.agentLifecycleReview === null &&
+    sandbox.__versionToasts.length === 0 && uiElements.get("agent-lifecycle-announcer").textContent === "");
+
+  W.store.agents.selected = assistantId;
+  W.store.agentLifecycleReview = null;
+  fetchCalls.length = 0;
+  fetchHandler = async (url, options) => {
+    if (options.method === "GET") return { ok: true, status: 200, async text() { return JSON.stringify(current); } };
+    return { ok: true, status: 200, async text() { return JSON.stringify({
+      changed: true, lifecycle: "archived", assistant: { ...current, archived_at: "2026-08-10T04:00:00Z" },
+    }); } };
+  };
+  check("assistant lifecycle: exact review opens from a corroborated server snapshot",
+    await W.agentLifecycleOpen(assistantId, "archive") && W.store.agentLifecycleReview.snapshot.active_version_id === v1);
+  check("assistant lifecycle: successful archive sends only the reviewed serving guard and moves to the retained shelf",
+    await W.agentLifecycleApply() && W.store.agents.list[0].archived_at === "2026-08-10T04:00:00Z" &&
+    W.store.agentLifecycleFilter === "archived" &&
+    JSON.parse(fetchCalls.at(-1).options.body).expected_active_version_id === v1 &&
+    Object.keys(JSON.parse(fetchCalls.at(-1).options.body)).length === 1);
+
+  const archivedCurrent = { ...current, archived_at: "2026-08-10T04:00:00Z" };
+  W.store.view = "agents";
+  W.store.agents = { list: [current, other], selected: assistantId, error: null };
+  W.store.agentLifecycleFilter = "active";
+  fetchHandler = async (url, options) => {
+    if (options.method === "GET") return { ok: true, status: 200, async text() { return JSON.stringify(current); } };
+    return new Promise((resolve) => { release = resolve; });
+  };
+  await W.agentLifecycleOpen(assistantId, "archive");
+  const successAnnouncement = uiElements.get("agent-lifecycle-announcer").textContent;
+  const successToasts = sandbox.__versionToasts.length;
+  release = null;
+  const pendingHiddenSuccess = W.agentLifecycleApply();
+  await Promise.resolve();
+  W.store.view = "home";
+  release({ ok: true, status: 200, async text() { return JSON.stringify({
+    changed: true, lifecycle: "archived", assistant: archivedCurrent,
+  }); } });
+  check("assistant lifecycle: a deferred success updates catalog truth without focusing or announcing inside a workspace the user left",
+    await pendingHiddenSuccess === true && W.store.view === "home" && W.store.agentLifecycleReview === null &&
+    W.agentLifecycleState(W.store.agents.list[0]) === "archived" &&
+    !W.agentReadiness(W.store.agents.list[0], info, null).steps[1].ready && sandbox.__versionToasts.length === successToasts &&
+    uiElements.get("agent-lifecycle-announcer").textContent === successAnnouncement);
+
+  W.store.view = "agents";
+  W.store.conn = { baseUrl: "/api", apiKey: "tenant-a" };
+  W.store.connectionEpoch = 7;
+  W.store.agents = { list: [current, other], selected: assistantId, error: null };
+  fetchHandler = async (url, options) => {
+    if (options.method === "GET") return { ok: true, status: 200, async text() { return JSON.stringify(current); } };
+    return new Promise((resolve) => { release = resolve; });
+  };
+  await W.agentLifecycleOpen(assistantId, "archive");
+  release = null;
+  const pendingTenantReceipt = W.agentLifecycleApply();
+  await Promise.resolve();
+  const tenantBRecord = { ...current, name: "Tenant B same ID", config: { model: "tenant-b" } };
+  W.store.conn = { baseUrl: "/api", apiKey: "tenant-b" };
+  W.store.connectionEpoch = 8;
+  W.store.agentLifecycleRequest += 1;
+  W.store.agentLifecycleReview = null;
+  W.store.agents = { list: [tenantBRecord, other], selected: assistantId, error: null };
+  release({ ok: true, status: 200, async text() { return JSON.stringify({
+    changed: true, lifecycle: "archived", assistant: archivedCurrent,
+  }); } });
+  check("assistant lifecycle: a deferred same-ID receipt can never cross a connection or tenant boundary",
+    await pendingTenantReceipt === false && W.store.agents.list[0].name === "Tenant B same ID" &&
+    W.store.agents.list[0].config.model === "tenant-b" && W.agentLifecycleState(W.store.agents.list[0]) === "active");
+
+  W.store.view = "agents";
+  W.store.conn = { baseUrl: "/api", apiKey: "tenant-a" };
+  W.store.connectionEpoch = 9;
+  W.store.agents = { list: [current, other], selected: assistantId, error: null };
+  W.store.agentLifecycleFilter = "active";
+  let restoredFilterFocus = 0;
+  const lifecycleFilter = { id: "sel-agent-lifecycle", value: "active", focus() { restoredFilterFocus += 1; } };
+  uiElements.set("sel-agent-lifecycle", lifecycleFilter);
+  uiElements.set("agents-view", { contains(element) { return element === lifecycleFilter; }, querySelectorAll() { return []; } });
+  sandbox.document.activeElement = lifecycleFilter;
+  vm.runInContext("globalThis.__agentRenderCount = 0; agentsRender = () => { globalThis.__agentRenderCount += 1; };", sandbox);
+  fetchHandler = async (url, options) => {
+    if (options.method === "GET") return { ok: true, status: 200, async text() { return JSON.stringify(current); } };
+    return new Promise((resolve) => { release = resolve; });
+  };
+  await W.agentLifecycleOpen(assistantId, "archive");
+  release = null;
+  const pendingVisibleSuccess = W.agentLifecycleApply();
+  await Promise.resolve();
+  W.agentSetLifecycleFilter("all", false);
+  lifecycleFilter.value = "all";
+  W.agentSelectAssistant(otherId);
+  const rendersBeforeReceipt = sandbox.__agentRenderCount;
+  release({ ok: true, status: 200, async text() { return JSON.stringify({
+    changed: true, lifecycle: "archived", assistant: archivedCurrent,
+  }); } });
+  check("assistant lifecycle: a stale-view success refreshes visible truth without taking newer filter, selection, or focus",
+    await pendingVisibleSuccess === true && W.store.agentLifecycleFilter === "all" &&
+    W.store.agents.selected === otherId && W.agentLifecycleState(W.store.agents.list[0]) === "archived" &&
+    sandbox.__agentRenderCount === rendersBeforeReceipt + 1 && restoredFilterFocus === 1);
+  sandbox.document.activeElement = null;
+
+  W.store.view = "agents";
+  W.store.agents = { list: [current, other], selected: assistantId, error: null };
+  fetchHandler = async (url, options) => {
+    if (options.method === "GET") return { ok: true, status: 200, async text() {
+      return JSON.stringify(url.endsWith(`/assistants/${assistantId}`) ? current : [archivedCurrent, other]);
+    } };
+    return new Promise((resolve, reject) => { release = () => reject(new TypeError("receipt connection closed")); });
+  };
+  await W.agentLifecycleOpen(assistantId, "archive");
+  const failureAnnouncement = uiElements.get("agent-lifecycle-announcer").textContent;
+  const failureToasts = sandbox.__versionToasts.length;
+  release = null;
+  const pendingHiddenFailure = W.agentLifecycleApply();
+  await Promise.resolve();
+  W.store.view = "home";
+  release();
+  check("assistant lifecycle: a deferred lost receipt silently reconciles catalog truth without announcing after workspace navigation",
+    await pendingHiddenFailure === false && W.store.view === "home" && W.store.agentLifecycleReview === null &&
+    W.agentLifecycleState(W.store.agents.list[0]) === "archived" &&
+    sandbox.__versionToasts.length === failureToasts &&
+    uiElements.get("agent-lifecycle-announcer").textContent === failureAnnouncement);
+
+  W.store.view = "agents";
+  W.store.agents = { list: [archivedCurrent, other], selected: assistantId, error: null };
+  W.store.agentLifecycleFilter = "archived";
+  fetchHandler = async (url, options) => {
+    if (options.method === "POST") throw new TypeError("connection closed before the receipt arrived");
+    if (url.endsWith(`/assistants/${assistantId}`)) {
+      return { ok: true, status: 200, async text() { return JSON.stringify(archivedCurrent); } };
+    }
+    return { ok: true, status: 200, async text() { return JSON.stringify([current, other]); } };
+  };
+  check("assistant lifecycle: restore review opens from the retained archived snapshot",
+    await W.agentLifecycleOpen(assistantId, "restore"));
+  check("assistant lifecycle: a lost receipt reconciles authoritative state without retaining a stale review",
+    await W.agentLifecycleApply() && W.store.agentLifecycleReview === null &&
+    W.store.agents.selected === assistantId && W.store.agentLifecycleFilter === "active" &&
+    !W.store.agents.list[0].archived_at &&
+    uiElements.get("agent-lifecycle-announcer").textContent.includes("confirmed after refresh"));
+
+  W.store.agents = { list: [archivedCurrent, other], selected: assistantId, error: null };
+  W.store.agentLifecycleFilter = "archived";
+  uiElements.get("sel-agent-lifecycle").value = "archived";
+  release = null;
+  fetchHandler = async (url, options) => {
+    if (options.method === "POST") throw new TypeError("connection closed before the receipt arrived");
+    if (url.endsWith(`/assistants/${assistantId}`)) {
+      return { ok: true, status: 200, async text() { return JSON.stringify(archivedCurrent); } };
+    }
+    return new Promise((resolve) => { release = resolve; });
+  };
+  await W.agentLifecycleOpen(assistantId, "restore");
+  const announcementBeforeRecovery = uiElements.get("agent-lifecycle-announcer").textContent;
+  const toastCountBeforeRecovery = sandbox.__versionToasts.length;
+  const pendingRecovery = W.agentLifecycleApply();
+  for (let turn = 0; turn < 6 && !release; turn += 1) await Promise.resolve();
+  W.agentSetLifecycleFilter("active", false);
+  release({ ok: true, status: 200, async text() { return JSON.stringify([current, other]); } });
+  check("assistant lifecycle: deferred lost-receipt reconciliation cannot override a newer filter and selection",
+    await pendingRecovery === false && W.store.agents.selected === otherId &&
+    W.store.agentLifecycleFilter === "active" && W.store.agentLifecycleReview === null &&
+    uiElements.get("agent-lifecycle-announcer").textContent === announcementBeforeRecovery &&
+    sandbox.__versionToasts.length === toastCountBeforeRecovery);
   fetchHandler = null;
 }
 

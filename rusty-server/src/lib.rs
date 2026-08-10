@@ -45,6 +45,7 @@
 //! | `GET /runs/{run_id}` | run status polling (plus `output`/`error`/`interrupt` once terminal) |
 //! | `POST /assistants` | create a named graph alias with config metadata |
 //! | `GET /assistants` / `GET /assistants/{id}` | list / fetch assistants |
+//! | `POST /assistants/{id}/archive` / `POST /assistants/{id}/restore` | reversibly retire or return an assistant using an expected-active-version guard; archived assistants retain their immutable lineage and history but reject new runs |
 //! | `GET /assistants/{id}/versions` | list the bounded immutable configuration lineage and active serving pointer |
 //! | `POST /assistants/{id}/versions` | stage an immutable child version against the exact active base (never activates it) |
 //! | `GET /assistants/{id}/versions/{version_id}` | fetch one exact immutable configuration version for review |
