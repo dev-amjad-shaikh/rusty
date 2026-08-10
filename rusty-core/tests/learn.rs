@@ -246,6 +246,9 @@ fn golden_promotion_envelope_shape() {
             scopes: vec![MemoryScope::Run, MemoryScope::Agent],
         }),
         tool_permission: EnvelopeRule::Approval,
+        // The R0.11 registry kinds sit at their approval default — absent
+        // from the wire, so this golden stays the R0.8 shape byte-for-byte.
+        ..PromotionEnvelope::r08_default()
     };
     assert_golden("promotion_envelope.json", &envelope);
 }
@@ -973,6 +976,8 @@ fn auto_policy_envelope() -> PromotionEnvelope {
         }),
         memory_set: EnvelopeRule::Approval,
         tool_permission: EnvelopeRule::Approval,
+        // The R0.11 registry kinds keep their approval default.
+        ..PromotionEnvelope::r08_default()
     }
 }
 

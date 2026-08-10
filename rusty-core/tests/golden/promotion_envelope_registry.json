@@ -1,0 +1,27 @@
+{
+  "envelope_version": "acme-r011-1",
+  "prompt": {
+    "mode": "approval"
+  },
+  "policy": {
+    "mode": "approval"
+  },
+  "memory_set": {
+    "mode": "approval"
+  },
+  "tool_permission": {
+    "mode": "approval"
+  },
+  "model_settings": {
+    "mode": "canary",
+    "fraction": 0.1,
+    "auto": {
+      "dataset_version": "support-v4",
+      "min_improvement": 0.01
+    }
+  },
+  "middleware_composition": {
+    "mode": "auto",
+    "min_improvement": 0.0
+  }
+}

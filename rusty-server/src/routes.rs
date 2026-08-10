@@ -31,9 +31,10 @@ use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
     admit_promotion, candidate_effect_key, detect_policy_drift, evaluation_effect_key,
-    promotion_effect_key, rollback_effect_key, Candidate, CandidateContent, CandidateOverlay,
-    CandidateRecord, CandidateStatus, DriftBaseline, DriftThresholds, EvaluationRequest,
-    LearnError, PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer,
+    promotion_effect_key, rollback_effect_key, surface_for_kind, Candidate, CandidateContent,
+    CandidateId, CandidateKind, CandidateOverlay, CandidateRecord, CandidateStatus, DriftBaseline,
+    DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError, PromotionReceipt,
+    PromotionRefusal, RollbackReceipt, VersionPointer,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
@@ -46,6 +47,7 @@ use rusty_agent_runtime::record::{
     derive_policy_version, sha256_hex, CapsuleVersion, DecisionEvent, Effect, EffectReceipt,
     ExecutorPolicy, JournalRef, PayloadRef, PolicyVersion, RunEventKind,
 };
+use rusty_agent_runtime::registry::{diff_candidates, ArtifactRecord, RegistryError};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
@@ -71,7 +73,7 @@ use crate::policy::{self, PolicyActivation, PolicyRecord, PolicySource, PolicyWr
 use crate::runs::{
     self, MultitaskStrategy, RunConfigPayload, RunDeps, RunManager, RunPayload, RunStatus,
 };
-use crate::server_store::{CandidateTransition, JsonFileStore, ServerStore};
+use crate::server_store::{ArtifactCommitOutcome, CandidateTransition, JsonFileStore, ServerStore};
 use crate::sse;
 use crate::supervision;
 use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
@@ -361,6 +363,25 @@ pub(crate) fn router_with_shutdown(
             post(rollback_candidate),
         )
         .route("/learn/versions", get(list_version_pointers))
+        // The configuration registry (R0.11 wave 1): named, owned
+        // artifacts indexing the candidate pipeline (never a fork of it),
+        // the append-only commit history, and diff views computed on
+        // read. Promotion itself stays on the learn surface — with an
+        // optional environment tag, the pointer moves per tag through
+        // the unchanged machinery.
+        .route(
+            "/registry/artifacts",
+            post(declare_artifact).get(list_artifacts),
+        )
+        .route("/registry/artifacts/{family}/{name}", get(get_artifact))
+        .route(
+            "/registry/artifacts/{family}/{name}/commits",
+            post(commit_artifact).get(list_artifact_commits),
+        )
+        .route(
+            "/registry/artifacts/{family}/{name}/diff",
+            get(diff_artifact),
+        )
         // The executor-policy registry (R0.8 wave 4): versioned,
         // immutable policy bodies; the append-only activation log moving
         // the active-version pointer; the active read; and the derived
@@ -5027,6 +5048,14 @@ struct PromoteCandidatePayload {
     /// approval-ruled promotions fail `403` without it.
     #[serde(default)]
     approval: Option<ApprovalToken>,
+    /// The environment tag the promotion targets (R0.11 wave 1): with a
+    /// tag, the pointer moves on the tagged surface
+    /// (`prompt:system@prod`) instead of the base one — one deployment
+    /// serving "the prod prompt" and "the staging prompt" from one
+    /// registry, through the unchanged pointer machinery. Absent is the
+    /// untagged surface, the pre-R0.11 behavior.
+    #[serde(default)]
+    tag: Option<EnvironmentTag>,
     /// The causal parent journal-event id (default: the journal's head).
     #[serde(default)]
     parent: Option<String>,
@@ -5059,7 +5088,10 @@ async fn promote_candidate(
         payload.approval.as_ref(),
     )
     .map_err(|e| learn_error(&e))?;
-    let surface = record.candidate.surface();
+    let surface = match &payload.tag {
+        Some(tag) => record.candidate.surface().tagged(tag),
+        None => record.candidate.surface(),
+    };
     let pointer = state
         .server_store
         .get_version_pointer(tenant.tenant(), surface.as_str())
@@ -5107,8 +5139,10 @@ async fn promote_candidate(
     // policy — the pointer move alone only names the surface winner; the
     // registry activation is what the admission decorator reads. Canary
     // promotions register nothing (policy canary bindings do not steer
-    // admission in v1).
-    if receipt.decision.canary.is_none() {
+    // admission in v1). R0.11: a tagged promotion targets one
+    // environment's surface, so it moves only the pointer — the executor-
+    // policy registry activation stays an untagged operation.
+    if payload.tag.is_none() && receipt.decision.canary.is_none() {
         if let CandidateContent::Policy { family, parameters } = &record.candidate.content {
             activate_policy_from_candidate(
                 &state,
@@ -5135,6 +5169,11 @@ struct RollbackCandidatePayload {
     /// Why the rollback happened — the drift monitor's verdict, the
     /// operator's note. Journaled on the receipt.
     cause: String,
+    /// The environment tag whose surface rolls back (R0.11 wave 1) — the
+    /// same rule as promotion: tagged rolls back the tagged surface's
+    /// pointer, absent rolls back the untagged one.
+    #[serde(default)]
+    tag: Option<EnvironmentTag>,
     /// The causal parent journal-event id (default: the journal's head).
     #[serde(default)]
     parent: Option<String>,
@@ -5166,7 +5205,10 @@ async fn rollback_candidate(
             status_wire(record.status)
         )));
     }
-    let surface = record.candidate.surface();
+    let surface = match &payload.tag {
+        Some(tag) => record.candidate.surface().tagged(tag),
+        None => record.candidate.surface(),
+    };
     let pointer = state
         .server_store
         .get_version_pointer(tenant.tenant(), surface.as_str())
@@ -5239,8 +5281,9 @@ async fn rollback_candidate(
     // Wave 4: rolling back a serving policy candidate reverts the active
     // executor policy to what the promotion displaced. Canary bindings
     // never activated anything, so a canary rollback leaves the registry
-    // untouched.
-    if serves_active {
+    // untouched. R0.11: a tagged rollback pairs with a tagged promotion,
+    // which never activated — same rule.
+    if payload.tag.is_none() && serves_active {
         if let CandidateContent::Policy { .. } = &record.candidate.content {
             revert_policy_from_rollback(&state, &tenant, &receipt).await?;
         }
@@ -5266,6 +5309,338 @@ async fn list_version_pointers(
         .map_err(internal_err)?;
     pointers.sort_by(|a, b| a.surface.as_str().cmp(b.surface.as_str()));
     Ok(Json(json!({ "versions": pointers })))
+}
+
+// --------------------------------------------------------------------- //
+// The configuration registry (R0.11 Extension Plane, wave 1)
+//
+// Named, owned artifacts indexing the candidate pipeline: a commit *is*
+// a candidate, so these routes never mint lifecycle evidence of their
+// own — the candidates an artifact names journaled their own creation
+// through the learn surface, and the artifact record is the store-level
+// index over them (its durability rule is the store's, not the journal's;
+// nothing here is a lifecycle transition). Promotion stays on the learn
+// routes, tagged per environment through the pointer machinery.
+// --------------------------------------------------------------------- //
+
+/// Map a registry refusal to its HTTP status: naming-rule and commit-rule
+/// violations are `422` (the request is well-formed; the contract refuses
+/// it), a content failure is `500` (unreachable for well-formed content).
+fn registry_error(error: &RegistryError) -> ApiError {
+    match error {
+        RegistryError::UndiffableContent(_) => ApiError::internal(error.to_string()),
+        _ => ApiError::unprocessable(error.to_string()),
+    }
+}
+
+/// Parse the `{family}` path segment as a candidate kind — `400` on an
+/// unknown wire name (the path is malformed, not the request body).
+fn parse_family(family: &str) -> Result<CandidateKind, ApiError> {
+    serde_json::from_value(Value::String(family.to_owned())).map_err(|_| {
+        ApiError::bad_request(format!(
+            "unknown registry family `{family}` — expected one of `prompt`, `policy`, \
+             `memory_set`, `tool_permission`, `tool_contract`, `model_settings`, \
+             `memory_configuration`, `middleware_composition`"
+        ))
+    })
+}
+
+/// The artifact key for a route's `{family}/{name}` pair: the untagged
+/// surface, built by the same rule the candidate's own surface uses.
+fn artifact_surface(family: &str, name: &str) -> Result<(CandidateKind, String), ApiError> {
+    let family = parse_family(family)?;
+    Ok((family, surface_for_kind(family, name).to_string()))
+}
+
+#[derive(Debug, Deserialize)]
+struct DeclareArtifactPayload {
+    /// The registry family (the candidate kind the artifact indexes).
+    family: CandidateKind,
+    /// The artifact's name — validated at declaration (`422`): the
+    /// naming rules keep names route-addressable and unambiguous under
+    /// tagging and tenant prefixing.
+    name: String,
+    /// The owner: review routing and attribution, not an ACL.
+    owner: ProvenanceAuthor,
+}
+
+/// `POST /registry/artifacts` — declare an artifact `{family, name,
+/// owner}` → `201 {surface, created, artifact}`; `200` + `created: false`
+/// when the same declaration is re-posted (artifact identity is
+/// immutable, so an identical re-declaration is the same fact); `409`
+/// when the surface is taken under a different family or owner; `422` on
+/// a name outside the naming rules.
+async fn declare_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<DeclareArtifactPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let record = ArtifactRecord::new(payload.family, payload.name, payload.owner, Utc::now())
+        .map_err(|e| registry_error(&e))?;
+    let surface = record.surface.to_string();
+    if state
+        .server_store
+        .put_artifact(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?
+    {
+        return Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "surface": surface,
+                "created": true,
+                "artifact": record,
+            })),
+        ));
+    }
+    // The surface is taken: an identical re-declaration converges,
+    // anything else conflicts — the policy registry's immutability rule
+    // applied to artifact identity.
+    let existing = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::internal("artifact declared but not readable".to_string()))?;
+    if existing.family == record.family && existing.owner == record.owner {
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "surface": surface,
+                "created": false,
+                "artifact": existing,
+            })),
+        ));
+    }
+    Err(ApiError::conflict(format!(
+        "surface `{surface}` is already declared as a `{}` artifact owned by `{}` — artifact \
+         identity is immutable; a different artifact needs a different name",
+        existing.family,
+        existing.owner.as_id_string()
+    )))
+}
+
+#[derive(Debug, Deserialize)]
+struct ListArtifactsQuery {
+    /// Restrict to one family's wire name (`prompt`, `tool_contract`, …).
+    family: Option<String>,
+}
+
+/// `GET /registry/artifacts?family=` — the tenant's artifacts (optionally
+/// one family's), sorted by surface for a deterministic listing.
+async fn list_artifacts(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<ListArtifactsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .server_store
+        .list_artifacts(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    if let Some(family) = &query.family {
+        let family = parse_family(family)?;
+        records.retain(|record| record.family == family);
+    }
+    records.sort_by(|a, b| a.surface.as_str().cmp(b.surface.as_str()));
+    Ok(Json(json!({ "artifacts": records })))
+}
+
+/// `GET /registry/artifacts/{family}/{name}` — fetch one artifact (`404`
+/// unknown/cross-tenant — the two are indistinguishable by design).
+async fn get_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+) -> Result<Json<ArtifactRecord>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct CommitArtifactPayload {
+    /// The candidate joining the artifact's history.
+    candidate_id: String,
+    /// When the commit happened (default: now). Explicit for callers
+    /// reproducing a recorded history; the instant is metadata, never
+    /// identity.
+    #[serde(default)]
+    committed_at: Option<DateTime<Utc>>,
+}
+
+/// `POST /registry/artifacts/{family}/{name}/commits` — commit a
+/// candidate to the artifact → `200 {surface, committed, commit,
+/// commits}`; `200` + `committed: false` when the candidate is already in
+/// the history (a re-commit is the same fact); `404` unknown artifact or
+/// candidate; `422` when the candidate is not this artifact's family or
+/// surface (a `prompt:other` candidate has no business in
+/// `prompt:system`'s history); `409` when a concurrent commit won the
+/// race — retry against the settled history.
+async fn commit_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+    Json(payload): Json<CommitArtifactPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    let artifact = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))?;
+    let candidate = state
+        .server_store
+        .get_candidate(tenant.tenant(), &payload.candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("candidate `{}` not found", payload.candidate_id))
+        })?;
+    if artifact
+        .find_commit(&candidate.candidate.candidate_id)
+        .is_some()
+    {
+        return Ok(Json(json!({
+            "surface": surface,
+            "committed": false,
+            "commits": artifact.commits.len(),
+        })));
+    }
+    let commit = artifact
+        .admit_commit(
+            &candidate.candidate,
+            payload.committed_at.unwrap_or_else(Utc::now),
+        )
+        .map_err(|e| registry_error(&e))?;
+    match state
+        .server_store
+        .commit_artifact(tenant.tenant(), &surface, artifact.commits.len(), &commit)
+        .await
+        .map_err(internal_err)?
+    {
+        ArtifactCommitOutcome::Applied => Ok(Json(json!({
+            "surface": surface,
+            "committed": true,
+            "commit": commit,
+            "commits": artifact.commits.len() + 1,
+        }))),
+        ArtifactCommitOutcome::Unknown => Err(ApiError::not_found(format!(
+            "artifact `{surface}` not found"
+        ))),
+        ArtifactCommitOutcome::Conflict(live) => Err(ApiError::conflict(format!(
+            "artifact `{surface}` has {live} commits, not {} — a concurrent commit won the \
+             race; retry against the settled history",
+            artifact.commits.len()
+        ))),
+    }
+}
+
+/// `GET /registry/artifacts/{family}/{name}/commits` — the history walk:
+/// every commit oldest first, joined with its candidate's lifecycle
+/// status and author, so a reviewer reads the artifact's lineage without
+/// a second round trip per entry.
+async fn list_artifact_commits(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    let artifact = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))?;
+    let mut commits = Vec::with_capacity(artifact.commits.len());
+    for commit in &artifact.commits {
+        // Candidates are never deleted, so a missing record is store
+        // corruption — but the walk degrades to a null join rather than
+        // failing the whole history on one bad entry.
+        let candidate = state
+            .server_store
+            .get_candidate(tenant.tenant(), commit.candidate_id.as_str())
+            .await
+            .map_err(internal_err)?;
+        commits.push(json!({
+            "candidate_id": commit.candidate_id,
+            "committed_at": commit.committed_at,
+            "author": candidate.as_ref().map(|record| &record.candidate.distilled_by),
+            "status": candidate.as_ref().map(|record| status_wire(record.status)),
+        }));
+    }
+    Ok(Json(json!({
+        "surface": artifact.surface,
+        "family": artifact.family,
+        "owner": artifact.owner,
+        "commits": commits,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ArtifactDiffQuery {
+    /// The base version's candidate id.
+    from: String,
+    /// The target version's candidate id.
+    to: String,
+}
+
+/// `GET /registry/artifacts/{family}/{name}/diff?from=&to=` — the diff
+/// view between two committed versions, computed on read (never stored):
+/// a line diff for prompts, a structural canonical-JSON diff for the
+/// JSON families. `404` unknown artifact; `422` when either candidate is
+/// not in this artifact's history — a diff views two committed versions
+/// of one artifact, nothing wider.
+async fn diff_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+    Query(query): Query<ArtifactDiffQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    let artifact = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))?;
+    for id in [&query.from, &query.to] {
+        if artifact
+            .find_commit(&CandidateId::from(id.clone()))
+            .is_none()
+        {
+            return Err(registry_error(&RegistryError::NotCommitted {
+                candidate_id: CandidateId::from(id.clone()),
+            }));
+        }
+    }
+    let load = |id: &str| {
+        let state = state.clone();
+        let tenant = tenant.clone();
+        let id = id.to_owned();
+        async move { state.server_store.get_candidate(tenant.tenant(), &id).await }
+    };
+    let from = load(&query.from)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{}` not found", query.from)))?;
+    let to = load(&query.to)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{}` not found", query.to)))?;
+    let diff = diff_candidates(&from.candidate, &to.candidate).map_err(|e| registry_error(&e))?;
+    Ok(Json(json!({
+        "surface": surface,
+        "from": query.from,
+        "to": query.to,
+        "diff": diff,
+    })))
 }
 
 // --------------------------------------------------------------------- //

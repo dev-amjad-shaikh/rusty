@@ -1,0 +1,26 @@
+{
+  "candidate_id": "a16ecd0083b83f09ec0cde20351a5246c1ed14b1f1cd83e8c0c239ad3f727a41",
+  "content": {
+    "kind": "memory_configuration",
+    "name": "default",
+    "budget": {
+      "max_tokens": 4096,
+      "overflow": "truncate"
+    },
+    "default_filters": {
+      "kinds": [
+        "fact",
+        "preference"
+      ],
+      "tags": [
+        "support"
+      ]
+    },
+    "schema_version": "memory-v1"
+  },
+  "distilled_by": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "created_at": "2025-10-09T08:53:22Z"
+}

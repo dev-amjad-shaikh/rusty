@@ -371,6 +371,23 @@ versions commit and diff; a pointer promotes per tag; all of it survives a resta
 backends; goldens pin every new wire shape; R0.8 candidate and pointer records keep
 deserializing.
 
+> **Wave 1 status: implemented (2026-08-10).** The contracts landed as
+> written (`CandidateKind` / `CandidateContent` gained `tool_contract`,
+> `model_settings`, `memory_configuration`, `middleware_composition`;
+> `ArtifactRecord` / `ArtifactCommit` / `RegistryDiff` in
+> `rusty-core/src/registry.rs`, goldens in `rusty-core/tests/golden/`; the
+> `/registry/artifacts` routes and the `server_registry_artifacts`
+> migration in `rusty-server`), with four settled refinements: artifact
+> names reject `/` and `@` (the tenant and tag separators), so memory
+> scope ids containing `/` cannot get artifacts in v1; artifact commits
+> journal nothing of their own (a commit *is* a candidate — the index
+> rides the candidates' own lifecycle evidence); the new envelope fields
+> default to `Approval` (the governance leaning); and a structural diff
+> reports a one-sided subtree as a single added/removed leaf. Environment
+> tags ride the surface key (`prompt:system@prod`) through the unchanged
+> pointer machinery, per open question 1's leaning. The middleware
+> manifest pin stays with wave 4.
+
 **Wave 2 — admission resolution and pinning.** The journaled resolution event,
 environment-tagged binding at admission, the receipt walk. Exit: a prompt version promotes
 without redeploying and a new run resolves and pins it; a run started before the promotion

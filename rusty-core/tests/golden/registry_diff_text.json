@@ -1,0 +1,25 @@
+{
+  "view": "text",
+  "lines": [
+    {
+      "op": "context",
+      "line": "You are a careful support agent."
+    },
+    {
+      "op": "removed",
+      "line": "Answer tersely."
+    },
+    {
+      "op": "added",
+      "line": "Answer fully."
+    },
+    {
+      "op": "added",
+      "line": "Cite sources."
+    },
+    {
+      "op": "context",
+      "line": "Be kind."
+    }
+  ]
+}

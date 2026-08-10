@@ -104,6 +104,14 @@
 //!   active-version pointer with byte-exact rollback. Every transition
 //!   journals through the `CandidateCreated` / `CandidateEvaluated` /
 //!   `CandidatePromoted` / `CandidateRolledBack` event kinds.
+//! - **The configuration registry** ([`registry`], R0.11 wave 1): the
+//!   prompt/configuration registry — named, owned [`registry::ArtifactRecord`]s
+//!   indexing the candidate pipeline (a commit *is* a candidate, never a fork
+//!   of it), environment tags on surface keys ([`learn::EnvironmentTag`]) so
+//!   one deployment promotes per environment through the unchanged pointer
+//!   machinery, and [`registry::diff_candidates`] views computed on read,
+//!   never stored. The store backends and endpoints live in
+//!   `rusty-agent-server`; these are the pure contracts both sides agree on.
 //! - **WASM nodes** (`wasm_node`, feature `wasm`): sandboxed WebAssembly
 //!   modules run as graph nodes via Wasmtime.
 //! - **Rusty Capsules** ([`capsule`], R0.9 wave 1): the content-addressed
@@ -176,6 +184,7 @@ pub mod node;
 pub mod react;
 pub mod receipt;
 pub mod record;
+pub mod registry;
 pub mod remote;
 pub mod replay;
 pub mod state;
@@ -232,14 +241,15 @@ pub mod prelude {
         admit_promotion, canary_admits, candidate_effect_key, derive_candidate_id,
         detect_policy_drift, distill_retry_parameters, distill_timeout_parameters,
         evaluation_effect_key, promotion_effect_id, promotion_effect_key, rollback_effect_key,
-        AutoPromotion, CanaryBinding, Candidate, CandidateContent, CandidateEvaluation,
-        CandidateEvaluator, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
-        CandidateStatus, DriftBaseline, DriftThresholds, EnvelopeRule, EvaluationRequest,
-        EvaluationThresholds, EvaluationVerdict, EvidenceSpan, GrantDirection, LearnError,
-        PolicyDriftReport, PromotionAuthority, PromotionDecision, PromotionEnvelope,
-        PromotionReceipt, PromotionRefusal, ReplayDivergence, ReplaySummary, RetryLearningConfig,
-        RollbackReceipt, SurfaceKey, TimeoutLearningConfig, TwinCandidateEvaluator, VersionPointer,
-        CANARY_DRAW_DOMAIN, PROMOTION_EFFECT_KIND,
+        surface_for_kind, AutoPromotion, CanaryBinding, Candidate, CandidateContent,
+        CandidateEvaluation, CandidateEvaluator, CandidateId, CandidateKind, CandidateOverlay,
+        CandidateRecord, CandidateStatus, DriftBaseline, DriftThresholds, EnvelopeRule,
+        EnvironmentTag, EvaluationRequest, EvaluationThresholds, EvaluationVerdict, EvidenceSpan,
+        GrantDirection, LearnError, MiddlewareLayerConfig, PolicyDriftReport, PromotionAuthority,
+        PromotionDecision, PromotionEnvelope, PromotionReceipt, PromotionRefusal, ReplayDivergence,
+        ReplaySummary, RetryLearningConfig, RollbackReceipt, SurfaceKey, TimeoutLearningConfig,
+        TwinCandidateEvaluator, VersionPointer, CANARY_DRAW_DOMAIN, PROMOTION_EFFECT_KIND,
+        SURFACE_TAG_SEPARATOR,
     };
     pub use crate::llm::{
         ChatMessage, ChatModel, ChatResponse, OpenAiCompatibleClient, Role, ToolCall, Usage,
@@ -272,6 +282,10 @@ pub mod prelude {
         JournalRef, PayloadRef, PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind,
         RunManifest, TimeoutPolicyParameters, CURRENT_FORMAT_VERSION, POLICY_MAX_ATTEMPTS_ENVELOPE,
         POLICY_MAX_DELAY_ENVELOPE_MS,
+    };
+    pub use crate::registry::{
+        diff_candidates, ArtifactCommit, ArtifactRecord, LeafChange, LeafModification,
+        RegistryDiff, RegistryError, TextDiffLine, MAX_ARTIFACT_NAME_LEN,
     };
     pub use crate::replay::{
         BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, LogicalClockParams,

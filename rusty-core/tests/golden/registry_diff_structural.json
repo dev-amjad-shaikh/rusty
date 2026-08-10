@@ -1,0 +1,22 @@
+{
+  "view": "structural",
+  "added": [
+    {
+      "path": "/parameters/top_p",
+      "value": 0.9
+    }
+  ],
+  "removed": [
+    {
+      "path": "/parameters/seed",
+      "value": 42
+    }
+  ],
+  "changed": [
+    {
+      "path": "/parameters/temperature",
+      "from": 0.2,
+      "to": 0.7
+    }
+  ]
+}

@@ -627,6 +627,8 @@ async fn canary_promotion_binds_the_pointer_without_moving_active() {
             },
             memory_set: EnvelopeRule::Approval,
             tool_permission: EnvelopeRule::Approval,
+            // The R0.11 registry kinds keep their approval default.
+            ..PromotionEnvelope::r08_default()
         })
     });
     let run_id = run_pipeline(&app).await;

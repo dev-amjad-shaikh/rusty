@@ -36,6 +36,7 @@ use rusty_agent_runtime::journal::{FileArtifactStore, JournalSnapshot};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
 use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
 use rusty_agent_runtime::receipt::RunReceipt;
+use rusty_agent_runtime::registry::{ArtifactCommit, ArtifactRecord};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -60,6 +61,7 @@ use crate::memory;
 use crate::outbox::{self, OutboxRecord};
 use crate::policy::{self, PolicyActivation, PolicyBinding, PolicyRecord, PolicyWrite};
 use crate::receipts::ReceiptKeyRecord;
+use crate::registry;
 use crate::store::{self, StoreItem};
 use crate::tasks::{self, CancelOutcome, MutationOutcome, RunCancellation, TaskRecord, TaskStatus};
 use crate::threads::{self, ThreadRecord};
@@ -591,6 +593,40 @@ pub(crate) trait ServerStore: Send + Sync {
     /// The tenant's version pointers (order unspecified; routes sort).
     async fn list_version_pointers(&self, tenant: &str) -> StoreResult<Vec<VersionPointer>>;
 
+    // -- The configuration registry (R0.11 Extension Plane, wave 1) ----- //
+
+    /// Declare an artifact under its tenant-scoped surface key; `false`
+    /// (no write) when the key is already present — artifact identity
+    /// (surface, family, owner) is immutable once declared, so a re-
+    /// declaration of the same artifact converges and a conflicting one
+    /// is refused at the route, exactly the policy-registry rule.
+    async fn put_artifact(&self, tenant: &str, record: &ArtifactRecord) -> StoreResult<bool>;
+    /// Fetch one artifact record by its (bare) surface key, tenant-scoped
+    /// (`None` for unknown or cross-tenant surfaces — the two are
+    /// indistinguishable by design).
+    async fn get_artifact(
+        &self,
+        tenant: &str,
+        surface: &str,
+    ) -> StoreResult<Option<ArtifactRecord>>;
+    /// The tenant's artifact records (order unspecified; routes sort).
+    async fn list_artifacts(&self, tenant: &str) -> StoreResult<Vec<ArtifactRecord>>;
+    /// Append one commit to an artifact's history: the record's live
+    /// commit count must be `expect_commits` (compare-and-swap — two
+    /// concurrent commits must not lose one another, the lock-pair /
+    /// `FOR UPDATE` discipline the candidate transition established).
+    /// One lock on the file backend, one transaction on Postgres.
+    /// Unknown/cross-tenant surfaces answer [`ArtifactCommitOutcome::Unknown`]
+    /// (`404`); a count mismatch answers [`ArtifactCommitOutcome::Conflict`]
+    /// with the live count (`409`) and changes nothing.
+    async fn commit_artifact(
+        &self,
+        tenant: &str,
+        surface: &str,
+        expect_commits: usize,
+        commit: &ArtifactCommit,
+    ) -> StoreResult<ArtifactCommitOutcome>;
+
     // -- The executor policy registry (R0.8 Rusty Learn, wave 4) -------- //
 
     /// Register one immutable policy body under its tenant-scoped version.
@@ -804,6 +840,22 @@ pub(crate) enum CandidateTransition {
     Conflict(CandidateStatus),
 }
 
+/// The outcome of an artifact commit append
+/// ([`ServerStore::commit_artifact`]) — the same mutation convention as
+/// [`CandidateTransition`]: unknown and cross-tenant surfaces are
+/// indistinguishable, a concurrent commit is a conflict, and anything but
+/// `Applied` changes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArtifactCommitOutcome {
+    /// The commit appended.
+    Applied,
+    /// No such artifact in this tenant.
+    Unknown,
+    /// The artifact's live commit count is not the expected one (a
+    /// concurrent commit won the race).
+    Conflict(usize),
+}
+
 // --------------------------------------------------------------------- //
 // JsonFileStore — default, extracted v0.2 behavior
 // --------------------------------------------------------------------- //
@@ -853,6 +905,11 @@ pub(crate) struct JsonFileStore {
     /// per pointer under `{store_path}/learn/versions/` (the filename is
     /// the key's hash; the file body carries the key).
     versions: Mutex<HashMap<String, VersionPointer>>,
+    /// The configuration registry (R0.11 wave 1): artifact records keyed
+    /// by tenant-scoped surface key, one file per record under
+    /// `{store_path}/registry/artifacts/` (the filename is the key's
+    /// hash, the version-pointer rule).
+    artifacts: Mutex<HashMap<String, ArtifactRecord>>,
     /// The executor policy registry (R0.8 wave 4): policy bodies keyed by
     /// tenant-scoped version, one file per record under
     /// `{store_path}/policy/versions/`.
@@ -906,6 +963,7 @@ impl JsonFileStore {
             memory_artifacts: memory::artifact_store(root),
             candidates: Mutex::new(learn::load_candidates(root)),
             versions: Mutex::new(learn::load_versions(root)),
+            artifacts: Mutex::new(registry::load_artifacts(root)),
             policies: Mutex::new(policy::load_policies(root)),
             activations: Mutex::new(policy::load_activations(root)),
             bindings: Mutex::new(policy::load_bindings(root)),
@@ -2175,6 +2233,69 @@ impl ServerStore for JsonFileStore {
             .collect())
     }
 
+    async fn put_artifact(&self, tenant: &str, record: &ArtifactRecord) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, record.surface.as_str());
+        let mut map = self.artifacts.lock().await;
+        if map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        // Hold the lock across the file write (the candidate-create
+        // convention): a concurrent declare of the same surface can't
+        // interleave.
+        registry::persist_artifact(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist artifact"))?;
+        map.insert(scoped, record.clone());
+        Ok(true)
+    }
+
+    async fn get_artifact(
+        &self,
+        tenant: &str,
+        surface: &str,
+    ) -> StoreResult<Option<ArtifactRecord>> {
+        let scoped = crate::auth::scope_id(tenant, surface);
+        Ok(self.artifacts.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_artifacts(&self, tenant: &str) -> StoreResult<Vec<ArtifactRecord>> {
+        let map = self.artifacts.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn commit_artifact(
+        &self,
+        tenant: &str,
+        surface: &str,
+        expect_commits: usize,
+        commit: &ArtifactCommit,
+    ) -> StoreResult<ArtifactCommitOutcome> {
+        let scoped = crate::auth::scope_id(tenant, surface);
+        // One lock, held across the check, the file write, and the index
+        // swap: the file backend's compare-and-swap — two concurrent
+        // commits cannot both pass the count check.
+        let mut artifacts = self.artifacts.lock().await;
+        let Some(current) = artifacts.get(&scoped) else {
+            return Ok(ArtifactCommitOutcome::Unknown);
+        };
+        if current.commits.len() != expect_commits {
+            return Ok(ArtifactCommitOutcome::Conflict(current.commits.len()));
+        }
+        let mut next = current.clone();
+        next.commits.push(commit.clone());
+        // File before index swap (the transition convention): a failed
+        // write never leaves state a restart would silently rewind.
+        registry::persist_artifact(&self.root, &scoped, &next)
+            .await
+            .map_err(io_err("persist artifact commit"))?;
+        artifacts.insert(scoped, next);
+        Ok(ArtifactCommitOutcome::Applied)
+    }
+
     async fn put_policy(&self, tenant: &str, record: &PolicyRecord) -> StoreResult<PolicyWrite> {
         let scoped = crate::auth::scope_id(tenant, record.version.as_str());
         let mut map = self.policies.lock().await;
@@ -2699,11 +2820,12 @@ mod postgres {
     use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
     use rusty_agent_runtime::receipt::RunReceipt;
     use rusty_agent_runtime::record::PolicyVersion;
+    use rusty_agent_runtime::registry::{ArtifactCommit, ArtifactRecord};
     use serde_json::Value;
     use sqlx::{PgPool, Row};
     use tokio::sync::OnceCell;
 
-    use super::{CandidateTransition, ServerStore, StoreResult};
+    use super::{ArtifactCommitOutcome, CandidateTransition, ServerStore, StoreResult};
     use crate::agents::{
         self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
         MailboxClaimScope,
@@ -3046,6 +3168,28 @@ mod postgres {
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )"#;
 
+    /// Registry artifacts (R0.11 wave 1): one row per artifact record,
+    /// keyed by tenant-scoped surface key. Family and name are real
+    /// columns (the registry's listing filters on them); the record —
+    /// commit history included — travels as JSONB, the
+    /// `server_learn_candidates` discipline. Additive for pre-R0.11
+    /// databases: a new table, never an alteration of an existing one.
+    pub(crate) const CREATE_REGISTRY_ARTIFACTS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_registry_artifacts (
+            artifact_key TEXT PRIMARY KEY,
+            tenant       TEXT NOT NULL,
+            family       TEXT NOT NULL,
+            name         TEXT NOT NULL,
+            payload      JSONB NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The registry listing's leading columns: every artifact query is
+    /// tenant-scoped, most filter on a family.
+    pub(crate) const CREATE_REGISTRY_ARTIFACTS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_registry_artifacts_listing
+            ON server_registry_artifacts (tenant, family, name)";
+
     /// The executor policy registry (R0.8 wave 4): one row per immutable
     /// policy body, keyed by tenant-scoped version. Immutability is the
     /// insert's `ON CONFLICT DO NOTHING` plus a payload comparison in
@@ -3246,6 +3390,8 @@ mod postgres {
         CREATE_LEARN_CANDIDATES_SQL,
         CREATE_LEARN_CANDIDATES_INDEX_SQL,
         CREATE_LEARN_VERSIONS_SQL,
+        CREATE_REGISTRY_ARTIFACTS_SQL,
+        CREATE_REGISTRY_ARTIFACTS_INDEX_SQL,
         CREATE_POLICIES_SQL,
         CREATE_POLICIES_INDEX_SQL,
         CREATE_POLICY_ACTIVATIONS_SQL,
@@ -3833,6 +3979,46 @@ mod postgres {
 
     pub(crate) const LIST_LEARN_VERSIONS_SQL: &str =
         "SELECT payload FROM server_learn_versions WHERE tenant = $1";
+
+    /// Registry-artifact statements (R0.11 wave 1). Declaration is
+    /// insert-only on the tenant-scoped surface key (artifact identity is
+    /// immutable once declared: a conflict returns no row, and the route
+    /// decides converge vs conflict, the policy-registry rule).
+    pub(crate) const INSERT_REGISTRY_ARTIFACT_SQL: &str = r#"
+        INSERT INTO server_registry_artifacts (
+            artifact_key, tenant, family, name, payload
+        ) VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (artifact_key) DO NOTHING
+        RETURNING artifact_key"#;
+
+    pub(crate) const SELECT_REGISTRY_ARTIFACT_SQL: &str =
+        "SELECT payload FROM server_registry_artifacts WHERE artifact_key = $1";
+
+    pub(crate) const LIST_REGISTRY_ARTIFACTS_SQL: &str =
+        "SELECT payload FROM server_registry_artifacts WHERE tenant = $1";
+
+    /// Commit append, step 1: lock the row and read the live commit
+    /// count — the compare-and-swap check and the update must serialize
+    /// against a concurrent commit (the candidate transition pair's
+    /// discipline). A missing `commits` array reads as length zero, the
+    /// declared-but-uncommitted shape.
+    pub(crate) const LOCK_REGISTRY_ARTIFACT_SQL: &str = r#"
+        SELECT jsonb_array_length(COALESCE(payload->'commits', '[]'::jsonb)) AS commits
+        FROM server_registry_artifacts
+        WHERE artifact_key = $1
+        FOR UPDATE"#;
+
+    /// Commit append, step 2: append the commit to the locked row's
+    /// history. The payload is rebuilt in place (`jsonb_set` over the
+    /// coalesced array) so the row's other fields — family, name, owner —
+    /// are untouched by construction.
+    pub(crate) const UPDATE_REGISTRY_ARTIFACT_SQL: &str = r#"
+        UPDATE server_registry_artifacts
+        SET payload = jsonb_set(
+            payload, '{commits}',
+            COALESCE(payload->'commits', '[]'::jsonb) || $2::jsonb
+        )
+        WHERE artifact_key = $1"#;
 
     /// Policy registry statements (R0.8 wave 4). Registration is
     /// insert-only on the tenant-scoped version (immutability: a conflict
@@ -6238,6 +6424,84 @@ mod postgres {
                 .collect()
         }
 
+        async fn put_artifact(&self, tenant: &str, record: &ArtifactRecord) -> StoreResult<bool> {
+            let row = sqlx::query(INSERT_REGISTRY_ARTIFACT_SQL)
+                .bind(crate::auth::scope_id(tenant, record.surface.as_str()))
+                .bind(tenant)
+                .bind(memory_wire_str(&record.family)?)
+                .bind(record.name())
+                .bind(record_to_payload(record)?)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("insert artifact"))?;
+            Ok(row.is_some())
+        }
+
+        async fn get_artifact(
+            &self,
+            tenant: &str,
+            surface: &str,
+        ) -> StoreResult<Option<ArtifactRecord>> {
+            let row = sqlx::query(SELECT_REGISTRY_ARTIFACT_SQL)
+                .bind(crate::auth::scope_id(tenant, surface))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select artifact"))?;
+            row.map(|row| record_from_payload("artifact", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_artifacts(&self, tenant: &str) -> StoreResult<Vec<ArtifactRecord>> {
+            let rows = sqlx::query(LIST_REGISTRY_ARTIFACTS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list artifacts"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("artifact", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn commit_artifact(
+            &self,
+            tenant: &str,
+            surface: &str,
+            expect_commits: usize,
+            commit: &ArtifactCommit,
+        ) -> StoreResult<ArtifactCommitOutcome> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, surface);
+            // Count check and append in one transaction: a crash cannot
+            // leave a committed candidate whose history never grew — the
+            // file backend's lock rule, exact here.
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin artifact commit"))?;
+            let row = sqlx::query(LOCK_REGISTRY_ARTIFACT_SQL)
+                .bind(&scoped)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("lock artifact"))?;
+            let Some(row) = row else {
+                return Ok(ArtifactCommitOutcome::Unknown);
+            };
+            let live: i32 = row.get("commits");
+            if live as usize != expect_commits {
+                return Ok(ArtifactCommitOutcome::Conflict(live as usize));
+            }
+            sqlx::query(UPDATE_REGISTRY_ARTIFACT_SQL)
+                .bind(&scoped)
+                .bind(serde_json::to_value(commit).map_err(|e| format!("commit payload: {e}"))?)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("append artifact commit"))?;
+            tx.commit()
+                .await
+                .map_err(db_err("commit artifact commit"))?;
+            Ok(ArtifactCommitOutcome::Applied)
+        }
+
         async fn put_policy(
             &self,
             tenant: &str,
@@ -6912,7 +7176,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 45);
+            assert_eq!(MIGRATION_SQL.len(), 47);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -6994,6 +7258,13 @@ mod postgres {
             assert!(CREATE_LEARN_CANDIDATES_INDEX_SQL.contains("(tenant, surface, status)"));
             assert!(CREATE_LEARN_VERSIONS_SQL.contains("server_learn_versions"));
             assert!(CREATE_LEARN_VERSIONS_SQL.contains("surface    TEXT PRIMARY KEY"));
+            // R0.11 wave 1: registry artifacts — one row per tenant-scoped
+            // surface, column-mapped on the listing's filters (family,
+            // name), the commit history inside the JSONB payload.
+            assert!(CREATE_REGISTRY_ARTIFACTS_SQL.contains("server_registry_artifacts"));
+            assert!(CREATE_REGISTRY_ARTIFACTS_SQL.contains("artifact_key TEXT PRIMARY KEY"));
+            assert!(CREATE_REGISTRY_ARTIFACTS_SQL.contains("payload      JSONB"));
+            assert!(CREATE_REGISTRY_ARTIFACTS_INDEX_SQL.contains("(tenant, family, name)"));
             // R0.8 wave 4: the policy registry — immutable bodies keyed by
             // tenant-scoped version, an append-only activation log ordered
             // by its serial key, and the denormalized binding index.

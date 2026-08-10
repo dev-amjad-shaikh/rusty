@@ -19,7 +19,10 @@
 //!   distillations of the same change converge on one id and a tampered
 //!   candidate fails its own address ([`Candidate::verify_address`]).
 //!   Closed enum [`CandidateKind`]: `prompt` / `policy` / `memory_set` /
-//!   `tool_permission`.
+//!   `tool_permission`, extended additively in R0.11 (wave 1) with
+//!   `tool_contract` / `model_settings` / `memory_configuration` /
+//!   `middleware_composition` — the registry families the Extension Plane
+//!   design's artifact table names as new kinds.
 //! - [`CandidateEvaluation`] — the journaled evaluation payload: the
 //!   replay divergence summary, the experiment report pair, the dataset
 //!   version, and the comparison verdict. The evaluator itself is a seam
@@ -74,8 +77,8 @@ use crate::effects::{derive_effect_id, ApprovalToken, EffectId};
 use crate::error::{Result, RustyError};
 use crate::journal::JournalSnapshot;
 use crate::memory::{
-    apply_query, MemoryQuery, MemoryRecord, MemoryScope, MemoryStore, ProvenanceAuthor,
-    ScopeAddress,
+    apply_query, ContextBudget, MemoryQuery, MemoryRecord, MemoryScope, MemoryStore,
+    ProvenanceAuthor, ScopeAddress,
 };
 use crate::record::{sha256_hex, DecisionFamily, RunManifest};
 
@@ -125,6 +128,13 @@ impl From<String> for CandidateId {
 
 /// What a candidate would change. Closed enum — the gate, the pointer,
 /// and the evaluator match exhaustively on it.
+///
+/// R0.11 (Extension Plane, wave 1) extends the enum additively with the
+/// registry families the design's artifact table names as new kinds:
+/// tool contracts, model settings, memory configurations, and middleware
+/// compositions. The evolution rule is the one R0.10 applied when it
+/// weighed a `Speculation` family and deferred it: new variants append,
+/// golden files pin every wire shape, and old records keep deserializing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateKind {
@@ -136,6 +146,41 @@ pub enum CandidateKind {
     MemorySet,
     /// A narrowed or widened tool grant.
     ToolPermission,
+    /// The JSON schema a tool's manifest pin digests (R0.11).
+    ToolContract,
+    /// A model id plus its parameters (R0.11).
+    ModelSettings,
+    /// Memory retrieval/assembly settings — distinct from
+    /// [`CandidateKind::MemorySet`], which carries *records*; this kind
+    /// carries the configuration that shapes what reads return (R0.11).
+    MemoryConfiguration,
+    /// An ordered middleware layer list plus per-layer configuration
+    /// (R0.11).
+    MiddlewareComposition,
+}
+
+impl CandidateKind {
+    /// The wire name (`prompt` / `policy` / `memory_set` /
+    /// `tool_permission` / `tool_contract` / `model_settings` /
+    /// `memory_configuration` / `middleware_composition`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CandidateKind::Prompt => "prompt",
+            CandidateKind::Policy => "policy",
+            CandidateKind::MemorySet => "memory_set",
+            CandidateKind::ToolPermission => "tool_permission",
+            CandidateKind::ToolContract => "tool_contract",
+            CandidateKind::ModelSettings => "model_settings",
+            CandidateKind::MemoryConfiguration => "memory_configuration",
+            CandidateKind::MiddlewareComposition => "middleware_composition",
+        }
+    }
+}
+
+impl std::fmt::Display for CandidateKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// The direction of a [`CandidateContent::ToolPermission`] change.
@@ -202,6 +247,75 @@ pub enum CandidateContent {
         /// The direction of the change (see [`GrantDirection`]).
         direction: GrantDirection,
     },
+    /// The JSON schema a tool's pin digests (R0.11). The digest —
+    /// canonical-JSON SHA-256 — is exactly what
+    /// [`RunManifest::pin_tool_schema`] records, so the candidate and the
+    /// manifest speak one content address, the
+    /// [`CandidateContent::Prompt`] precedent applied to tool schemas.
+    ToolContract {
+        /// The tool whose contract changes (the manifest pin's key).
+        tool: String,
+        /// The parameters schema the tool declares.
+        schema: Value,
+    },
+    /// A model id plus its parameters (R0.11). The pair is what
+    /// [`RunManifest::pin_model`] pins: the provider-precise model id
+    /// verbatim, the parameters as a canonical-JSON digest.
+    ModelSettings {
+        /// The settings' name (the registry artifact's key part).
+        name: String,
+        /// The provider-precise model identifier (an alias is not a pin).
+        model: String,
+        /// The parameter set (temperature, seed, token limits, ...).
+        parameters: Value,
+    },
+    /// Memory retrieval/assembly settings (R0.11): the budget and default
+    /// filters that shape what a run's memory reads return, plus the
+    /// record-schema version the settings assume (the
+    /// `manifest.memory_schema` pin). Deliberately a new kind rather than
+    /// a [`CandidateContent::MemorySet`] reuse: a memory set carries
+    /// *records* at a scope; this carries the configuration reads run
+    /// under. Conflating the two would fake coverage.
+    MemoryConfiguration {
+        /// The configuration's name (the registry artifact's key part).
+        name: String,
+        /// The default assembly budget reads run under.
+        budget: ContextBudget,
+        /// The default filters reads start from (a run's own query
+        /// narrows further; it never widens past the configuration).
+        default_filters: MemoryQuery,
+        /// The memory record-schema version the settings assume.
+        schema_version: String,
+    },
+    /// An ordered middleware layer list plus per-layer configuration
+    /// (R0.11): interception policy versioned like everything else. The
+    /// layers are code — the registry versions their composition and
+    /// configuration, not their behavior; a layer's logic change is a
+    /// deploy, covered by the checkpoint header's `graph_hash` story.
+    MiddlewareComposition {
+        /// The composition's name (the registry artifact's key part).
+        name: String,
+        /// The layers in declared order — before-hooks run in this order,
+        /// after-hooks in reverse (the chain's onion semantics, governed
+        /// here, untouched there).
+        layers: Vec<MiddlewareLayerConfig>,
+    },
+}
+
+/// One layer in a [`CandidateContent::MiddlewareComposition`]: the layer's
+/// registered name plus its configuration. A `ToolCallBlocklist`'s policy
+/// is configuration; the layer's code is not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MiddlewareLayerConfig {
+    /// The layer's registered name (the
+    /// [`crate::middleware::MiddlewareChain::names`] vocabulary).
+    pub layer: String,
+
+    /// The layer's configuration, when it declares one — absent from the
+    /// wire when unset, so a configuration-free layer (a request logger)
+    /// carries no placeholder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<Value>,
 }
 
 /// The content address of a candidate: `sha256` over the canonical
@@ -305,28 +419,46 @@ impl Candidate {
             CandidateContent::Policy { .. } => CandidateKind::Policy,
             CandidateContent::MemorySet { .. } => CandidateKind::MemorySet,
             CandidateContent::ToolPermission { .. } => CandidateKind::ToolPermission,
+            CandidateContent::ToolContract { .. } => CandidateKind::ToolContract,
+            CandidateContent::ModelSettings { .. } => CandidateKind::ModelSettings,
+            CandidateContent::MemoryConfiguration { .. } => CandidateKind::MemoryConfiguration,
+            CandidateContent::MiddlewareComposition { .. } => CandidateKind::MiddlewareComposition,
         }
     }
 
     /// The production surface this candidate would change — the pointer
     /// key: `prompt:{name}` / `policy:{family}` / `memory:{scope}` /
-    /// `tool:{tool}`. One surface admits one active version, which is
-    /// what makes promotion a pointer move and rollback a re-pointing.
+    /// `tool:{tool}` / `tool_contract:{tool}` / `model_settings:{name}` /
+    /// `memory_config:{name}` / `middleware:{name}`. One surface admits
+    /// one active version, which is what makes promotion a pointer move
+    /// and rollback a re-pointing.
     pub fn surface(&self) -> SurfaceKey {
         match &self.content {
-            CandidateContent::Prompt { name, .. } => SurfaceKey::new(format!("prompt:{name}")),
+            CandidateContent::Prompt { name, .. } => surface_for_kind(CandidateKind::Prompt, name),
             CandidateContent::Policy { family, .. } => {
                 let family = serde_json::to_value(family)
                     .ok()
                     .and_then(|v| v.as_str().map(str::to_owned))
                     .unwrap_or_else(|| format!("{family:?}").to_lowercase());
-                SurfaceKey::new(format!("policy:{family}"))
+                surface_for_kind(CandidateKind::Policy, &family)
             }
             CandidateContent::MemorySet { scope, .. } => {
-                SurfaceKey::new(format!("memory:{}", scope.as_address()))
+                surface_for_kind(CandidateKind::MemorySet, &scope.as_address())
             }
             CandidateContent::ToolPermission { tool, .. } => {
-                SurfaceKey::new(format!("tool:{tool}"))
+                surface_for_kind(CandidateKind::ToolPermission, tool)
+            }
+            CandidateContent::ToolContract { tool, .. } => {
+                surface_for_kind(CandidateKind::ToolContract, tool)
+            }
+            CandidateContent::ModelSettings { name, .. } => {
+                surface_for_kind(CandidateKind::ModelSettings, name)
+            }
+            CandidateContent::MemoryConfiguration { name, .. } => {
+                surface_for_kind(CandidateKind::MemoryConfiguration, name)
+            }
+            CandidateContent::MiddlewareComposition { name, .. } => {
+                surface_for_kind(CandidateKind::MiddlewareComposition, name)
             }
         }
     }
@@ -367,13 +499,31 @@ impl Candidate {
     }
 
     fn kind_str(&self) -> &'static str {
-        match self.kind() {
-            CandidateKind::Prompt => "prompt",
-            CandidateKind::Policy => "policy",
-            CandidateKind::MemorySet => "memory_set",
-            CandidateKind::ToolPermission => "tool_permission",
-        }
+        self.kind().as_str()
     }
+}
+
+/// The surface key for one kind's named surface: `prompt:{name}` /
+/// `policy:{family}` / `memory:{scope-address}` / `tool:{tool}` /
+/// `tool_contract:{tool}` / `model_settings:{name}` /
+/// `memory_config:{name}` / `middleware:{name}`.
+///
+/// [`Candidate::surface`] builds its key through this function, and the
+/// configuration registry (`crate::registry`) keys artifacts by the same
+/// rule — one surface admits one artifact, so a candidate can only ever
+/// join the artifact its own surface names.
+pub fn surface_for_kind(kind: CandidateKind, name: &str) -> SurfaceKey {
+    let prefix = match kind {
+        CandidateKind::Prompt => "prompt",
+        CandidateKind::Policy => "policy",
+        CandidateKind::MemorySet => "memory",
+        CandidateKind::ToolPermission => "tool",
+        CandidateKind::ToolContract => "tool_contract",
+        CandidateKind::ModelSettings => "model_settings",
+        CandidateKind::MemoryConfiguration => "memory_config",
+        CandidateKind::MiddlewareComposition => "middleware",
+    };
+    SurfaceKey::new(format!("{prefix}:{name}"))
 }
 
 /// A candidate's production surface: the pointer key. Transparent newtype
@@ -397,6 +547,126 @@ impl SurfaceKey {
 impl std::fmt::Display for SurfaceKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Environment tags on surfaces (R0.11 Extension Plane, wave 1)
+// --------------------------------------------------------------------- //
+
+/// The separator between a surface key and its environment tag
+/// (`prompt:system@prod`). One character, reserved: artifact names never
+/// carry it (the registry's naming rule), so the last separator in a key
+/// always introduces the tag.
+pub const SURFACE_TAG_SEPARATOR: char = '@';
+
+/// An environment tag on a promotion target: `dev` / `staging` / `prod`
+/// by convention, deployment-declared rather than enumerated — R0.11's
+/// tags are labels on promotion targets, not deployments (R0.12 builds
+/// environments as a control plane). What a tag is *not*: not an isolated
+/// store, not a trust boundary. One deployment serves the prod surface
+/// and the staging surface from one registry, with envelope strictness
+/// per tag.
+///
+/// The tag rides inside the surface key (`prompt:system@prod`), so the
+/// pointer store, hash-named files, transactional moves, and canary slots
+/// all work unchanged — the design's open question 1, settled as leaned.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct EnvironmentTag(String);
+
+impl EnvironmentTag {
+    /// The longest a tag may be. Tags live inside pointer keys, receipts,
+    /// and journaled payloads; a bound keeps a configuration typo from
+    /// minting an unbounded key.
+    pub const MAX_LEN: usize = 64;
+
+    /// Mint a tag. Refused: empty, over-long, carrying whitespace or
+    /// control characters, or carrying [`SURFACE_TAG_SEPARATOR`] or `/`
+    /// (the tenant id-prefix separator) — the characters that would make
+    /// the tagged key ambiguous downstream. Validation failures reuse the
+    /// invalid-update class, the module's convention for contract
+    /// violations at construction time.
+    pub fn new(tag: impl Into<String>) -> Result<Self> {
+        let tag = tag.into();
+        let refuse = |reason: &str| invalid(format!("invalid environment tag {tag:?}: {reason}"));
+        if tag.is_empty() {
+            return Err(refuse(
+                "empty — an absent tag is the untagged surface, spelled `None`",
+            ));
+        }
+        if tag.len() > Self::MAX_LEN {
+            return Err(refuse("over 64 bytes"));
+        }
+        if tag
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == SURFACE_TAG_SEPARATOR || c == '/')
+        {
+            return Err(refuse(
+                "carries whitespace, a control character, `@`, or `/` — the first two have no \
+                 business in a key, the last two are the tag and tenant separators",
+            ));
+        }
+        Ok(Self(tag))
+    }
+
+    /// The tag string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for EnvironmentTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for EnvironmentTag {
+    /// Validated at deserialization (the correction-author precedent): a
+    /// malformed tag in a request payload fails the parse, so no code path
+    /// downstream ever holds an unvalidated one.
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        EnvironmentTag::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl SurfaceKey {
+    /// The tagged surface for an environment (`prompt:system` at `prod` →
+    /// `prompt:system@prod`). Promotion composes the existing pointer
+    /// machinery: the tagged key is just another surface, so the pointer
+    /// store, canary slots, and byte-exact rollback work unchanged.
+    pub fn tagged(&self, tag: &EnvironmentTag) -> SurfaceKey {
+        SurfaceKey::new(format!(
+            "{}{}{}",
+            self.0,
+            SURFACE_TAG_SEPARATOR,
+            tag.as_str()
+        ))
+    }
+
+    /// Split a possibly tagged key into its base surface and tag, at the
+    /// last [`SURFACE_TAG_SEPARATOR`] (names never carry the separator, so
+    /// the last one always introduces the tag). The untagged key splits to
+    /// `(itself, None)`.
+    pub fn split_tag(&self) -> (SurfaceKey, Option<EnvironmentTag>) {
+        match self.0.rfind(SURFACE_TAG_SEPARATOR) {
+            Some(at) => {
+                let base = SurfaceKey::new(&self.0[..at]);
+                // The constructor cannot fail here: the tag came out of a
+                // key this module's own rules built (or a caller's raw
+                // string, which re-validates cleanly by construction of
+                // the split — any character that would be refused would
+                // have been refused when the key was tagged).
+                let tag = EnvironmentTag(self.0[at + 1..].to_owned());
+                (base, Some(tag))
+            }
+            None => (self.clone(), None),
+        }
     }
 }
 
@@ -673,12 +943,7 @@ impl CandidateOverlay {
             return Err(invalid(format!(
                 "only a `memory_set` candidate applies as a memory overlay; `{}` candidates \
                  apply to their own surfaces",
-                match candidate.kind() {
-                    CandidateKind::Prompt => "prompt",
-                    CandidateKind::Policy => "policy",
-                    CandidateKind::MemorySet => unreachable!(),
-                    CandidateKind::ToolPermission => "tool_permission",
-                }
+                candidate.kind().as_str()
             )));
         };
         Ok(Self {
@@ -813,6 +1078,15 @@ pub enum EnvelopeRule {
 /// standing approval — a journaled promotion names the envelope version
 /// it cleared, so the audit reads the declaration that was in force, not
 /// a later edit.
+///
+/// R0.11 (wave 1) grows the envelope additively for the registry kinds:
+/// the four new fields default to [`EnvelopeRule::Approval`] and are
+/// absent from the wire at that default, so R0.8-era envelopes keep
+/// deserializing and their serialization stays byte-stable — the
+/// established contract-evolution rule. Approval is the honest default
+/// for the new kinds: a schema tightening or an ordering change is a
+/// contract judgment, not a metric, and a fabricated auto bar is worse
+/// than an honest approval (the design's governance wiring).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromotionEnvelope {
     /// The deployment-declared envelope version.
@@ -829,13 +1103,62 @@ pub struct PromotionEnvelope {
 
     /// The rule for `tool_permission` candidates.
     pub tool_permission: EnvelopeRule,
+
+    /// The rule for `tool_contract` candidates (R0.11; defaults to
+    /// approval, absent from the wire at the default).
+    #[serde(
+        default = "approval_envelope_rule",
+        skip_serializing_if = "is_approval_envelope_rule"
+    )]
+    pub tool_contract: EnvelopeRule,
+
+    /// The rule for `model_settings` candidates (R0.11; same evolution
+    /// rule as `tool_contract`).
+    #[serde(
+        default = "approval_envelope_rule",
+        skip_serializing_if = "is_approval_envelope_rule"
+    )]
+    pub model_settings: EnvelopeRule,
+
+    /// The rule for `memory_configuration` candidates (R0.11; same
+    /// evolution rule as `tool_contract`).
+    #[serde(
+        default = "approval_envelope_rule",
+        skip_serializing_if = "is_approval_envelope_rule"
+    )]
+    pub memory_configuration: EnvelopeRule,
+
+    /// The rule for `middleware_composition` candidates (R0.11; same
+    /// evolution rule as `tool_contract`).
+    #[serde(
+        default = "approval_envelope_rule",
+        skip_serializing_if = "is_approval_envelope_rule"
+    )]
+    pub middleware_composition: EnvelopeRule,
+}
+
+/// The R0.11 additive fields' default: approval. A contract judgment
+/// (schema, settings, composition) earns a human's name by default; a
+/// deployment that wants evidence-gated automation declares it.
+fn approval_envelope_rule() -> EnvelopeRule {
+    EnvelopeRule::Approval
+}
+
+/// The sparse-wire predicate for the R0.11 additive fields: approval is
+/// the default, so an approval rule serializes as absence.
+fn is_approval_envelope_rule(rule: &EnvelopeRule) -> bool {
+    *rule == EnvelopeRule::Approval
 }
 
 impl PromotionEnvelope {
     /// The R0.8 default (design open question 6): `memory_set` candidates
     /// at run and agent scope with a clean verdict may auto-promote;
     /// `prompt`, `policy`, and `tool_permission` always require an
-    /// approval token this release.
+    /// approval token this release. The R0.11 stance extends it: the
+    /// registry kinds (tool contracts, model settings, memory
+    /// configurations, middleware compositions) default to approval —
+    /// a schema or ordering change is a contract judgment, and a
+    /// fabricated metric is worse than an honest approval.
     pub fn r08_default() -> Self {
         Self {
             envelope_version: "r0.8-default".to_owned(),
@@ -847,6 +1170,10 @@ impl PromotionEnvelope {
                 scopes: vec![MemoryScope::Run, MemoryScope::Agent],
             }),
             tool_permission: EnvelopeRule::Approval,
+            tool_contract: EnvelopeRule::Approval,
+            model_settings: EnvelopeRule::Approval,
+            memory_configuration: EnvelopeRule::Approval,
+            middleware_composition: EnvelopeRule::Approval,
         }
     }
 
@@ -857,6 +1184,10 @@ impl PromotionEnvelope {
             CandidateKind::Policy => &self.policy,
             CandidateKind::MemorySet => &self.memory_set,
             CandidateKind::ToolPermission => &self.tool_permission,
+            CandidateKind::ToolContract => &self.tool_contract,
+            CandidateKind::ModelSettings => &self.model_settings,
+            CandidateKind::MemoryConfiguration => &self.memory_configuration,
+            CandidateKind::MiddlewareComposition => &self.middleware_composition,
         }
     }
 
@@ -870,6 +1201,10 @@ impl PromotionEnvelope {
             &self.policy,
             &self.memory_set,
             &self.tool_permission,
+            &self.tool_contract,
+            &self.model_settings,
+            &self.memory_configuration,
+            &self.middleware_composition,
         ] {
             match rule {
                 EnvelopeRule::Auto(auto) => check_auto(auto)?,
@@ -2032,12 +2367,7 @@ impl CandidateEvaluator for TwinCandidateEvaluator {
             return Err(invalid(format!(
                 "the twin-backed evaluator prices `policy` candidates; `{}` candidates \
                  evaluate through the application's own evaluator",
-                match candidate.kind() {
-                    CandidateKind::Prompt => "prompt",
-                    CandidateKind::Policy => unreachable!(),
-                    CandidateKind::MemorySet => "memory_set",
-                    CandidateKind::ToolPermission => "tool_permission",
-                }
+                candidate.kind().as_str()
             )));
         };
         // The candidate as a concrete policy: parsed against the family's

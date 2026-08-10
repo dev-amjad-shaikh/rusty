@@ -93,9 +93,14 @@
 //! | `POST /learn/candidates` | R0.8 (wave 3): register a distilled candidate `{candidate, run_id, parent?}` → `201 {candidate_id, created, record}` (`200` + `created: false` when the content address is already stored — creation converges). The address is verified (`422`); the `candidate_created` event is journaled into `run_id`'s journal before the store write — hard-fail: an unresolvable run stops the transition (`404`) |
 //! | `GET /learn/candidates` / `GET /learn/candidates/{id}` | R0.8 (wave 3): the tenant's candidates (sorted by id) / fetch one record (`404` unknown/cross-tenant) |
 //! | `POST /learn/candidates/{id}/evaluate` | R0.8 (wave 3): drive the configured `CandidateEvaluator` `{request, run_id, parent?}` → `200 {candidate_id, status, evaluation}`; `409` when no evaluator is configured or the lifecycle forbids re-evaluation; `422` when the evaluation fails or violates the seam contract (it must name this candidate and the request's dataset version) |
-//! | `POST /learn/candidates/{id}/promote` | R0.8 (wave 3): run the promotion gate `{run_id, approval?, parent?}` → `200 {candidate_id, status, receipt, pointer}`. `403` on approval failures (out-of-envelope promotion needs an `ApprovalToken` scoped to the candidate's promotion effect id — non-transferable), `422` on evidence failures, `409` when the candidate is not `evaluated`. The status flip and the version-pointer move are one store transition |
-//! | `POST /learn/candidates/{id}/rollback` | R0.8 (wave 3): re-point the surface to the displaced version `{run_id, cause, parent?}` → `200 {candidate_id, status, receipt, pointer}`; `409` when the candidate is not `promoted` or the pointer no longer serves it. Byte-exact: the pointer's `to` is the promotion's recorded `previous`, and candidates are content-addressed — the restored version is the version that served |
+//! | `POST /learn/candidates/{id}/promote` | R0.8 (wave 3): run the promotion gate `{run_id, approval?, tag?, parent?}` → `200 {candidate_id, status, receipt, pointer}`. `403` on approval failures (out-of-envelope promotion needs an `ApprovalToken` scoped to the candidate's promotion effect id — non-transferable), `422` on evidence failures, `409` when the candidate is not `evaluated`. The status flip and the version-pointer move are one store transition. R0.11 (wave 1): the optional `tag` moves the pointer on the environment-tagged surface (`prompt:system@prod`) through the unchanged machinery; absent is the untagged, pre-R0.11 behavior |
+//! | `POST /learn/candidates/{id}/rollback` | R0.8 (wave 3): re-point the surface to the displaced version `{run_id, cause, tag?, parent?}` → `200 {candidate_id, status, receipt, pointer}`; `409` when the candidate is not `promoted` or the pointer no longer serves it. Byte-exact: the pointer's `to` is the promotion's recorded `previous`, and candidates are content-addressed — the restored version is the version that served. R0.11 (wave 1): `tag` rolls back the tagged surface's pointer |
 //! | `GET /learn/versions` | R0.8 (wave 3): the tenant's version pointers, sorted by surface |
+//! | `POST /registry/artifacts` | R0.11 (wave 1): declare a registry artifact `{family, name, owner}` → `201 {surface, created, artifact}` (`200` converged on an identical re-declaration; `409` when the surface is taken under a different family or owner; `422` on a name outside the naming rules). The artifact is an index over the candidate pipeline — a commit is a candidate, never a fork |
+//! | `GET /registry/artifacts?family=` / `GET /registry/artifacts/{family}/{name}` | R0.11 (wave 1): the tenant's artifacts (optionally one family's, sorted by surface) / fetch one (`404` unknown/cross-tenant) |
+//! | `POST /registry/artifacts/{family}/{name}/commits` | R0.11 (wave 1): commit a candidate `{candidate_id, committed_at?}` → `200 {surface, committed, commit, commits}` (`200` + `committed: false` when already committed; `404` unknown artifact/candidate; `422` family or surface mismatch; `409` concurrent commit) |
+//! | `GET /registry/artifacts/{family}/{name}/commits` | R0.11 (wave 1): the history walk — commits oldest first, joined with each candidate's status and author |
+//! | `GET /registry/artifacts/{family}/{name}/diff?from=&to=` | R0.11 (wave 1): the diff view between two committed versions, computed on read (never stored) — line diff for prompts, structural canonical-JSON diff for JSON families; `422` when either candidate is not committed to this artifact |
 //! | `POST /policy/versions` | R0.8 (wave 4): register an immutable executor policy body `{version?, policy}` → `201 {version, record}` (`200` converged when the version already names exactly this body; `409` when it names a different one — registry immutability; `400` invalid version). Without `version`, the content-derived `policy-{hash12}` name is minted. The reserved `static-v0` floor is never registerable |
 //! | `GET /policy/versions` / `GET /policy/versions/{version}` | R0.8 (wave 4): the tenant's registered policy bodies (sorted by version) / fetch one (`404` unknown/cross-tenant; the floor resolves as a synthetic record) |
 //! | `POST /policy/activations` | R0.8 (wave 4): move the active-version pointer `{version}` → `200 {version, active}`; `422` when the version is not registered (the floor is always activatable — reverting to pre-learning behavior needs no candidate) |
@@ -140,6 +145,7 @@ mod memory;
 mod outbox;
 mod policy;
 mod receipts;
+mod registry;
 mod replay;
 mod routes;
 mod runs;
@@ -183,7 +189,8 @@ pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::fro
 /// Names the JSON-file layout already owns at the store root
 /// (`agent_leases/`, `agents/`, `assistants/`, `capsules/`,
 /// `capsule_policies/`, `coordinations/`, `crons/`, `journals/`, `learn/`,
-/// `memory/`, `memory_artifacts/`, `outbox/`, `policy/`, `store/`,
+/// `memory/`, `memory_artifacts/`, `outbox/`, `policy/`, `registry/`,
+/// `store/`,
 /// `tasks/`, `threads/`, `trigger_events/`, `triggers/`, plus the
 /// `latest` pointer file inside each thread's checkpoint dir).
 /// Client-chosen ids and tenant ids claiming one of these would write
@@ -206,6 +213,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "outbox",
     "policy",
     "receipts",
+    "registry",
     "store",
     "tasks",
     "threads",
