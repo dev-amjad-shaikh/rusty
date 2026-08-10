@@ -162,10 +162,12 @@ Studio is a useful engineering console, not yet the complete experience describe
   durable team definitions, creation/editing lifecycle, server-side coordination discovery,
   supervisor and recovery controls, richer active-member evidence, and coordinated replay remain.
 - The general-purpose dataset remains portable page memory, and imported experiment reports are now
-  inspectable and exactly pair-comparable locally. The Matched Regression Lab recomputes Rusty's practical
-  and one-sided significance evidence, while execution, progress, durable discovery, durable statistical
-  reports, and gate decisions remain library/platform work. Governed learning-candidate evaluation is
-  server-backed in Studio.
+  inspectable, deterministically failure-clustered, and exactly pair-comparable locally. The Failure Atlas
+  recomputes Rusty's privacy-safe normalized causes, fingerprints, ranks, and source coordinates without
+  copying raw executor errors, observations, or judge rationales. The Matched Regression Lab recomputes
+  Rusty's practical and one-sided significance evidence, while execution, progress, durable discovery,
+  durable cluster/statistical reports, and gate decisions remain library/platform work. Governed
+  learning-candidate evaluation is server-backed in Studio.
 - Memory records and structural conflicts have a human-readable audit workspace. Selected-memory
   corrections now append attributed records through an immutable original → correction → result
   path, with candidacy, finalized-run adoption, receipt validation, reconciliation, and exact retry.
@@ -375,13 +377,19 @@ pass-rate comparison gap: two reconciled reports must share the exact dataset, r
 run-key set before Studio exposes the four paired outcomes, practical drop, exact one-sided p-value, and
 an explicit insufficient-evidence state. The result remains connection-bound browser evidence rather than
 a durable `StatisticalRegressionReport`, release gate, approval, or promotion.
+The Failure Atlas closes the local repeated-cause triage gap over that same reconciled report. It mirrors
+`rusty-eval` format-v1 normalization, safe evidence fingerprints, stable cluster identities, canonical
+ranking, and source coordinates while keeping raw errors, observed assertion values, and judge rationales
+in the Explorer. All failures participate in computation; bounded rank/member windows protect the DOM.
+The atlas remains connection-bound page memory rather than a durable `FailureClusterReport`, annotation
+queue, remediation record, gate decision, approval, or promotion.
 
 Scope:
 
 - Dataset creation from manual cases, files, and production traces.
 - Rule, trajectory, model-judge, safety, latency, and cost evaluators.
 - Baseline-versus-candidate experiments with bounded parallel execution.
-- Durable statistical reports, failure clusters, richer paired-case drill-down, and confidence explanations.
+- Durable statistical and failure-cluster reports, richer paired-case drill-down, and confidence explanations.
 - Annotation queues, pairwise review, corrections, disagreement resolution, and promotion to dataset.
 - Durable review inbox for interrupted runs, low-confidence outputs, failed gates, and learning approvals, including assignment, reservation, authority, deadline, decision, and safe resume.
 - Reusable release gates with a readable pass/fail explanation.
@@ -491,8 +499,8 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
-| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, portable multi-case Dataset Workbench, exact aggregate-reconciling Experiment Report Explorer, paired statistical regression evidence, and release-policy authoring delivered; durable reviews/dataset catalogs/report discovery, evaluators, experiment execution, durable statistical reports, and version-attributed gate decisions still need platform APIs | Converts the existing quality library into a product workflow |
-| 12 | Failure clusters, annotation queues, and release gates | Policy authoring foundation delivered; durable reports, queues, gate decisions, and promotion enforcement need platform APIs | Closes the human quality loop |
+| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, portable multi-case Dataset Workbench, exact aggregate-reconciling Experiment Report Explorer, deterministic privacy-safe Failure Atlas, paired statistical regression evidence, and release-policy authoring delivered; durable reviews/dataset catalogs/report discovery, evaluators, experiment execution, durable statistical reports, and version-attributed gate decisions still need platform APIs | Converts the existing quality library into a product workflow |
+| 12 | Failure clusters, annotation queues, and release gates | Local failure-clustering and policy-authoring foundations delivered; durable cluster reports, queues, gate decisions, and promotion enforcement need platform APIs | Closes the human quality loop |
 | 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
 | 14 | Environment, deployment, and fleet surfaces | First automation slice delivered — signed webhook creation, pause/resume, event/dead-letter evidence, safe replay, and run handoff; cron, environments, deployments, fleet health, and shared credential contracts remain | Builds operations on stable identity, version, quality, and audit concepts |
 

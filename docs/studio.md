@@ -341,6 +341,18 @@ studio/
     same connection, while a connection change or reload discards it. The Explorer did not execute the
     experiment, attest an external provider, evaluate an unknown future field, decide a release gate, or
     promote an agent.
+  - **Failure Atlas** — start from the Explorer's internally reconciled report and locally recompute the
+    exact format-v1 `rusty-eval` failure signatures, SHA-256 fingerprints, stable cluster ids, frequency,
+    ranking, and source coordinates. Execution errors are classified after volatile UUID, long-hex, and
+    digit normalization; completed evaluation failures group by failed assertion configuration and rejecting
+    judge-rationale fingerprints. The atlas never copies raw executor errors, observed assertion values, or
+    judge rationale text. It does retain case ids and sorted tags as potentially sensitive routing metadata,
+    and an explicit **Inspect evidence** action returns to the Explorer when raw source detail is needed.
+    Studio computes every failure but bounds the visible rank window to 100 clusters and the selected member
+    window to 200 occurrences; each member shows at most eight tags within a 512-byte preview while the
+    complete sorted tags still participate in the recomputed artifact semantics. A report replacement, connection change, or reload invalidates the page-memory
+    atlas. This is a browser recomputation of `FailureClusterReport` semantics, not a durable report, server
+    attestation, remediation, gate decision, approval, or promotion.
   - **Matched Regression Lab** — import two internally reconciled format-v1 experiment reports, or copy
     the current Explorer report into either slot, and pair every run by exact `(case_id, repetition)`.
     Dataset name/version, repetitions-per-case, case inventory, and run keys must match; Studio never drops

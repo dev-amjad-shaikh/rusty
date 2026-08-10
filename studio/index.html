@@ -742,6 +742,43 @@
   .quality-report-evidence pre { margin:3px 0 0; max-height:210px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
   .quality-report-judge { margin-top:9px; padding:9px 10px; border:1px solid #554c65; background:#211d29; }
   .quality-report-assertion p,.quality-report-judge,.quality-report-detail .note { overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
+  .quality-atlas { margin-top:14px; border:1px solid #5a4938; border-radius:10px; overflow:hidden; background:linear-gradient(150deg,#211a16,#121414 64%,#17161c); }
+  .quality-atlas-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:14px 17px; border-bottom:1px solid #5a4938; }
+  .quality-atlas-head h3 { margin:3px 0 4px; font-size:17px; }
+  .quality-atlas-head p { margin:0; max-width:790px; }
+  .quality-atlas-kicker { color:#d7a16f; font:700 9.5px/1.2 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  .quality-atlas-mark { flex:none; padding:6px 9px; border:1px solid #7c654d; border-radius:3px; color:#e4c5a4; font:700 9px var(--mono); text-transform:uppercase; letter-spacing:.06em; transform:rotate(-1deg); }
+  .quality-atlas-body { padding:14px 17px 16px; }
+  .quality-atlas-empty { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:center; padding:13px; border:1px dashed #66513e; background:#191613; }
+  .quality-atlas-empty h4 { margin:0 0 4px; }
+  .quality-atlas-empty p { margin:0; }
+  .quality-atlas-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; margin-bottom:10px; border:1px solid #514333; background:#514333; }
+  .quality-atlas-summary > div { min-width:0; padding:9px 10px; background:#171512; }
+  .quality-atlas-summary b,.quality-atlas-summary span { display:block; overflow-wrap:anywhere; }
+  .quality-atlas-summary b { color:#f0dfcc; font:650 15px/1.25 var(--mono); }
+  .quality-atlas-summary span { color:var(--text-faint); font:700 8px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.07em; }
+  .quality-atlas-layout { display:grid; grid-template-columns:minmax(250px,.78fr) minmax(0,1.22fr); min-height:390px; border:1px solid #514333; background:#111313; }
+  .quality-atlas-strata { min-width:0; max-height:680px; overflow:auto; border-right:1px solid #514333; }
+  .quality-atlas-stratum { --share:0%; position:relative; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:6px 9px; width:100%; padding:11px; overflow:hidden; border:0; border-bottom:1px solid #3f352b; border-radius:0; background:#171512; color:inherit; text-align:left; isolation:isolate; }
+  .quality-atlas-stratum::before { content:""; position:absolute; inset:0 auto 0 0; width:var(--share); background:linear-gradient(90deg,rgba(178,111,66,.25),rgba(178,111,66,.04)); z-index:-1; }
+  .quality-atlas-stratum:hover,.quality-atlas-stratum[aria-current="true"] { background:#241d18; box-shadow:inset 3px 0 #c08354; }
+  .quality-atlas-rank { color:#c99b73; font:700 10px var(--mono); }
+  .quality-atlas-stratum strong,.quality-atlas-stratum small { min-width:0; overflow-wrap:anywhere; }
+  .quality-atlas-stratum small { grid-column:2/-1; color:var(--text-faint); }
+  .quality-atlas-detail { min-width:0; padding:13px 14px 16px; }
+  .quality-atlas-detail h4 { margin:0; overflow-wrap:anywhere; }
+  .quality-atlas-signature { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin:10px 0; }
+  .quality-atlas-signature > div { min-width:0; padding:8px 9px; border:1px solid #46392e; background:#191612; }
+  .quality-atlas-signature span,.quality-atlas-signature b { display:block; overflow-wrap:anywhere; }
+  .quality-atlas-signature span { color:var(--text-faint); font:700 8px var(--mono); text-transform:uppercase; letter-spacing:.07em; }
+  .quality-atlas-fingerprints { display:grid; gap:6px; margin:9px 0; }
+  .quality-atlas-fingerprint { padding:8px 9px; border-left:3px solid #8c6a4d; background:#1d1915; overflow-wrap:anywhere; }
+  .quality-atlas-members { max-height:350px; overflow:auto; border:1px solid #46392e; }
+  .quality-atlas-member { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 9px; padding:8px 9px; border-bottom:1px solid #382f27; align-items:center; }
+  .quality-atlas-member:last-child { border-bottom:0; }
+  .quality-atlas-member code,.quality-atlas-member small { min-width:0; overflow-wrap:anywhere; }
+  .quality-atlas-member small { grid-column:1/-1; color:var(--text-faint); }
+  .quality-atlas-boundary { margin-top:10px; padding:9px 11px; border-left:3px solid #8b694c; background:#1d1915; color:#cdb9a4; font-size:10.5px; line-height:1.45; }
   .quality-regression { margin-top:14px; border:1px solid #45545e; border-radius:9px; overflow:hidden; background:linear-gradient(145deg,#131a1f,#111417 64%,#17151a); }
   .quality-regression-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:14px 17px; border-bottom:1px solid #45545e; }
   .quality-regression-head h3 { margin:3px 0 4px; font-size:16px; }
@@ -2108,6 +2145,10 @@
     .quality-report-index { max-height:280px; border-right:0; border-bottom:1px solid #4b4559; }
     .quality-report-evidence { grid-template-columns:1fr; }
     .quality-report-run-head span { white-space:normal; }
+    .quality-atlas-head,.quality-atlas-empty { display:grid; }
+    .quality-atlas-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .quality-atlas-layout,.quality-atlas-signature { grid-template-columns:1fr; }
+    .quality-atlas-strata { max-height:300px; border-right:0; border-bottom:1px solid #514333; }
     .quality-regression-head { display:grid; }
     .quality-regression-sources,.quality-regression-config,.quality-regression-verdict,.quality-regression-grid { grid-template-columns:1fr; }
     .quality-regression-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -2712,6 +2753,16 @@
             <div class="quality-report-body" id="quality-report-body"></div>
             <span class="sr-only" id="quality-report-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
           </section>
+          <section class="quality-atlas" id="quality-failure-atlas" aria-labelledby="quality-atlas-title">
+            <div class="quality-atlas-head">
+              <div><span class="quality-atlas-kicker">Deterministic failure strata · connection-bound page memory</span>
+                <h3 id="quality-atlas-title" tabindex="-1">Failure Atlas</h3>
+                <p class="muted tiny">Recompute <code>rusty-eval</code> format-v1 failure clusters from the reconciled Explorer report, rank repeated causes, and hand selected occurrences back to exact source evidence. Raw errors, observed values, and judge rationales stay out of this atlas.</p></div>
+              <span class="quality-atlas-mark" id="quality-atlas-mark">Awaiting report</span>
+            </div>
+            <div class="quality-atlas-body" id="quality-atlas-body"></div>
+            <span class="sr-only" id="quality-atlas-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
           <section class="quality-regression" id="quality-regression" aria-labelledby="quality-regression-title">
             <div class="quality-regression-head">
               <div><span class="quality-regression-kicker">Matched statistical evidence · connection-bound page memory</span>
@@ -2963,6 +3014,9 @@ const store = {
   qualityGateRequest: 0,
   qualityReport: null,  // connection-bound page-memory rusty-eval experiment report inspection
   qualityReportRequest: 0,
+  qualityReportRevision: 0,
+  qualityFailureAtlas: null, // deterministic privacy-safe failure clusters for the exact report
+  qualityFailureAtlasRequest: 0,
   qualityRegression: null, // connection-bound page-memory paired statistical evidence
   qualityRegressionRequest: 0,
   qualityRegressionSideRequest: { baseline: 0, candidate: 0 },
@@ -4864,6 +4918,9 @@ function connectionResetWorkspace() {
   store.qualityGateRequest += 1;
   store.qualityReport = null;
   store.qualityReportRequest += 1;
+  store.qualityReportRevision += 1;
+  store.qualityFailureAtlas = null;
+  store.qualityFailureAtlasRequest += 1;
   store.qualityRegression = null;
   store.qualityRegressionRequest += 1;
   store.qualityRegressionSideRequest.baseline += 1;
@@ -6473,6 +6530,7 @@ function recRender() {
   qualityLibraryRender();
   if (!store.qualityGate || !$("quality-gate-form")) qualityGateRender();
   qualityReportRender();
+  qualityFailureAtlasRender();
   qualityRegressionRender();
   detail.style.display = "none";
   detail.innerHTML = "";
@@ -8812,7 +8870,9 @@ async function qualityReportFile(event) {
     if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
     const report = qualityReportParse(qualityLibraryDecode(bytes));
     if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
-    store.qualityReport = report; qualityReportRender('[data-quality-report-search]');
+    qualityFailureAtlasInvalidate();
+    store.qualityReportRevision += 1;
+    store.qualityReport = report; qualityReportRender('[data-quality-report-search]'); qualityFailureAtlasRender();
     $("quality-report-announcer").textContent = `Experiment report ${report.name} loaded. ${report.consistent ? "Aggregates reconciled." : "Aggregate drift requires review."}`;
   } catch (error) {
     if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
@@ -8839,7 +8899,8 @@ function qualityReportClick(event) {
   const report = store.qualityReport;
   if (event.target.closest("[data-quality-report-clear]")) {
     if (!report || !window.confirm("Clear the page-memory experiment report? The source file is not affected.")) return;
-    store.qualityReportRequest += 1; store.qualityReport = null; qualityReportRender("[data-quality-report-file]");
+    store.qualityReportRequest += 1; store.qualityReport = null; store.qualityReportRevision += 1; qualityFailureAtlasInvalidate();
+    qualityReportRender("[data-quality-report-file]"); qualityFailureAtlasRender();
     $("quality-report-announcer").textContent = "Page-memory experiment report cleared."; return;
   }
   if (!report || report.invalid) return;
@@ -8851,6 +8912,345 @@ function qualityReportClick(event) {
   }
   const runTarget = event.target.closest("[data-quality-report-run]");
   if (runTarget) { report.selectedRun = runTarget.getAttribute("data-quality-report-run"); qualityReportRender("#quality-report-run-title"); }
+}
+
+/* ---------------- failure atlas --------------------------------------
+ * Recomputes rusty-eval's format-v1 failure clustering over the exact,
+ * internally reconciled ExperimentReport already loaded in Studio. The
+ * atlas carries only normalized categories, fingerprints, tags, and source
+ * coordinates; raw errors, observed values, and rationales remain in the
+ * Explorer report.
+ * ------------------------------------------------------------------------- */
+const QUALITY_FAILURE_CLUSTER_WINDOW = 100;
+const QUALITY_FAILURE_MEMBER_WINDOW = 200;
+const QUALITY_FAILURE_CATEGORY_ORDER = ["authentication", "authorization", "timeout", "rate_limit", "transport", "unavailable", "invalid_data", "cancelled", "unknown"];
+
+function qualityFailureU64Bytes(value) {
+  let current = BigInt(value), bytes = new Uint8Array(8);
+  for (let index = 7; index >= 0; index -= 1) { bytes[index] = Number(current & 255n); current >>= 8n; }
+  return bytes;
+}
+
+function qualityFailureConcat(parts) {
+  const size = parts.reduce((sum, part) => sum + part.length, 0), result = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) { result.set(part, offset); offset += part.length; }
+  return result;
+}
+
+function qualityFailureBytes(value) {
+  const bytes = value instanceof Uint8Array ? value : new TextEncoder().encode(value);
+  return qualityFailureConcat([qualityFailureU64Bytes(bytes.length), bytes]);
+}
+
+function qualityFailureWellKnownDigest(prefix, digest) {
+  return prefix + Array.from(new Uint8Array(digest).slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function qualityFailureFingerprint(domain, value, cryptography = globalThis.crypto) {
+  if (!cryptography?.subtle) throw new Error("This browser cannot compute SHA-256 failure fingerprints.");
+  const encoder = new TextEncoder(), domainBytes = encoder.encode(domain);
+  const input = qualityFailureConcat([encoder.encode("rusty.failure-fingerprint.v1\0"),
+    qualityFailureU64Bytes(domainBytes.length), domainBytes, qualityFailureU64Bytes(value.length), value]);
+  return qualityFailureWellKnownDigest("fp_", await cryptography.subtle.digest("SHA-256", input));
+}
+
+function qualityFailureAsciiAlphanumeric(value) { return /^[A-Za-z0-9]$/.test(value); }
+function qualityFailureAsciiHex(value) { return /^[A-Fa-f0-9]$/.test(value); }
+
+function qualityFailureScrubIds(value) {
+  const characters = Array.from(value), output = [];
+  let index = 0;
+  while (index < characters.length) {
+    const candidate = characters.slice(index, index + 36);
+    const uuid = candidate.length === 36 && [8, 13, 18, 23].every((offset) => candidate[offset] === "-") &&
+      candidate.every((character, offset) => [8, 13, 18, 23].includes(offset) || qualityFailureAsciiHex(character)) &&
+      (index === 0 || !qualityFailureAsciiAlphanumeric(characters[index - 1])) &&
+      (index + 36 === characters.length || !qualityFailureAsciiAlphanumeric(characters[index + 36]));
+    if (uuid) { output.push(" volatileid "); index += 36; continue; }
+    if (qualityFailureAsciiHex(characters[index]) && (index === 0 || !qualityFailureAsciiAlphanumeric(characters[index - 1]))) {
+      let end = index;
+      while (end < characters.length && qualityFailureAsciiHex(characters[end])) end += 1;
+      const token = characters.slice(index, end);
+      if (token.length >= 8 && token.some((character) => /[0-9]/.test(character)) &&
+          (end === characters.length || !qualityFailureAsciiAlphanumeric(characters[end]))) {
+        output.push(" volatileid "); index = end; continue;
+      }
+    }
+    output.push(characters[index]); index += 1;
+  }
+  return output.join("");
+}
+
+function qualityFailureNormalizedText(value) {
+  return qualityFailureScrubIds(value).split(/\p{White_Space}+/u).map((raw) => {
+    const points = Array.from(raw);
+    while (points.length && !qualityFailureAsciiAlphanumeric(points[0]) && points[0] !== "-") points.shift();
+    while (points.length && !qualityFailureAsciiAlphanumeric(points[points.length - 1]) && points[points.length - 1] !== "-") points.pop();
+    let normalized = "", replacingDigits = false;
+    for (const source of points) for (const character of Array.from(source.toLowerCase())) {
+      if (/^[0-9]$/.test(character)) {
+        if (!replacingDigits) normalized += "#";
+        replacingDigits = true;
+      } else {
+        replacingDigits = false;
+        if (/^[\p{Alphabetic}\p{Number}]$/u.test(character) || "_-.\/".includes(character)) normalized += character;
+      }
+    }
+    return normalized;
+  }).filter(Boolean).join(" ");
+}
+
+function qualityFailureClassify(error) {
+  const lower = error.replace(/[A-Z]/g, (character) => character.toLowerCase());
+  const status = (code) => lower.split(/[^A-Za-z0-9]+/).includes(code), any = (needles) => needles.some((needle) => lower.includes(needle));
+  if (any(["unauthorized", "authentication", "invalid token"]) || status("401")) return "authentication";
+  if (any(["forbidden", "permission denied", "not permitted"]) || status("403")) return "authorization";
+  if (any(["timeout", "timed out", "deadline exceeded"])) return "timeout";
+  if (any(["rate limit", "too many requests", "quota"]) || status("429")) return "rate_limit";
+  if (any(["cancelled", "canceled"])) return "cancelled";
+  if (any(["connection", "connect", "dns", "network", "transport"])) return "transport";
+  if (any(["unavailable", "server error"]) || ["500", "502", "503", "504"].some(status)) return "unavailable";
+  if (any(["schema", "deserialize", "invalid json", "parse error", "validation"])) return "invalid_data";
+  return "unknown";
+}
+
+function qualityFailureCanonicalValue(value, parent = null, key = "") {
+  const parts = [];
+  if (value === null) parts.push(Uint8Array.of(0));
+  else if (typeof value === "boolean") parts.push(Uint8Array.of(1, value ? 1 : 0));
+  else if (typeof value === "number") {
+    const canonical = qualityLibraryCanonicalValue(value, parent, key);
+    if (canonical == null) throw new Error("Assertion expectation contains an unrepresentable number.");
+    parts.push(Uint8Array.of(2), qualityFailureBytes(canonical));
+  } else if (typeof value === "string") parts.push(Uint8Array.of(3), qualityFailureBytes(new TextEncoder().encode(value)));
+  else if (Array.isArray(value)) {
+    parts.push(Uint8Array.of(4), qualityFailureU64Bytes(value.length));
+    value.forEach((item, index) => parts.push(qualityFailureCanonicalValue(item, value, String(index))));
+  } else if (value && typeof value === "object") {
+    const keys = Object.keys(value).sort(qualityLibraryKeyCompare);
+    parts.push(Uint8Array.of(5), qualityFailureU64Bytes(keys.length));
+    keys.forEach((item) => parts.push(qualityFailureBytes(new TextEncoder().encode(item)), qualityFailureCanonicalValue(value[item], value, item)));
+  } else throw new Error("Assertion expectation is outside the JSON value contract.");
+  return qualityFailureConcat(parts);
+}
+
+function qualityFailureExpectedBytes(json) {
+  const wrapper = qualityLibraryParseJson(`{"value":${json}}`);
+  return qualityFailureCanonicalValue(wrapper.value, wrapper, "value");
+}
+
+function qualityFailureCompare(left, right) { return qualityLibraryKeyCompare(left, right); }
+function qualityFailureListCompare(left, right, compare) {
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    const ordering = compare(left[index], right[index]); if (ordering) return ordering;
+  }
+  return left.length - right.length;
+}
+
+function qualityFailureEvidenceCompare(left, right) {
+  const order = { execution: 0, interrupted: 1, assertion: 2, judge: 3 }, kind = order[left.evidence] - order[right.evidence];
+  if (kind) return kind;
+  if (left.evidence === "execution") return QUALITY_FAILURE_CATEGORY_ORDER.indexOf(left.category) - QUALITY_FAILURE_CATEGORY_ORDER.indexOf(right.category) || qualityFailureCompare(left.fingerprint, right.fingerprint);
+  if (left.evidence === "assertion") return qualityFailureCompare(left.assertion, right.assertion) || qualityFailureCompare(left.expected_fingerprint, right.expected_fingerprint);
+  if (left.evidence === "judge") return qualityFailureCompare(left.rationale_fingerprint, right.rationale_fingerprint);
+  return 0;
+}
+
+function qualityFailureSignatureCompare(left, right) {
+  const termination = ["done", "interrupted", "failed"].indexOf(left.termination) - ["done", "interrupted", "failed"].indexOf(right.termination);
+  if (termination) return termination;
+  const causeOrder = { evaluation: 0, interrupted: 1, execution: 2 }, cause = causeOrder[left.cause.cause] - causeOrder[right.cause.cause];
+  if (cause) return cause;
+  if (left.cause.cause === "execution") {
+    const category = QUALITY_FAILURE_CATEGORY_ORDER.indexOf(left.cause.category) - QUALITY_FAILURE_CATEGORY_ORDER.indexOf(right.cause.category);
+    if (category) return category;
+  }
+  const fingerprint = qualityFailureCompare(left.cause.fingerprint || "", right.cause.fingerprint || "");
+  if (fingerprint) return fingerprint;
+  const assertions = qualityFailureListCompare(left.failed_assertions, right.failed_assertions,
+    (a, b) => qualityFailureCompare(a.assertion, b.assertion) || qualityFailureCompare(a.expected_fingerprint, b.expected_fingerprint));
+  if (assertions) return assertions;
+  if (left.judge_fingerprint == null || right.judge_fingerprint == null) return left.judge_fingerprint == null ? (right.judge_fingerprint == null ? 0 : -1) : 1;
+  return qualityFailureCompare(left.judge_fingerprint, right.judge_fingerprint);
+}
+
+function qualityFailureSignatureJson(signature) { return JSON.stringify(signature); }
+
+async function qualityFailureSignatureId(signature, cryptography = globalThis.crypto) {
+  if (!cryptography?.subtle) throw new Error("This browser cannot compute SHA-256 cluster identities.");
+  const encoder = new TextEncoder(), encoded = encoder.encode(qualityFailureSignatureJson(signature));
+  const input = qualityFailureConcat([encoder.encode("rusty.failure-cluster.v1\0"), qualityFailureU64Bytes(encoded.length), encoded]);
+  return qualityFailureWellKnownDigest("fc_", await cryptography.subtle.digest("SHA-256", input));
+}
+
+async function qualityFailureAtlasCompute(report, cryptography = globalThis.crypto) {
+  if (!report || report.invalid || !report.consistent) throw new Error("Failure clustering requires one internally reconciled ExperimentReport.");
+  const encoder = new TextEncoder(), cache = new Map();
+  const fingerprint = (domain, bytes) => {
+    const key = domain + "\0" + Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (!cache.has(key)) cache.set(key, qualityFailureFingerprint(domain, bytes, cryptography));
+    return cache.get(key);
+  };
+  const jobs = [];
+  for (const item of report.cases) for (const run of item.runs) if (!run.passed) jobs.push((async () => {
+    const evidence = [];
+    if (run.status.kind === "interrupted") evidence.push({ evidence: "interrupted" });
+    else if (run.status.kind === "failed") {
+      const category = qualityFailureClassify(run.status.error);
+      evidence.push({ evidence: "execution", category, fingerprint: await fingerprint("execution", encoder.encode(qualityFailureNormalizedText(run.status.error))) });
+    }
+    for (const assertion of run.assertions.filter((candidate) => !candidate.passed)) evidence.push({ evidence: "assertion", assertion: assertion.assertion,
+      expected_fingerprint: await fingerprint("assertion-expected", qualityFailureExpectedBytes(assertion.expected)) });
+    if (run.judge && !run.judge.passed) evidence.push({ evidence: "judge", rationale_fingerprint: await fingerprint("judge", encoder.encode(qualityFailureNormalizedText(run.judge.rationale))) });
+    evidence.sort(qualityFailureEvidenceCompare);
+    const unique = evidence.filter((value, index) => index === 0 || qualityFailureEvidenceCompare(evidence[index - 1], value) !== 0);
+    const failedAssertions = unique.filter((value) => value.evidence === "assertion").map((value) => ({ assertion: value.assertion, expected_fingerprint: value.expected_fingerprint }));
+    const judge = unique.find((value) => value.evidence === "judge")?.rationale_fingerprint || null;
+    const primary = unique.find((value) => value.evidence === "execution" || value.evidence === "interrupted");
+    let termination, cause;
+    if (primary?.evidence === "execution") { termination = "failed"; cause = { cause: "execution", category: primary.category, fingerprint: primary.fingerprint }; }
+    else if (primary?.evidence === "interrupted") { termination = "interrupted"; cause = { cause: "interrupted" }; }
+    else {
+      if (!failedAssertions.length && !judge) throw new Error(`Failed occurrence ${item.id}#${run.repetition} has no failure evidence.`);
+      const pieces = [qualityFailureU64Bytes(failedAssertions.length)];
+      failedAssertions.forEach((value) => pieces.push(qualityFailureBytes(encoder.encode(value.assertion)), qualityFailureBytes(encoder.encode(value.expected_fingerprint))));
+      pieces.push(judge ? Uint8Array.of(1) : Uint8Array.of(0));
+      if (judge) pieces.push(qualityFailureBytes(encoder.encode(judge)));
+      termination = "done"; cause = { cause: "evaluation", fingerprint: await fingerprint("evaluation", qualityFailureConcat(pieces)) };
+    }
+    return { signature: { termination, cause, failed_assertions: failedAssertions, judge_fingerprint: judge },
+      member: { caseId: item.id, repetition: run.repetition, tags: [...new Set(item.tags)].sort(qualityLibraryKeyCompare), evidence: unique,
+        casePosition: item.position, runPosition: run.position } };
+  })());
+  const occurrences = await Promise.all(jobs), grouped = new Map();
+  for (const occurrence of occurrences) {
+    const key = qualityFailureSignatureJson(occurrence.signature);
+    if (!grouped.has(key)) grouped.set(key, { signature: occurrence.signature, members: [] });
+    grouped.get(key).members.push(occurrence.member);
+  }
+  const clusters = await Promise.all(Array.from(grouped.values(), async (cluster) => {
+    cluster.members.sort((left, right) => qualityFailureCompare(left.caseId, right.caseId) || (BigInt(left.repetition) < BigInt(right.repetition) ? -1 : BigInt(left.repetition) > BigInt(right.repetition) ? 1 : 0));
+    return { id: await qualityFailureSignatureId(cluster.signature, cryptography), signature: cluster.signature,
+      occurrences: cluster.members.length, share: cluster.members.length / occurrences.length, members: cluster.members };
+  }));
+  clusters.sort((left, right) => right.occurrences - left.occurrences || qualityFailureSignatureCompare(left.signature, right.signature));
+  return { experiment: report.name, datasetName: report.datasetName, datasetVersion: report.datasetVersion,
+    totalRuns: report.summary.runs, totalFailures: occurrences.length, clusters, selected: clusters[0]?.id || "", phase: "ready", error: "" };
+}
+
+function qualityFailureAtlasInvalidate() {
+  store.qualityFailureAtlasRequest += 1;
+  store.qualityFailureAtlas = null;
+}
+
+function qualityFailureCauseText(signature) {
+  if (signature.cause.cause === "execution") return signature.cause.category.replaceAll("_", " ");
+  return signature.cause.cause;
+}
+
+function qualityFailureTextExcerpt(value, maximum = 512) {
+  let text = "", bytes = 0;
+  for (const character of qualityReportIdentityText(value)) {
+    const width = agentUtf8Length(character);
+    if (bytes + width > maximum) return { text, truncated: true };
+    text += character; bytes += width;
+  }
+  return { text, truncated: false };
+}
+
+function qualityFailureTagsText(tags) {
+  const visible = tags.slice(0, 8), excerpt = qualityFailureTextExcerpt(visible.join(" · "));
+  const omitted = tags.length - visible.length;
+  return excerpt.text + (excerpt.truncated ? " … tag preview truncated" : "") + (omitted ? ` · +${omitted} tag(s)` : "");
+}
+
+function qualityFailureAtlasDetail(cluster) {
+  if (!cluster) return '<div class="empty">Select a ranked failure stratum.</div>';
+  const assertions = cluster.signature.failed_assertions.map((item) => `<div class="quality-atlas-fingerprint"><b>${escapeHtml(qualityReportIdentityText(item.assertion))}</b><br><code>${escapeHtml(item.expected_fingerprint)}</code></div>`).join("");
+  const causeFingerprint = cluster.signature.cause.fingerprint ? `<div class="quality-atlas-fingerprint"><b>Cause fingerprint</b><br><code>${escapeHtml(cluster.signature.cause.fingerprint)}</code></div>` : "";
+  const judge = cluster.signature.judge_fingerprint ? `<div class="quality-atlas-fingerprint"><b>Judge rationale fingerprint</b><br><code>${escapeHtml(cluster.signature.judge_fingerprint)}</code></div>` : "";
+  const members = cluster.members.slice(0, QUALITY_FAILURE_MEMBER_WINDOW);
+  return `<h4 id="quality-atlas-cluster-title" tabindex="-1">${escapeHtml(qualityFailureCauseText(cluster.signature))} stratum</h4>` +
+    `<p class="muted tiny"><code>${escapeHtml(cluster.id)}</code></p>` +
+    `<div class="quality-atlas-signature"><div><span>Termination</span><b>${escapeHtml(cluster.signature.termination)}</b></div>` +
+      `<div><span>Primary cause</span><b>${escapeHtml(qualityFailureCauseText(cluster.signature))}</b></div>` +
+      `<div><span>Occurrences</span><b>${cluster.occurrences}</b></div><div><span>Failure share</span><b>${escapeHtml(qualityReportPercent(cluster.share))}</b></div></div>` +
+    `<div class="quality-atlas-fingerprints">${causeFingerprint}${assertions}${judge}</div>` +
+    `<h4>Source coordinates</h4><p class="muted tiny">${members.length} of ${cluster.members.length} occurrence(s) shown. Opening one deliberately returns to the Explorer’s exact raw evidence.</p>` +
+    `<div class="quality-atlas-members">${members.map((member) => `<div class="quality-atlas-member"><code>${escapeHtml(qualityReportIdentityText(member.caseId))}#${escapeHtml(member.repetition)}</code>` +
+      `<button class="small" type="button" data-quality-atlas-member="${escapeHtml(member.casePosition)}:${escapeHtml(member.runPosition)}" aria-label="Inspect exact source evidence for ${escapeHtml(qualityReportIdentityText(member.caseId))} repetition ${escapeHtml(member.repetition)}">Inspect evidence</button>` +
+      `<small>${member.tags.length ? escapeHtml(qualityFailureTagsText(member.tags)) : "untagged"} · ${member.evidence.length} safe evidence reference(s)</small></div>`).join("")}</div>`;
+}
+
+function qualityFailureAtlasHtml(atlas, report) {
+  if (!report || report.invalid) return `<div class="quality-atlas-empty"><div><h4>Load experiment evidence first</h4><p class="muted tiny">The Atlas starts only from the bounded Experiment Report Explorer above.</p></div></div>`;
+  if (!report.consistent) return `<div class="quality-atlas-empty"><div><h4>Reconcile the report before clustering</h4><p class="muted tiny">${report.issues.length} report integrity issue(s) prevent an exact <code>rusty-eval</code> recomputation.</p></div></div>`;
+  if (!atlas || (atlas.sourceRevision != null && atlas.sourceRevision !== store.qualityReportRevision)) return `<div class="quality-atlas-empty"><div><h4>Map repeated failure causes</h4><p class="muted tiny">Studio will hash normalized failure evidence locally. Raw executor errors, observed values, and judge rationales are never copied into the atlas.</p></div>` +
+    `<button class="primary" type="button" data-quality-atlas-build>Build failure atlas</button></div>`;
+  if (atlas.phase === "building") return `<div class="quality-atlas-empty" aria-busy="true"><div><h4 id="quality-atlas-progress" tabindex="-1">Computing deterministic strata…</h4><p class="muted tiny">Normalizing failure evidence and minting SHA-256 cluster identities in this page.</p></div></div>`;
+  if (atlas.phase === "error") return `<div class="quality-atlas-empty"><div><h4>Atlas could not be built</h4><p class="quality-regression-error" role="alert" tabindex="-1" id="quality-atlas-error">${escapeHtml(atlas.error)}</p></div><button class="small" type="button" data-quality-atlas-build>Retry exact recomputation</button></div>`;
+  if (!atlas.totalFailures) return `<div class="quality-atlas-empty"><div><h4 id="quality-atlas-clean" tabindex="-1">No failure strata</h4><p class="muted tiny">All ${escapeHtml(atlas.totalRuns)} source runs passed. The empty atlas is the exact clustering result, not a release approval.</p></div></div>`;
+  const visible = atlas.clusters.slice(0, QUALITY_FAILURE_CLUSTER_WINDOW);
+  if (!visible.some((cluster) => cluster.id === atlas.selected)) atlas.selected = visible[0]?.id || "";
+  const selected = visible.find((cluster) => cluster.id === atlas.selected) || null;
+  return `<div class="quality-atlas-summary"><div><b>${atlas.totalFailures}</b><span>failed runs</span></div><div><b>${atlas.clusters.length}</b><span>exact strata</span></div>` +
+    `<div><b>${visible[0]?.occurrences || 0}</b><span>largest stratum</span></div><div><b>${escapeHtml(qualityReportPercent(visible[0]?.share || 0))}</b><span>largest share</span></div></div>` +
+    `<div class="quality-atlas-layout"><div class="quality-atlas-strata" role="list" aria-label="Ranked failure strata">${visible.map((cluster, index) => `<div role="listitem"><button class="quality-atlas-stratum" type="button" data-quality-atlas-cluster="${escapeHtml(cluster.id)}" aria-current="${cluster === selected}" style="--share:${Math.max(2, cluster.share * 100).toFixed(3)}%">` +
+      `<span class="quality-atlas-rank">${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(qualityFailureCauseText(cluster.signature))}</strong><b>${cluster.occurrences}</b>` +
+      `<small>${escapeHtml(qualityReportPercent(cluster.share))} · ${escapeHtml(cluster.id)}</small></button></div>`).join("")}</div>` +
+      `<section class="quality-atlas-detail" aria-labelledby="quality-atlas-cluster-title">${qualityFailureAtlasDetail(selected)}</section></div>` +
+    `<div class="quality-atlas-boundary">All ${atlas.totalFailures} failures were clustered. The ranked DOM shows at most ${QUALITY_FAILURE_CLUSTER_WINDOW} strata and ${QUALITY_FAILURE_MEMBER_WINDOW} members in the selected stratum. Case IDs and tags are metadata that may still be sensitive; raw error, observed assertion, and rationale text remain only in the Explorer.</div>`;
+}
+
+function qualityFailureAtlasRender(focusSelector = "") {
+  const body = $("quality-atlas-body"); if (!body) return;
+  body.innerHTML = qualityFailureAtlasHtml(store.qualityFailureAtlas, store.qualityReport);
+  const atlas = store.qualityFailureAtlas, report = store.qualityReport;
+  $("quality-atlas-mark").textContent = !report || report.invalid ? "Awaiting report" : !report.consistent ? "Report drift" :
+    !atlas || (atlas.sourceRevision != null && atlas.sourceRevision !== store.qualityReportRevision) ? "Ready to map" : atlas.phase === "building" ? "Computing" : atlas.phase === "error" ? "Needs attention" : `${atlas.clusters.length} strata`;
+  if (focusSelector) body.querySelector(focusSelector)?.focus({ preventScroll: true });
+}
+
+async function qualityFailureAtlasBuild(cryptography = globalThis.crypto) {
+  const report = store.qualityReport;
+  if (!report || report.invalid || !report.consistent) return;
+  const request = ++store.qualityFailureAtlasRequest, sourceRevision = store.qualityReportRevision, epoch = store.connectionEpoch;
+  const initiatingView = store.view, initiatingSelected = store.selected;
+  store.qualityFailureAtlas = { sourceRevision, phase: "building", clusters: [], selected: "", error: "" };
+  qualityFailureAtlasRender("#quality-atlas-progress");
+  try {
+    const atlas = await qualityFailureAtlasCompute(report, cryptography);
+    if (request !== store.qualityFailureAtlasRequest || epoch !== store.connectionEpoch || store.qualityReportRevision !== sourceRevision) return;
+    store.qualityFailureAtlas = { ...atlas, sourceRevision };
+    const foreground = store.view === initiatingView && store.selected === initiatingSelected;
+    qualityFailureAtlasRender(foreground ? (atlas.totalFailures ? "#quality-atlas-cluster-title" : "#quality-atlas-clean") : "");
+    if (foreground) $("quality-atlas-announcer").textContent = atlas.totalFailures ? `${atlas.totalFailures} failures grouped into ${atlas.clusters.length} deterministic strata.` : "Failure atlas complete. No failed runs were present.";
+  } catch (error) {
+    if (request !== store.qualityFailureAtlasRequest || epoch !== store.connectionEpoch || store.qualityReportRevision !== sourceRevision) return;
+    store.qualityFailureAtlas = { sourceRevision, phase: "error", clusters: [], selected: "", error: error.message || "Failure clustering failed." };
+    const foreground = store.view === initiatingView && store.selected === initiatingSelected;
+    qualityFailureAtlasRender(foreground ? "#quality-atlas-error" : "");
+    if (foreground) $("quality-atlas-announcer").textContent = store.qualityFailureAtlas.error;
+  }
+}
+
+function qualityFailureAtlasClick(event) {
+  if (event.target.closest("[data-quality-atlas-build]")) { qualityFailureAtlasBuild(); return; }
+  const atlas = store.qualityFailureAtlas;
+  if (!atlas || atlas.phase !== "ready") return;
+  const cluster = event.target.closest("[data-quality-atlas-cluster]");
+  if (cluster) { atlas.selected = cluster.getAttribute("data-quality-atlas-cluster"); qualityFailureAtlasRender("#quality-atlas-cluster-title"); return; }
+  const member = event.target.closest("[data-quality-atlas-member]");
+  if (!member || !store.qualityReport || atlas.sourceRevision !== store.qualityReportRevision) return;
+  const [casePosition, runPosition] = member.getAttribute("data-quality-atlas-member").split(":");
+  const item = store.qualityReport.cases.find((candidate) => candidate.position === casePosition);
+  const run = item?.runs.find((candidate) => candidate.position === runPosition);
+  if (!item || !run) return;
+  store.qualityReport.search = ""; store.qualityReport.filter = "all"; store.qualityReport.selectedCase = casePosition; store.qualityReport.selectedRun = runPosition;
+  qualityReportRender("#quality-report-run-title");
+  $("quality-report").scrollIntoView({ block: "start", behavior: "smooth" });
+  $("quality-report-announcer").textContent = `Opened exact source evidence for ${qualityReportIdentityText(item.id)} repetition ${run.repetition}.`;
 }
 
 /* ---------------- matched regression lab -----------------------------
@@ -20205,6 +20605,7 @@ function init() {
   $("quality-report").addEventListener("input", qualityReportControl);
   $("quality-report").addEventListener("compositionend", qualityReportControl);
   $("quality-report").addEventListener("click", qualityReportClick);
+  $("quality-failure-atlas").addEventListener("click", qualityFailureAtlasClick);
   $("quality-regression").addEventListener("change", (event) => {
     if (event.target.matches("[data-quality-regression-file]")) qualityRegressionFile(event);
     else qualityRegressionControl(event);

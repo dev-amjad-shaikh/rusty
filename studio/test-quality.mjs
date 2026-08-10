@@ -6,13 +6,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
+import { webcrypto } from "node:crypto";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(path.join(here, "index.html"), "utf8");
 const match = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) throw new Error("Studio script not found");
 const src = match[1].replace(/\ninit\(\);\s*$/, "\n");
-const sandbox = { document: { getElementById() { return null; } }, TextDecoder };
+const sandbox = { document: { getElementById() { return null; } }, TextDecoder, TextEncoder, crypto: webcrypto };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 globalThis.__quality = {
@@ -28,6 +29,10 @@ globalThis.__quality = {
   qualityGateFilename, qualityGateApplyField, qualityGateOperationCurrent,
   qualityReportParse, qualityReportCases, qualityReportExcerpt,
   qualityReportHtml, qualityReportOperationCurrent, qualityReportFile, qualityReportControl, qualityReportClick,
+  qualityFailureScrubIds, qualityFailureNormalizedText, qualityFailureClassify,
+  qualityFailureExpectedBytes, qualityFailureFingerprint, qualityFailureSignatureJson,
+  qualityFailureSignatureId, qualityFailureAtlasCompute, qualityFailureAtlasHtml,
+  qualityFailureAtlasBuild, qualityFailureAtlasClick, qualityFailureAtlasInvalidate, qualityFailureTagsText,
   qualityRegressionDraft, qualityRegressionConfig, qualityRegressionLogTail,
   qualityRegressionCompute, qualityRegressionRefresh, qualityRegressionHtml,
   qualityRegressionOperationCurrent, qualityRegressionFile, qualityRegressionControl, qualityRegressionClick,
@@ -39,6 +44,7 @@ globalThis.__quality = {
   QUALITY_GATE_MAP_BYTES, QUALITY_GATE_NUMBER_BYTES,
   QUALITY_REPORT_BYTES, QUALITY_REPORT_CASE_LIMIT, QUALITY_REPORT_RUN_LIMIT,
   QUALITY_REPORT_ASSERTION_LIMIT, QUALITY_REPORT_VALUE_BYTES,
+  QUALITY_FAILURE_CLUSTER_WINDOW, QUALITY_FAILURE_MEMBER_WINDOW,
   QUALITY_REGRESSION_PAIR_WINDOW,
   runProofCanonicalJson, store,
 };`, sandbox, { filename: "index.html<script>" });
@@ -828,6 +834,124 @@ const experimentReportText = JSON.stringify(experimentReportValue);
   sandbox.document.getElementById = () => null;
 }
 
+{
+  check("failure atlas: volatile UUIDs, long hex ids, and digit runs normalize to stable evidence",
+    Q.qualityFailureNormalizedText("Timeout request 550e8400-e29b-41d4-a716-446655440000 after 12345 ms") ===
+      "timeout request volatileid after # ms" &&
+    Q.qualityFailureNormalizedText("Timeout request deadbeef1234 after 9 ms") === "timeout request volatileid after # ms");
+  check("failure atlas: execution-category priority mirrors rusty-eval",
+    Q.qualityFailureClassify("network request cancelled") === "cancelled" &&
+    Q.qualityFailureClassify("HTTP 401 transport failure") === "authentication" &&
+    Q.qualityFailureClassify("schema validation error") === "invalid_data" &&
+    Q.qualityFailureClassify("NETWORK failure") === "unknown");
+}
+
+{
+  const atlas = await Q.qualityFailureAtlasCompute(Q.qualityReportParse(experimentReportText), webcrypto);
+  check("failure atlas: every failed source run is grouped and ranked without raw evidence",
+    atlas.totalFailures === 2 && atlas.clusters.length === 2 &&
+    atlas.clusters.reduce((sum, cluster) => sum + cluster.occurrences, 0) === 2 &&
+    !JSON.stringify(atlas).includes("provider unavailable") &&
+    !JSON.stringify(atlas).includes("No terminal state") &&
+    !JSON.stringify(atlas).includes("The run stopped before"));
+  const source = Q.qualityReportParse(experimentReportText);
+  const rendered = atlas.clusters.map((cluster) => {
+    atlas.selected = cluster.id; return Q.qualityFailureAtlasHtml(atlas, source);
+  }).join("\n");
+  check("failure atlas: rendered strata expose safe coordinates and full fingerprints only",
+    rendered.includes("case-alpha#1") && rendered.includes("case-beta#1") && rendered.includes("fp_") &&
+    !rendered.includes("provider unavailable") && !rendered.includes("No terminal state") &&
+    !rendered.includes("The run stopped before"));
+  check("failure atlas: rank and member DOM are explicitly bounded while computation remains complete",
+    rendered.includes(`at most ${Q.QUALITY_FAILURE_CLUSTER_WINDOW} strata`) &&
+    rendered.includes(`${Q.QUALITY_FAILURE_MEMBER_WINDOW} members`));
+  atlas.selected = atlas.clusters[0].id;
+  atlas.clusters[0].members[0].tags = Array.from({ length: 64 }, (_, index) => `${index}-` + "x".repeat(4090));
+  const boundedTags = Q.qualityFailureAtlasHtml(atlas, source);
+  check("failure atlas: repeated tag metadata has a hard per-member UTF-8 preview bound",
+    boundedTags.includes("tag preview truncated") && boundedTags.includes("+56 tag(s)") &&
+    !boundedTags.includes("x".repeat(600)));
+}
+
+{
+  const golden = structuredClone(experimentReportValue);
+  golden.name = "timeout-golden"; golden.runs_per_case = 1; golden.max_concurrency = 1;
+  golden.cases = [{ case_id: "case-timeout", pass_rate: 0, runs: [{
+    repetition: 0, status: { status: "failed", error: "timeout 123" }, passed: false,
+    assertions: [], tool_calls: 0, latency_ms: 200, cost_usd: 0.02, total_tokens: 20,
+  }] }];
+  golden.summary = { cases: 1, runs: 1, runs_passed: 0, run_pass_rate: 0, case_pass_rate: 0,
+    assertions: [], latency_ms: { min: 200, p50: 200, p95: 200, max: 200, mean: 200.0 },
+    total_cost_usd: 0.02, total_tokens: 20 };
+  const report = Q.qualityReportParse(JSON.stringify(golden));
+  const atlas = await Q.qualityFailureAtlasCompute(report, webcrypto);
+  check("failure atlas: stable Rust golden cluster identity matches byte-for-byte",
+    atlas.clusters[0]?.id === "fc_47b49650d957bf634d336415945dd77c", atlas.clusters[0]?.id);
+}
+
+{
+  const repeated = structuredClone(experimentReportValue);
+  repeated.name = "volatile-timeouts"; repeated.runs_per_case = 2; repeated.max_concurrency = 2;
+  repeated.cases = [{ case_id: "case-timeout", tags: ["billing", "billing"], pass_rate: 0, runs: [
+    { repetition: 0, status: { status: "failed", error: "timeout request 550e8400-e29b-41d4-a716-446655440000 after 123 ms" }, passed: false,
+      assertions: [], tool_calls: 0, latency_ms: 1, cost_usd: 0, total_tokens: 0 },
+    { repetition: 1, status: { status: "failed", error: "timeout request deadbeef1234 after 999 ms" }, passed: false,
+      assertions: [], tool_calls: 0, latency_ms: 1, cost_usd: 0, total_tokens: 0 },
+  ] }];
+  repeated.summary = { cases: 1, runs: 2, runs_passed: 0, run_pass_rate: 0, case_pass_rate: 0,
+    assertions: [], latency_ms: { min: 1, p50: 1, p95: 1, max: 1, mean: 1.0 }, total_cost_usd: 0, total_tokens: 0 };
+  const atlas = await Q.qualityFailureAtlasCompute(Q.qualityReportParse(JSON.stringify(repeated)), webcrypto);
+  check("failure atlas: volatile execution identities and digit values do not fragment a cause",
+    atlas.clusters.length === 1 && atlas.clusters[0].occurrences === 2 &&
+    JSON.stringify(atlas.clusters[0].members[0].tags) === JSON.stringify(["billing"]));
+}
+
+{
+  const assertions = {
+    format_version: 1, name: "canonical-values", dataset_name: "objects", dataset_version: "v1",
+    runs_per_case: 1, max_concurrency: 1,
+    cases: ["a", "b"].map((id, index) => ({ case_id: id, pass_rate: 0, runs: [{ repetition: 0,
+      status: { status: "done" }, passed: false, assertions: [{ assertion: "json-shape", passed: false,
+        expected: index ? { a: 1, z: 2 } : { z: 2, a: 1 }, observed: null }],
+      tool_calls: 0, latency_ms: 1, cost_usd: 0, total_tokens: 0 }] })),
+    summary: { cases: 2, runs: 2, runs_passed: 0, run_pass_rate: 0, case_pass_rate: 0,
+      assertions: [{ assertion: "json-shape", passed: 0, total: 2, rate: 0 }],
+      latency_ms: { min: 1, p50: 1, p95: 1, max: 1, mean: 1.0 }, total_cost_usd: 0, total_tokens: 0 },
+  };
+  const atlas = await Q.qualityFailureAtlasCompute(Q.qualityReportParse(JSON.stringify(assertions)), webcrypto);
+  check("failure atlas: object-key order does not change expected-value fingerprints",
+    atlas.clusters.length === 1 && atlas.clusters[0].occurrences === 2 &&
+    atlas.clusters[0].signature.failed_assertions.length === 1);
+}
+
+{
+  const nodes = new Map([
+    ["quality-atlas-body", { innerHTML: "", querySelector() { return { focus() {} }; } }],
+    ["quality-atlas-mark", { textContent: "" }],
+    ["quality-atlas-announcer", { textContent: "" }],
+  ]);
+  sandbox.document.getElementById = (id) => nodes.get(id) || null;
+  const report = Q.qualityReportParse(experimentReportText);
+  Q.store.qualityReport = report; Q.store.qualityFailureAtlas = null; Q.store.qualityFailureAtlasRequest = 0;
+  Q.store.connectionEpoch = 12; Q.store.view = "thread"; Q.store.selected = "thread-a";
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let first = true;
+  const deferredCrypto = { subtle: { async digest(algorithm, value) {
+    if (first) { first = false; await gate; }
+    return webcrypto.subtle.digest(algorithm, value);
+  } } };
+  const pending = Q.qualityFailureAtlasBuild(deferredCrypto);
+  const buildingStateSafe = !JSON.stringify(Q.store.qualityFailureAtlas).includes("provider unavailable") &&
+    !Object.prototype.hasOwnProperty.call(Q.store.qualityFailureAtlas, "sourceRaw");
+  Q.store.qualityReport = Q.qualityReportParse(JSON.stringify({ ...experimentReportValue, name: "replacement" }));
+  Q.qualityFailureAtlasInvalidate();
+  release(); await pending;
+  check("failure atlas: a deferred hash cannot overwrite a newer Explorer report",
+    buildingStateSafe && Q.store.qualityFailureAtlas === null && Q.store.qualityReport.name === "replacement");
+  sandbox.document.getElementById = () => null;
+}
+
 function matchedReport(name, outcomes, runsPerCase) {
   if (!outcomes.length || outcomes.length % runsPerCase) throw new Error("fixture outcomes must fill complete cases");
   const cases = [];
@@ -1058,6 +1182,26 @@ check("experiment report responsive: summary, index, run, and assertion evidence
   html.includes(".quality-report-evidence { grid-template-columns:1fr; }") &&
   html.includes(".quality-report-identity { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
     html.includes(".quality-report-assertion p,.quality-report-judge,.quality-report-detail .note { overflow-wrap:anywhere;"));
+check("failure atlas markup: labelled privacy boundary and one stable live announcer",
+  html.includes('id="quality-failure-atlas" aria-labelledby="quality-atlas-title"') &&
+  html.includes('id="quality-atlas-announcer" role="status"') &&
+  html.includes("Raw errors, observed values, and judge rationales stay out of this atlas"));
+check("failure atlas interaction: build, strata, and exact-source handoff are delegated",
+  html.includes('addEventListener("click", qualityFailureAtlasClick)') &&
+  html.includes("qualityFailureAtlasBuild()") && html.includes("data-quality-atlas-cluster") &&
+  html.includes("data-quality-atlas-member"));
+check("failure atlas lifecycle: report replacement and connection reset invalidate asynchronous clustering",
+  (html.match(/qualityFailureAtlasInvalidate\(\);/g) || []).length >= 2 &&
+  html.includes("store.qualityFailureAtlas = null;") && html.includes("store.qualityFailureAtlasRequest += 1;"));
+check("failure atlas accessibility: ranked native buttons and selected detail retain explicit relationships",
+  html.includes('role="list" aria-label="Ranked failure strata"') &&
+  html.includes('aria-current="${cluster === selected}"') &&
+  html.includes('aria-labelledby="quality-atlas-cluster-title"') &&
+  html.includes('aria-label="Inspect exact source evidence for'));
+check("failure atlas responsive: summary, strata, signature, and member evidence collapse on narrow screens",
+  html.includes(".quality-atlas-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
+  html.includes(".quality-atlas-layout,.quality-atlas-signature { grid-template-columns:1fr; }") &&
+  html.includes(".quality-atlas-strata { max-height:300px; border-right:0;"));
 check("matched regression markup: labelled evidence boundary and one stable live announcer",
   html.includes('id="quality-regression" aria-labelledby="quality-regression-title"') &&
   html.includes("Studio exposes evidence; it does not run experiments, approve a release, or apply a gate policy") &&
