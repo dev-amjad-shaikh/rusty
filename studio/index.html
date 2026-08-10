@@ -827,6 +827,44 @@
   .quality-regression-pair code { min-width:0; overflow-wrap:anywhere; }
   .quality-regression-pair span { white-space:nowrap; }
   .quality-regression-boundary { margin-top:10px; padding:9px 11px; border-left:3px solid #6d8189; background:#151e22; color:#b9c9cf; font-size:10.5px; line-height:1.45; }
+  .quality-decision { margin-top:14px; border:1px solid #695b3d; border-radius:10px; overflow:hidden; background:linear-gradient(145deg,#1c1b17,#111514 62%,#171a20); }
+  .quality-decision-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:14px 17px; border-bottom:1px solid #695b3d; }
+  .quality-decision-head h3 { margin:3px 0 4px; font-size:17px; }
+  .quality-decision-head p { margin:0; max-width:800px; }
+  .quality-decision-kicker { color:#d4b970; font:700 9.5px/1.2 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  .quality-decision-mark { flex:none; padding:6px 9px; border:1px solid #82724e; border-radius:3px; color:#ead89d; font:700 9px var(--mono); text-transform:uppercase; letter-spacing:.06em; transform:rotate(1deg); }
+  .quality-decision-body { padding:14px 17px 16px; }
+  .quality-decision-sources { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; border:1px solid #51472f; background:#51472f; }
+  .quality-decision-source { min-width:0; padding:10px 11px; background:#171813; }
+  .quality-decision-source span,.quality-decision-source b,.quality-decision-source small { display:block; overflow-wrap:anywhere; }
+  .quality-decision-source span { color:var(--text-faint); font:700 8px/1.2 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+  .quality-decision-source b { margin:3px 0; color:#ece4c9; }
+  .quality-decision-source.ready { box-shadow:inset 0 3px #778a6d; }
+  .quality-decision-source.missing { box-shadow:inset 0 3px #9a7449; }
+  .quality-decision-source.blocked { box-shadow:inset 0 3px #985c54; }
+  .quality-decision-empty { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:center; margin-top:10px; padding:13px; border:1px dashed #655b3e; background:#181812; }
+  .quality-decision-empty h4 { margin:0 0 4px; }
+  .quality-decision-empty p { margin:0; }
+  .quality-decision-error { margin-top:10px; padding:9px 11px; border:1px solid #78483a; border-radius:7px; background:#321d18; color:#efc0b4; overflow-wrap:anywhere; }
+  .quality-decision-verdict { display:grid; grid-template-columns:minmax(180px,.42fr) minmax(0,1.58fr); gap:12px; margin-top:10px; padding:12px; border:1px solid #574c32; background:#151711; }
+  .quality-decision-stamp { display:grid; place-items:center; min-height:108px; padding:12px; border:4px double #71866b; color:#d6e4c8; font:800 15px/1.25 var(--mono); text-align:center; text-transform:uppercase; letter-spacing:.1em; transform:rotate(-1deg); }
+  .quality-decision-stamp.block { border-color:#9c5f52; color:#efc1b8; }
+  .quality-decision-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border:1px solid #4d452f; }
+  .quality-decision-metric { min-width:0; padding:9px; border-right:1px solid #4d452f; }
+  .quality-decision-metric:last-child { border-right:0; }
+  .quality-decision-metric b,.quality-decision-metric span { display:block; overflow-wrap:anywhere; }
+  .quality-decision-metric b { color:#eee5c8; font:650 14px/1.25 var(--mono); }
+  .quality-decision-metric span { color:var(--text-faint); font:700 8px/1.2 var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .quality-decision-spine { position:relative; display:grid; gap:7px; margin-top:11px; padding-left:20px; }
+  .quality-decision-spine::before { content:""; position:absolute; left:7px; top:9px; bottom:9px; width:2px; background:#5d5238; }
+  .quality-decision-check { position:relative; display:grid; grid-template-columns:minmax(170px,.55fr) minmax(0,1.45fr) auto; gap:8px 12px; align-items:center; min-width:0; padding:9px 10px; border:1px solid #443c2a; background:#181914; }
+  .quality-decision-check::before { content:""; position:absolute; left:-18px; width:9px; height:9px; border:2px solid #1a1a15; border-radius:50%; background:#758b6b; box-shadow:0 0 0 1px #758b6b; }
+  .quality-decision-check.fail::before { background:#a35f53; box-shadow:0 0 0 1px #a35f53; }
+  .quality-decision-check strong,.quality-decision-check span { min-width:0; overflow-wrap:anywhere; }
+  .quality-decision-check strong { color:#e7dfc6; }
+  .quality-decision-check span { color:var(--text-dim); font-size:10.5px; }
+  .quality-decision-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:11px; }
+  .quality-decision-boundary { margin-top:10px; padding:9px 11px; border-left:3px solid #7f714b; background:#1c1c15; color:#cfc6a7; font-size:10.5px; line-height:1.45; }
   .cmp-report {
     margin-top: 10px; border: 1px solid #5a493a; border-radius: 10px; overflow: hidden;
     background: linear-gradient(135deg, #211d19 0%, #181b19 62%, #171b1e 100%);
@@ -2156,6 +2194,13 @@
     .quality-regression-metric:nth-child(2n) { border-right:0; }
     .quality-regression-pair { grid-template-columns:minmax(0,1fr) auto; }
     .quality-regression-pair span:last-child { grid-column:1/-1; white-space:normal; }
+    .quality-decision-head,.quality-decision-empty { display:grid; }
+    .quality-decision-sources,.quality-decision-verdict { grid-template-columns:1fr; }
+    .quality-decision-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .quality-decision-metric { border-bottom:1px solid #4d452f; }
+    .quality-decision-metric:nth-child(2n) { border-right:0; }
+    .quality-decision-check { grid-template-columns:1fr; }
+    .quality-decision-check .small { justify-self:start; }
     .cmp-report-head { flex-direction: column; gap: 8px; }
     .cmp-balance { grid-template-columns: 1fr; }
     .cmp-balance-side:last-child { text-align: left; }
@@ -2773,6 +2818,16 @@
             <div class="quality-regression-body" id="quality-regression-body"></div>
             <span class="sr-only" id="quality-regression-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
           </section>
+          <section class="quality-decision" id="quality-decision" aria-labelledby="quality-decision-title">
+            <div class="quality-decision-head">
+              <div><span class="quality-decision-kicker">Policy × evidence · deterministic local preview</span>
+                <h3 id="quality-decision-title" tabindex="-1">Release Decision Room</h3>
+                <p class="muted tiny">Apply the reviewed Gate Policy to the reconciled Explorer candidate and, when exactly bound, the Regression Lab baseline. Studio mirrors <code>rusty-eval::evaluate_gate</code>; this page-memory decision does not approve, deploy, promote, or attest a release.</p></div>
+              <span class="quality-decision-mark" id="quality-decision-mark">Awaiting sources</span>
+            </div>
+            <div class="quality-decision-body" id="quality-decision-body"></div>
+            <span class="sr-only" id="quality-decision-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+          </section>
 
           <h2 class="section" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
@@ -3020,6 +3075,8 @@ const store = {
   qualityRegression: null, // connection-bound page-memory paired statistical evidence
   qualityRegressionRequest: 0,
   qualityRegressionSideRequest: { baseline: 0, candidate: 0 },
+  qualityDecision: null, // connection-bound page-memory rusty-eval GateDecision preview
+  qualityDecisionRequest: 0,
   recLoadRequest: 0,
   recReplayRequest: 0,
   recCompareRequest: 0,
@@ -4925,6 +4982,8 @@ function connectionResetWorkspace() {
   store.qualityRegressionRequest += 1;
   store.qualityRegressionSideRequest.baseline += 1;
   store.qualityRegressionSideRequest.candidate += 1;
+  store.qualityDecision = null;
+  store.qualityDecisionRequest += 1;
   store.compare = null;
   store.runProof = null;
   store.recUnsupported = false;
@@ -6532,6 +6591,7 @@ function recRender() {
   qualityReportRender();
   qualityFailureAtlasRender();
   qualityRegressionRender();
+  qualityDecisionRender();
   detail.style.display = "none";
   detail.innerHTML = "";
   investigation.innerHTML = "";
@@ -8365,6 +8425,7 @@ function qualityGateApplyField(draft, field, value, checked, type) {
     draft.acknowledged = false;
     draft.error = "";
   }
+  qualityDecisionInvalidate();
   return true;
 }
 
@@ -8440,6 +8501,9 @@ async function qualityGateFile(event) {
   input.value = "";
   if (!file) return;
   const request = ++store.qualityGateRequest, view = store.view, selected = store.selected;
+  store.qualityGate.acknowledged = false;
+  if ($("quality-gate-body")) qualityGateSync();
+  qualityDecisionInvalidate();
   if (file.size > QUALITY_GATE_BYTES) {
     store.qualityGate.error = "Policy file exceeds the 64 KiB import boundary.";
     qualityGateSync(); $("quality-gate-error-summary").focus({ preventScroll: true }); return;
@@ -8450,6 +8514,7 @@ async function qualityGateFile(event) {
     const draft = qualityGateParse(qualityLibraryDecode(bytes));
     if (!qualityGateOperationCurrent(request, view, selected)) return;
     store.qualityGate = draft;
+    qualityDecisionInvalidate();
     qualityGateRender('[data-quality-gate-field="name"]');
     $("quality-gate-announcer").textContent = `Policy ${draft.name} imported for exact review.`;
   } catch (error) {
@@ -8465,6 +8530,7 @@ function qualityGateClick(event) {
   if (event.target.closest("[data-quality-gate-strict]")) {
     store.qualityGateRequest += 1;
     store.qualityGate = qualityGateDraft();
+    qualityDecisionInvalidate();
     qualityGateRender('[data-quality-gate-field="name"]');
     $("quality-gate-announcer").textContent = "Strict release-gate starting point restored. Review is required.";
     return;
@@ -8860,6 +8926,7 @@ async function qualityReportFile(event) {
   const input = event.target, file = input.files && input.files[0]; input.value = "";
   if (!file) return;
   const request = ++store.qualityReportRequest, view = store.view, selected = store.selected, epoch = store.connectionEpoch;
+  qualityDecisionInvalidate();
   if (file.size > QUALITY_REPORT_BYTES) {
     store.qualityReport = store.qualityReport && !store.qualityReport.invalid ? store.qualityReport : { invalid: true };
     store.qualityReport.error = "Report file exceeds the 2 MiB import boundary.";
@@ -8872,7 +8939,7 @@ async function qualityReportFile(event) {
     if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
     qualityFailureAtlasInvalidate();
     store.qualityReportRevision += 1;
-    store.qualityReport = report; qualityReportRender('[data-quality-report-search]'); qualityFailureAtlasRender();
+    store.qualityReport = report; qualityDecisionInvalidate(); qualityReportRender('[data-quality-report-search]'); qualityFailureAtlasRender();
     $("quality-report-announcer").textContent = `Experiment report ${report.name} loaded. ${report.consistent ? "Aggregates reconciled." : "Aggregate drift requires review."}`;
   } catch (error) {
     if (!qualityReportOperationCurrent(request, view, selected, epoch)) return;
@@ -8899,7 +8966,7 @@ function qualityReportClick(event) {
   const report = store.qualityReport;
   if (event.target.closest("[data-quality-report-clear]")) {
     if (!report || !window.confirm("Clear the page-memory experiment report? The source file is not affected.")) return;
-    store.qualityReportRequest += 1; store.qualityReport = null; store.qualityReportRevision += 1; qualityFailureAtlasInvalidate();
+    store.qualityReportRequest += 1; store.qualityReport = null; store.qualityReportRevision += 1; qualityFailureAtlasInvalidate(); qualityDecisionInvalidate();
     qualityReportRender("[data-quality-report-file]"); qualityFailureAtlasRender();
     $("quality-report-announcer").textContent = "Page-memory experiment report cleared."; return;
   }
@@ -9492,6 +9559,7 @@ async function qualityRegressionFile(event) {
   if (!file || !["baseline", "candidate"].includes(side)) return;
   const draft = qualityRegressionEnsure(), lifecycle = store.qualityRegressionRequest;
   const request = ++store.qualityRegressionSideRequest[side];
+  qualityDecisionInvalidate();
   const view = store.view, selected = store.selected, epoch = store.connectionEpoch;
   if (file.size > QUALITY_REPORT_BYTES) {
     draft.sourceError = `${side === "baseline" ? "Baseline" : "Candidate"} report exceeds the 2 MiB import boundary.`;
@@ -9503,7 +9571,7 @@ async function qualityRegressionFile(event) {
     if (!qualityRegressionOperationCurrent(lifecycle, side, request, view, selected, epoch)) return;
     const report = qualityReportParse(qualityLibraryDecode(bytes));
     if (!qualityRegressionOperationCurrent(lifecycle, side, request, view, selected, epoch)) return;
-    draft[side] = report; draft.sourceError = ""; qualityRegressionRefresh(draft);
+    draft[side] = report; draft.sourceError = ""; qualityRegressionRefresh(draft); qualityDecisionInvalidate();
     qualityRegressionRender(draft.error ? "#quality-regression-error" : `[data-quality-regression-field="significance"]`);
     $("quality-regression-announcer").textContent = `${side === "baseline" ? "Baseline" : "Candidate"} report ${qualityReportIdentityText(report.name)} loaded. ${draft.result ? "Matched statistical evidence recomputed." : draft.error || "Choose the other report."}`;
   } catch (error) {
@@ -9531,14 +9599,14 @@ function qualityRegressionClick(event) {
     const side = use.getAttribute("data-quality-regression-use"), explorer = store.qualityReport;
     if (!explorer || explorer.invalid || !explorer.consistent || !["baseline", "candidate"].includes(side)) return;
     store.qualityRegressionSideRequest[side] += 1;
-    draft[side] = qualityReportParse(explorer.raw); draft.sourceError = ""; qualityRegressionRefresh(draft);
+    draft[side] = qualityReportParse(explorer.raw); draft.sourceError = ""; qualityRegressionRefresh(draft); qualityDecisionInvalidate();
     qualityRegressionRender(draft.error ? "#quality-regression-error" : `[data-quality-regression-file="${side === "baseline" ? "candidate" : "baseline"}"]`);
     $("quality-regression-announcer").textContent = `Explorer report copied into the ${side} slot. ${draft.result ? "Matched statistical evidence recomputed." : "Choose the other report."}`; return;
   }
   const clear = event.target.closest("[data-quality-regression-clear]");
   if (clear) {
     const side = clear.getAttribute("data-quality-regression-clear"); if (!['baseline', 'candidate'].includes(side)) return;
-    store.qualityRegressionSideRequest[side] += 1; draft[side] = null; draft.sourceError = ""; qualityRegressionRefresh(draft);
+    store.qualityRegressionSideRequest[side] += 1; draft[side] = null; draft.sourceError = ""; qualityRegressionRefresh(draft); qualityDecisionInvalidate();
     qualityRegressionRender(`[data-quality-regression-file="${side}"]`);
     $("quality-regression-announcer").textContent = `${side === "baseline" ? "Baseline" : "Candidate"} report removed from page memory.`; return;
   }
@@ -9548,6 +9616,273 @@ function qualityRegressionClick(event) {
     draft.filter = value; qualityRegressionRender(`[data-quality-regression-filter="${value}"]`);
     $("quality-regression-announcer").textContent = `${value === "all" ? "All matched runs" : qualityRegressionPairLabel(value)} shown.`;
   }
+}
+
+/* ---------------- release decision room ------------------------------
+ * Mirrors rusty-eval::evaluate_gate over the reviewed GatePolicy and the
+ * internally reconciled ExperimentReport already held by Studio. The optional
+ * baseline is admitted only when the Regression Lab candidate is byte-identical
+ * to the Explorer candidate. The result is page-memory evidence, never a
+ * deployment approval or serving-pointer mutation.
+ * ------------------------------------------------------------------------- */
+const QUALITY_DECISION_CHECK_WINDOW = 200;
+const QUALITY_DECISION_BYTES = 512 * 1024;
+
+function qualityDecisionInvalidate(render = true) {
+  store.qualityDecisionRequest += 1;
+  store.qualityDecision = null;
+  if (render) qualityDecisionRender();
+}
+
+function qualityDecisionReportReady(report) {
+  return Boolean(report && !report.invalid && report.consistent && !qualityReportReconcile(report).length &&
+    BigInt(report.runsPerCase) > 0n && BigInt(report.maxConcurrency) > 0n);
+}
+
+function qualityDecisionNeedsComparison(policy) {
+  return Boolean(policy && (policy.maximumCostRatio !== null || policy.maximumRegressions !== null || policy.forbidRemovedCases));
+}
+
+function qualityDecisionSource() {
+  const gate = qualityGateValidate(store.qualityGate), candidate = store.qualityReport;
+  const policyReady = gate.ok && store.qualityGate?.acknowledged === true;
+  const candidateReady = qualityDecisionReportReady(candidate);
+  const pair = store.qualityRegression, pairCandidateReady = qualityDecisionReportReady(pair?.candidate);
+  const baselineReady = qualityDecisionReportReady(pair?.baseline);
+  const candidateBound = candidateReady && pairCandidateReady && pair.candidate.raw === candidate.raw;
+  const baseline = candidateBound && baselineReady ? pair.baseline : null;
+  return {
+    gate, policyReady, candidate, candidateReady, baseline, baselineReady, candidateBound,
+    comparisonRequired: gate.ok ? qualityDecisionNeedsComparison(gate.policy) : false,
+    gateRequest: store.qualityGateRequest, reportRevision: store.qualityReportRevision,
+    baselineRequest: store.qualityRegressionSideRequest.baseline,
+    candidateRequest: store.qualityRegressionSideRequest.candidate,
+  };
+}
+
+function qualityDecisionCurrent(decision, source = qualityDecisionSource()) {
+  return Boolean(decision && decision.phase === "ready" && source.policyReady && source.candidateReady && decision.gateRequest === source.gateRequest &&
+    decision.reportRevision === source.reportRevision && decision.baselineRequest === source.baselineRequest &&
+    decision.candidateRequest === source.candidateRequest);
+}
+
+function qualityDecisionMetric(metric, name = "") {
+  return name ? { metric, [metric === "assertion_pass_rate" ? "assertion" : "tag"]: name } : { metric };
+}
+
+function qualityDecisionCheck(metric, passed, observedJson, requiredJson, detail, inspect = "candidate", name = "") {
+  return { metric: qualityDecisionMetric(metric, name), passed, observedJson, requiredJson, detail, inspect };
+}
+
+function qualityDecisionFixed6(value) {
+  if (!Number.isFinite(value)) return value > 0 ? "inf" : value < 0 ? "-inf" : "NaN";
+  if (Object.is(value, -0)) return "-0.000000";
+  if (Math.abs(value) >= 1e21) return `${BigInt(value)}.000000`;
+  return value.toFixed(6);
+}
+
+function qualityDecisionComparison(baseline, candidate, policy) {
+  let regressions = 0;
+  const maximumDrop = Number(policy.maxPassRateDrop), maximumLatency = Number(policy.maxLatencyP95Ratio);
+  for (const base of baseline.summary.assertions) {
+    const current = candidate.summary.assertions.find((item) => item.assertion === base.assertion);
+    if (current && base.rate.value - current.rate.value > maximumDrop) regressions += 1;
+  }
+  const ids = [...new Set([...baseline.cases.map((item) => item.id), ...candidate.cases.map((item) => item.id)])]
+    .sort(qualityLibraryKeyCompare);
+  const removed = [];
+  for (const id of ids) {
+    const base = baseline.cases.find((item) => item.id === id), current = candidate.cases.find((item) => item.id === id);
+    if (base && current && base.passRate.value - current.passRate.value > maximumDrop) regressions += 1;
+    else if (base && !current) removed.push(id);
+  }
+  const baselineP95 = BigInt(baseline.summary.latency.p95), candidateP95 = BigInt(candidate.summary.latency.p95);
+  const latencyRatio = baselineP95 > 0n ? Number(candidateP95) / Number(baselineP95) : null;
+  if (latencyRatio === null ? candidateP95 > 0n : latencyRatio > maximumLatency) regressions += 1;
+  return { regressions, removed, baselineCost: baseline.summary.totalCostUsd.value,
+    candidateCost: candidate.summary.totalCostUsd.value };
+}
+
+function qualityDecisionEvaluate(source) {
+  if (!source.policyReady) throw new Error("Review and acknowledge a valid Release Gate policy first.");
+  if (!source.candidateReady) throw new Error("Load an internally reconciled candidate in the Experiment Report Explorer first.");
+  const policy = source.gate.policy, candidate = source.candidate, baseline = source.baseline;
+  if (baseline && baseline.datasetName !== candidate.datasetName) {
+    throw new Error(`Baseline dataset \`${qualityReportIdentityText(baseline.datasetName)}\` does not match candidate dataset \`${qualityReportIdentityText(candidate.datasetName)}\`.`);
+  }
+  if (baseline && baseline.maxConcurrency !== candidate.maxConcurrency) {
+    throw new Error(`Baseline maximum concurrency ${baseline.maxConcurrency} does not match candidate maximum concurrency ${candidate.maxConcurrency}.`);
+  }
+  const checks = [], firstEvidence = (predicate) => {
+    for (const item of candidate.cases) for (const run of item.runs) if (predicate(item, run)) return { casePosition: item.position, runPosition: run.position };
+    return null;
+  };
+  if (policy.minimumRuns !== null) checks.push(qualityDecisionCheck("minimum_runs",
+    BigInt(candidate.summary.runs) >= BigInt(policy.minimumRuns), candidate.summary.runs,
+    `{"minimum":${policy.minimumRuns}}`, `candidate has ${candidate.summary.runs} runs; minimum is ${policy.minimumRuns}`));
+  if (policy.minimumRunPassRate !== null) checks.push(qualityDecisionCheck("minimum_run_pass_rate",
+    candidate.summary.runPassRate.value >= Number(policy.minimumRunPassRate), candidate.summary.runPassRate.canonical,
+    `{"minimum":${policy.minimumRunPassRate}}`, `aggregate run pass rate is ${qualityDecisionFixed6(candidate.summary.runPassRate.value)}; minimum is ${qualityDecisionFixed6(Number(policy.minimumRunPassRate))}`));
+  if (policy.minimumCasePassRate !== null) checks.push(qualityDecisionCheck("minimum_case_pass_rate",
+    candidate.summary.casePassRate.value >= Number(policy.minimumCasePassRate), candidate.summary.casePassRate.canonical,
+    `{"minimum":${policy.minimumCasePassRate}}`, `mean case pass rate is ${qualityDecisionFixed6(candidate.summary.casePassRate.value)}; minimum is ${qualityDecisionFixed6(Number(policy.minimumCasePassRate))}`));
+  for (const assertion of Object.keys(policy.assertionRates).sort(qualityLibraryKeyCompare)) {
+    const minimum = policy.assertionRates[assertion], observed = candidate.summary.assertions.find((item) => item.assertion === assertion)?.rate;
+    const check = qualityDecisionCheck("assertion_pass_rate", Boolean(observed && observed.value >= Number(minimum)),
+      observed ? observed.canonical : "null", `{"minimum":${minimum}}`, observed ?
+        `assertion \`${assertion}\` pass rate is ${qualityDecisionFixed6(observed.value)}` : `assertion \`${assertion}\` is absent from the candidate report`, "candidate", assertion);
+    Object.assign(check, firstEvidence((_item, run) => run.assertions.some((item) => item.assertion === assertion)) || {}); checks.push(check);
+  }
+  for (const tag of Object.keys(policy.tagRates).sort(qualityLibraryKeyCompare)) {
+    const minimum = policy.tagRates[tag], matching = candidate.cases.filter((item) => item.tags.includes(tag));
+    const rate = matching.length ? matching.reduce((sum, item) => sum + item.passRate.value, 0) / matching.length : null;
+    const check = qualityDecisionCheck("tag_pass_rate", rate !== null && rate >= Number(minimum),
+      `{"rate":${rate === null ? "null" : qualityLibraryRustF64(rate)},"cases":${matching.length}}`, `{"minimum":${minimum}}`, rate === null ?
+        `tag \`${tag}\` has no candidate cases` : `tag \`${tag}\` mean pass rate is ${qualityDecisionFixed6(rate)} across ${matching.length} cases`, "candidate", tag);
+    if (matching[0]) Object.assign(check, { casePosition: matching[0].position, runPosition: matching[0].runs[0]?.position || "" }); checks.push(check);
+  }
+  if (policy.maximumTotalCostUsd !== null) checks.push(qualityDecisionCheck("maximum_total_cost_usd",
+    candidate.summary.totalCostUsd.value <= Number(policy.maximumTotalCostUsd), candidate.summary.totalCostUsd.canonical,
+    `{"maximum":${policy.maximumTotalCostUsd}}`, `candidate total cost is $${qualityDecisionFixed6(candidate.summary.totalCostUsd.value)}; maximum is $${qualityDecisionFixed6(Number(policy.maximumTotalCostUsd))}`));
+  const needsComparison = qualityDecisionNeedsComparison(policy);
+  if (needsComparison && !baseline) checks.push(qualityDecisionCheck("comparison_available", false, "null", '{"required":true}',
+    "policy requires a baseline comparison", "sources"));
+  if (baseline) {
+    const comparison = qualityDecisionComparison(baseline, candidate, policy);
+    if (policy.maximumCostRatio !== null) {
+      const ratio = comparison.baselineCost > 0 ? comparison.candidateCost / comparison.baselineCost : null;
+      checks.push(qualityDecisionCheck("maximum_cost_ratio", ratio === null ? comparison.candidateCost === 0 : ratio <= Number(policy.maximumCostRatio),
+        `{"baseline":${qualityLibraryRustF64(comparison.baselineCost)},"candidate":${qualityLibraryRustF64(comparison.candidateCost)},"ratio":${ratio === null || !Number.isFinite(ratio) ? "null" : qualityLibraryRustF64(ratio)}}`,
+        `{"maximum":${policy.maximumCostRatio}}`, ratio === null ? `baseline cost is zero and candidate cost is $${qualityDecisionFixed6(comparison.candidateCost)}` :
+          `candidate/baseline cost ratio is ${qualityDecisionFixed6(ratio)}`, "sources"));
+    }
+    if (policy.maximumRegressions !== null) checks.push(qualityDecisionCheck("maximum_regressions",
+      BigInt(comparison.regressions) <= BigInt(policy.maximumRegressions), String(comparison.regressions),
+      `{"maximum":${policy.maximumRegressions}}`, `comparison contains ${comparison.regressions} regressions; maximum is ${policy.maximumRegressions}`, "sources"));
+    if (policy.forbidRemovedCases) checks.push(qualityDecisionCheck("no_removed_cases", comparison.removed.length === 0,
+      JSON.stringify(comparison.removed), "[]", comparison.removed.length ? `candidate removed ${comparison.removed.length} baseline cases` :
+        "candidate retains every baseline case", "sources"));
+  }
+  const outcome = checks.every((item) => item.passed) ? "allow" : "block";
+  const decision = { phase: "ready", policy: policy.name, candidate: candidate.name, baseline: baseline?.name || null, outcome, checks,
+    gateRequest: source.gateRequest, reportRevision: source.reportRevision,
+    baselineRequest: source.baselineRequest, candidateRequest: source.candidateRequest };
+  decision.json = qualityDecisionJson(decision);
+  if (agentUtf8Length(decision.json) > QUALITY_DECISION_BYTES) throw new Error("GateDecision exceeds Studio's 512 KiB portable review boundary.");
+  return decision;
+}
+
+function qualityDecisionJson(decision) {
+  const metric = (value) => `{"metric":${JSON.stringify(value.metric)}` +
+    (value.assertion !== undefined ? `,"assertion":${JSON.stringify(value.assertion)}` : value.tag !== undefined ? `,"tag":${JSON.stringify(value.tag)}` : "") + "}";
+  const checks = decision.checks.map((item) => `{"metric":${metric(item.metric)},"passed":${item.passed},"observed":${item.observedJson},"required":${item.requiredJson},"detail":${JSON.stringify(item.detail)}}`);
+  return `{"format_version":1,"policy":${JSON.stringify(decision.policy)},"candidate":${JSON.stringify(decision.candidate)},` +
+    `"baseline":${decision.baseline === null ? "null" : JSON.stringify(decision.baseline)},"outcome":${JSON.stringify(decision.outcome)},"checks":[${checks.join(",")}]}`;
+}
+
+function qualityDecisionMetricLabel(metric) {
+  const labels = { minimum_runs: "Minimum runs", minimum_run_pass_rate: "Run pass rate", minimum_case_pass_rate: "Mean case pass rate",
+    assertion_pass_rate: `Assertion · ${metric.assertion}`, tag_pass_rate: `Tag · ${metric.tag}`, maximum_total_cost_usd: "Total cost",
+    comparison_available: "Baseline comparison", maximum_cost_ratio: "Cost ratio", maximum_regressions: "Threshold breaches", no_removed_cases: "Case retention" };
+  return labels[metric.metric] || metric.metric.replaceAll("_", " ");
+}
+
+function qualityDecisionSourceHtml(source) {
+  const gateName = source.gate.ok ? qualityReportIdentityText(source.gate.policy.name) : "Policy incomplete";
+  const candidateName = source.candidateReady ? qualityReportIdentityText(source.candidate.name) : "Candidate unavailable";
+  const baselineState = source.baseline ? "ready" : source.comparisonRequired ? (source.baselineReady && !source.candidateBound ? "blocked" : "missing") : "ready";
+  const baselineName = source.baseline ? qualityReportIdentityText(source.baseline.name) : source.comparisonRequired ? "Comparison unavailable" : "Not required";
+  const baselineDetail = source.baseline ? "exactly bound through the Regression Lab candidate" : source.comparisonRequired ?
+    (source.baselineReady && !source.candidateBound ? "Regression candidate does not exactly match Explorer candidate" : "the decision will include a blocking comparison-available check") : "candidate-only policy";
+  return `<div class="quality-decision-sources" role="group" aria-label="Release decision source readiness">` +
+    `<div class="quality-decision-source ${source.policyReady ? "ready" : "blocked"}"><span>Reviewed policy</span><b>${escapeHtml(gateName)}</b><small>${source.policyReady ? "exact policy acknowledged" : "valid policy and acknowledgement required"}</small></div>` +
+    `<div class="quality-decision-source ${source.candidateReady ? "ready" : "blocked"}"><span>Candidate evidence</span><b>${escapeHtml(candidateName)}</b><small>${source.candidateReady ? `${escapeHtml(source.candidate.summary.runs)} reconciled runs` : "load a reconciled Explorer report"}</small></div>` +
+    `<div class="quality-decision-source ${baselineState}"><span>Baseline evidence</span><b>${escapeHtml(baselineName)}</b><small>${escapeHtml(baselineDetail)}</small></div></div>`;
+}
+
+function qualityDecisionHtml(value) {
+  const source = qualityDecisionSource(), decision = value;
+  let body = qualityDecisionSourceHtml(source);
+  if (!decision || !qualityDecisionCurrent(decision, source)) {
+    const ready = source.policyReady && source.candidateReady;
+    body += `<div class="quality-decision-empty"><div><h4>${ready ? "Evidence is ready" : "Bind the policy and candidate"}</h4>` +
+      `<p class="muted tiny">${ready ? "Compute every configured check in Rust's stable order. A required but missing baseline becomes an explicit blocking check." : "A reviewed Gate Policy and internally reconciled Explorer report are required. The Regression Lab contributes a baseline only when its candidate exactly matches the Explorer report."}</p></div>` +
+      `<button class="small primary" type="button" data-quality-decision-build${ready ? "" : " disabled"}>Compute decision</button></div>`;
+    if (decision?.error) body += `<div class="quality-decision-error" id="quality-decision-error" role="alert" tabindex="-1">${escapeHtml(decision.error)}</div>`;
+    return body + `<div class="quality-decision-boundary">Local recomputation only · no server write, promotion, deployment, approval identity, or external attestation. The result is discarded on connection change or reload unless downloaded.</div>`;
+  }
+  const failed = decision.checks.filter((item) => !item.passed).length, shown = decision.checks.slice(0, QUALITY_DECISION_CHECK_WINDOW);
+  body += `<div class="quality-decision-verdict"><div class="quality-decision-stamp ${decision.outcome}" tabindex="-1">${decision.outcome === "allow" ? "All checks\nallow" : "Release\nblocked"}</div><div>` +
+    `<div class="quality-decision-metrics" role="group" aria-label="Release gate decision summary">` +
+      [[decision.checks.length, "configured checks"], [decision.checks.length - failed, "passed"], [failed, "blocking"], [decision.baseline ? "candidate + baseline" : "candidate only", "evidence mode"]]
+      .map(([number, label]) => `<div class="quality-decision-metric"><b>${escapeHtml(String(number))}</b><span>${escapeHtml(label)}</span></div>`).join("") + `</div>` +
+    `<p class="muted tiny">Policy <b>${escapeHtml(qualityReportIdentityText(decision.policy))}</b> evaluated candidate <b>${escapeHtml(qualityReportIdentityText(decision.candidate))}</b>${decision.baseline ? ` against baseline <b>${escapeHtml(qualityReportIdentityText(decision.baseline))}</b>` : " without a baseline"}. Every configured check is represented below.</p></div></div>` +
+    `<div class="quality-decision-spine" role="list" aria-label="Deterministic release checks">${shown.map((item, index) =>
+      `<article class="quality-decision-check${item.passed ? "" : " fail"}" role="listitem"><strong>${escapeHtml(qualityReportIdentityText(qualityDecisionMetricLabel(item.metric)))} · ${item.passed ? "pass" : "block"}</strong>` +
+      `<span>${escapeHtml(qualityReportIdentityText(item.detail))}</span><button class="small" type="button" data-quality-decision-inspect="${index}" aria-label="${escapeHtml((item.inspect === "sources" ? "Open sources" : "Inspect evidence") + " for " + qualityReportIdentityText(qualityDecisionMetricLabel(item.metric)))}">${item.inspect === "sources" ? "Open sources" : "Inspect evidence"}</button></article>`).join("")}</div>` +
+    (decision.checks.length > shown.length ? `<p class="muted tiny">Showing ${shown.length} of ${decision.checks.length} checks; every check is included in the decision and portable JSON.</p>` : "") +
+    `<details class="quality-decision-artifact"><summary>Portable format-v1 GateDecision JSON · ${agentUtf8Length(decision.json).toLocaleString()} UTF-8 bytes</summary><pre class="json">${escapeHtml(qualityReportIdentityText(decision.json))}</pre></details>` +
+    `<div class="quality-decision-actions"><button class="small primary" type="button" data-quality-decision-download>Download decision</button>` +
+      `<button class="small" type="button" data-quality-decision-build>Recompute from current sources</button><button class="small" type="button" data-quality-decision-clear>Clear preview</button></div>`;
+  return body + `<div class="quality-decision-boundary">This portable decision records deterministic library evidence only. It is not a deployment authorization, promotion receipt, human approval, or proof that these page-memory inputs came from a trusted experiment runner.</div>`;
+}
+
+function qualityDecisionRender(focusSelector = "") {
+  const body = $("quality-decision-body"); if (!body) return;
+  body.innerHTML = qualityDecisionHtml(store.qualityDecision);
+  const decision = store.qualityDecision, current = qualityDecisionCurrent(decision);
+  $("quality-decision-mark").textContent = !current ? (decision?.error ? "Decision blocked" : "Awaiting sources") : decision.outcome === "allow" ? "Allow preview" : "Block preview";
+  if (focusSelector) body.querySelector(focusSelector)?.focus({ preventScroll: true });
+}
+
+function qualityDecisionBuild() {
+  const request = ++store.qualityDecisionRequest, source = qualityDecisionSource();
+  try {
+    const decision = qualityDecisionEvaluate(source);
+    if (request !== store.qualityDecisionRequest) return;
+    store.qualityDecision = decision; qualityDecisionRender(".quality-decision-stamp");
+    $("quality-decision-announcer").textContent = decision.outcome === "allow" ?
+      `Release decision preview allows under ${decision.checks.length} configured checks.` :
+      `Release decision preview blocks on ${decision.checks.filter((item) => !item.passed).length} of ${decision.checks.length} configured checks.`;
+  } catch (error) {
+    if (request !== store.qualityDecisionRequest) return;
+    store.qualityDecision = { phase: "error", error: error.message || "Release decision could not be computed." };
+    qualityDecisionRender("#quality-decision-error"); $("quality-decision-announcer").textContent = store.qualityDecision.error;
+  }
+}
+
+function qualityDecisionFilename(decision) {
+  const name = String(decision?.policy || "release").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 80) || "release";
+  return `${name}.decision.json`;
+}
+
+function qualityDecisionClick(event) {
+  if (event.target.closest("[data-quality-decision-build]")) { qualityDecisionBuild(); return; }
+  if (event.target.closest("[data-quality-decision-clear]")) {
+    qualityDecisionInvalidate(false); qualityDecisionRender("[data-quality-decision-build]");
+    $("quality-decision-announcer").textContent = "Page-memory release decision cleared."; return;
+  }
+  const decision = store.qualityDecision;
+  if (!qualityDecisionCurrent(decision)) return;
+  if (event.target.closest("[data-quality-decision-download]")) {
+    const url = URL.createObjectURL(new Blob([decision.json], { type: "application/json" })), anchor = document.createElement("a");
+    anchor.href = url; anchor.download = qualityDecisionFilename(decision); document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    toast("Portable release decision downloaded. No release was approved or promoted.", "ok");
+    $("quality-decision-announcer").textContent = "Portable release decision downloaded."; return;
+  }
+  const inspect = event.target.closest("[data-quality-decision-inspect]"); if (!inspect) return;
+  const check = decision.checks[Number(inspect.getAttribute("data-quality-decision-inspect"))]; if (!check) return;
+  if (check.inspect === "sources") {
+    $("quality-regression-title").focus({ preventScroll: true }); $("quality-regression").scrollIntoView({ block: "start", behavior: "smooth" });
+    $("quality-regression-announcer").textContent = `Opened the exact page-memory source pair for ${qualityReportIdentityText(qualityDecisionMetricLabel(check.metric))}.`; return;
+  }
+  const report = store.qualityReport; if (!qualityDecisionReportReady(report)) return;
+  if (check.casePosition !== undefined) {
+    report.search = ""; report.filter = "all"; report.selectedCase = check.casePosition; report.selectedRun = check.runPosition || report.cases.find((item) => item.position === check.casePosition)?.runs[0]?.position || "";
+  }
+  qualityReportRender(check.casePosition !== undefined ? "#quality-report-run-title" : "#quality-report-title");
+  $("quality-report").scrollIntoView({ block: "start", behavior: "smooth" });
+  $("quality-report-announcer").textContent = `Opened candidate evidence for ${qualityReportIdentityText(qualityDecisionMetricLabel(check.metric))}.`;
 }
 
 /* ---------------- recorder: exact replay & run comparison --------------
@@ -20614,6 +20949,7 @@ function init() {
   $("quality-regression").addEventListener("compositionend", qualityRegressionControl);
   $("quality-regression").addEventListener("click", qualityRegressionClick);
   $("quality-regression").addEventListener("submit", (event) => event.preventDefault());
+  $("quality-decision").addEventListener("click", qualityDecisionClick);
 
   // Replay & run comparison. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).

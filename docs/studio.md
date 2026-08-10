@@ -324,8 +324,9 @@ studio/
     every semantic edit invalidates acknowledgement, and an in-flight file import is bound to the initiating
     connection/thread workspace. An accepted draft survives thread changes on the same connection; a connection
     change or page reload discards it unless downloaded. Download creates only a portable policy file. It does not
-    run an experiment, recompute a decision, approve a release, or promote an agent; those outcomes require
-    complete baseline/candidate reports and durable server-side quality resources.
+    run an experiment, approve a release, or promote an agent. The local Release Decision Room described below can
+    recompute the library decision semantics from bounded page-memory evidence, but durable source provenance,
+    server-side decisions, approval identity, and promotion enforcement remain platform responsibilities.
   - **Experiment Report Explorer** — import one format-v1 `rusty-eval` `ExperimentReport` into a bounded,
     read-only evidence ledger. Studio preserves exact 64-bit count and token values, validates the known
     report shape, and independently recomputes case/run counts, verdicts, assertion pass rates, latency
@@ -367,6 +368,18 @@ studio/
     the same connection but is discarded on connection change or reload. It is browser-computed evidence,
     not a durable `StatisticalRegressionReport`, experiment execution, external attestation, release-gate
     decision, approval, or promotion.
+  - **Release Decision Room** — combine the freshly acknowledged Release Gate policy with the current
+    internally reconciled Explorer report and locally mirror `rusty_eval::evaluate_gate`. Studio emits every
+    configured check in Rust's deterministic order: candidate evidence floors, named assertion and tag rates,
+    cost, comparison availability, cost ratio, comparison-threshold breach count, and removed-case protection.
+    The Regression Lab contributes a baseline only when its candidate is byte-identical to the Explorer source;
+    otherwise a comparison-dependent policy receives an explicit blocking `comparison_available` check. Dataset
+    name and maximum concurrency are revalidated before any baseline decision is shown. Each check can return to
+    its candidate evidence or exact source pair, and the complete result can be downloaded as portable format-v1
+    `GateDecision` JSON. Studio bounds the visible spine to 200 checks and the portable decision to 512 KiB while
+    retaining every check in the calculation and download. Policy, report, pair, connection, or reload changes
+    invalidate the page-memory preview. This is deterministic local library evidence—not a server write, trusted
+    experiment provenance, human approval, promotion receipt, deployment authorization, or external attestation.
   - **Run comparison report** — enter a baseline and candidate run id (the baseline auto-fills from the
     loaded journal) and **Build report**. Studio calls the atomic
     `GET /runs/diff?base=…&branch=…` contract, then reconciles both independent

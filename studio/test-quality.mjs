@@ -26,7 +26,7 @@ globalThis.__quality = {
   qualityLibraryJsonl, qualityLibraryMerge, qualityLibraryStats, qualityLibraryHtml,
   qualityGateDraft, qualityGateU64, qualityGateF64, qualityGateMap,
   qualityGateCanonical, qualityGateValidate, qualityGateParse, qualityGateHtml,
-  qualityGateFilename, qualityGateApplyField, qualityGateOperationCurrent,
+  qualityGateFilename, qualityGateApplyField, qualityGateOperationCurrent, qualityGateFile,
   qualityReportParse, qualityReportCases, qualityReportExcerpt,
   qualityReportHtml, qualityReportOperationCurrent, qualityReportFile, qualityReportControl, qualityReportClick,
   qualityFailureScrubIds, qualityFailureNormalizedText, qualityFailureClassify,
@@ -36,6 +36,10 @@ globalThis.__quality = {
   qualityRegressionDraft, qualityRegressionConfig, qualityRegressionLogTail,
   qualityRegressionCompute, qualityRegressionRefresh, qualityRegressionHtml,
   qualityRegressionOperationCurrent, qualityRegressionFile, qualityRegressionControl, qualityRegressionClick,
+  qualityDecisionInvalidate, qualityDecisionReportReady, qualityDecisionNeedsComparison,
+  qualityDecisionSource, qualityDecisionCurrent, qualityDecisionComparison, qualityDecisionFixed6,
+  qualityDecisionEvaluate, qualityDecisionJson, qualityDecisionMetricLabel,
+  qualityDecisionSourceHtml, qualityDecisionHtml, qualityDecisionBuild, qualityDecisionFilename,
   QUALITY_DATASET_FORMAT_VERSION, QUALITY_TAG_LIMIT, QUALITY_PREDICATE_LIMIT,
   QUALITY_TOOL_LIMIT, QUALITY_EXPORT_LIMIT, QUALITY_LIBRARY_CASE_LIMIT,
   QUALITY_LIBRARY_BYTES, QUALITY_LIBRARY_LINE_BYTES, QUALITY_LIBRARY_DEPTH_LIMIT,
@@ -46,6 +50,7 @@ globalThis.__quality = {
   QUALITY_REPORT_ASSERTION_LIMIT, QUALITY_REPORT_VALUE_BYTES,
   QUALITY_FAILURE_CLUSTER_WINDOW, QUALITY_FAILURE_MEMBER_WINDOW,
   QUALITY_REGRESSION_PAIR_WINDOW,
+  QUALITY_DECISION_CHECK_WINDOW, QUALITY_DECISION_BYTES,
   runProofCanonicalJson, store,
 };`, sandbox, { filename: "index.html<script>" });
 
@@ -1163,6 +1168,140 @@ function matchedReport(name, outcomes, runsPerCase) {
   sandbox.document.getElementById = () => null;
 }
 
+{
+  const gate = Q.qualityGateDraft();
+  gate.name = "production-readiness";
+  gate.minimumRuns = "4";
+  gate.minimumRunPassRate = "0.5";
+  gate.minimumCasePassRate = "0.5";
+  gate.assertionRates = '{"state:/selected":0.5}';
+  gate.tagRates = '{"billing":0.5}';
+  gate.maximumTotalCostUsd = "0.1";
+  gate.maximumCostRatio = "1.5";
+  gate.maximumRegressions = "0";
+  gate.forbidRemovedCases = true;
+  gate.maxPassRateDrop = "0.05";
+  gate.maxLatencyP95Ratio = "2";
+  gate.acknowledged = true;
+  const validated = Q.qualityGateValidate(gate);
+  const candidate = Q.qualityReportParse(experimentReportText);
+  const source = { gate: validated, policyReady: true, candidate, candidateReady: true,
+    baseline: null, baselineReady: false, candidateBound: false, comparisonRequired: true,
+    gateRequest: 11, reportRevision: 12, baselineRequest: 13, candidateRequest: 14 };
+  const missingBaseline = Q.qualityDecisionEvaluate(source);
+  const metricNames = missingBaseline.checks.map((item) => item.metric.metric);
+  check("release decision: candidate-only evaluation preserves Rust check order and blocks missing comparison",
+    missingBaseline.outcome === "block" && metricNames.join(",") ===
+      "minimum_runs,minimum_run_pass_rate,minimum_case_pass_rate,assertion_pass_rate,tag_pass_rate,maximum_total_cost_usd,comparison_available" &&
+      missingBaseline.checks.at(-1).observedJson === "null");
+  const portable = JSON.parse(missingBaseline.json);
+  check("release decision: portable format-v1 JSON carries every configured check without raw run evidence",
+    portable.format_version === 1 && portable.policy === "production-readiness" && portable.checks.length === 7 &&
+      !missingBaseline.json.includes("provider unavailable") && !missingBaseline.json.includes("No terminal state"));
+
+  const baselineValue = structuredClone(experimentReportValue);
+  baselineValue.name = "support-baseline@1.3.0";
+  baselineValue.summary.latency_ms = { min: 25, p50: 50, p95: 100, max: 100, mean: 62.5 };
+  baselineValue.cases[0].runs[0].latency_ms = 25;
+  baselineValue.cases[0].runs[1].latency_ms = 50;
+  baselineValue.cases[1].runs[0].latency_ms = 75;
+  baselineValue.cases[1].runs[1].latency_ms = 100;
+  baselineValue.summary.total_cost_usd = 0.05;
+  baselineValue.cases[0].runs[0].cost_usd = 0.005;
+  baselineValue.cases[0].runs[1].cost_usd = 0.01;
+  baselineValue.cases[1].runs[0].cost_usd = 0.015;
+  baselineValue.cases[1].runs[1].cost_usd = 0.02;
+  const baseline = Q.qualityReportParse(JSON.stringify(baselineValue));
+  const paired = Q.qualityDecisionEvaluate({ ...source, baseline, baselineReady: true, candidateBound: true });
+  const pairedMetrics = paired.checks.map((item) => item.metric.metric);
+  check("release decision: exact baseline evaluation mirrors cost, regression, and removed-case checks",
+    pairedMetrics.slice(-3).join(",") === "maximum_cost_ratio,maximum_regressions,no_removed_cases" &&
+      paired.checks.find((item) => item.metric.metric === "maximum_cost_ratio").passed === false &&
+      paired.checks.find((item) => item.metric.metric === "maximum_regressions").passed === false &&
+      paired.checks.find((item) => item.metric.metric === "no_removed_cases").passed === true);
+  const tinyValue = structuredClone(experimentReportValue), hugeValue = structuredClone(experimentReportValue);
+  tinyValue.name = "tiny-baseline"; tinyValue.summary.total_cost_usd = 1e-308;
+  hugeValue.name = "huge-candidate"; hugeValue.summary.total_cost_usd = 1e308;
+  for (const item of tinyValue.cases.flatMap((entry) => entry.runs)) item.cost_usd = 0;
+  for (const item of hugeValue.cases.flatMap((entry) => entry.runs)) item.cost_usd = 0;
+  tinyValue.cases[0].runs[0].cost_usd = 1e-308;
+  hugeValue.cases[0].runs[0].cost_usd = 1e308;
+  const overflowDecision = Q.qualityDecisionEvaluate({ ...source,
+    baseline: Q.qualityReportParse(JSON.stringify(tinyValue)),
+    candidate: Q.qualityReportParse(JSON.stringify(hugeValue)), baselineReady: true, candidateBound: true });
+  const overflowCost = overflowDecision.checks.find((item) => item.metric.metric === "maximum_cost_ratio");
+  check("release decision: finite cost inputs whose ratio overflows mirror serde_json null evidence",
+    overflowCost.passed === false && JSON.parse(overflowDecision.json).checks.find((item) => item.metric.metric === "maximum_cost_ratio").observed.ratio === null &&
+      overflowCost.detail.endsWith(" inf"));
+  check("release decision: source mismatch errors fail before a decision can be presented", (() => {
+    try { Q.qualityDecisionEvaluate({ ...source, baseline: { ...baseline, datasetName: "other" } }); return false; }
+    catch (error) { return error.message.includes("does not match candidate dataset"); }
+  })());
+
+  Q.store.qualityGate = gate;
+  Q.store.qualityGateRequest = 11;
+  Q.store.qualityReport = candidate;
+  Q.store.qualityReportRevision = 12;
+  Q.store.qualityRegression = { ...Q.qualityRegressionDraft(), baseline, candidate: Q.qualityReportParse(candidate.raw) };
+  Q.store.qualityRegressionSideRequest = { baseline: 13, candidate: 14 };
+  const exactSource = Q.qualityDecisionSource();
+  check("release decision: Regression Lab baseline is admitted only for the exact Explorer candidate",
+    exactSource.baseline === baseline && exactSource.candidateBound);
+  Q.store.qualityRegression.candidate = Q.qualityReportParse(JSON.stringify({ ...experimentReportValue, name: "different-candidate" }));
+  check("release decision: a different candidate cannot lend its baseline to the Explorer decision",
+    Q.qualityDecisionSource().baseline === null && !Q.qualityDecisionSource().candidateBound);
+
+  Q.store.qualityDecision = paired;
+  Q.store.qualityDecisionRequest = 20;
+  Q.qualityDecisionInvalidate(false);
+  check("release decision: lifecycle invalidation clears page-memory evidence and owns later work",
+    Q.store.qualityDecision === null && Q.store.qualityDecisionRequest === 21);
+
+  Q.store.view = "thread"; Q.store.selected = "decision-a"; Q.store.connectionEpoch = 22;
+  Q.store.qualityDecision = missingBaseline;
+  let releaseGateImport;
+  const gateRead = new Promise((resolve) => { releaseGateImport = resolve; });
+  const gateOperation = Q.qualityGateFile({ target: { value: "chosen", files: [{ size: 8, arrayBuffer: () => gateRead }] } });
+  const gateCleared = Q.store.qualityDecision === null && Q.store.qualityGate.acknowledged === false && !Q.qualityDecisionSource().policyReady;
+  Q.store.selected = "decision-b"; releaseGateImport(new TextEncoder().encode(validated.json).buffer); await gateOperation;
+  Q.store.selected = "decision-a"; Q.store.qualityDecision = missingBaseline;
+  let releaseReportImport;
+  const reportRead = new Promise((resolve) => { releaseReportImport = resolve; });
+  const reportOperation = Q.qualityReportFile({ target: { value: "chosen", files: [{ size: 8, arrayBuffer: () => reportRead }] } });
+  const reportCleared = Q.store.qualityDecision === null;
+  Q.store.selected = "decision-b"; releaseReportImport(new TextEncoder().encode(experimentReportText).buffer); await reportOperation;
+  Q.store.selected = "decision-a"; Q.store.qualityDecision = missingBaseline;
+  Q.store.qualityRegression = Q.qualityRegressionDraft();
+  let releasePairImport;
+  const pairRead = new Promise((resolve) => { releasePairImport = resolve; });
+  const pairOperation = Q.qualityRegressionFile({ target: { value: "chosen", getAttribute() { return "baseline"; }, files: [{ size: 8, arrayBuffer: () => pairRead }] } });
+  const pairCleared = Q.store.qualityDecision === null;
+  Q.store.selected = "decision-b"; releasePairImport(new TextEncoder().encode(experimentReportText).buffer); await pairOperation;
+  check("release decision: every pending source replacement removes the old verdict before the read settles",
+    gateCleared && reportCleared && pairCleared);
+  check("release decision: Rust fixed-six detail formatting preserves large finite values and negative zero",
+    Q.qualityDecisionFixed6(1e21) === "1000000000000000000000.000000" &&
+    Q.qualityDecisionFixed6(-0) === "-0.000000" && Q.qualityDecisionFixed6(Number.POSITIVE_INFINITY) === "inf");
+  Q.store.selected = "decision-a";
+  const hostile = structuredClone(missingBaseline);
+  hostile.policy = '<img src=x onerror="alert(1)">\u202E';
+  hostile.checks[3].metric.assertion = '<script>bad()</script>\u200B';
+  hostile.checks[3].detail = 'assertion `<script>bad()</script>\u200B` is absent';
+  hostile.json = Q.qualityDecisionJson(hostile);
+  gate.acknowledged = true;
+  Q.store.qualityGate = gate; Q.store.qualityGateRequest = hostile.gateRequest;
+  Q.store.qualityReport = candidate; Q.store.qualityReportRevision = hostile.reportRevision;
+  Q.store.qualityRegression = Q.qualityRegressionDraft();
+  Q.store.qualityRegressionSideRequest = { baseline: hostile.baselineRequest, candidate: hostile.candidateRequest };
+  const hostileHtml = Q.qualityDecisionHtml(hostile);
+  check("release decision: hostile identities remain exact in JSON and visible-safe in the decision spine",
+    hostile.json.includes("<script>bad()") && !hostileHtml.includes("<script>bad()") &&
+      hostileHtml.includes("&lt;script&gt;bad()") && !hostileHtml.includes("\u200B") && hostileHtml.includes("\\u{200B}") &&
+      hostileHtml.includes('aria-label="Inspect evidence for Assertion · &lt;script&gt;bad()&lt;/script&gt;\\u{200B}"'));
+  check("release decision: download names stay purpose-specific and path-safe",
+    Q.qualityDecisionFilename({ policy: "../../Production Approval" }) === "production-approval.decision.json");
+}
+
 check("experiment report markup: labelled read-only boundary and one stable live announcer",
   html.includes('id="quality-report" aria-labelledby="quality-report-title"') &&
   html.includes("Studio did not execute this experiment") &&
@@ -1224,6 +1363,23 @@ check("matched regression responsive: sources, policy, verdict, ledger, and metr
   html.includes(".quality-regression-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
   html.includes(".quality-regression-pair { grid-template-columns:minmax(0,1fr) auto; }"));
 
+check("release decision markup: labelled local-evidence surface and one stable live announcer",
+  html.includes('id="quality-decision" aria-labelledby="quality-decision-title"') &&
+  html.includes('id="quality-decision-announcer" role="status"') &&
+  html.includes("does not approve, deploy, promote, or attest"));
+check("release decision interaction: compute, evidence handoff, download, and clear are delegated",
+  html.includes('addEventListener("click", qualityDecisionClick)') &&
+  html.includes('data-quality-decision-build') && html.includes('data-quality-decision-inspect') &&
+  html.includes('data-quality-decision-download') && html.includes('data-quality-decision-clear'));
+check("release decision lifecycle: policy, report, pair, and connection mutations invalidate evidence",
+  html.includes("store.qualityDecision = null;") && html.includes("store.qualityDecisionRequest += 1;") &&
+  (html.match(/qualityDecisionInvalidate\(\)/g) || []).length >= 8);
+check("release decision responsive: verdict, source readiness, metrics, and check actions collapse on narrow screens",
+  html.includes(".quality-decision-sources,.quality-decision-verdict { grid-template-columns:1fr; }") &&
+  html.includes(".quality-decision-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }") &&
+  html.includes(".quality-decision-check { grid-template-columns:1fr; }") &&
+  html.includes(".quality-decision-check .small { justify-self:start; }"));
+
 check("release gate filename: portable and purpose-specific",
   Q.qualityGateFilename("../../Production Approval") === "production-approval.gate.json");
 check("release gate markup: labelled evidence-contract surface and stable live announcer",
@@ -1236,6 +1392,8 @@ check("release gate interaction: edit, import, reset, and download are delegated
   html.includes('matches("[data-quality-gate-file]")') &&
   html.includes("qualityGateClick(event)") &&
   html.includes('addEventListener("submit", (event) => event.preventDefault())'));
+check("release gate import: pending replacement immediately removes visible reviewed state",
+  html.includes('store.qualityGate.acknowledged = false;\n  if ($("quality-gate-body")) qualityGateSync();'));
 check("release gate lifecycle: connection reset discards policy and invalidates pending file reads",
   html.includes("store.qualityGate = null;") && html.includes("store.qualityGateRequest += 1;"));
 check("release gate accessibility: field errors are programmatically associated",
