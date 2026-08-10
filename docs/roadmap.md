@@ -1,10 +1,12 @@
 # Rusty platform roadmap
 
-Where the platform has been, what's landing this cycle, and what's next. Crates are versioned independently (`rusty-agent-runtime` core, `rusty-agent-server`, `rusty-worker`); phases below group work across the monorepo. Named releases: **R0.1 — Ignition**, **R0.2 — Persistence**, **R0.3 — Interop**, **R0.4 — Time Travel** (all implemented), **R0.5 — Flight Recorder**, **R0.6 — Durable Work**, **R0.7 — Agent Fabric**, **R0.8 — Rusty Learn**, **R0.9 — Capsules**, **R0.10 — Adaptation** (upcoming), and **R1.0 — Unleashed** (the stability release). History lives in [../CHANGELOG.md](../CHANGELOG.md); per-crate detail lives in each crate's README.
+Where the platform has been, what's landing this cycle, and what's next. Crates are versioned independently (`rusty-agent-runtime` core, `rusty-agent-server`, `rusty-worker`); phases below group work across the monorepo. Named releases: **R0.1 — Ignition**, **R0.2 — Persistence**, **R0.3 — Interop**, **R0.4 — Time Travel** (all implemented), **R0.5 — Flight Recorder**, **R0.6 — Durable Work**, **R0.7 — Agent Fabric**, **R0.8 — Rusty Learn**, **R0.9 — Capsules**, **R0.10 — Adaptation** (upcoming), **R0.11 — Extension Plane**, **R0.12 — Operations Plane**, and **R1.0 — Unleashed** (the stability release). History lives in [../CHANGELOG.md](../CHANGELOG.md); per-crate detail lives in each crate's README.
 
 The forward plan (R0.5 onward) comes from the product/technical strategy review of 2026-08-07. Its sequencing rule: **replay before learning** — no learning mechanism ships before the run evidence it learns from can be faithfully recorded, evaluated, and rolled back.
 
 The direction, sharpened by the 2026-08-08 architecture review: **Rusty is becoming a verifiable, adaptive Agent OS — not merely a faster agent graph framework.** Five planes, each mapping to releases below: the Trust Kernel (typed effects, policies, versioning — R0.5 shipped the taxonomy, R0.7 adds compile-time enforcement and the versioned run manifest), the Evidence Layer (events, checkpoints, signed receipts — R0.5/R0.6 shipped the hash-chained journal and effect receipts, R0.9 signs them), the Execution OS (budgets, scheduling, backpressure — R0.6 shipped pools/quotas/drain, R0.7 adds budget inheritance), the Agent Fabric (R0.7), and the Adaptive Plane (R0.8/R0.10 — candidates evaluated in the digital twin, promoted through governance, never self-rewriting). Two commitments from that review stand above the rest: retries, recovery, and speculation are only safe behind a **typed effect kernel** (exactly-once *business outcomes* where the effect protocol supports it — never a pretend exactly-once execution), and the effect kernel lands **before** the multi-agent and learning layers expand on top of it.
+
+The 2026-08-09 competitive review (mature platforms + Rust-native field) confirmed the sequencing and added a platform-completeness lens. Its key readings: among Rust projects the closest neighbor is **Chidori** (supervised durable actors); Rusty's defensible differentiation is **BSP graph execution + transactional durable work + typed effect governance**, not "durable" alone. Three capabilities the review ranked P0 shipped during the R0.8/R0.9 cycle, ahead of the plane order below: the **Quality Plane** (`rusty-eval` — versioned datasets, evaluators, experiment runner, statistical regression, failure clustering, human-feedback operations, release gates), the **middleware/interceptor SDK**, and **event-driven triggers** (signed webhooks, deduplication, trigger replay). Two P0 gaps remain and become **R0.11**: the prompt/configuration registry and the credential/connection broker. The review's adoption verdict — "not yet the default choice; the choice for workloads needing crash-safe distributed activities, exact replay, and explicit effect safety" — stands until R1.0's case-study and hardening gates close.
 
 ## Status at a glance
 
@@ -21,7 +23,10 @@ The direction, sharpened by the 2026-08-08 architecture review: **Rusty is becom
 | **R0.8 — Rusty Learn** | governed learning | Memory record model with provenance/scopes, correction loop, candidate distillation, shadow evaluation, promotion/rollback by version pointer, executor policy plane v1 | `rusty-agent-runtime` v0.8.0, `rusty-agent-server` v0.8.0, `rusty-worker` v0.3.2, `rusty-eval` v0.1.1 | ✅ Implemented | 2026-08-09 |
 | **R0.9 — Capsules** | secure isolation + federation | WASM **Component Model** capsules (WIT worlds as language-neutral contracts), deny-by-default capability host, resource budgets (fuel/epoch interruption via Wasmtime), Cedar policy engine, policy overlays; **signed run receipts** over the hash-chained journal; MCP server bridge, A2A server/client with durable tasks/artifacts | `rusty-agent-runtime` v0.9.0, `rusty-agent-server` v0.9.0, `rusty-worker` v0.3.3 | ✅ Implemented | 2026-08-09 |
 | **R0.10 — Adaptation** | executor policy learning | Checkpoint placement, retry, timeout, worker placement, concurrency policies; **runtime digital twin** (replay with recorded effects, fault/schedule injection, counterfactual branches) for offline + shadow evaluation, drift detection, revert-to-default | `rusty-agent-runtime` v0.10.0 | 📋 Planned (gated on headroom experiment) | — |
-| **R1.0 — Unleashed** | stable platform | Stable public APIs, event schema, checkpoint format, capsule manifest, migration policy; independent security review; documented capacity envelope; three production-shaped case studies | v1.0.0 all crates | 🚧 Upcoming | — |
+| **R0.11 — Extension Plane** | governed configuration + credentials | Prompt/configuration registry (versioned prompts, policies, tool contracts, model settings as governed artifacts with diffs, environment tags, promotion/rollback); credential/connection broker (OAuth connections, per-user credentials, consent scopes, refresh/revocation, short-lived opaque capability handles for tools) | `rusty-agent-server` v0.11.0 | 📋 Planned | — |
+| **R0.12 — Operations Plane** | artifacts + deployment control | Artifact plane (content-addressed artifacts with lineage, permissions, previews, versions, retention — extends the R0.7 artifact contracts); deployment control plane (immutable revisions, dev/staging/prod environments, canary + shadow deployments wired to eval release gates) | `rusty-agent-server` v0.12.0 | 📋 Planned | — |
+| **R1.0 — Unleashed** | stable platform | Stable public APIs, event schema, checkpoint format, capsule manifest, migration policy; independent security review; documented capacity envelope; three production-shaped case studies; provider/ecosystem breadth via an integrated provider layer rather than hand-built adapters | v1.0.0 all crates | 🚧 Upcoming | — |
+| Post-R1.0 candidates | breadth planes | Realtime/multimodal sessions, durable knowledge-ingestion pipelines, agent catalog + fleet operations, application publishing, enterprise administration (OIDC/SAML, RBAC, audit export) — sequenced after the stability release, per the competitive review | — | 🔭 Under consideration | — |
 
 ## Implemented
 
@@ -123,14 +128,37 @@ Gated on the R0.5 headroom experiment. Decision families in priority order: same
 
 **Release proof:** a learned policy reduces cost or latency net of telemetry overhead at non-inferior completion, with the evaluation published.
 
+### R0.11 — Extension Plane · governed configuration + credentials
+
+The two P0 gaps from the 2026-08-09 competitive review. Both extend existing governance machinery rather than inventing new trust models: the registry reuses the R0.8 candidate/promotion pipeline and the R0.7 run-manifest pins; the broker reuses the R0.9 capability model.
+
+- **Prompt/configuration registry** — prompts, policies, tool contracts, model settings, and memory configurations as versioned, content-addressed artifacts: commits, diffs, owners, environment tags (dev/staging/prod), promotion and rollback by immutable version pointer, and change webhooks. Runs pin registry versions in the run manifest, so "which prompt produced this action" stays answerable from the receipt.
+- **Credential/connection broker** — tools stop holding raw credentials. OAuth connections, per-user credentials, consent scopes, automatic refresh, revocation, and connection health live in one broker; tools receive short-lived, opaque capability handles (non-serializable, scope-checked at use) — the same deny-by-default discipline capsules already apply to the filesystem and network.
+- **Middleware composition** — the shipped interceptor SDK gains registry-aware ordering and governed middleware configuration, so interception policy is versioned like everything else.
+
+**Release proof:** rotate a credential and promote a prompt version without redeploying; a replayed run still pins and reports the exact versions it used; a revoked connection fails closed at the next tool call.
+
+### R0.12 — Operations Plane · artifacts + deployment control
+
+- **Artifact plane** — content-addressed artifacts (files, images, audio, generated outputs) connected to runs: lineage back to the producing effect, permissions, previews, versions, and retention policies. Extends the R0.7 artifact contracts into a first-class server surface and SDK object.
+- **Deployment control plane** — immutable deployment revisions, dev/staging/prod environments, environment-scoped secrets, promotion and rollback, canary and shadow deployments gated by `rusty-eval` release gates, and health/log surfaces. Single-binary self-hosting remains the default; the control plane manages it, never replaces it.
+
+**Release proof:** ship a graph change to staging, evaluate it against a recorded dataset, canary it at 10%, and roll back by revision pointer — with every step on the receipt chain.
+
 ### R1.0 — Unleashed · stable platform
 
 - Stable public APIs, event schema, checkpoint format, capsule manifest, and migration policy.
 - Independent security review of server multitenancy, secrets, protocol endpoints, and the WASM host.
 - Documented capacity envelope and supported deployment topologies.
 - At least three production-shaped case studies: durability, multi-agent coordination, sandboxed execution.
+- Provider/ecosystem breadth by **integrating an external provider/vector layer** (Rig-class) instead of hand-building adapter lists — Rusty stays the durable runtime underneath; the integration carries our receipts and effect governance into third-party model calls.
+- Product readiness: publishable onboarding (done — all seven packages on crates.io/PyPI/npm), templates, contributor documentation, and issue/label hygiene.
 - No unresolved critical CI, data-loss, replay-integrity, or tenant-isolation defect.
-- Also in scope: hosted multi-tenant control plane (tenant isolation already landed in v0.5 as the first brick; durable queues arrive in R0.6), graphs on a WASM target (browser/edge), and registry publishing across crates.io / npm / PyPI.
+- Also in scope: hosted multi-tenant control plane (tenant isolation already landed in v0.5 as the first brick; durable queues arrive in R0.6), graphs on a WASM target (browser/edge), and registry publishing across crates.io / npm / PyPI (done 2026-08-10).
+
+### Post-R1.0 candidates · breadth planes
+
+From the competitive review, sequenced after the stability release so the runtime moat is proven first: realtime/multimodal durable sessions (voice, barge-in, live approvals — a Rust-native low-latency showcase), durable knowledge-ingestion pipelines (connectors, chunking, ACL propagation, freshness, retrieval evaluation — *not* a generic RAG framework), agent catalog + fleet operations (ownership, health, bulk upgrade/revoke), application publishing (one-command API/widget/webhook/channel), and enterprise administration (OIDC/SAML, SCIM, RBAC/ABAC, audit export, spend limits).
 
 ## Design principles
 
@@ -144,7 +172,7 @@ Gated on the R0.5 headroom experiment. Decision families in priority order: same
 
 ## Deliberately de-prioritized
 
-Until the runtime moat is proven, we do not build: a generic vector-database abstraction or RAG framework; long model-provider lists with no operational differentiation; voice/realtime media agents; a drag-and-drop no-code builder; an agent marketplace (before signed capsules exist); more ReAct variants and prompt templates; a hosted control plane (before durable workers, migrations, and self-hosting are excellent); model-weight training or open-ended self-modification.
+Until the runtime moat is proven, we do not build: a generic vector-database abstraction or RAG framework (durable *ingestion pipelines* are a post-R1.0 candidate — that is a different thing); hand-built long model-provider lists (R1.0 integrates an external provider layer instead); a drag-and-drop no-code builder; an agent marketplace (before signed capsules exist); more ReAct variants and prompt templates; a hosted control plane (before durable workers, migrations, and self-hosting are excellent); model-weight training or open-ended self-modification. Voice/realtime media sessions moved off this list into the post-R1.0 candidates per the 2026-08-09 competitive review — they are a sequencing decision, not a rejection.
 
 ## Explicitly rejected
 
