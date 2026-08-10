@@ -128,7 +128,7 @@
 //!   connection fails closed at the next tool call with a typed,
 //!   journaled [`broker::BrokerDenial`]. [`broker::CredentialMediator`] /
 //!   [`broker::MediatedTool`] mediate `ToolExecutor` dispatch, and behind
-//!   `wasm` [`broker::BrokeredCapsuleHost`] turns capsule `Secret`
+//!   `wasm` `broker::BrokeredCapsuleHost` turns capsule `Secret`
 //!   grants into broker-issued handles; in both, resolution returns the
 //!   credential bytes to the host-side connector, never to tool code.
 //!   The store backends, envelope cryptography, master key, and

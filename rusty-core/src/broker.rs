@@ -47,7 +47,7 @@
 //!   TTL turns over; the tool presents the handle to the host-side
 //!   connector, and resolution returns the credential bytes to the
 //!   *connector* — they never enter tool code. Behind `wasm`,
-//!   [`BrokeredCapsuleHost`] is the capsule half: a manifest's `Secret`
+//!   `BrokeredCapsuleHost` is the capsule half: a manifest's `Secret`
 //!   grants are brokered into issued handle tokens the guest receives in
 //!   its input, the R0.9 "the guest receives opaque tokens" precedent
 //!   extended from names to broker-issued handles.
