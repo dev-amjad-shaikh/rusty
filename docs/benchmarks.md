@@ -28,6 +28,7 @@ cargo bench -p rusty-agent-runtime --bench checkpoint
 cargo bench -p rusty-agent-runtime --bench interrupt_resume
 cargo bench -p rusty-agent-runtime --bench state_clone
 cargo bench -p rusty-agent-runtime --bench checkpoint_placement
+cargo bench -p rusty-agent-runtime --bench headroom_experiment
 ```
 
 Results (JSON estimates) are written to `target/criterion/<group>/<id>/new/estimates.json`.
@@ -582,3 +583,257 @@ still embed bytes by default, keeping replay fixtures self-contained per
 the design. Mailbox/checkpoint-channel spill adoption is deferred (see the
 wave-4 annotation in `docs/agent-fabric-design.md`), so no benchmark here
 claims end-to-end artifact savings yet.
+
+## Adaptation headroom — the R0.10 gate experiment (2026-08-09)
+
+The [adaptation design](adaptation-design.md) gates the whole R0.10 release
+on one question, pre-registered before the bench ran: **per decision family,
+can any policy beat the `static-v0` floor, net of the telemetry overhead
+that learning imposes?** This section publishes the measurement. The
+clairvoyant oracle arm is the point: if even an oracle deciding with full
+knowledge of the recorded outcome cannot beat the floor by more than the
+instrumentation costs, the family is closed regardless of learner quality,
+and the design's negative branch (twin machinery plus published evidence, no
+promoted learner) is the outcome. No family hit its kill condition in this
+run — but the table below is written to be re-run, and the bar does not
+move.
+
+**Reproduce:**
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# The new classes (durable-work, LLM-bound scripted) and the overhead
+# measurement; ~30 s with the bench's tuned Criterion budgets:
+cargo bench -p rusty-agent-runtime --bench headroom_experiment
+
+# The engine-bound class (the R0.5 checkpoint-placement family):
+cargo bench -p rusty-agent-runtime --bench checkpoint_placement
+```
+
+Deterministic family metrics (simulated latency, attempts, cost, completion)
+come from an untimed, asserted accounting pass printed with `HEADROOM-*`
+prefixes; the telemetry overhead is real wall time, Criterion-timed on the
+production emission path and re-measured untimed inside the accounting pass
+so every verdict row is self-contained.
+
+### Method
+
+**Workload classes.** Three, per the design's measurement protocol:
+
+- **Engine-bound** — the existing `checkpoint_placement` family (the R0.5
+  section above). Its row carries over; it was not re-run this cycle.
+- **Durable-work** — 400 tasks across four callee profiles (a fast
+  payment-style write path, a search read, a notification send, a heavy
+  report builder with a fat tail), 10 % declared `NonIdempotent`, failing on
+  a scripted schedule: transient errors, rate limits with `Retry-After`
+  floors, timeouts, dependency failures, resource exhaustion, and
+  permanent-invalid inputs in declared proportions, drawn from committed
+  seeds. Two queue-and-worker sub-experiments price the remaining families:
+  a 4-worker fleet with scripted degradation windows (placement), and one
+  shared callee behind a hard concurrency ceiling of 8 (concurrency). Retry
+  decisions are made by the real `classify_retry` / `backoff_delay_ms` /
+  `retry_legal_actions` — the floor arm *is* `static-v0`, sourced from
+  `ExecutorPolicy::static_v0()`, not restated.
+- **LLM-bound scripted** — 40 recorded runs of 24 steps (one model call per
+  step, a tool call on 60 % of steps) with realistic latencies (model p50
+  2.2 s, σ = 0.45) and per-attempt USD costs, replayed exactly with
+  decisions varied. The generator plus its seed is the committed artifact —
+  the same discipline as the placement bench's analytic schedules.
+
+**Arms, per family.** The floor (the floor's exact constants: 1 s base /
+300 s cap full-jitter backoff, 3 attempts, uncapped timeout and
+concurrency); a **clairvoyant oracle** (retries only when a remaining
+in-budget attempt succeeds, with no delay beyond the world's own
+`Retry-After`; bounds a hang at the 100 ms minimum rung and a completing
+attempt exactly at its true latency; never places work on a worker inside
+its degradation window; caps concurrency exactly at the ceiling); and one
+**cheap feature-based heuristic** (a per-class backoff table; a per-callee
+rolling p99-plus-25 % timeout; quarantine-after-`ResourceExhausted`
+placement; AIMD concurrency). Each family is priced in isolation: the
+family's arm varies while the other decision dimension is pinned at the
+floor.
+
+**World constraints, not policy choices** (they bound every arm equally): a
+hung attempt with no timeout in force surfaces at the queue's 300 s
+lease/visibility boundary and classifies `Unknown`; a callee-supplied
+`Retry-After` floors any arm's delay; the timeout ladder's minimum rung is
+100 ms. The gates never move for any arm: effect gate, class gate, attempt
+budget.
+
+**The pre-registered bar.** Headroom exists for a family when, on at least
+one workload class, the clairvoyant arm beats `static-v0` on cost or
+latency per run by a margin exceeding the family's measured per-run
+telemetry overhead, at non-inferior completion. Telemetry overhead is
+charged per run at the instrumented decision rate (the larger of the
+floor's and the oracle's) — emission on versus off, the granularity a user
+pays. Simulated-world margins are deterministic by construction, so the
+confidence intervals that matter are Criterion's, on the overhead term
+(measured on the real emission path: `DecisionEvent` construction, feature
+assembly, and journaling with the hash chain, the retry emitter calling the
+same `retry_decision_event` the scheduler uses).
+
+### Environment
+
+| | |
+|---|---|
+| CPU | Apple M2 Max (12 cores: 8 performance + 4 efficiency) |
+| RAM | 96 GB |
+| OS | macOS 26.5.1 (Build 25F80), arm64 |
+| Rust | rustc 1.97.1 (8bab26f4f 2026-07-14) |
+| Criterion | 0.5.1 (default features off: no plotters/rayon) |
+| Date of run | 2026-08-09 |
+| Crate version | R0.10 wave 1, unreleased, on top of `rusty-agent-runtime` 0.9.0 |
+| Load | single-user machine, no other heavy processes |
+
+### Results
+
+**Telemetry overhead per decision** (Criterion mean [95 % CI]; journal
+bytes from the accounting pass's snapshot-delta measurement):
+
+| Emission | Mean | 95 % CI | Journal bytes |
+|---|---|---|---|
+| Retry decision (wired since R0.8) | 9.99 µs | [9.94, 10.06] µs | 731 |
+| Timeout decision (with percentile features) | 14.94 µs | [14.82, 15.11] µs | 871 |
+| Timeout feature snapshot alone (p50/p95/p99 over 256 samples) | 3.63 µs | [3.61, 3.65] µs | — |
+| Placement decision (with worker-health features) | 12.53 µs | [12.48, 12.59] µs | 867 |
+| Concurrency decision | 11.33 µs | [11.29, 11.38] µs | 876 |
+
+**Retry family, durable-work** (400 tasks; latency is per-task wall):
+
+| Arm | Mean | p50 | p95 | Attempts | Wasted | Completion | Dead-lettered |
+|---|---|---|---|---|---|---|---|
+| floor | 905.4 ms | 218 ms | 3,624 ms | 459 | 64 | 98.8 % | 1 |
+| clairvoyant | 818.8 ms | 191 ms | 3,546 ms | 457 | 62 | 98.8 % | 0 |
+| heuristic | 976.4 ms | 224 ms | 4,141 ms | 459 | 64 | 98.8 % | 1 |
+
+**Timeout family, durable-work** (tapes with hangs; retry pinned at floor):
+
+| Arm | Mean | p50 | p95 | Attempts | Wasted | Completion | Dead-lettered |
+|---|---|---|---|---|---|---|---|
+| floor | 14,418 ms | 247 ms | 6,625 ms | 471 | 82 | 97.3 % | 2 |
+| clairvoyant | 929.8 ms | 237 ms | 3,984 ms | 471 | 82 | 97.3 % | 2 |
+| heuristic | 1,173.2 ms | 247 ms | 4,878 ms | 477 | 88 | 97.3 % | 2 |
+
+**Retry family, LLM-bound** (40 runs; latency is per-run wall; cost in USD):
+
+| Arm | Mean | p50 | p95 | Attempts | Wasted | Cost | Completion |
+|---|---|---|---|---|---|---|---|
+| floor | 62,266 ms | 67,214 ms | 86,335 ms | 1,448 | 144 | $3.3985 | 70.0 % |
+| clairvoyant | 60,793 ms | 65,966 ms | 85,445 ms | 1,442 | 138 | $3.3944 | 70.0 % |
+| heuristic | 63,107 ms | 67,564 ms | 88,595 ms | 1,448 | 144 | $3.3985 | 70.0 % |
+
+**Timeout family, LLM-bound** (tapes with hangs; retry pinned at floor):
+
+| Arm | Mean | p50 | p95 | Attempts | Wasted | Cost | Completion |
+|---|---|---|---|---|---|---|---|
+| floor | 279,212 ms | 364,596 ms | 672,883 ms | 1,629 | 175 | $3.7736 | 85.0 % |
+| clairvoyant | 69,070 ms | 71,619 ms | 83,958 ms | 1,629 | 175 | $3.7736 | 85.0 % |
+| heuristic | 77,309 ms | 77,076 ms | 111,008 ms | 1,595 | 196 | $3.7291 | 77.5 % |
+
+**Placement family, durable-work** (240 tasks, 4 workers, two scripted
+degradation windows; retry pinned at floor):
+
+| Arm | Mean | p50 | p95 | Attempts | Wasted | Completion | Dead-lettered |
+|---|---|---|---|---|---|---|---|
+| floor | 4,299 ms | 4,391 ms | 8,026 ms | 375 | 144 | 96.3 % | 9 |
+| clairvoyant | 4,245 ms | 4,399 ms | 7,872 ms | 240 | 0 | 100 % | 0 |
+| heuristic | 4,538 ms | 4,368 ms | 9,245 ms | 242 | 2 | 100 % | 0 |
+
+**Concurrency family, durable-work** (120 tasks against a hard ceiling of
+8 in-flight; retry pinned at floor):
+
+| Arm | Mean | p50 | p95 | Attempts | Wasted | Completion | Dead-lettered |
+|---|---|---|---|---|---|---|---|
+| floor | 2,126 ms | 2,030 ms | 3,119 ms | 336 | 280 | 46.7 % | 64 |
+| clairvoyant | 1,600 ms | 1,535 ms | 2,996 ms | 120 | 0 | 100 % | 0 |
+| heuristic | 2,169 ms | 2,080 ms | 4,279 ms | 122 | 2 | 100 % | 0 |
+
+**The verdict rows** (margin = floor − clairvoyant mean latency, per run;
+overhead = instrumented decision rate × measured per-decision cost, per
+run; the bar is margin > overhead at non-inferior completion):
+
+| Family | Class | Floor mean | Clairvoyant | Margin / run | Overhead / run | Completion floor→oracle | Headroom |
+|---|---|---|---|---|---|---|---|
+| Retry | durable-work | 905.4 ms | 818.8 ms | 34.6 s | 0.6 ms | 98.8 → 98.8 % | **YES** |
+| Timeout | durable-work | 14,418 ms | 929.8 ms | 5,395 s | 8.4 ms | 97.3 → 97.3 % | **YES** |
+| Retry | LLM-bound | 62.3 s | 60.8 s | 1.47 s | 0.03 ms | 70.0 → 70.0 % | **YES, thin** |
+| Timeout | LLM-bound | 279.2 s | 69.1 s | 210.1 s | 0.69 ms | 85.0 → 85.0 % | **YES** |
+| Placement | durable-work | 4,299 ms | 4,245 ms | 12.9 s | 6.2 ms | 96.3 → 100 % | **YES** |
+| Concurrency | durable-work | 2,126 ms | 1,600 ms | 63.2 s | 4.0 ms | 46.7 → 100 % | **YES** |
+| Checkpoint placement | engine-bound | — | — | — | — | — | **YES** (R0.5 row above) |
+| Checkpoint placement | LLM-bound | — | — | — | — | — | **NO** (R0.5: <1 % of run wall) |
+
+### Interpretation
+
+- **Timeout is the blowout the design predicted.** "No bound is a policy,
+  and rarely the right one": with hangs in the fault schedule, the floor
+  discovers each one at the 300 s lease boundary while the oracle pays
+  100 ms. Mean latency falls 14.4 s → 0.93 s per task in durable-work and
+  279 s → 69 s per run in LLM-bound — margins of four to six orders of
+  magnitude over the ~10–15 µs emission cost, at identical completion. The
+  heuristic captures ~90 % of the oracle's win, with one honest scar: on
+  the heavy-tailed model endpoint its p99-plus-margin bound aborts real
+  work, dropping completion 85.0 → 77.5 % (3 dead-lettered runs vs the
+  floor's 1). A learned timeout must clear the non-inferiority bar the
+  heuristic failed here.
+- **Retry headroom is real but bounded by the world's own floors.** In
+  durable-work the oracle saves ~10 % of mean latency — most of the floor's
+  remaining delay is `Retry-After` and fail latency no policy may skip. In
+  LLM-bound runs the margin thins to ~2.4 % of latency and 0.12 % of cost:
+  faults are infrequent and delays are small next to minute-long runs, and
+  the dominant run-failure source is the non-retryable tail (the effect
+  gate plus invalid input), which no retry policy may touch. Both clear the
+  bar by orders of magnitude regardless. Note the cheap per-class table
+  *underperforms* the floor's jittered exponential on latency in both
+  classes (976 vs 905 ms durable; 63.1 vs 62.3 s LLM) — it over-waits on
+  `Unknown` and `ResourceExhausted`. The wedge is real; the obvious static
+  table does not harvest it.
+- **Placement headroom shows up in completion and wasted attempts, not mean
+  latency.** The oracle's latency margin is thin (4,299 → 4,245 ms) because
+  only tasks landing in a degradation window are affected — but it
+  eliminates all 144 wasted attempts and all 9 dead-letters. The
+  quarantine heuristic nearly matches it (2 wasted, 100 % completion) at a
+  small latency cost for idling a worker through quarantine. This is the
+  family's predicted shape: value concentrates in fleets under faults.
+- **Concurrency is a completion family.** The uncapped floor thundering 120
+  tasks into a ceiling of 8 with a 3-attempt budget produces a rejection
+  storm that dead-letters 64 of 120 tasks; the oracle's exact cap completes
+  everything with zero waste. The AIMD heuristic also completes everything
+  but does not beat the floor's latency (its halving churns through the
+  same rejections) — backpressure's value is completion insurance, and its
+  engine-bound row is zero by construction (no shared constrained resource
+  in that class's definition).
+- **The LLM-bound control class confirms the R0.5 pattern and adds one
+  exception.** Cost headroom is ~0.1 % and retry latency headroom ~2 % —
+  the near-zero prediction holds for retry — but timeout is the exception:
+  a 2.5 % hang rate per model call puts a 300 s discovery wait inside the
+  median run (floor p50: 365 s), and bounding it is the largest single
+  margin in the experiment.
+- **Overhead is not the gate anywhere.** The dearest emission (timeout,
+  with its percentile snapshot) costs ~15 µs and 871 journal bytes per
+  decision; the cheapest margin above is 1.47 s per run. Instrumentation
+  would have to get ~10⁵× more expensive, or workloads ~10⁵× thinner, to
+  close any row that opened here.
+
+One discipline note: the clairvoyant arm is a *ceiling over the feature
+space*, not a learner. A promoted policy will land between the heuristic
+and the oracle; the gate establishes only that the wedge exists net of
+telemetry. Wave 3's twin evaluation is where a specific candidate proves
+its own row.
+
+### Verdict
+
+> **Headroom exists for every family the Wave-1 experiment priced, net of
+> telemetry overhead, at non-inferior completion — retry (durable-work and
+> LLM-bound, the latter thin), timeout (both classes, the largest margins
+> in the experiment), placement and concurrency (durable-work,
+> completion-driven) — while checkpoint placement keeps its R0.5 split
+> verdict (engine-bound yes, LLM-bound no). Per the design's leanings the
+> landing order stands: retry and timeout proceed to Wave 3's landing
+> track; placement, concurrency, and checkpoint placement ship shadow-only
+> with their emission points and fixtures in place; speculation stays
+> deferred. No family hit its kill condition, so R0.10's negative branch
+> does not trigger — but the bar, the fixtures, and the overhead
+> measurement are committed and re-runnable, so any future row closes by
+> re-measurement, not redesign.**

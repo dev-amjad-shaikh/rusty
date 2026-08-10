@@ -391,6 +391,40 @@ published in [benchmarks.md](benchmarks.md) in the established format, with each
 verdict — land, shadow-only, or closed — and the negative branch written where it applies.
 The experiment is the gate: Wave 3's scope is exactly the families whose rows clear the bar.
 
+> **Wave 1 status: implemented (2026-08-09).** The experiment landed as
+> `rusty-core/benches/headroom_experiment.rs` (`cargo bench -p
+> rusty-agent-runtime --bench headroom_experiment`), with the engine-bound
+> class carried from the R0.5 `checkpoint_placement` family. Durable-work
+> and LLM-bound-scripted classes run the floor (the real `classify_retry`
+> with `ExecutorPolicy::static_v0()`'s exact constants), a clairvoyant
+> oracle, and one cheap heuristic per family over seeded world tapes —
+> scripted fault schedules with transient errors, rate limits with
+> `Retry-After` floors, hangs, and resource exhaustion in declared
+> proportions — with each family priced in isolation and telemetry overhead
+> Criterion-timed on the real emission path (~10–15 µs and 731–876 journal
+> bytes per decision). **Every priced family cleared the pre-registered
+> bar; no kill condition triggered.** Timeout is the largest margin in the
+> experiment (the floor's 300 s lease-boundary hang discovery versus the
+> oracle's minimum rung: ~13.5 s per durable task, ~210 s per LLM run, at
+> identical completion); retry is real but bounded by `Retry-After` floors
+> (~10 % of durable-task latency, thinning to ~2 % of latency and ~0.1 % of
+> cost in LLM-bound runs — the R0.5 control-class prediction confirmed);
+> placement and concurrency headroom is completion-driven (wasted attempts
+> and dead-letters eliminated, mean latency nearly unchanged). Two honest
+> scars, published with the numbers: the cheap backoff table underperforms
+> the floor's jittered exponential on latency in both classes, and the
+> p99-plus-margin timeout heuristic fails the non-inferiority bar on the
+> heavy-tailed model endpoint (premature aborts, 77.5 % vs 85 %
+> completion). Checkpoint placement keeps its R0.5 split verdict
+> (engine-bound yes, LLM-bound no); speculation stays deferred with no
+> measurement, as designed. The full table, method, and per-family
+> interpretation are the "Adaptation headroom" section of
+> [benchmarks.md](benchmarks.md); Wave 3's scope per the gate is retry and
+> timeout on the landing track, placement, concurrency, and checkpoint
+> placement shadow-only. No core-file changes were needed: the emission
+> seams (`retry_decision_event`, `ExecutorPolicy::static_v0`, the
+> `DecisionEvent` contract) already exposed everything the arms required.
+
 **Wave 2 — the runtime digital twin.** Fault schedules, schedule randomization,
 counterfactual branches (fork + hybrid continuation + `BranchDiff`), shadow decisions with
 dual `DecisionEvent` emission. Exit: a recorded run replays under a fault schedule

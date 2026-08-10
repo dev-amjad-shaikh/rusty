@@ -87,3 +87,7 @@ harness = false
 [[bench]]
 name = "checkpoint_placement"
 harness = false
+
+[[bench]]
+name = "headroom_experiment"
+harness = false
