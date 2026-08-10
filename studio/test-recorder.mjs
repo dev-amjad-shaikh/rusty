@@ -29,7 +29,9 @@ globalThis.__rec = {
   recInlineValue, recIssueMessage, recIsSuspensionCheckpoint, recInvestigation,
   recStoryStepHtml, recFinalized, recInvestigationHtml,
   recReplayBannerHtml, recApiErrorBannerHtml, recTotalsHtml,
-  recCompareRows, recCmpEventHtml, recCompareHtml,
+  recExactUnsigned, recRecordedLatency, recComparisonEvidenceState, recJournalSignals,
+  recComparisonMetric, recComparisonLatencyMetric, recComparisonReport, recComparisonMetricHtml, recComparisonReportHtml,
+  recCompareRows, recCmpEventHtml, recCompareHtml, recCompareInputsCurrent, AGENT_NUMBER_TOKENS,
 };`, sandbox, { filename: "index.html<script>" });
 
 const R = sandbox.__rec;
@@ -435,7 +437,7 @@ check("investigation accessibility: stacked evidence is scrolled into view",
   check("error messages are HTML-escaped", escaped.includes("&lt;script&gt;") && !escaped.includes("<script>`"));
 }
 
-/* -- fork compare: row alignment (BranchDiff shape from rusty-core replay.rs) */
+/* -- run comparison: row alignment (BranchDiff shape from rusty-core replay.rs) */
 
 const cev = (seq, kind, extra = {}) => ({
   id: `cmp:${seq}`, seq, kind, node_id: null, status: "ok", ...extra,
@@ -461,6 +463,80 @@ const CMP_DIFF = {
 };
 
 {
+  const unsafe = {};
+  Object.defineProperty(unsafe, R.AGENT_NUMBER_TOKENS, {
+    value: { events: "18446744073709551615" }, enumerable: false,
+  });
+  check("comparison numbers: safe and raw u64 values remain exact",
+    R.recExactUnsigned({ events: 6 }, "events") === 6n &&
+    R.recExactUnsigned(unsafe, "events") === 18446744073709551615n &&
+    R.recExactUnsigned({ events: 1.5 }, "events") === null);
+}
+
+{
+  const completeBase = { run_id: "base", complete: true, events: CMP_BASE };
+  const completeBranch = { run_id: "candidate", complete: true, events: CMP_BRANCH };
+  eq("comparison evidence: finalized journals and matching atomic totals are exact",
+    R.recComparisonEvidenceState(CMP_DIFF, completeBase, completeBranch, "base", "candidate").state, "finalized");
+  eq("comparison evidence: matching unfinished journals stay live rather than final",
+    R.recComparisonEvidenceState(CMP_DIFF, { ...completeBase, complete: false }, completeBranch, "base", "candidate").state, "live");
+  eq("comparison evidence: a revision advance cannot masquerade as the atomic diff",
+    R.recComparisonEvidenceState(CMP_DIFF, { ...completeBase, events: CMP_BASE.concat(cev(7, "resume")) }, completeBranch, "base", "candidate").state, "mismatch");
+  eq("comparison evidence: unavailable timelines preserve divergence-only truth",
+    R.recComparisonEvidenceState(CMP_DIFF, null, completeBranch, "base", "candidate").state, "partial");
+  check("comparison evidence: response identities and boolean completeness are exact-contract gates",
+    R.recComparisonEvidenceState(CMP_DIFF, { ...completeBase, run_id: "other" }, completeBranch, "base", "candidate").reason === "invalid_envelope" &&
+    R.recComparisonEvidenceState(CMP_DIFF, completeBase, { ...completeBranch, complete: "true" }, "base", "candidate").usableEvents === false);
+}
+
+{
+  const base = CMP_BASE.map((event, index) => ({ ...event, effect: index === 5 ? "non_idempotent" : "pure", latency_ms: index + 1 }));
+  const branch = CMP_BRANCH.map((event, index) => ({ ...event, effect: index === 5 ? "read_only" : "pure", latency_ms: index + 2,
+    status: index === 5 ? "error" : "ok" }));
+  const diff = {
+    ...CMP_DIFF,
+    step_diffs: [{ step: 2, channels: [{ channel: "answer", base: "a", branch: "b" }, { channel: "audit<log>", base: null, branch: [] }] }],
+  };
+  const state = { state: "finalized", label: "finalized evidence", usableEvents: true };
+  const report = R.recComparisonReport("base-full", "candidate-full", base, branch, diff, state);
+  check("comparison report: resource deltas are descriptive, never a quality verdict",
+    report.metrics[0].delta === "80 tokens less" && report.metrics[1].tone === "less" &&
+    report.metrics[2].delta === "same recorded value" && report.metrics[3].delta.includes("latency more"));
+  check("comparison report: structural and repeat-risk signals remain attributable",
+    report.divergence === 4n && report.changedSteps === 1 && report.changedChannels === 2 &&
+    report.baseSignals.repeatSensitive === 1 && report.branchSignals.errors === 1);
+  const reportHtml = R.recComparisonReportHtml(report);
+  check("comparison report html: decision balance names both runs and withholds an automatic winner",
+    reportHtml.includes("base-full") && reportHtml.includes("candidate-full") &&
+    reportHtml.includes("No automatic winner") && reportHtml.includes("not proof of a better answer"));
+  check("comparison report html: metric values expose baseline/candidate semantics to assistive tech",
+    reportHtml.includes('<span class="sr-only">Baseline: </span>') &&
+    reportHtml.includes('<span class="sr-only">Candidate: </span>'));
+  check("comparison report html: hostile channel identities are escaped inside bounded structural evidence",
+    reportHtml.includes("audit&lt;log&gt;") && !reportHtml.includes("audit<log>"));
+}
+
+{
+  const partial = R.recComparisonReport("base", "candidate", CMP_BASE, CMP_BRANCH, CMP_DIFF,
+    { state: "partial", label: "divergence only", usableEvents: false });
+  check("comparison report: partial timelines suppress latency and operational claims",
+    partial.metrics[3].tone === "unknown" && partial.baseSignals === null && partial.branchSignals === null &&
+    R.recComparisonReportHtml(partial).includes("Full journal signals unavailable"));
+  const signals = R.recJournalSignals([
+    { effect: "future_effect", status: "ok" }, { effect: "compensatable", status: "interrupted", kind: "interrupt" },
+  ]);
+  check("comparison signals: unknown effects and one interrupt event stay distinct",
+    signals.unknownEffects === 1 && signals.repeatSensitive === 1 && signals.interruptions === 1);
+  const partialLatency = R.recRecordedLatency([{ latency_ms: 4 }, { latency_ms: null }]);
+  const fullLatency = R.recRecordedLatency([{ latency_ms: 4 }, { latency_ms: 6 }]);
+  check("comparison latency: optional samples retain explicit observed-event coverage",
+    partialLatency.total === 4n && partialLatency.observed === 1 && partialLatency.events === 2 && !partialLatency.complete &&
+    fullLatency.total === 10n && fullLatency.complete);
+  check("comparison latency: partial coverage stays neutral rather than creating a favorable rank",
+    R.recComparisonLatencyMetric([{ latency_ms: 1 }, {}], [{ latency_ms: 9 }, {}], true).delta === "partial samples · not ranked");
+}
+
+{
   const rows = R.recCompareRows(CMP_BASE, CMP_BRANCH, CMP_DIFF);
   eq("compare rows: one row per seq in the union",
     rows.map((r) => r.seq), [0, 1, 2, 3, 4, 5, 6]);
@@ -473,6 +549,17 @@ const CMP_DIFF = {
     rows[5].base && rows[5].base.kind === "model_call" && rows[5].branch === null);
   check("compare rows: added row carries only the branch event",
     rows[6].branch && rows[6].branch.kind === "tool_call" && rows[6].base === null);
+
+  const hugeA = cev(Number("9007199254740992"), "model_call");
+  const hugeB = cev(Number("9007199254740993"), "tool_call");
+  Object.defineProperty(hugeA, R.AGENT_NUMBER_TOKENS, { value: { seq: "9007199254740992" }, enumerable: false });
+  Object.defineProperty(hugeB, R.AGENT_NUMBER_TOKENS, { value: { seq: "9007199254740993" }, enumerable: false });
+  const hugeDiff = { first_divergent_seq: Number("9007199254740992") };
+  Object.defineProperty(hugeDiff, R.AGENT_NUMBER_TOKENS, { value: { first_divergent_seq: "9007199254740992" }, enumerable: false });
+  const hugeRows = R.recCompareRows([hugeB, hugeA], [hugeA], hugeDiff);
+  check("compare rows: adjacent legal u64 sequences remain distinct and ordered",
+    hugeRows.length === 2 && hugeRows[0].seq === 9007199254740992n && hugeRows[1].seq === 9007199254740993n &&
+    hugeRows[1].cls === "removed" && R.recSortEvents([hugeB, hugeA])[0] === hugeA);
 }
 
 {
@@ -505,6 +592,12 @@ const CMP_DIFF = {
     html.includes("first divergence — seq 4") && html.indexOf("first divergence") === html.lastIndexOf("first divergence"));
   check("compare html: removed and added tags", html.includes(">removed</span>") && html.includes(">added</span>"));
   check("compare html: prefix cells are dimmed", html.includes('cmp-side same'));
+  check("compare html: human report precedes technical rows behind a disclosure",
+    html.indexOf('class="cmp-report"') < html.indexOf('class="cmp-evidence"') &&
+    html.includes("Inspect aligned event evidence"));
+  check("compare html: aligned evidence exposes table, row, header, and cell semantics",
+    html.includes('role="table"') && html.includes('role="row"') &&
+    html.includes('role="columnheader"') && html.includes('role="cell"'));
 
   const sameHtml = R.recCompareHtml("a", "b", CMP_BASE, CMP_BASE, { first_divergent_seq: null });
   check("compare html: identical branches say so", sameHtml.includes("logically identical"));
@@ -512,6 +605,15 @@ const CMP_DIFF = {
   const xssBase = [cev(0, "node_input", { node_id: "<img src=x onerror=alert(1)>" })];
   const xssHtml = R.recCompareHtml("a", "b", xssBase, [], { first_divergent_seq: 0 });
   check("compare html escapes node ids", !xssHtml.includes("<img") && xssHtml.includes("&lt;img"));
+
+  const hostileSeq = cev(0, "model_call");
+  hostileSeq.seq = '\" onmouseover=alert(1) x="';
+  const hostileSeqHtml = R.recCmpEventHtml(hostileSeq, "divergent");
+  const exactSeq = cev(Number("9007199254740993"), "model_call");
+  Object.defineProperty(exactSeq, R.AGENT_NUMBER_TOKENS, { value: { seq: "9007199254740993" }, enumerable: false });
+  check("compare event: sequence tooltip rejects attribute injection and preserves raw u64 evidence",
+    !hostileSeqHtml.includes("onmouseover") && hostileSeqHtml.includes("seq ?") &&
+    R.recCmpEventHtml(exactSeq, "same").includes("seq 9007199254740993"));
 
   const noTotals = R.recCompareHtml("a", "b", CMP_BASE, CMP_BRANCH, {});
   check("compare html: missing totals degrade to a note", noTotals.includes("totals unavailable"));
@@ -523,6 +625,17 @@ const CMP_DIFF = {
     totals.includes("6 event(s)") && totals.includes("160 total") && totals.includes("$0.00042"));
   eq("totals line: missing value", R.recTotalsHtml(undefined).includes("unavailable"), true);
 }
+
+check("comparison interaction: semantic run labels, atomic revision reconciliation, and stable report focus are wired",
+  html.includes("Baseline run<input id=\"inp-cmp-base\"") &&
+  html.includes("Candidate run<input id=\"inp-cmp-branch\"") &&
+  html.includes("recComparisonEvidenceState(diff, baseResponse, branchResponse, baseId, branchId)") &&
+  html.includes("recCompareInputsCurrent(baseId, branchId)") &&
+  html.includes('$("cmp-report-title")?.focus({ preventScroll: true })'));
+check("comparison responsive: decision balance, metrics, and findings collapse deliberately",
+  html.includes(".cmp-balance { grid-template-columns: 1fr; }") &&
+  html.includes(".cmp-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }") &&
+  html.includes(".cmp-report-grid { grid-template-columns: 1fr; }"));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

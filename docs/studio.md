@@ -188,14 +188,19 @@ studio/
     as a jump link into the loaded timeline). Failures are shown distinctly: unknown run (404), no
     persisted journal (409), graph not registered (422), and route-missing (older server build, non-JSON
     404) each get their own note.
-  - **Fork compare** — enter two run ids (the base auto-fills from the loaded journal) and **Compare**
-    calls `GET /runs/diff?base=…&branch=…`, then renders both journals (via `GET /runs/{id}/events`)
-    side by side, aligned by `seq`: the identical prefix is dimmed, the first divergent seq is marked,
-    and events unique to one side are highlighted as *removed* (base) or *added* (branch). Column
-    headers carry per-branch totals from the diff's `base_totals` / `branch_totals` (event count, token
-    usage, cost). When the diff's `first_divergent_seq` is absent, the fork point is derived from event
-    presence alone; when the timeline fetches fail after a successful diff, the divergence region
-    carried by the diff itself (`added` / `removed`) is shown with a partial-view note.
+  - **Run comparison report** — enter a baseline and candidate run id (the baseline auto-fills from the
+    loaded journal) and **Build report**. Studio calls the atomic
+    `GET /runs/diff?base=…&branch=…` contract, then reconciles both independent
+    `GET /runs/{id}/events` reads against the diff's event totals. Finalized matching journals expose
+    exact operational signals; unfinished journals are labelled live, an advancing revision falls back
+    to the diff's carried region, and unavailable timeline reads remain divergence-only. The report's
+    decision balance compares model tokens, recorded cost, journal events, and recorded event-duration
+    samples. Latency sums show observed/total event coverage and remain neutral when coverage is partial,
+    first divergence, changed state channels, errors, interrupts, and repeat-sensitive journal events.
+    (The count is evidence rows, not deduplicated external-effect invocations.) It never
+    calls a candidate better without evaluated task outcomes. The aligned technical timelines remain
+    available under **Inspect aligned event evidence**, with the shared prefix dimmed and added/removed
+    work highlighted.
 - **Status badges** — `pending` / `running` / `success` / `interrupted` / `error`, mapped from the wire
   values returned by `GET /runs/{run_id}`, `runs/wait`, and SSE `end` frames.
 - **Durable tasks view (R0.6)** — **Open task queue** in the sidebar swaps the main panel to the
@@ -422,14 +427,14 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   execute from the latest state — upgrade the server for real replay.
 - **SSE resume (`Last-Event-ID`)** is implemented server-side but not surfaced in the UI — reload the page
   and the live feed starts fresh (state/history re-fetch on select).
-- **Flight Recorder requires an R0.5 server build.** `GET /runs/{run_id}/events` lands with the R0.5
-  server wave; against older builds the Recorder card says the route is missing and stays inert
+- **Flight Recorder requires an R0.5-or-newer server build.** `GET /runs/{run_id}/events` ships in the
+  current server; against older builds the Recorder card says the route is missing and stays inert
   (auto-load is suppressed after the first route-less 404). Artifact-ref payloads are shown by
-  reference (`sha256` + size) — resolving the bytes themselves needs the journal snapshot export,
-  which is not on the HTTP surface yet. Runs from before a server restart 404 here exactly like
-  `GET /runs/{id}` (the run registry is in-memory).
-- **Replay and fork compare need the R0.5 replay endpoints.** `POST /runs/replay` and `GET /runs/diff`
-  land in the same server wave as journal persistence; on older builds both surface the route-missing
+  reference (`sha256` + size); use the portable fixture endpoint when the complete journal artifact
+  map is required. Persisted journals remain reachable after live-run eviction or restart through the
+  server store, and their hash chain is re-verified on read.
+- **Replay and comparison use the shipped R0.5 replay endpoints.** `POST /runs/replay` and
+  `GET /runs/diff` ship with journal persistence; on older builds both surface the route-missing
   note (a non-JSON 404) and stay inert. Exact replay only works for runs whose journal was persisted
   and whose graph is still registered — the 409 and 422 banners say which. Replay of *resumed* runs is
   rejected by the replay engine itself (`ExactReplay` refuses journals that begin with a resume event);
@@ -538,8 +543,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   evidence links, and hostile evidence escaping; plus the replay banner states (verified / mismatch with
   divergence jump link / partial response), the 404 / 409 / 422 / route-missing error mapping, and
   fork-compare alignment (dimmed prefix, divergence marking, added/removed classes, presence-derived
-  fallback for partial diffs, per-branch totals, HTML escaping), plus finalized-journal-only proposal
-  handoff into governed learning. 111 passed, 0 failed.
+  fallback for partial diffs, exact u64 sequence alignment, strict response identities, per-branch totals,
+  accessible table semantics, HTML escaping), plus finalized-journal-only proposal handoff into governed
+  learning. Run the suite for the current assertion count.
 - `node studio/test-tasks.mjs` — 39 unit tests over the durable-tasks view helpers (same extraction
   harness): badge tone per status with the unknown-status fallback, terminality mirroring the server's
   `TaskRecord::is_terminal` (including the failed-with-retry-scheduled nuance), the list path builder,
@@ -547,11 +553,10 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   lease section present only while leased, `cancel_requested` note, DLQ triage fields, result/receipt,
   cancel disabled with reason on terminal tasks, defensive rendering of partial records), and the
   route-missing versus real-error note split. 39 passed, 0 failed.
-- The replay and fork-compare helpers were verified against **fixture-shaped JSON** built from the
+- The replay and comparison helpers are verified against **fixture-shaped JSON** built from the
   documented contracts (`{run_id, verified, expected_events, actual_events, first_divergence}` and the
-  `BranchDiff` serde shape in `rusty-core/src/replay.rs`): the replay/diff server endpoints had not
-  landed in this workspace and no server was reachable, so live verification against `server_demo` is
-  still outstanding and should happen once the server wave lands.
+  `BranchDiff` serde shape in `rusty-core/src/replay.rs`). The replay, diff, and journal endpoints now
+  ship in `rusty-server`; their integration coverage is listed below.
 - Live against `cargo run -p rusty-agent-server --example server_demo`: real journaled runs of both demo
   graphs (`pipeline`, `react_agent`) fetched through `GET /runs/{run_id}/events` and fed through the
   extracted render helpers — correct super-step grouping (2 and 3 steps), node lanes, zero dangling

@@ -442,7 +442,7 @@
   .task-item .tkid { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); word-break: break-all; }
   .task-item .tmeta { color: var(--text-dim); font-size: 11px; font-family: var(--mono); }
 
-  /* ---------- recorder replay banner & fork compare ---------- */
+  /* ---------- recorder replay banner & run comparison -------- */
   .rec-banner {
     border: 1px solid var(--border-hi); border-left-width: 3px; border-radius: 6px;
     padding: 8px 12px; font-size: 12.5px; margin: 8px 0;
@@ -457,7 +457,53 @@
     border: 1px solid var(--border); border-radius: 6px;
     padding: 5px 8px; font-family: var(--mono); font-size: 11.5px;
   }
+  .rec-compare-controls label { flex: 1; min-width: 180px; display: grid; gap: 4px; color: var(--text-dim); font-size: 10.5px; }
+  .rec-compare-controls label input { min-width: 0; width: 100%; }
+  .cmp-report {
+    margin-top: 10px; border: 1px solid #5a493a; border-radius: 10px; overflow: hidden;
+    background: linear-gradient(135deg, #211d19 0%, #181b19 62%, #171b1e 100%);
+  }
+  .cmp-report-head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 16px 18px 12px; border-bottom: 1px solid #3a322a; }
+  .cmp-report-kicker { color: #d19a71; font: 700 9.5px var(--mono); letter-spacing: .9px; text-transform: uppercase; }
+  .cmp-report-head h3 { margin: 3px 0 2px; color: #f0eadf; font-size: 18px; }
+  .cmp-report-head p { margin: 0; max-width: 620px; color: var(--text-dim); font-size: 11.5px; line-height: 1.45; }
+  .cmp-evidence-state { flex: 0 0 auto; padding: 5px 8px; border: 1px solid #4b5b4a; border-radius: 999px; color: #bdd2b2; font: 700 9.5px var(--mono); text-transform: uppercase; letter-spacing: .6px; }
+  .cmp-evidence-state.live { border-color: #74623c; color: #e5ce93; }
+  .cmp-evidence-state.partial, .cmp-evidence-state.mismatch { border-color: #794941; color: #eac5c0; }
+  .cmp-balance {
+    display: grid; grid-template-columns: minmax(0, 1fr) 170px minmax(0, 1fr); align-items: stretch;
+    margin: 14px 18px 0; border: 1px solid #443a31; border-radius: 8px; overflow: hidden; background: rgba(12,14,13,.32);
+  }
+  .cmp-balance-side { min-width: 0; padding: 11px 13px; }
+  .cmp-balance-side:last-child { text-align: right; }
+  .cmp-balance-side span { display: block; color: var(--text-faint); font: 9.5px var(--mono); text-transform: uppercase; letter-spacing: .7px; }
+  .cmp-balance-side b { display: block; margin-top: 3px; color: #e8e0d5; font: 11.5px var(--mono); overflow-wrap: anywhere; }
+  .cmp-balance-pivot {
+    position: relative; display: grid; place-items: center; padding: 9px 12px; text-align: center;
+    border-left: 1px solid #443a31; border-right: 1px solid #443a31; color: #d4bf82; font: 700 10px var(--mono);
+  }
+  .cmp-balance-pivot::before { content: ""; position: absolute; left: 14px; right: 14px; top: 50%; height: 1px; background: #8b7144; opacity: .55; }
+  .cmp-balance-pivot span { position: relative; padding: 3px 7px; background: #1b1916; }
+  .cmp-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 12px 18px; }
+  .cmp-metric { min-width: 0; padding: 10px; border: 1px solid #37322c; border-radius: 7px; background: rgba(35,32,28,.72); }
+  .cmp-metric-label { color: var(--text-faint); font: 9.5px var(--mono); text-transform: uppercase; letter-spacing: .55px; }
+  .cmp-metric-values { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 5px; align-items: baseline; margin-top: 6px; }
+  .cmp-metric-values b { min-width: 0; color: #eee7dc; font: 11px var(--mono); overflow-wrap: anywhere; }
+  .cmp-metric-values b:last-child { text-align: right; }
+  .cmp-metric-values i { color: #7e7467; font-style: normal; }
+  .cmp-delta { display: block; margin-top: 5px; color: #cdbd9d; font-size: 10px; line-height: 1.35; }
+  .cmp-delta.less { color: #b8d2aa; }
+  .cmp-delta.more { color: #e7c09f; }
+  .cmp-report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 18px 12px; }
+  .cmp-finding { min-width: 0; padding: 11px 12px; border: 1px solid #37322c; border-radius: 7px; background: #171715; }
+  .cmp-finding h4 { margin: 0 0 5px; color: #ded4c7; font-size: 12px; }
+  .cmp-finding p { margin: 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.5; }
+  .cmp-finding code { color: #d8bd7b; }
+  .cmp-decision-boundary { margin: 0 18px 16px; padding: 9px 11px; border-left: 3px solid #6f8062; background: #192019; color: #b9c8b1; font-size: 10.5px; line-height: 1.45; }
+  .cmp-evidence { margin-top: 9px; border-top: 1px solid var(--border); }
+  .cmp-evidence summary { padding: 9px 4px; color: var(--text-dim); cursor: pointer; font-size: 11.5px; }
   .cmp-grid { display: grid; grid-template-columns: minmax(0,1fr) 92px minmax(0,1fr); font-size: 11px; }
+  .cmp-row { display: contents; }
   .cmp-col-head {
     font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
     padding: 4px 8px; border-bottom: 1px solid var(--border-hi);
@@ -1534,6 +1580,12 @@
     .rec-story-step { padding-top: 10px; padding-left: 27px; }
     .rec-story-step::before { top: 13px; left: 10px; }
     .rec-controls input, .rec-compare-controls input { min-width: 100%; }
+    .cmp-report-head { flex-direction: column; gap: 8px; }
+    .cmp-balance { grid-template-columns: 1fr; }
+    .cmp-balance-side:last-child { text-align: left; }
+    .cmp-balance-pivot { border: 0; border-top: 1px solid #443a31; border-bottom: 1px solid #443a31; min-height: 38px; }
+    .cmp-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cmp-report-grid { grid-template-columns: 1fr; }
   }
 
   :is(button, input, select, textarea, summary):focus-visible {
@@ -2009,14 +2061,15 @@
           </div>
           <div id="rec-replay-banner"></div>
 
-          <h2 class="section" style="margin-top:16px">Fork compare</h2>
-          <div class="rec-compare-controls">
-            <input id="inp-cmp-base" type="text" spellcheck="false" placeholder="base run id…">
-            <span class="muted tiny">vs</span>
-            <input id="inp-cmp-branch" type="text" spellcheck="false" placeholder="branch run id…">
-            <button class="small primary" id="btn-rec-compare" title="GET /runs/diff?base=…&branch=… — side-by-side timelines with the identical prefix dimmed">Compare</button>
+          <h2 class="section" style="margin-top:16px">Run comparison report</h2>
+          <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
+          <div class="rec-compare-controls" role="group" aria-label="Runs to compare">
+            <label>Baseline run<input id="inp-cmp-base" type="text" spellcheck="false" placeholder="baseline run id…"></label>
+            <span class="muted tiny" aria-hidden="true">vs</span>
+            <label>Candidate run<input id="inp-cmp-branch" type="text" spellcheck="false" placeholder="candidate run id…"></label>
+            <button class="small primary" id="btn-rec-compare" title="Compare two persisted run journals and their recorded resource totals">Build report</button>
           </div>
-          <div id="rec-compare-view"></div>
+          <div id="rec-compare-view" aria-live="polite"></div>
         </div>
 
         <div class="card">
@@ -2178,7 +2231,7 @@ const store = {
   recReplayRequest: 0,
   recCompareRequest: 0,
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
-  compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, partial } for fork compare
+  compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, evidenceState }
   view: "home",        // "home" | "thread" | "tasks" | "agents" | "fabric" | "memory" | "learn" — active workspace
   tasks: null,         // { list, selected, error } for the durable-tasks view
   taskRequest: 0,      // generation guard: task catalogs never cross connection boundaries
@@ -4927,11 +4980,17 @@ const REC_EFFECT_INFO = {
 };
 
 function recSortEvents(events) {
-  // seq is the total order; fall back to array position when a partial
-  // server omits it, and keep the sort stable either way.
+  // seq is a u64 total order. Preserve its raw JSON token as BigInt so two
+  // adjacent legal values above Number.MAX_SAFE_INTEGER never collapse.
+  // Seqless partial-server events retain their relative order at the end.
   return (Array.isArray(events) ? events : [])
-    .map((ev, i) => ({ ev, i }))
-    .sort((a, b) => (((a.ev && a.ev.seq) ?? a.i) - ((b.ev && b.ev.seq) ?? b.i)) || (a.i - b.i))
+    .map((ev, i) => ({ ev, i, seq: recExactUnsigned(ev, "seq") }))
+    .sort((a, b) => {
+      if (a.seq !== null && b.seq !== null) return a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : a.i - b.i;
+      if (a.seq !== null) return -1;
+      if (b.seq !== null) return 1;
+      return a.i - b.i;
+    })
     .map((x) => x.ev);
 }
 
@@ -5351,7 +5410,7 @@ function recSelect(id, scroll, focusDetail) {
   }
 }
 
-/* ---------------- recorder: exact replay & fork compare ----------------
+/* ---------------- recorder: exact replay & run comparison --------------
  * Server contracts (R0.5 server wave — coded defensively: on older builds the
  * routes 404 with a non-JSON body, which maps to a route-missing note):
  *   POST /runs/replay  {"run_id": "…"} →
@@ -5415,6 +5474,162 @@ function recTotalsHtml(totals) {
     `${escapeHtml(recFormatTokens(totals.tokens))} · ${escapeHtml(recFormatUsd(totals.cost_usd))}`;
 }
 
+function recExactUnsigned(parent, key) {
+  if (!parent || typeof parent !== "object") return null;
+  const token = parent[AGENT_NUMBER_TOKENS] && parent[AGENT_NUMBER_TOKENS][key];
+  if (typeof token === "string" && /^(?:0|[1-9][0-9]*)$/.test(token)) {
+    try { return BigInt(token); } catch { return null; }
+  }
+  const value = parent[key];
+  return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+}
+
+function recRecordedLatency(events) {
+  const values = Array.isArray(events) ? events : [];
+  let total = 0n, observed = 0;
+  for (const event of values) {
+    if (!event || event.latency_ms === null || event.latency_ms === undefined) continue;
+    const value = recExactUnsigned(event, "latency_ms");
+    if (value === null) return null;
+    total += value;
+    observed += 1;
+  }
+  return { total, observed, events: values.length, complete: values.length > 0 && observed === values.length };
+}
+
+function recComparisonEvidenceState(diff, baseResponse, branchResponse, baseId, branchId) {
+  if (!baseResponse || !branchResponse || !Array.isArray(baseResponse.events) || !Array.isArray(branchResponse.events)) {
+    return { state: "partial", label: "divergence only", reason: "timeline_unavailable", usableEvents: false };
+  }
+  if (baseResponse.run_id !== baseId || branchResponse.run_id !== branchId ||
+      typeof baseResponse.complete !== "boolean" || typeof branchResponse.complete !== "boolean") {
+    return { state: "mismatch", label: "identity mismatch", reason: "invalid_envelope", usableEvents: false };
+  }
+  const baseExpected = recExactUnsigned(diff && diff.base_totals, "events");
+  const branchExpected = recExactUnsigned(diff && diff.branch_totals, "events");
+  const countsMatch = baseExpected !== null && branchExpected !== null &&
+    baseExpected === BigInt(baseResponse.events.length) && branchExpected === BigInt(branchResponse.events.length);
+  if (!countsMatch) return { state: "mismatch", label: "revision changed", reason: "revision_changed", usableEvents: false };
+  if (baseResponse.complete === true && branchResponse.complete === true) {
+    return { state: "finalized", label: "finalized evidence", reason: "finalized", usableEvents: true };
+  }
+  return { state: "live", label: "live snapshot", reason: "live", usableEvents: true };
+}
+
+function recJournalSignals(events, available = true) {
+  if (!available) return null;
+  const values = Array.isArray(events) ? events : [];
+  return {
+    errors: values.filter((event) => event && event.status === "error").length,
+    interruptions: values.filter((event) => event && (event.kind === "interrupt" || event.status === "interrupted")).length,
+    repeatSensitive: values.filter((event) => event && ["compensatable", "non_idempotent"].includes(event.effect)).length,
+    unknownEffects: values.filter((event) => event && event.effect && !Object.prototype.hasOwnProperty.call(REC_EFFECT_INFO, event.effect)).length,
+  };
+}
+
+function recComparisonMetric(label, base, candidate, format, deltaUnit) {
+  const known = base !== null && candidate !== null &&
+    ((typeof base === "bigint" && typeof candidate === "bigint") ||
+      (typeof base === "number" && typeof candidate === "number" && Number.isFinite(base) && Number.isFinite(candidate)));
+  if (!known) return { label, base: "—", candidate: "—", delta: "not comparable", tone: "unknown" };
+  const delta = candidate - base;
+  const tone = delta < 0 ? "less" : delta > 0 ? "more" : "same";
+  const magnitude = delta < 0 ? -delta : delta;
+  return {
+    label, base: format(base), candidate: format(candidate), tone,
+    delta: delta === 0 || delta === 0n ? "same recorded value"
+      : `${format(magnitude)} ${deltaUnit} ${delta < 0 ? "less" : "more"}`,
+  };
+}
+
+function recComparisonLatencyMetric(baseEvents, branchEvents, usable) {
+  if (!usable) return { label: "Recorded latency coverage", base: "—", candidate: "—", delta: "not comparable", tone: "unknown" };
+  const base = recRecordedLatency(baseEvents), candidate = recRecordedLatency(branchEvents);
+  if (!base || !candidate) return { label: "Recorded latency coverage", base: "—", candidate: "—", delta: "invalid latency evidence", tone: "unknown" };
+  const format = (value) => `${value.total} ms · ${value.observed}/${value.events} events`;
+  if (!base.complete || !candidate.complete) {
+    return { label: "Recorded latency coverage", base: format(base), candidate: format(candidate),
+      delta: "partial samples · not ranked", tone: "unknown" };
+  }
+  return recComparisonMetric("Recorded latency sum", base.total, candidate.total,
+    (value) => `${value} ms`, "latency");
+}
+
+function recComparisonReport(baseId, branchId, baseEvents, branchEvents, diff, evidenceState = { state: "finalized", label: "finalized evidence", usableEvents: true }) {
+  const d = diff && typeof diff === "object" ? diff : {};
+  const baseTotals = d.base_totals && typeof d.base_totals === "object" ? d.base_totals : {};
+  const branchTotals = d.branch_totals && typeof d.branch_totals === "object" ? d.branch_totals : {};
+  const baseTokens = recExactUnsigned(baseTotals.tokens, "total_tokens");
+  const branchTokens = recExactUnsigned(branchTotals.tokens, "total_tokens");
+  const baseEventsCount = recExactUnsigned(baseTotals, "events");
+  const branchEventsCount = recExactUnsigned(branchTotals, "events");
+  const baseCost = typeof baseTotals.cost_usd === "number" && Number.isFinite(baseTotals.cost_usd) && baseTotals.cost_usd >= 0 ? baseTotals.cost_usd : null;
+  const branchCost = typeof branchTotals.cost_usd === "number" && Number.isFinite(branchTotals.cost_usd) && branchTotals.cost_usd >= 0 ? branchTotals.cost_usd : null;
+  const usable = evidenceState && evidenceState.usableEvents === true;
+  const stepDiffs = Array.isArray(d.step_diffs) ? d.step_diffs : [];
+  const changedChannels = stepDiffs.reduce((count, step) => count + (Array.isArray(step && step.channels) ? step.channels.length : 0), 0);
+  const channelNames = [];
+  for (const step of stepDiffs) {
+    for (const channel of Array.isArray(step && step.channels) ? step.channels : []) {
+      if (typeof channel?.channel === "string" && !channelNames.includes(channel.channel)) channelNames.push(channel.channel);
+      if (channelNames.length >= 6) break;
+    }
+    if (channelNames.length >= 6) break;
+  }
+  const divergence = d.first_divergent_seq === null ? null : recExactUnsigned(d, "first_divergent_seq");
+  return {
+    baseId, branchId, evidenceState,
+    identical: d.first_divergent_seq === null,
+    divergence, changedSteps: stepDiffs.length, changedChannels, channelNames,
+    metrics: [
+      recComparisonMetric("Model tokens", baseTokens, branchTokens, (value) => String(value), "tokens"),
+      recComparisonMetric("Recorded cost", baseCost, branchCost, recFormatUsd, "cost"),
+      recComparisonMetric("Journal events", baseEventsCount, branchEventsCount, (value) => String(value), "events"),
+      recComparisonLatencyMetric(baseEvents, branchEvents, usable),
+    ],
+    baseSignals: recJournalSignals(baseEvents, usable),
+    branchSignals: recJournalSignals(branchEvents, usable),
+  };
+}
+
+function recComparisonMetricHtml(metric) {
+  return `<article class="cmp-metric"><span class="cmp-metric-label">${escapeHtml(metric.label)}</span>` +
+    `<div class="cmp-metric-values"><b><span class="sr-only">Baseline: </span>${escapeHtml(metric.base)}</b><i aria-hidden="true">→</i>` +
+    `<b><span class="sr-only">Candidate: </span>${escapeHtml(metric.candidate)}</b></div>` +
+    `<span class="cmp-delta ${escapeHtml(metric.tone)}">candidate: ${escapeHtml(metric.delta)}</span></article>`;
+}
+
+function recComparisonReportHtml(report) {
+  const value = report || recComparisonReport("", "", [], [], {}, { state: "partial", label: "unavailable", usableEvents: false });
+  const evidence = value.evidenceState || { state: "partial", label: "unavailable" };
+  const divergence = value.identical ? "The atomic diff snapshot is logically identical."
+    : value.divergence !== null ? `The first logical divergence is at sequence ${value.divergence}.`
+    : "The server reported divergence without a safely representable sequence.";
+  const channels = value.changedChannels
+    ? `${value.changedSteps} step(s) change ${value.changedChannels} channel value(s)` +
+      (value.channelNames.length ? `: ${value.channelNames.map((name) => `<code>${escapeHtml(name)}</code>`).join(", ")}${value.changedChannels > value.channelNames.length ? ", …" : ""}.` : ".")
+    : "No post-reducer channel differences are recorded in this diff snapshot.";
+  const signalLine = (signals) => signals
+    ? `${signals.errors} error event(s), ${signals.interruptions} interrupt event(s), ${signals.repeatSensitive} repeat-sensitive event(s)` +
+      (signals.unknownEffects ? `, ${signals.unknownEffects} unknown effect classification(s)` : "")
+    : "Full journal signals unavailable for this comparison snapshot.";
+  return `<section class="cmp-report" aria-labelledby="cmp-report-title">` +
+    `<div class="cmp-report-head"><div><span class="cmp-report-kicker">Evaluation evidence · baseline versus candidate</span>` +
+      `<h3 id="cmp-report-title" tabindex="-1">Run comparison report</h3>` +
+      `<p>Recorded execution facts are comparable. Task quality still needs an evaluator, rubric, or human judgment.</p></div>` +
+      `<span class="cmp-evidence-state ${escapeHtml(evidence.state)}">${escapeHtml(evidence.label)}</span></div>` +
+    `<div class="cmp-balance" role="group" aria-label="Baseline and candidate are not automatically ranked without quality evidence">` +
+      `<div class="cmp-balance-side"><span>Baseline</span><b title="${escapeHtml(value.baseId)}">${escapeHtml(shortId(value.baseId))}</b></div>` +
+      `<div class="cmp-balance-pivot"><span>No automatic winner</span></div>` +
+      `<div class="cmp-balance-side"><span>Candidate</span><b title="${escapeHtml(value.branchId)}">${escapeHtml(shortId(value.branchId))}</b></div></div>` +
+    `<div class="cmp-metric-grid">${value.metrics.map(recComparisonMetricHtml).join("")}</div>` +
+    `<div class="cmp-report-grid"><article class="cmp-finding"><h4>Structural divergence</h4><p>${escapeHtml(divergence)} ${channels}</p></article>` +
+      `<article class="cmp-finding"><h4>Operational signals</h4><p><b>Baseline:</b> ${escapeHtml(signalLine(value.baseSignals))}<br>` +
+      `<b>Candidate:</b> ${escapeHtml(signalLine(value.branchSignals))}</p></article></div>` +
+    `<div class="cmp-decision-boundary"><b>Decision boundary:</b> lower cost, fewer tokens, or fewer recorded errors are useful signals—not proof of a better answer. Recorded latency is an event-duration sum, not wall-clock time; partial sample coverage is never ranked. Add evaluated task outcomes before promotion.</div>` +
+    `</section>`;
+}
+
 /* Align two branches' events by seq against a BranchDiff. Rows are
  * {seq, base, branch, cls} with cls "same" (identical prefix — rendered
  * dimmed), "divergent" (both sides present at/after the fork), "removed"
@@ -5422,33 +5637,34 @@ function recTotalsHtml(totals) {
  * diff.first_divergent_seq; when the diff is missing or partial it is derived
  * from presence alone (the first seq only one side holds) — content-only
  * divergence needs the real diff, presence divergence does not. Events
- * without a numeric seq sort after numbered ones and align by position. */
+ * without a valid u64 seq sort after numbered ones and align by position. */
 function recCompareRows(baseEvents, branchEvents, diff) {
-  const keyOf = (ev, i) => (ev && typeof ev.seq === "number") ? ev.seq : `~${i}`;
+  const keyOf = (ev, i) => recExactUnsigned(ev, "seq") ?? `~${i}`;
   const baseByKey = new Map(), branchByKey = new Map();
   recSortEvents(baseEvents).forEach((ev, i) => baseByKey.set(keyOf(ev, i), ev));
   recSortEvents(branchEvents).forEach((ev, i) => branchByKey.set(keyOf(ev, i), ev));
   const keys = [...new Set([...baseByKey.keys(), ...branchByKey.keys()])].sort((a, b) => {
-    const na = typeof a === "number", nb = typeof b === "number";
-    if (na && nb) return a - b;
+    const na = typeof a === "bigint", nb = typeof b === "bigint";
+    if (na && nb) return a < b ? -1 : a > b ? 1 : 0;
     if (na) return -1;
     if (nb) return 1;
     return a < b ? -1 : a > b ? 1 : 0;
   });
-  let divergence = (diff && typeof diff.first_divergent_seq === "number") ? diff.first_divergent_seq : null;
+  let divergence = recExactUnsigned(diff, "first_divergent_seq");
   if (divergence === null) {
     const first = keys.find((k) => !baseByKey.has(k) || !branchByKey.has(k));
-    divergence = typeof first === "number" ? first : null;
+    divergence = typeof first === "bigint" ? first : null;
   }
   return keys.map((k) => {
     const b = baseByKey.get(k) || null, f = branchByKey.get(k) || null;
     let cls;
     if (b && f) {
-      cls = (divergence !== null && (typeof k !== "number" || k >= divergence)) ? "divergent" : "same";
+      cls = (divergence !== null && (typeof k !== "bigint" || k >= divergence)) ? "divergent" : "same";
     } else {
       cls = b ? "removed" : "added";
     }
-    return { seq: k, base: b, branch: f, cls };
+    const seq = typeof k === "bigint" && k <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(k) : k;
+    return { seq, base: b, branch: f, cls };
   });
 }
 
@@ -5457,9 +5673,11 @@ function recCompareRows(baseEvents, branchEvents, diff) {
 function recCmpEventHtml(ev, cls) {
   if (!ev) return "";
   const kind = ev.kind || "?";
+  const exactSeq = recExactUnsigned(ev, "seq");
+  const title = `${kind} · seq ${exactSeq === null ? "?" : exactSeq}`;
   const tag = cls === "removed" ? ` <span class="cmp-tag removed">removed</span>`
     : cls === "added" ? ` <span class="cmp-tag added">added</span>` : "";
-  return `<span class="cmp-ev" title="${escapeHtml(kind)} · seq ${ev.seq ?? "?"}">` +
+  return `<span class="cmp-ev" title="${escapeHtml(title)}">` +
     `<span class="dot" style="background:${recKindColor(kind)}"></span>${escapeHtml(recKindShort(kind))}` +
     (ev.node_id ? ` <span class="cnode">${escapeHtml(ev.node_id)}</span>` : "") +
     (ev.status === "error" ? ` <span class="cerr">error</span>` : "") +
@@ -5469,30 +5687,33 @@ function recCmpEventHtml(ev, cls) {
 /* The full compare view: run-id headers with per-branch totals, then both
  * timelines aligned by seq — identical prefix dimmed, the fork point marked,
  * added/removed events highlighted on their side. */
-function recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff) {
+function recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff, evidenceState) {
   const rows = recCompareRows(baseEvents, branchEvents, diff);
   const d = diff || {};
-  const firstBreak = rows.find((r) => r.cls !== "same" && typeof r.seq === "number");
-  let html = `<div class="cmp-grid">` +
-    `<div class="cmp-col-head" title="${escapeHtml(baseId)}">base ${escapeHtml(shortId(baseId))}</div>` +
-    `<div class="cmp-col-head mid">seq</div>` +
-    `<div class="cmp-col-head" title="${escapeHtml(branchId)}">branch ${escapeHtml(shortId(branchId))}</div>` +
-    `<div class="cmp-totals">${recTotalsHtml(d.base_totals)}</div><div></div>` +
-    `<div class="cmp-totals">${recTotalsHtml(d.branch_totals)}</div>`;
+  const report = recComparisonReport(baseId, branchId, baseEvents, branchEvents, d, evidenceState);
+  const firstBreak = rows.find((row) => row.cls !== "same" && (typeof row.seq === "number" || typeof row.seq === "bigint"));
+  let html = recComparisonReportHtml(report) +
+    `<details class="cmp-evidence"><summary>Inspect aligned event evidence · ${escapeHtml(String(rows.length))} row(s)</summary>` +
+    `<div class="cmp-grid" role="table" aria-label="Aligned baseline and candidate event evidence">` +
+    `<div class="cmp-row" role="row"><div class="cmp-col-head" role="columnheader" title="${escapeHtml(baseId)}">baseline ${escapeHtml(shortId(baseId))}</div>` +
+    `<div class="cmp-col-head mid" role="columnheader">seq</div>` +
+    `<div class="cmp-col-head" role="columnheader" title="${escapeHtml(branchId)}">candidate ${escapeHtml(shortId(branchId))}</div></div>` +
+    `<div class="cmp-row" role="row"><div class="cmp-totals" role="cell">${recTotalsHtml(d.base_totals)}</div><div role="cell"></div>` +
+    `<div class="cmp-totals" role="cell">${recTotalsHtml(d.branch_totals)}</div></div>`;
   if (!firstBreak) {
-    html += `<div class="cmp-divnote">branches are logically identical — no divergence</div>`;
+    html += `<div class="cmp-row" role="row"><div class="cmp-divnote" role="cell" aria-colspan="3">branches are logically identical — no divergence</div></div>`;
   }
   let marked = false;
   for (const row of rows) {
-    if (!marked && row.cls !== "same" && typeof row.seq === "number") {
-      html += `<div class="cmp-divnote">first divergence — seq ${escapeHtml(String(row.seq))}</div>`;
+    if (!marked && row.cls !== "same" && (typeof row.seq === "number" || typeof row.seq === "bigint")) {
+      html += `<div class="cmp-row" role="row"><div class="cmp-divnote" role="cell" aria-colspan="3">first divergence — seq ${escapeHtml(String(row.seq))}</div></div>`;
       marked = true;
     }
-    html += `<div class="cmp-side ${row.cls}">${recCmpEventHtml(row.base, row.cls)}</div>` +
-      `<div class="cmp-seq">${typeof row.seq === "number" ? escapeHtml(String(row.seq)) : "·"}</div>` +
-      `<div class="cmp-side ${row.cls}">${recCmpEventHtml(row.branch, row.cls)}</div>`;
+    html += `<div class="cmp-row" role="row"><div class="cmp-side ${row.cls}" role="cell">${recCmpEventHtml(row.base, row.cls)}</div>` +
+      `<div class="cmp-seq" role="cell">${typeof row.seq === "number" || typeof row.seq === "bigint" ? escapeHtml(String(row.seq)) : "·"}</div>` +
+      `<div class="cmp-side ${row.cls}" role="cell">${recCmpEventHtml(row.branch, row.cls)}</div></div>`;
   }
-  return html + `</div>`;
+  return html + `</div></details>`;
 }
 
 function recReplayOperationCurrent(request, operation) {
@@ -5501,6 +5722,10 @@ function recReplayOperationCurrent(request, operation) {
 
 function recCompareOperationCurrent(request, operation) {
   return request === store.recCompareRequest && connectionOperationCurrent(operation);
+}
+
+function recCompareInputsCurrent(baseId, branchId) {
+  return $("inp-cmp-base").value.trim() === baseId && $("inp-cmp-branch").value.trim() === branchId;
 }
 
 /* Re-drive the loaded run from its persisted journal (POST /runs/replay) and
@@ -5534,7 +5759,7 @@ async function recCompare() {
   const baseId = $("inp-cmp-base").value.trim(), branchId = $("inp-cmp-branch").value.trim();
   const view = $("rec-compare-view");
   if (!baseId || !branchId) { toast("Enter both run ids to compare.", "err"); return; }
-  if (baseId === branchId) { toast("Base and branch are the same run.", "warn"); return; }
+  if (baseId === branchId) { toast("Baseline and candidate are the same run.", "warn"); return; }
   const operation = connectionOperation(currentThread()?.thread_id || null); if (!operation) return;
   const request = ++store.recCompareRequest;
   $("btn-rec-compare").disabled = true;
@@ -5544,35 +5769,68 @@ async function recCompare() {
   try {
     diff = await apiForConnection(operation.connection, "GET", `/runs/diff?base=${encodeURIComponent(baseId)}&branch=${encodeURIComponent(branchId)}`);
     if (!recCompareOperationCurrent(request, operation)) return;
+    if (!recCompareInputsCurrent(baseId, branchId)) {
+      view.innerHTML = `<div class="note tiny">Run ids changed while the comparison was loading. Build the report again.</div>`;
+      $("btn-rec-compare").disabled = false;
+      return;
+    }
   } catch (e) {
     if (!recCompareOperationCurrent(request, operation)) return;
+    if (!recCompareInputsCurrent(baseId, branchId)) {
+      view.innerHTML = `<div class="note tiny">Run ids changed while the comparison was loading. Build the report again.</div>`;
+      $("btn-rec-compare").disabled = false;
+      return;
+    }
     view.innerHTML = recApiErrorBannerHtml("GET /runs/diff", e.status, e.body);
     $("btn-rec-compare").disabled = false;
     return;
   }
-  let baseEvents, branchEvents, partial = false;
+  let baseEvents, branchEvents, baseResponse = null, branchResponse = null;
+  let evidenceState;
   try {
-    const [baseRes, branchRes] = await Promise.all([
+    [baseResponse, branchResponse] = await Promise.all([
       apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(baseId)}/events`),
       apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(branchId)}/events`),
     ]);
     if (!recCompareOperationCurrent(request, operation)) return;
-    baseEvents = recSortEvents(baseRes && baseRes.events);
-    branchEvents = recSortEvents(branchRes && branchRes.events);
+    if (!recCompareInputsCurrent(baseId, branchId)) {
+      view.innerHTML = `<div class="note tiny">Run ids changed while the comparison was loading. Build the report again.</div>`;
+      $("btn-rec-compare").disabled = false;
+      return;
+    }
+    evidenceState = recComparisonEvidenceState(diff, baseResponse, branchResponse, baseId, branchId);
+    if (evidenceState.usableEvents) {
+      baseEvents = recSortEvents(baseResponse.events);
+      branchEvents = recSortEvents(branchResponse.events);
+    } else {
+      baseEvents = recSortEvents(diff && diff.removed);
+      branchEvents = recSortEvents(diff && diff.added);
+    }
   } catch {
     if (!recCompareOperationCurrent(request, operation)) return;
+    if (!recCompareInputsCurrent(baseId, branchId)) {
+      view.innerHTML = `<div class="note tiny">Run ids changed while the comparison was loading. Build the report again.</div>`;
+      $("btn-rec-compare").disabled = false;
+      return;
+    }
     // The diff succeeded but the timelines did not: render the divergence
     // region the diff itself carries rather than dropping the result.
-    partial = true;
+    evidenceState = recComparisonEvidenceState(diff, null, null, baseId, branchId);
     baseEvents = recSortEvents(diff && diff.removed);
     branchEvents = recSortEvents(diff && diff.added);
   }
-  store.compare = { baseId, branchId, baseEvents, branchEvents, diff, partial };
+  const partial = evidenceState.state === "partial";
+  const mismatch = evidenceState.state === "mismatch";
+  store.compare = { baseId, branchId, baseEvents, branchEvents, diff, partial, evidenceState };
   const note = partial
     ? `<div class="note tiny">Full timelines unavailable (GET /runs/{id}/events failed) — ` +
       `showing only the divergence region carried by the diff.</div>`
-    : "";
-  view.innerHTML = note + recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff);
+    : mismatch ? `<div class="note tiny">${evidenceState.reason === "invalid_envelope"
+      ? "A timeline response did not match the requested run identity or exact response contract."
+      : "A journal advanced between the atomic diff and the timeline reads."} ` +
+      `The report uses the atomic diff; aligned rows show only its carried divergence region.</div>` : "";
+  view.innerHTML = note + recCompareHtml(baseId, branchId, baseEvents, branchEvents, diff, evidenceState);
+  $("cmp-report-title")?.focus({ preventScroll: true });
   if (recCompareOperationCurrent(request, operation)) $("btn-rec-compare").disabled = false;
 }
 
@@ -13888,7 +14146,7 @@ function init() {
   $("rec-detail").addEventListener("click", recClick);
   $("rec-investigation").addEventListener("click", recClick);
 
-  // Replay & fork compare. The banner's divergence seq is a jump link into
+  // Replay & run comparison. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).
   $("btn-rec-replay").onclick = recReplay;
   $("btn-rec-compare").onclick = recCompare;
