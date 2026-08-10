@@ -1,6 +1,6 @@
 [package]
 name = "rusty-otel"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,7 +13,7 @@ keywords = ["opentelemetry", "tracing", "observability", "agent", "otlp"]
 categories = ["asynchronous", "network-programming"]
 
 [dependencies]
-rusty-agent-runtime = { path = "../rusty-core", version = "0.9" }
+rusty-agent-runtime = { path = "../rusty-core", version = "0.10" }
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
