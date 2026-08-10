@@ -234,10 +234,11 @@ pub mod prelude {
     pub use crate::broker::{
         new_connection_id, new_handle_id, scopes_missing, BrokerDenial, BrokerDenialReason,
         ClassifiedFailure, ConnectionConsent, ConnectionHealth, ConnectionProvider,
-        ConnectionRecord, ConnectionRefresh, ConnectionRevocation, ConnectionStatus,
-        CredentialBroker, CredentialHandle, CredentialMediator, CredentialRequirement,
-        CredentialTool, CredentialUse, HandleClaims, HandleIssuance, IssueRequest, MediatedTool,
-        ResolvedCredential, SealedCredential, StoredConnection, TokenMaterial,
+        ConnectionReauthRequired, ConnectionRecord, ConnectionRefresh, ConnectionRevocation,
+        ConnectionStatus, CredentialBroker, CredentialHandle, CredentialMediator,
+        CredentialRequirement, CredentialTool, CredentialUse, HandleClaims, HandleIssuance,
+        IssueRequest, MediatedTool, OAuthFailure, OAuthProvider, ResolvedCredential,
+        ScriptedOAuthProvider, SealedCredential, StoredConnection, TokenGrant, TokenMaterial,
         CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, HANDLE_TOKEN_PREFIX, SEALED_FORMAT_VERSION,
     };
     pub use crate::capsule::{
@@ -297,8 +298,9 @@ pub mod prelude {
         TOKEN_BYTES_PER_ESTIMATE,
     };
     pub use crate::middleware::{
-        Decision, InterceptPoint, Middleware, MiddlewareChain, MiddlewareChatModel, ModelCall,
-        NodeCall, Rejection, RequestLogger, ToolCallBlocklist, ToolInvocation,
+        instantiate_composition, Decision, InterceptPoint, Middleware, MiddlewareChain,
+        MiddlewareChatModel, ModelCall, NodeCall, Rejection, RequestLogger, ToolCallBlocklist,
+        ToolInvocation,
     };
     pub use crate::node::{Command, Node, NodeConfig, NodeContext, NodeOutput};
     pub use crate::react::{

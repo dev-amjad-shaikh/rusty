@@ -4,6 +4,16 @@
 //! chain. The pure contracts live in `rusty_agent_runtime::broker`;
 //! this module owns key custody, cryptography, and persistence.
 //!
+//! Wave 4 adds the OAuth lifecycle: refresh-at-resolution (a token
+//! inside its jittered refresh window is rotated by the deployment's
+//! [`OAuthProvider`](rusty_agent_runtime::broker::OAuthProvider) before
+//! it is served), the background sweeper ([`Broker::sweep_once`] /
+//! [`spawn_sweeper`]) that runs the same lifecycle over every
+//! connection on an interval, and the terminal refusal path — a
+//! provider-classified permanent failure flips the connection to
+//! `needs_reauth` (journaled `connection_needs_reauth`) and every use
+//! fails closed until a human records a new consent act.
+//!
 //! ## Key custody
 //!
 //! The deployment master key lives **outside the store abstraction**,
@@ -50,14 +60,15 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use rusty_agent_runtime::broker::{
     hex_decode, hex_encode, new_connection_id, new_handle_id, scopes_missing, BrokerDenial,
-    ConnectionConsent, ConnectionProvider, ConnectionRecord, ConnectionRefresh,
-    ConnectionRevocation, ConnectionStatus, CredentialHandle, CredentialUse, HandleClaims,
-    HandleIssuance, SealedCredential, StoredConnection, TokenMaterial, SEALED_FORMAT_VERSION,
+    ClassifiedFailure, ConnectionConsent, ConnectionProvider, ConnectionReauthRequired,
+    ConnectionRecord, ConnectionRefresh, ConnectionRevocation, ConnectionStatus, CredentialHandle,
+    CredentialUse, HandleClaims, HandleIssuance, OAuthProvider, SealedCredential, StoredConnection,
+    TokenMaterial, SEALED_FORMAT_VERSION,
 };
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
 use rusty_agent_runtime::record::{Effect, RunEventKind};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
@@ -78,6 +89,12 @@ pub(crate) const BROKER_JOURNAL_RUN_ID: &str = "credential-broker";
 /// (the design's open question 5 leaning), short enough that expiry is
 /// routine, long enough that a run's burst of calls reuses one issuance.
 pub(crate) const DEFAULT_HANDLE_TTL: Duration = Duration::from_secs(300);
+
+/// The default OAuth refresh window (R0.11 wave 4): a token expiring
+/// within this horizon (jittered, see [`refresh_window_for`]) is rotated
+/// before it is served. Five minutes — the same order as the handle TTL,
+/// so a resolution-path refresh is routine rather than exceptional.
+pub(crate) const DEFAULT_REFRESH_WINDOW: Duration = Duration::from_secs(300);
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -501,6 +518,12 @@ pub(crate) struct Broker {
     store_path: PathBuf,
     masters: Mutex<Option<MasterKeys>>,
     handle_ttl: Duration,
+    /// The OAuth lifecycle (R0.11 wave 4): the deployment's provider and
+    /// the refresh window. Absent means no lifecycle — OAuth connections
+    /// register and serve static material exactly as static kinds do, and
+    /// the exchange endpoints answer 409 (the evaluator-absent
+    /// precedent).
+    oauth: Option<(Arc<dyn OAuthProvider>, Duration)>,
     journal_lock: Mutex<()>,
 }
 
@@ -509,6 +532,13 @@ impl std::fmt::Debug for Broker {
         f.debug_struct("Broker")
             .field("store_path", &self.store_path)
             .field("handle_ttl", &self.handle_ttl)
+            .field(
+                "oauth",
+                &self
+                    .oauth
+                    .as_ref()
+                    .map(|(provider, window)| format!("{provider:?} (window {window:?})")),
+            )
             .finish()
     }
 }
@@ -526,8 +556,26 @@ impl Broker {
             store_path,
             masters: Mutex::new(None),
             handle_ttl,
+            oauth: None,
             journal_lock: Mutex::new(()),
         }
+    }
+
+    /// Builder-style: plug the OAuth provider and the refresh window
+    /// (R0.11 wave 4). Resolution-time refresh, the sweeper, and the
+    /// authorization-code exchange endpoints all read this pair.
+    pub(crate) fn with_oauth_provider(
+        mut self,
+        provider: Arc<dyn OAuthProvider>,
+        refresh_window: Duration,
+    ) -> Self {
+        self.oauth = Some((provider, refresh_window));
+        self
+    }
+
+    /// The OAuth pair, when the deployment plugged one.
+    pub(crate) fn oauth(&self) -> Option<&(Arc<dyn OAuthProvider>, Duration)> {
+        self.oauth.as_ref()
     }
 
     /// The master keys, ensuring at least one exists: serve the cached
@@ -1025,6 +1073,21 @@ impl Broker {
             .map_err(BrokerDenial::unavailable)?;
         let material = open(&master, &claims.connection_id, &stored.credential)
             .map_err(|e| BrokerDenial::unavailable(format!("the envelope did not open: {e}")))?;
+        // The OAuth lifecycle (R0.11 wave 4): a token inside its jittered
+        // refresh window rotates before it is served, so the bytes that
+        // reach the connector are never the ones about to die. No
+        // lifecycle configured, a static provider kind, or a token
+        // outside its window returns the opened material unchanged.
+        let material = match self
+            .refresh_at_resolution(&claims.tenant, &claims.handle_id, &stored, material)
+            .await
+        {
+            Ok(material) => material,
+            Err(denial) => {
+                self.journal_denial(&denial).await;
+                return Err(denial);
+            }
+        };
         self.journal(
             EventDraft::new(RunEventKind::CredentialUse, Effect::ReadOnly).output(
                 serde_json::to_value(CredentialUse {
@@ -1070,6 +1133,381 @@ impl rusty_agent_runtime::broker::CredentialBroker for Broker {
     }
 }
 
+// --------------------------------------------------------------------- //
+// The OAuth lifecycle (R0.11 Extension Plane, wave 4)
+// --------------------------------------------------------------------- //
+
+/// The per-connection refresh horizon: `window` scaled by a deterministic
+/// jitter in [0.5, 1.0) drawn from the connection id's hash. Deterministic
+/// — no RNG at resolution, so the same connection always refreshes at the
+/// same horizon and a recorded run's refresh cadence reproduces — and
+/// spread across connections, so a fleet registered together does not
+/// stampede the provider together.
+fn refresh_window_for(connection_id: &str, window: Duration) -> chrono::Duration {
+    let digest = Sha256::digest(connection_id.as_bytes());
+    let draw = u64::from_be_bytes(digest[..8].try_into().expect("a sha256 has 8 bytes"));
+    let fraction = 0.5 + 0.5 * (draw as f64 / u64::MAX as f64);
+    chrono::Duration::from_std(window.mul_f64(fraction)).unwrap_or(chrono::Duration::MAX)
+}
+
+/// What one refresh attempt produced. `resolve` serves the
+/// material-carrying variants and maps the rest to fail-closed denials;
+/// [`Broker::sweep_once`] counts them.
+enum RefreshAttempt {
+    /// Rotation applied, journaled, persisted: serve the new material.
+    Rotated(TokenMaterial),
+    /// The provider failed transiently; the health counters moved
+    /// (bookkeeping — transitions journal, counters don't) and the token
+    /// is still valid: serve it.
+    TransientServe(TokenMaterial),
+    /// The provider failed transiently and the token has expired:
+    /// nothing servable remains.
+    TransientExpired,
+    /// The token expired and the connection has no refresh material (no
+    /// refresh token, no client secret): nothing servable remains.
+    ExpiredUnservable,
+    /// The provider refused terminally: the connection flipped to
+    /// `needs_reauth` (journaled `connection_needs_reauth`) and every
+    /// use fails closed until a human records a new consent act.
+    NeedsReauth,
+}
+
+/// What one sweeper pass observed (R0.11 wave 4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SweepReport {
+    /// OAuth connections in `active` status the pass examined.
+    pub scanned: usize,
+    /// Connections whose material rotated and persisted.
+    pub refreshed: usize,
+    /// Connections that flipped to `needs_reauth` (journaled).
+    pub needs_reauth: usize,
+    /// Connections the pass could not refresh (transient provider
+    /// failures, expired tokens with no refresh path, envelopes that
+    /// would not open): retried next pass, or at resolution — whichever
+    /// comes first.
+    pub failed: usize,
+}
+
+impl Broker {
+    /// Run the refresh lifecycle for one connection whose envelope just
+    /// opened: `None` when nothing is due (serve the opened material),
+    /// else the attempt's outcome. `now` is the caller's clock reading —
+    /// resolution passes `Utc::now()`; the sweeper reads its own once so
+    /// one pass judges every connection against the same instant.
+    ///
+    /// The lifecycle is deliberately *not* retried here: one attempt per
+    /// resolution (or sweep pass), then the outcome stands — a stale
+    /// credential retried looks exactly like an attack retried, and the
+    /// next resolution is the retry.
+    async fn refresh_if_due(
+        &self,
+        tenant: &str,
+        stored: &StoredConnection,
+        material: TokenMaterial,
+        now: chrono::DateTime<Utc>,
+    ) -> StoreResult<Option<RefreshAttempt>> {
+        let Some((provider, window)) = &self.oauth else {
+            return Ok(None);
+        };
+        let record = &stored.record;
+        if !record.provider.is_oauth() {
+            return Ok(None);
+        }
+        // A token with no declared expiry is never due — the provider
+        // said nothing, so there is no horizon to preempt.
+        let Some(expires_at) = material.expires_at else {
+            return Ok(None);
+        };
+        if expires_at > now + refresh_window_for(&record.connection_id, *window) {
+            return Ok(None);
+        }
+        // The two OAuth flows refresh on different material: an
+        // authorization-code connection presents its refresh token, a
+        // client-credentials connection re-presents its client secret.
+        let has_refresh_path = match record.provider {
+            ConnectionProvider::Oauth2AuthorizationCode => material.refresh_token.is_some(),
+            ConnectionProvider::Oauth2ClientCredentials => material.client_secret.is_some(),
+            _ => unreachable!("the is_oauth gate passed"),
+        };
+        if !has_refresh_path {
+            return Ok(if expires_at > now {
+                // Due but not yet dead, and nothing to refresh with:
+                // serve while valid — the sweeper (or a consent act) has
+                // until expiry.
+                None
+            } else {
+                Some(RefreshAttempt::ExpiredUnservable)
+            });
+        }
+        match provider.refresh(record, &material).await {
+            Ok(grant) => {
+                let rotated = TokenMaterial {
+                    access_token: grant.access_token,
+                    // Providers that rotate refresh tokens return a new
+                    // one; providers that don't return `None` and the
+                    // presented one carries over. The client secret is
+                    // custody, not a grant output — it persists.
+                    refresh_token: grant
+                        .refresh_token
+                        .or_else(|| material.refresh_token.clone()),
+                    client_secret: material.client_secret.clone(),
+                    expires_at: grant.expires_at,
+                };
+                let (key_id, master) = self.active_master().await?;
+                let credential = reseal(
+                    &key_id,
+                    &master,
+                    &record.connection_id,
+                    &stored.credential,
+                    &rotated,
+                )?;
+                let mut updated_record = record.clone();
+                updated_record.health.last_refresh_at = Some(now);
+                updated_record.health.consecutive_failures = 0;
+                updated_record.updated_at = now;
+                // Evidence first, the module's rule: the journaled
+                // refresh, then the state change.
+                self.journal(
+                    EventDraft::new(RunEventKind::ConnectionRefreshed, Effect::Pure).output(
+                        serde_json::to_value(ConnectionRefresh {
+                            connection_id: record.connection_id.clone(),
+                            refreshed_at: now,
+                            expires_at: rotated.expires_at,
+                        })
+                        .map_err(|e| e.to_string())?,
+                    ),
+                )
+                .await?;
+                let updated = StoredConnection {
+                    record: updated_record,
+                    credential,
+                };
+                match self
+                    .store
+                    .update_connection(tenant, &record.connection_id, stored, &updated)
+                    .await?
+                {
+                    ConnectionUpdate::Applied => Ok(Some(RefreshAttempt::Rotated(rotated))),
+                    // A concurrent mutation won (a second refresh, or a
+                    // consent): re-read once and serve the winner's
+                    // material — it is at least as fresh as what we
+                    // minted. The row vanishing mid-refresh means a
+                    // delete raced us; serve what we minted — liveness
+                    // was checked before the envelope opened, and the
+                    // next resolution re-reads.
+                    ConnectionUpdate::Conflict | ConnectionUpdate::Unknown => {
+                        let fresh = self
+                            .store
+                            .get_connection(tenant, &record.connection_id)
+                            .await?;
+                        match fresh {
+                            Some(fresh) => {
+                                let master = self.master_for(&fresh.credential.key_id).await?;
+                                let material =
+                                    open(&master, &record.connection_id, &fresh.credential)?;
+                                Ok(Some(RefreshAttempt::Rotated(material)))
+                            }
+                            None => Ok(Some(RefreshAttempt::Rotated(rotated))),
+                        }
+                    }
+                }
+            }
+            Err(failure) if failure.permanent => {
+                let classified = ClassifiedFailure {
+                    class: failure.class,
+                    detail: failure.detail,
+                    at: now,
+                };
+                // The terminal refusal is a *transition*: journaled
+                // before the state change (evidence first). On a lost
+                // CAS race the event records the refusal the provider
+                // gave — which stands either way; the winner's row
+                // governs the next call.
+                self.journal(
+                    EventDraft::new(RunEventKind::ConnectionNeedsReauth, Effect::Pure).output(
+                        serde_json::to_value(ConnectionReauthRequired {
+                            connection_id: record.connection_id.clone(),
+                            failure: classified.clone(),
+                            grant: record.scopes.clone(),
+                            recorded_at: now,
+                        })
+                        .map_err(|e| e.to_string())?,
+                    ),
+                )
+                .await?;
+                let mut updated_record = record.clone();
+                updated_record.status = ConnectionStatus::NeedsReauth;
+                updated_record.health.last_failure = Some(classified);
+                updated_record.updated_at = now;
+                let updated = StoredConnection {
+                    record: updated_record,
+                    credential: stored.credential.clone(),
+                };
+                let _ = self
+                    .store
+                    .update_connection(tenant, &record.connection_id, stored, &updated)
+                    .await?;
+                Ok(Some(RefreshAttempt::NeedsReauth))
+            }
+            Err(failure) => {
+                // A transient failure moves the health counters and
+                // journals NOTHING: counters are bookkeeping, transitions
+                // are evidence (the wave-4 refinement — a provider's
+                // flaky minute must not write a journal page per
+                // connection per pass).
+                let mut updated_record = record.clone();
+                updated_record.health.consecutive_failures += 1;
+                updated_record.health.last_failure = Some(ClassifiedFailure {
+                    class: failure.class,
+                    detail: failure.detail,
+                    at: now,
+                });
+                updated_record.updated_at = now;
+                let updated = StoredConnection {
+                    record: updated_record,
+                    credential: stored.credential.clone(),
+                };
+                // A lost race loses the counter bump, nothing more — the
+                // winner's mutation carries its own bookkeeping.
+                let _ = self
+                    .store
+                    .update_connection(tenant, &record.connection_id, stored, &updated)
+                    .await?;
+                Ok(Some(if expires_at > now {
+                    RefreshAttempt::TransientServe(material)
+                } else {
+                    RefreshAttempt::TransientExpired
+                }))
+            }
+        }
+    }
+
+    /// The resolution-path wrapper: serve the (possibly rotated)
+    /// material, or fail closed with the denial the attempt maps to.
+    async fn refresh_at_resolution(
+        &self,
+        tenant: &str,
+        handle_id: &str,
+        stored: &StoredConnection,
+        material: TokenMaterial,
+    ) -> Result<TokenMaterial, BrokerDenial> {
+        let attempt = self
+            .refresh_if_due(tenant, stored, material.clone(), Utc::now())
+            .await
+            .map_err(BrokerDenial::unavailable)?;
+        match attempt {
+            None => Ok(material),
+            Some(RefreshAttempt::Rotated(rotated)) => Ok(rotated),
+            Some(RefreshAttempt::TransientServe(material)) => Ok(material),
+            Some(RefreshAttempt::TransientExpired) => Err(BrokerDenial::unavailable(format!(
+                "connection `{}`: the provider refresh failed transiently and the access token \
+                 has expired — retry, or record a new consent act",
+                stored.record.connection_id
+            ))),
+            Some(RefreshAttempt::ExpiredUnservable) => Err(BrokerDenial::unavailable(format!(
+                "connection `{}`: the access token expired and the connection has no refresh \
+                 path — record a new consent act",
+                stored.record.connection_id
+            ))),
+            Some(RefreshAttempt::NeedsReauth) => Err(BrokerDenial::connection_needs_reauth(
+                &stored.record,
+                tenant,
+                handle_id,
+            )),
+        }
+    }
+
+    /// One sweeper pass (R0.11 wave 4): the same lifecycle the
+    /// resolution path runs, over every active OAuth connection in the
+    /// deployment. The pass's concurrency control is the connection
+    /// row's own CAS — two sweepers (or a sweeper and a resolution)
+    /// cannot double-rotate: the loser's update conflicts, it re-reads,
+    /// and the winner's material serves.
+    ///
+    /// A connection whose envelope will not open (a master key this host
+    /// does not hold, corruption) counts as `failed` and the pass
+    /// continues — one bad row must not stall the fleet.
+    pub(crate) async fn sweep_once(&self, now: chrono::DateTime<Utc>) -> StoreResult<SweepReport> {
+        let mut report = SweepReport::default();
+        if self.oauth.is_none() {
+            return Ok(report);
+        }
+        for (tenant, stored) in self.store.list_all_connections().await? {
+            if stored.record.status != ConnectionStatus::Active
+                || !stored.record.provider.is_oauth()
+            {
+                continue;
+            }
+            report.scanned += 1;
+            let opened = async {
+                let master = self.master_for(&stored.credential.key_id).await?;
+                open(&master, &stored.record.connection_id, &stored.credential)
+            }
+            .await;
+            let material = match opened {
+                Ok(material) => material,
+                Err(e) => {
+                    tracing::warn!(
+                        connection_id = %stored.record.connection_id,
+                        %e,
+                        "broker sweep could not open the connection's envelope"
+                    );
+                    report.failed += 1;
+                    continue;
+                }
+            };
+            match self.refresh_if_due(&tenant, &stored, material, now).await? {
+                None => {}
+                Some(RefreshAttempt::Rotated(_)) => report.refreshed += 1,
+                Some(RefreshAttempt::NeedsReauth) => report.needs_reauth += 1,
+                Some(
+                    RefreshAttempt::TransientServe(_)
+                    | RefreshAttempt::TransientExpired
+                    | RefreshAttempt::ExpiredUnservable,
+                ) => report.failed += 1,
+            }
+        }
+        Ok(report)
+    }
+}
+
+/// Spawn the background sweeper (R0.11 wave 4): [`Broker::sweep_once`]
+/// on `interval`, with the outbox relay's drain semantics — a pass in
+/// flight when shutdown starts completes, and a delayed tick delays
+/// rather than bursting into a provider stampede. Nothing is due
+/// *because* the sweeper exists: resolution runs the same lifecycle,
+/// so a stopped sweeper degrades to refresh-at-use, never to expiry.
+pub(crate) fn spawn_sweeper(
+    broker: Arc<Broker>,
+    interval: Duration,
+    shutdown: tokio_util::sync::CancellationToken,
+) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {}
+                _ = shutdown.cancelled() => {
+                    tracing::info!("broker sweeper shutting down; due tokens refresh at resolution or on the next process");
+                    break;
+                }
+            }
+            match broker.sweep_once(Utc::now()).await {
+                Ok(report)
+                    if report.refreshed > 0 || report.needs_reauth > 0 || report.failed > 0 =>
+                {
+                    tracing::info!(?report, "broker sweep completed");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "broker sweep failed; will retry");
+                }
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1088,6 +1526,7 @@ mod tests {
         TokenMaterial {
             access_token: "sk-live-MARKER-9f2e".into(),
             refresh_token: Some("rt-MARKER-41ab".into()),
+            client_secret: None,
             expires_at: Some(DateTime::<Utc>::from_timestamp_millis(1_800_003_600_000).unwrap()),
         }
     }
@@ -1148,6 +1587,7 @@ mod tests {
         let rotated = TokenMaterial {
             access_token: "sk-live-ROTATED".into(),
             refresh_token: None,
+            client_secret: None,
             expires_at: None,
         };
         let second = reseal(&key_id, &master, "conn-abc", &first, &rotated).unwrap();
@@ -1422,6 +1862,7 @@ mod tests {
         let rotated = TokenMaterial {
             access_token: "sk-live-ROTATED".into(),
             refresh_token: None,
+            client_secret: None,
             expires_at: None,
         };
         match b
@@ -1482,5 +1923,477 @@ mod tests {
             _ => panic!("expected converged"),
         }
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    // ---------- the OAuth lifecycle (R0.11 wave 4) ----------
+
+    use rusty_agent_runtime::broker::{
+        CredentialBroker, OAuthFailure, ResolvedCredential, ScriptedOAuthProvider,
+    };
+    use rusty_agent_runtime::durable::ErrorClass;
+
+    fn oauth_broker(
+        root: &Path,
+        provider: Arc<ScriptedOAuthProvider>,
+        window: Duration,
+    ) -> (Broker, Arc<dyn ServerStore>) {
+        let store: Arc<dyn ServerStore> = Arc::new(JsonFileStore::load(root));
+        (
+            Broker::new(Arc::clone(&store), root.to_path_buf(), DEFAULT_HANDLE_TTL)
+                .with_oauth_provider(provider, window),
+            store,
+        )
+    }
+
+    /// Material inside any reasonable refresh window, with a refresh
+    /// path (an authorization-code connection's refresh token).
+    fn due_material() -> TokenMaterial {
+        TokenMaterial {
+            access_token: "sk-live-DUE".into(),
+            refresh_token: Some("rt-due".into()),
+            client_secret: None,
+            expires_at: Some(Utc::now() + chrono::Duration::seconds(60)),
+        }
+    }
+
+    /// Material far outside any refresh window.
+    fn fresh_material() -> TokenMaterial {
+        TokenMaterial {
+            expires_at: Some(Utc::now() + chrono::Duration::hours(2)),
+            ..due_material()
+        }
+    }
+
+    async fn journal_kinds(store: &Arc<dyn ServerStore>) -> Vec<RunEventKind> {
+        store
+            .get_journal(BROKER_JOURNAL_RUN_ID)
+            .await
+            .unwrap()
+            .map(|snapshot| snapshot.events.iter().map(|e| e.kind).collect())
+            .unwrap_or_default()
+    }
+
+    async fn issue_and_resolve(
+        b: &Broker,
+        connection_id: &str,
+    ) -> Result<ResolvedCredential, BrokerDenial> {
+        let handle = CredentialBroker::issue(
+            b,
+            &IssueRequest {
+                tenant: "acme".into(),
+                run_id: None,
+                requirement: CredentialRequirement {
+                    connection_id: connection_id.to_owned(),
+                    scopes: BTreeSet::new(),
+                },
+            },
+        )
+        .await?;
+        CredentialBroker::resolve(b, &handle.token(), &BTreeSet::new()).await
+    }
+
+    #[test]
+    fn refresh_window_jitter_is_deterministic_bounded_and_spread() {
+        let window = Duration::from_secs(600);
+        let full = chrono::Duration::from_std(window).unwrap();
+        let a = refresh_window_for("conn-a", window);
+        // Deterministic: no RNG at resolution, so a recorded run's
+        // refresh cadence reproduces.
+        assert_eq!(a, refresh_window_for("conn-a", window));
+        for connection_id in ["conn-a", "conn-b", "conn-c", "conn-d"] {
+            let jittered = refresh_window_for(connection_id, window);
+            assert!(jittered >= full / 2, "{connection_id}: {jittered}");
+            assert!(jittered < full, "{connection_id}: {jittered}");
+        }
+    }
+
+    #[tokio::test]
+    async fn resolution_refreshes_a_due_token_beneath_the_stable_id() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new());
+        let (b, store) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let record = {
+            let now = Utc::now();
+            let record = ConnectionRecord {
+                connection_id: new_connection_id(),
+                provider: ConnectionProvider::Oauth2AuthorizationCode,
+                subject: None,
+                scopes: BTreeSet::from(["drive.readonly".to_owned()]),
+                status: ConnectionStatus::Active,
+                health: Default::default(),
+                created_at: now,
+                updated_at: now,
+            };
+            b.register(
+                "acme",
+                record.provider,
+                record.subject.clone(),
+                record.scopes.clone(),
+                &due_material(),
+            )
+            .await
+            .unwrap()
+        };
+        let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
+        // The rotation: new access token, the presented refresh token
+        // carried over, and the connection id untouched.
+        assert_eq!(resolved.material.access_token, "scripted-token-0");
+        assert_eq!(resolved.material.refresh_token.as_deref(), Some("rt-due"));
+        assert_eq!(resolved.connection_id, record.connection_id);
+        assert_eq!(provider.call_counts(), (0, 1));
+        // The record's health half moved; the status stands.
+        let after = b.get("acme", &record.connection_id).await.unwrap().unwrap();
+        assert_eq!(after.status, ConnectionStatus::Active);
+        assert!(after.health.last_refresh_at.is_some());
+        assert_eq!(after.health.consecutive_failures, 0);
+        // The refresh journaled before the use it served.
+        assert_eq!(
+            journal_kinds(&store).await,
+            vec![
+                RunEventKind::ConnectionRegistered,
+                RunEventKind::CredentialHandleIssued,
+                RunEventKind::ConnectionRefreshed,
+                RunEventKind::CredentialUse,
+            ]
+        );
+        // The new grant lives an hour: the next resolution serves it
+        // untouched — no second refresh.
+        let again = issue_and_resolve(&b, &record.connection_id).await.unwrap();
+        assert_eq!(again.material.access_token, "scripted-token-0");
+        assert_eq!(provider.call_counts(), (0, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn a_token_outside_its_window_serves_untouched() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new());
+        let (b, store) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let record = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2AuthorizationCode,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &fresh_material(),
+            )
+            .await
+            .unwrap();
+        let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
+        assert_eq!(resolved.material.access_token, "sk-live-DUE");
+        assert_eq!(provider.call_counts(), (0, 0));
+        assert!(!journal_kinds(&store)
+            .await
+            .contains(&RunEventKind::ConnectionRefreshed));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn permanent_refresh_failure_flips_needs_reauth_and_fails_closed() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new().then_refresh_failure(
+            OAuthFailure::permanent("invalid_grant: the refresh token was revoked at the provider"),
+        ));
+        let (b, store) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let record = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2AuthorizationCode,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &due_material(),
+            )
+            .await
+            .unwrap();
+        let err = issue_and_resolve(&b, &record.connection_id)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err.reason, BrokerDenialReason::ConnectionNeedsReauth),
+            "got: {err}"
+        );
+        // The flip: status, the classified failure, and the journaled
+        // transition — the denial journaled after it.
+        let after = b.get("acme", &record.connection_id).await.unwrap().unwrap();
+        assert_eq!(after.status, ConnectionStatus::NeedsReauth);
+        let failure = after.health.last_failure.as_ref().unwrap();
+        assert_eq!(failure.class, ErrorClass::InvalidInput);
+        assert_eq!(
+            journal_kinds(&store).await,
+            vec![
+                RunEventKind::ConnectionRegistered,
+                RunEventKind::CredentialHandleIssued,
+                RunEventKind::ConnectionNeedsReauth,
+                RunEventKind::CredentialDenied,
+            ]
+        );
+        // Issuance fails closed the same way — every path out of
+        // `needs_reauth` runs through a recorded consent act.
+        let err = CredentialBroker::issue(
+            &b,
+            &IssueRequest {
+                tenant: "acme".into(),
+                run_id: None,
+                requirement: CredentialRequirement {
+                    connection_id: record.connection_id.clone(),
+                    scopes: BTreeSet::new(),
+                },
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err.reason,
+            BrokerDenialReason::ConnectionNeedsReauth
+        ));
+        // The re-auth path: a recorded consent act re-activates, and the
+        // next resolution serves the new material (steady-state rotation
+        // resumes — the scripted permanent failure is consumed).
+        match b
+            .record_consent("acme", &record.connection_id, None, Some(&fresh_material()))
+            .await
+            .unwrap()
+        {
+            ConsentOutcome::Applied { record, .. } => {
+                assert_eq!(record.status, ConnectionStatus::Active)
+            }
+            _ => panic!("expected applied"),
+        }
+        let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
+        assert_eq!(resolved.material.access_token, "sk-live-DUE");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn transient_refresh_failure_serves_a_still_valid_token_and_journals_nothing() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new().then_refresh_failure(
+            OAuthFailure::transient(ErrorClass::DependencyFailure, "token endpoint 503"),
+        ));
+        let (b, store) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let record = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2AuthorizationCode,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &due_material(),
+            )
+            .await
+            .unwrap();
+        // The token is still valid: serve it. The counters moved; the
+        // journal did not — bookkeeping, not a transition.
+        let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
+        assert_eq!(resolved.material.access_token, "sk-live-DUE");
+        assert_eq!(provider.call_counts(), (0, 1));
+        let after = b.get("acme", &record.connection_id).await.unwrap().unwrap();
+        assert_eq!(after.health.consecutive_failures, 1);
+        assert_eq!(
+            after.health.last_failure.as_ref().unwrap().class,
+            ErrorClass::DependencyFailure
+        );
+        assert_eq!(
+            journal_kinds(&store).await,
+            vec![
+                RunEventKind::ConnectionRegistered,
+                RunEventKind::CredentialHandleIssued,
+                RunEventKind::CredentialUse,
+            ]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn expired_tokens_with_no_servable_path_fail_closed() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new());
+        let (b, _) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let expired = Utc::now() - chrono::Duration::seconds(60);
+        // Expired, no refresh path: nothing to rotate with.
+        let no_path = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2AuthorizationCode,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &TokenMaterial {
+                    access_token: "sk-live-DEAD".into(),
+                    refresh_token: None,
+                    client_secret: None,
+                    expires_at: Some(expired),
+                },
+            )
+            .await
+            .unwrap();
+        let err = issue_and_resolve(&b, &no_path.connection_id)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+            "got: {err}"
+        );
+        assert!(err.detail.contains("no refresh path"), "got: {err}");
+        assert_eq!(provider.call_counts(), (0, 0));
+        let _ = std::fs::remove_dir_all(root);
+
+        // Expired, refresh path, transient failure: nothing servable
+        // remains.
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new().then_refresh_failure(
+            OAuthFailure::transient(ErrorClass::Transient, "connection reset"),
+        ));
+        let (b, _) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let dead = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2AuthorizationCode,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &TokenMaterial {
+                    expires_at: Some(expired),
+                    ..due_material()
+                },
+            )
+            .await
+            .unwrap();
+        let err = issue_and_resolve(&b, &dead.connection_id)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+            "got: {err}"
+        );
+        assert_eq!(provider.call_counts(), (0, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn client_credentials_refresh_rotates_on_the_client_secret() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new());
+        let (b, _) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let record = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2ClientCredentials,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &TokenMaterial {
+                    access_token: "cc-token-0".into(),
+                    refresh_token: None,
+                    client_secret: Some("cc-secret-MARKER".into()),
+                    expires_at: Some(Utc::now() + chrono::Duration::seconds(60)),
+                },
+            )
+            .await
+            .unwrap();
+        let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
+        // Rotated: a fresh access token, no refresh token (the flow has
+        // none), and the client secret — custody, not a grant output —
+        // carried over for the next rotation.
+        assert_eq!(resolved.material.access_token, "scripted-token-0");
+        assert_eq!(resolved.material.refresh_token, None);
+        assert_eq!(
+            resolved.material.client_secret.as_deref(),
+            Some("cc-secret-MARKER")
+        );
+        assert_eq!(provider.call_counts(), (0, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn the_sweeper_refreshes_due_connections_and_counts_outcomes() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new());
+        let (b, store) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        // One due, one fresh (both OAuth), one static kind — the pass
+        // scans the OAuth two and refreshes the due one.
+        let due = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2AuthorizationCode,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &due_material(),
+            )
+            .await
+            .unwrap();
+        b.register(
+            "acme",
+            ConnectionProvider::Oauth2AuthorizationCode,
+            None,
+            BTreeSet::from(["drive.readonly".to_owned()]),
+            &fresh_material(),
+        )
+        .await
+        .unwrap();
+        b.register(
+            "acme",
+            ConnectionProvider::ApiKey,
+            None,
+            BTreeSet::new(),
+            &TokenMaterial {
+                access_token: "sk-static".into(),
+                refresh_token: None,
+                client_secret: None,
+                expires_at: None,
+            },
+        )
+        .await
+        .unwrap();
+        let report = b.sweep_once(Utc::now()).await.unwrap();
+        assert_eq!(
+            report,
+            SweepReport {
+                scanned: 2,
+                refreshed: 1,
+                needs_reauth: 0,
+                failed: 0,
+            }
+        );
+        let after = b.get("acme", &due.connection_id).await.unwrap().unwrap();
+        assert!(after.health.last_refresh_at.is_some());
+        assert!(journal_kinds(&store)
+            .await
+            .contains(&RunEventKind::ConnectionRefreshed));
+
+        // A second due connection whose refresh the provider refuses
+        // terminally: the pass flips it (journaled) and counts it.
+        let provider2 = Arc::new(ScriptedOAuthProvider::new().then_refresh_failure(
+            OAuthFailure::permanent("invalid_grant: refresh token expired"),
+        ));
+        let root2 = temp_store();
+        let (b2, _) = oauth_broker(&root2, Arc::clone(&provider2), DEFAULT_REFRESH_WINDOW);
+        let terminal = b2
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2AuthorizationCode,
+                None,
+                BTreeSet::from(["drive.readonly".to_owned()]),
+                &due_material(),
+            )
+            .await
+            .unwrap();
+        let report = b2.sweep_once(Utc::now()).await.unwrap();
+        assert_eq!(
+            report,
+            SweepReport {
+                scanned: 1,
+                refreshed: 0,
+                needs_reauth: 1,
+                failed: 0,
+            }
+        );
+        let after = b2
+            .get("acme", &terminal.connection_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, ConnectionStatus::NeedsReauth);
+        // Out of `active`, so the next pass does not even scan it.
+        let report = b2.sweep_once(Utc::now()).await.unwrap();
+        assert_eq!(report, SweepReport::default());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(root2);
     }
 }

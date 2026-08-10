@@ -51,6 +51,13 @@
 //!   grants are brokered into issued handle tokens the guest receives in
 //!   its input, the R0.9 "the guest receives opaque tokens" precedent
 //!   extended from names to broker-issued handles.
+//! - [`OAuthProvider`] — the token-endpoint seam (wave 4): the
+//!   authorization-code exchange and the refresh the broker's lifecycle
+//!   drives (at resolution and from the server's sweeper), with
+//!   [`TokenGrant`] / [`OAuthFailure`] as the outcome vocabulary —
+//!   permanent failures flip the connection to `needs_reauth`, journaled
+//!   as [`ConnectionReauthRequired`]. [`ScriptedOAuthProvider`] is the
+//!   lifecycle's stand-in for a live endpoint, so no test needs one.
 //!
 //! Golden-file tests under `tests/golden/` pin every wire shape in this
 //! module; any accidental contract drift fails CI.
@@ -335,6 +342,13 @@ pub struct TokenMaterial {
     /// The access token's expiry, when the provider declares one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
+
+    /// The client credential of an `oauth2_client_credentials` connection
+    /// (R0.11 wave 4): the long-lived secret the provider exchanges for
+    /// access tokens on every refresh. Sealed like everything else in
+    /// this struct; redacted in `Debug`; absent for every other flow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
 }
 
 impl std::fmt::Debug for TokenMaterial {
@@ -346,6 +360,10 @@ impl std::fmt::Debug for TokenMaterial {
                 &self.refresh_token.as_ref().map(|_| "[redacted]"),
             )
             .field("expires_at", &self.expires_at)
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "[redacted]"),
+            )
             .finish()
     }
 }
@@ -831,6 +849,29 @@ pub struct ConnectionRevocation {
     pub reason: Option<String>,
 }
 
+/// The journaled re-auth transition (output of
+/// [`RunEventKind::ConnectionNeedsReauth`](crate::record::RunEventKind::ConnectionNeedsReauth)):
+/// the refresh path failed terminally and the connection's status flipped
+/// to `needs_reauth`. Names the classified failure that decided the flip
+/// and the consent set that stopped being servable — attributable, like
+/// every broker event, and metadata by construction: the provider's error
+/// detail is human-facing context, never credential material.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectionReauthRequired {
+    /// The connection that needs a new consent act.
+    pub connection_id: String,
+
+    /// The terminal failure: the provider's refusal classified under the
+    /// R0.6 [`ErrorClass`] taxonomy.
+    pub failure: ClassifiedFailure,
+
+    /// The consent scope set that stopped being servable.
+    pub grant: BTreeSet<String>,
+
+    /// When the flip was recorded.
+    pub recorded_at: DateTime<Utc>,
+}
+
 /// The journaled handle issuance (output of
 /// [`RunEventKind::CredentialHandleIssued`](crate::record::RunEventKind::CredentialHandleIssued)):
 /// the full claims, so the run's evidence pins the connection id and the
@@ -866,6 +907,339 @@ pub struct CredentialUse {
 
     /// When the resolution happened.
     pub used_at: DateTime<Utc>,
+}
+
+// --------------------------------------------------------------------- //
+// The OAuth lifecycle (R0.11 Extension Plane, wave 4)
+// --------------------------------------------------------------------- //
+
+/// A successful grant from a provider: token exchange (the back half of
+/// the human's consent act) or a refresh. Like [`TokenMaterial`], this
+/// type carries credential bytes and follows the same posture — redacted
+/// in `Debug`, no `Serialize` impl, because a grant is never evidence:
+/// the journaled `connection_refreshed` event is. The broker converts it
+/// into [`TokenMaterial`] and seals it; nothing else ever holds it.
+#[derive(Clone, PartialEq)]
+pub struct TokenGrant {
+    /// The freshly minted access token.
+    pub access_token: String,
+
+    /// The refresh token, where the provider rotates or issues one. When
+    /// absent on a refresh, the connection's existing refresh token
+    /// stands (providers that do not rotate refresh tokens).
+    pub refresh_token: Option<String>,
+
+    /// The new access token's expiry, when the provider declares one.
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+impl std::fmt::Debug for TokenGrant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenGrant")
+            .field("access_token", &"[redacted]")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "[redacted]"),
+            )
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+/// The provider's typed refusal. Classified under the R0.6 [`ErrorClass`]
+/// taxonomy so the retry policy plane reads it unchanged; `permanent`
+/// marks the terminal refusals — `invalid_grant`, an expired refresh
+/// token — that flip the connection to `needs_reauth` rather than retry:
+/// a stale credential retried looks exactly like an attack retried. The
+/// `detail` is human-facing context (the provider's error), never
+/// credential material.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OAuthFailure {
+    /// The retry-taxonomy class of the failure.
+    pub class: ErrorClass,
+
+    /// `true` for terminal refusals (`invalid_grant` and kin): the
+    /// connection flips to `needs_reauth` and calls fail closed until a
+    /// human records a new consent act.
+    pub permanent: bool,
+
+    /// Human-facing context, never credential material.
+    pub detail: String,
+}
+
+impl OAuthFailure {
+    /// A terminal refusal (`permanent: true`, classed `InvalidInput` — the
+    /// taxonomy's "the same bytes will fail the same way on every attempt"
+    /// bucket, which a stale grant is exactly).
+    pub fn permanent(detail: impl Into<String>) -> Self {
+        Self {
+            class: ErrorClass::InvalidInput,
+            permanent: true,
+            detail: detail.into(),
+        }
+    }
+
+    /// A retryable failure (`permanent: false`) under `class`.
+    pub fn transient(class: ErrorClass, detail: impl Into<String>) -> Self {
+        Self {
+            class,
+            permanent: false,
+            detail: detail.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for OAuthFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind = if self.permanent {
+            "permanent"
+        } else {
+            "transient"
+        };
+        write!(
+            f,
+            "{kind} OAuth failure ({:?}): {}",
+            self.class, self.detail
+        )
+    }
+}
+
+impl std::error::Error for OAuthFailure {}
+
+impl ConnectionProvider {
+    /// `true` for the OAuth 2.0 flows — the kinds whose token material the
+    /// refresh lifecycle (at-resolution and the sweeper) rotates. Static
+    /// kinds (`api_key`, `basic`) have no refresh path: their material
+    /// changes only by a recorded consent act.
+    pub fn is_oauth(self) -> bool {
+        matches!(
+            self,
+            ConnectionProvider::Oauth2AuthorizationCode
+                | ConnectionProvider::Oauth2ClientCredentials
+        )
+    }
+}
+
+/// The OAuth provider seam: where a deployment plugs the token endpoint.
+/// Core owns the lifecycle — when an exchange or refresh happens, what
+/// the outcomes mean — and the server owns custody; the provider owns
+/// exactly one thing: speaking the provider's wire protocol. Drawn as a
+/// trait (the [`CredentialBroker`] / `NetworkConnector` boundary) so the
+/// lifecycle is testable against a scripted provider with no live
+/// external dependency, and so a deployment's HTTP implementation is one
+/// small adapter rather than a fork of the broker.
+///
+/// Implementations MUST NOT log or persist anything they are handed or
+/// return: the arguments and the grant are credential bytes.
+#[async_trait]
+pub trait OAuthProvider: std::fmt::Debug + Send + Sync {
+    /// Exchange an authorization code for the initial grant — the back
+    /// half of the human's consent act at the provider. The `scopes` are
+    /// the consent set being recorded; providers that echo the granted
+    /// scope set in the exchange response answer for the same set.
+    async fn exchange_code(
+        &self,
+        code: &str,
+        scopes: &BTreeSet<String>,
+    ) -> std::result::Result<TokenGrant, OAuthFailure>;
+
+    /// Refresh the connection's access token. The two OAuth flows differ
+    /// in what they present, and the provider sees the sealed material so
+    /// it can serve both: authorization-code connections present
+    /// `material.refresh_token`; client-credentials connections re-present
+    /// `material.client_secret`. The connection record rides along for the
+    /// provider kind, the subject, and the consented scope set.
+    async fn refresh(
+        &self,
+        connection: &ConnectionRecord,
+        material: &TokenMaterial,
+    ) -> std::result::Result<TokenGrant, OAuthFailure>;
+}
+
+/// One scripted outcome of a [`ScriptedOAuthProvider`] call.
+#[derive(Debug, Clone)]
+enum ScriptedOutcome {
+    /// Mint the next rotating token (`{prefix}-{n}`, counter monotonic).
+    Rotate,
+    /// Answer with this grant verbatim.
+    Grant(TokenGrant),
+    /// Answer with this failure verbatim.
+    Fail(OAuthFailure),
+}
+
+/// A scripted OAuth provider for tests and embedder smoke checks — the
+/// lifecycle's stand-in for a live token endpoint, so no test needs a
+/// network. Authorization codes map to scripted outcomes (an unknown code
+/// is the provider's `invalid_grant`, permanent); refreshes pop a
+/// scripted queue and default to rotation: each call mints the next
+/// access token beneath the same refresh token, which is exactly the
+/// provider behavior the broker's rotation-beneath-a-stable-id contract
+/// is built on.
+#[derive(Debug)]
+pub struct ScriptedOAuthProvider {
+    codes: Mutex<std::collections::HashMap<String, ScriptedOutcome>>,
+    refresh_script: Mutex<std::collections::VecDeque<ScriptedOutcome>>,
+    counter: std::sync::atomic::AtomicU64,
+    token_prefix: String,
+    grant_ttl: chrono::Duration,
+    exchanges: Mutex<Vec<String>>,
+    refreshes: Mutex<u64>,
+}
+
+impl Default for ScriptedOAuthProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScriptedOAuthProvider {
+    /// A provider whose tokens read `scripted-token-{n}` and live one
+    /// hour per grant.
+    pub fn new() -> Self {
+        Self {
+            codes: Mutex::new(std::collections::HashMap::new()),
+            refresh_script: Mutex::new(std::collections::VecDeque::new()),
+            counter: std::sync::atomic::AtomicU64::new(0),
+            token_prefix: "scripted-token".to_owned(),
+            grant_ttl: chrono::Duration::hours(1),
+            exchanges: Mutex::new(Vec::new()),
+            refreshes: Mutex::new(0),
+        }
+    }
+
+    /// Builder-style: the minted token prefix (a distinctive marker, so a
+    /// leak scan is a scan for it).
+    pub fn with_token_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.token_prefix = prefix.into();
+        self
+    }
+
+    /// Builder-style: the lifetime stamped on minted grants.
+    pub fn with_grant_ttl(mut self, ttl: chrono::Duration) -> Self {
+        self.grant_ttl = ttl;
+        self
+    }
+
+    /// Script `code` to exchange for `grant`.
+    pub fn with_code(self, code: impl Into<String>, grant: TokenGrant) -> Self {
+        self.codes
+            .lock()
+            .expect("scripted provider lock")
+            .insert(code.into(), ScriptedOutcome::Grant(grant));
+        self
+    }
+
+    /// Script `code` to fail its exchange with `failure`.
+    pub fn with_code_failure(self, code: impl Into<String>, failure: OAuthFailure) -> Self {
+        self.codes
+            .lock()
+            .expect("scripted provider lock")
+            .insert(code.into(), ScriptedOutcome::Fail(failure));
+        self
+    }
+
+    /// Queue a scripted refresh failure (consumed in call order; the
+    /// queue empty is steady-state rotation — a transient failure that
+    /// heals is one entry, a terminal one is the last).
+    pub fn then_refresh_failure(self, failure: OAuthFailure) -> Self {
+        self.refresh_script
+            .lock()
+            .expect("scripted provider lock")
+            .push_back(ScriptedOutcome::Fail(failure));
+        self
+    }
+
+    /// Queue a scripted refresh grant.
+    pub fn then_refresh_grant(self, grant: TokenGrant) -> Self {
+        self.refresh_script
+            .lock()
+            .expect("scripted provider lock")
+            .push_back(ScriptedOutcome::Grant(grant));
+        self
+    }
+
+    /// `(exchanges, refreshes)` observed so far — the assertions a
+    /// lifecycle test makes ("the rotation happened exactly once").
+    pub fn call_counts(&self) -> (usize, u64) {
+        (
+            self.exchanges.lock().expect("scripted provider lock").len(),
+            *self.refreshes.lock().expect("scripted provider lock"),
+        )
+    }
+
+    fn mint(&self, refresh_token: Option<String>) -> TokenGrant {
+        let n = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        TokenGrant {
+            access_token: format!("{}-{n}", self.token_prefix),
+            refresh_token,
+            expires_at: Some(Utc::now() + self.grant_ttl),
+        }
+    }
+
+    fn resolve(
+        &self,
+        outcome: ScriptedOutcome,
+        material: Option<&TokenMaterial>,
+    ) -> std::result::Result<TokenGrant, OAuthFailure> {
+        match outcome {
+            // A rotation keeps the presented refresh token when the
+            // material carries one (providers that do not rotate refresh
+            // tokens); client-credentials material carries none, and the
+            // minted grant carries none either.
+            ScriptedOutcome::Rotate => {
+                Ok(self.mint(material.and_then(|m| m.refresh_token.clone())))
+            }
+            ScriptedOutcome::Grant(grant) => Ok(grant),
+            ScriptedOutcome::Fail(failure) => Err(failure),
+        }
+    }
+}
+
+#[async_trait]
+impl OAuthProvider for ScriptedOAuthProvider {
+    async fn exchange_code(
+        &self,
+        code: &str,
+        scopes: &BTreeSet<String>,
+    ) -> std::result::Result<TokenGrant, OAuthFailure> {
+        let _ = scopes;
+        self.exchanges
+            .lock()
+            .expect("scripted provider lock")
+            .push(code.to_owned());
+        let outcome = self
+            .codes
+            .lock()
+            .expect("scripted provider lock")
+            .get(code)
+            .cloned();
+        match outcome {
+            Some(outcome) => self.resolve(outcome, None),
+            // An unknown code is the provider's refusal, not a scripting
+            // gap: real providers answer `invalid_grant` here, and the
+            // broker's permanent-failure path is what a test drives.
+            None => Err(OAuthFailure::permanent(format!(
+                "invalid_grant: unknown authorization code `{code}`"
+            ))),
+        }
+    }
+
+    async fn refresh(
+        &self,
+        connection: &ConnectionRecord,
+        material: &TokenMaterial,
+    ) -> std::result::Result<TokenGrant, OAuthFailure> {
+        let _ = connection;
+        *self.refreshes.lock().expect("scripted provider lock") += 1;
+        let outcome = self
+            .refresh_script
+            .lock()
+            .expect("scripted provider lock")
+            .pop_front();
+        self.resolve(outcome.unwrap_or(ScriptedOutcome::Rotate), Some(material))
+    }
 }
 
 // --------------------------------------------------------------------- //
@@ -1374,10 +1748,79 @@ mod tests {
             access_token: "sk-live-MARKER".into(),
             refresh_token: Some("rt-MARKER".into()),
             expires_at: Some(ts(1_800_000_300_000)),
+            client_secret: Some("cs-MARKER".into()),
         };
         let rendered = format!("{material:?}");
         assert!(!rendered.contains("sk-live-MARKER"), "got: {rendered}");
         assert!(!rendered.contains("rt-MARKER"), "got: {rendered}");
+        assert!(!rendered.contains("cs-MARKER"), "got: {rendered}");
+        assert!(rendered.contains("[redacted]"));
+        // The sealed form is the store contract: `client_secret` rides
+        // the same skip-when-absent rule, so pre-wave-4 envelopes are
+        // byte-stable.
+        let without = TokenMaterial {
+            client_secret: None,
+            ..material.clone()
+        };
+        let value = serde_json::to_value(&without).unwrap();
+        assert!(value.get("client_secret").is_none(), "got: {value}");
+        let with = serde_json::to_value(&material).unwrap();
+        assert_eq!(with["client_secret"], serde_json::json!("cs-MARKER"));
+    }
+
+    #[tokio::test]
+    async fn scripted_provider_exchanges_rotates_and_fails_as_scripted() {
+        let scopes = BTreeSet::from(["drive.readonly".to_owned()]);
+        let provider = ScriptedOAuthProvider::new()
+            .with_token_prefix("proof-token")
+            .with_code(
+                "code-1",
+                TokenGrant {
+                    access_token: "exchanged-1".into(),
+                    refresh_token: Some("rt-1".into()),
+                    expires_at: Some(ts(1_800_003_600_000)),
+                },
+            )
+            .then_refresh_failure(OAuthFailure::transient(
+                ErrorClass::Transient,
+                "provider 503",
+            ))
+            .then_refresh_failure(OAuthFailure::permanent("invalid_grant"));
+
+        // The scripted exchange answers the grant verbatim; an unknown
+        // code is the provider's permanent `invalid_grant`.
+        let grant = provider.exchange_code("code-1", &scopes).await.unwrap();
+        assert_eq!(grant.access_token, "exchanged-1");
+        let err = provider
+            .exchange_code("code-unknown", &scopes)
+            .await
+            .unwrap_err();
+        assert!(err.permanent, "got: {err}");
+
+        // Refreshes pop the script (transient, then permanent), then fall
+        // back to rotation: a new access token beneath the same refresh
+        // token — the provider behavior the stable-id contract is built on.
+        let record = record();
+        let material = TokenMaterial {
+            access_token: "old".into(),
+            refresh_token: Some("rt-1".into()),
+            expires_at: None,
+            client_secret: None,
+        };
+        let err = provider.refresh(&record, &material).await.unwrap_err();
+        assert!(!err.permanent, "got: {err}");
+        let err = provider.refresh(&record, &material).await.unwrap_err();
+        assert!(err.permanent, "got: {err}");
+        let rotated = provider.refresh(&record, &material).await.unwrap();
+        assert_eq!(rotated.access_token, "proof-token-0");
+        assert_eq!(rotated.refresh_token.as_deref(), Some("rt-1"));
+        let rotated = provider.refresh(&record, &material).await.unwrap();
+        assert_eq!(rotated.access_token, "proof-token-1");
+        assert_eq!(provider.call_counts(), (2, 4));
+
+        // The grant's Debug shows the expiry — never the bytes.
+        let rendered = format!("{rotated:?}");
+        assert!(!rendered.contains("proof-token-1"), "got: {rendered}");
         assert!(rendered.contains("[redacted]"));
     }
 

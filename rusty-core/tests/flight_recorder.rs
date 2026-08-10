@@ -188,6 +188,20 @@ fn golden_run_manifest_shape() {
 }
 
 #[test]
+fn golden_run_manifest_middleware_shape() {
+    // R0.11 wave 4's one additive manifest field: a bound middleware
+    // composition pins as the canonical-JSON digest of its ordered layer
+    // list under `middleware`. Old manifests are byte-stable — the field
+    // is absent, not null, when no composition bound (pinned by
+    // `run_manifest.json` staying untouched).
+    let manifest = sample_run_manifest().pin_middleware(&json!([
+        {"layer": "request_logger"},
+        {"layer": "tool_call_blocklist", "config": {"blocked": ["shell", "fs_write"]}},
+    ]));
+    assert_golden("run_manifest_middleware.json", &manifest);
+}
+
+#[test]
 fn golden_checkpoint_header_with_manifest_shape() {
     // The extended header: the R0.5 fields unchanged, plus the pinned
     // manifest. This is the wire shape R0.7 checkpoints carry.

@@ -122,14 +122,15 @@
 //! | `GET /.well-known/agent-card.json` | R0.9 (wave 4): the A2A agent card (pinned spec `0.3.0`), derived from the registry on every read — one skill per registered graph; deterministic, no timestamps |
 //! | `POST /a2a` | R0.9 (wave 4): the A2A JSON-RPC task surface — `message/send` (enqueue a durable task, `kind = "a2a"`, idempotent on `messageId`; a capsule data part `{"capsule": {name, version}, "input"}` routes to the in-process executor over the `a2a-capsule` pool, plain messages queue on `a2a` for external workers) / `message/stream` (the same plus SSE status events) / `tasks/get` / `tasks/cancel`. The context id maps to one Flight Recorder journal (`a2a-{tenant}-{contextId}`), so capsule executions leave their evidence on the native `/runs/{id}/events` and `/fixture` endpoints |
 //! | `PUT /capsules/{id}/blob` | R0.9 (wave 4): upload the component bytes a registered manifest's `build_digest` commits to (raw body) → `201 {capsule_id, sha256, bytes}`; `404` unknown capsule, `422` digest mismatch, `409` different bytes under a taken address (registry immutability over bytes) |
-//! | `POST /connections` | R0.11 (wave 3): register a connection `{provider, subject?, scopes, token}` → `201 {connection}`; the token material is envelope-encrypted before it touches the store and the registration journaled — the bytes never travel beyond the broker |
+//! | `POST /connections` | R0.11 (wave 3): register a connection `{provider, subject?, scopes, token}` → `201 {connection}`; the token material is envelope-encrypted before it touches the store and the registration journaled — the bytes never travel beyond the broker. Wave 4: `{provider, subject?, scopes, authorization_code}` exchanges the code through the deployment's OAuth provider (`ServerConfig::with_oauth_provider`; `409` when none is configured) and seals the grant — the two credential paths are mutually exclusive (`422`) |
 //! | `GET /connections` | R0.11 (wave 3): the tenant's connection records (metadata only — sealed material never leaves the broker), sorted by id |
+//! | `GET /connections/health` | R0.11 (wave 4): the tenant-wide health surface — every connection with its status and health counters, sorted by id |
 //! | `GET /connections/{id}` | R0.11 (wave 3): one connection record → `200 {connection}`; `404` unknown/cross-tenant |
-//! | `POST /connections/{id}/consent` | R0.11 (wave 3): record a consent act `{scopes?, token?}` (one required, `422` otherwise) → `200 {connection, journaled}`; a scope-set change journals `connection_consented`, material-only `connection_refreshed`; re-recording the same fact converges without a second event. Re-activates a `needs_reauth` connection — this is the re-auth path |
+//! | `POST /connections/{id}/consent` | R0.11 (wave 3): record a consent act `{scopes?, token?}` (one required, `422` otherwise) → `200 {connection, journaled}`; a scope-set change journals `connection_consented`, material-only `connection_refreshed`; re-recording the same fact converges without a second event. Re-activates a `needs_reauth` connection — this is the re-auth path. Wave 4: `authorization_code` is a third, mutually exclusive material path — exchanged through the OAuth provider and sealed |
 //! | `POST /connections/{id}/revoke` | R0.11 (wave 3): revoke `{reason?}` → `200 {connection, event_id?}` (re-revocation converges with no `event_id`); outstanding handles fail at their next use with a typed, journaled `connection_revoked` denial |
 //! | `DELETE /connections/{id}` | R0.11 (wave 3): revoke-then-erase → `200 {deleted: true}`; the sealed material is really deleted, and resolution fails closed `unknown_connection` thereafter |
 //! | `GET /connections/{id}/health` | R0.11 (wave 3): the connection's status and health counters (last failure class, consecutive failures, last refresh) |
-//! | `GET /broker/journal` | R0.11 (wave 3): the deployment's broker evidence chain — registrations, consents, refreshes, revocations, issuances, uses, and denials, integrity re-verified on read (the `receipt_keys/journal` precedent for a second control plane) |
+//! | `GET /broker/journal` | R0.11 (wave 3): the deployment's broker evidence chain — registrations, consents, refreshes, revocations, issuances, uses, denials, and (wave 4) `connection_needs_reauth` terminal-refusal transitions, integrity re-verified on read (the `receipt_keys/journal` precedent for a second control plane) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -498,6 +499,33 @@ pub struct ServerConfig {
     /// live state, so a revoked connection fails at the next call
     /// regardless. See [`ServerConfig::with_broker_handle_ttl`].
     pub broker_handle_ttl: std::time::Duration,
+
+    /// The OAuth provider (R0.11 Extension Plane, wave 4): the
+    /// deployment's token-endpoint seam. Plugging one in enables the
+    /// whole lifecycle — authorization-code exchange on
+    /// `POST /connections` and `POST /connections/{id}/consent`,
+    /// refresh-at-resolution for due tokens, and the sweeper. `None`
+    /// (the default) means no lifecycle: the exchange endpoints answer
+    /// `409` (the evaluator-absent precedent) and OAuth connections
+    /// serve their sealed material unchanged, exactly as static kinds
+    /// do. See [`ServerConfig::with_oauth_provider`].
+    pub oauth_provider: Option<Arc<dyn rusty_agent_runtime::broker::OAuthProvider>>,
+
+    /// The OAuth refresh window (R0.11 wave 4), default 300 seconds: a
+    /// token expiring within this horizon — scaled per connection by a
+    /// deterministic jitter in [0.5, 1.0), so a fleet registered
+    /// together does not stampede the provider together — is rotated
+    /// before it is served. See
+    /// [`ServerConfig::with_broker_refresh_window`].
+    pub broker_refresh_window: std::time::Duration,
+
+    /// The broker sweep interval (R0.11 wave 4), default `None` (off):
+    /// how often the background sweeper runs the refresh lifecycle over
+    /// every connection. Off is safe — resolution runs the same
+    /// lifecycle, so no sweeper degrades to refresh-at-use, never to
+    /// expiry; the sweeper exists so idle connections are fresh before
+    /// the next call asks. See [`ServerConfig::with_broker_sweep_interval`].
+    pub broker_sweep_interval: Option<std::time::Duration>,
 }
 
 impl Default for ServerConfig {
@@ -523,6 +551,9 @@ impl Default for ServerConfig {
             #[cfg(feature = "capsules")]
             capsule_connector: None,
             broker_handle_ttl: broker::DEFAULT_HANDLE_TTL,
+            oauth_provider: None,
+            broker_refresh_window: broker::DEFAULT_REFRESH_WINDOW,
+            broker_sweep_interval: None,
         }
     }
 }
@@ -791,6 +822,36 @@ impl ServerConfig {
         self.broker_handle_ttl = ttl;
         self
     }
+
+    /// Builder-style: plug the OAuth provider (R0.11 wave 4) — the
+    /// deployment's token-endpoint seam. One plug enables the whole
+    /// lifecycle: authorization-code exchange on the connection routes,
+    /// refresh-at-resolution, and the sweeper. Without it the exchange
+    /// endpoints answer `409` and OAuth connections serve static
+    /// material.
+    pub fn with_oauth_provider(
+        mut self,
+        provider: Arc<dyn rusty_agent_runtime::broker::OAuthProvider>,
+    ) -> Self {
+        self.oauth_provider = Some(provider);
+        self
+    }
+
+    /// Builder-style: the OAuth refresh window (R0.11 wave 4). Tokens
+    /// expiring within this horizon (deterministically jittered per
+    /// connection) rotate before they serve.
+    pub fn with_broker_refresh_window(mut self, window: std::time::Duration) -> Self {
+        self.broker_refresh_window = window;
+        self
+    }
+
+    /// Builder-style: run the broker sweeper on this interval (R0.11
+    /// wave 4). Off by default; meaningful only with an OAuth provider
+    /// plugged in (without one there is nothing to sweep).
+    pub fn with_broker_sweep_interval(mut self, interval: std::time::Duration) -> Self {
+        self.broker_sweep_interval = Some(interval);
+        self
+    }
 }
 
 /// Build the axum [`Router`] for a registry and config. Use this to embed the
@@ -819,6 +880,27 @@ pub fn router_with_shutdown(
     shutdown: CancellationToken,
 ) -> Router {
     routes::router_with_shutdown(registry, config, shutdown)
+}
+
+/// Build the axum [`Router`] and hand back the credential broker it wired
+/// (R0.11 wave 4) — the app's own broker, so in-process mediators (graph
+/// nodes carrying a
+/// [`CredentialMediator`](rusty_agent_runtime::broker::CredentialMediator),
+/// capsule hosts) issue and resolve against the same custody and the
+/// same evidence chain the HTTP connection routes drive. The release
+/// proof's runs connector-resolve exactly this way. Drain control is
+/// internal and never fires, as for [`router`]; embedders wanting
+/// cooperative drain compose [`router_with_shutdown`] and read the
+/// broker off app state instead.
+pub fn router_with_broker(
+    registry: GraphRegistry,
+    config: ServerConfig,
+) -> (
+    Router,
+    Arc<dyn rusty_agent_runtime::broker::CredentialBroker>,
+) {
+    let (router, broker) = routes::build_router(registry, config, CancellationToken::new());
+    (router, broker)
 }
 
 /// Build the router and bind it to `config.bind_addr`. Blocks until the

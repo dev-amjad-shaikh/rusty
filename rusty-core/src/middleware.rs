@@ -449,6 +449,13 @@ impl MiddlewareChain {
         self.layers.iter().map(|l| l.name())
     }
 
+    /// The layers, in registration order, as shared handles — the form
+    /// the executor's `layer_shared` wiring takes them in when a resolved
+    /// composition attaches to a run (R0.11 wave 4).
+    pub fn layers(&self) -> &[Arc<dyn Middleware>] {
+        &self.layers
+    }
+
     /// Run the onion around a node invocation: before-hooks inward, `op`,
     /// after-hooks outward. See the module docs for the full contract.
     pub async fn run_node<F, Fut>(&self, call: &mut NodeCall, op: F) -> Result<NodeOutput>
@@ -780,9 +787,83 @@ impl Middleware for ToolCallBlocklist {
     }
 }
 
+/// Instantiate a journaled [`crate::learn::MiddlewareLayerConfig`] composition
+/// into a live [`MiddlewareChain`].
+///
+/// The composition is evidence: a run pins its digest in the manifest and the
+/// resolved layer order in the journal, so instantiation must be a pure,
+/// deterministic function of the journaled value against the **compiled-in
+/// layer vocabulary** — the same names [`MiddlewareChain::names`] reports.
+/// Two layers are in the vocabulary today:
+///
+/// - `request_logger` — zero-config; a `config` payload is refused (a config
+///   the layer ignores would be evidence the chain cannot honor);
+/// - `tool_call_blocklist` — requires `{"blocked": ["tool.name", ...],
+///   "reason": "..."?}`; `reason` defaults to the layer's own reason code.
+///
+/// An unknown layer name, a config on a config-free layer, or a malformed
+/// config is an error naming the vocabulary — the set NEVER grows by
+/// accepting unknown names at resolution time (R0.11 wave 4, closed-set
+/// extension; design doc §Middleware).
+pub fn instantiate_composition(
+    layers: &[crate::learn::MiddlewareLayerConfig],
+) -> Result<MiddlewareChain> {
+    /// The `tool_call_blocklist` layer's config payload. Unknown keys are
+    /// ignored (forward-compatible); the two governed keys are pinned by
+    /// golden evidence.
+    #[derive(Deserialize)]
+    struct BlocklistConfig {
+        blocked: Vec<String>,
+        #[serde(default)]
+        reason: Option<String>,
+    }
+
+    let mut chain = MiddlewareChain::new();
+    for entry in layers {
+        match entry.layer.as_str() {
+            "request_logger" => {
+                if entry.config.is_some() {
+                    return Err(RustyError::Graph(
+                        "middleware layer `request_logger` takes no config payload".to_owned(),
+                    ));
+                }
+                chain.push(Arc::new(RequestLogger::new()));
+            }
+            "tool_call_blocklist" => {
+                let config = entry.config.as_ref().ok_or_else(|| {
+                    RustyError::Graph(
+                        "middleware layer `tool_call_blocklist` requires a config payload: \
+                         {\"blocked\": [\"tool.name\"], \"reason\"?}"
+                            .to_owned(),
+                    )
+                })?;
+                let parsed: BlocklistConfig =
+                    serde_json::from_value(config.clone()).map_err(|e| {
+                        RustyError::Graph(format!(
+                            "middleware layer `tool_call_blocklist` config is malformed: {e}"
+                        ))
+                    })?;
+                let mut layer = ToolCallBlocklist::new(parsed.blocked);
+                if let Some(reason) = parsed.reason {
+                    layer = layer.with_reason(reason);
+                }
+                chain.push(Arc::new(layer));
+            }
+            other => {
+                return Err(RustyError::Graph(format!(
+                    "unknown middleware layer `{other}`: the compiled-in vocabulary is \
+                     [request_logger, tool_call_blocklist]"
+                )));
+            }
+        }
+    }
+    Ok(chain)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::learn::MiddlewareLayerConfig;
     use serde_json::json;
     use std::sync::Mutex;
 
@@ -1499,5 +1580,109 @@ mod tests {
         let debug = format!("{chain:?}");
         assert!(debug.contains("request_logger"), "got: {debug}");
         assert!(debug.contains("tool_call_blocklist"), "got: {debug}");
+    }
+
+    // ---------- instantiate_composition (R0.11 wave 4) ----------
+
+    fn layer(name: &str, config: Option<Value>) -> MiddlewareLayerConfig {
+        MiddlewareLayerConfig {
+            layer: name.to_owned(),
+            config,
+        }
+    }
+
+    #[test]
+    fn instantiate_builds_the_journaled_order() {
+        let chain = instantiate_composition(&[
+            layer("request_logger", None),
+            layer(
+                "tool_call_blocklist",
+                Some(json!({"blocked": ["shell", "fs_write"], "reason": "policy_denied"})),
+            ),
+        ])
+        .unwrap();
+        assert_eq!(
+            chain.names().collect::<Vec<_>>(),
+            ["request_logger", "tool_call_blocklist"]
+        );
+        // The order *is* the artifact: the reversed composition builds the
+        // reversed chain.
+        let reversed = instantiate_composition(&[
+            layer("tool_call_blocklist", Some(json!({"blocked": ["shell"]}))),
+            layer("request_logger", None),
+        ])
+        .unwrap();
+        assert_eq!(
+            reversed.names().collect::<Vec<_>>(),
+            ["tool_call_blocklist", "request_logger"]
+        );
+        // An empty composition instantiates an empty chain — pass-through,
+        // not an error.
+        assert!(instantiate_composition(&[]).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn instantiated_blocklist_enforces_its_config() {
+        // The chain is not a name list: the instantiated layer enforces
+        // the config the composition declared.
+        let chain = instantiate_composition(&[layer(
+            "tool_call_blocklist",
+            Some(json!({"blocked": ["shell"]})),
+        )])
+        .unwrap();
+        let mut call = ToolInvocation::new(
+            "t-1",
+            "node-a",
+            ToolCall {
+                id: "c-1".into(),
+                name: "shell".into(),
+                arguments: json!({}),
+            },
+        );
+        let err = chain
+            .run_tool(&mut call, |_call| async { Ok(json!("ran")) })
+            .await
+            .unwrap_err();
+        // Tool rejections surface through the taxonomy as RustyError::Tool
+        // carrying the Rejection's canonical Display (the typed Rejection's
+        // `detail` stays at the middleware API).
+        assert!(
+            err.to_string().contains(
+                "rejected by middleware `tool_call_blocklist` at tool_call: tool_blocked"
+            ),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn instantiate_refuses_what_the_vocabulary_cannot_honor() {
+        // Unknown layer: the closed set never grows by accepting unknown
+        // names at resolution time.
+        let err = instantiate_composition(&[layer("otel_tracer", None)]).unwrap_err();
+        assert!(err.to_string().contains("otel_tracer"), "got: {err}");
+        assert!(
+            err.to_string().contains("compiled-in vocabulary"),
+            "got: {err}"
+        );
+
+        // A config on the config-free layer: evidence the chain cannot
+        // honor, refused rather than silently ignored.
+        let err =
+            instantiate_composition(&[layer("request_logger", Some(json!({"level": "debug"})))])
+                .unwrap_err();
+        assert!(err.to_string().contains("request_logger"), "got: {err}");
+
+        // The blocklist without its config: the policy is the config, so
+        // a config-free blocklist blocks nothing and means nothing.
+        let err = instantiate_composition(&[layer("tool_call_blocklist", None)]).unwrap_err();
+        assert!(err.to_string().contains("requires a config"), "got: {err}");
+
+        // Malformed config: `blocked` must be a string list.
+        let err = instantiate_composition(&[layer(
+            "tool_call_blocklist",
+            Some(json!({"blocked": "shell"})),
+        )])
+        .unwrap_err();
+        assert!(err.to_string().contains("malformed"), "got: {err}");
     }
 }

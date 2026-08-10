@@ -493,6 +493,48 @@ typed, journaled, naming the revoked grant. The test walks the receipt to the pr
 version and asserts the credential bytes never appear in any journal, manifest, or store
 row it can read.
 
+> **Wave 4 status: implemented (2026-08-10).** The OAuth lifecycle landed
+> as the `OAuthProvider` seam in `rusty-core/src/broker.rs` (`TokenGrant`,
+> the typed `OAuthFailure` — `permanent` marks the terminal refusals that
+> flip a connection to `needs_reauth` — and the scripted test provider),
+> the authorization-code path on `POST /connections` and
+> `POST /connections/{id}/consent` (mutually exclusive with verbatim
+> material, `409` without a configured provider), refresh-at-resolution
+> inside the declared window with deterministic per-connection jitter
+> (one bounded attempt in the call's path), and the durable sweeper
+> (`sweep_once` reporting `scanned / refreshed / needs_reauth / failed`;
+> interval-driven in-process) in
+> `rusty-server/src/broker.rs`; the health surface as
+> `GET /connections/health` (tenant-wide board) alongside the
+> per-connection read; middleware composition as the
+> `middleware_composition` family resolved at admission into an
+> instantiated chain against the compiled-in layer vocabulary
+> (`instantiate_composition` — a layer the vocabulary cannot instantiate
+> refuses the run with `422`, never a partial chain), pinned through the
+> manifest's additive `middleware` slot (sha256 over the canonical layer
+> list) with the resolved layer order journaled on the `config_resolved`
+> event. Settled refinements this wave: a transient refresh failure
+> journals nothing (the connection's state did not change — the retry
+> counters carry it), only a permanent one journals
+> `connection_needs_reauth`; the refresh journal event reuses
+> `connection_refreshed` rather than minting a synonym; the sweeper
+> shares `refresh_if_due` with the resolution path so both roads through
+> the rotation write the same evidence. The exit criteria and the
+> whole-release proof land in
+> `rusty-server/tests/extension_release.rs`: an access token rotates
+> beneath a stable connection id with no redeploy and no disturbance to
+> anything an admitted run pinned (run 1's re-served receipt is
+> byte-identical and still verifies), a revoked connection fails the very
+> next run closed — typed `connection_revoked`, journaled, naming the
+> grant — and a middleware composition promotes to `staging` while
+> `prod`'s chain serves byte-identically, both chains' digests pinned in
+> their runs' manifests; the closing chapter scans every store byte plus
+> the broker journal, the run journals, and the receipts over the wire
+> for both access tokens, both refresh tokens, and both authorization
+> codes. The Postgres-backed re-run of the proof is deferred to the
+> follow-up hardening pass (the custody invariants it would re-exercise
+> are the wave-3 backend tests').
+
 ## Open questions
 
 Flagged before Wave 1 lands:

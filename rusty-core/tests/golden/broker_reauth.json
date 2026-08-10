@@ -1,0 +1,13 @@
+{
+  "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "failure": {
+    "class": "invalid_input",
+    "detail": "provider refused the refresh token: invalid_grant",
+    "at": "2027-01-15T08:08:20Z"
+  },
+  "grant": [
+    "drive.readonly",
+    "drive.write"
+  ],
+  "recorded_at": "2027-01-15T08:08:20Z"
+}

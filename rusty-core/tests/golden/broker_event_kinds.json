@@ -5,5 +5,6 @@
   "connection_revoked",
   "credential_handle_issued",
   "credential_use",
-  "credential_denied"
+  "credential_denied",
+  "connection_needs_reauth"
 ]

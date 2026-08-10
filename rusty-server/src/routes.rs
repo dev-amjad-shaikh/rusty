@@ -185,12 +185,15 @@ fn build_backends(config: &ServerConfig) -> (Arc<dyn Checkpointer>, Arc<dyn Serv
 
 /// Build the full router with an explicit drain control (used by
 /// [`crate::router`] with a never-fired token, and by
-/// [`crate::router_with_shutdown`] with the real one).
-pub(crate) fn router_with_shutdown(
+/// [`crate::router_with_shutdown`] with the real one), returning the
+/// broker it wired so [`crate::router_with_broker`] can hand the app's
+/// credential seam to in-process mediators (the release proof's runs
+/// connector-resolve against the same broker the HTTP surface drives).
+pub(crate) fn build_router(
     registry: GraphRegistry,
     config: ServerConfig,
     shutdown: tokio_util::sync::CancellationToken,
-) -> Router {
+) -> (Router, Arc<crate::broker::Broker>) {
     let (checkpointer, server_store) = build_backends(&config);
     let run_deps = RunDeps {
         registry: registry.clone(),
@@ -209,11 +212,23 @@ pub(crate) fn router_with_shutdown(
         Arc::clone(&server_store),
         config.store_path.clone(),
     ));
-    let broker = Arc::new(crate::broker::Broker::new(
+    let mut broker = crate::broker::Broker::new(
         Arc::clone(&server_store),
         config.store_path.clone(),
         config.broker_handle_ttl,
-    ));
+    );
+    // The OAuth lifecycle (R0.11 wave 4): plug the provider the config
+    // declares — resolution-time refresh, the sweeper, and the
+    // authorization-code exchange endpoints all read this pair.
+    if let Some(provider) = &config.oauth_provider {
+        broker = broker.with_oauth_provider(Arc::clone(provider), config.broker_refresh_window);
+    }
+    let broker = Arc::new(broker);
+    // The sweep interval only means something with a lifecycle plugged
+    // in; without a provider there is nothing to sweep.
+    let broker_sweep_interval = config
+        .broker_sweep_interval
+        .filter(|_| config.oauth_provider.is_some());
     let state = Arc::new(AppState {
         registry,
         config,
@@ -226,7 +241,7 @@ pub(crate) fn router_with_shutdown(
         #[cfg(feature = "capsules")]
         capsule_plane,
         receipt_keyring,
-        broker,
+        broker: Arc::clone(&broker),
         mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
@@ -259,6 +274,13 @@ pub(crate) fn router_with_shutdown(
         outbox_relay_interval,
         state.shutdown.clone(),
     );
+    // The broker sweeper (R0.11 wave 4): the OAuth refresh lifecycle run
+    // over every connection on an interval. Off by default — resolution
+    // runs the same lifecycle, so no sweeper degrades to refresh-at-use,
+    // never to expiry.
+    if let Some(interval) = broker_sweep_interval {
+        crate::broker::spawn_sweeper(Arc::clone(&state.broker), interval, state.shutdown.clone());
+    }
 
     let authed = Router::new()
         .route("/ok", get(ok))
@@ -304,6 +326,7 @@ pub(crate) fn router_with_shutdown(
             "/connections",
             post(register_connection).get(list_connections),
         )
+        .route("/connections/health", get(list_connections_health))
         .route(
             "/connections/{connection_id}",
             get(get_connection).delete(delete_connection),
@@ -524,7 +547,7 @@ pub(crate) fn router_with_shutdown(
             crate::auth::require_api_key,
         ));
 
-    Router::new()
+    let app = Router::new()
         // The trigger webhook authenticates by HMAC signature (per-trigger
         // secret), not by API key: external senders (GitHub, Stripe, …)
         // cannot present an `X-Api-Key`, so the signature is the credential
@@ -537,7 +560,19 @@ pub(crate) fn router_with_shutdown(
         // are answered before the API-key middleware runs. Production
         // deployments should replace this with a restrictive `CorsLayer`.
         .layer(tower_http::cors::CorsLayer::permissive())
-        .with_state(state)
+        .with_state(state);
+    (app, broker)
+}
+
+/// Build the full router with an explicit drain control (used by
+/// [`crate::router`] with a never-fired token, and by
+/// [`crate::router_with_shutdown`] with the real one).
+pub(crate) fn router_with_shutdown(
+    registry: GraphRegistry,
+    config: ServerConfig,
+    shutdown: tokio_util::sync::CancellationToken,
+) -> Router {
+    build_router(registry, config, shutdown).0
 }
 
 // --------------------------------------------------------------------- //
@@ -1858,9 +1893,11 @@ async fn get_receipt_keys_journal(
 // --------------------------------------------------------------------- //
 
 /// `POST /connections` body: the provider, the consent ceiling, and the
-/// token material to seal. The material crosses this boundary exactly
-/// once — route to broker to envelope — and is never journaled, stored,
-/// or served in the clear.
+/// credential — either the token material to seal, or an authorization
+/// code to exchange through the deployment's OAuth provider (R0.11
+/// wave 4). Exactly one is required. The material (or the exchanged
+/// grant) crosses this boundary exactly once — route to broker to
+/// envelope — and is never journaled, stored, or served in the clear.
 #[derive(Debug, Deserialize)]
 struct RegisterConnectionPayload {
     /// The provider kind (`openai`, `anthropic`, …).
@@ -1872,21 +1909,34 @@ struct RegisterConnectionPayload {
     /// ceiling.
     #[serde(default)]
     scopes: std::collections::BTreeSet<String>,
-    /// The token material to seal.
-    token: rusty_agent_runtime::broker::TokenMaterial,
+    /// The token material to seal (a client-credentials registration
+    /// carries its `client_secret` here alongside the initial access
+    /// token).
+    #[serde(default)]
+    token: Option<rusty_agent_runtime::broker::TokenMaterial>,
+    /// The authorization code to exchange for the initial grant — the
+    /// back half of the human's consent act at the provider (R0.11
+    /// wave 4).
+    #[serde(default)]
+    authorization_code: Option<String>,
 }
 
-/// `POST /connections/{id}/consent` body. Both fields optional, one
+/// `POST /connections/{id}/consent` body. All fields optional, one
 /// required: `scopes` re-records the consent ceiling (journaled
-/// `connection_consented`), `token` replaces the sealed material
-/// (journaled `connection_refreshed` — and resealed under the same data
-/// key, so the envelope's identity survives).
+/// `connection_consented`), `token` replaces the sealed material,
+/// `authorization_code` (R0.11 wave 4) exchanges a fresh grant through
+/// the OAuth provider and seals that — both material paths journal
+/// `connection_refreshed` when the ceiling stands, and the reseal keeps
+/// the envelope's identity. `token` and `authorization_code` are
+/// mutually exclusive.
 #[derive(Debug, Deserialize)]
 struct ConsentConnectionPayload {
     #[serde(default)]
     scopes: Option<std::collections::BTreeSet<String>>,
     #[serde(default)]
     token: Option<rusty_agent_runtime::broker::TokenMaterial>,
+    #[serde(default)]
+    authorization_code: Option<String>,
 }
 
 /// `POST /connections/{id}/revoke` body (an empty object revokes without
@@ -1904,6 +1954,49 @@ fn invalid_connection_input(e: impl std::fmt::Display) -> ApiError {
     ApiError::unprocessable(e.to_string())
 }
 
+/// Exchange an authorization code through the deployment's OAuth provider
+/// (R0.11 wave 4) — the back half of the human's consent act at the
+/// provider. The code and the grant cross this boundary exactly once —
+/// route to provider to envelope — and are never journaled, stored, or
+/// served in the clear. `409` when no provider is configured (the
+/// evaluator-absent precedent: the deployment cannot honor the flow it
+/// was asked to run); the provider's terminal refusal (`invalid_grant`
+/// and kin) is the client's `422`, a transient failure a `500`.
+async fn exchange_authorization_code(
+    state: &AppState,
+    code: &str,
+    scopes: &std::collections::BTreeSet<String>,
+) -> Result<rusty_agent_runtime::broker::TokenMaterial, ApiError> {
+    if code.is_empty() {
+        return Err(ApiError::unprocessable(
+            "authorization_code must not be empty".to_owned(),
+        ));
+    }
+    let Some((provider, _)) = state.broker.oauth() else {
+        return Err(ApiError::conflict(
+            "no OAuth provider is configured on this server — an authorization-code exchange \
+             requires one (`ServerConfig::with_oauth_provider`)"
+                .to_owned(),
+        ));
+    };
+    let grant = provider
+        .exchange_code(code, scopes)
+        .await
+        .map_err(|failure| {
+            if failure.permanent {
+                ApiError::unprocessable(format!("the authorization code was refused: {failure}"))
+            } else {
+                ApiError::internal(format!("the authorization code exchange failed: {failure}"))
+            }
+        })?;
+    Ok(rusty_agent_runtime::broker::TokenMaterial {
+        access_token: grant.access_token,
+        refresh_token: grant.refresh_token,
+        client_secret: None,
+        expires_at: grant.expires_at,
+    })
+}
+
 /// `POST /connections` — register a connection: validate, seal the
 /// material under a fresh per-connection data key, journal the
 /// registration, persist. `201 {connection}` with the public record —
@@ -1913,11 +2006,26 @@ async fn register_connection(
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<RegisterConnectionPayload>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    if payload.token.access_token.is_empty() {
+    if payload.token.is_some() == payload.authorization_code.is_some() {
         return Err(ApiError::unprocessable(
-            "token.access_token must not be empty".to_owned(),
+            "exactly one of `token` or `authorization_code` registers a connection — the \
+             material is sealed verbatim, or the code is exchanged through the deployment's \
+             OAuth provider; never both, never neither"
+                .to_owned(),
         ));
     }
+    let token = match (&payload.token, &payload.authorization_code) {
+        (Some(token), None) => {
+            if token.access_token.is_empty() {
+                return Err(ApiError::unprocessable(
+                    "token.access_token must not be empty".to_owned(),
+                ));
+            }
+            token.clone()
+        }
+        (None, Some(code)) => exchange_authorization_code(&state, code, &payload.scopes).await?,
+        _ => unreachable!("the exclusivity gate passed"),
+    };
     rusty_agent_runtime::broker::validate_connection_fields(
         payload.subject.as_deref(),
         &payload.scopes,
@@ -1930,7 +2038,7 @@ async fn register_connection(
             payload.provider,
             payload.subject,
             payload.scopes,
-            &payload.token,
+            &token,
         )
         .await
         .map_err(internal_err)?;
@@ -1972,38 +2080,73 @@ async fn get_connection(
 /// `POST /connections/{id}/consent` — record a consent act. The human's
 /// grant is executed at the provider; this endpoint records it — the
 /// only way a consented set changes — journals the act, and re-activates
-/// a `needs_reauth` connection (this is the re-auth path). `200
-/// {connection, journaled}`; re-recording the same fact converges
-/// (`journaled: null`) without a second event.
+/// a `needs_reauth` connection (this is the re-auth path). The material
+/// path is `token` verbatim or `authorization_code` exchanged through
+/// the OAuth provider (R0.11 wave 4). `200 {connection, journaled}`;
+/// re-recording the same fact converges (`journaled: null`) without a
+/// second event.
 async fn consent_connection(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Path(connection_id): Path<String>,
     Json(payload): Json<ConsentConnectionPayload>,
 ) -> Result<Json<Value>, ApiError> {
-    if payload.scopes.is_none() && payload.token.is_none() {
+    if payload.scopes.is_none() && payload.token.is_none() && payload.authorization_code.is_none() {
         return Err(ApiError::unprocessable(
-            "a consent act needs `scopes` and/or `token`".to_owned(),
+            "a consent act needs `scopes`, `token`, and/or `authorization_code`".to_owned(),
+        ));
+    }
+    if payload.token.is_some() && payload.authorization_code.is_some() {
+        return Err(ApiError::unprocessable(
+            "`token` and `authorization_code` are mutually exclusive — the material is sealed \
+             verbatim, or the code is exchanged through the deployment's OAuth provider; \
+             never both"
+                .to_owned(),
         ));
     }
     if let Some(scopes) = &payload.scopes {
         rusty_agent_runtime::broker::validate_connection_fields(None, scopes)
             .map_err(invalid_connection_input)?;
     }
-    if let Some(token) = &payload.token {
-        if token.access_token.is_empty() {
-            return Err(ApiError::unprocessable(
-                "token.access_token must not be empty".to_owned(),
-            ));
+    let token = match (&payload.token, &payload.authorization_code) {
+        (None, None) => None,
+        (Some(token), None) => {
+            if token.access_token.is_empty() {
+                return Err(ApiError::unprocessable(
+                    "token.access_token must not be empty".to_owned(),
+                ));
+            }
+            Some(token.clone())
         }
-    }
+        (None, Some(code)) => {
+            // The exchange's scope set is the act's new ceiling when the
+            // act declares one, else the connection's standing set — the
+            // provider answers for the same set the consent records.
+            let scopes = match &payload.scopes {
+                Some(scopes) => scopes.clone(),
+                None => {
+                    state
+                        .broker
+                        .get(tenant.tenant(), &connection_id)
+                        .await
+                        .map_err(internal_err)?
+                        .ok_or_else(|| {
+                            ApiError::not_found(format!("connection `{connection_id}` not found"))
+                        })?
+                        .scopes
+                }
+            };
+            Some(exchange_authorization_code(&state, code, &scopes).await?)
+        }
+        _ => unreachable!("the exclusivity gate passed"),
+    };
     match state
         .broker
         .record_consent(
             tenant.tenant(),
             &connection_id,
             payload.scopes,
-            payload.token.as_ref(),
+            token.as_ref(),
         )
         .await
         .map_err(internal_err)?
@@ -2098,6 +2241,35 @@ async fn get_connection_health(
         "status": record.status,
         "health": record.health,
     })))
+}
+
+/// `GET /connections/health` — every connection the tenant holds with
+/// its lifecycle status and health counters, sorted by id (R0.11
+/// wave 4): the tenant-wide board the per-connection health endpoint
+/// zooms into. Metadata by construction — sealed material never leaves
+/// the broker.
+async fn list_connections_health(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .broker
+        .list(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    records.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
+    let connections = records
+        .iter()
+        .map(|record| {
+            json!({
+                "connection_id": record.connection_id,
+                "provider": record.provider,
+                "status": record.status,
+                "health": record.health,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(json!({ "connections": connections })))
 }
 
 /// `GET /broker/journal` — the deployment's broker evidence chain:

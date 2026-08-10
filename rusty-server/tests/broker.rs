@@ -15,10 +15,12 @@
 //! this file proves the HTTP custody and lifecycle surface end to end.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
+use rusty_agent_runtime::broker::{ScriptedOAuthProvider, TokenGrant};
 use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -628,6 +630,253 @@ async fn the_file_store_holds_ciphertext_only() {
         let hex = credential[field].as_str().unwrap();
         assert!(!hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()));
     }
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+// --------------------------------------------------------------------- //
+// The OAuth lifecycle over HTTP (R0.11 wave 4)
+// --------------------------------------------------------------------- //
+
+/// An open-mode app with the OAuth lifecycle plugged in.
+fn oauth_app(provider: ScriptedOAuthProvider) -> (Router, PathBuf) {
+    let store = temp_store();
+    let app = app_with(store.clone(), |config| {
+        config.with_oauth_provider(Arc::new(provider))
+    });
+    (app, store)
+}
+
+/// A scripted grant expiring far beyond any refresh window.
+fn grant(access_token: &str, refresh_token: Option<&str>) -> TokenGrant {
+    TokenGrant {
+        access_token: access_token.to_owned(),
+        refresh_token: refresh_token.map(str::to_owned),
+        expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+    }
+}
+
+/// Read every byte the server wrote under the store root, concatenated —
+/// the leak scan's corpus.
+fn store_bytes(store: &std::path::Path) -> Vec<u8> {
+    let mut raw = Vec::new();
+    let mut stack = vec![store.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                raw.extend(std::fs::read(&path).unwrap_or_default());
+            }
+        }
+    }
+    raw
+}
+
+#[tokio::test]
+async fn register_and_reconsent_with_authorization_code() {
+    let provider = ScriptedOAuthProvider::new()
+        .with_code(
+            "code-1",
+            grant("oauth-token-v1-MARKER", Some("rt-v1-MARKER")),
+        )
+        .with_code(
+            "code-2",
+            grant("oauth-token-v2-MARKER", Some("rt-v2-MARKER")),
+        );
+    let (app, store) = oauth_app(provider);
+
+    // The authorization-code path: the exchange happens at the provider
+    // seam; the grant is sealed before it touches the store.
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/connections",
+        Some(json!({
+            "provider": "oauth2_authorization_code",
+            "subject": "user-7",
+            "scopes": ["drive.readonly"],
+            "authorization_code": "code-1",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "register failed: {v}");
+    let connection_id = v["connection"]["connection_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Re-consent with a second code: the connection id stands (rotation
+    // beneath the stable id), and a material-only act journals
+    // `connection_refreshed`.
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/connections/{connection_id}/consent"),
+        Some(json!({"authorization_code": "code-2"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "consent failed: {v}");
+    assert_eq!(v["connection"]["connection_id"], connection_id);
+    assert_eq!(v["journaled"], "connection_refreshed");
+
+    // The codes, the grants, the refresh tokens: nowhere the server
+    // writes, and nothing the journal carries.
+    let raw = store_bytes(&store);
+    for marker in [
+        "code-1",
+        "code-2",
+        "oauth-token-v1-MARKER",
+        "oauth-token-v2-MARKER",
+        "rt-v1-MARKER",
+        "rt-v2-MARKER",
+    ] {
+        assert!(
+            !raw.windows(marker.len()).any(|w| w == marker.as_bytes()),
+            "the store leaked {marker}"
+        );
+    }
+    let (status, v) = call(&app, "GET", "/broker/journal", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let journal = serde_json::to_string(&v).unwrap();
+    assert!(journal.contains("connection_registered"));
+    assert!(journal.contains("connection_refreshed"));
+    assert!(!journal.contains("oauth-token"), "journal: {journal}");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn authorization_code_without_a_provider_is_409() {
+    let (app, store) = app();
+    // Register: the deployment cannot honor the flow it was asked to
+    // run (the evaluator-absent precedent).
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/connections",
+        Some(json!({
+            "provider": "oauth2_authorization_code",
+            "scopes": ["drive.readonly"],
+            "authorization_code": "code-1",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "got: {v}");
+
+    // Consent likewise (after a token-path registration).
+    let record = register(&app, None).await;
+    let connection_id = record["connection_id"].as_str().unwrap();
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/connections/{connection_id}/consent"),
+        Some(json!({"authorization_code": "code-1"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "got: {v}");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn token_and_authorization_code_are_mutually_exclusive() {
+    let (app, store) = app();
+    // Both → 422; neither → 422 (register needs exactly one credential
+    // path).
+    for body in [
+        json!({
+            "provider": "api_key",
+            "token": {"access_token": MARKER},
+            "authorization_code": "code-1",
+        }),
+        json!({"provider": "api_key"}),
+    ] {
+        let (status, v) = call(&app, "POST", "/connections", Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "got: {v}");
+    }
+    // Consent: both material paths together → 422; nothing at all → 422.
+    let record = register(&app, None).await;
+    let connection_id = record["connection_id"].as_str().unwrap();
+    for body in [
+        json!({"token": {"access_token": MARKER}, "authorization_code": "code-1"}),
+        json!({}),
+    ] {
+        let (status, v) = call(
+            &app,
+            "POST",
+            &format!("/connections/{connection_id}/consent"),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "got: {v}");
+    }
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn a_refused_authorization_code_is_422_and_nothing_lands() {
+    // An unknown code is the provider's `invalid_grant` — permanent, the
+    // client's to fix (the ScriptedOAuthProvider's standing behavior).
+    let (app, store) = oauth_app(ScriptedOAuthProvider::new());
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/connections",
+        Some(json!({
+            "provider": "oauth2_authorization_code",
+            "scopes": ["drive.readonly"],
+            "authorization_code": "code-bogus",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "got: {v}");
+    assert!(v["message"].as_str().unwrap().contains("invalid_grant"));
+    // Nothing landed: the list stays empty, and the broker journal has
+    // no registration for the refused act.
+    let (status, v) = call(&app, "GET", "/connections", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["connections"].as_array().unwrap().len(), 0);
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn connections_health_is_tenant_wide_sorted_and_scoped() {
+    let (app, store) = two_tenant_app();
+    let acme = Some(("x-api-key", "acme-key"));
+    let globex = Some(("x-api-key", "globex-key"));
+
+    let first = register(&app, acme).await;
+    let second = register(&app, acme).await;
+    let mut ids = [
+        first["connection_id"].as_str().unwrap().to_owned(),
+        second["connection_id"].as_str().unwrap().to_owned(),
+    ];
+    ids.sort();
+
+    let (status, v) = call_as(&app, acme, "GET", "/connections/health", None).await;
+    assert_eq!(status, StatusCode::OK, "health failed: {v}");
+    let connections = v["connections"].as_array().unwrap();
+    assert_eq!(connections.len(), 2);
+    // Sorted by id, and every entry carries the board's four facts.
+    let served_ids = connections
+        .iter()
+        .map(|c| c["connection_id"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(served_ids, ids);
+    for entry in connections {
+        assert_eq!(entry["provider"], "oauth2_authorization_code");
+        assert_eq!(entry["status"], "active");
+        assert_eq!(entry["health"]["consecutive_failures"], 0);
+    }
+
+    // The board is tenant-scoped: globex's view is empty.
+    let (status, v) = call_as(&app, globex, "GET", "/connections/health", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["connections"].as_array().unwrap().len(), 0);
 
     let _ = std::fs::remove_dir_all(store);
 }

@@ -581,6 +581,15 @@ pub struct ConfigResolution {
     /// walk is incomplete without it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    /// The resolved layer order — present exactly for
+    /// `middleware_composition` resolutions (R0.11 wave 4): the layer
+    /// names in the order the run's chain instantiated them. Ordering is
+    /// registry-aware in both directions — the artifact declares the
+    /// order, and this is the journaled evidence of the order that
+    /// actually served.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layers: Option<Vec<String>>,
 }
 
 /// The candidate a pointer binds for `run_id`: the canary when this
@@ -617,13 +626,14 @@ pub fn pointer_admission(
 /// the manifest's pin can never diverge — one derivation, two homes
 /// (the header and the journal).
 ///
-/// Only the three families with a digest slot in the manifest resolve in
-/// this wave: prompts, tool contracts, and model settings. Every other
-/// kind is refused ([`RegistryError::UnresolvableKind`]) — executor
-/// policies bind through the checkpoint header's `policy_version`, tool
-/// permissions through the capsule machinery, and memory configuration
-/// and middleware compositions pin in their own waves; pretending
-/// otherwise would fake coverage the manifest cannot express.
+/// Four families resolve: prompts, tool contracts, and model settings
+/// (the R0.7 digest slots), plus middleware compositions (R0.11 wave 4 —
+/// the release's one additive manifest field, the `middleware` digest).
+/// Every other kind is refused ([`RegistryError::UnresolvableKind`]) —
+/// executor policies bind through the checkpoint header's
+/// `policy_version`, tool permissions through the capsule machinery, and
+/// memory configuration pins in its own wave; pretending otherwise would
+/// fake coverage the manifest cannot express.
 pub fn resolution_pin(candidate: &Candidate) -> Result<(String, Option<String>), RegistryError> {
     match &candidate.content {
         crate::learn::CandidateContent::Prompt { prompt, .. } => {
@@ -640,6 +650,19 @@ pub fn resolution_pin(candidate: &Candidate) -> Result<(String, Option<String>),
             let bytes = serde_json::to_vec(&canonicalize_value(parameters))
                 .map_err(|e| RegistryError::UndiffableContent(e.to_string()))?;
             Ok((sha256_hex(&bytes), Some(model.clone())))
+        }
+        // The composition's pin is the canonical-JSON digest of its
+        // ordered layer list — the same rule `RunManifest::pin_middleware`
+        // applies, so the journaled digest and the header pin are one
+        // derivation. Array order is significant: a middleware layer
+        // order *is* the artifact, so the canonical form sorts object
+        // keys but never arrays.
+        crate::learn::CandidateContent::MiddlewareComposition { layers, .. } => {
+            let value = serde_json::to_value(layers)
+                .map_err(|e| RegistryError::UndiffableContent(e.to_string()))?;
+            let bytes = serde_json::to_vec(&canonicalize_value(&value))
+                .map_err(|e| RegistryError::UndiffableContent(e.to_string()))?;
+            Ok((sha256_hex(&bytes), None))
         }
         _ => Err(RegistryError::UnresolvableKind {
             kind: candidate.kind(),
@@ -726,15 +749,15 @@ pub enum RegistryError {
     },
 
     /// An admission resolution was requested for a kind with no
-    /// content-digest slot in the run manifest (R0.11 wave 2): prompts,
-    /// tool contracts, and model settings resolve; executor policies
-    /// bind through the checkpoint header's `policy_version`, tool
-    /// permissions through the capsule machinery, and memory
-    /// configuration and middleware compositions pin in their own waves.
+    /// content-digest slot in the run manifest (R0.11): prompts, tool
+    /// contracts, model settings, and middleware compositions (wave 4)
+    /// resolve; executor policies bind through the checkpoint header's
+    /// `policy_version`, tool permissions through the capsule machinery,
+    /// and memory configuration pins in its own wave.
     #[error(
-        "`{kind}` candidates do not resolve into a run manifest at admission — wave 2 binds \
-         prompts, tool contracts, and model settings; the other families pin through their own \
-         surfaces (the checkpoint header, capsule manifests) or their own waves"
+        "`{kind}` candidates do not resolve into a run manifest at admission — prompts, tool \
+         contracts, model settings, and middleware compositions bind; the other families pin \
+         through their own surfaces (the checkpoint header, capsule manifests) or their own waves"
     )]
     UnresolvableKind {
         /// The kind refused.

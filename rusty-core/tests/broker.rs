@@ -5,7 +5,8 @@
 //!
 //! - **Golden files** — the serialized shapes of the connection record,
 //!   the stored (sealed) envelope, the handle claims, every denial
-//!   reason, the five journaled payloads, and the wave's seven additive
+//!   reason, the six journaled payloads (wave 4 adds
+//!   `connection_needs_reauth`), and the broker's eight additive
 //!   `RunEventKind` wire names are pinned against checked-in JSON under
 //!   `tests/golden/`. Any accidental contract drift fails here;
 //!   `UPDATE_GOLDEN=1` blesses an intentional change, the
@@ -42,11 +43,11 @@ use serde_json::{json, Value};
 
 use rusty_agent_runtime::broker::{
     scopes_missing, BrokerDenial, BrokerDenialReason, ClassifiedFailure, ConnectionConsent,
-    ConnectionHealth, ConnectionProvider, ConnectionRecord, ConnectionRefresh,
-    ConnectionRevocation, ConnectionStatus, CredentialBroker, CredentialHandle, CredentialMediator,
-    CredentialRequirement, CredentialTool, CredentialUse, HandleClaims, HandleIssuance,
-    IssueRequest, ResolvedCredential, SealedCredential, StoredConnection, TokenMaterial,
-    CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, SEALED_FORMAT_VERSION,
+    ConnectionHealth, ConnectionProvider, ConnectionReauthRequired, ConnectionRecord,
+    ConnectionRefresh, ConnectionRevocation, ConnectionStatus, CredentialBroker, CredentialHandle,
+    CredentialMediator, CredentialRequirement, CredentialTool, CredentialUse, HandleClaims,
+    HandleIssuance, IssueRequest, ResolvedCredential, SealedCredential, StoredConnection,
+    TokenMaterial, CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, SEALED_FORMAT_VERSION,
 };
 use rusty_agent_runtime::durable::ErrorClass;
 use rusty_agent_runtime::error::Result as RuntimeResult;
@@ -214,6 +215,22 @@ fn golden_journaled_payload_shapes() {
     );
     assert_golden("broker_issuance.json", &HandleIssuance { claims: claims() });
     assert_golden(
+        "broker_reauth.json",
+        // Wave 4's journaled transition: a refresh the provider classified
+        // permanent flipped the connection to `needs_reauth`. The failure
+        // and the grant travel typed; credential bytes never do.
+        &ConnectionReauthRequired {
+            connection_id: connection_id(),
+            failure: ClassifiedFailure {
+                class: ErrorClass::InvalidInput,
+                detail: "provider refused the refresh token: invalid_grant".into(),
+                at: ts(1_800_000_500_000),
+            },
+            grant: BTreeSet::from(["drive.readonly".to_owned(), "drive.write".to_owned()]),
+            recorded_at: ts(1_800_000_500_000),
+        },
+    );
+    assert_golden(
         "broker_use.json",
         &CredentialUse {
             handle_id: handle_id(),
@@ -229,9 +246,10 @@ fn golden_journaled_payload_shapes() {
 #[test]
 fn golden_broker_event_kinds_shape() {
     // The wave's seven additive RunEventKind wire names (the
-    // `registry_event_kinds.json` discipline), appended after
-    // `config_resolved` per the additive evolution rule every variant
-    // since R0.6 followed.
+    // `registry_event_kinds.json` discipline), plus wave 4's
+    // `connection_needs_reauth` — the terminal OAuth refusal a refresh
+    // classified permanent journals — appended last per the additive
+    // evolution rule every variant since R0.6 followed.
     assert_golden(
         "broker_event_kinds.json",
         &vec![
@@ -242,6 +260,7 @@ fn golden_broker_event_kinds_shape() {
             RunEventKind::CredentialHandleIssued,
             RunEventKind::CredentialUse,
             RunEventKind::CredentialDenied,
+            RunEventKind::ConnectionNeedsReauth,
         ],
     );
 }
@@ -257,6 +276,7 @@ fn resolved_credential_debug_never_shows_bytes() {
         material: TokenMaterial {
             access_token: "sk-live-MARKER".into(),
             refresh_token: Some("rt-MARKER".into()),
+            client_secret: None,
             expires_at: None,
         },
     };
@@ -308,6 +328,7 @@ impl ScriptedBroker {
             material: TokenMaterial {
                 access_token: MARKER.into(),
                 refresh_token: None,
+                client_secret: None,
                 expires_at: None,
             },
             issued_offset_ms: std::sync::atomic::AtomicI64::new(0),

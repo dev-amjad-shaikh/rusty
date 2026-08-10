@@ -699,6 +699,7 @@ fn prompt_resolution() -> ConfigResolution {
         pointer: PointerBinding::Active,
         digest,
         model,
+        layers: None,
     }
 }
 
@@ -722,8 +723,35 @@ fn golden_config_resolution_model_settings_shape() {
         pointer: PointerBinding::Canary,
         digest,
         model,
+        layers: None,
     };
     assert_golden("config_resolution_model_settings.json", &resolution);
+}
+
+#[test]
+fn golden_config_resolution_middleware_shape() {
+    // Wave 4's shape: the composition resolved on the staging tag, its
+    // pin in `digest`, and the resolved layer order in `layers` — the
+    // journaled evidence of the order that actually served (R0.11 wave 4).
+    let candidate = middleware_composition_candidate();
+    let (digest, model) = resolution_pin(&candidate).unwrap();
+    let layers = match &candidate.content {
+        CandidateContent::MiddlewareComposition { layers, .. } => layers
+            .iter()
+            .map(|layer| layer.layer.clone())
+            .collect::<Vec<_>>(),
+        _ => unreachable!(),
+    };
+    let resolution = ConfigResolution {
+        surface: candidate.surface(),
+        tag: Some(EnvironmentTag::new("staging").unwrap()),
+        candidate_id: candidate.candidate_id,
+        pointer: PointerBinding::Active,
+        digest,
+        model,
+        layers: Some(layers),
+    };
+    assert_golden("config_resolution_middleware.json", &resolution);
 }
 
 #[test]
@@ -770,14 +798,34 @@ fn resolution_pin_matches_the_manifest_pin_functions() {
     let manifest = RunManifest::new().pin_model("gpt-5.2-2026-06-01", &parameters);
     assert_eq!(digest, manifest.model_params.as_deref().unwrap());
     assert_eq!(model.as_deref(), Some("gpt-5.2-2026-06-01"));
+
+    // Wave 4's family: the composition's pin is the canonical-JSON digest
+    // of its ordered layer list — `pin_middleware` and `resolution_pin`
+    // computed by one rule, so the header pin and the journaled digest
+    // are one derivation here too.
+    let composition = middleware_composition_candidate();
+    let (digest, model) = resolution_pin(&composition).unwrap();
+    let CandidateContent::MiddlewareComposition { layers, .. } = &composition.content else {
+        unreachable!()
+    };
+    let manifest = RunManifest::new().pin_middleware(&serde_json::to_value(layers).unwrap());
+    assert_eq!(digest, manifest.middleware.as_deref().unwrap());
+    assert_eq!(model, None);
+    // And the order rule again, at the pin level: a reordered composition
+    // is a different artifact, so its pin differs.
+    let reordered = layers.iter().rev().cloned().collect::<Vec<_>>();
+    let manifest_reordered =
+        RunManifest::new().pin_middleware(&serde_json::to_value(reordered).unwrap());
+    assert_ne!(digest, manifest_reordered.middleware.as_deref().unwrap());
 }
 
 #[test]
 fn resolution_pin_refuses_kinds_without_a_manifest_digest_slot() {
     // Policies bind through the checkpoint header, tool permissions
-    // through the capsule machinery, memory configuration and middleware
-    // compositions in their own waves — a resolution request for any of
-    // them is refused, not faked.
+    // through the capsule machinery, memory configuration in its own
+    // wave — a resolution request for any of them is refused, not faked.
+    // (Middleware compositions resolved in wave 4 — the manifest's
+    // `middleware` slot — and left this list.)
     let memory_scope = rusty_agent_runtime::memory::ScopeAddress::new(
         rusty_agent_runtime::memory::MemoryScope::Agent,
         "support-1",
@@ -801,10 +849,6 @@ fn resolution_pin_refuses_kinds_without_a_manifest_digest_slot() {
             budget: ContextBudget::new(4096),
             default_filters: MemoryQuery::default(),
             schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
-        },
-        CandidateContent::MiddlewareComposition {
-            name: "default".into(),
-            layers: Vec::new(),
         },
     ] {
         let candidate =

@@ -853,6 +853,14 @@ pub(crate) trait ServerStore: Send + Sync {
         tenant: &str,
     ) -> StoreResult<Vec<rusty_agent_runtime::broker::StoredConnection>>;
 
+    /// Every stored connection across every tenant, each paired with its
+    /// tenant (order unspecified). The sweeper's scan (R0.11 wave 4):
+    /// refresh is a deployment-wide duty, and per-tenant listing would
+    /// need a tenant roster the broker does not keep.
+    async fn list_all_connections(
+        &self,
+    ) -> StoreResult<Vec<(String, rusty_agent_runtime::broker::StoredConnection)>>;
+
     /// Compare-and-swap a stored connection: install `updated` only when
     /// the live row still equals `expect`. The broker's consent and
     /// revoke flows read, derive, and then must not clobber a concurrent
@@ -2818,6 +2826,19 @@ impl ServerStore for JsonFileStore {
             .collect())
     }
 
+    async fn list_all_connections(&self) -> StoreResult<Vec<(String, StoredConnection)>> {
+        let map = self.connections.lock().await;
+        Ok(map
+            .iter()
+            .map(|(scoped, stored)| {
+                (
+                    crate::auth::tenant_of_internal(scoped).to_owned(),
+                    stored.clone(),
+                )
+            })
+            .collect())
+    }
+
     async fn update_connection(
         &self,
         tenant: &str,
@@ -4366,6 +4387,12 @@ mod postgres {
 
     pub(crate) const LIST_CONNECTIONS_SQL: &str =
         "SELECT payload FROM server_connections WHERE tenant = $1";
+
+    /// The sweeper's deployment-wide scan (R0.11 wave 4): every row, with
+    /// its tenant column — the payload is tenant-scoped by key, not by
+    /// content, so the tenant must come from the row.
+    pub(crate) const LIST_ALL_CONNECTIONS_SQL: &str =
+        "SELECT tenant, payload FROM server_connections";
 
     /// The compare-and-swap: the update lands only when the row still
     /// carries the expected payload; no returned row means gone or
@@ -7283,6 +7310,20 @@ mod postgres {
                 .map_err(db_err("list connections"))?;
             rows.into_iter()
                 .map(|row| record_from_payload("connection", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn list_all_connections(&self) -> StoreResult<Vec<(String, StoredConnection)>> {
+            let rows = sqlx::query(LIST_ALL_CONNECTIONS_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list all connections"))?;
+            rows.into_iter()
+                .map(|row| {
+                    let tenant = row.get::<String, _>("tenant");
+                    record_from_payload("connection", row.get::<Value, _>("payload"))
+                        .map(|stored| (tenant, stored))
+                })
                 .collect()
         }
 

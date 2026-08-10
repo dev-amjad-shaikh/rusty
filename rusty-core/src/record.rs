@@ -637,6 +637,19 @@ pub enum RunEventKind {
     /// [`crate::broker::BrokerDenial`], attributable to the connection
     /// and the grant — never the bytes.
     CredentialDenied,
+
+    /// A connection's refresh path failed terminally and its status
+    /// flipped to `needs_reauth` (R0.11 wave 4): the provider's
+    /// `invalid_grant` (or an expired refresh token) means a human must
+    /// record a new consent act before the connection serves again. The
+    /// flip and this event commit together, and calls fail closed with a
+    /// typed re-auth signal from the next use — never silent retries with
+    /// stale material, because a stale credential retried looks exactly
+    /// like an attack retried. An [`Effect::Pure`] record. Output carries
+    /// the journaled [`crate::broker::ConnectionReauthRequired`] — the
+    /// connection, the classified failure that decided the flip, and the
+    /// consent set that stopped being servable.
+    ConnectionNeedsReauth,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.
@@ -1355,6 +1368,21 @@ pub struct RunManifest {
     /// for R0.9's capsule manifests — see that type's docs).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub capsules: BTreeMap<String, CapsuleVersion>,
+
+    /// SHA-256 digest of the canonical JSON of the middleware composition
+    /// the run pinned (R0.11 Extension Plane, wave 4): the ordered layer
+    /// list plus per-layer configuration the run's chain was instantiated
+    /// from. This is the release's one additive manifest field — the
+    /// design's named exception to the wire-frozen manifest — because no
+    /// existing slot covers interception policy, and the deviation is
+    /// smaller than leaving it unpinned. A digest rather than the
+    /// composition itself, per the `model_params` reasoning; the digest ↔
+    /// version join is the journaled resolution event, exactly as for the
+    /// other families. Absent when the run bound no composition artifact —
+    /// absent means unpinned, never a default, and old manifests are
+    /// byte-stable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub middleware: Option<String>,
 }
 
 impl RunManifest {
@@ -1396,6 +1424,16 @@ impl RunManifest {
     /// Pin a capsule version (R0.9 placeholder; see [`CapsuleVersion`]).
     pub fn pin_capsule(mut self, name: impl Into<String>, version: CapsuleVersion) -> Self {
         self.capsules.insert(name.into(), version);
+        self
+    }
+
+    /// Pin a middleware composition by content: records the SHA-256 of the
+    /// canonical `serde_json` serialization of its ordered layer list —
+    /// the same digest convention every JSON pin here follows, computed by
+    /// the same rule the registry's `resolution_pin` applies, so the
+    /// journaled resolution digest and this pin can never diverge.
+    pub fn pin_middleware(mut self, composition: &Value) -> Self {
+        self.middleware = Some(canonical_json_digest(composition));
         self
     }
 }

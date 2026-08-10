@@ -37,6 +37,7 @@ use std::sync::Arc;
 use rusty_agent_runtime::learn::{
     surface_for_kind, CandidateContent, CandidateKind, EnvironmentTag,
 };
+use rusty_agent_runtime::middleware::{instantiate_composition, MiddlewareChain};
 use rusty_agent_runtime::record::{sha256_hex, RunManifest};
 use rusty_agent_runtime::registry::{
     pointer_admission, resolution_pin, ArtifactRecord, ConfigResolution,
@@ -194,6 +195,11 @@ pub struct RegistryAdmission {
     pub resolutions: Vec<ConfigResolution>,
     /// The manifest the resolved content pins.
     pub manifest: RunManifest,
+    /// The instantiated middleware chain — present exactly when the
+    /// binding resolved a `middleware_composition` artifact (R0.11
+    /// wave 4): the layers in resolved order, ready for the run's
+    /// executor wiring.
+    pub middleware: Option<MiddlewareChain>,
 }
 
 /// Resolve a run's registry binding against the store: each declared
@@ -211,12 +217,16 @@ pub struct RegistryAdmission {
 ///   run stops the request).
 /// - `422` when the declaration is malformed (empty, a duplicate
 ///   artifact, a second `model_settings` — the manifest's `model` slot
-///   is singular), when the family has no manifest digest slot
+///   is singular, or a second `middleware_composition` — a run serves
+///   one chain), when the family has no manifest digest slot
 ///   ([`resolution_pin`]'s refusal), or when the registry itself reads
 ///   corrupt: the pointer naming a candidate the store does not hold, a
 ///   candidate surfaced somewhere else, or a candidate failing its own
 ///   content address (the capsule registry's integrity rule — tampering
-///   is an admission error, never a journaled resolution).
+///   is an admission error, never a journaled resolution). A resolved
+///   middleware composition the compiled-in vocabulary cannot
+///   instantiate is refused here too — the chain is evidence the run
+///   must honor, never approximated.
 pub(crate) async fn resolve_admission(
     store: &Arc<dyn ServerStore>,
     tenant: &str,
@@ -242,6 +252,18 @@ pub(crate) async fn resolve_admission(
              manifest's `model` slot is singular; a run pins one model settings artifact"
         )));
     }
+    let middleware_compositions = binding
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.family == CandidateKind::MiddlewareComposition)
+        .count();
+    if middleware_compositions > 1 {
+        return Err(ApiError::unprocessable(format!(
+            "registry binding names {middleware_compositions} `middleware_composition` \
+             artifacts — a run serves one middleware chain; a second composition is a \
+             configuration error, not a merge"
+        )));
+    }
     let mut seen = std::collections::HashSet::new();
     for artifact in &binding.artifacts {
         if !seen.insert((artifact.family, artifact.name.clone())) {
@@ -260,6 +282,7 @@ pub(crate) async fn resolve_admission(
     let internal = |e: String| ApiError::internal(format!("registry admission read: {e}"));
     let mut resolutions = Vec::with_capacity(binding.artifacts.len());
     let mut manifest = RunManifest::new();
+    let mut middleware = None;
     for artifact in &binding.artifacts {
         let surface = surface_for_kind(artifact.family, &artifact.name);
         let target = match &tag {
@@ -314,7 +337,12 @@ pub(crate) async fn resolve_admission(
             .map_err(|e| ApiError::unprocessable(e.to_string()))?;
         // The manifest pin, through the R0.7 functions unchanged — the
         // resolved *content* is what pins, so the journaled digest above
-        // and the header's pin are one derivation.
+        // and the header's pin are one derivation. A middleware
+        // composition additionally instantiates its chain here (R0.11
+        // wave 4): instantiation is deterministic over the journaled
+        // layer list against the compiled-in vocabulary, so a refusal
+        // belongs at admission, before anything pins.
+        let mut layers = None;
         manifest = match &record.candidate.content {
             CandidateContent::Prompt { name, prompt } => {
                 manifest.pin_prompt(name.clone(), prompt.as_str())
@@ -325,6 +353,29 @@ pub(crate) async fn resolve_admission(
             CandidateContent::ModelSettings {
                 model, parameters, ..
             } => manifest.pin_model(model.clone(), parameters),
+            CandidateContent::MiddlewareComposition {
+                layers: declared, ..
+            } => {
+                middleware = Some(instantiate_composition(declared).map_err(|e| {
+                    ApiError::unprocessable(format!(
+                        "artifact `{target}` resolved to a middleware composition the \
+                         compiled-in vocabulary cannot instantiate: {e}"
+                    ))
+                })?);
+                layers = Some(
+                    declared
+                        .iter()
+                        .map(|layer| layer.layer.clone())
+                        .collect::<Vec<_>>(),
+                );
+                let value = serde_json::to_value(declared).map_err(|e| {
+                    ApiError::unprocessable(format!(
+                        "artifact `{target}` resolved to a middleware composition whose \
+                         layer list does not serialize: {e}"
+                    ))
+                })?;
+                manifest.pin_middleware(&value)
+            }
             _ => unreachable!("resolution_pin refused every other kind"),
         };
         resolutions.push(ConfigResolution {
@@ -334,11 +385,13 @@ pub(crate) async fn resolve_admission(
             pointer: slot,
             digest,
             model,
+            layers,
         });
     }
     Ok(RegistryAdmission {
         resolutions,
         manifest,
+        middleware,
     })
 }
 

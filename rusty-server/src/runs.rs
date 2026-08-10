@@ -923,9 +923,20 @@ async fn execute(deps: RunDeps, run_id: String) {
         .and_then(|v| State::from_value(v).ok())
         .unwrap_or_default();
 
-    let result = Executor::with_checkpointer(Arc::clone(&deps.checkpointer))
-        .run(&graph, &spec, initial, config)
-        .await;
+    let mut executor = Executor::with_checkpointer(Arc::clone(&deps.checkpointer));
+    // The resolved middleware chain (R0.11 wave 4) attaches in journaled
+    // order — the same layers the manifest's `middleware` digest pins and
+    // the admission resolution's `layers` field names. Attached after the
+    // admission journal writes above, so the evidence of *what* serves
+    // precedes the run it serves.
+    if let Some(admission) = &snap.admission {
+        if let Some(chain) = &admission.middleware {
+            for layer in chain.layers() {
+                executor = executor.layer_shared(Arc::clone(layer));
+            }
+        }
+    }
+    let result = executor.run(&graph, &spec, initial, config).await;
     // `config` (holding the only sender) is dropped with the run; the
     // forwarder drains what remains and exits.
     let _ = forwarder.await;
