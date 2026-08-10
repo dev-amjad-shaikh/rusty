@@ -122,6 +122,14 @@
 //! | `GET /.well-known/agent-card.json` | R0.9 (wave 4): the A2A agent card (pinned spec `0.3.0`), derived from the registry on every read — one skill per registered graph; deterministic, no timestamps |
 //! | `POST /a2a` | R0.9 (wave 4): the A2A JSON-RPC task surface — `message/send` (enqueue a durable task, `kind = "a2a"`, idempotent on `messageId`; a capsule data part `{"capsule": {name, version}, "input"}` routes to the in-process executor over the `a2a-capsule` pool, plain messages queue on `a2a` for external workers) / `message/stream` (the same plus SSE status events) / `tasks/get` / `tasks/cancel`. The context id maps to one Flight Recorder journal (`a2a-{tenant}-{contextId}`), so capsule executions leave their evidence on the native `/runs/{id}/events` and `/fixture` endpoints |
 //! | `PUT /capsules/{id}/blob` | R0.9 (wave 4): upload the component bytes a registered manifest's `build_digest` commits to (raw body) → `201 {capsule_id, sha256, bytes}`; `404` unknown capsule, `422` digest mismatch, `409` different bytes under a taken address (registry immutability over bytes) |
+//! | `POST /connections` | R0.11 (wave 3): register a connection `{provider, subject?, scopes, token}` → `201 {connection}`; the token material is envelope-encrypted before it touches the store and the registration journaled — the bytes never travel beyond the broker |
+//! | `GET /connections` | R0.11 (wave 3): the tenant's connection records (metadata only — sealed material never leaves the broker), sorted by id |
+//! | `GET /connections/{id}` | R0.11 (wave 3): one connection record → `200 {connection}`; `404` unknown/cross-tenant |
+//! | `POST /connections/{id}/consent` | R0.11 (wave 3): record a consent act `{scopes?, token?}` (one required, `422` otherwise) → `200 {connection, journaled}`; a scope-set change journals `connection_consented`, material-only `connection_refreshed`; re-recording the same fact converges without a second event. Re-activates a `needs_reauth` connection — this is the re-auth path |
+//! | `POST /connections/{id}/revoke` | R0.11 (wave 3): revoke `{reason?}` → `200 {connection, event_id?}` (re-revocation converges with no `event_id`); outstanding handles fail at their next use with a typed, journaled `connection_revoked` denial |
+//! | `DELETE /connections/{id}` | R0.11 (wave 3): revoke-then-erase → `200 {deleted: true}`; the sealed material is really deleted, and resolution fails closed `unknown_connection` thereafter |
+//! | `GET /connections/{id}/health` | R0.11 (wave 3): the connection's status and health counters (last failure class, consecutive failures, last refresh) |
+//! | `GET /broker/journal` | R0.11 (wave 3): the deployment's broker evidence chain — registrations, consents, refreshes, revocations, issuances, uses, and denials, integrity re-verified on read (the `receipt_keys/journal` precedent for a second control plane) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -133,6 +141,7 @@ mod a2a;
 mod agents;
 mod assistants;
 mod auth;
+mod broker;
 pub mod capsule_policy;
 mod capsules;
 mod coordination;
@@ -203,6 +212,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "assistants",
     "capsules",
     "capsule_policies",
+    "connections",
     "coordinations",
     "crons",
     "journals",
@@ -479,6 +489,15 @@ pub struct ServerConfig {
     /// [`ServerConfig::with_capsule_connector`].
     #[cfg(feature = "capsules")]
     pub capsule_connector: Option<Arc<dyn rusty_agent_runtime::capsule_host::NetworkConnector>>,
+
+    /// The credential handle TTL (R0.11 Extension Plane, wave 3): how
+    /// long one issued handle stays valid, default 300 seconds — "handles
+    /// live for minutes": short enough that expiry is routine, long
+    /// enough that a run's burst of provider calls reuses one issuance.
+    /// Revocation never waits on this — resolution reads the connection's
+    /// live state, so a revoked connection fails at the next call
+    /// regardless. See [`ServerConfig::with_broker_handle_ttl`].
+    pub broker_handle_ttl: std::time::Duration,
 }
 
 impl Default for ServerConfig {
@@ -503,6 +522,7 @@ impl Default for ServerConfig {
             capsule_budget_ceiling: None,
             #[cfg(feature = "capsules")]
             capsule_connector: None,
+            broker_handle_ttl: broker::DEFAULT_HANDLE_TTL,
         }
     }
 }
@@ -760,6 +780,15 @@ impl ServerConfig {
         connector: Arc<dyn rusty_agent_runtime::capsule_host::NetworkConnector>,
     ) -> Self {
         self.capsule_connector = Some(connector);
+        self
+    }
+
+    /// Builder-style: set the credential handle TTL (R0.11 wave 3). The
+    /// TTL bounds how long one issuance is reused, not how long a
+    /// revocation takes to bite — resolution reads live state, so a
+    /// revoked connection fails at the very next call.
+    pub fn with_broker_handle_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.broker_handle_ttl = ttl;
         self
     }
 }

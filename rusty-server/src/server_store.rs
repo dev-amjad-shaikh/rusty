@@ -30,6 +30,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use rusty_agent_runtime::broker::StoredConnection;
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
 use rusty_agent_runtime::durable::resolve_timeout_bound_ms;
 use rusty_agent_runtime::journal::{FileArtifactStore, JournalSnapshot};
@@ -823,6 +824,51 @@ pub(crate) trait ServerStore: Send + Sync {
 
     /// The receipt stored for `run_id` (`None` when none was minted).
     async fn get_run_receipt(&self, run_id: &str) -> StoreResult<Option<RunReceipt>>;
+
+    // -- Connections (R0.11 wave 3) ------------------------------------- //
+
+    /// Insert a stored connection (record + sealed credential). The id is
+    /// minted fresh per registration (`conn-` + random), so a duplicate
+    /// insert is always a bug or a retry of a create that already
+    /// journaled — replacing is correct, and the broker never calls this
+    /// for an update (updates go through the CAS).
+    async fn put_connection(
+        &self,
+        tenant: &str,
+        connection: &rusty_agent_runtime::broker::StoredConnection,
+    ) -> StoreResult<()>;
+
+    /// Fetch one stored connection (`None` for unknown or cross-tenant
+    /// ids — the store's indistinguishability rule).
+    async fn get_connection(
+        &self,
+        tenant: &str,
+        connection_id: &str,
+    ) -> StoreResult<Option<rusty_agent_runtime::broker::StoredConnection>>;
+
+    /// Every stored connection the tenant holds (order unspecified;
+    /// callers sort).
+    async fn list_connections(
+        &self,
+        tenant: &str,
+    ) -> StoreResult<Vec<rusty_agent_runtime::broker::StoredConnection>>;
+
+    /// Compare-and-swap a stored connection: install `updated` only when
+    /// the live row still equals `expect`. The broker's consent and
+    /// revoke flows read, derive, and then must not clobber a concurrent
+    /// mutation — [`ConnectionUpdate`] is the three-way answer.
+    async fn update_connection(
+        &self,
+        tenant: &str,
+        connection_id: &str,
+        expect: &rusty_agent_runtime::broker::StoredConnection,
+        updated: &rusty_agent_runtime::broker::StoredConnection,
+    ) -> StoreResult<ConnectionUpdate>;
+
+    /// Erase a stored connection, sealed material included (`false` when
+    /// it was not there). Real deletion — the memory-forget posture —
+    /// reached only through `Broker::delete`, which revokes first.
+    async fn delete_connection(&self, tenant: &str, connection_id: &str) -> StoreResult<bool>;
 }
 
 /// The outcome of a candidate lifecycle transition
@@ -854,6 +900,22 @@ pub(crate) enum ArtifactCommitOutcome {
     /// The artifact's live commit count is not the expected one (a
     /// concurrent commit won the race).
     Conflict(usize),
+}
+
+/// The outcome of a connection compare-and-swap
+/// ([`ServerStore::update_connection`]) — the store's mutation
+/// convention: unknown and cross-tenant ids are indistinguishable, a
+/// live row that no longer equals the expected one is a conflict, and
+/// anything but `Applied` changes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectionUpdate {
+    /// The swap applied.
+    Applied,
+    /// No such connection in this tenant.
+    Unknown,
+    /// The live row is not the expected one (a concurrent consent,
+    /// refresh, or revocation won the race).
+    Conflict,
 }
 
 // --------------------------------------------------------------------- //
@@ -940,6 +1002,13 @@ pub(crate) struct JsonFileStore {
     /// record under `{store_path}/capsule_policies/overlays/`.
     #[cfg(feature = "capsules")]
     capsule_overlays: Mutex<HashMap<String, CapsuleOverlayRecord>>,
+    /// The connection store (R0.11 wave 3): records plus sealed
+    /// credentials keyed by tenant-scoped connection id, one file per
+    /// record under `{store_path}/connections/` (the filename is the
+    /// key's hash; the file body carries the key — the version-pointer
+    /// envelope's rule). The broker owns the cryptography; this index
+    /// only ever holds ciphertext.
+    connections: Mutex<HashMap<String, StoredConnection>>,
 }
 
 impl JsonFileStore {
@@ -976,6 +1045,7 @@ impl JsonFileStore {
             )),
             #[cfg(feature = "capsules")]
             capsule_overlays: Mutex::new(capsule_policy::load_capsule_overlays(root)),
+            connections: Mutex::new(crate::broker::load_connections(root)),
         }
     }
 }
@@ -2717,6 +2787,77 @@ impl ServerStore for JsonFileStore {
             .await
             .map_err(io_err("load run receipt"))
     }
+
+    async fn put_connection(&self, tenant: &str, connection: &StoredConnection) -> StoreResult<()> {
+        let scoped = crate::auth::scope_id(tenant, connection.record.connection_id.as_str());
+        let mut map = self.connections.lock().await;
+        // Hold the lock across the file write (the assistants convention):
+        // a concurrent create of the same id can't interleave.
+        crate::broker::persist_connection(&self.root, &scoped, connection)
+            .await
+            .map_err(io_err("persist connection"))?;
+        map.insert(scoped, connection.clone());
+        Ok(())
+    }
+
+    async fn get_connection(
+        &self,
+        tenant: &str,
+        connection_id: &str,
+    ) -> StoreResult<Option<StoredConnection>> {
+        let scoped = crate::auth::scope_id(tenant, connection_id);
+        Ok(self.connections.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_connections(&self, tenant: &str) -> StoreResult<Vec<StoredConnection>> {
+        let map = self.connections.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, stored)| stored.clone())
+            .collect())
+    }
+
+    async fn update_connection(
+        &self,
+        tenant: &str,
+        connection_id: &str,
+        expect: &StoredConnection,
+        updated: &StoredConnection,
+    ) -> StoreResult<ConnectionUpdate> {
+        let scoped = crate::auth::scope_id(tenant, connection_id);
+        let mut map = self.connections.lock().await;
+        let Some(live) = map.get(&scoped) else {
+            return Ok(ConnectionUpdate::Unknown);
+        };
+        // Whole-value equality is the compare: the broker derived
+        // `updated` from exactly this `expect`, so any drift — status,
+        // scopes, resealed material — means a concurrent mutation won.
+        if live != expect {
+            return Ok(ConnectionUpdate::Conflict);
+        }
+        // Lock held across the write (the put rule): the swap is
+        // check-then-act, and the file must not name a state the index
+        // rejected.
+        crate::broker::persist_connection(&self.root, &scoped, updated)
+            .await
+            .map_err(io_err("persist connection"))?;
+        map.insert(scoped, updated.clone());
+        Ok(ConnectionUpdate::Applied)
+    }
+
+    async fn delete_connection(&self, tenant: &str, connection_id: &str) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, connection_id);
+        let mut map = self.connections.lock().await;
+        if !map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        crate::broker::delete_connection_file(&self.root, &scoped)
+            .await
+            .map_err(io_err("delete connection"))?;
+        map.remove(&scoped);
+        Ok(true)
+    }
 }
 
 impl JsonFileStore {
@@ -2814,6 +2955,7 @@ impl JsonFileStore {
 #[cfg(feature = "postgres")]
 mod postgres {
     use chrono::{DateTime, Utc};
+    use rusty_agent_runtime::broker::StoredConnection;
     use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
     use rusty_agent_runtime::journal::JournalSnapshot;
     use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
@@ -2825,7 +2967,9 @@ mod postgres {
     use sqlx::{PgPool, Row};
     use tokio::sync::OnceCell;
 
-    use super::{ArtifactCommitOutcome, CandidateTransition, ServerStore, StoreResult};
+    use super::{
+        ArtifactCommitOutcome, CandidateTransition, ConnectionUpdate, ServerStore, StoreResult,
+    };
     use crate::agents::{
         self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
         MailboxClaimScope,
@@ -3359,6 +3503,28 @@ mod postgres {
             minted_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )"#;
 
+    /// The connection store (R0.11 wave 3): one row per connection,
+    /// keyed by the tenant-scoped id. `provider` and `status` are
+    /// projected columns so operators can list and audit without opening
+    /// the payload — which matters because the payload carries the
+    /// sealed credential, and ciphertext is all this table may ever hold
+    /// (the master key lives in host key files, never in the database).
+    pub(crate) const CREATE_CONNECTIONS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_connections (
+            connection_id TEXT PRIMARY KEY,
+            tenant        TEXT NOT NULL,
+            provider      TEXT NOT NULL,
+            status        TEXT NOT NULL,
+            payload       JSONB NOT NULL,
+            updated_at    TIMESTAMPTZ NOT NULL,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The tenant's connections (the list route's scan).
+    pub(crate) const CREATE_CONNECTIONS_TENANT_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_connections_listing
+            ON server_connections (tenant, connection_id)";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -3408,6 +3574,8 @@ mod postgres {
         CREATE_CAPSULE_OVERLAYS_INDEX_SQL,
         CREATE_RECEIPT_KEYS_SQL,
         CREATE_RUN_RECEIPTS_SQL,
+        CREATE_CONNECTIONS_SQL,
+        CREATE_CONNECTIONS_TENANT_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -4181,6 +4349,37 @@ mod postgres {
     pub(crate) const SELECT_RUN_RECEIPT_SQL: &str =
         "SELECT payload FROM server_run_receipts WHERE run_id = $1";
 
+    /// Connection statements (R0.11 wave 3). The payload is the whole
+    /// `StoredConnection` — record plus sealed credential — so a dump of
+    /// this table holds ciphertext only. Insert is plain (the broker
+    /// mints a fresh id per registration; a duplicate insert is a bug,
+    /// not a merge). Mutation is a compare-and-swap on the whole
+    /// payload — the file backend's `live != expect` rule, exact in the
+    /// database (JSONB equality is semantic, so a re-keyed serialization
+    /// cannot false-conflict).
+    pub(crate) const INSERT_CONNECTION_SQL: &str = r#"
+        INSERT INTO server_connections (connection_id, tenant, provider, status, payload, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6)"#;
+
+    pub(crate) const SELECT_CONNECTION_SQL: &str =
+        "SELECT payload FROM server_connections WHERE connection_id = $1";
+
+    pub(crate) const LIST_CONNECTIONS_SQL: &str =
+        "SELECT payload FROM server_connections WHERE tenant = $1";
+
+    /// The compare-and-swap: the update lands only when the row still
+    /// carries the expected payload; no returned row means gone or
+    /// changed, and the caller's existence probe decides which.
+    pub(crate) const CAS_CONNECTION_SQL: &str = r#"
+        UPDATE server_connections
+            SET provider = $3, status = $4, payload = $5, updated_at = $6
+        WHERE connection_id = $1 AND tenant = $2 AND payload = $7
+        RETURNING connection_id"#;
+
+    pub(crate) const DELETE_CONNECTION_SQL: &str = r#"
+        DELETE FROM server_connections WHERE connection_id = $1 AND tenant = $2
+        RETURNING connection_id"#;
+
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
         WHERE coordination_id = $1
@@ -4322,6 +4521,17 @@ mod postgres {
         payload: Value,
     ) -> StoreResult<T> {
         serde_json::from_value(payload).map_err(|e| format!("corrupt {what} payload: {e}"))
+    }
+
+    /// The snake_case name a closed broker enum serializes to, for the
+    /// connection table's projected `provider` / `status` columns —
+    /// derived through the same serde derivation the payload uses, so the
+    /// columns can never drift from the payload they mirror.
+    fn broker_enum_name<T: serde::Serialize>(what: &str, value: &T) -> StoreResult<String> {
+        match record_to_payload(value)? {
+            Value::String(name) => Ok(name),
+            _ => Err(format!("{what} did not serialize to a name")),
+        }
     }
 
     fn assistant_from_payload(payload: Value) -> StoreResult<AssistantRecord> {
@@ -7031,6 +7241,96 @@ mod postgres {
             row.map(|row| record_from_payload("run receipt", row.get::<Value, _>("payload")))
                 .transpose()
         }
+
+        async fn put_connection(
+            &self,
+            tenant: &str,
+            connection: &StoredConnection,
+        ) -> StoreResult<()> {
+            let scoped = crate::auth::scope_id(tenant, connection.record.connection_id.as_str());
+            sqlx::query(INSERT_CONNECTION_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind(broker_enum_name("provider", &connection.record.provider)?)
+                .bind(broker_enum_name("status", &connection.record.status)?)
+                .bind(record_to_payload(connection)?)
+                .bind(connection.record.updated_at)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("insert connection"))?;
+            Ok(())
+        }
+
+        async fn get_connection(
+            &self,
+            tenant: &str,
+            connection_id: &str,
+        ) -> StoreResult<Option<StoredConnection>> {
+            let row = sqlx::query(SELECT_CONNECTION_SQL)
+                .bind(crate::auth::scope_id(tenant, connection_id))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select connection"))?;
+            row.map(|row| record_from_payload("connection", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_connections(&self, tenant: &str) -> StoreResult<Vec<StoredConnection>> {
+            let rows = sqlx::query(LIST_CONNECTIONS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list connections"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("connection", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn update_connection(
+            &self,
+            tenant: &str,
+            connection_id: &str,
+            expect: &StoredConnection,
+            updated: &StoredConnection,
+        ) -> StoreResult<ConnectionUpdate> {
+            let pool = self.pool().await?;
+            let applied = sqlx::query(CAS_CONNECTION_SQL)
+                .bind(crate::auth::scope_id(tenant, connection_id))
+                .bind(tenant)
+                .bind(broker_enum_name("provider", &updated.record.provider)?)
+                .bind(broker_enum_name("status", &updated.record.status)?)
+                .bind(record_to_payload(updated)?)
+                .bind(updated.record.updated_at)
+                .bind(record_to_payload(expect)?)
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("cas connection"))?;
+            if applied.is_some() {
+                return Ok(ConnectionUpdate::Applied);
+            }
+            // No row moved: either the connection is gone or the payload
+            // drifted — the probe decides, the lease-outcome rule.
+            let exists = sqlx::query(SELECT_CONNECTION_SQL)
+                .bind(crate::auth::scope_id(tenant, connection_id))
+                .fetch_optional(pool)
+                .await
+                .map_err(db_err("select connection"))?;
+            Ok(if exists.is_some() {
+                ConnectionUpdate::Conflict
+            } else {
+                ConnectionUpdate::Unknown
+            })
+        }
+
+        async fn delete_connection(&self, tenant: &str, connection_id: &str) -> StoreResult<bool> {
+            let row = sqlx::query(DELETE_CONNECTION_SQL)
+                .bind(crate::auth::scope_id(tenant, connection_id))
+                .bind(tenant)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("delete connection"))?;
+            Ok(row.is_some())
+        }
     }
 
     impl PostgresStore {
@@ -7176,7 +7476,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 47);
+            assert_eq!(MIGRATION_SQL.len(), 49);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -7302,6 +7602,10 @@ mod postgres {
             assert!(CREATE_RUN_RECEIPTS_SQL.contains("server_run_receipts"));
             assert!(CREATE_RUN_RECEIPTS_SQL.contains("run_id    TEXT PRIMARY KEY"));
             assert!(CREATE_RUN_RECEIPTS_SQL.contains("payload   JSONB"));
+            assert!(CREATE_CONNECTIONS_SQL.contains("server_connections"));
+            assert!(CREATE_CONNECTIONS_SQL.contains("connection_id TEXT PRIMARY KEY"));
+            assert!(CREATE_CONNECTIONS_SQL.contains("payload       JSONB"));
+            assert!(CREATE_CONNECTIONS_TENANT_INDEX_SQL.contains("server_connections"));
         }
 
         #[test]

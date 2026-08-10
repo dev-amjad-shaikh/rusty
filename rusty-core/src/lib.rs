@@ -116,6 +116,24 @@
 //!   digest, the digest ↔ version join journaled as
 //!   [`registry::ConfigResolution`]. The store backends and endpoints live in
 //!   `rusty-agent-server`; these are the pure contracts both sides agree on.
+//! - **The credential/connection broker** ([`broker`], R0.11 wave 3): no
+//!   tool ever holds a raw credential. The connection entity
+//!   ([`broker::ConnectionRecord`] — consent scope set as the ceiling
+//!   everything narrows against, status, health), the sealed-storage shape
+//!   ([`broker::StoredConnection`] — ciphertext and a wrapped data key
+//!   only, plaintext on neither backend ever), and the handle lifecycle:
+//!   short-lived, opaque, non-serializable [`broker::CredentialHandle`]s
+//!   whose validity is self-contained in signed claims while revocation
+//!   reads live connection state at every resolution — a revoked
+//!   connection fails closed at the next tool call with a typed,
+//!   journaled [`broker::BrokerDenial`]. [`broker::CredentialMediator`] /
+//!   [`broker::MediatedTool`] mediate `ToolExecutor` dispatch, and behind
+//!   `wasm` [`broker::BrokeredCapsuleHost`] turns capsule `Secret`
+//!   grants into broker-issued handles; in both, resolution returns the
+//!   credential bytes to the host-side connector, never to tool code.
+//!   The store backends, envelope cryptography, master key, and
+//!   endpoints live in `rusty-agent-server`; these are the pure
+//!   contracts both sides agree on.
 //! - **WASM nodes** (`wasm_node`, feature `wasm`): sandboxed WebAssembly
 //!   modules run as graph nodes via Wasmtime.
 //! - **Rusty Capsules** ([`capsule`], R0.9 wave 1): the content-addressed
@@ -167,6 +185,7 @@
 
 pub mod a2a;
 pub mod agents;
+pub mod broker;
 pub mod capsule;
 #[cfg(feature = "wasm")]
 pub mod capsule_host;
@@ -209,6 +228,17 @@ pub mod prelude {
         QuorumOutcome, QuorumResolver, QuorumResolverRecord, QuorumTally, RaceContract,
         RestartPolicy, StateScope, SupervisionAttempt, SupervisionPolicy, SupervisionTrigger,
         AGENT_RECIPIENT_PREFIX, COORDINATION_RESULT_KIND, ESCALATION_MESSAGE_KIND,
+    };
+    #[cfg(feature = "wasm")]
+    pub use crate::broker::BrokeredCapsuleHost;
+    pub use crate::broker::{
+        new_connection_id, new_handle_id, scopes_missing, BrokerDenial, BrokerDenialReason,
+        ClassifiedFailure, ConnectionConsent, ConnectionHealth, ConnectionProvider,
+        ConnectionRecord, ConnectionRefresh, ConnectionRevocation, ConnectionStatus,
+        CredentialBroker, CredentialHandle, CredentialMediator, CredentialRequirement,
+        CredentialTool, CredentialUse, HandleClaims, HandleIssuance, IssueRequest, MediatedTool,
+        ResolvedCredential, SealedCredential, StoredConnection, TokenMaterial,
+        CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, HANDLE_TOKEN_PREFIX, SEALED_FORMAT_VERSION,
     };
     pub use crate::capsule::{
         any_grant_of_kind, derive_capsule_id, network_grant_covers, CapabilityGrant,

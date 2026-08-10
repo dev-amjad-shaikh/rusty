@@ -1,0 +1,9 @@
+{
+  "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "grant": [
+    "drive.readonly",
+    "drive.write"
+  ],
+  "revoked_at": "2027-01-15T08:06:40Z",
+  "reason": "employee offboarded"
+}

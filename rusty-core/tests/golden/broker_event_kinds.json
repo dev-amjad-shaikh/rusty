@@ -1,0 +1,9 @@
+[
+  "connection_registered",
+  "connection_consented",
+  "connection_refreshed",
+  "connection_revoked",
+  "credential_handle_issued",
+  "credential_use",
+  "credential_denied"
+]

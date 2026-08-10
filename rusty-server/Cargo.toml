@@ -48,6 +48,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # and SHA-256 payload hashes for the event log.
 hmac = "0.12"
 sha2 = "0.10"
+# The credential broker (R0.11 wave 3): XChaCha20-Poly1305 for the
+# envelope encryption of connection token material. RustCrypto's AEADs
+# are the established, externally audited (NCC Group) pure-Rust choice —
+# matching the `ed25519-dalek` posture of no native crypto code — and
+# the XChaCha20 variant's 192-bit nonces make random-nonce-per-seal safe
+# at envelope scale, so no nonce counter exists to mismanage (the
+# failure mode that rules out random-nonce AES-GCM). Its software
+# implementation is constant-time without AES-NI, which `aes-gcm`'s
+# portable fallback does not guarantee on every target.
+chacha20poly1305 = "0.10"
 # Permissive CORS in `router()` so browser clients (e.g. the Studio) can call
 # the API cross-origin. Production deployments should restrict this — see README.
 tower-http = { version = "0.6", features = ["cors"] }

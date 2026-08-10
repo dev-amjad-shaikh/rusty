@@ -569,6 +569,74 @@ pub enum RunEventKind {
     /// signed receipt → manifest pin → resolution event → candidate →
     /// author is covered end to end.
     ConfigResolved,
+
+    /// A broker connection was registered (R0.11 Extension Plane, wave
+    /// 3): a named, tenant-scoped binding of a provider account to its
+    /// consent scope set landed in the broker. Journaled into the
+    /// deployment's broker evidence chain (the `receipt-keys` precedent
+    /// applied to a second control plane). An [`Effect::Pure`] record:
+    /// registration is local broker state, so the event is the lineage
+    /// evidence. Output carries the
+    /// [`crate::broker::ConnectionRecord`] — metadata by construction;
+    /// the credential bytes live only in the sealed store envelope and
+    /// can never appear here.
+    ConnectionRegistered,
+
+    /// A connection's consent act was recorded (R0.11 wave 3): the
+    /// human's grant at the provider, written down as the connection's
+    /// new scope ceiling. An [`Effect::Pure`] record. Output carries the
+    /// journaled [`crate::broker::ConnectionConsent`] — the connection,
+    /// the subject, and the recorded scope set. Scope widening is only
+    /// ever this event: a new consent act, journaled; there is no silent
+    /// widening path.
+    ConnectionConsented,
+
+    /// A connection's token material rotated beneath an unchanged
+    /// consent set (R0.11 wave 3): a recorded credential rotation. An
+    /// [`Effect::Pure`] record. Output carries the journaled
+    /// [`crate::broker::ConnectionRefresh`] — the connection and the new
+    /// expiry, never the bytes. Rotation changes nothing a run pinned:
+    /// the pin names the connection id and the consent set, not the
+    /// secret of the moment.
+    ConnectionRefreshed,
+
+    /// A connection was revoked (R0.11 wave 3). The status flip and this
+    /// event commit together, and resolution reads live connection
+    /// state, so revocation takes effect at the next tool call — not the
+    /// next deploy. An [`Effect::Pure`] record. Output carries the
+    /// journaled [`crate::broker::ConnectionRevocation`]: the connection
+    /// and the grant that stopped holding.
+    ConnectionRevoked,
+
+    /// A credential handle was issued (R0.11 wave 3): a tool (or
+    /// capsule) declaring a credential need received a short-lived,
+    /// opaque handle — scope-narrowed against the consent ceiling at
+    /// issuance. An [`Effect::Pure`] record. Output carries the
+    /// journaled [`crate::broker::HandleIssuance`] — the full claims, so
+    /// the run's evidence pins the connection id and the consent scope
+    /// set it resolved.
+    CredentialHandleIssued,
+
+    /// A credential handle was resolved at use (R0.11 wave 3): the
+    /// broker checked live connection state, expiry, and scope coverage,
+    /// and handed the credential to the host-side connector. An
+    /// [`Effect::ReadOnly`] record (the resolution itself performs no
+    /// external effect — the authenticated call it enables is the
+    /// connector's own evidence). Output carries the journaled
+    /// [`crate::broker::CredentialUse`] — handle, connection, scopes
+    /// checked — never bytes (the `CapsuleCall` precedent).
+    CredentialUse,
+
+    /// A handle issuance or resolution was refused (R0.11 wave 3):
+    /// revoked connection, expired handle, scope beyond the bound set,
+    /// `needs_reauth`, unknown handle or connection, or a broker that
+    /// could not perform the check. An [`Effect::Pure`] record: nothing
+    /// executed, so there is no external effect to classify — the event
+    /// is the evidence that nothing happened (the `CapsuleDenied`
+    /// precedent). Output carries the journaled
+    /// [`crate::broker::BrokerDenial`], attributable to the connection
+    /// and the grant — never the bytes.
+    CredentialDenied,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

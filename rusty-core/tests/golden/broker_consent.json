@@ -1,0 +1,9 @@
+{
+  "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "subject": "user-7",
+  "scopes": [
+    "drive.readonly",
+    "drive.write"
+  ],
+  "recorded_at": "2027-01-15T08:01:40Z"
+}

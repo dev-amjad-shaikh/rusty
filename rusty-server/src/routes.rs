@@ -118,6 +118,14 @@ pub(crate) struct AppState {
     /// through `POST /receipt_keys/rotate`; the key history both store
     /// backends keep is what old receipts verify against.
     pub receipt_keyring: Arc<crate::receipts::SigningKeyring>,
+    /// The credential broker (R0.11 wave 3): envelope-encrypted
+    /// connection custody over the same store, master keys beside the
+    /// receipt signing secrets under `{store_path}/keys/` (never through
+    /// the store abstraction — a Postgres dump holds ciphertext only),
+    /// and one deployment evidence chain
+    /// ([`crate::broker::BROKER_JOURNAL_RUN_ID`]) every registration,
+    /// consent, revocation, issuance, use, and denial appends to.
+    pub broker: Arc<crate::broker::Broker>,
     /// The MCP bridge's in-flight `tools/call` map (R0.9 wave 4): request
     /// id → run id, the lookup `notifications/cancelled` resolves. Lives
     /// on the state (not inside the handler) so the cancellation
@@ -201,6 +209,11 @@ pub(crate) fn router_with_shutdown(
         Arc::clone(&server_store),
         config.store_path.clone(),
     ));
+    let broker = Arc::new(crate::broker::Broker::new(
+        Arc::clone(&server_store),
+        config.store_path.clone(),
+        config.broker_handle_ttl,
+    ));
     let state = Arc::new(AppState {
         registry,
         config,
@@ -213,6 +226,7 @@ pub(crate) fn router_with_shutdown(
         #[cfg(feature = "capsules")]
         capsule_plane,
         receipt_keyring,
+        broker,
         mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
@@ -281,6 +295,32 @@ pub(crate) fn router_with_shutdown(
         .route("/receipt_keys", get(list_receipt_keys_route))
         .route("/receipt_keys/rotate", post(rotate_receipt_key))
         .route("/receipt_keys/journal", get(get_receipt_keys_journal))
+        // The credential/connection broker (R0.11 wave 3): connection
+        // custody and lifecycle — register, list, read, consent (the
+        // re-auth path), revoke, erase — plus health and the
+        // deployment's broker evidence chain. Reads serve metadata only;
+        // the sealed material never leaves the broker.
+        .route(
+            "/connections",
+            post(register_connection).get(list_connections),
+        )
+        .route(
+            "/connections/{connection_id}",
+            get(get_connection).delete(delete_connection),
+        )
+        .route(
+            "/connections/{connection_id}/consent",
+            post(consent_connection),
+        )
+        .route(
+            "/connections/{connection_id}/revoke",
+            post(revoke_connection),
+        )
+        .route(
+            "/connections/{connection_id}/health",
+            get(get_connection_health),
+        )
+        .route("/broker/journal", get(get_broker_journal))
         .route("/assistants", post(create_assistant).get(list_assistants))
         .route("/assistants/{assistant_id}", get(get_assistant))
         .route(
@@ -1809,6 +1849,280 @@ async fn get_receipt_keys_journal(
         "run_id": crate::receipts::RECEIPTS_JOURNAL_RUN_ID,
         "events": events,
         // The lineage never completes — it grows with every rotation.
+        "complete": false,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// The credential/connection broker (R0.11 wave 3)
+// --------------------------------------------------------------------- //
+
+/// `POST /connections` body: the provider, the consent ceiling, and the
+/// token material to seal. The material crosses this boundary exactly
+/// once — route to broker to envelope — and is never journaled, stored,
+/// or served in the clear.
+#[derive(Debug, Deserialize)]
+struct RegisterConnectionPayload {
+    /// The provider kind (`openai`, `anthropic`, …).
+    provider: rusty_agent_runtime::broker::ConnectionProvider,
+    /// The per-user binding; absent for service-level connections.
+    #[serde(default)]
+    subject: Option<String>,
+    /// The consented scope set, in provider semantics — the issuance
+    /// ceiling.
+    #[serde(default)]
+    scopes: std::collections::BTreeSet<String>,
+    /// The token material to seal.
+    token: rusty_agent_runtime::broker::TokenMaterial,
+}
+
+/// `POST /connections/{id}/consent` body. Both fields optional, one
+/// required: `scopes` re-records the consent ceiling (journaled
+/// `connection_consented`), `token` replaces the sealed material
+/// (journaled `connection_refreshed` — and resealed under the same data
+/// key, so the envelope's identity survives).
+#[derive(Debug, Deserialize)]
+struct ConsentConnectionPayload {
+    #[serde(default)]
+    scopes: Option<std::collections::BTreeSet<String>>,
+    #[serde(default)]
+    token: Option<rusty_agent_runtime::broker::TokenMaterial>,
+}
+
+/// `POST /connections/{id}/revoke` body (an empty object revokes without
+/// a recorded reason).
+#[derive(Debug, Deserialize)]
+struct RevokeConnectionPayload {
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// The 422 for input the connection contract refuses — validation
+/// happens before the broker call, so a store error is never a client
+/// error and a client error never reaches the store.
+fn invalid_connection_input(e: impl std::fmt::Display) -> ApiError {
+    ApiError::unprocessable(e.to_string())
+}
+
+/// `POST /connections` — register a connection: validate, seal the
+/// material under a fresh per-connection data key, journal the
+/// registration, persist. `201 {connection}` with the public record —
+/// the material is not part of any answer, ever.
+async fn register_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterConnectionPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if payload.token.access_token.is_empty() {
+        return Err(ApiError::unprocessable(
+            "token.access_token must not be empty".to_owned(),
+        ));
+    }
+    rusty_agent_runtime::broker::validate_connection_fields(
+        payload.subject.as_deref(),
+        &payload.scopes,
+    )
+    .map_err(invalid_connection_input)?;
+    let record = state
+        .broker
+        .register(
+            tenant.tenant(),
+            payload.provider,
+            payload.subject,
+            payload.scopes,
+            &payload.token,
+        )
+        .await
+        .map_err(internal_err)?;
+    Ok((StatusCode::CREATED, Json(json!({ "connection": record }))))
+}
+
+/// `GET /connections` — the tenant's connection records, sorted by id.
+/// Metadata only: `ConnectionRecord` carries no material, sealed or
+/// otherwise — that is why it is safe to serve whole.
+async fn list_connections(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .broker
+        .list(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    records.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
+    Ok(Json(json!({ "connections": records })))
+}
+
+/// `GET /connections/{connection_id}` — one record; `404` for unknown
+/// and cross-tenant ids alike (the store's indistinguishability rule).
+async fn get_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .broker
+        .get(tenant.tenant(), &connection_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("connection `{connection_id}` not found")))?;
+    Ok(Json(json!({ "connection": record })))
+}
+
+/// `POST /connections/{id}/consent` — record a consent act. The human's
+/// grant is executed at the provider; this endpoint records it — the
+/// only way a consented set changes — journals the act, and re-activates
+/// a `needs_reauth` connection (this is the re-auth path). `200
+/// {connection, journaled}`; re-recording the same fact converges
+/// (`journaled: null`) without a second event.
+async fn consent_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+    Json(payload): Json<ConsentConnectionPayload>,
+) -> Result<Json<Value>, ApiError> {
+    if payload.scopes.is_none() && payload.token.is_none() {
+        return Err(ApiError::unprocessable(
+            "a consent act needs `scopes` and/or `token`".to_owned(),
+        ));
+    }
+    if let Some(scopes) = &payload.scopes {
+        rusty_agent_runtime::broker::validate_connection_fields(None, scopes)
+            .map_err(invalid_connection_input)?;
+    }
+    if let Some(token) = &payload.token {
+        if token.access_token.is_empty() {
+            return Err(ApiError::unprocessable(
+                "token.access_token must not be empty".to_owned(),
+            ));
+        }
+    }
+    match state
+        .broker
+        .record_consent(
+            tenant.tenant(),
+            &connection_id,
+            payload.scopes,
+            payload.token.as_ref(),
+        )
+        .await
+        .map_err(internal_err)?
+    {
+        crate::broker::ConsentOutcome::Applied { record, journaled } => Ok(Json(
+            json!({ "connection": record, "journaled": journaled }),
+        )),
+        crate::broker::ConsentOutcome::Converged(record) => Ok(Json(
+            json!({ "connection": record, "journaled": Value::Null }),
+        )),
+        crate::broker::ConsentOutcome::Unknown => Err(ApiError::not_found(format!(
+            "connection `{connection_id}` not found"
+        ))),
+        crate::broker::ConsentOutcome::Conflict => Err(ApiError::conflict(format!(
+            "connection `{connection_id}` changed under the consent; retry"
+        ))),
+    }
+}
+
+/// `POST /connections/{id}/revoke` — revoke the grant. The status flip
+/// and its journaled event commit together, and outstanding handles fail
+/// at their next use — resolution reads live state, so revocation bites
+/// at the next call, never the next deploy. `200 {connection, event_id}`;
+/// re-revocation converges without an `event_id` (the fact journaled
+/// once already).
+async fn revoke_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+    Json(payload): Json<RevokeConnectionPayload>,
+) -> Result<Json<Value>, ApiError> {
+    match state
+        .broker
+        .revoke(tenant.tenant(), &connection_id, payload.reason)
+        .await
+        .map_err(internal_err)?
+    {
+        crate::broker::RevokeOutcome::Applied { record, event_id } => {
+            Ok(Json(json!({ "connection": record, "event_id": event_id })))
+        }
+        crate::broker::RevokeOutcome::Converged(record) => {
+            Ok(Json(json!({ "connection": record })))
+        }
+        crate::broker::RevokeOutcome::Unknown => Err(ApiError::not_found(format!(
+            "connection `{connection_id}` not found"
+        ))),
+        crate::broker::RevokeOutcome::Conflict => Err(ApiError::conflict(format!(
+            "connection `{connection_id}` changed under the revocation; retry"
+        ))),
+    }
+}
+
+/// `DELETE /connections/{id}` — revoke-then-erase: the evidence trail
+/// first (a deleted connection's grant stopped holding *here*, journaled
+/// when still live), then real deletion of the stored record, sealed
+/// material included. Resolution fails closed `unknown_connection`
+/// thereafter, exactly as for a revocation.
+async fn delete_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let deleted = state
+        .broker
+        .delete(tenant.tenant(), &connection_id)
+        .await
+        .map_err(internal_err)?;
+    if !deleted {
+        return Err(ApiError::not_found(format!(
+            "connection `{connection_id}` not found"
+        )));
+    }
+    Ok(Json(json!({ "deleted": true })))
+}
+
+/// `GET /connections/{id}/health` — the lifecycle status and the health
+/// counters (last failure class, consecutive failures, last refresh).
+/// Metadata by construction; `404` unknown/cross-tenant.
+async fn get_connection_health(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .broker
+        .get(tenant.tenant(), &connection_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("connection `{connection_id}` not found")))?;
+    Ok(Json(json!({
+        "connection_id": record.connection_id,
+        "status": record.status,
+        "health": record.health,
+    })))
+}
+
+/// `GET /broker/journal` — the deployment's broker evidence chain:
+/// registrations, consents, refreshes, revocations, issuances, uses, and
+/// denials, integrity re-verified on read like every journal this server
+/// serves (the `receipt_keys/journal` precedent applied to the second
+/// control plane). Empty until the first broker act. Uses and denials
+/// name the connection, the handle, and the grant — never the bytes.
+async fn get_broker_journal(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let events = match state
+        .server_store
+        .get_journal(crate::broker::BROKER_JOURNAL_RUN_ID)
+        .await
+        .map_err(internal_err)?
+    {
+        Some(snapshot) => reverify_journal(crate::broker::BROKER_JOURNAL_RUN_ID, snapshot)?.events,
+        None => Vec::new(),
+    };
+    Ok(Json(json!({
+        "run_id": crate::broker::BROKER_JOURNAL_RUN_ID,
+        "events": events,
+        // The chain never completes — it grows with every broker act.
         "complete": false,
     })))
 }

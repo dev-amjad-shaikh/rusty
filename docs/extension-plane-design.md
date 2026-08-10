@@ -435,6 +435,43 @@ a provider call through a handle without the bytes entering tool code; both back
 ciphertext only (a Postgres dump contains no plaintext credential); a revoked connection
 fails closed at the next tool call with a typed, journaled denial.
 
+> **Wave 3 status: implemented (2026-08-10).** The contracts landed in
+> `rusty-core/src/broker.rs` (connection model, sealed envelope, handle
+> claims and token codec, typed denials, the `CredentialBroker` /
+> `CredentialTool` / `CredentialMediator` seam and the wasm
+> `BrokeredCapsuleHost`, goldens in `rusty-core/tests/golden/`) and the
+> custody layer in `rusty-server/src/broker.rs` with the `/connections`
+> routes and the `server_connections` migration, with nine settled
+> refinements: the evidence vocabulary is seven additive event kinds
+> (registered / consented / refreshed / revoked / issued / used /
+> denied); all broker evidence lives in one deployment chain
+> (`credential-broker`, the `receipt-keys` precedent) with the run
+> binding in each payload, because a run's own journal is not always
+> server-persisted; handle validity is self-contained HMAC-SHA256-signed
+> claims under a domain-separated key derived from the master key, so
+> only the connection liveness check hits the store at resolution (open
+> question 5's leaning, adopted); the envelope is XChaCha20-Poly1305
+> with the connection id as associated data under per-connection data
+> keys wrapped by the deployment master key; master keys live under
+> `{store_path}/keys/` in the receipt-secret discipline with the key id
+> recorded on every envelope — a single active key this wave, rotation
+> and journaled re-wrap deferred as open question 3's seam (genesis is
+> not journaled: nothing exists to journal it into yet); the mediator
+> issues at first use and caches per `(run, connection, scopes)` with
+> renewal at three-quarter TTL, and capsule `Secret` grants become
+> input-injected tokens under a reserved `secrets` key (honest: v1's
+> world model still has no secret import — the host mediates the
+> declared grant, it does not mint one); an empty scope request binds
+> the whole consent set, anything narrower must be covered by it;
+> delete is revoke-then-erase, so a removed connection leaves the same
+> evidence trail a revoked one does; and there is no refresh flow yet —
+> the consent endpoint is the re-auth path until wave 4's OAuth
+> lifecycle. The exit criteria hold by test: a scripted credential tool
+> authenticates through a handle with the bytes observable only at the
+> connector, both backends are scanned for the marker plaintext (the
+> Postgres assertion reads the raw row), and a revoked connection's next
+> resolution answers `connection_revoked` — typed and journaled.
+
 **Wave 4 — OAuth lifecycle, health, and middleware composition.** Authorization-code and
 client-credentials flows, automatic refresh (at-resolution plus the durable sweeper), the
 connection health surface, middleware composition artifacts with the additive manifest
