@@ -744,6 +744,27 @@
   .agent-kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 16px 0; }
   .agent-kv .k { color: var(--text-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px; }
   .agent-kv .v { font-family: var(--mono); font-size: 11.5px; word-break: break-word; }
+  .agent-version-desk { margin: 16px 0; border: 1px solid #46566a; border-radius: 9px; overflow: hidden; background: #141b22; }
+  .agent-version-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 12px 14px; border-bottom: 1px solid #344455; background: #18222c; }
+  .agent-version-head h3 { margin: 0; color: #eef7ff; font-size: 14px; }
+  .agent-version-head p { margin: 3px 0 0; color: #91a0ad; font-size: 10.5px; line-height: 1.4; }
+  .agent-version-head code { display: block; max-width: 390px; color: #91b9dc; font-size: 9.5px; overflow-wrap: anywhere; text-align: right; }
+  .agent-version-body { padding: 12px 14px 14px; }
+  .agent-version-rail { position: relative; display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .agent-version-rail::before { content: ""; position: absolute; left: 8px; top: 14px; bottom: 14px; width: 1px; background: #3f5265; }
+  .agent-version-item { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 8px 0 9px 27px; border-bottom: 1px solid #253441; }
+  .agent-version-item:last-child { border-bottom: 0; }
+  .agent-version-item::before { content: ""; position: absolute; z-index: 1; left: 3px; top: 14px; width: 9px; height: 9px; border: 2px solid #627a8e; border-radius: 50%; background: #141b22; }
+  .agent-version-item.active::before { border-color: #e0bf6f; background: #8d7235; box-shadow: 0 0 0 3px #2f2a1e; }
+  .agent-version-item strong { display: flex; gap: 7px; align-items: center; color: #dfe8ee; font-size: 11.5px; }
+  .agent-version-item code { display: block; margin-top: 3px; color: #8294a2; font-size: 9px; overflow-wrap: anywhere; }
+  .agent-version-item small { display: block; margin-top: 3px; color: #748593; font-size: 9.5px; }
+  .agent-version-active { color: #efd28a; font: 700 8px var(--mono); letter-spacing: .55px; text-transform: uppercase; }
+  .agent-version-review { margin-top: 12px; border-top: 1px solid #344455; padding-top: 12px; }
+  .agent-version-review > h4 { margin: 0 0 7px; color: #eef7ff; font-size: 13px; }
+  .agent-version-review > p { color: #9aa9b4; font-size: 10.5px; line-height: 1.45; }
+  .agent-version-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 10px; }
+  .agent-version-empty { margin: 0; color: #9aa9b4; font-size: 11px; line-height: 1.5; }
   .agent-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
   .agent-form label, .agent-test label { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim); font-size: 11.5px; }
   .field-help { color: var(--text-faint); font-size: 10.5px; font-weight: 400; }
@@ -1643,6 +1664,10 @@
     .agent-change-row { grid-template-columns: 1fr; gap: 5px; }
     .agent-change-values { grid-template-columns: 1fr; }
     .agent-change-arrow { padding-top: 0; transform: rotate(90deg); }
+    .agent-version-head { flex-direction: column; }
+    .agent-version-head code { max-width: none; text-align: left; }
+    .agent-version-item { grid-template-columns: 1fr; }
+    .agent-version-item button { justify-self: start; }
     .agent-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-run-row { grid-template-columns: 1fr; }
     .agent-run-row button { justify-self: start; }
@@ -1904,6 +1929,7 @@
 
         <div class="agent-journey" id="agent-journey" aria-live="polite"></div>
         <div class="sr-only" id="agent-run-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+        <div class="sr-only" id="agent-version-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
         <div class="card" id="agent-create-panel" role="region" aria-labelledby="agent-create-title" style="display:none">
           <h2 class="section" id="agent-create-title" style="margin-top:0">Configure an agent</h2>
@@ -2409,6 +2435,8 @@ const AGENT_MANIFEST_TEXT_LIMIT = 65536;
 const AGENT_MANIFEST_DEPTH_LIMIT = 16;
 const AGENT_MANIFEST_NODE_LIMIT = 2000;
 const AGENT_CHANGE_EXCERPT_LIMIT = 180;
+const AGENT_VERSION_LIMIT = 256;
+const AGENT_VERSION_RESPONSE_LIMIT = 8 * 1024 * 1024;
 const AGENT_INTENT_FORMAT = "rusty.agent-intent/v1";
 const AGENT_INTENT_TOOL_LIMIT = 16;
 const AGENT_INTENT_EFFECTS = new Set(["pure", "read_only", "idempotent", "compensatable", "non_idempotent"]);
@@ -2468,11 +2496,14 @@ const store = {
   tasksUnsupported: false, // server build has no /tasks routes (pre-R0.6 server wave)
   agents: null,        // { list, selected, error } for the assistant-configuration workbench
   agentRequest: 0,     // generation guard: assistant catalogs never cross connection boundaries
+  agentVersionRequest: 0, // generation guard for version history, exact review, and activation
+  agentVersions: null, // selected assistant's server history and page-memory activation review
   agentFocusRecord: null, // remembered run row that should receive focus after Home navigation
   agentRuns: Object.create(null),       // latest full run from this browser session, keyed by assistant id
   agentRunHistory: Object.create(null), // sanitized recent-run metadata for the current connection identity
   agentCreateOpen: false, // creation form temporarily owns the guided journey
   agentCopySource: null, // source snapshot while a copy-to-draft form is open
+  agentVersionSource: null, // exact active assistant snapshot while creating an immutable draft version
   agentManifestSource: null, // imported/copied config + metadata preserved while the workshop is open
   agentManifestDirty: false, // exact JSON has unapplied edits that must never be ignored
   agentIntentScopeOrder: [], // preserves imported scope order while the visual shortcut is untouched
@@ -3638,7 +3669,7 @@ function homeNavigate(action, id, owner) {
     return;
   }
   if (action === "agent-run") {
-    if (store.agents && store.agents.list.some((agent) => agent.assistant_id === owner)) store.agents.selected = owner;
+    if (store.agents && store.agents.list.some((agent) => agent.assistant_id === owner)) agentSelectAssistant(owner);
     store.agentFocusRecord = id || null;
     openAgents();
     return;
@@ -3961,6 +3992,7 @@ function connectionSetSubmitting(submitting) {
 function connectionResetWorkspace() {
   store.connectionEpoch += 1;
   store.agentRequest += 1;
+  store.agentVersionRequest += 1;
   store.taskRequest += 1;
   store.memoryRequest += 1;
   store.fabricRequest += 1;
@@ -3973,10 +4005,12 @@ function connectionResetWorkspace() {
   store.agentRunHistory = Object.create(null);
   store.agentCreateOpen = false;
   store.agentCopySource = null;
+  store.agentVersionSource = null;
   store.agentManifestSource = null;
   store.agentManifestDirty = false;
   store.agentIntentScopeOrder = [];
   store.agents = null;
+  store.agentVersions = null;
   store.agentsUnsupported = false;
   store.agentFocusRecord = null;
   store.tasks = null;
@@ -7569,6 +7603,15 @@ function agentCopyDraft(agent) {
   };
 }
 
+function agentVersionDraft(agent) {
+  const source = agent && typeof agent === "object" ? agent : {};
+  return {
+    ...agentCopyDraft(source),
+    name: String(source.name || ""),
+    assistantId: String(source.assistant_id || ""),
+  };
+}
+
 function agentManifestDraft(manifest) {
   const source = manifest && typeof manifest === "object" ? manifest : {};
   const config = agentPlainObject(source.config) ? source.config : {};
@@ -7659,6 +7702,17 @@ function agentImportContextHtml(manifest, label) {
     `The import has not changed the server.</p>` +
     (scan.sensitivePaths.length
       ? `<p>Secret-looking values remain in the draft but stay hidden in the evidence preview.</p>` : "");
+}
+
+function agentVersionContextHtml(source) {
+  return `<div class="agent-copy-flow">Active version → immutable draft</div>` +
+    `<h3>${escapeHtml(source.name || "Unnamed agent")}</h3>` +
+    `<div class="agent-copy-id">${escapeHtml(source.active_version_id || "active version unavailable")}</div>` +
+    `<div class="agent-copy-summary">` +
+      `<span>Agent ID<b>${escapeHtml(source.assistant_id || "—")}</b></span>` +
+      `<span>Behavior<b>${escapeHtml(agentGraphLabel(source.graph))}</b></span>` +
+      `<span>Serving state<b>Unchanged until activation</b></span>` +
+    `</div><p>Save a reviewable immutable configuration. New runs continue using the active version until you deliberately activate this draft.</p>`;
 }
 
 function agentCopyIdentityConflict(source, payload) {
@@ -7899,26 +7953,37 @@ function agentChangeReviewHtml(source, draft, origin) {
   const comparison = agentChangeReview(source, draft);
   if (!comparison) return "";
   const mode = origin === "copy" ? "Source agent → separate assistant"
+    : origin === "version" ? "Active version → immutable draft"
+    : origin === "activation" ? "Current serving → selected version"
     : "Applied manifest → new assistant";
   const boundary = origin === "copy"
     ? "This creates a separate assistant. It is not a new active version, and the source remains unchanged."
+    : origin === "version"
+      ? "Saving creates an immutable draft version. The active version continues serving until a separate activation."
+    : origin === "activation"
+      ? "Activation moves the serving pointer. Every prior version and its history remain unchanged for rollback."
     : "Nothing has changed on the server. This review covers the new assistant that will be created.";
+  const beforeLabel = origin === "activation" ? "Current" : origin === "version" ? "Active" : "Source";
+  const afterLabel = origin === "activation" ? "Selected" : origin === "version" ? "Draft" : "Draft";
   const rows = comparison.rows.map((row) => {
     const stateLabel = row.state === "changed" ? "changed" : row.state === "review" ? "needs exact-manifest review" : "unchanged";
     const arrow = row.state === "unchanged" ? "=" : row.state === "review" ? "?" : "→";
     return `<article class="agent-change-row ${row.state}" role="listitem" aria-label="${escapeHtml(`${row.label}: ${stateLabel}`)}">` +
       `<div class="agent-change-label"><b>${escapeHtml(row.label)}</b><span class="agent-change-state">${escapeHtml(stateLabel)}</span></div>` +
-      `<div class="agent-change-values"><div class="agent-change-value before"><span>Source</span><code>${escapeHtml(agentChangeExcerpt(row.before))}</code></div>` +
+      `<div class="agent-change-values"><div class="agent-change-value before"><span>${beforeLabel}</span><code>${escapeHtml(agentChangeExcerpt(row.before))}</code></div>` +
       `<span class="agent-change-arrow" aria-hidden="true">${arrow}</span>` +
-      `<div class="agent-change-value after"><span>Draft</span><code>${escapeHtml(agentChangeExcerpt(row.after))}</code></div></div></article>`;
+      `<div class="agent-change-value after"><span>${afterLabel}</span><code>${escapeHtml(agentChangeExcerpt(row.after))}</code></div></div></article>`;
   }).join("");
+  const foot = origin === "activation"
+    ? "Comparison uses exact structural values. Long visible text is excerpted here; the complete current and selected manifests are required in the activation evidence below."
+    : "Comparison uses exact structural values. Long visible text is excerpted; the exact portable manifest remains available below.";
   return `<div class="agent-change-head"><span class="agent-change-kicker">${escapeHtml(mode)}</span>` +
     `<h3 id="agent-change-title">Review the change set</h3><p>${escapeHtml(boundary)}</p></div>` +
     `<div class="agent-change-counts" aria-label="Change summary"><span class="changed">${comparison.changed} changed</span>` +
       `<span>${comparison.unchanged} unchanged</span>` +
       (comparison.review ? `<span>${comparison.review} needs review</span>` : "") + `</div>` +
     `<div class="agent-change-list" role="list">${rows}</div>` +
-    `<div class="agent-change-foot">Comparison uses exact structural values. Long visible text is excerpted; the exact portable manifest remains available below.</div>`;
+    `<div class="agent-change-foot">${escapeHtml(foot)}</div>`;
 }
 
 function agentErrorHtml(status, body) {
@@ -7959,6 +8024,197 @@ function agentAnnounceRun(run) {
   if (announcer) announcer.textContent = agentRunAnnouncement(run);
 }
 
+function agentVersionIdValid(value) {
+  return typeof value === "string" && /^av-[0-9a-f]{64}$/.test(value);
+}
+
+function agentVersionAssistant(value, assistantId) {
+  if (!agentPlainObject(value) || value.assistant_id !== assistantId ||
+      typeof value.name !== "string" || typeof value.graph !== "string" ||
+      typeof value.created_at !== "string" || !agentVersionIdValid(value.active_version_id) ||
+      !Number.isInteger(value.version_count) || value.version_count < 1 || value.version_count > AGENT_VERSION_LIMIT ||
+      !Object.prototype.hasOwnProperty.call(value, "config") || !Object.prototype.hasOwnProperty.call(value, "metadata") ||
+      !agentStoredNumbersRoundTrip(value.config) || !agentStoredNumbersRoundTrip(value.metadata)) return null;
+  return agentCopyableValue(value);
+}
+
+function agentVersionEnvelope(value, assistantId) {
+  if (!agentPlainObject(value) || value.assistant_id !== assistantId ||
+      !agentVersionIdValid(value.active_version_id) || !Array.isArray(value.versions) ||
+      value.versions.length < 1 || value.versions.length > AGENT_VERSION_LIMIT) return null;
+  const assistant = agentVersionAssistant(value.assistant, assistantId);
+  if (!assistant || assistant.active_version_id !== value.active_version_id ||
+      assistant.version_count !== value.versions.length) return null;
+  const ids = new Set();
+  const versions = [];
+  let activeCount = 0, rootCount = 0;
+  for (const item of value.versions) {
+    if (!agentPlainObject(item) || !agentVersionIdValid(item.version_id) || ids.has(item.version_id) ||
+        (item.parent_version_id !== undefined && item.parent_version_id !== null && !agentVersionIdValid(item.parent_version_id)) ||
+        typeof item.graph !== "string" || typeof item.created_at !== "string" || !Number.isFinite(Date.parse(item.created_at)) ||
+        typeof item.active !== "boolean") return null;
+    ids.add(item.version_id);
+    if (item.active) activeCount += 1;
+    if (item.parent_version_id == null) rootCount += 1;
+    versions.push({
+      version_id: item.version_id,
+      parent_version_id: item.parent_version_id == null ? null : item.parent_version_id,
+      graph: item.graph,
+      created_at: item.created_at,
+      active: item.active,
+    });
+  }
+  if (activeCount !== 1 || rootCount !== 1 ||
+      !versions.some((item) => item.version_id === value.active_version_id && item.active) ||
+      versions.some((item) => item.parent_version_id && !ids.has(item.parent_version_id))) return null;
+  return { assistantId, activeVersionId: value.active_version_id, assistant, versions };
+}
+
+function agentVersionExact(value, assistantId, expectedSummary, expectedActiveVersionId) {
+  if (!agentPlainObject(value) || value.assistant_id !== assistantId ||
+      value.active_version_id !== expectedActiveVersionId || !agentPlainObject(value.version)) return null;
+  const item = value.version;
+  if (!agentVersionIdValid(item.version_id) || item.version_id !== expectedSummary.version_id ||
+      (item.parent_version_id ?? null) !== expectedSummary.parent_version_id || item.graph !== expectedSummary.graph ||
+      item.created_at !== expectedSummary.created_at || typeof item.name !== "string" ||
+      !Object.prototype.hasOwnProperty.call(item, "config") || !Object.prototype.hasOwnProperty.call(item, "metadata") ||
+      !agentStoredNumbersRoundTrip(item.config) || !agentStoredNumbersRoundTrip(item.metadata) ||
+      typeof item.active !== "boolean" || item.active !== (item.version_id === expectedActiveVersionId)) return null;
+  return agentCopyableValue(item);
+}
+
+function agentVersionCreateReceipt(value, assistantId, baseVersionId, draft) {
+  if (!agentPlainObject(value) || value.assistant_id !== assistantId || typeof value.created !== "boolean" ||
+      value.active_version_id !== baseVersionId || !agentPlainObject(value.version)) return null;
+  const version = value.version;
+  if (!agentVersionIdValid(version.version_id) || version.parent_version_id !== baseVersionId || version.active !== false ||
+      version.name !== draft.name || version.graph !== draft.graph || typeof version.created_at !== "string" ||
+      !Number.isFinite(Date.parse(version.created_at)) ||
+      agentChangeEqual(version.config, draft.config ?? null) !== true ||
+      agentChangeEqual(version.metadata, draft.metadata ?? null) !== true) return null;
+  return { created: value.created, version: agentCopyableValue(version) };
+}
+
+function agentVersionDraftReviewable(draft) {
+  if (!draft) return false;
+  try {
+    const manifest = agentPortableManifest({
+      assistant_id: "version-review",
+      name: draft.name || "Version draft",
+      graph: draft.graph || "version-review",
+      config: draft.config,
+      metadata: draft.metadata,
+    });
+    return agentUtf8Length(agentManifestText(manifest, false)) <= AGENT_MANIFEST_TEXT_LIMIT - 1024 &&
+      agentChangeEqual(draft.config, draft.config) === true &&
+      agentChangeEqual(draft.metadata, draft.metadata) === true;
+  } catch { return false; }
+}
+
+function agentVersionReviewManifest(record) {
+  if (!record || typeof record !== "object") throw new Error("version body is unavailable");
+  const manifest = {
+    format: AGENT_MANIFEST_FORMAT,
+    name: record.name,
+    graph: record.graph,
+  };
+  if (Object.prototype.hasOwnProperty.call(record, "assistant_id")) {
+    manifest.assistant_id = record.assistant_id;
+  }
+  for (const key of ["config", "metadata"]) {
+    if (!Object.prototype.hasOwnProperty.call(record, key) || !agentStoredNumbersRoundTrip(record[key])) {
+      throw new Error(`version ${key} cannot be represented exactly`);
+    }
+    manifest[key] = agentCopyableValue(record[key]);
+  }
+  if (typeof manifest.name !== "string" || typeof manifest.graph !== "string" ||
+      (Object.prototype.hasOwnProperty.call(manifest, "assistant_id") && typeof manifest.assistant_id !== "string")) {
+    throw new Error("version identity cannot be represented exactly");
+  }
+  agentManifestScan(manifest);
+  return manifest;
+}
+
+function agentVersionManifestEvidence(current, selected) {
+  const render = (record, label) => {
+    try {
+      const text = agentManifestText(agentVersionReviewManifest(record), false);
+      if (agentUtf8Length(text) > AGENT_MANIFEST_TEXT_LIMIT) throw new Error("manifest exceeds review boundary");
+      return `<details class="agent-copy-manifest"><summary>${escapeHtml(label)}</summary>` +
+        `<pre class="json">${escapeHtml(text)}</pre></details>`;
+    } catch {
+      return "";
+    }
+  };
+  const currentHtml = render(current, "Review complete current manifest");
+  const selectedHtml = render(selected, "Review complete selected manifest");
+  const ready = Boolean(currentHtml && selectedHtml);
+  return {
+    ready,
+    html: ready
+      ? `<div class="agent-version-manifests"><p>These collapsed manifests contain the complete stored values, including any credentials that were placed in configuration. Expand only in a trusted setting.</p>${currentHtml}${selectedHtml}</div>`
+      : `<div class="note tiny">This version is outside Studio's exact 64 KiB / 2,000-value review boundary. Activate it through a client that can review the complete immutable body.</div>`,
+  };
+}
+
+function agentVersionActivationReceipt(value, assistantId, selected, versionCount) {
+  if (!agentPlainObject(value) || typeof value.activated !== "boolean") return null;
+  const assistant = agentVersionAssistant(value.assistant, assistantId);
+  if (!assistant || assistant.active_version_id !== selected.version_id || assistant.version_count !== versionCount ||
+      assistant.name !== selected.name || assistant.graph !== selected.graph ||
+      agentChangeEqual(assistant.config, selected.config) !== true ||
+      agentChangeEqual(assistant.metadata, selected.metadata) !== true) return null;
+  return { activated: value.activated, assistant };
+}
+
+function agentVersionTime(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? new Date(time).toLocaleString() : "Time unavailable";
+}
+
+function agentVersionDeskHtml(agent, state) {
+  if (!agent || !state || state.assistantId !== agent.assistant_id) return "";
+  const heading = `<div class="agent-version-head"><div><h3 id="agent-version-title" tabindex="-1">Version history</h3>` +
+    `<p>Immutable configurations. Only the version marked active serves new runs.</p></div>` +
+    `<code>${escapeHtml(state.activeVersionId || agent.active_version_id || "active version unavailable")}</code></div>`;
+  if (state.loading) return `<section class="agent-version-desk" aria-labelledby="agent-version-title" aria-busy="true">${heading}` +
+    `<div class="agent-version-body"><p class="agent-version-empty">Loading server version history…</p></div></section>`;
+  if (state.error) return `<section class="agent-version-desk" aria-labelledby="agent-version-title">${heading}` +
+    `<div class="agent-version-body">${agentErrorHtml(state.error.status, state.error.body)}` +
+    `<div class="agent-version-actions"><button type="button" data-agent-version-retry="${escapeHtml(agent.assistant_id)}">Retry history</button></div></div></section>`;
+  const versions = Array.isArray(state.versions) ? state.versions : [];
+  const busy = Boolean(state.reviewing || state.submitting);
+  const rows = versions.map((version, index) => {
+    const rowId = `agent-version-row-${index}`;
+    return `<li class="agent-version-item${version.active ? " active" : ""}">` +
+      `<div id="${rowId}"><strong>${escapeHtml(agentGraphLabel(version.graph))}` +
+      (version.active ? `<span class="agent-version-active">Active</span>` : "") + `</strong>` +
+      `<code>${escapeHtml(version.version_id)}</code><small>${escapeHtml(agentVersionTime(version.created_at))}` +
+      (version.parent_version_id ? ` · from ${escapeHtml(shortId(version.parent_version_id))}` : " · initial version") + `</small></div>` +
+      (version.active ? "" : `<button class="small" type="button" data-agent-version-review="${escapeHtml(version.version_id)}" ` +
+        `aria-describedby="${rowId}"${busy ? " disabled" : ""}>Review activation</button>`) + `</li>`;
+  }).join("");
+  let review = "";
+  if (state.pendingActivation) {
+    const selected = { assistant_id: agent.assistant_id, ...state.pendingActivation };
+    const evidence = agentVersionManifestEvidence(agent, selected);
+    const graphAvailable = (((store.info && store.info.graphs) || [])
+      .map((graph) => graph && graph.name).filter(Boolean)).includes(selected.graph);
+    review = `<div class="agent-version-review"><h4>Activation review</h4>` +
+      `<p>New runs will use the selected configuration after this guarded pointer move. In-flight and historical runs are not rewritten.</p>` +
+      agentChangeReviewHtml(agent, selected, "activation") +
+      evidence.html +
+      (graphAvailable ? "" : `<div class="note tiny">The selected behavior <code>${escapeHtml(selected.graph)}</code> is not registered on this server. Activation is unavailable until that behavior returns.</div>`) +
+      `<div class="agent-version-actions"><button type="button" data-agent-version-cancel${state.submitting ? " disabled" : ""}>Cancel</button>` +
+      `<button class="primary" type="button" data-agent-version-activate="${escapeHtml(selected.version_id)}"` +
+      `${state.submitting || !evidence.ready || !graphAvailable ? " disabled" : ""}>${state.submitting ? "Activating…" : "Make this version active"}</button></div></div>`;
+  } else if (state.reviewing) {
+    review = `<div class="agent-version-review" aria-busy="true"><p>Loading the exact immutable version for review…</p></div>`;
+  }
+  return `<section class="agent-version-desk" aria-labelledby="agent-version-title">${heading}` +
+    `<div class="agent-version-body"><ol class="agent-version-rail">${rows}</ol>${review}</div></section>`;
+}
+
 function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
   if (!agent) return `<div class="empty">Select an agent to inspect and test it.</div>`;
   const meta = agent.metadata || {};
@@ -7970,6 +8226,10 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
   return `<div class="agent-detail-head"><div><h2>${escapeHtml(agent.name || "Unnamed agent")}</h2>` +
     `<div class="muted tiny">${escapeHtml(meta.description || agentGraphLabel(agent.graph))}</div></div>` +
     `<div class="agent-detail-actions"><button class="small" type="button" data-agent-export="${escapeHtml(agent.assistant_id || "")}">Export manifest</button>` +
+      `<button class="small" type="button" data-agent-versions="${escapeHtml(agent.assistant_id || "")}"` +
+      `${agentVersionIdValid(agent.active_version_id) ? "" : ` disabled title="Upgrade the server to manage immutable versions"`}>Version history</button>` +
+      `<button class="small" type="button" data-agent-version-create="${escapeHtml(agent.assistant_id || "")}"` +
+      `${agentVersionIdValid(agent.active_version_id) && runnable ? "" : ` disabled title="A version-capable server and registered graph are required"`}>Create version</button>` +
       `<button class="small" type="button" data-agent-copy="${escapeHtml(agent.assistant_id || "")}"` +
       `${runnable ? "" : ` disabled title="Register this graph before copying the agent"`}>Copy agent</button>` +
       `<span class="badge ${readiness.ready === readiness.total ? "success" : "pending"}">${readiness.ready}/${readiness.total} ready</span></div></div>` +
@@ -7977,8 +8237,11 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
     `<div class="agent-kv">` +
       `<span class="k">Agent ID</span><span class="v">${escapeHtml(agent.assistant_id || "—")}</span>` +
       `<span class="k">Graph</span><span class="v">${escapeHtml(agent.graph || "—")}</span>` +
+      `<span class="k">Active version</span><span class="v">${escapeHtml(agent.active_version_id || "Server does not expose versions")}</span>` +
+      `<span class="k">Versions</span><span class="v">${Number.isInteger(agent.version_count) ? escapeHtml(agent.version_count) : "—"}</span>` +
       `<span class="k">Created</span><span class="v">${escapeHtml(agent.created_at || "—")}</span>` +
     `</div>` +
+    agentVersionDeskHtml(agent, store.agentVersions) +
     `<section class="agent-config-summary" aria-labelledby="agent-config-summary-heading"><h3 id="agent-config-summary-heading">Configuration contract</h3>` +
       `<p>See which fields execute, which fields describe, and which fields are only stored.</p>` +
       `<div class="agent-contract-panel" aria-labelledby="agent-config-summary-title">` +
@@ -8022,6 +8285,8 @@ async function agentsLoad(quiet) {
     if (!store.agents.list.some((a) => a.assistant_id === store.agents.selected)) {
       store.agents.selected = store.agents.list[0] ? store.agents.list[0].assistant_id : null;
     }
+    const selected = store.agents.list.find((item) => item.assistant_id === store.agents.selected);
+    agentInvalidateVersionsForSelection(selected && selected.assistant_id, selected && selected.active_version_id);
   } catch (e) {
     if (!current()) return;
     store.agents.loading = false;
@@ -8032,6 +8297,182 @@ async function agentsLoad(quiet) {
   agentsUpdateSidebar();
   if (store.view === "agents") agentsRender();
   else if (store.view === "home") homeRender();
+}
+
+function agentReplaceCatalogRecord(record) {
+  if (!store.agents || !Array.isArray(store.agents.list) || !record) return false;
+  const index = store.agents.list.findIndex((item) => item.assistant_id === record.assistant_id);
+  if (index < 0) return false;
+  store.agents.list[index] = record;
+  return true;
+}
+
+function agentInvalidateVersionsForSelection(assistantId, activeVersionId) {
+  if (!store.agentVersions) return false;
+  const mismatchedAssistant = store.agentVersions.assistantId !== assistantId;
+  const mismatchedActive = activeVersionId && store.agentVersions.activeVersionId !== activeVersionId;
+  if (!mismatchedAssistant && !mismatchedActive) return false;
+  store.agentVersionRequest += 1;
+  store.agentVersions = null;
+  return true;
+}
+
+function agentSelectAssistant(assistantId) {
+  if (!store.agents || store.agents.selected === assistantId) return false;
+  agentInvalidateVersionsForSelection(assistantId);
+  store.agents.selected = assistantId;
+  agentsRender();
+  return true;
+}
+
+async function agentVersionsLoad(assistantId, focus) {
+  const agent = store.agents && store.agents.list.find((item) => item.assistant_id === assistantId);
+  if (!agent || !agentVersionIdValid(agent.active_version_id)) return false;
+  const operation = connectionOperation(); if (!operation) return false;
+  const request = ++store.agentVersionRequest;
+  const current = () => request === store.agentVersionRequest && connectionOperationCurrent(operation) &&
+    store.agents && store.agents.selected === assistantId;
+  store.agentVersions = {
+    assistantId,
+    activeVersionId: agent.active_version_id,
+    versions: [],
+    loading: true,
+    error: null,
+    reviewing: "",
+    pendingActivation: null,
+    submitting: false,
+  };
+  agentsRender();
+  if (focus !== false) $("agent-version-title")?.focus({ preventScroll: true });
+  try {
+    const raw = await apiForConnection(
+      operation.connection,
+      "GET",
+      `/assistants/${encodeURIComponent(assistantId)}/versions`,
+      undefined,
+      AGENT_VERSION_RESPONSE_LIMIT,
+    );
+    if (!current()) return false;
+    const loaded = agentVersionEnvelope(raw, assistantId);
+    if (!loaded) throw new ApiError(0, { error: "invalid_contract", message: "The server returned an invalid assistant version history." });
+    agentReplaceCatalogRecord(loaded.assistant);
+    store.agentVersions = {
+      ...loaded,
+      loading: false,
+      error: null,
+      reviewing: "",
+      pendingActivation: null,
+      submitting: false,
+    };
+    agentsRender();
+    if (focus !== false) $("agent-version-title")?.focus({ preventScroll: true });
+    $("agent-version-announcer").textContent = `${loaded.versions.length} immutable versions loaded. ${shortId(loaded.activeVersionId)} is active.`;
+    return true;
+  } catch (error) {
+    if (!current()) return false;
+    store.agentVersions = {
+      ...store.agentVersions,
+      loading: false,
+      error: { status: error.status || 0, body: error.body || { message: error.message } },
+    };
+    agentsRender();
+    if (focus !== false) $("agent-version-title")?.focus({ preventScroll: true });
+    return false;
+  }
+}
+
+async function agentVersionReview(assistantId, versionId) {
+  const state = store.agentVersions;
+  const summary = state && state.assistantId === assistantId &&
+    state.versions.find((item) => item.version_id === versionId && !item.active);
+  if (!summary || state.reviewing || state.submitting) return false;
+  const operation = connectionOperation(); if (!operation) return false;
+  const request = ++store.agentVersionRequest;
+  const expectedActive = state.activeVersionId;
+  const current = () => request === store.agentVersionRequest && connectionOperationCurrent(operation) &&
+    store.agents && store.agents.selected === assistantId && store.agentVersions === state &&
+    state.assistantId === assistantId && state.activeVersionId === expectedActive;
+  state.reviewing = versionId;
+  state.pendingActivation = null;
+  agentsRender();
+  $("agent-version-title")?.focus({ preventScroll: true });
+  try {
+    const raw = await apiForConnection(
+      operation.connection,
+      "GET",
+      `/assistants/${encodeURIComponent(assistantId)}/versions/${encodeURIComponent(versionId)}`,
+      undefined,
+      AGENT_VERSION_RESPONSE_LIMIT,
+    );
+    if (!current()) return false;
+    const version = agentVersionExact(raw, assistantId, summary, expectedActive);
+    if (!version) {
+      toast("Version evidence changed or did not match the selected history. Refreshing server truth.", "warn");
+      await agentVersionsLoad(assistantId, true);
+      return false;
+    }
+    state.reviewing = "";
+    state.pendingActivation = version;
+    agentsRender();
+    $("agent-version-title")?.focus({ preventScroll: true });
+    $("agent-version-announcer").textContent = `Activation review loaded for ${shortId(version.version_id)}.`;
+    return true;
+  } catch (error) {
+    if (!current()) return false;
+    state.reviewing = "";
+    agentsRender();
+    $("agent-version-title")?.focus({ preventScroll: true });
+    toast(error.message, "err");
+    return false;
+  }
+}
+
+function agentVersionCancelReview() {
+  const state = store.agentVersions;
+  if (!state || state.submitting) return;
+  const versionId = state.pendingActivation && state.pendingActivation.version_id;
+  state.pendingActivation = null;
+  agentsRender();
+  const target = versionId && Array.from($("agent-detail").querySelectorAll("[data-agent-version-review]"))
+    .find((button) => button.getAttribute("data-agent-version-review") === versionId);
+  (target || $("agent-version-title"))?.focus({ preventScroll: true });
+}
+
+async function agentVersionActivate(assistantId, versionId) {
+  const state = store.agentVersions;
+  const selected = state && state.assistantId === assistantId && state.pendingActivation;
+  if (!selected || selected.version_id !== versionId || state.submitting) return false;
+  const operation = connectionOperation(); if (!operation) return false;
+  const request = ++store.agentVersionRequest;
+  const expectedActive = state.activeVersionId;
+  const versionCount = state.versions.length;
+  const current = () => request === store.agentVersionRequest && connectionOperationCurrent(operation) &&
+    store.agents && store.agents.selected === assistantId && store.agentVersions === state &&
+    state.assistantId === assistantId;
+  state.submitting = true;
+  agentsRender();
+  try {
+    const raw = await apiForConnection(
+      operation.connection,
+      "POST",
+      `/assistants/${encodeURIComponent(assistantId)}/versions/${encodeURIComponent(versionId)}/activate`,
+      { expected_active_version_id: expectedActive },
+      AGENT_VERSION_RESPONSE_LIMIT,
+    );
+    if (!current()) return false;
+    const receipt = agentVersionActivationReceipt(raw, assistantId, selected, versionCount);
+    if (!receipt) throw new ApiError(0, { error: "invalid_receipt", message: "The activation receipt did not match the reviewed immutable version." });
+    agentReplaceCatalogRecord(receipt.assistant);
+    $("agent-version-announcer").textContent = `${shortId(versionId)} is now the active version.`;
+    toast(`${receipt.assistant.name} now serves ${shortId(versionId)}. Prior versions remain available.`, "ok");
+    await agentVersionsLoad(assistantId, true);
+    return true;
+  } catch (error) {
+    if (!current()) return false;
+    toast(error.message, "err");
+    await agentVersionsLoad(assistantId, true);
+    return false;
+  }
 }
 
 function agentsRender() {
@@ -8286,7 +8727,7 @@ function agentRefreshContract() {
   }
   $("agent-contract-preview").innerHTML = agentConfigurationEvidenceHtml(record, agentGraphNames(), "agent-contract-title");
   const review = $("agent-change-review");
-  const baseline = store.agentCopySource || store.agentManifestSource;
+  const baseline = store.agentVersionSource || store.agentCopySource || store.agentManifestSource;
   if (!baseline) {
     review.hidden = true;
     review.innerHTML = "";
@@ -8296,7 +8737,7 @@ function agentRefreshContract() {
       ? `<div class="agent-change-head"><span class="agent-change-kicker">Change review paused</span>` +
         `<h3 id="agent-change-title">Complete the draft to compare it</h3></div>` +
         `<p class="agent-change-unavailable">${escapeHtml(draftError)}</p>`
-      : agentChangeReviewHtml(baseline, record, store.agentCopySource ? "copy" : "manifest");
+      : agentChangeReviewHtml(baseline, record, store.agentVersionSource ? "version" : store.agentCopySource ? "copy" : "manifest");
   }
 }
 
@@ -8328,7 +8769,10 @@ function agentRefreshManifestEditor() {
 function agentApplyManifest(manifest, label, imported) {
   store.agentManifestSource = agentCopyableValue(manifest);
   store.agentManifestDirty = false;
-  if (imported) store.agentCopySource = null;
+  if (imported) {
+    store.agentCopySource = null;
+    store.agentVersionSource = null;
+  }
   agentPopulateDraft(agentManifestDraft(manifest));
   agentSetShortcutLocks(manifest);
   if (imported) {
@@ -8431,6 +8875,7 @@ function agentResetCreateForm() {
   $("sel-agent-approval").value = "runtime_policy";
   for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) input.checked = false;
   store.agentIntentScopeOrder = [];
+  store.agentVersionSource = null;
   store.agentManifestSource = null;
   store.agentManifestDirty = false;
   agentSetShortcutLocks(null);
@@ -8443,6 +8888,7 @@ function agentResetCreateForm() {
   $("agent-copy-context").innerHTML = "";
   $("agent-change-review").hidden = true;
   $("agent-change-review").innerHTML = "";
+  $("inp-agent-id").disabled = false;
 }
 
 function agentOpenCreate(source) {
@@ -8453,6 +8899,7 @@ function agentOpenCreate(source) {
   agentResetCreateForm();
   store.agentCreateOpen = true;
   store.agentCopySource = agentCopySourceSnapshot(source);
+  store.agentVersionSource = null;
   store.agentManifestSource = store.agentCopySource;
   const select = $("sel-agent-graph");
   select.innerHTML = agentGraphNames().map((name) =>
@@ -8476,19 +8923,57 @@ function agentOpenCreate(source) {
   return true;
 }
 
+function agentOpenVersion(source) {
+  if (!source || !agentVersionIdValid(source.active_version_id)) {
+    toast("This server does not expose an immutable active version for this agent.", "err");
+    return false;
+  }
+  if (!agentStoredNumbersRoundTrip(source.config) || !agentStoredNumbersRoundTrip(source.metadata)) {
+    toast("This agent cannot be versioned without changing a stored JSON number token.", "err");
+    return false;
+  }
+  agentResetCreateForm();
+  store.agentCreateOpen = true;
+  store.agentCopySource = null;
+  store.agentVersionSource = agentCopySourceSnapshot(source);
+  store.agentManifestSource = store.agentVersionSource;
+  const select = $("sel-agent-graph");
+  select.innerHTML = agentGraphNames().map((name) =>
+    `<option value="${escapeHtml(name)}">${escapeHtml(agentGraphLabel(name))} · ${escapeHtml(name)}</option>`).join("");
+  $("agent-create-title").textContent = "Create a draft version";
+  $("agent-create-note").textContent = "Change the configuration, review the exact diff, then save it without moving the active serving pointer.";
+  $("btn-agent-create").textContent = "Save draft version";
+  $("agent-copy-context").innerHTML = agentVersionContextHtml(store.agentVersionSource);
+  $("agent-copy-context").hidden = false;
+  agentPopulateDraft(agentVersionDraft(store.agentVersionSource));
+  $("inp-agent-id").disabled = true;
+  agentSetShortcutLocks(store.agentVersionSource);
+  agentRefreshManifestEditor();
+  agentRefreshContract();
+  $("agent-create-panel").style.display = "block";
+  $("agent-journey").innerHTML = agentJourneyHtml(source, agentLatestRun(source.assistant_id), true);
+  $("agent-create-panel").scrollIntoView({ block: "start" });
+  $("inp-agent-name").focus({ preventScroll: true });
+  return true;
+}
+
 function agentCloseCreate(returnFocus) {
-  const sourceId = store.agentCopySource && store.agentCopySource.assistant_id;
+  const versionSource = store.agentVersionSource;
+  const source = versionSource || store.agentCopySource;
+  const sourceId = source && source.assistant_id;
   store.agentCreateOpen = false;
   store.agentCopySource = null;
+  store.agentVersionSource = null;
   store.agentManifestSource = null;
   store.agentManifestDirty = false;
   $("agent-create-panel").style.display = "none";
   agentResetCreateForm();
   agentsRender();
   if (returnFocus !== false) {
+    const attribute = versionSource ? "data-agent-version-create" : "data-agent-copy";
     const target = sourceId
-      ? Array.from($("agent-detail").querySelectorAll("[data-agent-copy]"))
-        .find((button) => button.getAttribute("data-agent-copy") === String(sourceId))
+      ? Array.from($("agent-detail").querySelectorAll(`[${attribute}]`))
+        .find((button) => button.getAttribute(attribute) === String(sourceId))
       : $("btn-agent-create-open");
     if (target) target.focus({ preventScroll: true });
   }
@@ -8497,7 +8982,8 @@ function agentCloseCreate(returnFocus) {
 async function agentCreate() {
   if (!agentRequireAppliedManifest()) return;
   const source = store.agentCopySource;
-  const imported = Boolean(store.agentManifestSource && !source);
+  const versionSource = store.agentVersionSource;
+  const imported = Boolean(store.agentManifestSource && !source && !versionSource);
   const validation = agentValidateDraft(agentFormFields(), agentGraphNames());
   if (!agentApplyDraftValidation(validation, true)) { toast(validation.errors[validation.first], "err"); return; }
   let payload;
@@ -8508,14 +8994,63 @@ async function agentCreate() {
     toast(message, "err");
     return;
   }
-  if (agentCopyIdentityConflict(source, payload)) {
+  if (versionSource && (payload.assistant_id !== versionSource.assistant_id ||
+      !agentVersionIdValid(versionSource.active_version_id))) {
+    toast("A draft version must keep the active agent identity and exact base version.", "err");
+    return;
+  }
+  if (!versionSource && agentCopyIdentityConflict(source, payload)) {
     toast("Use a new agent ID for the copy. The source agent stays unchanged.", "err");
     $("inp-agent-id").focus();
     return;
   }
   const operation = connectionOperation(); if (!operation) return;
   $("btn-agent-create").disabled = true;
+  let blocked = false;
   try {
+    if (versionSource) {
+      const currentAgent = store.agents && store.agents.list.find((item) => item.assistant_id === versionSource.assistant_id);
+      if (!currentAgent || currentAgent.active_version_id !== versionSource.active_version_id) {
+        blocked = true;
+        throw new ApiError(409, { error: "stale_active_version", message: "The active version changed. Close this draft and reopen it from the latest version before saving." });
+      }
+      const draft = {
+        name: payload.name,
+        graph: payload.graph,
+        config: Object.prototype.hasOwnProperty.call(payload, "config") ? payload.config : null,
+        metadata: Object.prototype.hasOwnProperty.call(payload, "metadata") ? payload.metadata : null,
+      };
+      if (!agentVersionDraftReviewable(draft)) {
+        throw new ApiError(0, { error: "review_boundary", message: "This draft is outside Studio's exact 2,000-value review boundary and cannot be receipt-checked safely." });
+      }
+      const raw = await apiForConnection(
+        operation.connection,
+        "POST",
+        `/assistants/${encodeURIComponent(versionSource.assistant_id)}/versions`,
+        { base_version_id: versionSource.active_version_id, ...draft },
+        AGENT_VERSION_RESPONSE_LIMIT,
+      );
+      if (!connectionOperationCurrent(operation) || store.agentVersionSource !== versionSource) return;
+      const receipt = agentVersionCreateReceipt(raw, versionSource.assistant_id, versionSource.active_version_id, draft);
+      if (!receipt) throw new ApiError(0, { error: "invalid_receipt", message: "The version receipt did not match the reviewed draft. The exact retry remains safe." });
+      const assistantId = versionSource.assistant_id;
+      const reviewedBase = versionSource.active_version_id;
+      agentCloseCreate(false);
+      store.agents.selected = assistantId;
+      const refreshed = await agentVersionsLoad(assistantId, true);
+      const baseStillActive = refreshed && store.agentVersions && store.agentVersions.activeVersionId === reviewedBase;
+      const versionLabel = shortId(receipt.version.version_id);
+      if (!refreshed) {
+        toast(`Draft ${versionLabel} is stored, but Studio could not refresh the current active version. Retry Version history before activation.`, "warn");
+      } else if (baseStillActive) {
+        toast(receipt.created
+          ? `Draft ${versionLabel} saved. The active version remains unchanged.`
+          : `Draft ${versionLabel} already existed. The exact retry was reconciled.`, "ok");
+      } else {
+        toast(`Draft ${versionLabel} is stored, but another version is now active. Server history was refreshed.`, "warn");
+      }
+      return;
+    }
     const created = await apiForConnection(operation.connection, "POST", "/assistants", payload);
     if (!connectionOperationCurrent(operation)) return;
     if (!store.agents) store.agents = { list: [], selected: null, error: null };
@@ -8531,8 +9066,17 @@ async function agentCreate() {
       ? `${created.name} is ready. ${sourceName} is unchanged.`
       : imported ? `${created.name} is ready from the reviewed manifest.`
       : `${created.name} is ready for a first run`, "ok");
-  } catch (e) { if (connectionOperationCurrent(operation)) toast(e.message, "err"); }
-  finally { if (connectionOperationCurrent(operation)) $("btn-agent-create").disabled = false; }
+  } catch (e) {
+    if (connectionOperationCurrent(operation)) {
+      if (versionSource && e.status === 409) {
+        blocked = true;
+        $("agent-create-note").textContent = "The active version changed while this draft was open. Close it and reopen from current server truth before saving.";
+        $("agent-form-error").textContent = "Draft base is stale. Close and reopen this version draft.";
+      }
+      toast(e.message, "err");
+    }
+  }
+  finally { if (connectionOperationCurrent(operation) && !blocked) $("btn-agent-create").disabled = false; }
 }
 
 async function agentRunTest(assistantId) {
@@ -15591,18 +16135,46 @@ function init() {
   $("agent-list").addEventListener("click", (e) => {
     const item = e.target.closest("[data-assistant-id]");
     if (!item || !store.agents) return;
-    store.agents.selected = item.getAttribute("data-assistant-id");
-    agentsRender();
+    agentSelectAssistant(item.getAttribute("data-assistant-id"));
   });
   $("agent-list").addEventListener("keydown", (e) => {
     if (!["Enter", " "].includes(e.key)) return;
     const item = e.target.closest("[data-assistant-id]");
     if (!item || !store.agents) return;
     e.preventDefault();
-    store.agents.selected = item.getAttribute("data-assistant-id");
-    agentsRender();
+    agentSelectAssistant(item.getAttribute("data-assistant-id"));
   });
   $("agent-detail").addEventListener("click", (e) => {
+    const versions = e.target.closest("[data-agent-versions]");
+    if (versions && !versions.disabled) {
+      agentVersionsLoad(versions.getAttribute("data-agent-versions"), true);
+      return;
+    }
+    const createVersion = e.target.closest("[data-agent-version-create]");
+    if (createVersion && !createVersion.disabled && store.agents) {
+      const source = store.agents.list.find((item) => item.assistant_id === createVersion.getAttribute("data-agent-version-create"));
+      if (source) agentOpenVersion(source);
+      return;
+    }
+    const retryVersions = e.target.closest("[data-agent-version-retry]");
+    if (retryVersions) {
+      agentVersionsLoad(retryVersions.getAttribute("data-agent-version-retry"), true);
+      return;
+    }
+    const reviewVersion = e.target.closest("[data-agent-version-review]");
+    if (reviewVersion && !reviewVersion.disabled && store.agents) {
+      agentVersionReview(store.agents.selected, reviewVersion.getAttribute("data-agent-version-review"));
+      return;
+    }
+    if (e.target.closest("[data-agent-version-cancel]")) {
+      agentVersionCancelReview();
+      return;
+    }
+    const activateVersion = e.target.closest("[data-agent-version-activate]");
+    if (activateVersion && !activateVersion.disabled && store.agents) {
+      agentVersionActivate(store.agents.selected, activateVersion.getAttribute("data-agent-version-activate"));
+      return;
+    }
     const exportButton = e.target.closest("[data-agent-export]");
     if (exportButton && store.agents) {
       const record = store.agents.list.find((item) => item.assistant_id === exportButton.getAttribute("data-agent-export"));

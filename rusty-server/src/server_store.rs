@@ -42,7 +42,10 @@ use crate::agents::{
     self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
     MailboxClaimScope,
 };
-use crate::assistants::{self, AssistantRecord};
+use crate::assistants::{
+    self, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord, CreateVersionOutcome,
+    ASSISTANT_VERSION_LIMIT,
+};
 #[cfg(feature = "capsules")]
 use crate::capsule_policy::{
     self, CapsuleOverlayRecord, CapsulePolicyActivation, CapsulePolicyRecord, CapsulePolicyWrite,
@@ -79,7 +82,23 @@ pub(crate) trait ServerStore: Send + Sync {
     /// Fetch one assistant by id.
     async fn get_assistant(&self, assistant_id: &str) -> StoreResult<Option<AssistantRecord>>;
     /// All assistants (order unspecified; routes sort).
-    async fn list_assistants(&self) -> StoreResult<Vec<AssistantRecord>>;
+    async fn list_assistants(&self) -> StoreResult<Vec<crate::assistants::AssistantView>>;
+    /// Append an immutable assistant version when `base_version_id` is still
+    /// active. Implementations must make the stale check and append atomic.
+    async fn create_assistant_version(
+        &self,
+        assistant_id: &str,
+        base_version_id: &str,
+        version: &AssistantVersionRecord,
+    ) -> StoreResult<CreateVersionOutcome>;
+    /// Move the serving pointer to an existing immutable version when the
+    /// caller's expected active version is still current.
+    async fn activate_assistant_version(
+        &self,
+        assistant_id: &str,
+        version_id: &str,
+        expected_active_version_id: &str,
+    ) -> StoreResult<ActivateVersionOutcome>;
 
     /// Insert a new cron; `false` (no write) when the id exists.
     async fn create_cron(&self, record: &CronRecord) -> StoreResult<bool>;
@@ -922,8 +941,108 @@ impl ServerStore for JsonFileStore {
         Ok(self.assistants.lock().await.get(assistant_id).cloned())
     }
 
-    async fn list_assistants(&self) -> StoreResult<Vec<AssistantRecord>> {
-        Ok(self.assistants.lock().await.values().cloned().collect())
+    async fn list_assistants(&self) -> StoreResult<Vec<crate::assistants::AssistantView>> {
+        Ok(self
+            .assistants
+            .lock()
+            .await
+            .iter()
+            .map(|(assistant_id, record)| record.view(assistant_id.clone()))
+            .collect())
+    }
+
+    async fn create_assistant_version(
+        &self,
+        assistant_id: &str,
+        base_version_id: &str,
+        version: &AssistantVersionRecord,
+    ) -> StoreResult<CreateVersionOutcome> {
+        let mut map = self.assistants.lock().await;
+        let Some(current) = map.get(assistant_id) else {
+            return Ok(CreateVersionOutcome::AssistantNotFound);
+        };
+        let mut next = current.clone();
+        next.ensure_version_history();
+        let active = next.active_version_id();
+        if active != base_version_id {
+            return Ok(CreateVersionOutcome::Stale {
+                active_version_id: active,
+            });
+        }
+        if let Some(existing) = next
+            .versions
+            .iter()
+            .find(|existing| existing.version_id == version.version_id)
+            .cloned()
+        {
+            return Ok(CreateVersionOutcome::Existing {
+                record: next,
+                version: existing,
+            });
+        }
+        if next.versions.len() >= ASSISTANT_VERSION_LIMIT {
+            return Ok(CreateVersionOutcome::LimitReached);
+        }
+        if next
+            .version_history()
+            .iter()
+            .any(|item| item.storage_size() > crate::assistants::ASSISTANT_VERSION_BYTES_LIMIT)
+            || version.storage_size() > crate::assistants::ASSISTANT_VERSION_BYTES_LIMIT
+            || next.lineage_storage_size_with(version)
+                > crate::assistants::ASSISTANT_LINEAGE_BYTES_LIMIT
+        {
+            return Ok(CreateVersionOutcome::SizeLimitReached);
+        }
+        next.versions.push(version.clone());
+        assistants::persist(&self.root, &next)
+            .await
+            .map_err(io_err("persist assistant version"))?;
+        map.insert(assistant_id.to_string(), next.clone());
+        Ok(CreateVersionOutcome::Created {
+            record: next,
+            version: version.clone(),
+        })
+    }
+
+    async fn activate_assistant_version(
+        &self,
+        assistant_id: &str,
+        version_id: &str,
+        expected_active_version_id: &str,
+    ) -> StoreResult<ActivateVersionOutcome> {
+        let mut map = self.assistants.lock().await;
+        let Some(current) = map.get(assistant_id) else {
+            return Ok(ActivateVersionOutcome::AssistantNotFound);
+        };
+        let mut next = current.clone();
+        next.ensure_version_history();
+        let active = next.active_version_id();
+        if active != expected_active_version_id {
+            return Ok(ActivateVersionOutcome::Stale {
+                active_version_id: active,
+            });
+        }
+        let Some(version) = next
+            .versions
+            .iter()
+            .find(|version| version.version_id == version_id)
+            .cloned()
+        else {
+            return Ok(ActivateVersionOutcome::VersionNotFound);
+        };
+        if active == version_id {
+            return Ok(ActivateVersionOutcome::AlreadyActive { record: next });
+        }
+        next.name = version.name;
+        next.graph = version.graph;
+        next.config = version.config;
+        next.metadata = version.metadata;
+        next.active_version_id = Some(version.version_id);
+        assistants::persist(&self.root, &next)
+            .await
+            .map_err(io_err("activate assistant version"))?;
+        map.insert(assistant_id.to_string(), next.clone());
+        Ok(ActivateVersionOutcome::Activated { record: next })
     }
 
     async fn create_cron(&self, record: &CronRecord) -> StoreResult<bool> {
@@ -2523,7 +2642,11 @@ mod postgres {
         self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
         MailboxClaimScope,
     };
-    use crate::assistants::AssistantRecord;
+    use crate::assistants::{
+        ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord, AssistantView,
+        CreateVersionOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT,
+        ASSISTANT_VERSION_LIMIT,
+    };
     #[cfg(feature = "capsules")]
     use crate::capsule_policy::{
         CapsuleOverlayRecord, CapsulePolicyActivation, CapsulePolicyRecord, CapsulePolicyWrite,
@@ -3090,6 +3213,12 @@ mod postgres {
 
     pub(crate) const SELECT_ASSISTANT_SQL: &str =
         "SELECT payload FROM server_assistants WHERE assistant_id = $1";
+
+    pub(crate) const SELECT_ASSISTANT_FOR_UPDATE_SQL: &str =
+        "SELECT payload FROM server_assistants WHERE assistant_id = $1 FOR UPDATE";
+
+    pub(crate) const UPDATE_ASSISTANT_SQL: &str =
+        "UPDATE server_assistants SET payload = $2 WHERE assistant_id = $1";
 
     pub(crate) const LIST_ASSISTANTS_SQL: &str = "SELECT payload FROM server_assistants";
 
@@ -3940,6 +4069,32 @@ mod postgres {
         serde_json::from_value(payload).map_err(|e| format!("corrupt {what} payload: {e}"))
     }
 
+    fn assistant_from_payload(payload: Value) -> StoreResult<AssistantRecord> {
+        let record: AssistantRecord = record_from_payload("assistant", payload)?;
+        record
+            .validate_lineage()
+            .map_err(|error| format!("corrupt assistant payload: {error}"))?;
+        Ok(record)
+    }
+
+    fn assistant_views_from_payloads(
+        payloads: impl IntoIterator<Item = Value>,
+    ) -> Vec<AssistantView> {
+        let mut views = Vec::new();
+        for payload in payloads {
+            match assistant_from_payload(payload) {
+                Ok(record) => {
+                    let assistant_id = record.assistant_id.clone();
+                    views.push(record.view(assistant_id));
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "skipping corrupt assistant payload");
+                }
+            }
+        }
+        views
+    }
+
     /// Assemble a wire-facing [`StoreItem`] from one `server_kv` row.
     pub(crate) fn kv_row_to_item(
         namespace: &str,
@@ -4217,18 +4372,164 @@ mod postgres {
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("select assistant"))?;
-            row.map(|r| record_from_payload("assistant", r.get::<Value, _>("payload")))
+            row.map(|r| assistant_from_payload(r.get::<Value, _>("payload")))
                 .transpose()
         }
 
-        async fn list_assistants(&self) -> StoreResult<Vec<AssistantRecord>> {
+        async fn list_assistants(&self) -> StoreResult<Vec<AssistantView>> {
             let rows = sqlx::query(LIST_ASSISTANTS_SQL)
                 .fetch_all(self.pool().await?)
                 .await
                 .map_err(db_err("list assistants"))?;
-            rows.into_iter()
-                .map(|r| record_from_payload("assistant", r.get::<Value, _>("payload")))
-                .collect()
+            Ok(assistant_views_from_payloads(
+                rows.into_iter().map(|row| row.get::<Value, _>("payload")),
+            ))
+        }
+
+        async fn create_assistant_version(
+            &self,
+            assistant_id: &str,
+            base_version_id: &str,
+            version: &AssistantVersionRecord,
+        ) -> StoreResult<CreateVersionOutcome> {
+            let pool = self.pool().await?;
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin assistant version transaction"))?;
+            let row = sqlx::query(SELECT_ASSISTANT_FOR_UPDATE_SQL)
+                .bind(assistant_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("lock assistant for version"))?;
+            let Some(row) = row else {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit missing assistant version transaction"))?;
+                return Ok(CreateVersionOutcome::AssistantNotFound);
+            };
+            let mut record = assistant_from_payload(row.get::<Value, _>("payload"))?;
+            let active = record.active_version_id();
+            if active != base_version_id {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit stale assistant version transaction"))?;
+                return Ok(CreateVersionOutcome::Stale {
+                    active_version_id: active,
+                });
+            }
+            if let Some(existing) = record
+                .versions
+                .iter()
+                .find(|existing| existing.version_id == version.version_id)
+                .cloned()
+            {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit existing assistant version transaction"))?;
+                return Ok(CreateVersionOutcome::Existing {
+                    record,
+                    version: existing,
+                });
+            }
+            if record.versions.len() >= ASSISTANT_VERSION_LIMIT {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit assistant version limit transaction"))?;
+                return Ok(CreateVersionOutcome::LimitReached);
+            }
+            if record
+                .version_history()
+                .iter()
+                .any(|item| item.storage_size() > ASSISTANT_VERSION_BYTES_LIMIT)
+                || version.storage_size() > ASSISTANT_VERSION_BYTES_LIMIT
+                || record.lineage_storage_size_with(version) > ASSISTANT_LINEAGE_BYTES_LIMIT
+            {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit assistant version size transaction"))?;
+                return Ok(CreateVersionOutcome::SizeLimitReached);
+            }
+            record.versions.push(version.clone());
+            sqlx::query(UPDATE_ASSISTANT_SQL)
+                .bind(assistant_id)
+                .bind(record_to_payload(&record)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("update assistant version"))?;
+            tx.commit()
+                .await
+                .map_err(db_err("commit assistant version transaction"))?;
+            Ok(CreateVersionOutcome::Created {
+                record,
+                version: version.clone(),
+            })
+        }
+
+        async fn activate_assistant_version(
+            &self,
+            assistant_id: &str,
+            version_id: &str,
+            expected_active_version_id: &str,
+        ) -> StoreResult<ActivateVersionOutcome> {
+            let pool = self.pool().await?;
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin assistant activation transaction"))?;
+            let row = sqlx::query(SELECT_ASSISTANT_FOR_UPDATE_SQL)
+                .bind(assistant_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("lock assistant for activation"))?;
+            let Some(row) = row else {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit missing assistant activation transaction"))?;
+                return Ok(ActivateVersionOutcome::AssistantNotFound);
+            };
+            let mut record = assistant_from_payload(row.get::<Value, _>("payload"))?;
+            let active = record.active_version_id();
+            if active != expected_active_version_id {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit stale assistant activation transaction"))?;
+                return Ok(ActivateVersionOutcome::Stale {
+                    active_version_id: active,
+                });
+            }
+            let Some(version) = record
+                .versions
+                .iter()
+                .find(|version| version.version_id == version_id)
+                .cloned()
+            else {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit missing assistant version transaction"))?;
+                return Ok(ActivateVersionOutcome::VersionNotFound);
+            };
+            if active == version_id {
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit active assistant version transaction"))?;
+                return Ok(ActivateVersionOutcome::AlreadyActive { record });
+            }
+            record.name = version.name;
+            record.graph = version.graph;
+            record.config = version.config;
+            record.metadata = version.metadata;
+            record.active_version_id = Some(version.version_id);
+            sqlx::query(UPDATE_ASSISTANT_SQL)
+                .bind(assistant_id)
+                .bind(record_to_payload(&record)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("activate assistant version"))?;
+            tx.commit()
+                .await
+                .map_err(db_err("commit assistant activation transaction"))?;
+            Ok(ActivateVersionOutcome::Activated { record })
         }
 
         async fn create_cron(&self, record: &CronRecord) -> StoreResult<bool> {
@@ -6835,22 +7136,67 @@ mod postgres {
 
         #[test]
         fn assistant_payload_round_trip() {
-            let record = AssistantRecord {
-                assistant_id: "a-1".to_string(),
-                name: "support-bot".to_string(),
-                graph: "pipeline".to_string(),
-                config: json!({"recursion_limit": 10}),
-                metadata: json!({"team": "qa"}),
-                created_at: Utc::now(),
-            };
+            let record = AssistantRecord::new(
+                "a-1".to_string(),
+                "support-bot".to_string(),
+                "pipeline".to_string(),
+                json!({"recursion_limit": 10}),
+                json!({"team": "qa"}),
+                Utc::now(),
+            );
             let payload = record_to_payload(&record).unwrap();
-            let back: AssistantRecord = record_from_payload("assistant", payload).unwrap();
+            let back = assistant_from_payload(payload).unwrap();
             assert_eq!(back.assistant_id, record.assistant_id);
             assert_eq!(back.name, record.name);
             assert_eq!(back.graph, record.graph);
             assert_eq!(back.config, record.config);
             assert_eq!(back.metadata, record.metadata);
             assert_eq!(back.created_at, record.created_at);
+            assert_eq!(back.active_version_id, record.active_version_id);
+            assert_eq!(back.versions, record.versions);
+        }
+
+        #[test]
+        fn assistant_payload_rejects_a_tampered_version_body() {
+            let record = AssistantRecord::new(
+                "a-1".to_string(),
+                "support-bot".to_string(),
+                "pipeline".to_string(),
+                json!({"model": "stable"}),
+                Value::Null,
+                Utc::now(),
+            );
+            let mut payload = record_to_payload(&record).unwrap();
+            payload["versions"][0]["config"]["model"] = json!("tampered");
+            let error = assistant_from_payload(payload).unwrap_err();
+            assert!(error.contains("content address"));
+        }
+
+        #[test]
+        fn assistant_catalog_quarantines_one_corrupt_payload_without_hiding_others() {
+            let valid = AssistantRecord::new(
+                "globex/healthy".to_string(),
+                "healthy".to_string(),
+                "pipeline".to_string(),
+                Value::Null,
+                Value::Null,
+                Utc::now(),
+            );
+            let mut corrupt = record_to_payload(&AssistantRecord::new(
+                "acme/corrupt".to_string(),
+                "corrupt".to_string(),
+                "pipeline".to_string(),
+                json!({"model": "stable"}),
+                Value::Null,
+                Utc::now(),
+            ))
+            .unwrap();
+            corrupt["versions"][0]["config"]["model"] = json!("tampered");
+
+            let views =
+                assistant_views_from_payloads([corrupt, record_to_payload(&valid).unwrap()]);
+            assert_eq!(views.len(), 1);
+            assert_eq!(views[0].assistant_id, "globex/healthy");
         }
 
         #[test]

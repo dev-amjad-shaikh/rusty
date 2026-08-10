@@ -53,7 +53,11 @@ use tokio::sync::Mutex;
 use crate::agents::{
     self, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim, MailboxClaimScope,
 };
-use crate::assistants::AssistantRecord;
+use crate::assistants::{
+    valid_version_id, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord,
+    AssistantVersionView, AssistantView, CreateVersionOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT,
+    ASSISTANT_VERSION_BYTES_LIMIT,
+};
 use crate::auth::TenantContext;
 use crate::capsules::{CapsuleRecord, CapsuleWrite};
 use crate::coordination;
@@ -273,6 +277,18 @@ pub(crate) fn router_with_shutdown(
         .route("/receipt_keys/journal", get(get_receipt_keys_journal))
         .route("/assistants", post(create_assistant).get(list_assistants))
         .route("/assistants/{assistant_id}", get(get_assistant))
+        .route(
+            "/assistants/{assistant_id}/versions",
+            post(create_assistant_version).get(list_assistant_versions),
+        )
+        .route(
+            "/assistants/{assistant_id}/versions/{version_id}",
+            get(get_assistant_version),
+        )
+        .route(
+            "/assistants/{assistant_id}/versions/{version_id}/activate",
+            post(activate_assistant_version),
+        )
         .route("/crons", post(create_cron).get(list_crons))
         .route("/crons/{cron_id}", delete(delete_cron))
         .route("/store/{namespace}", get(list_store_namespace))
@@ -1919,7 +1935,7 @@ async fn create_assistant(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<CreateAssistantPayload>,
-) -> Result<(StatusCode, Json<AssistantRecord>), ApiError> {
+) -> Result<(StatusCode, Json<AssistantView>), ApiError> {
     if payload.name.trim().is_empty() {
         return Err(ApiError::bad_request(
             "`name` must not be empty".to_string(),
@@ -1938,14 +1954,22 @@ async fn create_assistant(
     validate_client_id("assistant_id", &assistant_id)?;
 
     // Persist under the tenant's internal id; the wire shows the external id.
-    let record = AssistantRecord {
-        assistant_id: tenant.scope(&assistant_id),
-        name: payload.name,
-        graph: payload.graph,
-        config: payload.config.unwrap_or(Value::Null),
-        metadata: payload.metadata.unwrap_or(Value::Null),
-        created_at: Utc::now(),
-    };
+    let record = AssistantRecord::new(
+        tenant.scope(&assistant_id),
+        payload.name,
+        payload.graph,
+        payload.config.unwrap_or(Value::Null),
+        payload.metadata.unwrap_or(Value::Null),
+        Utc::now(),
+    );
+    if record.versions[0].storage_size() > ASSISTANT_VERSION_BYTES_LIMIT
+        || record.lineage_storage_size() > ASSISTANT_LINEAGE_BYTES_LIMIT
+    {
+        return Err(ApiError::unprocessable(format!(
+            "assistant configuration exceeds the {} KiB version boundary",
+            ASSISTANT_VERSION_BYTES_LIMIT / 1024
+        )));
+    }
     let created = state
         .server_store
         .create_assistant(&record)
@@ -1956,9 +1980,7 @@ async fn create_assistant(
             "assistant `{assistant_id}` already exists"
         )));
     }
-    let mut wire = record;
-    wire.assistant_id = assistant_id;
-    Ok((StatusCode::CREATED, Json(wire)))
+    Ok((StatusCode::CREATED, Json(record.view(assistant_id))))
 }
 
 async fn list_assistants(
@@ -1971,7 +1993,7 @@ async fn list_assistants(
         .await
         .map_err(internal_err)?;
     // Only this tenant's assistants, reported with their external ids.
-    let mut records: Vec<AssistantRecord> = records
+    let mut records: Vec<AssistantView> = records
         .into_iter()
         .filter_map(|mut record| {
             let external = tenant.unscope(&record.assistant_id)?.to_string();
@@ -1991,17 +2013,234 @@ async fn get_assistant(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Path(assistant_id): Path<String>,
-) -> Result<Json<AssistantRecord>, ApiError> {
+) -> Result<Json<AssistantView>, ApiError> {
     state
         .server_store
         .get_assistant(&tenant.scope(&assistant_id))
         .await
         .map_err(internal_err)?
-        .map(|mut record| {
-            record.assistant_id = assistant_id.clone();
-            Json(record)
-        })
+        .map(|record| Json(record.view(assistant_id.clone())))
         .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateAssistantVersionPayload {
+    base_version_id: String,
+    name: String,
+    graph: String,
+    #[serde(default)]
+    config: Option<Value>,
+    #[serde(default)]
+    metadata: Option<Value>,
+}
+
+async fn create_assistant_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<CreateAssistantVersionPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&payload.base_version_id) {
+        return Err(ApiError::bad_request(
+            "`base_version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    if payload.name.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "`name` must not be empty".to_string(),
+        ));
+    }
+    if !state.registry.contains(&payload.graph) {
+        return Err(ApiError::bad_request(format!(
+            "unknown graph `{}` (see GET /info for registered graphs)",
+            payload.graph
+        )));
+    }
+    let version = AssistantVersionRecord::new(
+        Some(payload.base_version_id.clone()),
+        payload.name,
+        payload.graph,
+        payload.config.unwrap_or(Value::Null),
+        payload.metadata.unwrap_or(Value::Null),
+        Utc::now(),
+    );
+    let scoped_id = tenant.scope(&assistant_id);
+    let outcome = state
+        .server_store
+        .create_assistant_version(&scoped_id, &payload.base_version_id, &version)
+        .await
+        .map_err(internal_err)?;
+    let (created, record, stored) = match outcome {
+        CreateVersionOutcome::Created { record, version } => (true, record, version),
+        CreateVersionOutcome::Existing { record, version } => (false, record, version),
+        CreateVersionOutcome::AssistantNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant `{assistant_id}` not found"
+            )))
+        }
+        CreateVersionOutcome::Stale { active_version_id } => {
+            return Err(ApiError::conflict(format!(
+                "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before creating a version"
+            )))
+        }
+        CreateVersionOutcome::LimitReached => {
+            return Err(ApiError::unprocessable(
+                "assistant version history reached its 256-version limit".to_string(),
+            ))
+        }
+        CreateVersionOutcome::SizeLimitReached => {
+            return Err(ApiError::unprocessable(format!(
+                "assistant version exceeds the {} KiB per-version or {} KiB lineage boundary",
+                ASSISTANT_VERSION_BYTES_LIMIT / 1024,
+                ASSISTANT_LINEAGE_BYTES_LIMIT / 1024
+            )))
+        }
+    };
+    let active_id = record.active_version_id();
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(json!({
+            "assistant_id": assistant_id,
+            "created": created,
+            "active_version_id": active_id,
+            "version": AssistantVersionView {
+                active: stored.version_id == active_id,
+                version: stored,
+            },
+        })),
+    ))
+}
+
+async fn list_assistant_versions(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let active_id = record.active_version_id();
+    let assistant = record.view(assistant_id.clone());
+    if record.versions.len() > crate::assistants::ASSISTANT_VERSION_LIMIT {
+        return Err(ApiError::internal(
+            "assistant version history exceeds the supported limit".to_string(),
+        ));
+    }
+    let views = record.version_summaries();
+    Ok(Json(json!({
+        "assistant_id": assistant_id,
+        "active_version_id": active_id,
+        "assistant": assistant,
+        "versions": views,
+    })))
+}
+
+async fn get_assistant_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, version_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&version_id) {
+        return Err(ApiError::bad_request(
+            "`version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let active_id = record.active_version_id();
+    let version = record.version(&version_id).ok_or_else(|| {
+        ApiError::not_found(format!(
+            "assistant version `{version_id}` not found for `{assistant_id}`"
+        ))
+    })?;
+    Ok(Json(json!({
+        "assistant_id": assistant_id,
+        "active_version_id": active_id,
+        "version": AssistantVersionView {
+            active: version.version_id == active_id,
+            version,
+        },
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivateAssistantVersionPayload {
+    expected_active_version_id: String,
+}
+
+async fn activate_assistant_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, version_id)): Path<(String, String)>,
+    Json(payload): Json<ActivateAssistantVersionPayload>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&version_id) || !valid_version_id(&payload.expected_active_version_id) {
+        return Err(ApiError::bad_request(
+            "version ids must be exact assistant version ids".to_string(),
+        ));
+    }
+    let scoped_id = tenant.scope(&assistant_id);
+    let target = state
+        .server_store
+        .get_assistant(&scoped_id)
+        .await
+        .map_err(internal_err)?
+        .and_then(|record| record.version(&version_id))
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "assistant version `{version_id}` not found for `{assistant_id}`"
+            ))
+        })?;
+    if !state.registry.contains(&target.graph) {
+        return Err(ApiError::unprocessable(format!(
+            "assistant version `{version_id}` requires graph `{}`, which is not registered on this server",
+            target.graph
+        )));
+    }
+    let outcome = state
+        .server_store
+        .activate_assistant_version(&scoped_id, &version_id, &payload.expected_active_version_id)
+        .await
+        .map_err(internal_err)?;
+    let (activated, record) = match outcome {
+        ActivateVersionOutcome::Activated { record } => (true, record),
+        ActivateVersionOutcome::AlreadyActive { record } => (false, record),
+        ActivateVersionOutcome::AssistantNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant `{assistant_id}` not found"
+            )))
+        }
+        ActivateVersionOutcome::VersionNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant version `{version_id}` not found for `{assistant_id}`"
+            )))
+        }
+        ActivateVersionOutcome::Stale { active_version_id } => {
+            return Err(ApiError::conflict(format!(
+                "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before activation"
+            )))
+        }
+    };
+    Ok(Json(json!({
+        "assistant": record.view(assistant_id),
+        "activated": activated,
+    })))
 }
 
 // --------------------------------------------------------------------- //

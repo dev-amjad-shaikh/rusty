@@ -21,11 +21,13 @@ const localData = new Map();
 let quotaFailures = 0;
 let storageWrites = 0;
 let fetchFailure = null;
+let fetchHandler = null;
 const fetchCalls = [];
 const uiElements = new Map();
 const sandbox = {
   async fetch(url, options) {
     fetchCalls.push({ url, options });
+    if (fetchHandler) return fetchHandler(url, options);
     if (fetchFailure) {
       return {
         ok: false, status: fetchFailure.status,
@@ -56,7 +58,7 @@ globalThis.__workbench = {
   agentCardHtml, agentGraphLabel, agentDefaultInput, agentBuildRunInput,
   agentRunTone, agentErrorCategory, agentNormalizeRunRecord, agentMergeRunHistory,
   agentDurationLabel, agentRunTimeLabel, agentRunHistoryHtml,
-  agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft, agentCopySourceSnapshot,
+  agentJourney, agentJourneyHtml, agentCopyableValue, agentCopyableMap, agentCopyDraft, agentVersionDraft, agentCopySourceSnapshot,
   agentSensitiveKey, agentSensitiveValueKeys, agentRedactedValue, agentCopyManifestText, agentCopyContextHtml,
   agentUtf8Length, agentClientIdError, agentValidateDraft, agentManifestScan, agentPortableManifest,
   agentIntentInspectConfig, agentIntentDraft, agentIntentBuild, agentIntentToolsText, agentIntentSelectedScopeOrder,
@@ -69,12 +71,17 @@ globalThis.__workbench = {
   agentCopyIdentityConflict, agentBuildCreatePayload,
   agentChangeFingerprint, agentChangeEqual, agentChangeExcerpt, agentChangeAdvanced,
   agentChangeIntentView, agentChangeReviewView, agentChangeReview, agentChangeReviewHtml,
+  agentVersionIdValid, agentVersionAssistant, agentVersionEnvelope, agentVersionExact,
+  agentVersionCreateReceipt, agentVersionDraftReviewable, agentVersionActivationReceipt, agentVersionManifestEvidence,
+  agentVersionDeskHtml, agentVersionContextHtml, agentInvalidateVersionsForSelection,
+  agentVersionsLoad, agentVersionReview, agentVersionActivate, agentSelectAssistant, homeNavigate,
   agentErrorHtml, agentTestResultHtml, agentRunAnnouncement, agentDetailHtml,
-  agentOpenCreate, agentCreate, store,
+  agentOpenCreate, agentOpenVersion, agentCreate, store,
 };`, sandbox, { filename: "index.html<script>" });
 
 const W = sandbox.__workbench;
 const info = { graphs: [{ name: "pipeline" }, { name: "react_agent" }] };
+const VERSION1 = `av-${"1".repeat(64)}`;
 const agent = {
   assistant_id: "research-coordinator",
   name: "Research <Coordinator>",
@@ -82,6 +89,8 @@ const agent = {
   config: { recursion_limit: 12 },
   metadata: { description: "Collect and synthesize evidence", tags: ["research", "production"] },
   created_at: "2026-08-09T12:00:00Z",
+  active_version_id: VERSION1,
+  version_count: 1,
 };
 
 let passed = 0, failed = 0;
@@ -438,6 +447,118 @@ check("graph labels: built-in behaviors are understandable",
     { assistant_id: "deep-copy", name: "Deep", graph: "pipeline", config: { extension: tooDeep } });
   check("configuration change review: over-bound structures degrade to explicit review instead of throwing",
     bounded.rows.find((row) => row.key === "advancedConfig").state === "review");
+}
+
+{
+  const v2 = `av-${"2".repeat(64)}`;
+  const assistantId = "research-coordinator";
+  const active = { ...agent, version_count: 2 };
+  const envelope = {
+    assistant_id: assistantId,
+    active_version_id: VERSION1,
+    assistant: active,
+    versions: [
+      { version_id: v2, parent_version_id: VERSION1, graph: "pipeline", created_at: "2026-08-10T01:00:00Z", active: false },
+      { version_id: VERSION1, graph: "react_agent", created_at: "2026-08-09T12:00:00Z", active: true },
+    ],
+  };
+  const loaded = W.agentVersionEnvelope(envelope, assistantId);
+  check("assistant versions: exact bounded history binds one active version and its catalog snapshot",
+    loaded && loaded.activeVersionId === VERSION1 && loaded.versions.length === 2 &&
+    loaded.assistant.version_count === 2 && loaded.versions[0].parent_version_id === VERSION1);
+  check("assistant versions: malformed identity, duplicate, active, parent, and boolean evidence fail closed",
+    W.agentVersionEnvelope({ ...envelope, active_version_id: "av-bad" }, assistantId) === null &&
+    W.agentVersionEnvelope({ ...envelope, versions: [envelope.versions[0], envelope.versions[0]] }, assistantId) === null &&
+    W.agentVersionEnvelope({ ...envelope, versions: envelope.versions.map((item) => ({ ...item, active: false })) }, assistantId) === null &&
+    W.agentVersionEnvelope({ ...envelope, versions: [{ ...envelope.versions[0], parent_version_id: `av-${"3".repeat(64)}` }, envelope.versions[1]] }, assistantId) === null &&
+    W.agentVersionEnvelope({ ...envelope, versions: [{ ...envelope.versions[0], active: "false" }, envelope.versions[1]] }, assistantId) === null);
+  check("assistant versions: IDs require the full lowercase content address",
+    W.agentVersionIdValid(VERSION1) && !W.agentVersionIdValid(`av-${"A".repeat(64)}`) &&
+    !W.agentVersionIdValid(`av-${"1".repeat(63)}`) && !W.agentVersionIdValid("v1"));
+  const versionDraft = W.agentVersionDraft(active);
+  check("assistant versions: a version draft preserves identity and name instead of becoming a copy",
+    versionDraft.assistantId === assistantId && versionDraft.name === active.name &&
+    W.agentCopyDraft(active).assistantId === "" && W.agentCopyDraft(active).name.startsWith("Copy of "));
+
+  const exactWire = W.agentParseJsonWithNumberKinds(`{
+    "assistant_id":"research-coordinator",
+    "active_version_id":"${VERSION1}",
+    "version":{
+      "version_id":"${v2}","parent_version_id":"${VERSION1}",
+      "name":"Research candidate","graph":"pipeline",
+      "config":{"recursion_limit":9007199254740992,"model":"candidate"},
+      "metadata":{"owner":"quality"},"created_at":"2026-08-10T01:00:00Z","active":false
+    }
+  }`);
+  const candidate = W.agentVersionExact(exactWire, assistantId, envelope.versions[0], VERSION1);
+  check("assistant versions: exact version reads preserve unsafe Rust integers",
+    candidate && candidate.version_id === v2 && W.agentStoredNumbersRoundTrip(candidate.config));
+  const draft = { name: candidate.name, graph: candidate.graph, config: candidate.config, metadata: candidate.metadata };
+  const createReceipt = W.agentVersionCreateReceipt({
+    assistant_id: assistantId, active_version_id: VERSION1, created: true, version: candidate,
+  }, assistantId, VERSION1, draft);
+  check("assistant versions: creation receipt binds parent, draft content, inactive state, and idempotency bit",
+    createReceipt && createReceipt.created && createReceipt.version.version_id === v2 &&
+    W.agentVersionCreateReceipt({ assistant_id: assistantId, active_version_id: VERSION1, created: true, version: { ...candidate, active: true } }, assistantId, VERSION1, draft) === null &&
+    W.agentVersionCreateReceipt({ assistant_id: assistantId, active_version_id: v2, created: true, version: candidate }, assistantId, VERSION1, draft) === null &&
+    W.agentVersionCreateReceipt({ assistant_id: assistantId, active_version_id: VERSION1, created: true, version: candidate }, assistantId, VERSION1,
+      { ...draft, metadata: { owner: "other" } }) === null);
+  const activatedAssistant = {
+    ...active, name: candidate.name, graph: candidate.graph, config: candidate.config,
+    metadata: candidate.metadata, active_version_id: v2,
+  };
+  const activation = W.agentVersionActivationReceipt({ activated: true, assistant: activatedAssistant }, assistantId, candidate, 2);
+  check("assistant versions: activation receipt binds the exact reviewed snapshot and serving pointer",
+    activation && activation.assistant.active_version_id === v2 &&
+    W.agentVersionActivationReceipt({ activated: true, assistant: { ...activatedAssistant, graph: "react_agent" } }, assistantId, candidate, 2) === null);
+  const manifests = W.agentVersionManifestEvidence(active, { assistant_id: assistantId, ...candidate });
+  const oversized = { ...candidate, config: Object.fromEntries(Array.from({ length: 2001 }, (_, index) => [`field_${index}`, index])) };
+  check("assistant versions: activation requires complete bounded current and selected manifests",
+    manifests.ready && manifests.html.includes("Review complete current manifest") &&
+    manifests.html.includes("Review complete selected manifest") && manifests.html.includes('&quot;owner&quot;: &quot;quality&quot;') &&
+    !W.agentVersionManifestEvidence(active, { assistant_id: assistantId, ...oversized }).ready);
+  const whitespaceIdentity = W.agentVersionManifestEvidence(
+    { ...active, name: "  Stored exactly  ", graph: "pipeline " },
+    { assistant_id: assistantId, ...candidate, name: "  Candidate exactly  ", graph: "canary " },
+  );
+  check("assistant versions: activation evidence preserves stored identity bytes without portable-manifest trimming",
+    whitespaceIdentity.ready && whitespaceIdentity.html.includes("  Stored exactly  ") &&
+    whitespaceIdentity.html.includes("pipeline ") && whitespaceIdentity.html.includes("  Candidate exactly  "));
+  check("assistant versions: an over-bound draft is blocked before a mutation it cannot receipt-check",
+    W.agentVersionDraftReviewable(draft) &&
+    !W.agentVersionDraftReviewable({ ...draft, config: oversized.config }));
+  W.store.agentVersions = { assistantId, activeVersionId: VERSION1, loading: true, reviewing: v2, submitting: true };
+  const generation = W.store.agentVersionRequest;
+  check("assistant versions: selecting another assistant invalidates every stale busy operation",
+    W.agentInvalidateVersionsForSelection("another-assistant") && W.store.agentVersions === null &&
+    W.store.agentVersionRequest === generation + 1 && !W.agentInvalidateVersionsForSelection("another-assistant"));
+
+  W.store.info = info;
+  const desk = W.agentVersionDeskHtml(active, {
+    ...loaded, loading: false, error: null, reviewing: "", submitting: false, pendingActivation: candidate,
+  });
+  check("assistant versions: lineage rail exposes full IDs, one active marker, and deliberate activation review",
+    desk.includes(VERSION1) && desk.includes(v2) && desk.includes("Active") &&
+    desk.includes("Review activation") && desk.includes("Make this version active") &&
+    desk.includes("Current serving → selected version") && desk.includes('aria-describedby="agent-version-row-0"'));
+  W.store.info = { graphs: [{ name: "react_agent" }] };
+  const unavailableDesk = W.agentVersionDeskHtml(active, {
+    ...loaded, loading: false, error: null, reviewing: "", submitting: false, pendingActivation: candidate,
+  });
+  check("assistant versions: activation is disabled when the historical behavior is no longer registered",
+    unavailableDesk.includes("not registered on this server") &&
+    unavailableDesk.includes('data-agent-version-activate=') && unavailableDesk.includes(" disabled"));
+  W.store.info = info;
+  const hostileDesk = W.agentVersionDeskHtml(active, {
+    ...loaded, versions: [{ ...loaded.versions[0], graph: '<img src=x onerror="alert(1)">' }, loaded.versions[1]],
+    loading: false, error: null, reviewing: "", submitting: false, pendingActivation: null,
+  });
+  check("assistant versions: hostile lineage labels are escaped",
+    hostileDesk.includes("&lt;img") && !hostileDesk.includes("<img src=x"));
+  const versionContext = W.agentVersionContextHtml(active);
+  check("assistant versions: draft copy explains the non-serving boundary",
+    versionContext.includes("immutable draft") && versionContext.includes("Unchanged until activation") &&
+    versionContext.includes(VERSION1));
 }
 
 {
@@ -917,6 +1038,9 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     detail.includes('data-agent-open-run="019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d"'));
   check("detail offers a source-safe copy action",
     detail.includes('data-agent-copy="research-coordinator"') && detail.includes(">Copy agent</button>"));
+  check("detail exposes immutable version identity and lifecycle entry points",
+    detail.includes(VERSION1) && detail.includes('data-agent-versions="research-coordinator"') &&
+    detail.includes('data-agent-version-create="research-coordinator"') && detail.includes(">Version history</button>"));
   check("detail makes configuration portable and explains its runtime contract",
     detail.includes('data-agent-export="research-coordinator"') && detail.includes(">Export manifest</button>") &&
     detail.includes('aria-labelledby="agent-config-summary-heading"') &&
@@ -992,11 +1116,85 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes(".agent-change-row { grid-template-columns: 1fr; gap: 5px; }") &&
     html.includes(".agent-change-values { grid-template-columns: 1fr; }") &&
     html.includes(".agent-review-stack { position: static; }"));
+  check("assistant version rail is labelled, responsive, and announced outside rerendered detail",
+    html.includes('id="agent-version-announcer" role="status" aria-live="polite" aria-atomic="true"') &&
+    html.includes('id="agent-version-title" tabindex="-1"') &&
+    html.includes(".agent-version-head { flex-direction: column; }") &&
+    html.includes(".agent-version-item { grid-template-columns: 1fr; }") &&
+    html.includes('data-agent-version-activate="'));
   check("configuration workshop carries responsive and reduced-motion quality hooks",
     html.includes(".agent-workshop { grid-template-columns: 1fr;") &&
     html.includes('@media (prefers-reduced-motion: reduce)'));
   check("copy outcomes are announced through an atomic live region",
     html.includes('id="toast" role="status" aria-live="polite" aria-atomic="true"'));
+}
+
+{
+  vm.runInContext(`
+    globalThis.__versionToasts = [];
+    agentsRender = () => {};
+    openAgents = () => {};
+    toast = (message, tone) => globalThis.__versionToasts.push({ message, tone });
+  `, sandbox);
+  uiElements.clear();
+  uiElements.set("agent-version-title", { focus() {} });
+  uiElements.set("agent-version-announcer", { textContent: "" });
+  const assistantId = "async-a";
+  const otherId = "async-b";
+  const v1 = `av-${"a".repeat(64)}`;
+  const v2 = `av-${"b".repeat(64)}`;
+  const current = {
+    assistant_id: assistantId, name: "Async A", graph: "pipeline", config: { model: "stable" },
+    metadata: null, created_at: "2026-08-10T00:00:00Z", active_version_id: v1, version_count: 2,
+  };
+  const other = { ...current, assistant_id: otherId, name: "Async B", active_version_id: `av-${"c".repeat(64)}`, version_count: 1 };
+  const summary = { version_id: v2, parent_version_id: v1, graph: "pipeline", created_at: "2026-08-10T01:00:00Z", active: false };
+  const candidate = { ...summary, name: "Async A next", config: { model: "next" }, metadata: null };
+  const baseState = () => ({
+    assistantId, activeVersionId: v1, assistant: current,
+    versions: [summary, { version_id: v1, parent_version_id: null, graph: "pipeline", created_at: current.created_at, active: true }],
+    loading: false, error: null, reviewing: "", pendingActivation: null, submitting: false,
+  });
+  W.store.conn = { baseUrl: "/api", apiKey: "tenant-a" };
+  W.store.connectionEpoch = 7;
+  W.store.info = info;
+  W.store.agents = { list: [current, other], selected: assistantId, error: null };
+  W.store.agentVersions = baseState();
+  fetchFailure = null;
+  let release;
+  fetchHandler = () => new Promise((resolve) => { release = resolve; });
+  const pendingReview = W.agentVersionReview(assistantId, v2);
+  await Promise.resolve();
+  W.homeNavigate("agent-run", "", otherId);
+  release({
+    ok: true, status: 200,
+    async text() { return JSON.stringify({ assistant_id: assistantId, active_version_id: v1, version: candidate }); },
+  });
+  await pendingReview;
+  check("assistant versions: deferred exact review cannot return into another selected agent",
+    W.store.agents.selected === otherId && W.store.agentVersions === null &&
+    sandbox.__versionToasts.length === 0 && uiElements.get("agent-version-announcer").textContent === "");
+
+  W.store.agents.selected = assistantId;
+  W.store.agentVersions = { ...baseState(), pendingActivation: candidate };
+  release = null;
+  const pendingActivation = W.agentVersionActivate(assistantId, v2);
+  await Promise.resolve();
+  W.homeNavigate("agent-run", "", otherId);
+  release({
+    ok: true, status: 200,
+    async text() {
+      return JSON.stringify({
+        activated: true,
+        assistant: { ...current, name: candidate.name, config: candidate.config, active_version_id: v2 },
+      });
+    },
+  });
+  await pendingActivation;
+  check("assistant versions: deferred activation cannot mutate catalog or announce after selected-agent ownership changes",
+    W.store.agents.selected === otherId && W.store.agents.list[0].active_version_id === v1 &&
+    W.store.agentVersions === null && sandbox.__versionToasts.length === 0);
+  fetchHandler = null;
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

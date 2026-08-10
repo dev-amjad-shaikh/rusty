@@ -53,7 +53,20 @@ studio/
   is a separate assistant—not an active version—and that the source and its evidence remain unchanged. A
   versioned `rusty.assistant/v1` JSON manifest can be imported, reviewed, edited explicitly, and exported;
   imports reject unknown top-level fields rather than silently losing them, and secret-looking values
-  stay hidden in the evidence preview. A bounded, connection-scoped browser ledger preserves only safe
+  stay hidden in the evidence preview. Each assistant now has a bounded server-side lineage of immutable,
+  content-addressed configuration versions. **Create version** starts from the exact active snapshot and
+  saves a non-serving draft only after the existing configuration review. **Version history** shows the
+  active pointer and lineage; selecting an older or staged version loads both complete stored manifests into
+  a separate activation review (collapsed by default because advanced configuration can contain credentials).
+  Lineage is capped at 256 versions, 64 KiB per version, and 1 MiB total; records whose content addresses,
+  parent topology, active pointer, or storage bounds fail validation are not served. Activation and rollback
+  are the same guarded pointer operation: the request
+  names the active version the operator reviewed, so a concurrent change returns a conflict and forces a
+  fresh review instead of overwriting it. A historical version whose graph is no longer registered cannot be
+  activated. Pre-version assistants from older releases remain readable when their original body exceeds the
+  new size boundary, but cannot add a lineage until migrated to a bounded configuration. New runs use the
+  active snapshot; historical and in-flight runs are not rewritten. A bounded,
+  connection-scoped browser ledger preserves only safe
   run metadata (identity, status, timing, and stable error category); prompts and result payloads are
   deliberately not stored.
 - **Team observatory** — an Agent Fabric workspace that explains the boundary between a

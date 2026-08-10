@@ -45,6 +45,10 @@
 //! | `GET /runs/{run_id}` | run status polling (plus `output`/`error`/`interrupt` once terminal) |
 //! | `POST /assistants` | create a named graph alias with config metadata |
 //! | `GET /assistants` / `GET /assistants/{id}` | list / fetch assistants |
+//! | `GET /assistants/{id}/versions` | list the bounded immutable configuration lineage and active serving pointer |
+//! | `POST /assistants/{id}/versions` | stage an immutable child version against the exact active base (never activates it) |
+//! | `GET /assistants/{id}/versions/{version_id}` | fetch one exact immutable configuration version for review |
+//! | `POST /assistants/{id}/versions/{version_id}/activate` | atomically activate or roll back to a reviewed version using an expected-active guard |
 //! | `POST /crons` | schedule recurring runs (interval secs or 5-field cron expr) |
 //! | `GET /crons` / `DELETE /crons/{id}` | list / delete crons |
 //! | `POST /triggers` | create an event-driven trigger: name, target (assistant or thread), action (`start_run` / `resume_thread` / `send_message`), `{{event.*}}` input template, per-trigger webhook secret, optional debounce window |
