@@ -1169,6 +1169,9 @@
   .agent-intent-card label:first-of-type { margin-top: 0; }
   .agent-intent-card textarea { min-height: 76px; }
   .agent-intent-card .field-help { line-height: 1.4; }
+  .agent-intent-budget { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .agent-intent-budget label { min-width: 0; }
+  .agent-intent-budget input { min-width: 0; }
   .agent-intent-scopes { display: flex; gap: 5px 9px; flex-wrap: wrap; margin: 9px 0 0; padding: 8px; border: 1px solid var(--border); border-radius: 5px; }
   .agent-intent-scopes legend { padding: 0 4px; color: var(--text-dim); font-size: 10.5px; }
   .agent-intent-scopes label { flex-direction: row; gap: 4px; align-items: center; margin: 0; font-size: 10.5px; }
@@ -2155,6 +2158,7 @@
     .agent-intent-shell { grid-column: auto; padding-top: 0; }
     .agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }
     .agent-intent-grid { grid-template-columns: 1fr; }
+    .agent-intent-budget { grid-template-columns: 1fr; }
     .agent-intent-truth { flex-direction: column; }
     .agent-review-stack { position: static; }
     .agent-change-row { grid-template-columns: 1fr; gap: 5px; }
@@ -2561,8 +2565,22 @@
                     <div class="agent-intent-head"><b id="agent-intent-guard-title">Guardrail</b><span class="agent-intent-state">portable intent</span></div>
                     <label>Required approval boundary <select id="sel-agent-approval" aria-describedby="agent-approval-help agent-intent-truth agent-intent-lock"><option value="runtime_policy">Use runtime policy</option><option value="irreversible">Before irreversible effects</option><option value="external_effect">Before every external effect</option></select><span class="field-help" id="agent-approval-help">A declared requirement, not a browser-side permission grant.</span></label>
                   </section>
+                  <section class="agent-intent-card" aria-labelledby="agent-intent-output-title">
+                    <div class="agent-intent-head"><b id="agent-intent-output-title">Output contract</b><span class="agent-intent-state">portable intent</span></div>
+                    <label>Required output <select id="sel-agent-output-mode" aria-describedby="agent-output-help agent-intent-truth agent-intent-lock"><option value="runtime_default">Use runtime default</option><option value="text">Text</option><option value="json_object">JSON object</option><option value="json_schema">Named JSON schema</option></select><span class="field-help" id="agent-output-help">Choose the shape consumers should receive. A named schema requires an identifier below.</span></label>
+                    <label>Schema binding <input id="inp-agent-output-schema" type="text" maxlength="256" spellcheck="false" placeholder="registry/schema-v1" aria-describedby="agent-output-schema-help agent-intent-truth agent-intent-lock"><span class="field-help" id="agent-output-schema-help">A portable identifier or registry reference—not inline schema JSON, a URL, or a credential.</span></label>
+                  </section>
+                  <section class="agent-intent-card" aria-labelledby="agent-intent-budget-title">
+                    <div class="agent-intent-head"><b id="agent-intent-budget-title">Run budget</b><span class="agent-intent-state">portable intent</span></div>
+                    <div class="agent-intent-budget">
+                      <label>Model tokens <input id="inp-agent-budget-tokens" type="text" inputmode="numeric" maxlength="20" placeholder="Runtime default" aria-describedby="agent-budget-help agent-intent-truth agent-intent-lock"></label>
+                      <label>Cost · USD <input id="inp-agent-budget-cost" type="text" inputmode="decimal" maxlength="16" placeholder="Runtime default" aria-describedby="agent-budget-help agent-intent-truth agent-intent-lock"></label>
+                      <label>Wall time · ms <input id="inp-agent-budget-latency" type="text" inputmode="numeric" maxlength="20" placeholder="Runtime default" aria-describedby="agent-budget-help agent-intent-truth agent-intent-lock"></label>
+                    </div>
+                    <span class="field-help" id="agent-budget-help">Exact decimal strings avoid browser rounding. Blank keeps each runtime default; zero is an explicit zero budget.</span>
+                  </section>
                 </div>
-                <div class="agent-intent-truth" id="agent-intent-truth"><b>Execution boundary</b><span>The server stores this versioned intent exactly. Today it does not bind model, tool, memory, or approval providers from these fields; the selected graph remains authoritative.</span></div>
+                <div class="agent-intent-truth" id="agent-intent-truth"><b>Execution boundary</b><span>The server stores this versioned intent exactly. Today it does not bind or enforce model, tool, memory, approval, output, or budget providers from these fields; the selected graph remains authoritative.</span></div>
                 <div class="agent-intent-lock" id="agent-intent-lock" role="note" hidden></div>
               </div>
 
@@ -3187,12 +3205,14 @@ const AGENT_MANIFEST_NODE_LIMIT = 2000;
 const AGENT_CHANGE_EXCERPT_LIMIT = 180;
 const AGENT_VERSION_LIMIT = 256;
 const AGENT_VERSION_RESPONSE_LIMIT = 8 * 1024 * 1024;
-const AGENT_INTENT_FORMAT = "rusty.agent-intent/v1";
+const AGENT_INTENT_FORMAT = "rusty.agent-intent/v2";
+const AGENT_INTENT_LEGACY_FORMAT = "rusty.agent-intent/v1";
 const AGENT_INTENT_TOOL_LIMIT = 16;
 const AGENT_INTENT_EFFECTS = new Set(["pure", "read_only", "idempotent", "compensatable", "non_idempotent"]);
 const AGENT_INTENT_SCOPES = new Set(["run", "agent", "team", "user", "tenant"]);
 const AGENT_INTENT_MEMORY_MODES = new Set(["none", "read_only", "read_write"]);
 const AGENT_INTENT_APPROVALS = new Set(["runtime_policy", "irreversible", "external_effect"]);
+const AGENT_INTENT_OUTPUT_MODES = new Set(["runtime_default", "text", "json_object", "json_schema"]);
 const AGENT_NUMBER_TOKENS = Symbol("rusty.json.number_tokens");
 const LEARN_SNAPSHOT_LIMIT = 200;
 const LEARN_RENDER_LIMIT = 100;
@@ -5244,9 +5264,11 @@ function connectionResetWorkspace() {
   $("btn-rec-replay").disabled = false;
   $("btn-rec-compare").disabled = false;
   $("sel-agent-graph").innerHTML = "";
-  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-model", "inp-agent-tools", "inp-agent-manifest"]) $(id).value = "";
+  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-model", "inp-agent-tools",
+    "inp-agent-output-schema", "inp-agent-budget-tokens", "inp-agent-budget-cost", "inp-agent-budget-latency", "inp-agent-manifest"]) $(id).value = "";
   $("sel-agent-memory-mode").value = "none";
   $("sel-agent-approval").value = "runtime_policy";
+  $("sel-agent-output-mode").value = "runtime_default";
   for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) input.checked = false;
 }
 
@@ -11527,7 +11549,8 @@ function agentValidateDraft(fields, graphNames) {
   }
   const intent = agentIntentBuild(source);
   for (const [key, message] of Object.entries(intent.errors)) errors[key] = message;
-  const order = ["name", "graph", "assistantId", "recursionLimit", "model", "tools", "memoryMode", "approval"];
+  const order = ["name", "graph", "assistantId", "recursionLimit", "model", "tools", "memoryMode", "approval",
+    "outputMode", "outputSchema", "budgetTokens", "budgetCost", "budgetLatency"];
   const first = order.find((key) => errors[key]) || "";
   return { valid: !first, errors, first, intent };
 }
@@ -11766,11 +11789,11 @@ function agentConfigurationEvidenceHtml(source, graphNames, titleId) {
   const descriptionDetail = evidence.description
     ? evidence.description : evidence.tags.length ? `Cataloged as ${evidence.tags.join(", ")}` : "Responsibility and tags help people find it; they are not runtime instructions.";
   const intentValue = evidence.intent.valid && evidence.intent.present
-    ? `${evidence.intent.intent.model || "Model unbound"} · ${evidence.intent.intent.tools.length} tool${evidence.intent.intent.tools.length === 1 ? "" : "s"}`
+    ? `${evidence.intent.intent.model || "Model unbound"} · ${evidence.intent.intent.tools.length} tool${evidence.intent.intent.tools.length === 1 ? "" : "s"} · ${evidence.intent.intent.output.mode.replaceAll("_", " ")} output`
     : evidence.intent.present ? "Intent preserved, builder locked" : "No runtime intent declared";
   const intentDetail = evidence.intent.valid && evidence.intent.present
-    ? `${evidence.intent.intent.memory.access.replaceAll("_", " ")} memory · ${evidence.intent.intent.approval.replaceAll("_", " ")} approval. Portable requirement only; the graph remains authoritative.`
-    : evidence.intent.error || "Add model, tools, memory, or an approval boundary to carry a versioned requirement with this assistant.";
+    ? `${evidence.intent.intent.memory.access.replaceAll("_", " ")} memory · ${evidence.intent.intent.approval.replaceAll("_", " ")} approval · ${Object.values(evidence.intent.intent.budget).filter(Boolean).length} budget cap${Object.values(evidence.intent.intent.budget).filter(Boolean).length === 1 ? "" : "s"}. Portable requirement only; the graph remains authoritative.`
+    : evidence.intent.error || "Add model, tools, memory, approval, output, or budget requirements to carry a versioned intent with this assistant.";
   const preservedLabel = `${evidence.preservedFields} advanced field${evidence.preservedFields === 1 ? "" : "s"}`;
   const shapeWarning = evidence.portableError
     ? evidence.portableError
@@ -11862,7 +11885,9 @@ function agentMetadataFieldEditable(metadata, key) {
 }
 
 function agentIntentEmptyDraft() {
-  return { model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy", intentLocked: false, intentError: "" };
+  return { model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy",
+    outputMode: "runtime_default", outputSchema: "", budgetTokens: "", budgetCost: "", budgetLatency: "",
+    intentLocked: false, intentError: "" };
 }
 
 function agentIntentControlFree(value) {
@@ -11882,6 +11907,45 @@ function agentIntentModelError(value) {
   return "";
 }
 
+function agentIntentOutputSchemaError(value, mode) {
+  if (typeof value !== "string") return "Output schema binding must be a string.";
+  if (!value) return mode === "json_schema" ? "Enter the named JSON schema binding." : "";
+  if (mode !== "json_schema") return "Choose Named JSON schema before declaring a schema binding.";
+  if (!agentIntentControlFree(value) || value !== value.trim() || agentUtf8Length(value) > 256 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._/@:-]*$/.test(value) || value.includes("://") || /[^/]+:[^/]+@/.test(value) ||
+      /^sk-[A-Za-z0-9_-]{16,}$/i.test(value)) {
+    return "Use a 256-byte schema identifier or registry reference, not a URL, credential, hidden text, or surrounding whitespace.";
+  }
+  return "";
+}
+
+function agentIntentUnsignedBudgetError(value, label) {
+  if (typeof value !== "string") return `${label} must be an exact decimal string.`;
+  if (!value) return "";
+  if (!/^(?:0|[1-9][0-9]{0,19})$/.test(value)) return `${label} must be a canonical unsigned decimal with no separators or leading zeroes.`;
+  try {
+    if (BigInt(value) > 18446744073709551615n) return `${label} exceeds the portable unsigned 64-bit limit.`;
+  } catch { return `${label} must be a canonical unsigned decimal.`; }
+  return "";
+}
+
+function agentIntentCostBudgetError(value) {
+  if (typeof value !== "string") return "Cost budget must be an exact decimal string.";
+  if (!value) return "";
+  if (!/^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,6})?$/.test(value)) {
+    return "Cost budget must be canonical USD with at most 9 whole digits and 6 fractional digits.";
+  }
+  return "";
+}
+
+function agentIntentDefaultOutput() {
+  return { mode: "runtime_default", schema: "" };
+}
+
+function agentIntentDefaultBudget() {
+  return { max_tokens: "", max_cost_usd: "", max_latency_ms: "" };
+}
+
 function agentIntentInspectConfig(config) {
   if (!agentPlainObject(config) || !Object.prototype.hasOwnProperty.call(config, "studio_intent")) {
     return { present: false, valid: agentPlainObject(config) || config == null, intent: null,
@@ -11890,9 +11954,12 @@ function agentIntentInspectConfig(config) {
   const value = config.studio_intent;
   const fail = (message) => ({ present: true, valid: false, intent: null, error: message });
   if (!agentPlainObject(value)) return fail("Stored studio_intent is not an object.");
-  const allowed = new Set(["format", "model", "tools", "memory", "approval"]);
+  const legacy = value.format === AGENT_INTENT_LEGACY_FORMAT;
+  const allowed = new Set(legacy
+    ? ["format", "model", "tools", "memory", "approval"]
+    : ["format", "model", "tools", "memory", "approval", "output", "budget"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return fail("Stored studio_intent has fields this builder does not understand.");
-  if (value.format !== AGENT_INTENT_FORMAT) return fail(`Stored studio_intent is not ${AGENT_INTENT_FORMAT}.`);
+  if (value.format !== AGENT_INTENT_FORMAT && !legacy) return fail(`Stored studio_intent is not ${AGENT_INTENT_FORMAT}.`);
   const modelError = agentIntentModelError(value.model);
   if (modelError) return fail(modelError);
   if (!Array.isArray(value.tools) || value.tools.length > AGENT_INTENT_TOOL_LIMIT) return fail("Stored tool contracts are outside the builder contract.");
@@ -11914,10 +11981,30 @@ function agentIntentInspectConfig(config) {
     return fail("Stored memory intent is outside the builder contract.");
   }
   if (!AGENT_INTENT_APPROVALS.has(value.approval)) return fail("Stored approval intent is outside the builder contract.");
-  if (!value.model && !value.tools.length && value.memory.access === "none" && !value.memory.scopes.length && value.approval === "runtime_policy") {
+  const output = legacy ? agentIntentDefaultOutput() : value.output;
+  if (!agentPlainObject(output) || Object.keys(output).some((key) => !["mode", "schema"].includes(key)) ||
+      !AGENT_INTENT_OUTPUT_MODES.has(output.mode) || agentIntentOutputSchemaError(output.schema, output.mode)) {
+    return fail("Stored output intent is outside the builder contract.");
+  }
+  const budget = legacy ? agentIntentDefaultBudget() : value.budget;
+  if (!agentPlainObject(budget) || Object.keys(budget).length !== 3 ||
+      !Object.prototype.hasOwnProperty.call(budget, "max_tokens") ||
+      !Object.prototype.hasOwnProperty.call(budget, "max_cost_usd") ||
+      !Object.prototype.hasOwnProperty.call(budget, "max_latency_ms") ||
+      agentIntentUnsignedBudgetError(budget.max_tokens, "Model-token budget") ||
+      agentIntentCostBudgetError(budget.max_cost_usd) ||
+      agentIntentUnsignedBudgetError(budget.max_latency_ms, "Wall-time budget")) {
+    return fail("Stored run-budget intent is outside the builder contract.");
+  }
+  if (!value.model && !value.tools.length && value.memory.access === "none" && !value.memory.scopes.length &&
+      value.approval === "runtime_policy" && output.mode === "runtime_default" && !output.schema &&
+      !budget.max_tokens && !budget.max_cost_usd && !budget.max_latency_ms) {
     return fail("Stored studio_intent does not declare a requirement.");
   }
-  return { present: true, valid: true, intent: value, error: "" };
+  return { present: true, valid: true, intent: { ...value, format: AGENT_INTENT_FORMAT,
+    output: { mode: output.mode, schema: output.schema },
+    budget: { max_tokens: budget.max_tokens, max_cost_usd: budget.max_cost_usd, max_latency_ms: budget.max_latency_ms } },
+    legacy, error: "" };
 }
 
 function agentIntentToolsText(tools) {
@@ -11943,6 +12030,11 @@ function agentIntentDraft(config) {
     memoryMode: inspected.intent.memory.access,
     scopes: inspected.intent.memory.scopes.slice(),
     approval: inspected.intent.approval,
+    outputMode: inspected.intent.output.mode,
+    outputSchema: inspected.intent.output.schema,
+    budgetTokens: inspected.intent.budget.max_tokens,
+    budgetCost: inspected.intent.budget.max_cost_usd,
+    budgetLatency: inspected.intent.budget.max_latency_ms,
     intentLocked: false,
     intentError: "",
   };
@@ -11956,6 +12048,11 @@ function agentIntentBuild(fields) {
   const memoryMode = String(source.memoryMode || "none");
   const scopes = Array.isArray(source.scopes) ? source.scopes.map(String) : [];
   const approval = String(source.approval || "runtime_policy");
+  const outputMode = String(source.outputMode || "runtime_default");
+  const outputSchema = String(source.outputSchema || "");
+  const budgetTokens = String(source.budgetTokens || "");
+  const budgetCost = String(source.budgetCost || "");
+  const budgetLatency = String(source.budgetLatency || "");
   const errors = Object.create(null);
   const modelError = agentIntentModelError(model);
   if (modelError) errors.model = modelError;
@@ -11978,15 +12075,27 @@ function agentIntentBuild(fields) {
   if (memoryMode === "none" && scopes.length) errors.memoryMode = "Choose read access before declaring memory scopes.";
   if (memoryMode !== "none" && !scopes.length) errors.memoryMode = "Choose at least one allowed memory scope.";
   if (!AGENT_INTENT_APPROVALS.has(approval)) errors.approval = "Choose a supported approval boundary.";
-  const order = ["model", "tools", "memoryMode", "approval"];
+  if (!AGENT_INTENT_OUTPUT_MODES.has(outputMode)) errors.outputMode = "Choose a supported output requirement.";
+  const outputError = agentIntentOutputSchemaError(outputSchema, outputMode);
+  if (outputError) errors.outputSchema = outputError;
+  const tokenError = agentIntentUnsignedBudgetError(budgetTokens, "Model-token budget");
+  const costError = agentIntentCostBudgetError(budgetCost);
+  const latencyError = agentIntentUnsignedBudgetError(budgetLatency, "Wall-time budget");
+  if (tokenError) errors.budgetTokens = tokenError;
+  if (costError) errors.budgetCost = costError;
+  if (latencyError) errors.budgetLatency = latencyError;
+  const order = ["model", "tools", "memoryMode", "approval", "outputMode", "outputSchema", "budgetTokens", "budgetCost", "budgetLatency"];
   const first = order.find((key) => errors[key]) || "";
-  const empty = !model && !tools.length && memoryMode === "none" && !scopes.length && approval === "runtime_policy";
+  const empty = !model && !tools.length && memoryMode === "none" && !scopes.length && approval === "runtime_policy" &&
+    outputMode === "runtime_default" && !outputSchema && !budgetTokens && !budgetCost && !budgetLatency;
   const intent = first || empty ? null : {
     format: AGENT_INTENT_FORMAT,
     model,
     tools,
     memory: { access: memoryMode, scopes: scopes.slice() },
     approval,
+    output: { mode: outputMode, schema: outputSchema },
+    budget: { max_tokens: budgetTokens, max_cost_usd: budgetCost, max_latency_ms: budgetLatency },
   };
   return { valid: !first, empty, intent, errors, first };
 }
@@ -12265,12 +12374,14 @@ function agentChangeIntentView(config) {
       tools: { raw: null, display: "Not declared" },
       memory: { raw: null, display: "Not declared" },
       approval: { raw: null, display: "Runtime policy" },
+      output: { raw: null, display: "Runtime default" },
+      budget: { raw: null, display: "Runtime defaults" },
     };
   }
   if (!inspected.valid) {
     const raw = agentPlainObject(config) ? config.studio_intent : config;
     const opaque = { raw, display: "Opaque intent · exact manifest" };
-    return { model: opaque, tools: opaque, memory: opaque, approval: opaque };
+    return { model: opaque, tools: opaque, memory: opaque, approval: opaque, output: opaque, budget: opaque };
   }
   const intent = inspected.intent;
   const toolNames = intent.tools.map((tool) => `${tool.name} (${tool.effect.replaceAll("_", " ")})`);
@@ -12281,11 +12392,28 @@ function agentChangeIntentView(config) {
     irreversible: "Before irreversible effects",
     external_effect: "Before every external effect",
   };
+  const outputLabels = {
+    runtime_default: "Runtime default",
+    text: "Text",
+    json_object: "JSON object",
+    json_schema: "Named JSON schema",
+  };
+  const budgetParts = [];
+  if (intent.budget.max_tokens) budgetParts.push(`${intent.budget.max_tokens} model tokens`);
+  if (intent.budget.max_cost_usd) budgetParts.push(`$${intent.budget.max_cost_usd}`);
+  if (intent.budget.max_latency_ms) budgetParts.push(`${intent.budget.max_latency_ms} ms`);
+  const intentFormat = inspected.legacy ? AGENT_INTENT_LEGACY_FORMAT : AGENT_INTENT_FORMAT;
+  const formatLabel = inspected.legacy ? "implicit v1" : "explicit v2";
+  const outputDisplay = intent.output.mode === "json_schema"
+    ? `${outputLabels[intent.output.mode]} · ${intent.output.schema}` : outputLabels[intent.output.mode] || intent.output.mode;
   return {
     model: { raw: intent.model, display: intent.model || "Unbound" },
     tools: { raw: intent.tools, display: toolNames.length ? toolNames.join(" · ") : "None" },
     memory: { raw: intent.memory, display: memory },
     approval: { raw: intent.approval, display: approvalLabels[intent.approval] || intent.approval },
+    output: { raw: { format: intentFormat, value: intent.output }, display: `${outputDisplay} · ${formatLabel}` },
+    budget: { raw: { format: intentFormat, value: intent.budget },
+      display: `${budgetParts.length ? budgetParts.join(" · ") : "Runtime defaults"} · ${formatLabel}` },
   };
 }
 
@@ -12319,6 +12447,8 @@ function agentChangeReviewView(record, draft) {
     tools: intent.tools,
     memory: intent.memory,
     approval: intent.approval,
+    output: intent.output,
+    budget: intent.budget,
     description: hasDescription
       ? { raw: metadataMap.description, display: typeof metadataMap.description === "string" ? metadataMap.description || "Empty" : "Opaque stored value" }
       : { raw: null, display: "None" },
@@ -12337,6 +12467,7 @@ function agentChangeReview(source, draft) {
   const fields = [
     ["name", "Name"], ["assistantId", "Agent ID"], ["graph", "Behavior"], ["recursionLimit", "Step limit"],
     ["model", "Model"], ["tools", "Tools"], ["memory", "Memory"], ["approval", "Approval"],
+    ["output", "Output"], ["budget", "Run budget"],
     ["description", "Responsibility"], ["tags", "Tags"], ["advancedConfig", "Other config"],
     ["advancedMetadata", "Other metadata"],
   ];
@@ -13257,6 +13388,11 @@ function agentFormFields() {
     memoryMode: $("sel-agent-memory-mode").value,
     scopes,
     approval: $("sel-agent-approval").value,
+    outputMode: $("sel-agent-output-mode").value,
+    outputSchema: $("inp-agent-output-schema").value,
+    budgetTokens: $("inp-agent-budget-tokens").value,
+    budgetCost: $("inp-agent-budget-cost").value,
+    budgetLatency: $("inp-agent-budget-latency").value,
     intentLocked: $("inp-agent-model").disabled,
   };
 }
@@ -13273,6 +13409,11 @@ function agentPopulateDraft(draft) {
   $("inp-agent-tools").value = value.tools || "";
   $("sel-agent-memory-mode").value = value.memoryMode || "none";
   $("sel-agent-approval").value = value.approval || "runtime_policy";
+  $("sel-agent-output-mode").value = value.outputMode || "runtime_default";
+  $("inp-agent-output-schema").value = value.outputSchema || "";
+  $("inp-agent-budget-tokens").value = value.budgetTokens || "";
+  $("inp-agent-budget-cost").value = value.budgetCost || "";
+  $("inp-agent-budget-latency").value = value.budgetLatency || "";
   const scopes = new Set(Array.isArray(value.scopes) ? value.scopes : []);
   store.agentIntentScopeOrder = Array.isArray(value.scopes) ? value.scopes.slice() : [];
   for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) {
@@ -13281,7 +13422,8 @@ function agentPopulateDraft(draft) {
 }
 
 function agentSetShortcutLocks(source) {
-  const intentIds = ["inp-agent-model", "inp-agent-tools", "sel-agent-memory-mode", "sel-agent-approval"];
+  const intentIds = ["inp-agent-model", "inp-agent-tools", "sel-agent-memory-mode", "sel-agent-approval", "sel-agent-output-mode",
+    "inp-agent-output-schema", "inp-agent-budget-tokens", "inp-agent-budget-cost", "inp-agent-budget-latency"];
   const lockNote = $("agent-intent-lock");
   lockNote.textContent = "";
   lockNote.hidden = true;
@@ -13334,9 +13476,11 @@ function agentSetShortcutLocks(source) {
   }
 }
 
-function agentApplyDraftValidation(validation, announce) {
+function agentApplyDraftValidation(validation, announce, focusError) {
   const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit",
-    model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval" };
+    model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval",
+    outputMode: "sel-agent-output-mode", outputSchema: "inp-agent-output-schema", budgetTokens: "inp-agent-budget-tokens",
+    budgetCost: "inp-agent-budget-cost", budgetLatency: "inp-agent-budget-latency" };
   for (const [key, id] of Object.entries(fields)) {
     const field = $(id);
     const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
@@ -13353,7 +13497,7 @@ function agentApplyDraftValidation(validation, announce) {
   }
   const message = validation && validation.first ? validation.errors[validation.first] : "";
   $("agent-form-error").textContent = announce ? message : "";
-  if (announce && message) {
+  if (announce && focusError !== false && message) {
     const id = fields[validation.first];
     if (id) {
       const field = $(id);
@@ -13368,34 +13512,22 @@ function agentApplyDraftValidation(validation, announce) {
 function agentRevalidateEditedField(target) {
   const fieldKeys = { "inp-agent-name": "name", "sel-agent-graph": "graph", "inp-agent-id": "assistantId",
     "inp-agent-limit": "recursionLimit", "inp-agent-model": "model", "inp-agent-tools": "tools",
-    "sel-agent-memory-mode": "memoryMode", "sel-agent-approval": "approval" };
+    "sel-agent-memory-mode": "memoryMode", "sel-agent-approval": "approval", "sel-agent-output-mode": "outputMode",
+    "inp-agent-output-schema": "outputSchema", "inp-agent-budget-tokens": "budgetTokens", "inp-agent-budget-cost": "budgetCost",
+    "inp-agent-budget-latency": "budgetLatency" };
   const key = target && target.hasAttribute && target.hasAttribute("data-agent-scope") ? "memoryMode" : fieldKeys[target && target.id];
   if (!key) return false;
   const fields = { name: "inp-agent-name", graph: "sel-agent-graph", assistantId: "inp-agent-id", recursionLimit: "inp-agent-limit",
-    model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval" };
+    model: "inp-agent-model", tools: "inp-agent-tools", memoryMode: "sel-agent-memory-mode", approval: "sel-agent-approval",
+    outputMode: "sel-agent-output-mode", outputSchema: "inp-agent-output-schema", budgetTokens: "inp-agent-budget-tokens",
+    budgetCost: "inp-agent-budget-cost", budgetLatency: "inp-agent-budget-latency" };
   const field = $(fields[key]);
-  if (!field || field.getAttribute("aria-invalid") !== "true") return false;
+  if (!field) return false;
+  const hasValidatedError = Object.values(fields).some((id) => $(id)?.getAttribute("aria-invalid") === "true");
+  if (!hasValidatedError) return false;
   const validation = agentValidateDraft(agentFormFields(), agentGraphNames());
-  if (validation.errors[key]) {
-    const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
-    if (describedBy.has("agent-form-error")) $("agent-form-error").textContent = validation.errors[key];
-    return false;
-  }
-  field.removeAttribute("aria-invalid");
-  const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
-  describedBy.delete("agent-form-error");
-  if (describedBy.size) field.setAttribute("aria-describedby", [...describedBy].join(" "));
-  else field.removeAttribute("aria-describedby");
-  if (validation.first && fields[validation.first]) {
-    const nextField = $(fields[validation.first]);
-    const nextDescribedBy = new Set(String(nextField.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
-    nextDescribedBy.add("agent-form-error");
-    nextField.setAttribute("aria-describedby", [...nextDescribedBy].join(" "));
-    $("agent-form-error").textContent = validation.errors[validation.first];
-  } else {
-    $("agent-form-error").textContent = "";
-  }
-  return true;
+  agentApplyDraftValidation(validation, true, false);
+  return !validation.errors[key];
 }
 
 function agentManifestActionError(dirty) {
@@ -13577,9 +13709,11 @@ function agentExportDraft() {
 }
 
 function agentResetCreateForm() {
-  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-model", "inp-agent-tools", "inp-agent-manifest"]) $(id).value = "";
+  for (const id of ["inp-agent-name", "inp-agent-id", "inp-agent-limit", "inp-agent-description", "inp-agent-tags", "inp-agent-model", "inp-agent-tools",
+    "inp-agent-output-schema", "inp-agent-budget-tokens", "inp-agent-budget-cost", "inp-agent-budget-latency", "inp-agent-manifest"]) $(id).value = "";
   $("sel-agent-memory-mode").value = "none";
   $("sel-agent-approval").value = "runtime_policy";
+  $("sel-agent-output-mode").value = "runtime_default";
   for (const input of $("agent-create-form").querySelectorAll("[data-agent-scope]")) input.checked = false;
   store.agentIntentScopeOrder = [];
   store.agentVersionSource = null;

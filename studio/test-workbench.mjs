@@ -328,12 +328,19 @@ check("graph labels: built-in behaviors are understandable",
     memoryMode: "read_write",
     scopes: ["agent", "user"],
     approval: "irreversible",
+    outputMode: "json_schema",
+    outputSchema: "registry/report-v2",
+    budgetTokens: "18446744073709551615",
+    budgetCost: "125.500001",
+    budgetLatency: "90000",
   };
   const built = W.agentIntentBuild(fields);
   check("visual intent: typed model, tool, memory, and approval surfaces form one versioned contract",
-    built.valid && built.intent.format === "rusty.agent-intent/v1" && built.intent.model === "openai/gpt-5" &&
+    built.valid && built.intent.format === "rusty.agent-intent/v2" && built.intent.model === "openai/gpt-5" &&
     built.intent.tools[1].effect === "non_idempotent" && built.intent.memory.scopes.join(",") === "agent,user" &&
-    built.intent.approval === "irreversible");
+    built.intent.approval === "irreversible" && built.intent.output.mode === "json_schema" &&
+    built.intent.output.schema === "registry/report-v2" &&
+    built.intent.budget.max_tokens === "18446744073709551615" && built.intent.budget.max_cost_usd === "125.500001");
   check("visual intent: the untouched canvas does not invent a stored requirement",
     W.agentIntentBuild({ model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy" }).empty);
   check("visual intent: tool contracts use a canonical exact effect grammar", (() => {
@@ -361,6 +368,22 @@ check("graph labels: built-in behaviors are understandable",
   check("visual intent: ordinary registry names with security-adjacent prefixes remain usable",
     W.agentIntentBuild({ ...fields, model: "api-speech-preview" }).valid &&
     W.agentIntentBuild({ ...fields, model: "token-embedding-model" }).valid);
+  check("visual intent: output schema binding is mode-bound and credential-safe",
+    !W.agentIntentBuild({ ...fields, outputMode: "text", outputSchema: "registry/report-v2" }).valid &&
+    !W.agentIntentBuild({ ...fields, outputSchema: "https://user:password@host/schema" }).valid &&
+    !W.agentIntentBuild({ ...fields, outputSchema: "schema\u202Ename" }).valid &&
+    W.agentIntentBuild({ ...fields, outputSchema: "registry/report-v3" }).valid);
+  check("visual intent: exact budget strings reject rounding, exponent, leading-zero, and u64 overflow shapes",
+    !W.agentIntentBuild({ ...fields, budgetTokens: "1e3" }).valid &&
+    !W.agentIntentBuild({ ...fields, budgetTokens: "01" }).valid &&
+    !W.agentIntentBuild({ ...fields, budgetLatency: "18446744073709551616" }).valid &&
+    !W.agentIntentBuild({ ...fields, budgetCost: "1.0000001" }).valid &&
+    W.agentIntentBuild({ ...fields, budgetTokens: "0", budgetCost: "0", budgetLatency: "0" }).valid);
+  check("visual intent: output-only and zero-budget-only requirements are not erased as untouched defaults",
+    !W.agentIntentBuild({ model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy",
+      outputMode: "text", outputSchema: "", budgetTokens: "", budgetCost: "", budgetLatency: "" }).empty &&
+    !W.agentIntentBuild({ model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy",
+      outputMode: "runtime_default", outputSchema: "", budgetTokens: "0", budgetCost: "", budgetLatency: "" }).empty);
   check("visual intent: imported invisible or credential-shaped model bindings lock instead of rendering a shortcut", (() => {
     const base = { format: "rusty.agent-intent/v1", tools: [], memory: { access: "none", scopes: [] }, approval: "irreversible" };
     return ["model\u202Ename", "model\u200Bname", "https://user:password@host/model", "sk-1234567890abcdef"]
@@ -369,9 +392,29 @@ check("graph labels: built-in behaviors are understandable",
   const config = { recursion_limit: 9, studio_intent: built.intent };
   const inspected = W.agentIntentInspectConfig(config);
   const draft = W.agentIntentDraft(config);
-  check("visual intent: stored v1 contracts hydrate every guided surface exactly",
+  check("visual intent: stored v2 contracts hydrate every guided surface exactly",
     inspected.valid && inspected.present && draft.model === fields.model && draft.tools === fields.tools &&
-    draft.memoryMode === fields.memoryMode && draft.scopes.join(",") === "agent,user" && draft.approval === fields.approval);
+    draft.memoryMode === fields.memoryMode && draft.scopes.join(",") === "agent,user" && draft.approval === fields.approval &&
+    draft.outputMode === fields.outputMode && draft.outputSchema === fields.outputSchema &&
+    draft.budgetTokens === fields.budgetTokens && draft.budgetCost === fields.budgetCost && draft.budgetLatency === fields.budgetLatency);
+  check("visual intent: valid v1 intent hydrates safe defaults and upgrades only when rebuilt", (() => {
+    const legacy = { format: "rusty.agent-intent/v1", model: "legacy/model", tools: [],
+      memory: { access: "none", scopes: [] }, approval: "irreversible" };
+    const legacyDraft = W.agentIntentDraft({ studio_intent: legacy });
+    const upgraded = W.agentIntentBuild(legacyDraft);
+    return !legacyDraft.intentLocked && legacyDraft.outputMode === "runtime_default" && legacyDraft.budgetTokens === "" &&
+      upgraded.valid && upgraded.intent.format === "rusty.agent-intent/v2";
+  })());
+  check("visual intent: malformed v2 output and budget envelopes lock instead of being normalized", (() => {
+    const base = { format: "rusty.agent-intent/v2", model: "model", tools: [],
+      memory: { access: "none", scopes: [] }, approval: "runtime_policy",
+      output: { mode: "text", schema: "" }, budget: { max_tokens: "", max_cost_usd: "", max_latency_ms: "" } };
+    return [
+      { ...base, output: { mode: "json_schema", schema: "" } },
+      { ...base, budget: { max_tokens: 10, max_cost_usd: "", max_latency_ms: "" } },
+      { ...base, budget: { max_tokens: "", max_cost_usd: "", max_latency_ms: "", extra: "" } },
+    ].every((studio_intent) => W.agentIntentDraft({ studio_intent }).intentLocked);
+  })());
   check("visual intent: imported scope order survives fixed checkbox display order",
     W.agentIntentSelectedScopeOrder(["tenant", "run"], ["run", "tenant"]).join(",") === "tenant,run");
   const payload = W.agentBuildCreatePayload({
@@ -424,14 +467,28 @@ check("graph labels: built-in behaviors are understandable",
   }, source);
   const review = W.agentChangeReview(source, draft);
   check("configuration change review: a copy binds exact source and draft surfaces",
-    review.changed === 3 && review.unchanged === 9 && review.review === 0 &&
+    review.changed === 3 && review.unchanged === 11 && review.review === 0 &&
     review.rows.find((row) => row.key === "name").state === "changed" &&
     review.rows.find((row) => row.key === "assistantId").state === "changed" &&
     review.rows.find((row) => row.key === "model").state === "changed" &&
+    review.rows.find((row) => row.key === "output").state === "unchanged" &&
+    review.rows.find((row) => row.key === "budget").state === "unchanged" &&
     review.rows.find((row) => row.key === "advancedConfig").state === "unchanged");
   check("configuration change review: comparison does not mutate the source record",
     source.name === "Evidence scout" && source.assistant_id === "evidence-scout" &&
     source.config.studio_intent.model === "openai/gpt-5");
+  check("configuration change review: rebuilding v1 visibly discloses both v2 default envelopes", (() => {
+    const legacy = { assistant_id: "legacy", name: "Legacy", graph: "react_agent", config: { studio_intent: {
+      format: "rusty.agent-intent/v1", model: "legacy/model", tools: [], memory: { access: "none", scopes: [] }, approval: "irreversible",
+    } } };
+    const rebuilt = W.agentBuildCreatePayload({ ...W.agentVersionDraft(legacy), description: "", tags: "" }, legacy);
+    const review = W.agentChangeReview(legacy, rebuilt);
+    const rendered = W.agentChangeReviewHtml(legacy, rebuilt, "version");
+    return review.rows.find((row) => row.key === "output").state === "changed" &&
+      review.rows.find((row) => row.key === "budget").state === "changed" &&
+      rendered.includes("Runtime default · implicit v1") && rendered.includes("Runtime default · explicit v2") &&
+      rendered.includes("Runtime defaults · implicit v1") && rendered.includes("Runtime defaults · explicit v2");
+  })());
   check("configuration change review: structural object order is not a false change",
     W.agentChangeEqual({ alpha: 1, nested: { one: true, two: false } },
       { nested: { two: false, one: true }, alpha: 1 }) === true);
@@ -923,7 +980,8 @@ check("graph labels: built-in behaviors are understandable",
     "inp-agent-id": agent.assistant_id, "inp-agent-limit": "12",
     "inp-agent-description": "Collect evidence", "inp-agent-tags": "research",
     "inp-agent-model": "", "inp-agent-tools": "", "sel-agent-memory-mode": "none",
-    "sel-agent-approval": "runtime_policy",
+    "sel-agent-approval": "runtime_policy", "sel-agent-output-mode": "runtime_default", "inp-agent-output-schema": "",
+    "inp-agent-budget-tokens": "", "inp-agent-budget-cost": "", "inp-agent-budget-latency": "",
     "btn-agent-create": "", "agent-form-error": "", "agent-intent-lock": "", toast: "",
   })) { const next = element(value); next.id = id; uiElements.set(id, next); }
   uiElements.set("agent-create-form", { querySelectorAll() { return []; } });
@@ -995,6 +1053,28 @@ check("graph labels: built-in behaviors are understandable",
     W.agentRevalidateEditedField(toolField) && toolField["aria-invalid"] === undefined &&
     !toolField["aria-describedby"].includes("agent-form-error") &&
     uiElements.get("agent-form-error").textContent === "");
+  const budgetField = uiElements.get("inp-agent-budget-tokens");
+  budgetField.value = "01";
+  W.agentApplyDraftValidation(W.agentValidateDraft({
+    name: "Draft", graph: "react_agent", model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy",
+    outputMode: "runtime_default", outputSchema: "", budgetTokens: "01", budgetCost: "", budgetLatency: "",
+  }, ["react_agent"]), true);
+  budgetField.value = "18446744073709551615";
+  check("visual intent interaction: correcting an exact budget clears its associated error without rounding",
+    budgetField["aria-invalid"] === "true" && W.agentRevalidateEditedField(budgetField) &&
+    budgetField["aria-invalid"] === undefined && uiElements.get("agent-form-error").textContent === "");
+  const outputModeField = uiElements.get("sel-agent-output-mode");
+  const outputSchemaField = uiElements.get("inp-agent-output-schema");
+  outputModeField.value = "json_schema";
+  outputSchemaField.value = "";
+  W.agentApplyDraftValidation(W.agentValidateDraft({
+    name: "Draft", graph: "react_agent", model: "", tools: "", memoryMode: "none", scopes: [], approval: "runtime_policy",
+    outputMode: "json_schema", outputSchema: "", budgetTokens: "", budgetCost: "", budgetLatency: "",
+  }, ["react_agent"]), true);
+  outputModeField.value = "text";
+  check("visual intent interaction: changing output mode clears a resolved dependent schema error atomically",
+    outputSchemaField["aria-invalid"] === "true" && W.agentRevalidateEditedField(outputModeField) &&
+    outputSchemaField["aria-invalid"] === undefined && uiElements.get("agent-form-error").textContent === "");
   W.agentSetShortcutLocks({ config: { studio_intent: { format: "vendor/v2" } } });
   check("visual intent interaction: unknown stored contracts expose a visible described lock reason",
     uiElements.get("inp-agent-model").disabled && !uiElements.get("agent-intent-lock").hidden &&
@@ -1161,12 +1241,15 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes('id="agent-form-error" role="alert"') &&
     html.includes('id="agent-manifest-status" role="status"') &&
     html.includes('id="agent-contract-preview" aria-labelledby="agent-contract-title"'));
-  check("visual intent canvas exposes model, tools, memory, and approval as labelled native controls",
+  check("visual intent canvas exposes model, tools, memory, approval, output, and budgets as labelled native controls",
     html.includes('id="agent-intent-model-title"') && html.includes('id="inp-agent-model"') &&
     html.includes('id="inp-agent-tools" maxlength="4096"') && html.includes('id="sel-agent-memory-mode"') &&
-    html.includes('data-agent-scope="tenant"') && html.includes('id="sel-agent-approval"'));
+    html.includes('data-agent-scope="tenant"') && html.includes('id="sel-agent-approval"') &&
+    html.includes('id="sel-agent-output-mode"') && html.includes('id="inp-agent-output-schema"') &&
+    html.includes('id="inp-agent-budget-tokens"') && html.includes('id="inp-agent-budget-cost"') &&
+    html.includes('id="inp-agent-budget-latency"'));
   check("visual intent canvas never claims portable requirements are already runtime-enforced",
-    html.includes("Today it does not bind model, tool, memory, or approval providers") &&
+    html.includes("Today it does not bind or enforce model, tool, memory, approval, output, or budget providers") &&
     html.includes("A declared requirement, not a browser-side permission grant") &&
     html.includes("Use an identifier or registry reference, not a URL or credential"));
   check("visual intent canvas collapses the wiring bench into one mobile column",

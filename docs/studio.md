@@ -53,15 +53,17 @@ studio/
   over identity or run history, give it a real task, and move directly into the resulting thread and
   trace. The configuration workshop separates fields the server executes (**Runs with**) from catalog
   metadata (**Describes**) and unknown or graph-specific fields stored without silent field loss (**Preserves**). A
-  visual wiring bench adds a typed `rusty.agent-intent/v1` requirement for model identity, tool names and
-  replay-safety effects, governed-memory access/scopes, and approval boundary. The intent is stored under
+  visual wiring bench adds a typed `rusty.agent-intent/v2` requirement for model identity, tool names and
+  replay-safety effects, governed-memory access/scopes, approval boundary, output shape/schema binding, and
+  exact per-run token, USD, and wall-time budget strings. The intent is stored under
   `config.studio_intent`, survives import/export and duplication, and locks rather than rewriting an
-  unfamiliar stored shape. Its controls are designed for identifiers and policy declarations; Studio
+  unfamiliar stored shape. Valid v1 intents remain editable with safe output/budget defaults and become v2
+  only when rebuilt. Its controls are designed for identifiers and policy declarations; Studio
   warns operators not to paste provider credentials because the assistant record stores these values.
-  Studio labels this as portable intent: the current generic assistant runner does not bind providers,
-  tools, memory, or approval enforcement from it, so the registered graph remains authoritative. When a
-  stored agent or applied manifest becomes the source for a new draft, a live change review compares twelve
-  bounded configuration surfaces: identity, enforced graph and step limit, portable model/tool/memory/approval
+  Studio labels this as portable intent: the current generic assistant runner does not bind or enforce
+  model, tool, memory, approval, output, or budget providers from it, so the registered graph remains
+  authoritative. When a stored agent or applied manifest becomes the source for a new draft, a live change review compares fourteen
+  bounded configuration surfaces: identity, enforced graph and step limit, portable model/tool/memory/approval/output/budget
   intent, descriptive fields, and carried advanced values. Structural equality uses the stored JSON values,
   while long visible text is excerpted and the exact manifest remains available. The review states that a copy
   is a separate assistant—not an active version—and that the source and its evidence remain unchanged. A
@@ -545,8 +547,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
 - **Assistant configuration reflects the current server contract.** The graph binding is enforced and
   `config.recursion_limit` is applied as a run default. Responsibility and tags are catalog metadata,
   not prompt instructions. Other `config` / `metadata` fields round-trip without silent field loss, but the generic server
-  makes no claim that they affect execution; the evidence rail says so. First-class model, tool, memory,
-  output, guardrail, and budget controls remain blocked on typed discovery and persistence contracts.
+  makes no claim that they affect execution; the evidence rail says so. Studio can author portable model,
+  tool, memory, output, guardrail, and budget requirements, but provider discovery and generic runtime
+  enforcement remain blocked on typed platform contracts.
   Portable manifests are bounded to 64 KiB, 16 nesting levels, and 2,000 JSON values. Numeric values
   that a browser would mutate (non-finite results, negative zero, non-round-tripping large integers, or
   alternate decimal/exponent forms) are rejected before import. Exactly representable large integer
