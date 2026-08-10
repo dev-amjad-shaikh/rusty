@@ -1,6 +1,6 @@
 {
   "name": "@rusty-runtime/client",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Zero-dependency JS/TS client for rusty-server (HTTP + SSE). Works in Node.js >= 18 and browsers.",
   "type": "module",
   "main": "./src/index.js",

@@ -9,8 +9,8 @@ promises not to break, see [stability.md](stability.md).
 **Packages version independently.** There is no single "Rusty version".
 Each crate bumps its own version in its own `Cargo.toml`; each SDK bumps
 its own package manifest. The root [CHANGELOG.md](../CHANGELOG.md) groups
-implemented work into named releases (R0.1 — Ignition through R0.10 —
-Adaptation, with the v0.5 SDK/tenancy cycle in between) purely as a
+implemented work into named releases (R0.1 — Ignition through R0.11 —
+Extension Plane, with the v0.5 SDK/tenancy cycle in between) purely as a
 branding and history layer — a named release does not imply a shared
 version number.
 
@@ -49,17 +49,17 @@ version. Until one exists, the compatibility rule is:
 
 ## Current versions
 
-As of 2026-08-09 (v0.11.0 / R0.10 — Adaptation):
+As of 2026-08-10 (v0.12.0 / R0.11 — Extension Plane):
 
 | Package | Registry | Source | Version |
 |---|---|---|---|
-| `rusty-agent-runtime` | crates.io | `rusty-core/` | 0.10.0 |
-| `rusty-agent-server` | crates.io | `rusty-server/` | 0.10.0 |
-| `rusty-worker` | crates.io | `rusty-worker/` | 0.3.4 |
-| `rusty-otel` | crates.io | `rusty-otel/` | 0.1.5 |
-| `rusty-eval` | crates.io | `rusty-eval/` | 0.1.3 |
-| `@rusty-runtime/client` | npm | `sdks/typescript/` | 0.3.0 |
-| `rusty-agent-runtime` (import: `rusty_client`) | PyPI | `sdks/python/` | 0.3.0 |
+| `rusty-agent-runtime` | crates.io | `rusty-core/` | 0.11.0 |
+| `rusty-agent-server` | crates.io | `rusty-server/` | 0.11.0 |
+| `rusty-worker` | crates.io | `rusty-worker/` | 0.3.5 |
+| `rusty-otel` | crates.io | `rusty-otel/` | 0.1.6 |
+| `rusty-eval` | crates.io | `rusty-eval/` | 0.1.4 |
+| `@rusty-runtime/client` | npm | `sdks/typescript/` | 0.4.0 |
+| `rusty-agent-runtime` (import: `rusty_client`) | PyPI | `sdks/python/` | 0.4.0 |
 
 Note the name collision by design: the Rust core crate and the Python SDK
 are both published as `rusty-agent-runtime` (crates.io and PyPI
@@ -76,7 +76,7 @@ Which package pairs must agree, and on what:
 | Producer | Consumer | Governing version | Rule |
 |---|---|---|---|
 | `rusty-agent-runtime` (RemoteNode) | `rusty-worker` | `PROTOCOL_VERSION` = 1 | Worker rejects tasks with an unsupported `protocol_version`. Both sides currently speak v1. Keep worker and runtime on compatible protocol majors. |
-| `rusty-agent-server` | `@rusty-runtime/client`, `rusty_client` (PyPI) | same-cycle pairing (no constant yet) | SDK 0.3.x ↔ server 0.10.x is the tested pairing. Cross-cycle use is unvalidated. |
+| `rusty-agent-server` | `@rusty-runtime/client`, `rusty_client` (PyPI) | same-cycle pairing (no constant yet) | SDK 0.4.x ↔ server 0.11.x is the tested pairing. Cross-cycle use is unvalidated. |
 | `rusty-agent-runtime` | `rusty-agent-server`, `rusty-worker`, `rusty-otel` | crate versions | All three are path-dependents built in lockstep from this monorepo; a published crate pair must satisfy SemVer on the Rust API, which is unstable at 0.x (see [stability.md](stability.md)). |
 | `rusty-agent-server` | Rusty Studio (`studio/`) | same-cycle pairing | Studio is a zero-build UI distributed in-repo; it calls the same-cycle server API and notes fallbacks for older servers in-line. |
 | checkpoint writers (`JsonFileCheckpointer`, `PostgresCheckpointer`) | checkpoint readers | `rusty-agent-runtime` minor version | Checkpoints written by one `0.x.*` line are guaranteed readable by that same minor line only. See [stability.md](stability.md). |
