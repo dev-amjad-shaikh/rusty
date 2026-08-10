@@ -8,6 +8,7 @@ studio/
 ├── index.html         ← the entire UI (open this)
 ├── serve.py           ← optional same-origin static host + API proxy
 ├── test-recorder.mjs  ← node unit tests for the Flight Recorder timeline helpers
+├── test-receipts.mjs  ← signed run-proof contract, trust-boundary, and interaction tests
 ├── test-tasks.mjs     ← node unit tests for the durable-tasks view helpers
 ├── test-workbench.mjs ← node unit tests for the agent-creation and run journey
 ├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
@@ -182,6 +183,28 @@ studio/
     event count and whether the journal is `complete` (run terminal) or partial. On a server build
     without the route (pre-R0.5 server wave) the card explains the missing endpoint instead of
     erroring; event fields are read defensively, so partial implementations still render.
+  - **Signed execution proof** — after a complete journal is loaded, **Mint & verify signed proof**
+    opens a four-link chain of custody: journal head, pinned runtime contract, effect/denial ledger,
+    and deployment signer. Studio first calls the mint-on-read `GET /runs/{id}/receipt`, then loads
+    the portable journal from `GET /runs/{id}/fixture`, requires the exact run id, head hash, and
+    event count to still match, and submits only that bound pair to `POST /receipts/verify` for a full
+    evidence recomputation and signature check. The typed
+    verification result must repeat every component Studio renders. Finally, the GET-only
+    `GET /receipt_keys` history identifies the signer as active, retired, or historical-but-unretired;
+    every recognized historical key remains a valid signer. The first receipt read persists a receipt and may initialize the
+    deployment's local Ed25519 signing key, so that consequence is stated beside the action before it
+    is used. Key rotation is deliberately absent from Studio.
+
+    The fixture must also match the exact thread and every Recorder event visible when the action began;
+    the verifier request uses an exact JSON serializer so legal Rust integers cannot round through
+    JavaScript. The proof desk is page-memory, connection/thread/run scoped, bounds the visible event corpus and
+    every proof-specific response at an 8 MiB inspection ceiling, and explains when a finalized journal is too
+    large or malformed for that boundary. A journal or workspace change cancels late evidence. Route-missing,
+    unknown/access-bound run, pre-journal conflict, missing signer, component mismatch, and transport
+    failure stay distinct; a returned receipt is never called verified merely because minting
+    succeeded. The verified v1 statement proves that the served journal chain and signed runtime
+    commitments are unchanged and resolve to this deployment's public key history. It does **not**
+    prove model-answer quality, external provider honesty, or remote/KMS/transparency attestation.
   - **Exact replay** — the **Replay** button calls `POST /runs/replay` with the loaded run id and renders
     the verdict as a banner: *verified* (the replayed run reproduced every journaled event byte-for-byte,
     with the event count) or *mismatch* (expected vs actual event counts, plus the `first_divergence` seq
@@ -555,6 +578,11 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   fallback for partial diffs, exact u64 sequence alignment, strict response identities, per-branch totals,
   accessible table semantics, HTML escaping), plus finalized-journal-only proposal handoff into governed
   learning. Run the suite for the current assertion count.
+- `node studio/test-receipts.mjs` — contract checks for exact receipt, portable fixture, typed
+  verification summary, and public-key history binding; finalized-run readiness, mint-on-read copy,
+  trust-boundary language, hostile-message escaping, tenant/thread/run generation ownership, bounded
+  responses, error families, sequential request order, delegated interaction, and narrow-screen proof
+  layout. Run the suite for the current assertion count.
 - `node studio/test-tasks.mjs` — 39 unit tests over the durable-tasks view helpers (same extraction
   harness): badge tone per status with the unknown-status fallback, terminality mirroring the server's
   `TaskRecord::is_terminal` (including the failed-with-retry-scheduled nuance), the list path builder,
@@ -573,6 +601,13 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   Unknown-run 404 confirmed to be the JSON error shape (drives the "run not found" toast path, distinct
   from the route-missing fallback). `studio/serve.py` confirmed to serve the page and proxy the new
   route unchanged.
+- Live against `cargo run -p rusty-agent-server --example server_demo`: completed a real pipeline run,
+  loaded its 12-event finalized journal, minted the deployment's first signed receipt, fetched the exact
+  portable snapshot, verified it through `POST /receipts/verify`, and resolved its signer as the active
+  public key. Studio rendered the exact head, zero-effect/zero-denial ledger, `static-v0` executor policy,
+  and the local-attestation boundary. A 390 × 844 browser pass confirmed the four-link chain stacks with
+  no horizontal overflow, keyboard focus remains on its labelled heading, and the browser logged no
+  warnings or errors.
 - `python3 -m py_compile studio/serve.py` — syntax OK.
 - All endpoint paths, payload fields, response shapes, SSE frame kinds, and status strings cross-checked
   against `rusty-server/src/routes.rs`, `src/runs.rs`, `src/sse.rs`, and `examples/server_demo.rs`;

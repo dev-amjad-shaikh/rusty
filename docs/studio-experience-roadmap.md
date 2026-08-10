@@ -123,6 +123,12 @@ Studio is a useful engineering console, not yet the complete experience describe
   into the bounded provenance ledger.
 - Investigate Flight Recorder evidence through a causal run story: journal finding, recorded error event
   or unresolved pause, recovery boundary, effect risk, and direct links into the technical timeline.
+- Mint and cryptographically verify a finalized run's signed chain of custody through the connected
+  deployment verifier. Studio binds the exact
+  journal head to its carried manifest, resolved capsules, effect/denial ledger, executor/Cedar policy,
+  and active, retired, or historical deployment signer. The operator sees the mint-on-read consequence before the
+  action and an explicit boundary: local receipt integrity is not model quality, provider truth, or
+  remote/KMS transparency attestation. Key rotation remains an operator/platform concern outside Studio.
 - Review a selected run's interrupt at an explicit human decision boundary: bounded request preview,
   corroborated run/thread/checkpoint identities, schema-led approve/deny or custom exact response,
   checkpoint-bound resume, super-step re-execution warning, competing-run gate, wait or live-event resume,
@@ -412,7 +418,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 2 | Assistant edit and duplicate, with a readable configuration summary | Partial — safe duplicate and summary delivered; edit/version endpoints pending | Establishes lifecycle management as soon as the server route surface is free to extend |
 | 3 | Configuration workshop for instructions, behavior, limits, and advanced manifest | Partial — current runtime contract and manifest portability delivered; typed model/tool/memory controls pending | Replaces the current create-only form and raw configuration gap |
 | 4 | Run desk with search/filter and durable server discovery | Platform contract needed | Removes browser-local run/thread dependence |
-| 5 | Flight Recorder investigation layout and manifest/effect context | Partial — causal run story, recovery boundary, and effect-risk guidance delivered; immutable configuration-manifest resolution still pending | Makes Rusty's strongest runtime advantage understandable |
+| 5 | Flight Recorder investigation layout and manifest/effect context | Usable foundation — causal run story, recovery boundary, effect-risk guidance, and exact signed run-proof chain delivered; cross-run manifest drift navigation and remote/KMS attestation remain | Makes Rusty's strongest runtime advantage understandable |
 | 6 | Memory browser, context assembly, provenance, conflicts, corrections, and forgetting | Partial — browser, deterministic token-budget context preview, provenance, conflict review, selected-memory correction, exact durable consolidation launch, and task-to-summary follow-through delivered; candidate approval, expiration, and approval-gated forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Partial — selected-thread decision boundary delivered with corroborated checkpoint identity, exact response preview, checkpoint-bound resume, suspension/re-execution evidence, and duplicate-resistant uncertain handling; durable discovery, assignment, authority, deadline, and audit remain | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
@@ -515,3 +521,4 @@ Completing one slice never means the Studio roadmap is complete. Roadmap status 
 | Learning appears after evaluation in the primary journey | Rusty's governing rule is replay and evidence before promotion |
 | Local-first remains a release requirement | It is a practical adoption advantage and keeps private agent data under user control |
 | Architecture migration is incremental | Product progress and verification must continue while maintainability improves |
+| Signed proof is narrower than quality or external truth | A cryptographic chain can establish evidence integrity and local signer provenance without overstating model correctness, provider honesty, or remote attestation |

@@ -425,6 +425,45 @@
   }
   #rec-detail:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
+  /* Signed proof is a chain-of-custody instrument, not a generic success
+   * card: the ruled track encodes the four commitments that verification
+   * joins, while the seal names the deliberately narrow trust boundary. */
+  .run-proof {
+    margin: 14px 0 4px; border: 1px solid #4f493f; border-radius: 10px;
+    background: linear-gradient(135deg, #211f1b 0%, #171c1d 72%, #16191a 100%);
+    overflow: hidden;
+  }
+  .run-proof-head {
+    display: flex; justify-content: space-between; gap: 18px; align-items: flex-start;
+    padding: 15px 17px 11px; border-bottom: 1px solid #3b3832;
+  }
+  .run-proof-kicker { color: #d7a967; font: 700 9.5px var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+  .run-proof-head h3 { margin: 3px 0 3px; color: #f0eadf; font-size: 18px; }
+  .run-proof-head p { margin: 0; max-width: 660px; color: var(--text-dim); font-size: 11.5px; line-height: 1.45; }
+  .run-proof-seal {
+    flex: 0 0 76px; width: 76px; height: 76px; display: grid; place-items: center;
+    border: 1px solid #6c624f; border-radius: 50%; color: #c8b994; text-align: center;
+    font: 700 9px/1.25 var(--mono); letter-spacing: .7px; text-transform: uppercase;
+    box-shadow: inset 0 0 0 4px #1b2020, inset 0 0 0 5px #3e4c48;
+  }
+  .run-proof-seal.verified { border-color: #6e8b7c; color: #b9d8c8; box-shadow: inset 0 0 0 4px #1b2020, inset 0 0 0 5px #426356; }
+  .run-proof-seal.rejected { border-color: #865149; color: #efc0b8; box-shadow: inset 0 0 0 4px #211a19, inset 0 0 0 5px #633b35; }
+  .run-proof-chain { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 15px 17px 12px; }
+  .run-proof-chain::before { content: ""; position: absolute; left: 11%; right: 11%; top: 30px; height: 1px; background: #665a47; }
+  .run-proof-link { position: relative; min-width: 0; padding: 25px 9px 9px; border: 1px solid #3b3933; border-radius: 7px; background: rgba(20,21,20,.9); }
+  .run-proof-link::before { content: ""; position: absolute; top: 10px; left: calc(50% - 5px); width: 8px; height: 8px; border: 2px solid #7d705b; border-radius: 50%; background: #171b1b; }
+  .run-proof-link.done::before { border-color: #7ca18d; background: #314d40; }
+  .run-proof-link.active::before { border-color: #d7a967; background: #6a512c; box-shadow: 0 0 0 3px rgba(215,169,103,.13); }
+  .run-proof-link b { display: block; color: #e7dfd2; font: 700 10.5px var(--mono); overflow-wrap: anywhere; }
+  .run-proof-link span { display: block; margin-top: 4px; color: var(--text-faint); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+  .run-proof-meta { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px; padding: 0 17px 12px; }
+  .run-proof-meta div { min-width: 0; border-top: 1px solid #39362f; padding-top: 7px; }
+  .run-proof-meta span { display: block; color: var(--text-faint); font: 9px var(--mono); letter-spacing: .6px; text-transform: uppercase; }
+  .run-proof-meta b { display: block; margin-top: 3px; color: #ded5c8; font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .run-proof-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 11px 17px 14px; border-top: 1px solid #34322d; }
+  .run-proof-boundary { margin: 0 17px 14px; padding: 9px 11px; border-left: 2px solid #6b624f; background: rgba(35,32,28,.72); color: var(--text-dim); font-size: 10.5px; line-height: 1.45; }
+  .run-proof-error { margin: 0 17px 12px; padding: 9px 11px; border: 1px solid #70453f; border-radius: 6px; color: #efc0b8; background: #2b1e1c; font-size: 11.5px; }
+
   /* ---------- durable tasks ---------- */
   .rec-controls select {
     background: var(--bg-inset); color: var(--text); border: 1px solid var(--border);
@@ -1642,6 +1681,13 @@
     .cmp-review-rubric-row .cmp-review-criterion { grid-column: 1 / -1; grid-row: 1; }
     .cmp-review-rubric-row label { grid-row: 2; }
     .cmp-review-mobile-side { display: block; color: var(--text-faint); font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .5px; }
+    .run-proof-head { flex-direction: column; }
+    .run-proof-seal { width: 60px; height: 60px; flex-basis: 60px; }
+    .run-proof-chain { grid-template-columns: 1fr; }
+    .run-proof-chain::before { display: none; }
+    .run-proof-link { padding: 10px 10px 10px 30px; }
+    .run-proof-link::before { top: 12px; left: 10px; }
+    .run-proof-meta { grid-template-columns: repeat(2, minmax(0,1fr)); }
   }
 
   :is(button, input, select, textarea, summary):focus-visible {
@@ -2117,6 +2163,18 @@
           </div>
           <div id="rec-replay-banner"></div>
 
+          <section class="run-proof" id="run-proof" aria-labelledby="run-proof-title">
+            <span class="sr-only" id="run-proof-announcer" role="status" aria-live="polite" aria-atomic="true">Load a finalized journal before requesting a signed proof.</span>
+            <div id="run-proof-body">
+              <div class="run-proof-head">
+                <div><div class="run-proof-kicker">Signed execution proof</div><h3 id="run-proof-title" tabindex="-1">Chain of custody</h3>
+                  <p id="run-proof-status">Load a finalized journal, then ask this Rusty deployment to sign its persisted evidence and recompute the cryptographic proof.</p></div>
+                <div class="run-proof-seal" aria-hidden="true">Awaiting<br>evidence</div>
+              </div>
+              <div class="run-proof-actions"><span class="muted tiny">A complete journal is required before Studio makes a proof claim.</span></div>
+            </div>
+          </section>
+
           <h2 class="section" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
           <div class="rec-compare-controls" role="group" aria-label="Runs to compare">
@@ -2284,8 +2342,11 @@ const store = {
   streamAbort: null,   // AbortController for an active SSE fetch
   interruptDecision: null, // selected thread's session-only suspension review and exact resume value
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
+  recLoadRequest: 0,
   recReplayRequest: 0,
   recCompareRequest: 0,
+  runProof: null,      // page-memory signed-receipt verification for the exact loaded run
+  runProofRequest: 0,  // generation guard for receipt / fixture / verify / public-key reads
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, evidenceState }
   view: "home",        // "home" | "thread" | "tasks" | "agents" | "fabric" | "memory" | "learn" — active workspace
@@ -3170,14 +3231,14 @@ async function apiResponseText(res, maxBytes = 0) {
   }
 }
 
-async function apiForConnection(connection, method, path, body, maxResponseBytes = 0) {
+async function apiForConnection(connection, method, path, body, maxResponseBytes = 0, exactBodyText = "") {
   const headers = {};
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (body !== undefined || exactBodyText) headers["Content-Type"] = "application/json";
   if (connection && connection.apiKey) headers["X-Api-Key"] = connection.apiKey;
   let res;
   try {
     res = await fetch(connection.baseUrl + path, {
-      method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
+      method, headers, body: exactBodyText || (body !== undefined ? JSON.stringify(body) : undefined),
     });
   } catch (e) {
     throw new ApiError(0, { error: "network", message:
@@ -3813,9 +3874,12 @@ function connectionResetWorkspace() {
   store.selectedCp = null;
   store.recorder = null;
   store.compare = null;
+  store.runProof = null;
   store.recUnsupported = false;
   store.recReplayRequest += 1;
   store.recCompareRequest += 1;
+  store.recLoadRequest += 1;
+  store.runProofRequest += 1;
   store.fabric = null;
   store.fabricUnsupported = false;
   clearTimeout(store.fabricLeaseTimer);
@@ -4169,6 +4233,9 @@ function renderMain() {
   store.history = [];
   store.selectedCp = null;
   store.recorder = null;
+  store.recLoadRequest += 1;
+  store.runProof = null;
+  store.runProofRequest += 1;
   hideInterrupt(false);
   $("th-id").textContent = t.thread_id;
   $("th-graph").textContent = t.graph;
@@ -5321,35 +5388,44 @@ async function recLoad(runId, quiet) {
   runId = (runId || "").trim();
   if (!runId) { if (!quiet) toast("Enter a run id.", "err"); return; }
   const operation = connectionOperation(currentThread()?.thread_id || null); if (!operation) return;
+  const request = ++store.recLoadRequest;
+  store.runProof = { runId, phase: "verifying", step: "journal", receiptReceived: false };
+  store.runProofRequest += 1;
+  runProofRender();
   $("rec-statusline").textContent = "loading…";
   try {
     const res = await apiForConnection(operation.connection, "GET", `/runs/${encodeURIComponent(runId)}/events`);
-    if (!connectionOperationCurrent(operation)) return;
+    if (request !== store.recLoadRequest || !connectionOperationCurrent(operation)) return;
     store.recorder = {
       runId: res.run_id || runId,
+      requestedRunId: runId,
+      exactEnvelope: Boolean(res && res.run_id === runId && Array.isArray(res.events) && typeof res.complete === "boolean"),
       events: recSortEvents(res.events),
       complete: recFinalized(res.complete),
       selected: null,
       error: null,
     };
+    store.recorder.proofEvidence = runProofLoadedEvidence(store.recorder);
+    store.runProof = null;
     store.recUnsupported = false;
     // A fresh journal invalidates any replay verdict shown for a previous run.
     $("rec-replay-banner").innerHTML = "";
     if (!$("inp-cmp-base").value.trim()) $("inp-cmp-base").value = store.recorder.runId;
   } catch (e) {
-    if (!connectionOperationCurrent(operation)) return;
+    if (request !== store.recLoadRequest || !connectionOperationCurrent(operation)) return;
     // A 404 with a non-JSON body means a server build without the route at
     // all (the Flight Recorder server API is a later R0.5 wave); a JSON 404
     // means the run is genuinely unknown — surface that one.
     const noRoute = e.status === 404 && !(e.body && e.body.error);
     if (noRoute) store.recUnsupported = true;
     store.recorder = {
-      runId, events: [], complete: false, selected: null,
+      runId, requestedRunId: runId, exactEnvelope: false, events: [], complete: false, selected: null,
       error: noRoute
         ? "This server build has no GET /runs/{run_id}/events route yet — the Flight Recorder " +
           "server API lands in a later R0.5 wave. Rebuild rusty-server from the R0.5 branch to use this view."
         : e.message,
     };
+    store.runProof = null;
     if (!quiet && !noRoute) toast(e.message, "err");
   }
   recRender();
@@ -5373,6 +5449,7 @@ function recRender() {
   const body = $("rec-body"), detail = $("rec-detail"), scrub = $("rec-scrub");
   const investigation = $("rec-investigation");
   const r = store.recorder;
+  runProofRender();
   detail.style.display = "none";
   detail.innerHTML = "";
   investigation.innerHTML = "";
@@ -5463,6 +5540,353 @@ function recSelect(id, scroll, focusDetail) {
   if (focusDetail) {
     detail.focus({ preventScroll: true });
     detail.scrollIntoView({ block: "nearest", behavior: "auto" });
+  }
+}
+
+/* ---------------- recorder: signed run proof ---------------------------
+ * The proof desk composes three existing R0.9 contracts without weakening
+ * any of them: GET the mint-on-read receipt, GET the portable fixture, then
+ * POST both to the deployment's verifier.  The public key catalog is a
+ * read-only lineage annotation; key rotation is intentionally not exposed.
+ * Every response is byte-bounded and every completion is tied to the
+ * selected connection, thread, request generation, and finalized run. */
+const RUN_PROOF_RESPONSE_BYTES = 8 * 1024 * 1024;
+const RUN_PROOF_LIST_LIMIT = 4096;
+const RUN_PROOF_KEY_LIMIT = 256;
+
+function runProofObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function runProofField(object, key, fallback) {
+  return object && Object.prototype.hasOwnProperty.call(object, key) ? object[key] : fallback;
+}
+
+function runProofHex(value, bytes = 32) {
+  return typeof value === "string" && new RegExp(`^[a-f0-9]{${bytes * 2}}$`).test(value);
+}
+
+function runProofText(value) {
+  return typeof value === "string" && agentUtf8Length(value) <= 1024 && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function runProofStringList(value, predicate = runProofText) {
+  return Array.isArray(value) && value.length <= RUN_PROOF_LIST_LIMIT && value.every(predicate);
+}
+
+function runProofSame(left, right) {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+      left.every((item, index) => runProofSame(item, right[index]));
+  }
+  const a = runProofObject(left), b = runProofObject(right);
+  if (!a || !b) return false;
+  const ak = Object.keys(a).sort(), bk = Object.keys(b).sort();
+  return ak.length === bk.length && ak.every((key, index) => key === bk[index] && runProofSame(a[key], b[key]));
+}
+
+function runProofMap(value, valuePredicate) {
+  const map = runProofObject(value);
+  const entries = map && Object.entries(map);
+  return Boolean(entries && entries.length <= RUN_PROOF_KEY_LIMIT &&
+    entries.every(([key, item]) => runProofText(key) && valuePredicate(item)));
+}
+
+function runProofExactJson(value) {
+  return memoryAssemblyCompactJson(value);
+}
+
+function runProofCanonicalJson(value, parent = null, key = "", seen = new Set()) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    const token = parent && parent[AGENT_NUMBER_TOKENS] && parent[AGENT_NUMBER_TOKENS][key];
+    if (typeof token === "string") return token;
+    if (!Number.isFinite(value) || Object.is(value, -0) || (Number.isInteger(value) && !Number.isSafeInteger(value))) return null;
+    return JSON.stringify(value);
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return null;
+  seen.add(value);
+  let text;
+  if (Array.isArray(value)) {
+    const parts = value.map((item, index) => runProofCanonicalJson(item, value, String(index), seen));
+    text = parts.some((item) => item == null) ? null : `[${parts.join(",")}]`;
+  } else {
+    const parts = [];
+    for (const childKey of Object.keys(value).sort()) {
+      const rendered = runProofCanonicalJson(value[childKey], value, childKey, seen);
+      if (rendered == null) { text = null; break; }
+      parts.push(`${JSON.stringify(childKey)}:${rendered}`);
+    }
+    if (text !== null) text = `{${parts.join(",")}}`;
+  }
+  seen.delete(value);
+  return text;
+}
+
+function runProofLoadedEvidence(recorder, maximum = RUN_PROOF_RESPONSE_BYTES) {
+  if (!recorder || !Array.isArray(recorder.events) || !recorder.events.length) return null;
+  const serialized = [], threads = new Set();
+  let bytes = 2;
+  for (const event of recorder.events) {
+    if (!event || event.run_id !== recorder.runId || !runProofText(event.thread_id)) return null;
+    const exact = runProofCanonicalJson(event);
+    if (exact == null) return null;
+    bytes += agentUtf8Length(exact) + (serialized.length ? 1 : 0);
+    if (bytes > maximum) return null;
+    threads.add(event.thread_id); serialized.push(exact);
+  }
+  if (threads.size !== 1) return null;
+  return { runId: recorder.runId, threadId: threads.values().next().value, events: serialized, bytes };
+}
+
+function runProofValidateReceipt(value, expectedRunId) {
+  const receipt = runProofObject(value), head = receipt && runProofObject(receipt.journal_head);
+  const events = head && recExactUnsigned(head, "events");
+  const manifestPresent = receipt && Object.prototype.hasOwnProperty.call(receipt, "manifest") && receipt.manifest != null;
+  const digestPresent = receipt && Object.prototype.hasOwnProperty.call(receipt, "manifest_digest") && receipt.manifest_digest != null;
+  const optionalText = (item) => item == null || runProofText(item);
+  const capsules = receipt && runProofField(receipt, "capsules", {});
+  const effects = receipt && runProofField(receipt, "effects", []);
+  const policies = receipt && runProofField(receipt, "capsule_policies", []);
+  const denials = receipt && runProofField(receipt, "denials", []);
+  const ok = receipt && receipt.format_version === 1 && receipt.run_id === expectedRunId &&
+    events !== null && events <= 18446744073709551615n && runProofHex(head.sha256) &&
+    (!digestPresent || runProofHex(receipt.manifest_digest)) && manifestPresent === digestPresent &&
+    (!manifestPresent || runProofObject(receipt.manifest)) &&
+    runProofMap(capsules, (item) => runProofHex(item)) &&
+    runProofStringList(effects, (item) => runProofHex(item)) &&
+    optionalText(receipt.executor_policy) && runProofStringList(policies) &&
+    runProofStringList(denials) && runProofHex(receipt.signer) && runProofHex(receipt.signature, 64);
+  return ok ? { ok: true, receipt, events, headHash: head.sha256,
+    capsules, effects, policies, denials } : {
+    ok: false, error: "Rusty returned a receipt outside the signed run-receipt v1 contract. No verification claim was made.",
+  };
+}
+
+function runProofValidateFixture(value, expectedRunId, checkedReceipt, loadedEvidence) {
+  const fixture = runProofObject(value), snapshot = fixture && runProofObject(fixture.journal);
+  const artifacts = snapshot && runProofObject(snapshot.artifacts);
+  const refs = snapshot && runProofObject(runProofField(snapshot, "artifact_refs", {}));
+  const exactEvents = snapshot && Array.isArray(snapshot.events) && loadedEvidence &&
+    snapshot.events.length === loadedEvidence.events.length && snapshot.events.every((event, index) =>
+      runProofCanonicalJson(event) === loadedEvidence.events[index]);
+  const ok = fixture && fixture.format_version === 1 && snapshot && snapshot.run_id === expectedRunId &&
+    runProofText(snapshot.thread_id) && snapshot.thread_id === loadedEvidence?.threadId && exactEvents && artifacts && refs &&
+    Object.keys(refs).length === 0 && runProofHex(snapshot.head_hash) &&
+    snapshot.head_hash === checkedReceipt.headHash && BigInt(snapshot.events.length) === checkedReceipt.events;
+  return ok ? { ok: true, fixture, snapshot } : {
+    ok: false, error: "The portable journal no longer matches the signed run and head. Reload the journal, then verify the current finalized evidence.",
+  };
+}
+
+function runProofValidateVerified(value, receiptCheck) {
+  const verified = runProofObject(value), head = verified && runProofObject(verified.journal_head);
+  const events = head && recExactUnsigned(head, "events");
+  const effectCount = verified && recExactUnsigned(verified, "effect_receipts");
+  const receipt = receiptCheck.receipt;
+  const capsules = verified && runProofField(verified, "capsules", {});
+  const policies = verified && runProofField(verified, "capsule_policies", []);
+  const denials = verified && runProofField(verified, "denials", []);
+  const ok = verified && verified.run_id === receipt.run_id && events === receiptCheck.events &&
+    head.sha256 === receiptCheck.headHash && effectCount === BigInt(receiptCheck.effects.length) &&
+    (verified.manifest_digest ?? null) === (receipt.manifest_digest ?? null) &&
+    runProofSame(capsules, receiptCheck.capsules) &&
+    (verified.executor_policy ?? null) === (receipt.executor_policy ?? null) &&
+    runProofSame(policies, receiptCheck.policies) &&
+    runProofSame(denials, receiptCheck.denials) && verified.signer === receipt.signer;
+  return ok ? { ok: true, verified } : {
+    ok: false, error: "The verification summary does not bind every reviewed receipt component. No verification claim was made.",
+  };
+}
+
+function runProofValidateKeys(value, signer) {
+  const catalog = runProofObject(value), keys = catalog && catalog.keys;
+  if (!catalog || !runProofHex(catalog.active) || !Array.isArray(keys) || keys.length > RUN_PROOF_KEY_LIMIT) return null;
+  const instant = (text) => typeof text === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(text) && Number.isFinite(Date.parse(text));
+  const valid = keys.every((item) => {
+    const key = runProofObject(item);
+    return key && runProofHex(key.key_id) && runProofHex(key.public_key) && instant(key.registered_at) &&
+      (key.retired_at == null || (instant(key.retired_at) && Date.parse(key.retired_at) >= Date.parse(key.registered_at)));
+  });
+  if (!valid || new Set(keys.map((item) => item.key_id)).size !== keys.length ||
+      !keys.some((item) => item.key_id === catalog.active && item.retired_at == null)) return null;
+  const record = keys.find((item) => item.key_id === signer);
+  return record ? { state: catalog.active === signer ? "active" : record.retired_at ? "retired" : "historical", record } : null;
+}
+
+function runProofReady(recorder = store.recorder) {
+  return Boolean(recorder && !recorder.error && recorder.exactEnvelope === true && recorder.complete === true &&
+    recorder.requestedRunId === recorder.runId && runProofText(recorder.runId) &&
+    Array.isArray(recorder.events) && recorder.events.length > 0 && recorder.proofEvidence &&
+    recorder.proofEvidence.runId === recorder.runId);
+}
+
+function runProofOperationCurrent(request, operation, runId, recorder) {
+  return request === store.runProofRequest && connectionOperationCurrent(operation) && runProofReady() &&
+    store.recorder === recorder && store.recorder.runId === runId;
+}
+
+function runProofVisibleMessage(value, maximum = 2048) {
+  const text = String(value || "");
+  if (agentUtf8Length(text) <= maximum) return text;
+  let out = "";
+  for (const char of text) {
+    if (agentUtf8Length(out + char) > maximum) break;
+    out += char;
+  }
+  return `${out}… [message truncated by Studio]`;
+}
+
+function runProofError(stage, error) {
+  const status = Number(error && error.status), body = error && error.body || {};
+  if (status === 404 && Object.prototype.hasOwnProperty.call(body, "raw")) {
+    return "This server build does not expose signed run receipts yet. The loaded journal remains available without a proof claim.";
+  }
+  if (stage === "receipt" && status === 404) return "The finalized run is not available inside this connection's access boundary.";
+  if (stage === "receipt" && status === 409) return "The run has no persisted journal head that Rusty can sign yet.";
+  if (stage === "verify" && status === 404) return "The receipt signer is not present in this deployment's public key history.";
+  if (stage === "verify" && status === 422 && body.error === "receipt_verification_failed") {
+    return runProofVisibleMessage(body.message || "Rusty rejected the receipt because one signed evidence component did not match.");
+  }
+  return runProofVisibleMessage(body.message || error && error.message || "The signed proof could not be completed.");
+}
+
+function runProofLink(label, detail, state) {
+  return `<div class="run-proof-link ${state || ""}"><b>${escapeHtml(label)}</b><span>${escapeHtml(detail)}</span></div>`;
+}
+
+function runProofHtml(recorder, state) {
+  const ready = runProofReady(recorder), value = state || {};
+  let seal = "Awaiting<br>evidence", sealClass = "", status = "Load a complete journal before requesting a signed proof.";
+  let chain = [runProofLink("Journal head", "not loaded", ""), runProofLink("Runtime contract", "not inspected", ""),
+    runProofLink("Effect ledger", "not inspected", ""), runProofLink("Deployment signer", "not resolved", "")].join("");
+  let meta = "", error = "", action = "";
+  if (recorder && !recorder.error && recorder.complete === true && recorder.exactEnvelope !== true) {
+    status = "The loaded journal response does not bind the exact requested run and terminal envelope. Reload it from a compatible server before requesting proof.";
+  }
+  if (recorder && !recorder.error && recorder.complete === true && recorder.exactEnvelope === true &&
+      Array.isArray(recorder.events) && recorder.events.length && !recorder.proofEvidence) {
+    status = "This finalized journal cannot enter signed proof: its visible event evidence exceeds the 8 MiB inspection boundary or does not carry one exact run and thread identity.";
+  }
+  if (ready) {
+    const phase = value.phase || "ready";
+    const receipt = value.receipt || {}, checked = value.receiptCheck || {};
+    const step = value.step || "";
+    const active = (name) => phase === "verifying" && step === name ? "active" :
+      (phase === "verified" || ["fixture", "verify", "keys"].indexOf(step) > ["receipt", "fixture", "verify", "keys"].indexOf(name)) ? "done" : "";
+    const count = checked.events === undefined ? `${recorder.events.length} loaded events` : `${checked.events} signed events`;
+    chain = [
+      runProofLink("Journal head", count, active("receipt")),
+      runProofLink("Runtime contract", receipt.manifest_digest ? `manifest ${shortId(receipt.manifest_digest)}` : "no manifest pinned", active("fixture")),
+      runProofLink("Effect ledger", value.receiptReceived ? `${(checked.effects || []).length} effect receipt(s) · ${(checked.denials || []).length} denial(s)` : "awaiting receipt", active("verify")),
+      runProofLink("Deployment signer", receipt.signer ? shortId(receipt.signer) : "awaiting public identity", active("keys")),
+    ].join("");
+    if (phase === "verifying") {
+      seal = "Checking<br>chain"; status = `Verifying ${step === "journal" ? "finalized journal availability" : step === "receipt" ? "signed receipt" : step === "fixture" ? "portable journal" : step === "verify" ? "cryptographic statement" : "public key lineage"}…`;
+    } else if (phase === "verified") {
+      seal = "Verified<br>v1"; sealClass = "verified";
+      const keyState = value.keyInfo ? (value.keyInfo.state === "active" ? "active signing key" :
+        value.keyInfo.state === "retired" ? "retired key · still verifiable" : "historical key · still verifiable") : "key history unavailable";
+      status = `Verified against the exact finalized journal head. Signer: ${keyState}.`;
+      meta = `<div class="run-proof-meta"><div><span>Run</span><b>${escapeHtml(shortId(recorder.runId))}</b></div>` +
+        `<div><span>Journal commitment</span><b>${escapeHtml(shortId(checked.headHash))}</b></div>` +
+        `<div><span>Executor policy</span><b>${escapeHtml(receipt.executor_policy || "unpinned")}</b></div>` +
+        `<div><span>Capsules</span><b>${escapeHtml(String(Object.keys(checked.capsules || {}).length))} resolved</b></div></div>`;
+    } else if (phase === "error") {
+      seal = value.rejected ? "Proof<br>rejected" : "Check<br>incomplete";
+      sealClass = value.rejected ? "rejected" : "";
+      status = value.receiptReceived
+        ? "A receipt was returned for this journal head, but the complete verification chain was not established."
+        : "Receipt creation may or may not have reached the server; retry safely reads or refreshes the current head.";
+      error = `<div class="run-proof-error" role="alert" tabindex="-1">${escapeHtml(value.error || "Verification did not complete.")}</div>`;
+    } else {
+      seal = "Ready to<br>attest"; status = "The complete journal is ready for a signed chain-of-custody check.";
+    }
+    const disabled = phase === "verifying" ? " disabled" : "";
+    const label = phase === "verified" ? "Verify current head again" : phase === "error" ? "Retry signed proof" : "Mint & verify signed proof";
+    action = `<div class="run-proof-actions"><button class="small primary" type="button" data-run-proof-action${disabled} aria-describedby="run-proof-mint-note">${label}</button>` +
+      `<span class="muted tiny" id="run-proof-mint-note">First use persists a receipt and may initialize this deployment's local signing key.</span></div>`;
+  }
+  return `<div class="run-proof-head"><div><div class="run-proof-kicker">Signed execution proof</div>` +
+    `<h3 id="run-proof-title" tabindex="-1">Chain of custody</h3>` +
+    `<p id="run-proof-status">${escapeHtml(status)}</p></div>` +
+    `<div class="run-proof-seal ${sealClass}" aria-hidden="true">${seal}</div></div>` +
+    `<div class="run-proof-chain" aria-label="Run proof chain">${chain}</div>${meta}${error}` +
+    `<div class="run-proof-boundary"><b>What this proves:</b> the served evidence is unchanged, names the signed runtime commitments, and verifies against this deployment's public key history. ` +
+      `<b>What it does not prove:</b> model answer quality, an external provider's honesty, or remote/KMS transparency attestation.</div>` + action;
+}
+
+function runProofRender(focusSelector = "") {
+  const panel = $("run-proof"), body = $("run-proof-body"), announcer = $("run-proof-announcer");
+  if (!panel || !body || !announcer) return;
+  const ownedFocus = panel.contains(document.activeElement);
+  panel.setAttribute("aria-busy", String(store.runProof && store.runProof.phase === "verifying"));
+  body.innerHTML = runProofHtml(store.recorder, store.runProof);
+  announcer.textContent = $("run-proof-status")?.textContent || "Signed proof status updated.";
+  if (focusSelector || ownedFocus) body.querySelector(focusSelector || "#run-proof-title")?.focus({ preventScroll: true });
+}
+
+async function runProofVerify() {
+  if (!runProofReady()) { toast("Load a complete journal before requesting signed proof.", "warn"); return; }
+  const recorder = store.recorder, runId = recorder.runId;
+  const loadedEvidence = recorder.proofEvidence;
+  if (!loadedEvidence) { toast("Reload the exact finalized journal before requesting signed proof.", "warn"); return; }
+  const operation = connectionOperation(currentThread()?.thread_id || null); if (!operation) return;
+  const request = ++store.runProofRequest;
+  const state = { runId, phase: "verifying", step: "receipt", receiptReceived: false, receipt: null,
+    receiptCheck: null, verified: null, keyInfo: null, error: "", rejected: false };
+  store.runProof = state;
+  runProofRender("#run-proof-title");
+  let stage = "receipt";
+  try {
+    const receiptBody = await apiForConnection(operation.connection, "GET",
+      `/runs/${encodeURIComponent(runId)}/receipt`, undefined, RUN_PROOF_RESPONSE_BYTES);
+    if (!runProofOperationCurrent(request, operation, runId, recorder) || store.runProof !== state) return;
+    const receiptCheck = runProofValidateReceipt(receiptBody, runId);
+    if (!receiptCheck.ok) throw new Error(receiptCheck.error);
+    state.receiptReceived = true; state.receipt = receiptCheck.receipt; state.receiptCheck = receiptCheck; state.step = "fixture";
+    runProofRender();
+
+    stage = "fixture";
+    const fixtureBody = await apiForConnection(operation.connection, "GET",
+      `/runs/${encodeURIComponent(runId)}/fixture`, undefined, RUN_PROOF_RESPONSE_BYTES);
+    if (!runProofOperationCurrent(request, operation, runId, recorder) || store.runProof !== state) return;
+    const fixtureCheck = runProofValidateFixture(fixtureBody, runId, receiptCheck, loadedEvidence);
+    if (!fixtureCheck.ok) throw new Error(fixtureCheck.error);
+    state.step = "verify"; runProofRender();
+
+    stage = "verify";
+    const exactRequest = runProofExactJson({ snapshot: fixtureCheck.snapshot, receipt: receiptCheck.receipt });
+    if (exactRequest == null || agentUtf8Length(exactRequest) > RUN_PROOF_RESPONSE_BYTES) {
+      throw new Error("The exact combined proof exceeds Studio's 8 MiB verification boundary.");
+    }
+    const verifiedBody = await apiForConnection(operation.connection, "POST", "/receipts/verify",
+      undefined, RUN_PROOF_RESPONSE_BYTES, exactRequest);
+    if (!runProofOperationCurrent(request, operation, runId, recorder) || store.runProof !== state) return;
+    const verifiedCheck = runProofValidateVerified(verifiedBody, receiptCheck);
+    if (!verifiedCheck.ok) throw new Error(verifiedCheck.error);
+    state.verified = verifiedCheck.verified; state.step = "keys"; runProofRender();
+
+    try {
+      const keys = await apiForConnection(operation.connection, "GET", "/receipt_keys", undefined, RUN_PROOF_RESPONSE_BYTES);
+      if (!runProofOperationCurrent(request, operation, runId, recorder) || store.runProof !== state) return;
+      state.keyInfo = runProofValidateKeys(keys, receiptCheck.receipt.signer);
+    } catch {
+      if (!runProofOperationCurrent(request, operation, runId, recorder) || store.runProof !== state) return;
+      state.keyInfo = null;
+    }
+    state.phase = "verified"; state.step = "done";
+    runProofRender("#run-proof-title");
+    $("run-proof-announcer").textContent = `Signed proof verified for run ${runId}.`;
+  } catch (error) {
+    if (!runProofOperationCurrent(request, operation, runId, recorder) || store.runProof !== state) return;
+    state.phase = "error";
+    state.error = runProofError(stage, error);
+    state.rejected = stage === "verify" && Number(error && error.status) === 422 &&
+      error.body && error.body.error === "receipt_verification_failed";
+    runProofRender(".run-proof-error");
   }
 }
 
@@ -14429,6 +14853,9 @@ function init() {
   $("rec-body").addEventListener("click", recClick);
   $("rec-detail").addEventListener("click", recClick);
   $("rec-investigation").addEventListener("click", recClick);
+  $("run-proof").addEventListener("click", (event) => {
+    if (event.target.closest("[data-run-proof-action]")) runProofVerify();
+  });
 
   // Replay & run comparison. The banner's divergence seq is a jump link into
   // the loaded timeline (when that seq is in it).
