@@ -1738,6 +1738,31 @@
   .fabric-blueprint-card-actions { display: grid; grid-template-columns: repeat(2, auto); gap: 5px; justify-content: end; }
   .fabric-blueprint-card-actions [data-blueprint-load] { grid-column: 1 / -1; }
   .fabric-blueprint-card-actions .danger { border-color: #70443a; color: #e2a895; }
+  .fabric-blueprint-editor { margin: 10px 12px 4px; border: 1px solid #71563f; border-radius: 9px; background: linear-gradient(132deg, #2b241d, #1d1b18 64%); overflow: hidden; }
+  .fabric-blueprint-editor[hidden] { display: none; }
+  .fabric-blueprint-editor-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 13px 14px 11px; border-bottom: 1px solid #564333; }
+  .fabric-blueprint-editor-head h3 { margin: 0; font: 700 14px var(--sans); }
+  .fabric-blueprint-editor-head p { max-width: 760px; margin: 4px 0 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.45; }
+  .fabric-blueprint-editor-mark { flex: 0 0 auto; color: #e0aa78; font: 700 9.5px var(--mono); letter-spacing: .8px; text-transform: uppercase; }
+  .fabric-blueprint-editor-form { display: grid; gap: 11px; padding: 12px 14px 14px; }
+  .fabric-blueprint-revision-name { display: grid; gap: 4px; max-width: 520px; color: var(--text-dim); font-size: 10px; letter-spacing: .4px; text-transform: uppercase; }
+  .fabric-blueprint-revision-name input { width: 100%; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); color: var(--text); font: 11px var(--mono); }
+  .fabric-blueprint-compare { display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); gap: 8px; align-items: stretch; }
+  .fabric-blueprint-version { min-width: 0; padding: 10px; border: 1px solid #4f4639; border-radius: 7px; background: rgba(12, 14, 13, .36); }
+  .fabric-blueprint-version > b { display: block; margin-bottom: 7px; color: #d8b28b; font: 700 9.5px var(--mono); letter-spacing: .55px; text-transform: uppercase; }
+  .fabric-blueprint-version .fabric-blueprint-score { grid-template-columns: minmax(0, 1fr) 18px minmax(82px, .62fr); }
+  .fabric-blueprint-version-note { margin: 8px 0 0; color: var(--text-dim); font-size: 9.5px; line-height: 1.4; overflow-wrap: anywhere; }
+  .fabric-blueprint-version details { margin-top: 8px; }
+  .fabric-blueprint-version summary { cursor: pointer; color: #c5aa8d; font: 9.5px var(--mono); }
+  .fabric-blueprint-version pre { max-height: 280px; margin: 7px 0 0; padding: 8px; overflow: auto; border: 1px solid #41382f; border-radius: 5px; background: #111311; color: var(--text-dim); font: 9px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .fabric-blueprint-revision-arrow { display: grid; place-items: center; color: #d8905d; font: 700 20px var(--mono); }
+  .fabric-blueprint-change-list { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+  .fabric-blueprint-change-list li { padding: 4px 7px; border: 1px solid #665240; border-radius: 999px; background: #30261e; color: #e1c4a5; font: 9.5px var(--mono); }
+  .fabric-blueprint-revision-error { margin: 0; padding: 8px 9px; border: 1px solid #784b3f; border-radius: 6px; background: #321f1b; color: #efb09d; font-size: 10.5px; }
+  .fabric-blueprint-revision-ack { display: flex; gap: 8px; align-items: flex-start; color: var(--text); font-size: 10.5px; line-height: 1.45; }
+  .fabric-blueprint-revision-ack input { margin-top: 2px; }
+  .fabric-blueprint-editor-actions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  .fabric-blueprint-editor-actions small { color: var(--text-dim); font-size: 9.5px; }
   .fabric-compose { margin-top: 14px; padding: 0; overflow: hidden; }
   .fabric-compose-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(105deg, #1c2828, var(--bg-panel) 58%); }
   .fabric-compose-head h2 { margin: 0; font-size: 16px; }
@@ -2118,6 +2143,9 @@
     .fabric-blueprint-card { grid-template-columns: 1fr; }
     .fabric-blueprint-score { grid-template-columns: minmax(0, 1fr) 20px minmax(85px, .6fr); }
     .fabric-blueprint-card-actions { grid-column: auto; }
+    .fabric-blueprint-editor-head { flex-direction: column; }
+    .fabric-blueprint-compare { grid-template-columns: 1fr; }
+    .fabric-blueprint-revision-arrow { min-height: 18px; transform: rotate(90deg); }
     .fabric-trace-event { grid-template-columns: 1fr; gap: 2px; }
     .fabric-compose-meta, .fabric-assignment-grid, .fabric-assignment-task, .fabric-compose-options { grid-template-columns: 1fr; }
     .learn-head { flex-direction: column; }
@@ -2512,6 +2540,7 @@
             </div>
           </div>
           <div class="fabric-blueprints-status" id="fabric-blueprints-status" role="status" aria-live="polite"></div>
+          <div class="fabric-blueprint-editor" id="fabric-blueprint-editor" hidden></div>
           <div class="fabric-blueprints-list" id="fabric-blueprints-list"><div class="empty">No team blueprints are saved for this connection.</div></div>
           <span class="sr-only" id="fabric-blueprints-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
         </section>
@@ -3123,6 +3152,7 @@ const store = {
   fabricRunRequest: 0,
   fabricRunPersistenceWarning: false,
   fabricBlueprints: [], // reusable structure only; work inputs, results, deadlines, and receipts are excluded
+  fabricBlueprintRevision: null, // connection-bound page-memory review for a new immutable local blueprint revision
   fabricBlueprintPersistenceWarning: false,
   fabricBlueprintRenderKey: "",
   fabricFollowEnabled: true,
@@ -5005,6 +5035,7 @@ function connectionResetWorkspace() {
   store.fabricRunRefreshing = false;
   store.fabricRunPersistenceWarning = false;
   store.fabricBlueprints = [];
+  store.fabricBlueprintRevision = null;
   store.fabricBlueprintPersistenceWarning = false;
   store.fabricBlueprintRenderKey = "";
   store.memory = null;
@@ -14240,6 +14271,7 @@ function fabricBlueprintCardHtml(blueprint, allAgents) {
     fabricBlueprintScoreHtml(value) +
     `<div class="fabric-blueprint-readiness"><b class="${readiness.tone}">${escapeHtml(readiness.label)}</b><span>${escapeHtml(readiness.message)}</span></div>` +
     `<div class="fabric-blueprint-card-actions"><button class="small primary" type="button" aria-label="${escapeHtml(`${loadLabel} ${value.name}`)}" data-blueprint-load="${id}" data-fabric-blueprint-focus="${id}:load"${readiness.loadable ? "" : " disabled"}>${loadLabel}</button>` +
+    `<button class="small" type="button" aria-label="${escapeHtml(`Revise ${value.name}`)}" data-blueprint-revise="${id}" data-fabric-blueprint-focus="${id}:revise"${readiness.loadable ? "" : " disabled"}>Revise</button>` +
     `<button class="small" type="button" aria-label="${escapeHtml(`Export ${value.name}`)}" data-blueprint-export="${id}" data-fabric-blueprint-focus="${id}:export">Export</button>` +
     `<button class="small danger" type="button" aria-label="${escapeHtml(`Delete ${value.name}`)}" data-blueprint-delete="${id}" data-fabric-blueprint-focus="${id}:delete">Delete</button></div></article>`;
 }
@@ -14267,6 +14299,119 @@ function fabricParseBlueprintText(text) {
   const normalized = fabricNormalizeBlueprint(parsed);
   if (normalized.error) throw new Error(normalized.error);
   return normalized.value;
+}
+
+function fabricBlueprintRevisionSnapshot(blueprint) {
+  const normalized = fabricNormalizeBlueprint(blueprint);
+  if (normalized.error) return null;
+  const value = normalized.value;
+  const snapshot = {
+    name: value.name, team_label: value.team_label, pattern: value.pattern,
+    roles: value.roles.map((role) => ({ ...role })),
+  };
+  if (value.delegator) snapshot.delegator = value.delegator;
+  if (value.context) snapshot.context = { scopes: [...value.context.scopes], channels: [...value.context.channels] };
+  if (value.handoff === true) snapshot.handoff = true;
+  if (value.fan_out) snapshot.fan_out = { ...value.fan_out };
+  if (value.quorum) snapshot.quorum = { ...value.quorum };
+  return snapshot;
+}
+
+function fabricBlueprintRevisionName(name) {
+  const source = String(name || "Team blueprint").trim();
+  const match = source.match(/^(.*) revision(?: ([2-9][0-9]*))?$/i);
+  const suffix = match ? ` revision ${match[2] ? Number(match[2]) + 1 : 2}` : " revision";
+  const base = match ? match[1] : source;
+  const budget = Math.max(1, FABRIC_BLUEPRINT_NAME_LIMIT - agentUtf8Length(suffix));
+  let bounded = "";
+  for (const character of base) {
+    if (agentUtf8Length(bounded + character) > budget) break;
+    bounded += character;
+  }
+  return `${bounded.trimEnd()}${suffix}`;
+}
+
+function fabricBlueprintRevisionCandidate(revision, draft, group, allAgents, now = Date.now(), idFactory) {
+  const source = fabricNormalizeBlueprint(revision && revision.source);
+  if (source.error) return { value: null, error: source.error };
+  const made = fabricBlueprintFromComposer(revision && revision.name, draft, group, allAgents, now, idFactory);
+  if (made.error) return made;
+  if (made.value.team_label !== source.value.team_label) {
+    return { value: null, error: "The selected team changed. Cancel this revision and start from the blueprint again." };
+  }
+  return made;
+}
+
+function fabricBlueprintRevisionChanges(source, candidate) {
+  const before = fabricBlueprintRevisionSnapshot(source);
+  const after = fabricBlueprintRevisionSnapshot(candidate);
+  if (!before || !after) return [];
+  const changes = [];
+  if (before.name !== after.name) changes.push("Blueprint name");
+  if (before.team_label !== after.team_label) changes.push("Declared team");
+  if (before.pattern !== after.pattern) changes.push("Coordination pattern");
+  if (JSON.stringify(before.roles) !== JSON.stringify(after.roles)) changes.push("Role bindings and contracts");
+  if ((before.delegator || "") !== (after.delegator || "")) changes.push("Outcome recipient");
+  if (JSON.stringify(before.context || null) !== JSON.stringify(after.context || null) ||
+      Boolean(before.handoff) !== Boolean(after.handoff)) changes.push("Context and handoff");
+  if (JSON.stringify(before.fan_out || null) !== JSON.stringify(after.fan_out || null)) changes.push("Fan-out policy");
+  if (JSON.stringify(before.quorum || null) !== JSON.stringify(after.quorum || null)) changes.push("Quorum policy");
+  return changes;
+}
+
+function fabricBlueprintRevisionReview(revision, draft, group, allAgents, now = Date.now(), idFactory) {
+  if (!revision || !revision.source) return { source: null, candidate: null, error: "No blueprint revision is open.", changes: [], signature: "", approved: false };
+  const source = fabricNormalizeBlueprint(revision.source);
+  if (source.error) return { source: null, candidate: null, error: source.error, changes: [], signature: "", approved: false };
+  const candidate = fabricBlueprintRevisionCandidate(revision, draft, group, allAgents, now, idFactory);
+  if (candidate.error) return { source: source.value, candidate: null, error: candidate.error, changes: [], signature: "", approved: false };
+  const snapshot = fabricBlueprintRevisionSnapshot(candidate.value);
+  const signature = JSON.stringify(snapshot);
+  const changes = fabricBlueprintRevisionChanges(source.value, candidate.value);
+  return {
+    source: source.value, candidate: candidate.value, error: null, changes, signature,
+    approved: changes.length > 0 && revision.acknowledged === true && revision.acknowledgedSignature === signature,
+  };
+}
+
+function fabricBlueprintRevisionNote(blueprint) {
+  const value = fabricNormalizeBlueprint(blueprint).value;
+  if (!value) return "Topology unavailable.";
+  const recipient = value.delegator ? `Outcome returns to ${value.delegator}.` : "No outcome recipient is pinned.";
+  const contracts = value.roles.map((role) => `${role.member}: ${role.kind} / ${role.effect.replaceAll("_", " ")}`).join(" · ");
+  return `${recipient} ${contracts}`;
+}
+
+function fabricBlueprintRevisionExactHtml(blueprint, label) {
+  const snapshot = fabricBlueprintRevisionSnapshot(blueprint);
+  if (!snapshot) return "";
+  return `<details><summary>${escapeHtml(label)}</summary><pre>${escapeHtml(JSON.stringify(snapshot, null, 2))}</pre></details>`;
+}
+
+function fabricBlueprintEditorHtml(revision, draft, group, allAgents) {
+  const review = fabricBlueprintRevisionReview(revision, draft, group, allAgents, revision && revision.previewAt || Date.now(), () => "revision-preview");
+  if (!review.source) return "";
+  const source = review.source;
+  const candidate = review.candidate;
+  const changeHtml = review.changes.length
+    ? `<ul class="fabric-blueprint-change-list" aria-label="Reviewed topology changes">${review.changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("")}</ul>`
+    : `<p class="fabric-blueprint-version-note">No structural change yet. Use the composer below to revise a role, contract, pattern, routing choice, or policy.</p>`;
+  const message = review.error || revision.saveError || "";
+  const nameInvalid = Boolean(message && /blueprint name|with this name/i.test(message));
+  const error = message ? `<p class="fabric-blueprint-revision-error" id="fabric-blueprint-revision-error" tabindex="-1"${revision.saveError ? ` role="alert"` : ""}>${escapeHtml(message)}</p>` : "";
+  const describedBy = nameInvalid ? ` aria-describedby="fabric-blueprint-revision-error fabric-blueprint-revision-boundary"` : ` aria-describedby="fabric-blueprint-revision-boundary"`;
+  return `<div class="fabric-blueprint-editor-head"><div><h3 id="fabric-blueprint-editor-title" tabindex="-1">Revise ${escapeHtml(source.name)}</h3>` +
+    `<p id="fabric-blueprint-revision-boundary">Edit the reusable structure in the composer, then save a new blueprint. The open draft lives only in this page and is lost on reload or connection change; a saved revision follows the bounded browser-scoped blueprint storage. The source remains unchanged. Task text, deadlines, coordination identities, acknowledgements, results, and receipts never enter either version.</p></div>` +
+    `<span class="fabric-blueprint-editor-mark">source → revision</span></div>` +
+    `<form class="fabric-blueprint-editor-form" id="fabric-blueprint-editor-form">` +
+    `<label class="fabric-blueprint-revision-name">New blueprint name<input id="inp-fabric-blueprint-revision-name" type="text" maxlength="${FABRIC_BLUEPRINT_NAME_LIMIT}" value="${escapeHtml(revision.name)}" autocomplete="off"${describedBy}${nameInvalid ? ` aria-invalid="true"` : ""}></label>` +
+    error + `<div class="fabric-blueprint-compare"><section class="fabric-blueprint-version" aria-label="Source blueprint"><b>Source · unchanged</b>${fabricBlueprintScoreHtml(source)}<p class="fabric-blueprint-version-note">${escapeHtml(fabricBlueprintRevisionNote(source))}</p>${fabricBlueprintRevisionExactHtml(source, "Exact source structure")}</section>` +
+    `<div class="fabric-blueprint-revision-arrow" aria-hidden="true">→</div>` +
+    `<section class="fabric-blueprint-version" aria-label="Proposed blueprint revision"><b>Proposed · page memory</b>${candidate ? fabricBlueprintScoreHtml(candidate) : `<div class="empty">Fix the composer contract to preview this revision.</div>`}<p class="fabric-blueprint-version-note">${candidate ? escapeHtml(fabricBlueprintRevisionNote(candidate)) : "The source blueprint remains available."}</p>${candidate ? fabricBlueprintRevisionExactHtml(candidate, "Exact proposed structure") : ""}</section></div>` +
+    changeHtml + `<label class="fabric-blueprint-revision-ack"><input type="checkbox" data-blueprint-revision-ack${review.approved ? " checked" : ""}${!candidate || !review.changes.length ? " disabled" : ""}>` +
+    `<span>I reviewed the exact source-to-revision topology and understand that saving creates a separate browser-scoped blueprint; it does not update durable agents, active coordinations, or the source blueprint.</span></label>` +
+    `<div class="fabric-blueprint-editor-actions"><button class="small primary" type="submit"${review.approved ? "" : " disabled"}>Save new revision</button>` +
+    `<button class="small" type="button" data-blueprint-revision-cancel>Cancel revision</button><small>Use the composer below as the editing canvas.</small></div></form>`;
 }
 
 function fabricComposerRecordPayload(record) {
@@ -14890,7 +15035,7 @@ function fabricRenderBlueprints(force = false) {
   const save = $("btn-fabric-blueprint-save");
   if (!list || !status || !save) return;
   const { state, group, draft } = fabricComposerContext();
-  save.disabled = !store.conn || !state || !group || !group.teamId || !draft || draft.submitting || draft.completed || draft.errorAmbiguous;
+  save.disabled = Boolean(store.fabricBlueprintRevision) || !store.conn || !state || !group || !group.teamId || !draft || draft.submitting || draft.completed || draft.errorAmbiguous;
   const agents = state && Array.isArray(state.list) ? state.list : [];
   const registryPins = agents.map((agent) => [agent.agent_id, agent.team_id,
     String(fabricObject(agent.manifest).manifest_version || ""), fabricAcceptedKinds(agent),
@@ -14905,11 +15050,170 @@ function fabricRenderBlueprints(force = false) {
   const persistence = store.fabricBlueprintPersistenceWarning ? " · session only: browser storage is unavailable or could not retain every blueprint" : " · browser scoped";
   const team = group && group.teamId ? ` · composing ${group.teamId}` : " · choose a declared team label to save";
   status.textContent = `${store.fabricBlueprints.length} saved structure${store.fabricBlueprints.length === 1 ? "" : "s"}${persistence}${team}`;
+  fabricRenderBlueprintEditor();
+}
+
+function fabricRenderBlueprintEditor() {
+  const panel = $("fabric-blueprint-editor");
+  if (!panel) return;
+  const revision = store.fabricBlueprintRevision;
+  const { state, group, draft } = fabricComposerContext();
+  if (!revision || !state || !group || !draft) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  const active = document.activeElement;
+  const focusKey = active && panel.contains(active)
+    ? (active.id || (active.matches("[data-blueprint-revision-ack]") ? "ack" : active.matches("[data-blueprint-revision-cancel]") ? "cancel" : ""))
+    : "";
+  const selection = active && active.id === "inp-fabric-blueprint-revision-name"
+    ? [active.selectionStart, active.selectionEnd] : null;
+  panel.innerHTML = fabricBlueprintEditorHtml(revision, draft, group, state.list);
+  panel.hidden = false;
+  let restore = focusKey === "ack" ? panel.querySelector("[data-blueprint-revision-ack]")
+    : focusKey === "cancel" ? panel.querySelector("[data-blueprint-revision-cancel]")
+      : focusKey ? $(focusKey) : null;
+  if (restore && !restore.disabled) {
+    restore.focus({ preventScroll: true });
+    if (selection && typeof restore.setSelectionRange === "function") restore.setSelectionRange(selection[0], selection[1]);
+  }
+}
+
+function fabricBlueprintRevisionTouch() {
+  const revision = store.fabricBlueprintRevision;
+  if (!revision) return;
+  revision.acknowledged = false;
+  revision.acknowledgedSignature = "";
+  revision.saveError = "";
+  fabricRenderBlueprintEditor();
+}
+
+function fabricBeginBlueprintRevision(blueprintId) {
+  const state = store.fabric;
+  const blueprint = store.fabricBlueprints.find((item) => item.blueprint_id === blueprintId);
+  if (!state || !blueprint) return false;
+  if (store.fabricBlueprintRevision &&
+      !confirm("Discard the open blueprint revision and start again from this source? No saved blueprint will be changed.")) return false;
+  if (state.composer && (state.composer.submitting || state.composer.errorAmbiguous)) {
+    $("fabric-blueprints-announcer").textContent = state.composer.submitting
+      ? "Wait for the coordination receipt before revising a blueprint."
+      : "Resolve the uncertain coordination receipt before revising a blueprint.";
+    return false;
+  }
+  const applied = fabricBlueprintApply(blueprint, state);
+  if (applied.error) {
+    $("fabric-blueprints-status").textContent = applied.error;
+    $("fabric-blueprints-announcer").textContent = `Blueprint revision could not start. ${applied.error}`;
+    return false;
+  }
+  const groupChanged = state.selectedGroup !== applied.group.key;
+  state.selectedGroup = applied.group.key;
+  state.selectedAgent = applied.draft.selectedIds[0] || applied.group.members[0]?.agent_id || null;
+  state.composer = applied.draft;
+  const previewAt = Date.now();
+  store.fabricBlueprintRevision = {
+    sourceId: blueprint.blueprint_id,
+    source: structuredClone(blueprint),
+    name: fabricBlueprintRevisionName(blueprint.name),
+    previewAt,
+    acknowledged: false,
+    acknowledgedSignature: "",
+    saveError: "",
+  };
+  if (groupChanged) {
+    state.statusRequest += 1;
+    state.evidenceRequest += 1;
+    state.statuses = Object.create(null);
+    state.statusErrors = Object.create(null);
+    state.evidence = null;
+  }
+  fabricRender();
+  if (groupChanged) {
+    fabricLoadGroupStatuses(applied.group.key);
+    if (state.selectedAgent) fabricLoadMemberEvidence(state.selectedAgent);
+  }
+  $("fabric-blueprint-editor-title")?.focus({ preventScroll: true });
+  $("fabric-blueprint-editor")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  $("fabric-blueprints-announcer").textContent = `${blueprint.name} opened as a new blueprint revision. The source remains unchanged.`;
+  return true;
+}
+
+function fabricCancelBlueprintRevision(message = "Blueprint revision cancelled. The source blueprint is unchanged.") {
+  if (!store.fabricBlueprintRevision) return false;
+  const sourceId = store.fabricBlueprintRevision.sourceId;
+  store.fabricBlueprintRevision = null;
+  fabricRenderBlueprints(true);
+  const sourceButton = $("fabric-blueprints-list")?.querySelector(`[data-blueprint-revise="${CSS.escape(sourceId)}"]`);
+  (sourceButton || $("inp-fabric-blueprint-name"))?.focus({ preventScroll: true });
+  $("fabric-blueprints-announcer").textContent = message;
+  return true;
+}
+
+function fabricBlueprintRevisionEdit(event) {
+  const revision = store.fabricBlueprintRevision;
+  if (!revision || !event.target) return;
+  if (event.target.id === "inp-fabric-blueprint-revision-name") {
+    revision.name = event.target.value;
+    revision.acknowledged = false;
+    revision.acknowledgedSignature = "";
+    revision.saveError = "";
+    if (!event.isComposing) fabricRenderBlueprintEditor();
+    return;
+  }
+  if (event.target.matches("[data-blueprint-revision-ack]")) {
+    if (event.type === "input") return;
+    const { state, group, draft } = fabricComposerContext();
+    const review = fabricBlueprintRevisionReview(revision, draft, group, state && state.list,
+      revision.previewAt, () => "revision-preview");
+    revision.acknowledged = Boolean(event.target.checked && review.candidate && review.changes.length);
+    revision.acknowledgedSignature = revision.acknowledged ? review.signature : "";
+    revision.saveError = "";
+    fabricRenderBlueprintEditor();
+  }
+}
+
+function fabricSaveBlueprintRevision() {
+  const revision = store.fabricBlueprintRevision;
+  const { state, group, draft } = fabricComposerContext();
+  if (!revision || !state || !group || !draft) return false;
+  const review = fabricBlueprintRevisionReview(revision, draft, group, state.list,
+    revision.previewAt, () => "revision-preview");
+  if (!review.approved) {
+    revision.saveError = review.error || (review.changes.length ? "Review and acknowledge the current topology changes before saving." : "Make at least one structural change before saving a revision.");
+    fabricRenderBlueprintEditor();
+    $("fabric-blueprint-revision-error")?.focus({ preventScroll: true });
+    return false;
+  }
+  const created = fabricBlueprintRevisionCandidate(revision, draft, group, state.list);
+  if (created.error) {
+    revision.saveError = created.error;
+    fabricRenderBlueprintEditor();
+    return false;
+  }
+  const remembered = fabricRememberBlueprint(created.value);
+  if (!remembered.ok) {
+    revision.saveError = remembered.error;
+    fabricRenderBlueprintEditor();
+    return false;
+  }
+  store.fabricBlueprintRevision = null;
+  fabricRenderBlueprints(true);
+  const button = $("fabric-blueprints-list")?.querySelector(`[data-blueprint-revise="${CSS.escape(created.value.blueprint_id)}"]`);
+  (button || $("inp-fabric-blueprint-name"))?.focus({ preventScroll: true });
+  const persistence = remembered.persisted ? "Saved for this browser connection." : "Available this session; browser storage could not retain it.";
+  $("fabric-blueprints-announcer").textContent = `${created.value.name} saved as a separate blueprint revision. ${persistence}`;
+  return true;
 }
 
 function fabricSaveCurrentBlueprint() {
   const { state, group, draft } = fabricComposerContext();
   const input = $("inp-fabric-blueprint-name");
+  if (store.fabricBlueprintRevision) {
+    $("fabric-blueprints-announcer").textContent = "Finish or cancel the open revision before saving another blueprint. Revision changes require their fresh acknowledgement.";
+    $("fabric-blueprint-editor-title")?.focus({ preventScroll: true });
+    return;
+  }
   if (!state || !group || !draft || !input || draft.submitting || draft.completed || draft.errorAmbiguous) return;
   const created = fabricBlueprintFromComposer(input.value, draft, group, state.list);
   if (created.error) {
@@ -14938,6 +15242,8 @@ function fabricUseBlueprint(blueprintId) {
   const state = store.fabric;
   const blueprint = store.fabricBlueprints.find((item) => item.blueprint_id === blueprintId);
   if (!state || !blueprint) return;
+  if (store.fabricBlueprintRevision &&
+      !confirm("Discard the open blueprint revision and load this structure for a run? The source blueprint remains unchanged.")) return;
   if (state.composer && (state.composer.submitting || state.composer.errorAmbiguous)) {
     $("fabric-blueprints-announcer").textContent = state.composer.submitting
       ? "Wait for the coordination receipt before loading a blueprint."
@@ -14951,6 +15257,7 @@ function fabricUseBlueprint(blueprintId) {
     fabricRenderBlueprints(true);
     return;
   }
+  store.fabricBlueprintRevision = null;
   const groupChanged = state.selectedGroup !== applied.group.key;
   state.selectedGroup = applied.group.key;
   state.selectedAgent = applied.draft.selectedIds[0] || applied.group.members[0]?.agent_id || null;
@@ -15016,6 +15323,10 @@ async function fabricImportBlueprint(file) {
 
 function fabricDeleteBlueprint(blueprintId) {
   const blueprint = store.fabricBlueprints.find((item) => item.blueprint_id === blueprintId);
+  if (blueprint && store.fabricBlueprintRevision && store.fabricBlueprintRevision.sourceId === blueprintId) {
+    $("fabric-blueprints-announcer").textContent = "Cancel or save the open revision before deleting its source blueprint.";
+    return false;
+  }
   if (!blueprint || !confirm(`Delete the local blueprint “${blueprint.name}”? This does not change durable agents or coordinations.`)) return false;
   store.fabricBlueprints = store.fabricBlueprints.filter((item) => item.blueprint_id !== blueprintId);
   const persisted = saveFabricBlueprints();
@@ -15077,6 +15388,9 @@ function fabricComposerHandleClick(event) {
   if (!group || !draft) return;
   const another = event.target.closest("[data-compose-new]");
   if (another) {
+    if (store.fabricBlueprintRevision &&
+        !confirm("Discard the open blueprint revision and start a new coordination draft? The source blueprint remains unchanged.")) return;
+    store.fabricBlueprintRevision = null;
     state.composer = fabricComposerInitial();
     fabricRenderComposer(true);
     fabricFocusData($("fabric-compose-body"), "data-fabric-focus", "compose-id");
@@ -15097,6 +15411,7 @@ function fabricComposerHandleClick(event) {
     fabricComposerEnsure(draft, group);
     draft.needsRender = true;
     fabricRenderComposer(true);
+    fabricBlueprintRevisionTouch();
     $("fabric-compose-announcer").textContent = `${fabricComposerPatternLabel(draft.pattern)} pattern selected.`;
     return;
   }
@@ -15110,6 +15425,7 @@ function fabricComposerHandleClick(event) {
   fabricComposerEnsure(draft, group);
   draft.needsRender = true;
   fabricRenderComposer(true);
+  fabricBlueprintRevisionTouch();
 }
 
 function fabricComposerHandleEdit(event) {
@@ -15122,6 +15438,7 @@ function fabricComposerHandleEdit(event) {
     if (target.checked && !draft.contextScopes.includes(scope)) draft.contextScopes.push(scope);
     else if (!target.checked) draft.contextScopes = draft.contextScopes.filter((item) => item !== scope);
     fabricComposerResetApproval(draft);
+    fabricBlueprintRevisionTouch();
     fabricRenderComposerReview();
     return;
   }
@@ -15136,6 +15453,9 @@ function fabricComposerHandleEdit(event) {
     draft[field] = value;
   }
   if (field !== "acknowledge") fabricComposerResetApproval(draft, field === "coordinationId");
+  if (["member", "kind", "effect", "delegator", "channels", "handoff", "maxInFlight", "failurePolicy", "threshold", "resolver"].includes(field)) {
+    fabricBlueprintRevisionTouch();
+  }
   if (field === "delegator") {
     if (!value) draft.handoff = false;
     draft.needsRender = true;
@@ -15474,7 +15794,16 @@ function fabricSelectGroup(key, focus) {
     if (focus && state.selectedAgent) fabricFocusData($("fabric-team"), "data-fabric-agent", state.selectedAgent);
     return true;
   }
+  if (store.fabricBlueprintRevision &&
+      !confirm("Discard the open blueprint revision and change teams? The source blueprint remains unchanged.")) {
+    fabricFocusData($("fabric-groups"), "data-fabric-group", state.selectedGroup);
+    return false;
+  }
   if (state.composer && state.composer.completed) state.composer = fabricComposerInitial();
+  if (store.fabricBlueprintRevision) {
+    store.fabricBlueprintRevision = null;
+    $("fabric-blueprints-announcer").textContent = "Blueprint revision cancelled because the selected team changed. The source remains unchanged.";
+  }
   state.selectedGroup = group.key;
   state.selectedAgent = group.members[0] ? group.members[0].agent_id : null;
   state.statusRequest += 1;
@@ -21189,6 +21518,8 @@ function init() {
   $("fabric-blueprints-list").addEventListener("click", (event) => {
     const load = event.target.closest("[data-blueprint-load]");
     if (load && !load.disabled) { fabricUseBlueprint(load.getAttribute("data-blueprint-load")); return; }
+    const revise = event.target.closest("[data-blueprint-revise]");
+    if (revise && !revise.disabled) { fabricBeginBlueprintRevision(revise.getAttribute("data-blueprint-revise")); return; }
     const exportButton = event.target.closest("[data-blueprint-export]");
     if (exportButton) {
       try {
@@ -21199,6 +21530,17 @@ function init() {
     }
     const remove = event.target.closest("[data-blueprint-delete]");
     if (remove) fabricDeleteBlueprint(remove.getAttribute("data-blueprint-delete"));
+  });
+  $("fabric-blueprint-editor").addEventListener("input", fabricBlueprintRevisionEdit);
+  $("fabric-blueprint-editor").addEventListener("change", fabricBlueprintRevisionEdit);
+  $("fabric-blueprint-editor").addEventListener("compositionend", fabricBlueprintRevisionEdit);
+  $("fabric-blueprint-editor").addEventListener("click", (event) => {
+    if (event.target.closest("[data-blueprint-revision-cancel]")) fabricCancelBlueprintRevision();
+  });
+  $("fabric-blueprint-editor").addEventListener("submit", (event) => {
+    if (event.target.id !== "fabric-blueprint-editor-form") return;
+    event.preventDefault();
+    fabricSaveBlueprintRevision();
   });
   $("fabric-coordination-form").addEventListener("submit", (event) => {
     event.preventDefault();

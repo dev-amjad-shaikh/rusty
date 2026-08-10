@@ -158,8 +158,9 @@ Studio is a useful engineering console, not yet the complete experience describe
   that binds an assistant version to a registered durable identity.
 - The Team Observatory provides inventory, all four typed coordination launches, read-only coordination
   evidence, browser-scoped run recall with a selected-run live settlement overlay, and portable structural
-  blueprints with a visual topology score and live-roster drift preflight. Server-persisted visual topology,
-  durable team definitions, creation/editing lifecycle, server-side coordination discovery,
+  blueprints with a visual topology score, live-roster drift preflight, and reviewed source-to-revision editing
+  that creates a separate browser-scoped blueprint instead of mutating the source. Server-persisted visual topology,
+  durable team definitions, shared creation/editing lifecycle, server-side coordination discovery,
   supervisor and recovery controls, richer active-member evidence, and coordinated replay remain.
 - The general-purpose dataset remains portable page memory, and imported experiment reports are now
   inspectable, deterministically failure-clustered, and exactly pair-comparable locally. The Failure Atlas
@@ -310,8 +311,8 @@ stable retry, exact receipt checks, and direct TeamTrace investigation. The Team
 privacy-minimized browser recall, bounded reconciliation, trustworthy terminal settlement progress,
 visibility-aware live following, and last-evidence preservation during outages. Connection-scoped
 `rusty.team-blueprint/v1` manifests add a readable topology score, safe import/export, exact role and
-policy preservation, and live-registry drift gates without retaining task or run content. Server-persisted team topology
-and lifecycle, durable server-side discovery, richer active-member execution evidence, supervision
+policy preservation, live-registry drift gates, and an exact reviewed local revision path without retaining
+task or run content. Server-persisted team topology and lifecycle, durable server-side discovery, richer active-member execution evidence, supervision
 control, recovery actions, shared/versioned template lifecycle, and coordinated replay remain.
 
 Scope:
@@ -502,7 +503,7 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 6 | Memory browser, context assembly, provenance, conflicts, corrections, and forgetting | Partial — browser, deterministic token-budget context preview, provenance, conflict review, selected-memory correction, exact durable consolidation launch, and task-to-summary follow-through delivered; candidate approval, expiration, and approval-gated forgetting pending | Uses server contracts that already exist and makes a distinctive Rusty capability legible early |
 | 7 | Durable interrupt and human-review inbox | Partial — selected-thread decision boundary delivered with corroborated checkpoint identity, exact response preview, checkpoint-bound resume, suspension/re-execution evidence, and duplicate-resistant uncertain handling; durable discovery, assignment, authority, deadline, and audit remain | Establishes safe assignment, authority, decisions, and resume before quality and learning approvals depend on it |
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
-| 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and topology editing remain | Delivers the most common multi-agent patterns first |
+| 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, reviewed immutable local blueprint revisions, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and shared topology lifecycle remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
 | 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, portable multi-case Dataset Workbench, exact aggregate-reconciling Experiment Report Explorer, deterministic privacy-safe Failure Atlas, paired statistical regression evidence, release-policy authoring, and deterministic local gate-decision preview delivered; durable reviews/dataset catalogs/report discovery, evaluators, experiment execution, durable statistical reports, trusted provenance, and version-attributed decisions still need platform APIs | Converts the existing quality library into a product workflow |
 | 12 | Failure clusters, annotation queues, and release gates | Local failure-clustering, policy-authoring, and portable gate-decision foundations delivered; durable cluster reports, queues, approval identity, gate decisions, and promotion enforcement need platform APIs | Closes the human quality loop |

@@ -66,6 +66,9 @@ globalThis.__fabric = {
   fabricParseBlueprintEnvelope, fabricPruneBlueprintEnvelope, loadFabricBlueprints,
   saveFabricBlueprints, fabricRememberBlueprint, fabricBlueprintScoreHtml,
   fabricBlueprintDomId, fabricBlueprintCardHtml, fabricBlueprintListHtml, fabricBlueprintFilename, fabricParseBlueprintText,
+  fabricBlueprintRevisionSnapshot, fabricBlueprintRevisionName, fabricBlueprintRevisionCandidate, fabricBlueprintRevisionChanges,
+  fabricBlueprintRevisionReview, fabricBlueprintRevisionNote, fabricBlueprintRevisionExactHtml, fabricBlueprintEditorHtml,
+  fabricBeginBlueprintRevision, fabricSaveCurrentBlueprint,
   fabricRunSafeId, fabricRunTimestamp, fabricRunCount, fabricNormalizeRunRecord,
   fabricRunFromRecord, fabricRunFromPayload, fabricMergeRunHistory, fabricEmptyRunEnvelope,
   fabricParseRunEnvelope, fabricPruneRunEnvelope, loadFabricRunHistory, saveFabricRunHistory,
@@ -970,6 +973,88 @@ const blueprintFixture = {
 }
 
 {
+  check("blueprint editor: repeated revisions get readable bounded names instead of duplicated suffixes",
+    F.fabricBlueprintRevisionName("Insight review cell") === "Insight review cell revision" &&
+    F.fabricBlueprintRevisionName("Insight review cell revision") === "Insight review cell revision 2" &&
+    F.fabricBlueprintRevisionName("Insight review cell revision 2") === "Insight review cell revision 3" &&
+    Buffer.byteLength(F.fabricBlueprintRevisionName("x".repeat(100)), "utf8") <= 80 &&
+    Buffer.byteLength(F.fabricBlueprintRevisionName("🦀".repeat(20)), "utf8") <= 80);
+  const sourceBefore = JSON.stringify(blueprintFixture);
+  const applied = F.fabricBlueprintApply(blueprintFixture, { list: [research, writer, lead] });
+  applied.draft.assignments["writer-1"].member = "final-draft";
+  applied.draft.assignments["writer-1"].input = "must never enter the blueprint";
+  applied.draft.assignments["writer-1"].deadline = "2099-01-01T00:00:00Z";
+  applied.draft.maxInFlight = "1";
+  const revision = {
+    source: structuredClone(blueprintFixture), sourceId: blueprintFixture.blueprint_id,
+    name: "Insight review cell v2", previewAt: Date.parse("2026-08-10T00:00:00Z"),
+    acknowledged: false, acknowledgedSignature: "", saveError: "",
+  };
+  const review = F.fabricBlueprintRevisionReview(revision, applied.draft, applied.group,
+    [research, writer, lead], revision.previewAt, () => "revision-preview");
+  check("blueprint editor: composer changes become a separate structural candidate without mutating the source",
+    !review.error && review.candidate.blueprint_id === "bp-revision-preview" &&
+    review.candidate.roles[1].member === "final-draft" && review.candidate.fan_out.max_in_flight === 1 &&
+    JSON.stringify(blueprintFixture) === sourceBefore && review.candidate.blueprint_id !== blueprintFixture.blueprint_id);
+  check("blueprint editor: task text and deadlines remain outside both revision comparison and portable candidate",
+    !JSON.stringify(review.candidate).includes("must never") && !JSON.stringify(review.candidate).includes("2099") &&
+    !JSON.stringify(F.fabricBlueprintRevisionSnapshot(review.candidate)).includes("deadline"));
+  check("blueprint editor: exact review names every changed topology surface",
+    review.changes.includes("Blueprint name") && review.changes.includes("Role bindings and contracts") &&
+    review.changes.includes("Fan-out policy") && !review.approved);
+  revision.acknowledged = true;
+  revision.acknowledgedSignature = review.signature;
+  const approved = F.fabricBlueprintRevisionReview(revision, applied.draft, applied.group,
+    [research, writer, lead], revision.previewAt, () => "revision-preview");
+  applied.draft.maxInFlight = "2";
+  const drifted = F.fabricBlueprintRevisionReview(revision, applied.draft, applied.group,
+    [research, writer, lead], revision.previewAt, () => "revision-preview");
+  check("blueprint editor: acknowledgement binds the exact candidate and fails closed after a later edit",
+    approved.approved && !drifted.approved && drifted.signature !== revision.acknowledgedSignature);
+  const editor = F.fabricBlueprintEditorHtml(revision, applied.draft, applied.group, [research, writer, lead]);
+  check("blueprint editor: source and proposed topology are accessible, bounded, and explicit about revision semantics",
+    editor.includes("Source · unchanged") && editor.includes("Proposed · page memory") &&
+    editor.includes('aria-label="Source blueprint"') && editor.includes('aria-label="Proposed blueprint revision"') &&
+    editor.includes("Exact source structure") && editor.includes("Exact proposed structure") &&
+    editor.includes("researcher/1.4.0") && editor.includes("does not update durable agents") && !editor.includes("must never enter"));
+}
+
+{
+  const previousDocument = sandbox.document;
+  const previousConfirm = sandbox.confirm;
+  const previousFabric = F.store.fabric;
+  const previousBlueprints = F.store.fabricBlueprints;
+  const previousRevision = F.store.fabricBlueprintRevision;
+  let focused = false;
+  const nodes = {
+    "fabric-blueprints-announcer": { textContent: "" },
+    "fabric-blueprint-editor-title": { focus() { focused = true; } },
+    "inp-fabric-blueprint-name": {},
+  };
+  sandbox.document = { getElementById(id) { return nodes[id] || null; } };
+  F.store.fabric = null;
+  F.store.fabricBlueprintRevision = { sourceId: blueprintFixture.blueprint_id };
+  F.fabricSaveCurrentBlueprint();
+  check("blueprint editor: toolbar save is actively blocked while the reviewed revision owns the composer",
+    focused && nodes["fabric-blueprints-announcer"].textContent.includes("fresh acknowledgement"));
+
+  const openRevision = { sourceId: blueprintFixture.blueprint_id, name: "Edited in progress" };
+  let confirmations = 0;
+  sandbox.confirm = () => { confirmations += 1; return false; };
+  F.store.fabric = {};
+  F.store.fabricBlueprints = [structuredClone(blueprintFixture)];
+  F.store.fabricBlueprintRevision = openRevision;
+  check("blueprint editor: reopening the same source asks before replacing newer draft work",
+    !F.fabricBeginBlueprintRevision(blueprintFixture.blueprint_id) && confirmations === 1 &&
+    F.store.fabricBlueprintRevision === openRevision);
+  sandbox.document = previousDocument;
+  sandbox.confirm = previousConfirm;
+  F.store.fabric = previousFabric;
+  F.store.fabricBlueprints = previousBlueprints;
+  F.store.fabricBlueprintRevision = previousRevision;
+}
+
+{
   fakeLocalStorage.clear();
   fakeLocalStorage.failReads = 0;
   fakeLocalStorage.failWrites = 0;
@@ -1032,11 +1117,12 @@ const blueprintFixture = {
   const fixtureTitleId = F.fabricBlueprintDomId(blueprintFixture.blueprint_id);
   check("blueprints: the topology score is standalone accessible evidence with separate native actions",
     card.includes('role="img"') && card.includes('aria-label="Insight review cell: 2 roles') &&
-    card.includes("Use blueprint") && card.includes("Export") && card.includes("Delete") &&
+    card.includes("Use blueprint") && card.includes("Revise") && card.includes("Export") && card.includes("Delete") &&
     !card.match(/<button[^>]*>[\s\S]*role="img"[\s\S]*<\/button>/));
   check("blueprints: each card and repeated action names expose the blueprint they operate on",
     card.includes(`aria-labelledby="${fixtureTitleId}"`) && card.includes(`id="${fixtureTitleId}"`) &&
     card.includes('aria-label="Use blueprint Insight review cell"') &&
+    card.includes('aria-label="Revise Insight review cell"') &&
     card.includes('aria-label="Export Insight review cell"') && card.includes('aria-label="Delete Insight review cell"') &&
     otherCard.includes('aria-label="Use blueprint Second cell"') && !otherCard.includes('aria-label="Use blueprint Insight review cell"'));
   check("blueprints: opaque whitespace in a legal blueprint ID cannot split the card accessible-name reference",
@@ -1357,17 +1443,38 @@ check("blueprint markup: reusable topology is a labelled Studio surface with exp
   html.includes("Task instructions, deadlines, coordination IDs, parents, results, and receipts are never saved") &&
   html.includes('id="fabric-blueprints-status" role="status" aria-live="polite"') &&
   html.includes('id="fabric-blueprints-announcer" role="status" aria-live="polite"'));
-check("blueprint lifecycle: save, import, export, delete, and exact composer hydration use native controls",
+check("blueprint lifecycle: save, revise, import, export, delete, and exact composer hydration use native controls",
   html.includes('$("btn-fabric-blueprint-save").onclick = fabricSaveCurrentBlueprint;') &&
   html.includes('$("btn-fabric-blueprint-import").onclick') &&
   html.includes('$("inp-fabric-blueprint-import").addEventListener("change"') &&
   html.includes('$("fabric-blueprints-list").addEventListener("click"') &&
-  html.includes("fabricUseBlueprint(load.getAttribute") && html.includes("fabricExportBlueprint(exportButton.getAttribute") &&
+  html.includes("fabricUseBlueprint(load.getAttribute") && html.includes("fabricBeginBlueprintRevision(revise.getAttribute") &&
+  html.includes("fabricExportBlueprint(exportButton.getAttribute") &&
   html.includes("fabricDeleteBlueprint(remove.getAttribute") &&
   html.includes("draft.submitting || draft.completed || draft.errorAmbiguous"));
 check("blueprint isolation: connection changes clear old bindings before loading the new opaque scope",
-  html.includes("store.fabricBlueprints = [];") && html.includes("store.fabricBlueprintRenderKey = \"\";") &&
+  html.includes("store.fabricBlueprints = [];") && html.includes("store.fabricBlueprintRevision = null;") &&
+  html.includes("store.fabricBlueprintRenderKey = \"\";") &&
   html.includes("loadFabricBlueprints();") && html.includes("connectionRunScope(store.conn)"));
+check("blueprint editor lifecycle: one delegated form creates a reviewed new ID and keeps the source immutable",
+  html.includes('id="fabric-blueprint-editor" hidden') &&
+  html.includes('$("fabric-blueprint-editor").addEventListener("submit"') &&
+  html.includes("fabricSaveBlueprintRevision();") &&
+  html.includes("source: structuredClone(blueprint)") &&
+  html.includes("saved as a separate blueprint revision"));
+check("blueprint editor lifecycle: toolbar saves cannot bypass review and reopening any source requires confirmation",
+  html.includes("save.disabled = Boolean(store.fabricBlueprintRevision)") &&
+  html.includes("Finish or cancel the open revision before saving another blueprint") &&
+  html.includes("Discard the open blueprint revision and start again from this source?") &&
+  !html.includes("store.fabricBlueprintRevision.sourceId !== blueprintId"));
+check("blueprint editor accessibility: source, candidate, change list, boundary, and fresh acknowledgement stay named",
+  html.includes('aria-label="Source blueprint"') && html.includes('aria-label="Proposed blueprint revision"') &&
+  html.includes('aria-label="Reviewed topology changes"') &&
+  html.includes('id="fabric-blueprint-revision-boundary"') &&
+  html.includes("data-blueprint-revision-ack"));
+check("blueprint editor lifecycle: visible copy distinguishes the page-memory draft from bounded saved storage",
+  html.includes("The open draft lives only in this page and is lost on reload or connection change") &&
+  html.includes("a saved revision follows the bounded browser-scoped blueprint storage"));
 check("blueprint focus: list replacement restores the exact action or falls back to the stable name field",
   html.includes('element.getAttribute("data-fabric-blueprint-focus")') &&
   html.includes('blueprint ? "fabric-blueprints-list"') &&
@@ -1437,7 +1544,9 @@ check("blueprint responsive: toolbar, topology cards, and actions stack without 
   html.includes(".fabric-blueprints-toolbar { grid-template-columns: 1fr;") &&
   html.includes(".fabric-blueprint-card { grid-template-columns: 1fr;") &&
   html.includes(".fabric-blueprint-score { grid-template-columns:") &&
-  html.includes(".fabric-blueprint-card-actions { grid-column: auto;"));
+  html.includes(".fabric-blueprint-card-actions { grid-column: auto;") &&
+  html.includes(".fabric-blueprint-compare { grid-template-columns: 1fr;") &&
+  html.includes(".fabric-blueprint-revision-arrow { min-height: 18px; transform: rotate(90deg);"));
 check("accessibility: essential TeamTrace sequence and depth use the AA text token",
   html.includes(".fabric-trace-event small { color: var(--text-dim);") &&
   !html.includes(".fabric-trace-event small { color: var(--text-faint);"));

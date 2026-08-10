@@ -116,7 +116,12 @@ studio/
   outcome recipient block loading; changed manifest pins require visible review and use the live pins.
   Blueprint JSON import rejects unknown fields, and export is a bounded `rusty.team-blueprint/v1`
   structural manifest. Task instructions, deadlines, coordination ids, causal parents, results,
-  acknowledgements, and receipts never enter a blueprint. A **Team Run Desk** remembers sanitized coordination metadata for runs started or
+  acknowledgements, and receipts never enter a blueprint. **Revise** opens that topology in the existing
+  composer as an editing canvas, keeps the exact source beside the proposed structure, names every changed
+  surface, and requires a fresh acknowledgement before saving a separate blueprint ID. It never mutates
+  the source, durable identities, or an active coordination. The open draft is page memory and is lost on
+  reload or connection change; after save, the separate revision uses the same bounded, connection-scoped
+  browser storage as other blueprints. A **Team Run Desk** remembers sanitized coordination metadata for runs started or
   attached in the current browser and server/tenant connection scope; task inputs, outputs, results, member
   identities, and API keys are never written into that ledger. Search and lifecycle filters find recent
   work, the pulse rail shows only settlement Rusty has actually reported, and a bounded three-request
@@ -613,8 +618,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   manifests in the current scope, 8 scopes and 80 manifests globally, under a hard 128 KiB storage
   ceiling; an unavailable or partially retained browser store is reported as session-only. Their 64 KiB
   import format rejects unknown fields so task/run content cannot be silently accepted and discarded.
-  The view intentionally
-  offers no coordination restart, operator cancellation, team editing, coordination discovery, or replay controls.
+  The view intentionally offers no coordination restart, operator cancellation, server-persisted team editing,
+  coordination discovery, or replay controls. Local blueprint revision creates a separate browser-scoped structural
+  artifact; it is not a durable team-definition lifecycle.
   Those actions need their own runtime and safety contracts before they become honest affordances.
 - **Thread list is local-only.** The server (as of v0.4) has no `GET /threads`; the Studio's thread list lives in
   `localStorage`, isolated by server and an opaque access-boundary scope, and is not shared across browsers or machines. Server restarts
