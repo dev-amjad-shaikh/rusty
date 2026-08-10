@@ -116,7 +116,15 @@ jobs:
         working-directory: rusty-core
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if curl -sf -H 'User-Agent: rusty-release (github.com/dev-amjad-shaikh/rusty)' \
+              "https://crates.io/api/v1/crates/rusty-agent-runtime/$version" > /dev/null; then
+            echo "rusty-agent-runtime $version is already on crates.io — skipping (idempotent re-run)"
+          else
+            cargo publish
+          fi
 
       # Each cargo publish packages and verifies the crate before uploading,
       # which doubles as the dependents' preflight. Retries absorb the lag
@@ -133,6 +141,14 @@ jobs:
           for crate in rusty-eval rusty-server rusty-worker rusty-otel; do
             echo "== cargo publish: $crate =="
             cd "$crate"
+            pkg=$(grep -m1 '^name' Cargo.toml | cut -d'"' -f2)
+            version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+            if curl -sf -H 'User-Agent: rusty-release (github.com/dev-amjad-shaikh/rusty)' \
+                "https://crates.io/api/v1/crates/$pkg/$version" > /dev/null; then
+              echo "$pkg $version is already on crates.io — skipping (idempotent re-run)"
+              cd "$GITHUB_WORKSPACE"
+              continue
+            fi
             attempt=1
             until cargo publish; do
               if [ "$attempt" -ge 5 ]; then
@@ -170,8 +186,20 @@ jobs:
         working-directory: sdks/python
         run: python -m build
 
-      - name: Publish to PyPI
+      - name: Check whether this version is already on PyPI
         if: needs.config.outputs.dry_run == 'false'
+        id: pypi_check
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' sdks/python/pyproject.toml | cut -d'"' -f2)
+          if curl -sf "https://pypi.org/pypi/rusty-agent-runtime/$version/json" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to PyPI
+        if: needs.config.outputs.dry_run == 'false' && steps.pypi_check.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
@@ -199,8 +227,22 @@ jobs:
         working-directory: sdks/typescript
         run: npm pack
 
-      - name: Publish to npm
+      - name: Check whether this version is already on npm
         if: needs.config.outputs.dry_run == 'false'
+        id: npm_check
+        working-directory: sdks/typescript
+        run: |
+          set -euo pipefail
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "$name@$version" version > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        if: needs.config.outputs.dry_run == 'false' && steps.npm_check.outputs.exists == 'false'
         working-directory: sdks/typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
