@@ -205,6 +205,15 @@ studio/
     succeeded. The verified v1 statement proves that the served journal chain and signed runtime
     commitments are unchanged and resolve to this deployment's public key history. It does **not**
     prove model-answer quality, external provider honesty, or remote/KMS/transparency attestation.
+
+    After verification, **What shaped this run** turns the carried manifest into a signed runtime bill
+    of materials. Five bounded surfaces show the exact model identity and parameter digest, named prompt
+    content digests, canonical tool-schema digests, memory-schema identity, and capsule versions. Every
+    missing surface says **Unpinned** rather than inventing a default; a model name without a parameter
+    digest remains visibly partial. Prompt text, tool schemas, and model parameters are not exposed—their
+    content addresses are. Future signed fields remain named but uninterpreted, and deployment-declared
+    model/capsule identities are not presented as external-provider attestation. The five-column instrument
+    becomes a single ordered column on narrow screens.
   - **Exact replay** — the **Replay** button calls `POST /runs/replay` with the loaded run id and renders
     the verdict as a banner: *verified* (the replayed run reproduced every journaled event byte-for-byte,
     with the event count) or *mismatch* (expected vs actual event counts, plus the `first_divergence` seq
@@ -580,7 +589,8 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   learning. Run the suite for the current assertion count.
 - `node studio/test-receipts.mjs` — contract checks for exact receipt, portable fixture, typed
   verification summary, and public-key history binding; finalized-run readiness, mint-on-read copy,
-  trust-boundary language, hostile-message escaping, tenant/thread/run generation ownership, bounded
+  strict signed-manifest normalization, five-surface runtime bill of materials, trust-boundary language,
+  hostile-name/message escaping, tenant/thread/run generation ownership, bounded
   responses, error families, sequential request order, delegated interaction, and narrow-screen proof
   layout. Run the suite for the current assertion count.
 - `node studio/test-tasks.mjs` — 39 unit tests over the durable-tasks view helpers (same extraction

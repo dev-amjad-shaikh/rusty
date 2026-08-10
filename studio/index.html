@@ -460,6 +460,25 @@
   .run-proof-meta div { min-width: 0; border-top: 1px solid #39362f; padding-top: 7px; }
   .run-proof-meta span { display: block; color: var(--text-faint); font: 9px var(--mono); letter-spacing: .6px; text-transform: uppercase; }
   .run-proof-meta b { display: block; margin-top: 3px; color: #ded5c8; font: 10.5px var(--mono); overflow-wrap: anywhere; }
+  .run-contract { margin: 0 17px 14px; border: 1px solid #4a4439; border-radius: 8px; overflow: hidden; background: rgba(12,15,15,.48); }
+  .run-contract-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; padding: 11px 12px; border-bottom: 1px solid #39362f; }
+  .run-contract-kicker { color: #9cb9aa; font: 700 9px var(--mono); letter-spacing: .8px; text-transform: uppercase; }
+  .run-contract-head h4 { margin: 3px 0 2px; color: #e7e1d6; font-size: 14px; }
+  .run-contract-head p { margin: 0; max-width: 640px; color: var(--text-faint); font-size: 10px; line-height: 1.45; }
+  .run-contract-count { flex: 0 0 auto; color: #bad5c6; font: 700 10px var(--mono); white-space: nowrap; }
+  .run-contract-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); }
+  .run-contract-pin { position: relative; min-width: 0; padding: 13px 10px 11px; border-right: 1px solid #35332d; }
+  .run-contract-pin:last-child { border-right: 0; }
+  .run-contract-pin::before { content: ""; position: absolute; top: 8px; right: 8px; width: 5px; height: 5px; border: 1px solid #756a58; border-radius: 50%; background: #171b1b; }
+  .run-contract-pin.pinned::before { border-color: #7ba18d; background: #385a4a; }
+  .run-contract-pin.partial::before { border-color: #c19a61; background: #624a28; }
+  .run-contract-pin span { display: block; color: var(--text-faint); font: 700 8.5px var(--mono); letter-spacing: .6px; text-transform: uppercase; }
+  .run-contract-pin b { display: block; margin: 5px 12px 0 0; color: #ded7ca; font: 10.5px/1.4 var(--mono); overflow-wrap: anywhere; }
+  .run-contract-pin small { display: block; margin-top: 5px; color: var(--text-faint); font-size: 9.5px; line-height: 1.4; overflow-wrap: anywhere; }
+  .run-contract-pin ul { margin: 6px 0 0; padding: 0; list-style: none; }
+  .run-contract-pin li { margin-top: 3px; color: #bdb4a7; font: 9px/1.35 var(--mono); overflow-wrap: anywhere; }
+  .run-contract-note { padding: 8px 12px; border-top: 1px solid #35332d; color: var(--text-faint); font-size: 9.5px; line-height: 1.45; }
+  .run-contract-note.warn { color: #e0c58f; }
   .run-proof-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 11px 17px 14px; border-top: 1px solid #34322d; }
   .run-proof-boundary { margin: 0 17px 14px; padding: 9px 11px; border-left: 2px solid #6b624f; background: rgba(35,32,28,.72); color: var(--text-dim); font-size: 10.5px; line-height: 1.45; }
   .run-proof-error { margin: 0 17px 12px; padding: 9px 11px; border: 1px solid #70453f; border-radius: 6px; color: #efc0b8; background: #2b1e1c; font-size: 11.5px; }
@@ -1688,6 +1707,10 @@
     .run-proof-link { padding: 10px 10px 10px 30px; }
     .run-proof-link::before { top: 12px; left: 10px; }
     .run-proof-meta { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .run-contract-head { flex-direction: column; }
+    .run-contract-grid { grid-template-columns: 1fr; }
+    .run-contract-pin { border-right: 0; border-bottom: 1px solid #35332d; }
+    .run-contract-pin:last-child { border-bottom: 0; }
   }
 
   :is(button, input, select, textarea, summary):focus-visible {
@@ -5640,11 +5663,49 @@ function runProofLoadedEvidence(recorder, maximum = RUN_PROOF_RESPONSE_BYTES) {
   return { runId: recorder.runId, threadId: threads.values().next().value, events: serialized, bytes };
 }
 
+function runProofManifestSerde(value) {
+  const manifest = runProofObject(value);
+  if (!manifest) return false;
+  const stringMap = (map) => Boolean(runProofObject(map) && Object.values(map).every((item) => typeof item === "string"));
+  const prompts = runProofField(manifest, "prompts", {});
+  const tools = runProofField(manifest, "tool_schemas", {});
+  const capsules = runProofField(manifest, "capsules", {});
+  const model = runProofField(manifest, "model", null);
+  const modelParams = runProofField(manifest, "model_params", null);
+  const memory = runProofField(manifest, "memory_schema", null);
+  return stringMap(prompts) && stringMap(tools) && stringMap(capsules) &&
+    (model === null || typeof model === "string") && (modelParams === null || typeof modelParams === "string") &&
+    (memory === null || typeof memory === "string");
+}
+
+function runProofValidateManifest(value) {
+  const manifest = runProofObject(value);
+  if (!runProofManifestSerde(manifest)) return null;
+  const prompts = runProofField(manifest, "prompts", {});
+  const tools = runProofField(manifest, "tool_schemas", {});
+  const capsules = runProofField(manifest, "capsules", {});
+  const model = runProofField(manifest, "model", null);
+  const modelParams = runProofField(manifest, "model_params", null);
+  const memory = runProofField(manifest, "memory_schema", null);
+  const known = new Set(["prompts", "tool_schemas", "model", "model_params", "memory_schema", "capsules"]);
+  const unknown = Object.keys(manifest).filter((key) => !known.has(key)).sort();
+  const interpretable = Object.keys(manifest).length <= RUN_PROOF_KEY_LIMIT && Object.keys(manifest).every(runProofText) &&
+    runProofMap(prompts, runProofHex) && runProofMap(tools, runProofHex) &&
+    runProofMap(capsules, (item) => runProofText(item) && item.length > 0) &&
+    (model === null || (runProofText(model) && model.length > 0)) &&
+    (modelParams === null || runProofHex(modelParams)) &&
+    (memory === null || (runProofText(memory) && memory.length > 0));
+  return interpretable
+    ? { manifest, interpreted: true, prompts, tools, capsules, model, modelParams, memory, unknown }
+    : { manifest, interpreted: false, unknown: [] };
+}
+
 function runProofValidateReceipt(value, expectedRunId) {
   const receipt = runProofObject(value), head = receipt && runProofObject(receipt.journal_head);
   const events = head && recExactUnsigned(head, "events");
   const manifestPresent = receipt && Object.prototype.hasOwnProperty.call(receipt, "manifest") && receipt.manifest != null;
   const digestPresent = receipt && Object.prototype.hasOwnProperty.call(receipt, "manifest_digest") && receipt.manifest_digest != null;
+  const manifestCheck = manifestPresent ? runProofValidateManifest(receipt.manifest) : null;
   const optionalText = (item) => item == null || runProofText(item);
   const capsules = receipt && runProofField(receipt, "capsules", {});
   const effects = receipt && runProofField(receipt, "effects", []);
@@ -5653,12 +5714,12 @@ function runProofValidateReceipt(value, expectedRunId) {
   const ok = receipt && receipt.format_version === 1 && receipt.run_id === expectedRunId &&
     events !== null && events <= 18446744073709551615n && runProofHex(head.sha256) &&
     (!digestPresent || runProofHex(receipt.manifest_digest)) && manifestPresent === digestPresent &&
-    (!manifestPresent || runProofObject(receipt.manifest)) &&
+    (!manifestPresent || runProofManifestSerde(receipt.manifest)) &&
     runProofMap(capsules, (item) => runProofHex(item)) &&
     runProofStringList(effects, (item) => runProofHex(item)) &&
     optionalText(receipt.executor_policy) && runProofStringList(policies) &&
     runProofStringList(denials) && runProofHex(receipt.signer) && runProofHex(receipt.signature, 64);
-  return ok ? { ok: true, receipt, events, headHash: head.sha256,
+  return ok ? { ok: true, receipt, events, headHash: head.sha256, manifestCheck,
     capsules, effects, policies, denials } : {
     ok: false, error: "Rusty returned a receipt outside the signed run-receipt v1 contract. No verification claim was made.",
   };
@@ -5757,12 +5818,57 @@ function runProofLink(label, detail, state) {
   return `<div class="run-proof-link ${state || ""}"><b>${escapeHtml(label)}</b><span>${escapeHtml(detail)}</span></div>`;
 }
 
+function runProofManifestItems(map, formatter = String, limit = 6) {
+  const entries = Object.entries(map || {}).sort(([left], [right]) => left.localeCompare(right));
+  const shown = entries.slice(0, limit).map(([name, value]) =>
+    `<li><b>${escapeHtml(name)}</b> · ${escapeHtml(formatter(value))}</li>`).join("");
+  return `<ul>${shown}${entries.length > limit ? `<li>+${entries.length - limit} more signed pin(s)</li>` : ""}</ul>`;
+}
+
+function runProofManifestHtml(check) {
+  if (check && !check.interpreted) {
+    return `<section class="run-contract" aria-labelledby="run-contract-title"><div class="run-contract-head"><div>` +
+      `<div class="run-contract-kicker">Signed runtime bill of materials</div><h4 id="run-contract-title">Signed, not interpreted</h4>` +
+      `<p>The deployment verifier accepted this manifest, but its size or values exceed Studio's bounded display grammar.</p></div>` +
+      `<div class="run-contract-count">Verification retained</div></div>` +
+      `<div class="run-contract-note warn">Studio makes no model, prompt, tool, memory, or capsule display claim for this manifest. Inspect it with a compatible bounded auditor.</div></section>`;
+  }
+  const value = check || { prompts: {}, tools: {}, capsules: {}, model: null, modelParams: null, memory: null, unknown: [] };
+  const modelState = value.model && value.modelParams ? "pinned" : value.model || value.modelParams ? "partial" : "";
+  const surfaces = [Boolean(value.model || value.modelParams), Object.keys(value.prompts).length > 0,
+    Object.keys(value.tools).length > 0, Boolean(value.memory), Object.keys(value.capsules).length > 0];
+  const count = surfaces.filter(Boolean).length;
+  const card = (label, state, headline, detail, items = "") =>
+    `<article class="run-contract-pin ${state}" aria-label="${escapeHtml(`${label}: ${headline}`)}"><span>${escapeHtml(label)}</span>` +
+    `<b>${escapeHtml(headline)}</b><small>${escapeHtml(detail)}</small>${items}</article>`;
+  const modelHeadline = value.model || (value.modelParams ? "Parameters only" : "Unpinned");
+  const modelDetail = value.modelParams ? `parameter digest ${value.modelParams}` : value.model ? "parameter set unpinned" : "No model identity or parameter digest";
+  const prompts = Object.keys(value.prompts).length;
+  const tools = Object.keys(value.tools).length;
+  const capsules = Object.keys(value.capsules).length;
+  const unknown = value.unknown.length ? `<div class="run-contract-note warn">${value.unknown.length} signed manifest field(s) are not interpreted by this Studio build: ${escapeHtml(value.unknown.slice(0, 6).join(", "))}${value.unknown.length > 6 ? "…" : ""}.</div>` : "";
+  return `<section class="run-contract" aria-labelledby="run-contract-title"><div class="run-contract-head"><div>` +
+    `<div class="run-contract-kicker">Signed runtime bill of materials</div><h4 id="run-contract-title">What shaped this run</h4>` +
+    `<p>Absent means unpinned, never defaulted. Digests identify exact content without exposing prompt text, tool schemas, or model parameters.</p></div>` +
+    `<div class="run-contract-count">${count} / 5 surfaces carry pins</div></div><div class="run-contract-grid">` +
+    card("Model", modelState, modelHeadline, modelDetail) +
+    card("Prompts", prompts ? "pinned" : "", prompts ? `${prompts} content pin${prompts === 1 ? "" : "s"}` : "Unpinned",
+      prompts ? "Exact prompt text stays outside the receipt" : "No prompt digests", prompts ? runProofManifestItems(value.prompts) : "") +
+    card("Tools", tools ? "pinned" : "", tools ? `${tools} schema pin${tools === 1 ? "" : "s"}` : "Unpinned",
+      tools ? "Canonical parameter-schema digests" : "No tool-schema digests", tools ? runProofManifestItems(value.tools) : "") +
+    card("Memory", value.memory ? "pinned" : "", value.memory || "Unpinned",
+      value.memory ? "Schema identity carried by the run" : "No memory schema identity") +
+    card("Capsules", capsules ? "pinned" : "", capsules ? `${capsules} version pin${capsules === 1 ? "" : "s"}` : "Unpinned",
+      capsules ? "Version identities carried by the manifest" : "No capsule versions", capsules ? runProofManifestItems(value.capsules, String) : "") +
+    `</div><div class="run-contract-note">The model name and capsule versions are deployment-declared identities; the signature proves what Rusty recorded, not an external provider claim.</div>${unknown}</section>`;
+}
+
 function runProofHtml(recorder, state) {
   const ready = runProofReady(recorder), value = state || {};
   let seal = "Awaiting<br>evidence", sealClass = "", status = "Load a complete journal before requesting a signed proof.";
   let chain = [runProofLink("Journal head", "not loaded", ""), runProofLink("Runtime contract", "not inspected", ""),
     runProofLink("Effect ledger", "not inspected", ""), runProofLink("Deployment signer", "not resolved", "")].join("");
-  let meta = "", error = "", action = "";
+  let meta = "", contract = "", error = "", action = "";
   if (recorder && !recorder.error && recorder.complete === true && recorder.exactEnvelope !== true) {
     status = "The loaded journal response does not bind the exact requested run and terminal envelope. Reload it from a compatible server before requesting proof.";
   }
@@ -5794,6 +5900,7 @@ function runProofHtml(recorder, state) {
         `<div><span>Journal commitment</span><b>${escapeHtml(shortId(checked.headHash))}</b></div>` +
         `<div><span>Executor policy</span><b>${escapeHtml(receipt.executor_policy || "unpinned")}</b></div>` +
         `<div><span>Capsules</span><b>${escapeHtml(String(Object.keys(checked.capsules || {}).length))} resolved</b></div></div>`;
+      contract = runProofManifestHtml(checked.manifestCheck);
     } else if (phase === "error") {
       seal = value.rejected ? "Proof<br>rejected" : "Check<br>incomplete";
       sealClass = value.rejected ? "rejected" : "";
@@ -5813,7 +5920,7 @@ function runProofHtml(recorder, state) {
     `<h3 id="run-proof-title" tabindex="-1">Chain of custody</h3>` +
     `<p id="run-proof-status">${escapeHtml(status)}</p></div>` +
     `<div class="run-proof-seal ${sealClass}" aria-hidden="true">${seal}</div></div>` +
-    `<div class="run-proof-chain" aria-label="Run proof chain">${chain}</div>${meta}${error}` +
+    `<div class="run-proof-chain" aria-label="Run proof chain">${chain}</div>${meta}${contract}${error}` +
     `<div class="run-proof-boundary"><b>What this proves:</b> the served evidence is unchanged, names the signed runtime commitments, and verifies against this deployment's public key history. ` +
       `<b>What it does not prove:</b> model answer quality, an external provider's honesty, or remote/KMS transparency attestation.</div>` + action;
 }

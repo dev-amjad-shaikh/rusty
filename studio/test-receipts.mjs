@@ -17,7 +17,7 @@ globalThis.__proof = {
   runProofHex, runProofText, runProofSame, runProofValidateReceipt, runProofValidateFixture,
   runProofValidateVerified, runProofValidateKeys, runProofReady, runProofOperationCurrent,
   runProofError, runProofHtml, runProofLoadedEvidence, runProofExactJson, runProofVisibleMessage,
-  runProofVerify, agentParseJsonWithNumberKinds, store,
+  runProofVerify, runProofValidateManifest, runProofManifestHtml, agentParseJsonWithNumberKinds, store,
   RUN_PROOF_RESPONSE_BYTES, RUN_PROOF_LIST_LIMIT, RUN_PROOF_KEY_LIMIT,
 };
 globalThis.__setProofApi = (fn) => { apiForConnection = fn; };`, sandbox, { filename: "index.html<script>" });
@@ -76,6 +76,23 @@ const verified = {
   check("receipt: effect ledger has a hard item bound", !P.runProofValidateReceipt({ ...receipt, effects: Array(P.RUN_PROOF_LIST_LIMIT + 1).fill("e".repeat(64)) }, RUN).ok);
   check("receipt: explicit null and falsy default collections are malformed", !P.runProofValidateReceipt({ ...receipt, capsules: null }, RUN).ok &&
     !P.runProofValidateReceipt({ ...receipt, effects: false }, RUN).ok && !P.runProofValidateReceipt({ ...receipt, capsule_policies: "" }, RUN).ok);
+  check("manifest: explicit null maps are malformed rather than serde omission",
+    P.runProofValidateManifest({ prompts: {}, tool_schemas: {}, capsules: {} }) &&
+    !P.runProofValidateManifest({ prompts: null }) && !P.runProofValidateManifest({ tool_schemas: false }) &&
+    !P.runProofValidateManifest({ capsules: "" }));
+  check("manifest: digests and optional identities retain their exact wire types",
+    P.runProofValidateManifest({ prompts: { system: "bad" } }).interpreted === false &&
+    !P.runProofValidateManifest({ model: 7 }) && P.runProofValidateManifest({ model_params: "bad" }).interpreted === false &&
+    !P.runProofValidateManifest({ memory_schema: ["v1"] }));
+  const broadManifest = { model: "legal\u0000rust-string", prompts: Object.fromEntries(Array.from({ length: P.RUN_PROOF_KEY_LIMIT + 1 }, (_, index) => [`p${index}`, "not-hex"])) };
+  const broadReceipt = { ...receipt, manifest: broadManifest };
+  check("manifest: legal broad serde values retain verification but degrade visual interpretation",
+    P.runProofValidateReceipt(broadReceipt, RUN).ok && P.runProofValidateManifest(broadManifest).interpreted === false &&
+    P.runProofManifestHtml(P.runProofValidateManifest(broadManifest)).includes("Signed, not interpreted"));
+  check("manifest: present-empty optional identities never render as absent defaults",
+    P.runProofValidateManifest({ model: "" }).interpreted === false &&
+    P.runProofValidateManifest({ memory_schema: "" }).interpreted === false &&
+    P.runProofValidateManifest({ capsules: { worker: "" } }).interpreted === false);
 
   const checkedFixture = P.runProofValidateFixture(fixture, RUN, checked, loaded);
   check("fixture: exact run, event count, and head bind the signed statement", checkedFixture.ok && checkedFixture.snapshot === snapshot);
@@ -150,6 +167,22 @@ const verified = {
     verified, keyInfo: { state: "retired", record: { key_id: SIGNER } } });
   check("verified UI: all four proof links and retired-key truth are visible", ["Journal head", "Runtime contract", "Effect ledger", "Deployment signer", "retired key · still verifiable"].every((text) => doneHtml.includes(text)));
   check("verified UI: exact trust boundary rejects model-quality and remote-attestation inference", doneHtml.includes("model answer quality") && doneHtml.includes("remote/KMS transparency attestation"));
+  const fullManifest = P.runProofValidateManifest({ model: "provider/model-2026-08-09", model_params: "1".repeat(64),
+    prompts: { '<system>': "2".repeat(64), reviewer: "2".repeat(8) + "f".repeat(52) + "2".repeat(4) },
+    tool_schemas: { search: "4".repeat(64) }, memory_schema: "memory-v1",
+    capsules: { research: "capsule-v3" }, future_pin: { digest: "5".repeat(64) } });
+  const manifestHtml = P.runProofManifestHtml(fullManifest);
+  check("runtime contract: five signed surfaces become one visual bill of materials",
+    ["5 / 5 surfaces carry pins", "provider/model-2026-08-09", "2 content pins", "1 schema pin", "memory-v1", "capsule-v3", "1".repeat(64)].every((text) => manifestHtml.includes(text)));
+  check("runtime contract: collision-shaped digests remain visually distinguishable in full",
+    manifestHtml.includes("2".repeat(64)) && manifestHtml.includes("2".repeat(8) + "f".repeat(52) + "2".repeat(4)));
+  check("runtime contract: hostile names are escaped and unknown signed fields stay explicit",
+    manifestHtml.includes("&lt;system&gt;") && !manifestHtml.includes("<system>") &&
+    manifestHtml.includes("future_pin") && manifestHtml.includes("not interpreted"));
+  const partialModel = P.runProofManifestHtml(P.runProofValidateManifest({ model: "floating-alias" }));
+  check("runtime contract: partial and absent pins never become defaults",
+    partialModel.includes("parameter set unpinned") && partialModel.includes("1 / 5 surfaces carry pins") &&
+    P.runProofManifestHtml(null).includes("0 / 5 surfaces carry pins"));
   const hostile = P.runProofHtml(recorder, { phase: "error", error: '<img src=x onerror="boom">', receiptReceived: true });
   check("error UI: server and client messages are escaped", hostile.includes("&lt;img") && !hostile.includes("<img"));
   check("empty UI: partial journals never expose a mint control", !P.runProofHtml({ ...recorder, complete: false }, null).includes("data-run-proof-action"));
@@ -252,6 +285,8 @@ check("errors: visible server text is bounded and names truncation", (() => { co
     src.includes('focusSelector || "#run-proof-title"'));
   check("integration: workspace and journal changes invalidate proof generations", (src.match(/store\.runProofRequest \+= 1/g) || []).length >= 3);
   check("responsive: the proof chain stacks deliberately on narrow screens", html.includes(".run-proof-chain { grid-template-columns: 1fr; }") && html.includes(".run-proof-meta { grid-template-columns: repeat(2"));
+  check("responsive: the runtime bill of materials becomes one readable mobile column",
+    html.includes(".run-contract-grid { grid-template-columns: 1fr; }") && html.includes(".run-contract-head { flex-direction: column; }"));
   check("accessibility: only the narrow status region is live", !html.includes('id="run-proof" aria-labelledby="run-proof-title" aria-live') &&
     html.includes('id="run-proof-announcer" role="status" aria-live="polite" aria-atomic="true"') &&
     !P.runProofHtml(recorder, { phase: "ready" }).includes('aria-live='));
