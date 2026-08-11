@@ -819,7 +819,7 @@ pub enum DeployError {
 /// `GateCheck`, serde-mapped at the seam so the runtime never links the
 /// eval crate (the workspace's dependency direction is `rusty-eval` →
 /// runtime, never the reverse — the
-/// [`crate::learn::CompareThresholdsRecord`] precedent). `metric` is the
+/// [`crate::learn::EvaluationThresholds`] precedent). `metric` is the
 /// eval metric's own serde form (`snake_case`-tagged), carried as a
 /// string so a new eval metric needs no core release to journal.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
