@@ -1129,6 +1129,26 @@
   .studio-mission-action { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 9px; }
   .studio-mission-action span { color: #746c60; font: 8px/1.35 var(--mono); }
   .studio-mission-action button { white-space: nowrap; }
+  .mission-brief { margin-top: 10px; border: 1px solid #5b4c3c; background: linear-gradient(115deg,#211b16,#171a18 74%); }
+  .mission-brief-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 11px 8px; border-bottom: 1px solid #443a30; }
+  .mission-brief-head span { color: #d19a71; font: 700 8px var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+  .mission-brief-head h4 { margin: 3px 0 0; color: #eee5d8; font-size: 12px; }
+  .mission-brief-head b { padding: 2px 5px; border: 1px solid #4f5f4a; color: #a8c49e; font: 700 7.5px var(--mono); text-transform: uppercase; white-space: nowrap; }
+  .mission-brief-form { display: grid; grid-template-columns: minmax(150px,.48fr) minmax(0,1.52fr); gap: 8px 10px; padding: 10px 11px 11px; }
+  .mission-brief-form label { min-width: 0; color: #9c9385; font: 8.5px var(--mono); }
+  .mission-brief-form :is(select,textarea) { width: 100%; margin-top: 4px; border: 1px solid #50483d; border-radius: 4px; background: #101210; color: #ded6ca; font: 10px var(--mono); }
+  .mission-brief-form select { height: 34px; padding: 0 7px; }
+  .mission-brief-form textarea { min-height: 82px; padding: 7px 8px; resize: vertical; line-height: 1.45; }
+  .mission-brief-form [aria-invalid="true"] { border-color: var(--err); }
+  .mission-brief-error, .mission-brief-recovery, .mission-brief-prepared, .mission-brief-boundary { grid-column: 1 / -1; }
+  .mission-brief-error { padding: 7px 9px; border-left: 3px solid var(--err); background: #2a1918; color: #e8b7b1; font-size: 9px; overflow-wrap: anywhere; }
+  .mission-brief-recovery, .mission-brief-prepared { padding: 8px 9px; border: 1px solid #735d3c; background: #292116; }
+  .mission-brief-recovery h5 { margin: 0 0 4px; color: #e4c08c; font-size: 10px; }
+  .mission-brief-recovery p, .mission-brief-prepared p { margin: 0 0 7px; color: #bcb09e; font-size: 9px; overflow-wrap: anywhere; }
+  .mission-brief-recovery div, .mission-brief-prepared { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .mission-brief-boundary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 8px; border-top: 1px solid #3b352d; }
+  .mission-brief-boundary span { max-width: 650px; color: #82796d; font: 8px/1.4 var(--mono); }
+  .mission-brief-boundary button { flex: 0 0 auto; }
 
   /* ---------- Studio home ---------- */
   .home-hero {
@@ -2322,6 +2342,10 @@
     .studio-mission-grid { grid-template-columns: 1fr; }
     .studio-mission-action { align-items: stretch; flex-direction: column; }
     .studio-mission-action button { width: 100%; }
+    .mission-brief-form { grid-template-columns: 1fr; }
+    .mission-brief-objective, .mission-brief-error, .mission-brief-recovery, .mission-brief-prepared, .mission-brief-boundary { grid-column: auto; }
+    .mission-brief-boundary, .mission-brief-prepared { align-items: stretch; flex-direction: column; }
+    .mission-brief-boundary button, .mission-brief-prepared button { width: 100%; }
     .home-hero { grid-template-columns: 1fr; padding: 18px; }
     .home-hero-action { min-width: 0; text-align: left; }
     .home-signals { grid-template-columns: 1fr; }
@@ -3574,6 +3598,8 @@ const store = {
   view: "home",        // active Studio workspace
   journeyPhase: "",    // optional Run-workspace focus: run, inspect, or evaluate
   journeyRequest: 0,   // generation guard for deferred journey handoffs
+  missionBrief: null,  // connection-bound page-memory objective and prepare-only launch state
+  missionBriefRequest: 0, // generation guard for draft edits and exact thread preparation
   navigationPending: null, // parsed non-secret workspace/evidence target waiting for local or server truth
   navigationRequest: 0, // generation guard for an in-flight shared run handoff
   navigationCopyRequest: 0, // generation guard for clipboard completion after workspace changes
@@ -3744,6 +3770,13 @@ function navigationRouteForStore(state) {
  * ------------------------------------------------------------------------- */
 
 const JOURNEY_STAGE_KEYS = ["shape", "run", "inspect", "evaluate", "govern", "operate"];
+const MISSION_BRIEF_OBJECTIVE_LIMIT = 32768;
+const MISSION_BRIEF_AGENT_LIMIT = 120;
+const MISSION_BRIEF_RESERVED_TENANTS = new Set([
+  "agent_leases", "agents", "artifacts", "assistants", "capsules", "capsule_policies", "connections",
+  "coordinations", "crons", "journals", "keys", "learn", "memory", "memory_artifacts", "outbox", "policy",
+  "receipts", "registry", "store", "tasks", "threads", "trigger_events", "triggers", "latest",
+]);
 
 function journeyRunTime(run) {
   const value = Date.parse(String(run && (run.finished_at || run.started_at || run.observed_at) || ""));
@@ -3801,20 +3834,30 @@ function journeySnapshot(state) {
   const source = state && typeof state === "object" ? state : {};
   const connected = Boolean(source.conn && source.info);
   const assistantList = Array.isArray(source.agents && source.agents.list) ? source.agents.list : [];
-  const selectedThread = navigationSafeId(source.selected);
-  const exactRecorder = journeyRecorderContext(source.recorder, selectedThread);
   const runs = journeyRunEntries(source);
   let agentId = navigationSafeId(source.agents && source.agents.selected);
+  const rememberedThread = navigationSafeId(source.selected);
+  const rememberedThreadRecord = rememberedThread && Array.isArray(source.threads)
+    ? source.threads.find((item) => item && item.thread_id === rememberedThread) : null;
+  const metadataThreadOwner = navigationSafeId(rememberedThreadRecord && rememberedThreadRecord.metadata &&
+    rememberedThreadRecord.metadata.assistant_id);
+  const runThreadOwners = new Set(runs.filter((entry) => entry.run && entry.run.thread_id === rememberedThread)
+    .map((entry) => navigationSafeId(entry.assistantId)).filter(Boolean));
+  const threadOwnerConflict = runThreadOwners.size > 1 || Boolean(metadataThreadOwner &&
+    [...runThreadOwners].some((owner) => owner !== metadataThreadOwner));
+  const rememberedThreadOwner = threadOwnerConflict ? "" : metadataThreadOwner || [...runThreadOwners][0] || "";
+  const selectedThread = source.view === "agents" && agentId &&
+    (threadOwnerConflict || rememberedThreadOwner !== agentId) ? "" : rememberedThread;
+  const exactRecorder = rememberedThread && !selectedThread ? null : journeyRecorderContext(source.recorder, selectedThread);
   let runEntry = exactRecorder
     ? runs.find((entry) => entry.run && entry.run.run_id === exactRecorder.runId && entry.run.thread_id === exactRecorder.threadId) || null
     : selectedThread ? runs.find((entry) => entry.run && entry.run.thread_id === selectedThread) || null
       : agentId ? runs.find((entry) => entry.assistantId === agentId) || null : null;
-  if (source.view === "thread") agentId = runEntry ? navigationSafeId(runEntry.assistantId) : null;
+  if (source.view === "thread") agentId = runEntry ? navigationSafeId(runEntry.assistantId) : rememberedThreadOwner;
   const agent = assistantList.find((item) => item && item.assistant_id === agentId) || null;
   const threadId = exactRecorder ? exactRecorder.threadId : selectedThread || navigationSafeId(runEntry && runEntry.run && runEntry.run.thread_id);
   const runId = exactRecorder ? exactRecorder.runId : navigationSafeId(runEntry && runEntry.run && runEntry.run.run_id);
-  const selectedThreadRecord = selectedThread && Array.isArray(source.threads)
-    ? source.threads.find((item) => item && item.thread_id === selectedThread) : null;
+  const selectedThreadRecord = selectedThread === rememberedThread ? rememberedThreadRecord : null;
   const graph = String((selectedThreadRecord && selectedThreadRecord.graph) ||
     (runEntry && runEntry.run && runEntry.run.graph) || (agent && agent.graph) || "");
   const versionId = navigationSafeId(agent && agent.active_version_id);
@@ -3859,6 +3902,112 @@ function journeySnapshot(state) {
 
 function journeyEvidenceLabel(value) {
   return registryEvidencePreview(value, 160);
+}
+
+function missionBriefRunnableAgents(state = store) {
+  const graphs = new Set((((state.info && state.info.graphs) || []).map((item) => item && item.name).filter(Boolean)));
+  return (Array.isArray(state.agents && state.agents.list) ? state.agents.list : []).filter((agent) =>
+    agent && navigationSafeId(agent.assistant_id) && agentLifecycleState(agent) === "active" && graphs.has(agent.graph));
+}
+
+function missionBriefWindow(agents, selectedId) {
+  const list = Array.isArray(agents) ? agents : [];
+  const shown = list.slice(0, MISSION_BRIEF_AGENT_LIMIT);
+  const selected = list.find((item) => item.assistant_id === selectedId);
+  if (selected && !shown.includes(selected)) shown[shown.length ? shown.length - 1 : 0] = selected;
+  return shown.filter(Boolean);
+}
+
+function missionBriefEnsure(snapshot, state = store) {
+  const available = missionBriefRunnableAgents(state);
+  const selected = available.find((item) => item.assistant_id === (state.missionBrief && state.missionBrief.agentId)) ||
+    available.find((item) => item.assistant_id === snapshot.agentId) || available[0] || null;
+  if (!state.missionBrief) {
+    state.missionBrief = { agentId: selected ? selected.assistant_id : "", objective: "", submitting: false,
+      error: "", errorField: "", uncertainThreadId: "", preparedThreadId: "" };
+  } else if (!available.some((item) => item.assistant_id === state.missionBrief.agentId) && !state.missionBrief.submitting) {
+    state.missionBrief.agentId = "";
+    state.missionBrief.error = "The selected agent is no longer active on an available behavior. Choose current catalog truth before preparing.";
+    state.missionBrief.errorField = "agent";
+  }
+  return state.missionBrief;
+}
+
+function missionBriefInputError(value) {
+  const pending = [{ value, depth: 0 }];
+  let nodes = 0;
+  while (pending.length) {
+    const current = pending.pop();
+    nodes += 1;
+    if (nodes > 4096) return "Mission input contains more than 4,096 JSON values.";
+    if (current.depth > 32) return "Mission input is nested more than 32 levels deep.";
+    if (typeof current.value === "string") {
+      if (!qualityLibraryWellFormed(current.value)) return "Mission input contains an invalid Unicode scalar value.";
+      continue;
+    }
+    if (current.value == null || typeof current.value === "boolean" || typeof current.value === "number") continue;
+    if (!Array.isArray(current.value) && !agentPlainObject(current.value)) return "Mission input contains a value JSON cannot preserve.";
+    const entries = Array.isArray(current.value) ? current.value.map((item) => ["", item]) : Object.entries(current.value);
+    for (const [key, item] of entries) {
+      if (key && !qualityLibraryWellFormed(key)) return "Mission input contains an invalid Unicode key.";
+      pending.push({ value: item, depth: current.depth + 1 });
+    }
+  }
+  return "";
+}
+
+function missionBriefValidation(draft, state = store) {
+  const agents = missionBriefRunnableAgents(state);
+  const agent = agents.find((item) => item.assistant_id === (draft && draft.agentId));
+  if (!agent) return { agent: null, input: null, error: "Choose an active agent whose behavior is available on this server.", field: "agent" };
+  const objective = String(draft && draft.objective || "");
+  if (!objective.trim()) return { agent, input: null, error: "Describe the outcome this mission should produce.", field: "objective" };
+  if (registryString(objective, MISSION_BRIEF_OBJECTIVE_LIMIT) !== objective) {
+    return { agent, input: null, error: "The mission objective exceeds 32 KiB or contains an invalid Unicode scalar value.", field: "objective" };
+  }
+  try {
+    if (agent.graph === "react_agent") return { agent, input: agentBuildRunInput(agent, objective), error: "", field: "" };
+    const input = agentParseJsonWithNumberKinds(objective);
+    if (!agentPlainObject(input)) throw new Error("Input data must be a JSON object.");
+    if (!agentStoredNumbersRoundTrip(input)) throw new Error("Mission input contains a JSON number this browser cannot transfer exactly.");
+    const inputError = missionBriefInputError(input);
+    if (inputError) throw new Error(inputError);
+    return { agent, input, error: "", field: "" };
+  } catch (error) {
+    const message = error instanceof SyntaxError ? `Input data is not valid JSON: ${error.message}` : error.message;
+    return { agent, input: null, error: message || "The mission input is invalid.", field: "objective" };
+  }
+}
+
+function missionBriefCurrentSource(agent, draft, request, operation) {
+  if (!connectionOperationIdentityCurrent(operation) || store.missionBrief !== draft || store.missionBriefRequest !== request) return false;
+  const current = missionBriefRunnableAgents(store).find((item) => item.assistant_id === agent.assistant_id);
+  return Boolean(current && current.graph === agent.graph && current.active_version_id === agent.active_version_id &&
+    agentChangeEqual(current.config, agent.config) === true);
+}
+
+function missionBriefHtml(snapshot, state = store) {
+  const draft = missionBriefEnsure(snapshot, state), agents = missionBriefRunnableAgents(state);
+  const selected = agents.find((item) => item.assistant_id === draft.agentId) || null;
+  const shown = missionBriefWindow(agents, draft.agentId);
+  const options = (!selected ? `<option value="" selected disabled>Choose an active agent…</option>` : "") + shown.map((agent) => {
+    const name = registryEvidencePreview(agent.name || agent.assistant_id, 160);
+    const suffix = registryEvidencePreview(`${agent.graph} · ${agent.active_version_id || "active version unavailable"}`, 160);
+    return `<option value="${escapeHtml(agent.assistant_id)}"${agent.assistant_id === draft.agentId ? " selected" : ""}>${escapeHtml(`${name} — ${suffix}`)}</option>`;
+  }).join("");
+  const inputLabel = selected && selected.graph === "react_agent" ? "Mission objective" : "Mission input (JSON object)";
+  const placeholder = selected && selected.graph === "react_agent"
+    ? "Describe the outcome, constraints, and evidence you need — not implementation steps."
+    : '{\n  "task": "Describe the mission outcome"\n}';
+  const busy = draft.submitting ? " disabled" : "";
+  const locked = Boolean(draft.uncertainThreadId);
+  const error = draft.error ? `<div class="mission-brief-error" id="mission-brief-error" role="alert" tabindex="-1">${escapeHtml(runProofVisibleMessage(draft.error))}</div>` : "";
+  const recovery = locked ? `<section class="mission-brief-recovery" aria-labelledby="mission-brief-recovery-title"><h5 id="mission-brief-recovery-title">Creation outcome needs recovery</h5><p>Studio cannot prove whether thread <code>${escapeHtml(draft.uncertainThreadId)}</code> exists. No run was started. Attach that exact ID before deliberately preparing another thread.</p><div><button class="small" type="button" data-mission-attach data-mission-focus="attach">Attach exact thread</button><button class="small" type="button" data-mission-abandon data-mission-focus="abandon">I checked — prepare another</button></div></section>` : "";
+  const prepared = draft.preparedThreadId ? `<section class="mission-brief-prepared"><p>Prepared thread <code>${escapeHtml(draft.preparedThreadId)}</code>. The objective is still page memory until you transfer it.</p><button class="small primary" type="button" data-mission-open-prepared data-mission-focus="open">Open prepared run surface</button></section>` : "";
+  return `<section class="mission-brief" aria-labelledby="mission-brief-title"><div class="mission-brief-head"><div><span>Mission brief · prepare only</span><h4 id="mission-brief-title">Turn intent into one exact local run</h4></div><b>Page memory</b></div>` +
+    `<form class="mission-brief-form" data-mission-brief-form aria-busy="${draft.submitting ? "true" : "false"}"><label>Active agent<select data-mission-agent data-mission-focus="agent"${busy}${locked ? " disabled" : ""} aria-invalid="${draft.errorField === "agent"}"${draft.errorField === "agent" ? ' aria-describedby="mission-brief-error"' : ""}>${options}</select></label>` +
+    `<label class="mission-brief-objective">${inputLabel}<textarea data-mission-objective data-mission-focus="objective" maxlength="32768" spellcheck="true"${busy}${locked ? " disabled" : ""} aria-invalid="${draft.errorField === "objective"}"${draft.errorField === "objective" ? ' aria-describedby="mission-brief-error"' : ""} placeholder="${escapeHtml(placeholder)}">${escapeHtml(draft.objective)}</textarea></label>` +
+    `${error}${recovery}${prepared}<div class="mission-brief-boundary"><span>The objective stays in this page until it is transferred to the existing run form. It is not placed in the URL or thread metadata; reconnecting or reloading discards the draft. Running can send it to configured models/tools and journal evidence, so never use this field as a credential store.</span><button class="small primary" type="submit" data-mission-focus="submit" aria-disabled="${draft.submitting || locked || !agents.length}"${locked || !agents.length ? " disabled" : ""}>${draft.submitting ? "Preparing exact thread…" : "Prepare mission — no run starts"}</button></div></form></section>`;
 }
 
 const JOURNEY_MISSION_DECISIONS = {
@@ -3944,15 +4093,18 @@ function journeyMissionDossier(snapshot, state) {
   };
 }
 
-function journeyMissionHtml(dossier) {
+function journeyMissionHtml(dossier, snapshot = null, state = store) {
+  if (!snapshot) snapshot = journeySnapshot(state);
   const evidence = dossier.evidence.length
     ? `<dl class="studio-mission-evidence">${dossier.evidence.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(journeyEvidenceLabel(value))}</dd></div>`).join("")}</dl>`
     : `<p>No mission identity has been selected.</p>`;
+  const brief = snapshot && dossier.key === "run" && !snapshot.threadId && snapshot.agentId
+    ? missionBriefHtml(snapshot, state) : "";
   return `<section class="studio-mission-decision"><span class="studio-mission-stage">${escapeHtml(dossier.label)} decision</span><h3>${escapeHtml(dossier.question)}</h3><p>One decision at a time. The dossier carries bounded identity and status only; the destination remains authoritative.</p></section>` +
     `<div><div class="studio-mission-grid"><section class="studio-mission-card"><h4>Evidence in hand</h4>${evidence}</section>` +
     `<section class="studio-mission-card"><h4>Still unproved</h4><p>${escapeHtml(dossier.gap)}</p></section>` +
     `<section class="studio-mission-card"><h4>Next safe move</h4><p>${escapeHtml(dossier.safeMove)}</p></section></div>` +
-    `<div class="studio-mission-action"><span>${escapeHtml(dossier.destination)} reloads or preserves its own evidence; this summary never approves a change.</span><button class="small primary" type="button" data-mission-primary data-journey-next="${escapeHtml(dossier.key)}">${escapeHtml(dossier.actionLabel)}</button></div></div>`;
+    (brief || `<div class="studio-mission-action"><span>${escapeHtml(dossier.destination)} reloads or preserves its own evidence; this summary never approves a change.</span><button class="small primary" type="button" data-mission-primary data-journey-next="${escapeHtml(dossier.key)}">${escapeHtml(dossier.actionLabel)}</button></div>`) + `</div>`;
 }
 
 function journeyHtml(snapshot) {
@@ -3977,6 +4129,7 @@ function journeyRender() {
   const active = document.activeElement;
   const focusedStage = active && panel.contains(active) && active.getAttribute ? active.getAttribute("data-journey-stage") : "";
   const focusedMission = Boolean(active && panel.contains(active) && active.hasAttribute && active.hasAttribute("data-mission-primary"));
+  const focusedMissionControl = active && panel.contains(active) && active.getAttribute ? active.getAttribute("data-mission-focus") : "";
   const focusedNext = Boolean(!focusedMission && active && panel.contains(active) && active.getAttribute && active.hasAttribute("data-journey-next"));
   const snapshot = journeySnapshot(store);
   const dossier = journeyMissionDossier(snapshot, store);
@@ -3986,14 +4139,220 @@ function journeyRender() {
   next.innerHTML = `<span>${escapeHtml(snapshot.next.hint)}</span><button class="small primary" type="button" data-journey-next="${snapshot.next.key}">${escapeHtml(snapshot.next.label)}</button>`;
   if (missionProgress) missionProgress.textContent = `${dossier.checkpoints}/6 evidence checkpoints`;
   if (missionBody) missionBody.innerHTML = journeyMissionHtml(dossier);
-  if (focusedStage || focusedNext || focusedMission) {
+  if (focusedStage || focusedNext || focusedMission || focusedMissionControl) {
     const exactStage = focusedStage ? rail.querySelector(`[data-journey-stage="${CSS.escape(focusedStage)}"]:not(:disabled)`) : null;
     const exactMission = focusedMission && missionBody ? missionBody.querySelector("[data-mission-primary]:not(:disabled)") : null;
+    const exactMissionControl = focusedMissionControl && missionBody ? missionBody.querySelector(`[data-mission-focus="${CSS.escape(focusedMissionControl)}"]:not(:disabled)`) : null;
     const exactNext = focusedNext ? next.querySelector("[data-journey-next]:not(:disabled)") : null;
     const fallback = next.querySelector("[data-journey-next]:not(:disabled)") || rail.querySelector("[data-journey-stage]:not(:disabled)");
-    (exactStage || exactMission || exactNext || fallback)?.focus({ preventScroll: true });
+    (exactStage || exactMissionControl || exactMission || exactNext || fallback)?.focus({ preventScroll: true });
   }
   return snapshot;
+}
+
+function missionBriefSetError(draft, error, field = "") {
+  if (!draft) return;
+  draft.error = runProofVisibleMessage(error || "");
+  draft.errorField = field;
+}
+
+function missionBriefThreadReceipt(value, threadId, graph, metadata) {
+  const keys = ["thread_id", "tenant", "graph", "metadata", "created_at"];
+  if (!registryKeys(value, keys, keys) || typeof value.tenant !== "string" ||
+      !/^[A-Za-z0-9._-]{1,64}$/.test(value.tenant) || MISSION_BRIEF_RESERVED_TENANTS.has(value.tenant)) return null;
+  const verified = agentPreparedThreadReceipt(value, threadId, graph, metadata);
+  return verified ? { thread_id: verified.thread_id, tenant: value.tenant, graph: verified.graph,
+    metadata: verified.metadata, created_at: verified.created_at } : null;
+}
+
+function missionBriefPreparedSourceCurrent(draft) {
+  const source = draft && draft.preparedSource;
+  if (!source) return false;
+  const current = missionBriefRunnableAgents(store).find((item) => item.assistant_id === source.assistant_id);
+  return Boolean(current && current.graph === source.graph && current.active_version_id === source.active_version_id &&
+    agentChangeEqual(current.config, source.config) === true);
+}
+
+function missionBriefInstallBinding(threadId, binding) {
+  if (!binding) return;
+  store.registryBindings[threadId] = {
+    enabled: true, environment: binding.environment, surfaces: binding.surfaces.slice(), acknowledged: false,
+    error: "", errorField: "", lastSubmission: null, submissionPending: false, uncertainSubmission: "",
+  };
+}
+
+function missionBriefOpenPrepared(draft, announce = true) {
+  if (!draft || store.missionBrief !== draft || !navigationSafeId(draft.preparedThreadId) ||
+      !store.threads.some((item) => item.thread_id === draft.preparedThreadId)) return false;
+  if (!missionBriefPreparedSourceCurrent(draft)) {
+    missionBriefSetError(draft, "The agent changed after this thread was prepared. Review the current active version before transferring a task.");
+    journeyRender();
+    $("mission-brief-error")?.focus({ preventScroll: true });
+    return false;
+  }
+  const threadId = draft.preparedThreadId, payloadText = draft.preparedPayloadText;
+  missionBriefInstallBinding(threadId, draft.preparedBinding);
+  if (store.agents) store.agents.selected = draft.preparedAgentId;
+  store.selected = threadId;
+  store.view = "thread";
+  store.journeyPhase = "run";
+  store.missionBriefRequest += 1;
+  store.missionBrief = null;
+  saveThreads();
+  renderThreads();
+  renderMain();
+  const payload = $("inp-payload");
+  if (payload) payload.value = payloadText;
+  if (draft.preparedBinding) {
+    const card = $("registry-binding-card");
+    if (card) card.open = true;
+    registryBindingRender();
+    $("registry-binding-card")?.querySelector("summary")?.focus({ preventScroll: true });
+  } else {
+    payload?.focus({ preventScroll: true });
+  }
+  if (announce) toast("Mission prepared in the local run surface. Review the payload, then choose how to run it.", "ok");
+  return true;
+}
+
+function missionBriefEdit(target) {
+  const draft = store.missionBrief;
+  if (!draft || draft.submitting || draft.uncertainThreadId) return false;
+  if (target.matches("[data-mission-agent]")) {
+    if (!missionBriefRunnableAgents(store).some((item) => item.assistant_id === target.value)) return false;
+    draft.agentId = target.value;
+    if (store.agents) store.agents.selected = target.value;
+    draft.error = ""; draft.errorField = ""; draft.preparedThreadId = "";
+    store.missionBriefRequest += 1;
+    if (store.view === "agents") agentsRender();
+    navigationReplaceManagedAddress();
+    journeyRender();
+    $("studio-mission-body")?.querySelector('[data-mission-focus="agent"]')?.focus({ preventScroll: true });
+    return true;
+  }
+  if (target.matches("[data-mission-objective]")) {
+    draft.objective = target.value;
+    draft.preparedThreadId = "";
+    store.missionBriefRequest += 1;
+    if (draft.errorField === "objective") {
+      const validation = missionBriefValidation(draft);
+      if (!validation.error) {
+        draft.error = ""; draft.errorField = "";
+        target.setAttribute("aria-invalid", "false");
+        target.removeAttribute("aria-describedby");
+        $("mission-brief-error")?.remove();
+      } else {
+        missionBriefSetError(draft, validation.error, validation.field);
+        const alert = $("mission-brief-error");
+        if (alert) alert.textContent = draft.error;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function missionBriefAbandonUncertain() {
+  const draft = store.missionBrief;
+  if (!draft || !draft.uncertainThreadId || !confirm(`Only continue after checking thread ${draft.uncertainThreadId}. Prepare a different stable thread ID?`)) return false;
+  draft.uncertainThreadId = ""; draft.error = ""; draft.errorField = ""; draft.submitting = false;
+  store.missionBriefRequest += 1;
+  journeyRender();
+  $("studio-mission-body")?.querySelector('[data-mission-focus="submit"]')?.focus({ preventScroll: true });
+  return true;
+}
+
+function missionBriefAttachUncertain() {
+  const draft = store.missionBrief, input = $("inp-attach");
+  if (!draft || !draft.uncertainThreadId || !input) return false;
+  input.value = draft.uncertainThreadId;
+  input.focus({ preventScroll: true });
+  $("studio-journey-announcer").textContent = `Thread ${draft.uncertainThreadId} is ready in Attach thread. Attaching proves existence only; it does not prove the original creation receipt.`;
+  return true;
+}
+
+async function missionBriefSubmit() {
+  const draft = store.missionBrief;
+  if (!draft || draft.submitting || draft.uncertainThreadId) return false;
+  const validation = missionBriefValidation(draft);
+  if (validation.error) {
+    missionBriefSetError(draft, validation.error, validation.field);
+    journeyRender();
+    const target = $("studio-mission-body")?.querySelector(`[data-mission-${validation.field}]`) || $("mission-brief-error");
+    target?.focus({ preventScroll: true });
+    return false;
+  }
+  const agent = validation.agent, input = validation.input;
+  const preset = agentIntentBindingPreset(agent.config);
+  const operation = connectionOperation();
+  if (!operation) return false;
+  const request = ++store.missionBriefRequest, initiatingView = store.view;
+  draft.submitting = true; draft.error = ""; draft.errorField = ""; draft.preparedThreadId = "";
+  journeyRender();
+  $("studio-mission-body")?.querySelector('[data-mission-focus="submit"]')?.focus({ preventScroll: true });
+  let threadId = "", responseStatus = 0;
+  try {
+    let exactBinding = null;
+    if (preset) {
+      const loaded = await registryLoad(true, false);
+      if (!missionBriefCurrentSource(agent, draft, request, operation)) {
+        if (connectionOperationIdentityCurrent(operation) && store.missionBrief === draft && store.missionBriefRequest === request) {
+          draft.submitting = false;
+          missionBriefSetError(draft, "The selected agent changed while its live governed catalog was loading. Review the current active version before preparing.");
+          if (store.view === initiatingView) journeyRender();
+        }
+        return false;
+      }
+      if (!loaded) throw new Error("The live extension catalog could not be refreshed. No thread was created.");
+      const checked = agentIntentBindingCatalog(preset);
+      if (!checked.valid || !checked.binding) throw new Error(checked.error || "The governed preset is not available on this server.");
+      exactBinding = { environment: preset.environment, surfaces: preset.surfaces.slice() };
+    }
+    if (!missionBriefCurrentSource(agent, draft, request, operation)) return false;
+    threadId = agentPreparedThreadId();
+    const metadata = { source: "studio_mission_brief", assistant_id: agent.assistant_id,
+      assistant_version_id: agent.active_version_id || null, governed_preset: Boolean(exactBinding) };
+    const response = await apiForConnection(operation.connection, "POST", "/threads",
+      { thread_id: threadId, graph: agent.graph, metadata }, AGENT_VERSION_RESPONSE_LIMIT, "", true);
+    responseStatus = response.status;
+    if (!connectionOperationIdentityCurrent(operation)) return false;
+    const thread = response.status === 201 ? missionBriefThreadReceipt(response.body, threadId, agent.graph, metadata) : null;
+    if (!thread) {
+      const error = new ApiError(response.status, { error: "invalid_thread_receipt",
+        message: "The thread response did not prove the exact reviewed identity, graph, metadata, and creation time." });
+      error.mayHaveCommitted = response.status >= 200 && response.status < 300;
+      throw error;
+    }
+    if (!store.threads.some((item) => item.thread_id === threadId)) store.threads.unshift(thread);
+    saveThreads(); renderThreads();
+    draft.submitting = false;
+    draft.preparedThreadId = threadId;
+    draft.preparedAgentId = agent.assistant_id;
+    draft.preparedPayloadText = JSON.stringify({ assistant_id: agent.assistant_id, input }, null, 2);
+    draft.preparedBinding = exactBinding;
+    draft.preparedSource = { assistant_id: agent.assistant_id, graph: agent.graph,
+      active_version_id: agent.active_version_id, config: agent.config };
+    const sourceStillCurrent = missionBriefCurrentSource(agent, draft, request, operation);
+    const ownsView = sourceStillCurrent && store.view === initiatingView &&
+      store.agents && store.agents.selected === agent.assistant_id;
+    if (ownsView) return missionBriefOpenPrepared(draft, true);
+    if (!sourceStillCurrent) missionBriefSetError(draft, "The agent changed after the thread was created. The task was not transferred; review the current active version before opening it.");
+    if (store.view === initiatingView) journeyRender();
+    return true;
+  } catch (error) {
+    if (!connectionOperationIdentityCurrent(operation) || store.missionBrief !== draft || store.missionBriefRequest !== request) return false;
+    draft.submitting = false;
+    const ambiguous = error.mayHaveCommitted === true || error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500 || (responseStatus >= 200 && responseStatus < 300);
+    if (ambiguous && threadId) {
+      draft.uncertainThreadId = threadId;
+      missionBriefSetError(draft, "Studio cannot prove whether the prepared thread was created. No run started; check the exact stable thread ID before any retry.");
+    } else missionBriefSetError(draft, error.message || "The mission could not be prepared.");
+    if (store.view === initiatingView) {
+      journeyRender();
+      $("mission-brief-error")?.focus({ preventScroll: true });
+    }
+    return false;
+  }
 }
 
 function journeyFocus(id, scroll = true) {
@@ -5790,6 +6149,8 @@ function connectionSetSubmitting(submitting) {
 
 function connectionResetWorkspace() {
   store.connectionEpoch += 1;
+  store.missionBriefRequest += 1;
+  store.missionBrief = null;
   store.agentRequest += 1;
   store.agentVersionRequest += 1;
   store.agentLifecycleRequest += 1;
@@ -23781,11 +24142,21 @@ function init() {
   $("btn-connection-open").onclick = connectionOpen;
   $("btn-copy-view-link").onclick = navigationCopyCurrent;
   $("studio-journey").addEventListener("click", (event) => {
+    if (event.target.closest("[data-mission-attach]")) { missionBriefAttachUncertain(); return; }
+    if (event.target.closest("[data-mission-abandon]")) { missionBriefAbandonUncertain(); return; }
+    if (event.target.closest("[data-mission-open-prepared]")) { missionBriefOpenPrepared(store.missionBrief, true); return; }
     const target = event.target.closest("[data-journey-stage],[data-journey-next]");
     if (!target || target.disabled) return;
     journeyOpenStage(target.getAttribute("data-journey-stage") || target.getAttribute("data-journey-next")).catch((error) => {
       $("studio-journey-announcer").textContent = `The journey destination did not open: ${runProofVisibleMessage(error && error.message)}.`;
     });
+  });
+  $("studio-journey").addEventListener("input", (event) => missionBriefEdit(event.target));
+  $("studio-journey").addEventListener("change", (event) => missionBriefEdit(event.target));
+  $("studio-journey").addEventListener("submit", (event) => {
+    if (!event.target.matches("[data-mission-brief-form]")) return;
+    event.preventDefault();
+    missionBriefSubmit();
   });
   $("studio-journey-rail").addEventListener("keydown", journeyKeyboard);
   window.addEventListener("popstate", () => navigationActivateLocation({ focus: true }));

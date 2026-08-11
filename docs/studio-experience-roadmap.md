@@ -100,6 +100,12 @@ Studio is a useful engineering console, not yet the complete experience describe
   decision, bounded evidence in hand, missing proof, and next safe move, then hands off to the workspace that
   owns the authoritative evidence. It follows the operator's current stage before returning to earlier gaps,
   retains no separate mission record, and can be collapsed without losing the underlying workspace state.
+- Turn that dossier into a **Mission Brief** only at the Shape-to-Run boundary: choose the exact active agent,
+  frame one bounded objective, create a receipt-proven stable thread, and transfer the task into the existing
+  local run surface without starting execution. Objectives remain connection-bound page memory and stay out
+  of URLs and thread metadata; the visible boundary still warns that an eventual run may send input through
+  configured providers and journal evidence. Governed presets still flow through live catalog resolution and fresh
+  admission review. Uncertain creation keeps its thread ID locked for explicit recovery rather than retrying.
 - Start from a coherent Home mission board that shows the complete evidence-led journey, distinguishes
   current server catalog state from bounded browser recall, recommends the next action, and continues
   directly into the latest remembered agent or team evidence without retaining prompts or results.

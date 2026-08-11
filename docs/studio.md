@@ -46,6 +46,17 @@ studio/
   derived on render, retains at most five bounded identity/status facts, and never copies prompts, payloads,
   results, credentials, or evaluation inputs. Collapsing it is a page-only display choice; every action still
   reloads or preserves evidence in the destination and never approves a mutation from summary state.
+- **Mission Brief** — when a runnable agent is shaped but no thread exists yet, the dossier becomes a
+  prepare-only bridge instead of sending the operator back through another catalog screen. Choose an active
+  agent, describe one outcome (or provide the graph's JSON input), and create an exact stable thread; Studio
+  then transfers the reviewed task into the existing local run surface. Preparation never starts the run.
+  The objective is connection-bound page memory until that transfer: it is not placed in a shareable URL or
+  durable thread metadata, and a reconnect or reload discards an unfinished draft. Starting the run can still
+  send that input to configured model/tool providers and journal evidence, so Mission Brief is not a credential
+  store. A governed agent preset
+  still requires a fresh live Extension Catalog read and the existing one-run admission acknowledgement.
+  A malformed or uncertain create receipt locks the stable thread ID for explicit attach/check recovery
+  instead of offering a potentially duplicating retry.
 - **Connection Hub** — a guided **Reach server → Verify identity → Inspect features** handshake replaces
   the raw connection form. Reusable profiles remember only non-secret server metadata by default. Access
   keys stay in the browser session unless the user explicitly accepts a device-local plaintext warning;
