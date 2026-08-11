@@ -101,7 +101,29 @@ Reviewed at desktop width and by inspecting the 680px mobile rules (no live 390p
 - **Mobile (680px):** The sidebar collapses above the main area and all multi-column grids stack to one column. This is good, but the nav still shows nine items stacked vertically, which is overwhelming on a 390px phone.
 - **Reduced motion:** Only `.badge.running` is disabled; other animated surfaces (pulse indicators) may need to be added to the media query if they are introduced in the product-shell redesign.
 
-## 7. Recommendation
+## 7. Design review of the product-shell implementation
+
+Reviewed Codex's local `feat/studio-product-shell` changes (uncommitted at the time of review).
+
+**What works well:**
+
+- The three-destination nav (`Agents / Work / Operations`) is clean and uses equal-weight buttons.
+- The `studio-tool-drawer` keeps 7 specialist workspaces reachable without competing for attention.
+- The disconnected Work view leads with exactly one primary action: **Connect Rusty**.
+- The capability map is a strong visual system: Purpose, Knowledge, Tools, Model, Output, Guardrails, with a central "Agent" core and a dynamic readiness summary.
+- Operations surfaces attention first (`X items need attention` + **Review exceptions**), then lists secondary tools with plain-language copy.
+- Existing safety guarantees remain intact: connection identity checks, tenant isolation, receipt validation, and strict manifest rejection are untouched.
+
+**Suggested refinements for Codex to consider (do not block acceptance):**
+
+1. **Update `test-home.mjs` onboarding wording.** One assertion still expects the old "Create your first agent" copy; the new Work-first disconnected screen uses "Build an agent that can do real work" / "Connect Rusty".
+2. **Agent form section labels vs. capability map.** The map uses Purpose / Knowledge / Tools / Model / Output / Guardrails, while the form sections are still "01 · Purpose", "02 · Runtime", "03 · Intent". Consider aligning section headings to the map language so the visual system and the form feel like one model.
+3. **"Runtime" in the agent form.** The `Behavior` and `Step limit` fields are server-side runtime details. If they cannot be removed, keep them but ensure the map's "Model" card is what users click first for the reasoning runtime, with Behavior as a secondary binding detail.
+4. **Tool drawer label.** "Specialist tools" is concise; an alternative like "More workspaces" might read more invitingly to a first-time user. Either satisfies the acceptance contract.
+5. **Operations tool: "Improvements" for Learning.** Learning is governance, not operations. The current placement is acceptable because the user must evaluate proposed changes before promotion, but consider whether it belongs under Work or Agents instead.
+6. **390px mobile breakpoint.** The 680px breakpoint handles most layouts, but the contract asks for 390px. Consider adding `@media (max-width: 390px)` rules for the capability map (it may still feel dense on very small phones) and the operations tool grid.
+
+## 8. Recommendation
 
 The implementation stream (`feat/studio-product-shell`) should:
 
@@ -111,3 +133,4 @@ The implementation stream (`feat/studio-product-shell`) should:
 4. Move `Automations`, `Schedules`, `Task queue` inside **Operations**, with the tasks view leading attention-first.
 5. Re-render the disconnected home view as a single "Connect a server" action.
 6. Keep all existing evidence, receipt, tenant-isolation, and accessibility guarantees untouched.
+7. Update `test-home.mjs` for the new Work-first onboarding copy, and consider the design refinements above before declaring the stream done.
