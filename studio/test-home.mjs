@@ -48,10 +48,9 @@ function connectedState() {
   check("home onboarding: disconnected state leads with a local connection", !snapshot.connected &&
     snapshot.next.action === "connect" && snapshot.service === "Not connected");
   const markup = H.homeHtml(snapshot);
-  check("home onboarding: the empty mission board still explains the full evidence journey",
-    markup.includes("Shape") && markup.includes("Run") && markup.includes("Inspect") &&
-    markup.includes("Evaluate") && markup.includes("Govern") && markup.includes("Operate") && markup.includes('data-home-action="connect"') &&
-    markup.includes("connect to load") && !markup.includes("loading server"));
+  check("home onboarding: the empty mission board leads with the user's first agent task",
+    markup.includes("Create your first agent") && markup.includes("Define its job, connect the capabilities it needs") &&
+    markup.includes('data-home-action="connect"') && !markup.includes("evidence-led workspace") && !markup.includes("registered behavior"));
 }
 
 {
@@ -99,10 +98,9 @@ function connectedState() {
   state.learn = { records: [{ candidate_id: "old" }], totalCandidates: 1, loading: false, error: { status: 503 } };
   const failed = H.homeSnapshot(state);
   const markup = H.homeHtml(failed);
-  check("home truth: failed refreshes label retained catalogs stale instead of presenting current counts",
+  check("home truth: failed refreshes present concise unavailable state instead of retained counts",
     !failed.assistant_known && failed.assistant_count === null && !failed.team_known && failed.team_count === null &&
-    !failed.candidate_known && failed.candidate_count === null && markup.includes("stale · agent catalog unavailable") &&
-    markup.includes("stale · team registry unavailable"));
+    !failed.candidate_known && failed.candidate_count === null && (markup.match(/Needs refresh/g) || []).length >= 2);
 }
 
 {
@@ -112,7 +110,7 @@ function connectedState() {
   state.learn.records = [{ candidate_id: "candidate-1", status: "created" }];
   const markup = H.homeHtml(H.homeSnapshot(state));
   check("home truth: candidate evidence never turns unloaded memory into a false zero",
-    markup.includes(">—</b><span>Governed memory</span>") && !markup.includes(">0</b><span>Governed memory</span>"));
+    markup.includes(">—</b><span>Memory</span><small>Not loaded</small>") && !markup.includes(">0</b><span>Memory</span>"));
 }
 
 {
@@ -132,7 +130,7 @@ function connectedState() {
   check("home lifecycle: an unclassifiable record is discoverable and never becomes a create-first recommendation",
     unavailable.assistant_count === 0 && unavailable.assistant_archived_count === 0 &&
     unavailable.assistant_unavailable_count === 1 && unavailable.next.action === "unavailable-agents" &&
-    markup.includes("Review unavailable agents") && markup.includes("Active / archived / unavailable agents"));
+    markup.includes("Review unavailable agents") && markup.includes("0 archived · 1 unavailable"));
 }
 
 {
@@ -213,8 +211,10 @@ function connectedState() {
   check("home truth: memory not loaded is distinct from a server-confirmed empty ledger",
     !unknownSnapshot.memory_known && unknownSnapshot.memory_records === null &&
     knownSnapshot.memory_known && knownSnapshot.memory_records === 0 && knownSnapshot.memory_conflicts === 0);
-  check("home truth: rendered copy labels browser recall and requests workspace server truth",
-    H.homeHtml(unknownSnapshot).includes("browser recall") && H.homeHtml(unknownSnapshot).includes("open ledger to load server truth"));
+  check("home truth: unloaded and confirmed-empty memory remain visibly distinct without implementation narration",
+    H.homeHtml(unknownSnapshot).includes(">—</b><span>Memory</span><small>Not loaded</small>") &&
+    H.homeHtml(knownSnapshot).includes(">0</b><span>Memory</span><small>0 conflicts</small>") &&
+    !H.homeHtml(unknownSnapshot).includes("server truth"));
 }
 
 check("home markup: Home is the default labelled workspace with a persistent sidebar return",
@@ -241,14 +241,12 @@ check("home interaction: one delegated handler routes every mission-board action
   check("home focus: async replacement restores the same action and disappearing actions fall back to Home",
     replaced && focused === "title");
 }
-check("home responsive: hero, persistent evidence thread, and signals collapse without hiding the journey",
+check("home responsive: the primary mission and system actions collapse cleanly",
   html.includes(".home-hero { grid-template-columns: 1fr;") &&
-  html.includes(".studio-journey-rail { grid-template-columns: repeat(3,minmax(0,1fr));") &&
   html.includes(".home-signals { grid-template-columns: 1fr;"));
-check("home accessibility: the persistent signature rail is a named ordered journey and Home receives focus",
-  html.includes('<ol class="studio-journey-rail" id="studio-journey-rail" aria-label="Agent lifecycle stages"></ol>') &&
-  html.includes('aria-current="step"') &&
-  html.includes('id="home-title" tabindex="-1"') && html.includes('$("home-title")?.focus'));
+check("home accessibility: Mission control is focusable and the quiet navigation exposes its current workspace",
+  html.includes('id="home-title" tabindex="-1"') && html.includes('$("home-title")?.focus') &&
+  html.includes('button.setAttribute("aria-current", "page")'));
 check("home accessibility: every Home destination receives a visible labelled focus target",
   html.includes('id="agents-title" tabindex="-1"') && html.includes('$("agents-title").focus') &&
   html.includes('id="tasks-title" tabindex="-1"') && html.includes('$("tasks-title").focus') &&

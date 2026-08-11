@@ -91,7 +91,8 @@ Studio is a useful engineering console, not yet the complete experience describe
 
 ### Available now
 
-- Follow one persistent evidence thread across every workspace. It shows the selected agent and active
+- Follow one lifecycle evidence thread across active workspaces. Mission control stays focused on the next
+  task instead of repeating the rail. The thread shows the selected agent and active
   version when known, keeps thread/run ownership coherent, distinguishes browser-recalled runs from an exact
   loaded journal, unlocks evaluation only from complete same-thread evidence, and recommends the next safe
   stage without retaining prompts, payloads, results, credentials, or evaluation inputs. The rail is native-
@@ -106,8 +107,14 @@ Studio is a useful engineering console, not yet the complete experience describe
   of URLs and thread metadata; the visible boundary still warns that an eventual run may send input through
   configured providers and journal evidence. Governed presets still flow through live catalog resolution and fresh
   admission review. Uncertain creation keeps its thread ID locked for explicit recovery rather than retrying.
-- Start from a coherent Home mission board that shows the complete evidence-led journey, distinguishes
-  current server catalog state from bounded browser recall, recommends the next action, and continues
+- Carry that prepared work through one unified **Run Session**. Its **Prepare → Execute → Resolve → Prove**
+  spine makes live progress, interruption, exact-journal proof, and evaluation handoff one continuous mission
+  without replacing their source contracts. Streaming is the primary action; background and wait remain
+  available. The derived session keeps only bounded thread/run/status facts in page memory, preserves uncertain
+  accepted work instead of inviting duplication, and unlocks evaluation only from a complete exact same-thread
+  Recorder envelope. The thread workspace presents **Run**, **Trace**, or **Evaluate**, never all three at
+  once; Evaluate similarly shows one chosen quality tool instead of stacking the entire quality plane.
+- Start from a coherent Mission control that recommends the next action and continues
   directly into the latest remembered agent or team evidence without retaining prompts or results.
 - Connect to a local or remote Rusty server.
 - View registered graphs and create or attach threads.
@@ -255,8 +262,8 @@ Each milestone is a complete user outcome. A milestone is not complete because i
 
 Status: **usable foundation delivered**. The guided path and evidence-led Home mission board work,
 including honest local/server signals and direct continuation into recent agent or team evidence. The same
-six-stage evidence thread now persists above Home, Agent Workbench, thread/Recorder, quality, governance,
-and operations surfaces, replacing the prior Home-only journey summary with one continuous navigation model.
+six-stage evidence thread now connects Agent Workbench, thread/Recorder, quality, governance, and operations
+surfaces. Mission control deliberately omits it so the default view stays action-first.
 The Connection Hub now delivers guided onboarding, bounded non-secret server profiles, session-only
 secrets by default, explicit device-local opt-in, verified server identity, safe compatibility evidence,
 and recovery-preserving connection switching. Workspace and evidence navigation is now URL-addressable

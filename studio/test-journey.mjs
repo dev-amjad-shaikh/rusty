@@ -163,7 +163,7 @@ function connectedState() {
   check("journey rendering: hostile legal identities are escaped in the visible exact context",
     context.includes("&lt;agent&amp;1&gt;") && !context.includes("<agent&1>"));
   check("journey accessibility: native stages expose current position and disable unavailable destinations",
-    rail.includes('aria-current="step"') && rail.includes('data-journey-stage="inspect" disabled') && rail.includes('aria-describedby="studio-journey-boundary"'));
+    rail.includes('aria-current="step"') && rail.includes('data-journey-stage="inspect" disabled'));
 }
 
 {
@@ -266,6 +266,7 @@ function connectedState() {
     ["studio-journey-next", next], ["studio-journey-label", label]]);
   sandbox.document.activeElement = oldNext;
   Object.assign(J.store, connectedState());
+  J.store.view = "agents";
   J.journeyRender();
   const nextPreserved = focused === "next";
   focused = ""; sandbox.document.activeElement = oldStage;
@@ -300,19 +301,20 @@ function connectedState() {
     moved && event.prevented && focused.join(",") === "govern,shape");
 }
 
-check("journey markup: the evidence thread is persistent before every workspace and has one stable announcer",
+check("journey markup: the lifecycle rail is available inside active workspaces with one stable announcer",
   html.indexOf('id="studio-journey"') < html.indexOf('id="home-view"') &&
-  html.includes('id="studio-journey-announcer" role="status" aria-live="polite" aria-atomic="true"'));
+  html.includes('id="studio-journey-announcer" role="status" aria-live="polite" aria-atomic="true"') &&
+  html.includes('panel.hidden = store.view === "home" || store.view === "thread"'));
 check("journey interaction: one delegated action path owns stage and next-safe-move routing",
   html.includes('target.closest("[data-journey-stage],[data-journey-next]")') &&
   html.includes('$("studio-journey-rail").addEventListener("keydown", journeyKeyboard)'));
 check("journey responsive: mobile uses a deliberate three-by-two rail and stacked identity context",
   html.includes('.studio-journey-rail { grid-template-columns: repeat(3,minmax(0,1fr));') &&
   html.includes('.studio-journey-context { grid-column: 1 / -1; grid-row: 2; }'));
-check("journey singularity: Home points to the persistent rail instead of rendering a second competing stepper",
-  !html.includes('class="home-evidence-rail"') && html.includes("The evidence thread above is the primary journey"));
-check("journey boundary: visible copy distinguishes identity continuity from workspace authority",
-  html.includes("Identity-only page context") && html.includes("the rail never upgrades browser recall into server truth"));
+check("journey singularity: Mission control and the focused thread flow omit duplicate lifecycle rails",
+  !html.includes('class="home-evidence-rail"') && html.includes('store.view === "home" || store.view === "thread"'));
+check("journey calmness: implementation-boundary commentary is absent from the primary workspace",
+  !html.includes("Identity-only page context") && !html.includes("the rail never upgrades browser recall into server truth"));
 
 if (failed) {
   console.error(`\nFAIL: ${failed} failed, ${passed} passed`);

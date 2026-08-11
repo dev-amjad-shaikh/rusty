@@ -150,23 +150,25 @@ function connectedState() {
   ]);
   sandbox.document.activeElement = oldMission;
   Object.assign(M.store, connectedState());
+  M.store.view = "agents";
   const snapshot = M.journeyRender();
   check("mission focus: evidence refresh restores the dossier action rather than jumping to the header",
     snapshot && focused === "mission" && missionBody.innerHTML.includes("studio-mission-decision"));
   sandbox.document.activeElement = null;
 }
 
-check("mission markup: the progressive dossier is a native expandable region directly beneath the evidence rail",
+check("mission markup: the progressive dossier is a native, collapsed-on-entry region beneath the evidence rail",
   html.indexOf('id="studio-journey-rail"') < html.indexOf('id="studio-mission"') &&
-  html.includes('<details class="studio-mission" id="studio-mission" open>') &&
+  html.includes('<details class="studio-mission" id="studio-mission">') &&
   html.includes('id="studio-mission-body" aria-labelledby="studio-mission-label"'));
 check("mission lifecycle: rendering updates only the dossier body so the operator's expanded state is preserved",
   html.includes('missionBody.innerHTML = journeyMissionHtml(dossier)') && !html.includes('$("studio-mission").innerHTML'));
 check("mission responsive: the dossier becomes one decision column with a full-width primary handoff",
   html.includes('.studio-mission-body { grid-template-columns: 1fr;') &&
   html.includes('.studio-mission-action button { width: 100%; }'));
-check("mission boundary: visible copy refuses to turn the dossier into an approval or duplicate source of truth",
-  html.includes("the destination remains authoritative") && html.includes("this summary never approves a change"));
+check("mission calmness: the primary next-step view omits implementation and approval commentary",
+  !html.includes("the destination remains authoritative") && !html.includes("this summary never approves a change") &&
+  !html.includes("One decision at a time. The dossier carries bounded identity"));
 check("mission documentation: product and roadmap name the same derived, collapsible evidence boundary",
   docs.includes("Progressive mission dossier") && docs.includes("at most five bounded identity/status facts") &&
   roadmap.includes("progressive mission dossier") && roadmap.includes("retains no separate mission record"));

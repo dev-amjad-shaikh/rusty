@@ -260,9 +260,10 @@ for (const [label, recorder] of [
     N.store.agentLifecycleFilter === "all" && element("sel-agent-lifecycle").value === "all");
 }
 
-check("markup: global copy action states the content-free privacy boundary",
+check("markup: global copy action stays concise while retaining accessible status",
   page.includes('id="btn-copy-view-link"') && page.includes('aria-describedby="view-link-status"') &&
-  page.includes("no server address, key, prompt, or payload") && page.includes('id="view-link-announcer"'));
+  page.includes('<small class="sr-only" id="view-link-status">Copy a link to this workspace</small>') &&
+  !page.includes("no server address, key, prompt, or payload") && page.includes('id="view-link-announcer"'));
 {
   const panel = element("view-link-message");
   N.navigationRouteMessage("Connect to the intended Rusty server to open this run evidence.");

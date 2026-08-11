@@ -201,12 +201,29 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
 
   /* ---------- sidebar ---------- */
+  .studio-nav { display: grid; gap: 15px; }
+  .studio-nav-group { display: grid; gap: 5px; }
+  .studio-nav-group h2 {
+    margin: 0 5px 3px; color: var(--text-faint); font: 9px var(--mono);
+    letter-spacing: 1.35px; text-transform: uppercase;
+  }
+  .studio-nav-button {
+    width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center;
+    gap: 4px 10px; padding: 8px 10px; text-align: left; background: transparent; border-color: transparent;
+  }
+  .studio-nav-button:hover, .studio-nav-button:focus-visible { background: var(--bg-raised); border-color: var(--border-hi); }
+  .studio-nav-button.active { background: #302b21; border-color: #5b4f35; color: #f2e5bd; }
+  .studio-nav-button > b { font-size: 12px; font-weight: 600; }
+  .studio-nav-button > span { grid-column: 1 / -1; color: var(--text-faint); font: 10px var(--mono); overflow-wrap: anywhere; }
+  .studio-nav-button.nav-primary { background: #2d291f; border-color: #4a412d; color: #efdfae; }
+  .studio-sidebar-section { margin-top: 20px; }
+  .studio-sidebar-section > h2 { margin-top: 0; }
   .graph-item {
     border: 1px solid var(--border); border-radius: 7px;
     padding: 8px 10px; margin-bottom: 8px; background: var(--bg-raised);
   }
-  .graph-item .gname { font-family: var(--mono); font-weight: 600; font-size: 13px; }
-  .graph-item .channels { color: var(--text-dim); font-size: 11.5px; margin: 3px 0 7px; font-family: var(--mono); }
+  .graph-item .gname { font-weight: 650; font-size: 13px; }
+  .graph-item .channels { color: var(--text-dim); font-size: 11px; margin: 3px 0 7px; }
   .thread-item {
     border: 1px solid var(--border); border-radius: 7px;
     padding: 7px 10px; margin-bottom: 6px; cursor: pointer;
@@ -214,7 +231,7 @@
   }
   .thread-item:hover { border-color: var(--border-hi); }
   .thread-item.selected { border-color: var(--accent-dim); background: #2e2a20; }
-  .thread-item .tid { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
+  .thread-item .tid { font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
   .thread-item .tmeta { display: flex; justify-content: space-between; align-items: center; margin-top: 3px; }
   .thread-item .tgraph { color: var(--accent); font-family: var(--mono); font-size: 11px; }
   .thread-item .forget { color: var(--text-faint); font-size: 11px; background: none; border: none; padding: 0 2px; cursor: pointer; }
@@ -229,6 +246,86 @@
   /* ---------- main thread panel ---------- */
   #thread-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
   #thread-head .tid { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .thread-stage-nav {
+    display: inline-flex; gap: 3px; margin: 0 0 12px; padding: 3px;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--bg-inset);
+  }
+  .thread-stage-nav button { min-width: 92px; border-color: transparent; background: transparent; }
+  .thread-stage-nav button[aria-selected="true"] { border-color: #5b4f35; background: #302b21; color: #f2e5bd; }
+  .thread-stage-nav button:disabled { opacity: .45; }
+  .thread-evaluate-nav {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin: 0 0 12px; padding: 11px 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-inset);
+  }
+  .thread-evaluate-nav label { display: flex; align-items: center; gap: 9px; color: var(--text-dim); font-size: 11px; }
+  .thread-evaluate-nav select { min-width: 210px; }
+  .thread-evaluate-nav span { color: var(--text-faint); font-size: 10.5px; }
+  .run-session {
+    padding: 0; overflow: hidden; border-color: #4c422d;
+    background: linear-gradient(145deg, #28231a 0, var(--bg-panel) 37%, #1c1a17 100%);
+  }
+  .run-session-head {
+    display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr); gap: 12px 24px; align-items: start;
+    padding: 16px 18px 14px; border-bottom: 1px solid #463d2b;
+  }
+  .run-session-kicker { color: var(--accent); font: 9px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; }
+  .run-session-head h1 { margin: 3px 0 5px; font-size: 22px; line-height: 1.12; letter-spacing: -.3px; }
+  .run-session-head p { max-width: 720px; margin: 0; color: var(--text-dim); font-size: 11.5px; }
+  .run-session-identity { min-width: 0; justify-content: flex-end; margin: 0; text-align: right; }
+  .run-session-identity .tid { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .run-session-status {
+    display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; min-height: 24px;
+    color: var(--text-dim); font: 10px var(--mono); overflow-wrap: anywhere;
+  }
+  .run-session-status::before { content: ""; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--pending); }
+  .run-session-status[data-state="running"]::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+  .run-session-status[data-state="interrupted"]::before { background: var(--interrupt); }
+  .run-session-status[data-state="complete"]::before { background: var(--ok); }
+  .run-session-status[data-state="failed"], .run-session-status[data-state="uncertain"] { color: #e0b7af; }
+  .run-session-status[data-state="failed"]::before, .run-session-status[data-state="uncertain"]::before { background: var(--err); }
+  .run-session-spine {
+    position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 0 18px; border-bottom: 1px solid var(--border); background: rgba(19,17,16,.58);
+  }
+  .run-session-spine::before { content: ""; position: absolute; top: 20px; left: calc(12.5% + 18px); right: calc(12.5% + 18px); height: 1px; background: #4a4235; }
+  .run-session-step { position: relative; min-width: 0; padding: 13px 8px 11px 30px; }
+  .run-session-step::before {
+    content: ""; position: absolute; z-index: 1; top: 15px; left: 8px; width: 10px; height: 10px;
+    border: 2px solid var(--pending); border-radius: 50%; background: var(--bg-inset);
+  }
+  .run-session-step b, .run-session-step span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-session-step b { color: var(--text-dim); font-size: 10.5px; }
+  .run-session-step span { margin-top: 1px; color: var(--text-faint); font: 9px var(--mono); }
+  .run-session-step.complete::before { border-color: var(--ok); background: #293524; }
+  .run-session-step.complete b { color: #bfd3b6; }
+  .run-session-step.active::before { border-color: var(--accent); background: #493d1e; box-shadow: 0 0 0 4px rgba(201,162,39,.09); }
+  .run-session-step.active b { color: #efdfae; }
+  .run-session-step.attention::before { border-color: var(--interrupt); background: #42291f; }
+  .run-session-step.attention b { color: #e2bca4; }
+  .run-session-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(250px, .55fr); }
+  .run-session-grid.single { grid-template-columns: minmax(0, 1fr); }
+  .run-session-grid.single .run-session-compose { border-right: 0; }
+  .run-session-compose { min-width: 0; padding: 16px 18px 18px; border-right: 1px solid var(--border); }
+  .run-session-label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 600; }
+  .run-session-label span { color: var(--text-faint); font: 9.5px var(--mono); font-weight: 400; }
+  .run-session-launch { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .run-session-launch #btn-run-stream { padding: 8px 15px; }
+  .run-session-advanced { margin-left: auto; }
+  .run-session-advanced summary { color: var(--text-dim); font-size: 10.5px; cursor: pointer; }
+  .run-session-advanced[open] { flex-basis: 100%; margin: 5px 0 0; padding: 10px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-inset); }
+  .run-session-advanced .row { margin-top: 0; }
+  .run-session-now { display: flex; flex-direction: column; min-width: 0; padding: 16px; background: rgba(13,12,11,.35); }
+  .run-session-now[hidden] { display: none; }
+  .run-session-now-label { color: var(--accent); font: 9px var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+  .run-session-now h2 { margin: 7px 0 6px; font-size: 15px; line-height: 1.25; }
+  .run-session-now p { margin: 0 0 14px; color: var(--text-dim); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+  .run-session-now button { margin-top: auto; width: 100%; }
+  .run-session-boundary { margin-top: 9px; color: var(--text-faint); font: 9px var(--mono); line-height: 1.45; }
+  .run-session-help { margin-top: 9px; color: var(--text-faint); font: 9px/1.45 var(--mono); }
+  .run-session-help summary { width: max-content; cursor: pointer; color: var(--text-dim); }
+  .run-session-help p { margin: 6px 0 0; max-width: 720px; }
+  .run-session-live { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(270px, .8fr); gap: 14px; }
+  .run-session-live > .card { min-width: 0; }
   .run-controls textarea, .interrupt-custom textarea {
     width: 100%; min-height: 88px; resize: vertical;
     background: var(--bg-inset); color: var(--text);
@@ -2249,6 +2346,9 @@
     .connection-body { grid-template-columns: 220px minmax(0, 1fr); }
     .connection-grid { grid-template-columns: 1fr; }
     aside { width: 250px; flex-basis: 250px; }
+    .run-session-grid { grid-template-columns: 1fr; }
+    .run-session-compose { border-right: 0; border-bottom: 1px solid var(--border); }
+    .run-session-live { grid-template-columns: 1fr; gap: 0; }
     .agent-layout { grid-template-columns: 1fr; }
     .home-grid { grid-template-columns: 1fr; }
     .workbench-head { flex-direction: column; }
@@ -2346,6 +2446,27 @@
     .mission-brief-objective, .mission-brief-error, .mission-brief-recovery, .mission-brief-prepared, .mission-brief-boundary { grid-column: auto; }
     .mission-brief-boundary, .mission-brief-prepared { align-items: stretch; flex-direction: column; }
     .mission-brief-boundary button, .mission-brief-prepared button { width: 100%; }
+    .run-session-head { grid-template-columns: 1fr; padding: 14px; }
+    .thread-stage-nav { display: flex; width: 100%; }
+    .thread-stage-nav button { flex: 1; min-width: 0; }
+    .thread-evaluate-nav { align-items: stretch; flex-direction: column; }
+    .thread-evaluate-nav label { align-items: stretch; flex-direction: column; }
+    .thread-evaluate-nav select { width: 100%; min-width: 0; }
+    .run-session-identity { justify-content: flex-start; text-align: left; }
+    .run-session-status { justify-content: flex-start; }
+    .run-session-spine { grid-template-columns: repeat(2,minmax(0,1fr)); padding: 0 10px; }
+    .run-session-spine::before { display: none; }
+    .run-session-step { padding: 10px 6px 9px 27px; border-bottom: 1px solid #332f28; }
+    .run-session-step:nth-last-child(-n+2) { border-bottom: 0; }
+    .run-session-step::before { top: 12px; left: 6px; }
+    .run-session-compose, .run-session-now { padding: 13px; }
+    .run-session-label { align-items: flex-start; flex-direction: column; gap: 2px; }
+    .run-session-launch { align-items: stretch; flex-direction: column; }
+    .run-session-launch #btn-run-stream { width: 100%; }
+    .run-session-advanced { width: 100%; margin-left: 0; }
+    .run-session-advanced[open] { margin-top: 3px; }
+    .run-session-advanced .row { align-items: stretch; flex-direction: column; }
+    .run-session-advanced .row button, .run-session-advanced .row select { width: 100%; }
     .home-hero { grid-template-columns: 1fr; padding: 18px; }
     .home-hero-action { min-width: 0; text-align: left; }
     .home-signals { grid-template-columns: 1fr; }
@@ -2625,13 +2746,13 @@
   <header>
     <div class="brand">Rusty <span>Studio</span></div>
     <div class="view-link-control">
-      <button class="small" id="btn-copy-view-link" type="button" aria-describedby="view-link-status">Copy evidence link</button>
-      <small id="view-link-status">Workspace only · no server address, key, prompt, or payload</small>
+      <button class="small" id="btn-copy-view-link" type="button" aria-describedby="view-link-status">Copy link</button>
+      <small class="sr-only" id="view-link-status">Copy a link to this workspace</small>
       <span class="sr-only" id="view-link-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
     </div>
     <button class="connection-chip" id="btn-connection-open" type="button" aria-haspopup="dialog" aria-controls="connection-dialog">
       <span class="connection-chip-dot" aria-hidden="true"></span>
-      <span class="connection-chip-copy"><b id="conn-profile">Choose a server</b><small id="conn-status">Not connected · local-first</small></span>
+      <span class="connection-chip-copy"><b id="conn-profile">Choose a server</b><small id="conn-status">Not connected</small></span>
       <span class="connection-chip-warning" id="conn-warning" hidden>Security cleanup needed</span>
       <span class="connection-chip-action">Manage</span>
     </button>
@@ -2641,7 +2762,7 @@
   <dialog class="connection-dialog" id="connection-dialog" aria-labelledby="connection-title">
     <div class="connection-shell">
       <div class="connection-head">
-        <div><span class="connection-kicker">Connection hub · ignition desk</span><h1 id="connection-title" tabindex="-1">Choose where Studio works</h1><p>Verify one Rusty server, keep its non-secret profile, and see exactly which workspaces it can support.</p></div>
+        <div><span class="connection-kicker">Connection</span><h1 id="connection-title" tabindex="-1">Connect Studio</h1><p>Choose a Rusty server and verify it before you start.</p></div>
         <button class="small" id="btn-connection-close" type="button" aria-label="Close connection hub">Close</button>
       </div>
       <div class="connection-body">
@@ -2681,73 +2802,55 @@
 
   <div id="body">
     <aside>
-      <h2 class="section">Studio</h2>
-      <button class="small primary" id="btn-home-open" style="width:100%">Open mission board</button>
+      <nav class="studio-nav" aria-label="Studio workspaces">
+        <section class="studio-nav-group" aria-labelledby="studio-nav-create">
+          <h2 id="studio-nav-create">Create</h2>
+          <button class="studio-nav-button nav-primary" id="btn-home-open" type="button"><b>Mission control</b></button>
+          <button class="studio-nav-button" id="btn-agents-open" type="button"><b>Agents</b><span id="agent-side-count">Not loaded</span></button>
+          <button class="studio-nav-button" id="btn-fabric-open" type="button"><b>Teams</b><span id="fabric-side-count">Not loaded</span></button>
+        </section>
+        <section class="studio-nav-group" aria-labelledby="studio-nav-improve">
+          <h2 id="studio-nav-improve">Improve</h2>
+          <button class="studio-nav-button" id="btn-memory-open" type="button"><b>Memory</b><span id="memory-side-count">Not loaded</span></button>
+          <button class="studio-nav-button" id="btn-learn-open" type="button"><b>Learning</b><span id="learn-side-count">Not loaded</span></button>
+          <button class="studio-nav-button" id="btn-registry-open" type="button"><b>Configuration</b><span id="registry-side-count">Not loaded</span></button>
+        </section>
+        <section class="studio-nav-group" aria-labelledby="studio-nav-operate">
+          <h2 id="studio-nav-operate">Operate</h2>
+          <button class="studio-nav-button" id="btn-automations-open" type="button"><b>Automations</b><span id="automations-side-count">Not loaded</span></button>
+          <button class="studio-nav-button" id="btn-schedules-open" type="button"><b>Schedules</b><span id="schedules-side-count">Not loaded</span></button>
+          <button class="studio-nav-button" id="btn-tasks-open" type="button"><b>Task queue</b></button>
+        </section>
+      </nav>
 
-      <h2 class="section">Agents</h2>
-      <button class="small primary" id="btn-agents-open" style="width:100%">Open agent workbench</button>
-      <div class="muted tiny" id="agent-side-count" style="margin:6px 2px 0">Connect to load assistant configurations.</div>
+      <section class="studio-sidebar-section" aria-labelledby="studio-behaviors-title">
+        <h2 class="section" id="studio-behaviors-title">Start a thread</h2>
+        <div id="graph-list"><div class="empty">Connect to choose a behavior.</div></div>
+      </section>
 
-      <h2 class="section">Teams</h2>
-      <button class="small primary" id="btn-fabric-open" style="width:100%">Open team observatory</button>
-      <div class="muted tiny" id="fabric-side-count" style="margin:6px 2px 0">Connect to discover durable identities.</div>
-
-      <h2 class="section">Memory</h2>
-      <button class="small primary" id="btn-memory-open" style="width:100%">Open memory ledger</button>
-      <div class="muted tiny" id="memory-side-count" style="margin:6px 2px 0">Connect to inspect governed memory.</div>
-
-      <h2 class="section">Learning</h2>
-      <button class="small primary" id="btn-learn-open" style="width:100%">Open learning control room</button>
-      <div class="muted tiny" id="learn-side-count" style="margin:6px 2px 0">Connect to review proposed changes.</div>
-
-      <h2 class="section">Extensions</h2>
-      <button class="small primary" id="btn-registry-open" style="width:100%">Open extension catalog</button>
-      <div class="muted tiny" id="registry-side-count" style="margin:6px 2px 0">Connect to discover configuration artifacts.</div>
-
-      <h2 class="section">Automations</h2>
-      <button class="small primary" id="btn-automations-open" style="width:100%">Open automation desk</button>
-      <div class="muted tiny" id="automations-side-count" style="margin:6px 2px 0">Connect to inspect signed webhook bindings.</div>
-
-      <h2 class="section">Schedules</h2>
-      <button class="small primary" id="btn-schedules-open" style="width:100%">Open schedule desk</button>
-      <div class="muted tiny" id="schedules-side-count" style="margin:6px 2px 0">Connect to inspect recurring server work.</div>
-
-      <h2 class="section">Graphs</h2>
-      <div id="graph-list"><div class="empty">Connect to a server.</div></div>
-
-      <h2 class="section">Threads (local)</h2>
-      <div class="note tiny">
-        The server has no list-threads endpoint (v0.2) — threads you create or attach are remembered in this
-        browser only, isolated by server and access boundary.
-      </div>
-      <div id="thread-list"></div>
-      <div class="attach-row">
-        <input id="inp-attach" type="text" spellcheck="false" placeholder="attach thread by id…">
-        <button class="small" id="btn-attach">Attach</button>
-      </div>
-
-      <h2 class="section">Durable tasks</h2>
-      <div class="note tiny">
-        The R0.6 task queue is tenant-wide — it does not belong to any thread.
-        The <code>dead</code> status filter is the dead-letter queue.
-      </div>
-      <button class="small primary" id="btn-tasks-open" style="width:100%">Open task queue</button>
+      <section class="studio-sidebar-section" aria-labelledby="studio-threads-title">
+        <h2 class="section" id="studio-threads-title">Recent threads</h2>
+        <div id="thread-list"></div>
+        <div class="attach-row">
+          <input id="inp-attach" type="text" spellcheck="false" aria-label="Thread ID" placeholder="Thread ID">
+          <button class="small" id="btn-attach" type="button">Attach</button>
+        </div>
+      </section>
     </aside>
 
     <main id="main">
       <div id="view-link-message" class="view-link-message" role="note" hidden></div>
       <section class="studio-journey" id="studio-journey" aria-labelledby="studio-journey-label">
         <div class="studio-journey-head">
-          <div class="studio-journey-title"><span>Evidence thread</span><strong id="studio-journey-label">One system, one continuous journey</strong></div>
+          <div class="studio-journey-title"><span>Progress</span><strong id="studio-journey-label">Current task</strong></div>
           <div class="studio-journey-context" id="studio-journey-context" aria-label="Current agent, version, thread, and run context"></div>
           <div class="studio-journey-next" id="studio-journey-next"></div>
         </div>
         <ol class="studio-journey-rail" id="studio-journey-rail" aria-label="Agent lifecycle stages"></ol>
-        <details class="studio-mission" id="studio-mission" open>
-          <summary><span class="studio-mission-summary"><span>Mission dossier</span><strong id="studio-mission-label">Next decision, assembled from current evidence</strong></span><span class="studio-mission-progress" id="studio-mission-progress"></span></summary>
+        <details class="studio-mission" id="studio-mission">
+          <summary><span class="studio-mission-summary"><span>Next step</span><strong id="studio-mission-label">Continue this work</strong></span><span class="studio-mission-progress" id="studio-mission-progress"></span></summary>
           <div class="studio-mission-body" id="studio-mission-body" aria-labelledby="studio-mission-label"></div>
         </details>
-        <p class="studio-journey-boundary" id="studio-journey-boundary">Identity-only page context. Each destination reloads or preserves its own authoritative evidence; the rail never upgrades browser recall into server truth.</p>
         <span class="sr-only" id="studio-journey-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
       </section>
       <div id="home-view" aria-labelledby="home-title"><div class="empty">Loading the Studio mission board.</div></div>
@@ -3119,51 +3222,83 @@
       </div>
 
       <div id="thread-view" style="display:none">
-
-        <div id="thread-head" tabindex="-1" aria-label="Selected thread workspace">
-          <span class="tid" id="th-id"></span>
-          <span class="badge" id="th-graph"></span>
-          <span class="muted tiny" id="th-created"></span>
-          <span id="th-runstatus"></span>
-        </div>
-
-        <div class="card run-controls">
-          <h2 class="section" style="margin-top:0">Run</h2>
-          <textarea id="inp-payload" spellcheck="false"></textarea>
-          <div class="row">
-            <button class="primary" id="btn-run">Run (background)</button>
-            <button class="primary" id="btn-run-wait">Run &amp; wait</button>
-            <button class="primary" id="btn-run-stream">Stream run</button>
-            <span class="muted tiny">stream_mode:</span>
-            <label class="chk"><input type="checkbox" id="sm-values" checked> values</label>
-            <label class="chk"><input type="checkbox" id="sm-updates" checked> updates</label>
-            <label class="chk"><input type="checkbox" id="sm-messages"> messages</label>
-            <span class="muted tiny">multitask:</span>
-            <select id="sel-multitask">
-              <option value="">enqueue (default)</option>
-              <option value="reject">reject</option>
-            </select>
+        <nav class="thread-stage-nav" id="thread-stage-nav" role="tablist" aria-label="Current task workspace">
+          <button id="thread-stage-run" type="button" role="tab" aria-controls="thread-run-panel" data-thread-stage="run" aria-selected="true">Run</button>
+          <button id="thread-stage-trace" type="button" role="tab" aria-controls="thread-trace-core" data-thread-stage="trace" aria-selected="false" tabindex="-1">Trace</button>
+          <button id="thread-stage-evaluate" type="button" role="tab" aria-controls="thread-evaluate-core" data-thread-stage="evaluate" aria-selected="false" tabindex="-1">Evaluate</button>
+        </nav>
+        <div id="thread-run-panel" role="tabpanel" aria-labelledby="thread-stage-run">
+        <section class="card run-session run-controls" id="run-session" aria-labelledby="run-session-title">
+          <header class="run-session-head">
+            <div><h1 id="run-session-title" tabindex="-1">Run</h1></div>
+            <div class="run-session-identity" id="thread-head" tabindex="-1" aria-label="Selected thread workspace">
+              <span class="tid" id="th-id"></span>
+              <span class="badge" id="th-graph"></span>
+              <span class="muted tiny" id="th-created"></span>
+              <span id="th-runstatus"></span>
+              <div class="run-session-status" id="run-session-status" role="status" aria-live="polite" aria-atomic="true" data-state="ready">Ready for a mission</div>
+            </div>
+          </header>
+          <div class="run-session-spine" id="run-session-spine" role="list" aria-label="Run session progress"></div>
+          <div class="run-session-grid">
+            <div class="run-session-compose">
+              <label class="run-session-label" for="inp-payload">Mission input <span>Exact JSON sent to this thread</span></label>
+              <textarea id="inp-payload" spellcheck="false" aria-describedby="run-session-input-boundary"></textarea>
+              <div class="run-session-launch">
+                <button class="primary" id="btn-run-stream" type="button">Start live run</button>
+                <span class="muted tiny">Best for watching progress and handling pauses.</span>
+                <details class="run-session-advanced">
+                  <summary>Other execution modes and delivery controls</summary>
+                  <div class="row">
+                    <button id="btn-run" type="button">Start in background</button>
+                    <button id="btn-run-wait" type="button">Run until finished</button>
+                    <span class="muted tiny">live events:</span>
+                    <label class="chk"><input type="checkbox" id="sm-values" checked> values</label>
+                    <label class="chk"><input type="checkbox" id="sm-updates" checked> updates</label>
+                    <label class="chk"><input type="checkbox" id="sm-messages"> messages</label>
+                    <span class="muted tiny">while busy:</span>
+                    <select id="sel-multitask" aria-label="When this thread is already busy">
+                      <option value="">queue this run</option>
+                      <option value="reject">reject this run</option>
+                    </select>
+                  </div>
+                </details>
+              </div>
+              <details class="run-session-help"><summary>Execution and data details</summary><p id="run-session-input-boundary">Input stays in this page until you start a run. A run may call configured models and tools; Rusty journals execution evidence on the connected deployment.</p></details>
+              <details class="runtime-binding" id="registry-binding-card">
+                <summary id="registry-binding-toggle"><span>Governed runtime binding</span><span id="registry-binding-summary" class="muted">Unbound</span></summary>
+                <div class="runtime-binding-body" id="registry-binding-body"><div class="empty">Open this planner to bind promoted configuration into the next run.</div></div>
+                <span class="sr-only" id="registry-binding-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+              </details>
+            </div>
+            <aside class="run-session-now" id="run-session-now" aria-labelledby="run-session-now-title">
+              <div class="run-session-now-label">Next safe move</div>
+              <h2 id="run-session-now-title">Review the mission</h2>
+              <p id="run-session-now-copy">Confirm the exact input and any governed runtime binding before starting live execution.</p>
+              <button class="small primary" id="btn-run-session-next" type="button" data-run-session-action="input">Review mission input</button>
+              <button class="small" id="btn-run-session-abandon" type="button" hidden>Abandon uncertainty</button>
+              <details class="run-session-help"><summary>Evidence details</summary><p id="run-session-evidence-boundary">The session summarizes identifiers and status only. Event payloads remain in their existing evidence surfaces.</p></details>
+            </aside>
           </div>
-          <details class="runtime-binding" id="registry-binding-card">
-            <summary id="registry-binding-toggle"><span>Governed runtime binding</span><span id="registry-binding-summary" class="muted">Unbound</span></summary>
-            <div class="runtime-binding-body" id="registry-binding-body"><div class="empty">Open this planner to bind promoted configuration into the next run.</div></div>
-            <span class="sr-only" id="registry-binding-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
-          </details>
-        </div>
+        </section>
 
         <section class="card interrupt-decision" id="interrupt-card" aria-labelledby="interrupt-title" hidden></section>
 
-        <div class="card">
-          <h2 class="section" style="margin-top:0">Event feed</h2>
-          <div id="feed"><div class="empty">No events yet — start a streamed run.</div></div>
-        </div>
+        <div class="run-session-live">
+          <div class="card">
+            <h2 class="section" style="margin-top:0">Live activity</h2>
+            <div id="feed" tabindex="-1"><div class="empty">No live activity yet — start a live run to watch it unfold.</div></div>
+          </div>
 
-        <div class="card">
-          <h2 class="section" style="margin-top:0">Run result</h2>
-            <div id="run-result" tabindex="-1"><div class="empty">No run result yet.</div></div>
+          <div class="card">
+            <h2 class="section" style="margin-top:0">Latest outcome</h2>
+              <div id="run-result" tabindex="-1"><div class="empty">No run outcome yet.</div></div>
+          </div>
+        </div>
         </div>
 
         <div class="card" id="flight-recorder-card">
+          <div id="thread-trace-core" role="tabpanel" aria-labelledby="thread-stage-trace">
           <h2 class="section" id="flight-recorder-title" tabindex="-1" style="margin-top:0">
             Flight Recorder
             <button class="small" id="btn-rec-refresh" style="float:right">reload</button>
@@ -3199,7 +3334,23 @@
               <div class="run-proof-actions"><span class="muted tiny">A complete journal is required before Studio makes a proof claim.</span></div>
             </div>
           </section>
+          </div>
 
+          <div id="thread-evaluate-core" role="tabpanel" aria-labelledby="thread-stage-evaluate">
+          <div class="thread-evaluate-nav">
+            <label for="sel-evaluate-tool">Evaluation tool
+              <select id="sel-evaluate-tool">
+                <option value="case">Build a test case</option>
+                <option value="dataset">Manage datasets</option>
+                <option value="gate">Define a release gate</option>
+                <option value="report">Inspect an experiment</option>
+                <option value="atlas">Explore failures</option>
+                <option value="regression">Compare regressions</option>
+                <option value="decision">Review a release decision</option>
+                <option value="compare">Compare two runs</option>
+              </select>
+            </label>
+          </div>
           <section class="quality-foundry" id="quality-foundry" aria-labelledby="quality-foundry-title">
             <div class="quality-foundry-head">
               <div><span class="quality-foundry-kicker">Quality plane · evidence to regression</span>
@@ -3274,7 +3425,8 @@
             <span class="sr-only" id="quality-decision-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
           </section>
 
-          <h2 class="section" style="margin-top:16px">Run comparison report</h2>
+          <section id="quality-run-compare" aria-labelledby="quality-run-compare-title">
+          <h2 class="section" id="quality-run-compare-title" tabindex="-1" style="margin-top:16px">Run comparison report</h2>
           <p class="muted tiny">Compare recorded execution evidence. Rusty reports structural and resource differences; it does not invent a quality winner without an evaluator.</p>
           <div class="rec-compare-controls" role="group" aria-label="Runs to compare">
             <label>Baseline run<input id="inp-cmp-base" type="text" spellcheck="false" placeholder="baseline run id…"></label>
@@ -3283,9 +3435,11 @@
             <button class="small primary" id="btn-rec-compare" title="Compare two persisted run journals and their recorded resource totals">Build report</button>
           </div>
           <div id="rec-compare-view" aria-live="polite"></div>
+          </section>
+          </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="thread-state-card">
           <h2 class="section" style="margin-top:0">
             Current state
             <button class="small" id="btn-refresh-state" style="float:right">refresh</button>
@@ -3293,7 +3447,7 @@
           <div id="state-view"><div class="empty">Loading…</div></div>
         </div>
 
-        <div class="card">
+        <div class="card" id="thread-history-card">
           <h2 class="section" style="margin-top:0">
             Checkpoint history
             <button class="small" id="btn-refresh-history" style="float:right">refresh</button>
@@ -3303,7 +3457,7 @@
             <button class="small" id="btn-replay" disabled>Replay &amp; run from here</button>
             <span class="muted tiny" id="hist-sel-label">select a checkpoint</span>
           </div>
-          <div class="note tiny">
+          <details class="note tiny"><summary>How replay and forking work</summary><div style="margin-top:7px">
             Both actions use the real time-travel API: <b>Fork</b> calls
             <code>POST /threads/{id}/fork</code> with the selected
             <code>checkpoint_id</code> (history is copied up to that checkpoint into a new thread);
@@ -3311,7 +3465,7 @@
             <code>"checkpoint": {"checkpoint_id": …}</code>, so the executor replays from that checkpoint.
             On an older server that 404s either call, the Studio falls back to its client-side
             composition (state write + plain run) and says so in the toast.
-          </div>
+          </div></details>
           <div id="history-list"><div class="empty">Loading…</div></div>
         </div>
 
@@ -3568,9 +3722,12 @@ const store = {
   selected: null,      // selected thread_id
   history: [],         // last fetched history items
   selectedCp: null,    // selected checkpoint (history item)
+  runSessions: Object.create(null), // thread-bound page-memory launch/progress/handoff state; never payload content
   pollTimer: null,     // background-run poll timer
   pollRequest: 0,      // generation guard for an in-flight background poll
+  pollSession: null,   // bounded initiating thread/run identity for poll ownership loss
   streamAbort: null,   // AbortController for an active SSE fetch
+  streamSession: null, // bounded initiating thread/run identity for live-stream ownership loss
   interruptDecision: null, // selected thread's session-only suspension review and exact resume value
   recorder: null,      // { runId, events, complete, selected, error } for the Flight Recorder view
   qualityCase: null,   // page-memory evaluation case bound to one exact finalized Recorder journal
@@ -3596,6 +3753,8 @@ const store = {
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, evidenceState }
   view: "home",        // active Studio workspace
+  threadStage: "run",  // one calm thread surface at a time: run, trace, or evaluate
+  qualityTool: "case", // one evaluation workspace at a time
   journeyPhase: "",    // optional Run-workspace focus: run, inspect, or evaluate
   journeyRequest: 0,   // generation guard for deferred journey handoffs
   missionBrief: null,  // connection-bound page-memory objective and prepare-only launch state
@@ -4100,17 +4259,17 @@ function journeyMissionHtml(dossier, snapshot = null, state = store) {
     : `<p>No mission identity has been selected.</p>`;
   const brief = snapshot && dossier.key === "run" && !snapshot.threadId && snapshot.agentId
     ? missionBriefHtml(snapshot, state) : "";
-  return `<section class="studio-mission-decision"><span class="studio-mission-stage">${escapeHtml(dossier.label)} decision</span><h3>${escapeHtml(dossier.question)}</h3><p>One decision at a time. The dossier carries bounded identity and status only; the destination remains authoritative.</p></section>` +
-    `<div><div class="studio-mission-grid"><section class="studio-mission-card"><h4>Evidence in hand</h4>${evidence}</section>` +
-    `<section class="studio-mission-card"><h4>Still unproved</h4><p>${escapeHtml(dossier.gap)}</p></section>` +
-    `<section class="studio-mission-card"><h4>Next safe move</h4><p>${escapeHtml(dossier.safeMove)}</p></section></div>` +
-    (brief || `<div class="studio-mission-action"><span>${escapeHtml(dossier.destination)} reloads or preserves its own evidence; this summary never approves a change.</span><button class="small primary" type="button" data-mission-primary data-journey-next="${escapeHtml(dossier.key)}">${escapeHtml(dossier.actionLabel)}</button></div>`) + `</div>`;
+  return `<section class="studio-mission-decision"><span class="studio-mission-stage">${escapeHtml(dossier.label)}</span><h3>${escapeHtml(dossier.question)}</h3></section>` +
+    `<div><div class="studio-mission-grid"><section class="studio-mission-card"><h4>Current</h4>${evidence}</section>` +
+    `<section class="studio-mission-card"><h4>Missing</h4><p>${escapeHtml(dossier.gap)}</p></section>` +
+    `<section class="studio-mission-card"><h4>Next</h4><p>${escapeHtml(dossier.safeMove)}</p></section></div>` +
+    (brief || `<div class="studio-mission-action"><button class="small primary" type="button" data-mission-primary data-journey-next="${escapeHtml(dossier.key)}">${escapeHtml(dossier.actionLabel)}</button></div>`) + `</div>`;
 }
 
 function journeyHtml(snapshot) {
   return snapshot.stages.map((stage, index) => {
     const classes = [stage.complete ? "proved" : stage.available ? "available" : "", stage.current ? "current" : "", stage.attention ? "attention" : ""].filter(Boolean).join(" ");
-    return `<li class="studio-journey-stage ${classes}"><button type="button" data-journey-stage="${stage.key}"${stage.current ? ' aria-current="step"' : ""}${stage.available ? "" : " disabled"} aria-describedby="studio-journey-boundary"><span class="studio-journey-node" aria-hidden="true">${index + 1}</span><strong>${escapeHtml(stage.label)}</strong><small>${escapeHtml(stage.detail)}</small></button></li>`;
+    return `<li class="studio-journey-stage ${classes}"><button type="button" data-journey-stage="${stage.key}"${stage.current ? ' aria-current="step"' : ""}${stage.available ? "" : " disabled"}><span class="studio-journey-node" aria-hidden="true">${index + 1}</span><strong>${escapeHtml(stage.label)}</strong><small>${escapeHtml(stage.detail)}</small></button></li>`;
   }).join("");
 }
 
@@ -4126,6 +4285,8 @@ function journeyRender() {
   const rail = $("studio-journey-rail"), context = $("studio-journey-context"), next = $("studio-journey-next"), label = $("studio-journey-label");
   const missionBody = $("studio-mission-body"), missionProgress = $("studio-mission-progress");
   if (!panel || !rail || !context || !next || !label || typeof panel.contains !== "function" || typeof rail.querySelectorAll !== "function") return null;
+  panel.hidden = store.view === "home" || store.view === "thread";
+  if (panel.hidden) return journeySnapshot(store);
   const active = document.activeElement;
   const focusedStage = active && panel.contains(active) && active.getAttribute ? active.getAttribute("data-journey-stage") : "";
   const focusedMission = Boolean(active && panel.contains(active) && active.hasAttribute && active.hasAttribute("data-mission-primary"));
@@ -4376,6 +4537,7 @@ async function journeyOpenStage(key) {
   if (key === "shape") { store.journeyPhase = ""; openAgents(); return true; }
   if (key === "run") {
     store.journeyPhase = "run";
+    store.threadStage = "run";
     if (snapshot.threadId) {
       const alreadyVisible = store.view === "thread";
       const preserve = snapshot.threadId === store.selected && Boolean(journeyRecorderContext(store.recorder, snapshot.threadId));
@@ -4390,19 +4552,21 @@ async function journeyOpenStage(key) {
   }
   if (key === "inspect") {
     store.journeyPhase = "inspect";
+    store.threadStage = "trace";
     const operation = connectionOperation(snapshot.threadId);
     const current = () => request === store.journeyRequest && connectionOperationIdentityCurrent(operation) &&
       store.view === "thread" && store.selected === snapshot.threadId && store.journeyPhase === "inspect";
     if (snapshot.exactRecorder && snapshot.threadId === store.selected) {
       const alreadyVisible = store.view === "thread";
       store.view = "thread";
-      if (alreadyVisible) journeyRender(); else renderMain({ preserveThreadEvidence: true });
+      if (alreadyVisible) { journeyRender(); threadStageRender(); } else renderMain({ preserveThreadEvidence: true });
       journeyFocus("flight-recorder-title"); return true;
     }
     return Boolean(await agentOpenThread(snapshot.threadId, snapshot.runId, snapshot.graph, { current }));
   }
   if (key === "evaluate") {
     store.journeyPhase = "evaluate";
+    store.threadStage = "evaluate";
     const operation = connectionOperation(snapshot.threadId);
     const current = () => request === store.journeyRequest && connectionOperationIdentityCurrent(operation) &&
       store.view === "thread" && store.selected === snapshot.threadId && store.journeyPhase === "evaluate";
@@ -4411,7 +4575,7 @@ async function journeyOpenStage(key) {
     } else {
       const alreadyVisible = store.view === "thread";
       store.view = "thread";
-      if (alreadyVisible) journeyRender(); else renderMain({ preserveThreadEvidence: true });
+      if (alreadyVisible) { journeyRender(); threadStageRender(); } else renderMain({ preserveThreadEvidence: true });
     }
     if (!current()) return false;
     journeyFocus("quality-foundry-title"); return true;
@@ -4460,7 +4624,7 @@ function navigationRecorderThread(recorder, runId) {
 function navigationStatus(message, announce = false) {
   const text = String(message || "");
   const visible = $("view-link-status");
-  if (visible) visible.textContent = text || "Workspace only · no server address, key, prompt, or payload";
+  if (visible) visible.textContent = text || "Copy a link to this workspace";
   if (announce) $("view-link-announcer").textContent = text;
 }
 
@@ -4480,7 +4644,7 @@ function navigationCancelPending(nextView, nextId = "") {
   store.navigationRequest += 1;
   store.navigationPending = null;
   store.navigationError = "";
-  navigationStatus("Workspace only · no server address, key, prompt, or payload");
+  navigationStatus("Copy a link to this workspace");
   navigationRouteMessage();
   return true;
 }
@@ -4593,6 +4757,7 @@ async function navigationOpenSharedRun(route) {
     }
     store.selected = threadId;
     store.view = "thread";
+    store.threadStage = "trace";
     saveThreads(); renderThreads(); renderMain();
     $("inp-rec-run").value = route.run;
     await recLoad(route.run, true, false);
@@ -4627,7 +4792,7 @@ async function navigationApplyPending(options = {}) {
       navigationRouteMessage(message, "error");
       return false;
     }
-    store.selected = thread.thread_id; store.view = "thread";
+    store.selected = thread.thread_id; store.view = "thread"; store.threadStage = "run";
     saveThreads(); renderThreads(); renderMain();
     return navigationFinish(`Opened remembered thread ${shortId(thread.thread_id)}`, options.focus === false ? null : "thread-head");
   }
@@ -5713,19 +5878,19 @@ function homeHtml(snapshot) {
   let continueHtml;
   if (!latest) {
     continueHtml = `<div class="home-continue"><span class="home-continue-meta">No remembered runs yet</span>` +
-      `<strong>Your first useful evidence starts with a real task.</strong>` +
-      `<p>Studio keeps bounded run metadata in this browser. Prompts and results do not enter the Home summary.</p>` +
+      `<strong>Start a real task to see it here.</strong>` +
+      `<p>Choose an agent, give it a goal, and follow the result.</p>` +
       `<div class="home-continue-actions"><button class="primary" type="button" data-home-action="${connected ? "agents" : "connect"}">${connected ? "Open agent workbench" : "Connect a server"}</button></div></div>`;
   } else if (latest.family === "team") {
     continueHtml = `<div class="home-continue"><span class="home-continue-meta">Latest team coordination · ${escapeHtml(latest.status || "unknown")}</span>` +
-      `<strong>${escapeHtml(latest.coordination_id || "Remembered coordination")}</strong>` +
+      `<strong>${escapeHtml(latest.coordination_id || "Team run")}</strong>` +
       `<p>${escapeHtml(latest.pattern || "unknown")} · ${Number(latest.settled_count || 0)}/${Number(latest.member_count || 0)} members settled${latest.stale ? " · last observation is stale" : ""}</p>` +
       `<div class="home-continue-actions"><button class="primary" type="button" data-home-action="team-run" data-home-id="${escapeHtml(latest.coordination_id || "")}">Inspect team evidence</button>` +
       `<button type="button" data-home-action="fabric">Open team observatory</button></div></div>`;
   } else {
     continueHtml = `<div class="home-continue"><span class="home-continue-meta">Latest agent run · ${escapeHtml(latest.status || "unknown")}</span>` +
-      `<strong>${escapeHtml(latest.run_id || latest.record_id || "Remembered run")}</strong>` +
-      `<p>${escapeHtml(latest.graph || "unknown behavior")} · browser recall for ${escapeHtml(latest.assistant_id || "assistant")}</p>` +
+      `<strong>${escapeHtml(latest.run_id || latest.record_id || "Agent run")}</strong>` +
+      `<p>${escapeHtml(latest.graph || "unknown behavior")} · ${escapeHtml(latest.assistant_id || "assistant")}</p>` +
       `<div class="home-continue-actions"><button class="primary" type="button" data-home-action="agent-run" data-home-owner="${escapeHtml(latest.assistant_id || "")}">Open agent evidence</button>` +
       (latest.thread_id ? `<button type="button" data-home-action="thread" data-home-id="${escapeHtml(latest.thread_id)}">Open thread</button>` : "") +
       `</div></div>`;
@@ -5734,20 +5899,29 @@ function homeHtml(snapshot) {
   const memoryNote = snapshot.memory_known
     ? `${snapshot.memory_conflicts == null ? "conflict state unavailable" : `${snapshot.memory_conflicts} conflict${snapshot.memory_conflicts === 1 ? "" : "s"}`}`
     : "open ledger to load server truth";
-  return `<section class="home-hero"><div><span class="home-kicker">Rusty Studio · evidence-led workspace</span>` +
-    `<h1 id="home-title" tabindex="-1">Build the system. Keep the proof beside it.</h1>` +
-    `<p>Move from a real configuration to a real run, causal evidence, governed memory, and reversible learning without copying identifiers between tools.</p></div>` +
-    `<div class="home-hero-action"><span>${escapeHtml(snapshot.service)} · ${connected ? `${snapshot.graph_count} registered behavior${snapshot.graph_count === 1 ? "" : "s"}` : "local first"}</span>` +
+  const hasAgents = snapshot.assistant_known && snapshot.assistant_count > 0;
+  const homeTitle = hasAgents ? "What needs your attention?" : "Create your first agent";
+  const homeCopy = hasAgents ? "Continue recent work or open the next decision in your agent lifecycle."
+    : "Define its job, connect the capabilities it needs, and test it on a real task.";
+  const agentState = snapshot.assistant_known
+    ? `${snapshot.assistant_archived_count} archived${snapshot.assistant_unavailable_count ? ` · ${snapshot.assistant_unavailable_count} unavailable` : ""}`
+    : snapshot.assistant_loading ? "Loading…" : connected ? "Needs refresh" : "Not loaded";
+  const teamState = snapshot.team_known
+    ? `${snapshot.blueprint_count} blueprint${snapshot.blueprint_count === 1 ? "" : "s"}`
+    : snapshot.team_loading ? "Loading…" : connected ? "Needs refresh" : "Not loaded";
+  return `<section class="home-hero"><div><span class="home-kicker">Mission control</span>` +
+    `<h1 id="home-title" tabindex="-1">${homeTitle}</h1>` +
+    `<p>${homeCopy}</p></div>` +
+    `<div class="home-hero-action"><span>${connected ? `Connected · ${snapshot.graph_count} behavior${snapshot.graph_count === 1 ? "" : "s"}` : "Connect to begin"}</span>` +
     `<button class="primary" type="button" data-home-action="${snapshot.next.action}">${escapeHtml(snapshot.next.label)}</button></div></section>` +
-    `<div class="home-truth">The evidence thread above is the primary journey: Shape → Run → Inspect → Evaluate → Govern → Operate. It carries only bounded identities and routes every stage back to its own authoritative workspace.</div>` +
-    `<div class="home-grid"><section class="card home-panel" aria-labelledby="home-system-title"><div class="home-panel-head"><h2 id="home-system-title">System signals</h2><span>current connection</span></div>` +
+    `<div class="home-grid"><section class="card home-panel" aria-labelledby="home-system-title"><div class="home-panel-head"><h2 id="home-system-title">Your system</h2><span>now</span></div>` +
       `<div class="home-signals">` +
-        `<button class="home-signal" type="button" data-home-action="${snapshot.assistant_unavailable_count ? "unavailable-agents" : "agents"}"><b>${snapshot.assistant_known ? `${snapshot.assistant_count} / ${snapshot.assistant_archived_count} / ${snapshot.assistant_unavailable_count}` : "—"}</b><span>Active / archived / unavailable agents</span><small>${connected ? snapshot.assistant_note : "connect to discover"}</small></button>` +
-        `<button class="home-signal" type="button" data-home-action="fabric"><b>${snapshot.team_known ? snapshot.team_count : "—"} / ${snapshot.blueprint_count}</b><span>Teams / blueprints</span><small>${escapeHtml(snapshot.team_note)} / browser structure</small></button>` +
-        `<button class="home-signal" type="button" data-home-action="continue"><b>${snapshot.run_count}</b><span>Remembered runs</span><small>${snapshot.attention_count} need attention · browser recall</small></button>` +
-        `<button class="home-signal" type="button" data-home-action="memory"><b>${memoryValue}</b><span>Governed memory</span><small>${escapeHtml(memoryNote)}</small></button>` +
-      `</div><div class="home-truth">Home uses bounded browser recall for recent work and asks each workspace for current server evidence. It never presents local history as fleet-wide discovery.</div></section>` +
-      `<section class="card home-panel" aria-labelledby="home-continue-title"><div class="home-panel-head"><h2 id="home-continue-title">Continue with evidence</h2><span>${snapshot.thread_count} local thread${snapshot.thread_count === 1 ? "" : "s"}</span></div>${continueHtml}</section></div>`;
+        `<button class="home-signal" type="button" data-home-action="${snapshot.assistant_unavailable_count ? "unavailable-agents" : "agents"}" aria-label="Agents: ${snapshot.assistant_count || 0} active, ${snapshot.assistant_archived_count || 0} archived, ${snapshot.assistant_unavailable_count || 0} unavailable"><b>${snapshot.assistant_known ? snapshot.assistant_count : "—"}</b><span>Agents</span><small>${agentState}</small></button>` +
+        `<button class="home-signal" type="button" data-home-action="fabric"><b>${snapshot.team_known ? snapshot.team_count : "—"}</b><span>Teams</span><small>${teamState}</small></button>` +
+        `<button class="home-signal" type="button" data-home-action="continue"><b>${snapshot.run_count}</b><span>Runs</span><small>${snapshot.attention_count ? `${snapshot.attention_count} need attention` : "No open issues"}</small></button>` +
+        `<button class="home-signal" type="button" data-home-action="memory"><b>${memoryValue}</b><span>Memory</span><small>${snapshot.memory_known ? escapeHtml(memoryNote) : "Not loaded"}</small></button>` +
+      `</div></section>` +
+      `<section class="card home-panel" aria-labelledby="home-continue-title"><div class="home-panel-head"><h2 id="home-continue-title">Recent work</h2><span>${snapshot.thread_count} thread${snapshot.thread_count === 1 ? "" : "s"}</span></div>${continueHtml}</section></div>`;
 }
 
 function homeFocusIdentity(view) {
@@ -6016,8 +6190,8 @@ function connectionRenderChip() {
   chip.classList.toggle("failed", !store.conn && store.connectionCompatibility && store.connectionCompatibility.phase === "failed");
   $("conn-profile").textContent = store.conn ? (profile && profile.name || "Current server") : "Choose a server";
   $("conn-status").textContent = store.conn && store.info
-    ? `${store.info.service} v${store.info.version} · ${store.conn.baseUrl}`
-    : "Not connected · local-first";
+    ? `Connected · ${store.info.graphs.length} behavior${store.info.graphs.length === 1 ? "" : "s"}`
+    : "Not connected";
   const warning = $("conn-warning");
   const privacy = Boolean(store.connectionPrivacyWarning);
   const persistence = Boolean(store.connectionPersistenceWarning);
@@ -6185,6 +6359,9 @@ function connectionResetWorkspace() {
   store.agentFocusRecord = null;
   store.tasks = null;
   store.tasksUnsupported = false;
+  store.runSessions = Object.create(null);
+  store.threadStage = "run";
+  store.qualityTool = "case";
   stopPoll();
   abortStream();
   store.interruptDecision = null;
@@ -6427,12 +6604,15 @@ function renderGraphs() {
   for (const g of store.info.graphs) {
     const div = document.createElement("div");
     div.className = "graph-item";
+    const graphLabel = agentGraphLabel(g.name);
+    const graphNote = g.name === "react_agent" ? "Conversation" : g.name === "pipeline" ? "Structured workflow" : "Custom behavior";
     div.innerHTML =
-      `<div class="gname">${escapeHtml(g.name)}</div>` +
-      `<div class="channels">channels: ${(g.channels || []).map(escapeHtml).join(", ") || "—"}</div>`;
+      `<div class="gname">${escapeHtml(graphLabel)}</div>` +
+      `<div class="channels">${escapeHtml(graphNote)}</div>`;
     const btn = document.createElement("button");
     btn.className = "small";
-    btn.textContent = "+ New thread";
+    btn.textContent = "Start";
+    btn.setAttribute("aria-label", `Start ${graphLabel}`);
     btn.onclick = () => createThread(g.name);
     div.appendChild(btn);
     el.appendChild(div);
@@ -6449,6 +6629,7 @@ async function createThread(graph, threadId) {
     store.threads.unshift(rec);
     store.selected = rec.thread_id;
     store.view = "thread";
+    store.threadStage = "run";
     saveThreads();
     renderThreads();
     renderMain();
@@ -6468,6 +6649,7 @@ async function attachThread() {
   if (!operation) return;
   if (store.threads.some((t) => t.thread_id === id)) {
     store.selected = id; store.view = "thread";
+    store.threadStage = "run";
     saveThreads(); renderThreads(); renderMain(); return;
   }
   // No GET /threads/{id} exists; probe via /state. A 404 means the in-memory
@@ -6478,6 +6660,7 @@ async function attachThread() {
     store.threads.unshift({ thread_id: id, graph: "?", metadata: null, created_at: null });
     store.selected = id;
     store.view = "thread";
+    store.threadStage = "run";
   } catch (e) {
     if (!connectionOperationCurrent(operation)) return;
     if (e.status === 404) {
@@ -6504,6 +6687,7 @@ function forgetThread(id, ev) {
   ev.stopPropagation();
   store.threads = store.threads.filter((t) => t.thread_id !== id);
   delete store.registryBindings[id];
+  delete store.runSessions[id];
   if (store.selected === id) store.selected = null;
   saveThreads();
   renderThreads();
@@ -6520,15 +6704,18 @@ function renderThreads() {
   for (const t of store.threads) {
     const div = document.createElement("div");
     div.className = "thread-item" + (t.thread_id === store.selected ? " selected" : "");
+    const graphLabel = agentGraphLabel(t.graph);
+    div.setAttribute("aria-label", `${graphLabel} thread ${t.thread_id}`);
     div.innerHTML =
-      `<div class="tid">${escapeHtml(t.thread_id)}</div>` +
-      `<div class="tmeta"><span class="tgraph">${escapeHtml(t.graph)}</span>` +
-      `<button class="forget" title="remove from local list (server thread is untouched)">✕ forget</button></div>`;
+      `<div class="tid">${escapeHtml(graphLabel)}</div>` +
+      `<div class="tmeta"><span class="tgraph">${escapeHtml(shortId(t.thread_id))}</span>` +
+      `<button class="forget" aria-label="Remove ${escapeHtml(graphLabel)} from recent threads" title="Remove from recent threads">Remove</button></div>`;
     div.querySelector(".forget").onclick = (ev) => forgetThread(t.thread_id, ev);
     div.onclick = () => {
       navigationCancelPending("thread", t.thread_id);
       store.selected = t.thread_id;
       store.view = "thread"; // leave the tasks view when a thread is picked
+      store.threadStage = "run";
       saveThreads();
       renderThreads();
       renderMain();
@@ -6539,8 +6726,103 @@ function renderThreads() {
 
 /* ---------------- main panel ---------------- */
 
+function studioNavRender() {
+  const activeByView = {
+    home: "btn-home-open", agents: "btn-agents-open", fabric: "btn-fabric-open",
+    memory: "btn-memory-open", learn: "btn-learn-open", registry: "btn-registry-open",
+    automations: "btn-automations-open", schedules: "btn-schedules-open", tasks: "btn-tasks-open",
+  };
+  const activeId = activeByView[store.view] || "";
+  document.querySelectorAll(".studio-nav-button").forEach((button) => {
+    const active = button.id === activeId;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
+
+function threadStageRender(focus = false) {
+  const thread = currentThread();
+  const requestedStage = ["run", "trace", "evaluate"].includes(store.threadStage) ? store.threadStage : "run";
+  const exact = Boolean(thread && runSessionRecorder(store, thread.thread_id));
+  const runPanel = $("thread-run-panel"), recorder = $("flight-recorder-card");
+  const trace = $("thread-trace-core"), evaluate = $("thread-evaluate-core");
+  const state = $("thread-state-card"), history = $("thread-history-card");
+  const session = thread ? runSessionRecord(thread.thread_id) : null;
+  const forcedFallback = requestedStage === "evaluate" && !exact;
+  const stage = forcedFallback ? (navigationSafeId(session && session.runId) || store.recorder ? "trace" : "run") : requestedStage;
+  const active = document.activeElement;
+  const restoreTabFocus = forcedFallback && active && (
+    active.getAttribute?.("data-thread-stage") === "evaluate" || evaluate?.contains?.(active)
+  );
+  store.threadStage = stage;
+  if (runPanel) runPanel.hidden = stage !== "run";
+  if (recorder) recorder.hidden = stage === "run";
+  if (trace) trace.hidden = stage !== "trace";
+  if (evaluate) evaluate.hidden = stage !== "evaluate";
+  if (state) state.hidden = stage !== "trace";
+  if (history) history.hidden = stage !== "trace";
+  const stageButtons = Array.from($("thread-stage-nav")?.querySelectorAll("[data-thread-stage]") || []);
+  stageButtons.forEach((button) => {
+    const key = button.getAttribute("data-thread-stage");
+    button.setAttribute("aria-selected", String(key === stage));
+    button.tabIndex = key === stage ? 0 : -1;
+    button.disabled = key === "evaluate" && !exact;
+  });
+  if (stage === "evaluate") threadEvaluateToolRender();
+  if (restoreTabFocus) stageButtons.find((button) => button.getAttribute("data-thread-stage") === stage)?.focus?.({ preventScroll: true });
+  if (focus) {
+    const target = stage === "run" ? $("run-session-title") : stage === "trace" ? $("flight-recorder-title") : $("quality-foundry-title");
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  return stage;
+}
+
+function threadEvaluateToolRender(focus = false) {
+  const key = ["case", "dataset", "gate", "report", "atlas", "regression", "decision", "compare"].includes(store.qualityTool)
+    ? store.qualityTool : "case";
+  store.qualityTool = key;
+  const select = $("sel-evaluate-tool");
+  if (select && document.activeElement !== select) select.value = key;
+  const panels = {
+    case: "quality-foundry", dataset: "quality-dataset", gate: "quality-gate", report: "quality-report",
+    atlas: "quality-failure-atlas", regression: "quality-regression", decision: "quality-decision", compare: "quality-run-compare",
+  };
+  Object.entries(panels).forEach(([name, id]) => {
+    const panel = $(id);
+    if (panel) panel.hidden = name !== key;
+  });
+  if (focus) $(panels[key])?.querySelector("h2,h3")?.focus({ preventScroll: true });
+  return key;
+}
+
+function threadStageOpen(stage, focus = true) {
+  if (!["run", "trace", "evaluate"].includes(stage)) return false;
+  if (stage === "evaluate" && !runSessionRecorder(store, currentThread()?.thread_id)) return false;
+  store.threadStage = stage;
+  if (stage === "evaluate" && !store.qualityTool) store.qualityTool = "case";
+  threadStageRender(focus);
+  return true;
+}
+
+function threadStageKeyboard(event) {
+  const current = event.target.closest?.("[data-thread-stage]");
+  if (!current || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return false;
+  const buttons = Array.from($("thread-stage-nav").querySelectorAll("[data-thread-stage]:not(:disabled)"));
+  if (!buttons.length) return false;
+  event.preventDefault();
+  const index = Math.max(0, buttons.indexOf(current));
+  const next = event.key === "Home" ? buttons[0] : event.key === "End" ? buttons[buttons.length - 1]
+    : buttons[(index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length];
+  threadStageOpen(next.getAttribute("data-thread-stage"), false);
+  next.focus({ preventScroll: true });
+  return true;
+}
+
 function renderMain(options = {}) {
   navigationReplaceManagedAddress();
+  studioNavRender();
   journeyRender();
   const home = store.view === "home";
   const tasks = store.view === "tasks";
@@ -6624,11 +6906,16 @@ function renderMain(options = {}) {
     stopPoll();
     abortStream();
     hideInterrupt(false);
-    $("th-id").textContent = t.thread_id;
-    $("th-graph").textContent = t.graph;
-    $("th-created").textContent = t.created_at ? `created ${t.created_at}` : "";
+    $("th-id").textContent = shortId(t.thread_id);
+    $("th-id").title = t.thread_id;
+    $("th-id").setAttribute("aria-label", `Thread ${t.thread_id}`);
+    $("th-graph").textContent = agentGraphLabel(t.graph);
+    $("th-created").textContent = "";
+    runSessionEnsure(t.thread_id);
+    runSessionRender();
     recRender();
     qualityRender();
+    threadStageRender();
     return;
   }
 
@@ -6642,13 +6929,16 @@ function renderMain(options = {}) {
   store.runProof = null;
   store.runProofRequest += 1;
   hideInterrupt(false);
-  $("th-id").textContent = t.thread_id;
-  $("th-graph").textContent = t.graph;
+  $("th-id").textContent = shortId(t.thread_id);
+  $("th-id").title = t.thread_id;
+  $("th-id").setAttribute("aria-label", `Thread ${t.thread_id}`);
+  $("th-graph").textContent = agentGraphLabel(t.graph);
   $("th-graph").className = "badge pending";
-  $("th-created").textContent = t.created_at ? `created ${t.created_at}` : "";
+  $("th-created").textContent = "";
+  runSessionEnsure(t.thread_id);
   setRunStatus(null);
-  $("feed").innerHTML = `<div class="empty">No events yet — start a streamed run.</div>`;
-  $("run-result").innerHTML = `<div class="empty">No run result yet.</div>`;
+  $("feed").innerHTML = `<div class="empty">No live activity yet — start a live run to watch it unfold.</div>`;
+  $("run-result").innerHTML = `<div class="empty">No run outcome yet.</div>`;
   $("inp-payload").value = defaultPayload(t.graph);
   $("inp-rec-run").value = "";
   registryBindingRender();
@@ -6656,6 +6946,8 @@ function renderMain(options = {}) {
   $("rec-replay-banner").innerHTML = "";
   $("rec-compare-view").innerHTML = "";
   recRender();
+  runSessionRender();
+  threadStageRender();
   refreshState();
   refreshHistory();
 }
@@ -6691,6 +6983,180 @@ function withRunOpts(payload) {
   const mt = $("sel-multitask").value;
   if (mt) payload.multitask_strategy = mt;
   return payload;
+}
+
+/* ---------------- unified run session -------------------------------
+ * This is an orchestration view, not another source of execution truth.
+ * It retains bounded identifiers and status for one local thread while the
+ * existing run, interrupt, Recorder, and quality surfaces remain authoritative.
+ * Payloads and event bodies never enter this state.
+ * ------------------------------------------------------------------- */
+
+function runSessionRecord(threadId, source = store) {
+  const sessions = source && source.runSessions;
+  const value = sessions && navigationSafeId(threadId) ? sessions[threadId] : null;
+  return value && typeof value === "object" && value.threadId === threadId ? value : null;
+}
+
+function runSessionEnsure(threadId, source = store) {
+  if (!source || !navigationSafeId(threadId)) return null;
+  if (!source.runSessions || typeof source.runSessions !== "object") source.runSessions = Object.create(null);
+  if (!runSessionRecord(threadId, source)) source.runSessions[threadId] = {
+    threadId, phase: "ready", mode: "", runId: "", status: "", attempt: null, message: "",
+  };
+  return source.runSessions[threadId];
+}
+
+function runSessionUpdate(threadId, patch, source = store) {
+  const session = runSessionEnsure(threadId, source);
+  if (!session || !patch || typeof patch !== "object") return null;
+  Object.assign(session, patch, { threadId });
+  if (source === store && currentThread()?.thread_id === threadId && store.view === "thread") runSessionRender();
+  return session;
+}
+
+function runSessionLaunchBlocked(threadId, source = store) {
+  const phase = runSessionSnapshot(source, threadId)?.phase;
+  return phase === "submitting" || phase === "running" || phase === "uncertain";
+}
+
+function runSessionBegin(threadId, mode, source = store) {
+  if (runSessionLaunchBlocked(threadId, source)) return false;
+  runSessionUpdate(threadId, { phase: "submitting", mode, runId: "", status: mode === "background" ? "pending" : "running", attempt: null, message: "" }, source);
+  return true;
+}
+
+function runSessionBackgroundAccepted(threadId, runId, status, visible, source = store) {
+  if (visible) return runSessionUpdate(threadId, { phase: "running", runId, status, message: "" }, source);
+  return runSessionUpdate(threadId, {
+    phase: "uncertain", runId, status,
+    message: `Rusty accepted run ${shortId(runId)}, but Studio stopped following it after the workspace changed. Load its exact journal before deciding whether to repeat work.`,
+  }, source);
+}
+
+function runSessionAbandonUncertainty() {
+  const thread = currentThread();
+  const session = thread && runSessionRecord(thread.thread_id);
+  if (!thread || !session || session.phase !== "uncertain") return false;
+  const binding = registryBindingState(thread.thread_id);
+  if (binding) {
+    binding.submissionPending = false; binding.uncertainSubmission = ""; binding.acknowledged = false;
+    binding.error = ""; binding.errorField = "";
+  }
+  runSessionUpdate(thread.thread_id, { phase: "ready", mode: "", runId: "", status: "", attempt: null, message: "" });
+  registryBindingRender();
+  $("inp-payload")?.focus({ preventScroll: true });
+  toast("Uncertainty lock abandoned. Review the mission before starting another run; the prior run may still exist.", "warn");
+  return true;
+}
+
+function runSessionTerminalPhase(status) {
+  if (status === "interrupted") return "interrupted";
+  if (["error", "failed", "cancelled"].includes(status)) return "failed";
+  return "complete";
+}
+
+function runSessionRecorder(source, threadId) {
+  const exact = journeyRecorderContext(source && source.recorder, threadId);
+  return exact && exact.threadId === threadId ? exact : null;
+}
+
+function runSessionSnapshot(source = store, threadId = source && source.selected) {
+  if (!navigationSafeId(threadId)) return null;
+  const retained = runSessionRecord(threadId, source) || {
+    threadId, phase: "ready", mode: "", runId: "", status: "", attempt: null, message: "",
+  };
+  const recorder = runSessionRecorder(source, threadId);
+  const decision = source && source.interruptDecision && source.interruptDecision.threadId === threadId
+    ? source.interruptDecision : null;
+  let runId = navigationSafeId(retained.runId) || "";
+  const exact = recorder && (!runId || recorder.runId === runId) && retained.phase !== "submitting"
+    ? recorder : null;
+  let phase = decision ? "interrupted" : retained.phase;
+  if (exact) { runId = exact.runId; if (!decision) phase = "complete"; }
+  if (!new Set(["ready", "submitting", "running", "interrupted", "complete", "failed", "uncertain"]).has(phase)) phase = "ready";
+  const status = typeof retained.status === "string" ? retained.status : "";
+  const terminal = ["complete", "failed", "interrupted"].includes(phase);
+  const steps = [
+    { key: "prepare", label: "Prepare", detail: "thread + exact input", state: phase === "ready" ? "active" : "complete" },
+    { key: "execute", label: "Execute", detail: phase === "submitting" ? "submitting" : phase === "running" ? "live" : runId ? "run identified" : "not started",
+      state: ["submitting", "running"].includes(phase) ? "active" : terminal || exact ? "complete" : "" },
+    { key: "resolve", label: "Resolve", detail: decision ? "human input required" : terminal || exact ? "no open pause" : "if the run pauses",
+      state: decision ? "attention" : terminal || exact ? "complete" : "" },
+    { key: "prove", label: "Prove", detail: exact ? "exact journal loaded" : runId ? "load exact journal" : "run identity required",
+      state: exact ? "complete" : terminal && runId ? "active" : "" },
+  ];
+  let action = { key: "input", label: "Review mission input", title: "Review the mission", copy: "Confirm the exact input and any governed runtime binding before starting live execution." };
+  if (phase === "submitting") action = { key: "activity", label: "Follow admission", title: "Submitting this mission", copy: "Rusty is admitting the request. Keep this workspace open until one exact run identity or a clear rejection arrives." };
+  else if (phase === "running") action = { key: "activity", label: "Follow live activity", title: "Execution is in progress", copy: "Watch live activity here. The exact journal becomes available after Rusty records the run." };
+  else if (decision) action = { key: "decision", label: "Review the pause", title: "A human decision is required", copy: "Review the corroborated suspension boundary and send one deliberate response before any competing launch." };
+  else if (phase === "uncertain") action = { key: runId ? "trace" : "activity", label: runId ? "Check exact run evidence" : "Review run evidence", title: "Run outcome is uncertain", copy: retained.message || "Do not repeat an effectful run until server evidence establishes whether Rusty accepted it." };
+  else if (runId && !exact) action = { key: "trace", label: "Load exact trace", title: phase === "failed" ? "Inspect what failed" : "Prove what happened", copy: "Load the thread-bound journal before drawing conclusions or building evaluation evidence." };
+  else if (exact) action = { key: "evaluate", label: "Build evaluation case", title: status === "error" ? "Turn this failure into a test" : "Carry evidence into evaluation", copy: "The complete exact journal is loaded. Review its input and choose expectations without inventing an answer." };
+  else if (phase === "failed") action = { key: "input", label: "Review rejected mission", title: "Rusty rejected this mission", copy: retained.message || "Review the mission input and runtime binding before making a deliberate retry." };
+  const visibleStatus = decision ? "interrupted" : exact ? "complete" : phase;
+  const statusText = phase === "ready" ? "Ready for a mission"
+    : phase === "submitting" ? "Submitting mission"
+    : phase === "running" ? `Running${runId ? ` · ${shortId(runId)}` : ""}`
+    : decision ? `Waiting for a decision${runId ? ` · ${shortId(runId)}` : ""}`
+    : exact ? `Exact journal ready · ${shortId(exact.runId)}`
+    : phase === "failed" ? `Run failed${runId ? ` · ${shortId(runId)}` : ""}`
+    : phase === "uncertain" ? "Run admission uncertain" : "Run finished";
+  return { threadId, phase, visibleStatus, runId, status, exact: Boolean(exact), decision: Boolean(decision), steps, action, statusText };
+}
+
+function runSessionRender() {
+  const thread = currentThread();
+  const spine = $("run-session-spine"), status = $("run-session-status"), button = $("btn-run-session-next"), abandon = $("btn-run-session-abandon");
+  if (!thread || !spine || !status || !button) return null;
+  const snapshot = runSessionSnapshot(store, thread.thread_id);
+  spine.innerHTML = snapshot.steps.map((step) => `<div class="run-session-step ${step.state}" role="listitem" data-run-session-step="${step.key}"><b>${step.label}</b><span>${escapeHtml(step.detail)}</span></div>`).join("");
+  status.dataset.state = snapshot.visibleStatus;
+  status.textContent = snapshot.statusText;
+  $("run-session-now-title").textContent = snapshot.action.title;
+  $("run-session-now-copy").textContent = snapshot.action.copy;
+  button.dataset.runSessionAction = snapshot.action.key;
+  button.textContent = snapshot.action.label;
+  button.disabled = snapshot.phase === "submitting";
+  if (abandon) abandon.hidden = snapshot.phase !== "uncertain";
+  const launchBlocked = ["submitting", "running", "uncertain"].includes(snapshot.phase);
+  for (const id of ["btn-run", "btn-run-wait", "btn-run-stream"]) {
+    const launch = $(id);
+    if (launch) launch.disabled = launchBlocked || Boolean(store.interruptDecision);
+  }
+  const hideNext = snapshot.phase === "ready" && snapshot.action.key === "input";
+  const now = $("run-session-now");
+  if (now) { now.hidden = hideNext; now.parentElement?.classList.toggle("single", hideNext); }
+  threadStageRender();
+  return snapshot;
+}
+
+async function runSessionAction(action = $("btn-run-session-next")?.dataset.runSessionAction) {
+  const thread = currentThread();
+  if (!thread) return false;
+  const threadId = thread.thread_id;
+  const snapshot = runSessionSnapshot(store, threadId);
+  if (action === "input") { $("inp-payload")?.focus({ preventScroll: true }); return true; }
+  if (action === "activity") { $("feed")?.focus?.({ preventScroll: true }); $("feed")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" }); return true; }
+  if (action === "decision") { $("interrupt-title")?.focus({ preventScroll: true }); $("interrupt-card")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" }); return true; }
+  if (action === "trace" && snapshot.runId) {
+    threadStageOpen("trace", false);
+    const request = store.recLoadRequest + 1;
+    await recLoad(snapshot.runId, false);
+    if (store.view !== "thread" || currentThread()?.thread_id !== threadId || request !== store.recLoadRequest) return false;
+    $("flight-recorder-title")?.focus({ preventScroll: true });
+    $("flight-recorder-card")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    return Boolean(runSessionRecorder(store, threadId));
+  }
+  if (action === "evaluate" && snapshot.exact) {
+    store.journeyPhase = "evaluate";
+    qualityRender();
+    threadStageOpen("evaluate", false);
+    $("quality-foundry-title")?.focus({ preventScroll: true });
+    $("quality-foundry")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    return true;
+  }
+  return false;
 }
 
 /* ---------------- governed runtime binding planner -------------------
@@ -7021,6 +7487,7 @@ async function runBackground() {
   const connection = operation.connection;
   const payload = readPayload(); if (payload === null) return;
   const prepared = registryBindingPrepare(payload); if (!prepared) return;
+  if (!runSessionBegin(t.thread_id, "background")) { toast("This thread already has a run in progress. Follow it before starting another mission.", "warn"); return; }
   registryBindingSubmitted(prepared.plan);
   try {
     const res = await apiForConnection(connection, "POST", `/threads/${t.thread_id}/runs`, withRunOpts(prepared.payload));
@@ -7028,7 +7495,9 @@ async function runBackground() {
     const runId = registryBindingRunReceipt(res, t.thread_id, REGISTRY_BACKGROUND_STATUSES);
     if (!runId) throw new Error("Rusty returned a run receipt outside the exact thread-bound contract. The submission may have been accepted; review server evidence before retrying.");
     registryBindingAccepted(runId, prepared.plan);
-    if (!connectionOperationCurrent(operation)) return;
+    const visible = connectionOperationCurrent(operation);
+    runSessionBackgroundAccepted(t.thread_id, runId, res.status, visible);
+    if (!visible) return;
     toast(`run ${shortId(runId)} started`, "ok");
     setRunStatus(res.status, `run ${shortId(runId)}`);
     noteRunId(runId);
@@ -7036,6 +7505,10 @@ async function runBackground() {
   } catch (e) {
     if (!connectionOperationIdentityCurrent(operation)) return;
     registryBindingFailed(e, prepared.plan);
+    runSessionUpdate(t.thread_id, {
+      phase: interruptFailureUncertain(e) ? "uncertain" : "failed", status: "error",
+      message: runProofVisibleMessage(e && e.message),
+    });
     if (connectionOperationCurrent(operation)) toast(e.message, "err");
   }
 }
@@ -7044,6 +7517,7 @@ function pollRun(runId, sourceOperation) {
   stopPoll();
   const operation = sourceOperation && sourceOperation.connection ? sourceOperation : connectionOperation(currentThread()?.thread_id || null);
   if (!operation) return;
+  store.pollSession = { threadId: operation.threadId || "", runId };
   const connection = operation.connection;
   const request = store.pollRequest;
   // Recursive setTimeout (not setInterval): a slow poll response must
@@ -7053,8 +7527,12 @@ function pollRun(runId, sourceOperation) {
       const info = await apiForConnection(connection, "GET", `/runs/${runId}`);
       if (request !== store.pollRequest || !connectionOperationCurrent(operation)) return;
       setRunStatus(info.status, `run ${shortId(runId)} · attempt ${info.attempt}`);
+      runSessionUpdate(operation.threadId || currentThread()?.thread_id, {
+        phase: ["pending", "running"].includes(info.status) ? "running" : runSessionTerminalPhase(info.status),
+        runId, status: info.status, attempt: info.attempt, message: "",
+      });
       if (!["pending", "running"].includes(info.status)) {
-        stopPoll();
+        stopPoll(true);
         showRunResult(info);
         refreshState();
         refreshHistory();
@@ -7065,6 +7543,9 @@ function pollRun(runId, sourceOperation) {
       if (request !== store.pollRequest || !connectionOperationCurrent(operation)) return;
       stopPoll();
       setRunStatus(null);
+      runSessionUpdate(operation.threadId || currentThread()?.thread_id, {
+        phase: "uncertain", runId, message: `Rusty accepted run ${shortId(runId)}, but Studio could not refresh its latest status. Load the exact journal before deciding whether to repeat work.`,
+      });
       toast(`poll failed: ${e.message}`, "err");
       return;
     }
@@ -7073,9 +7554,18 @@ function pollRun(runId, sourceOperation) {
   store.pollTimer = setTimeout(tick, 800);
 }
 
-function stopPoll() {
+function stopPoll(settled = false) {
   store.pollRequest += 1;
   if (store.pollTimer) { clearTimeout(store.pollTimer); store.pollTimer = null; }
+  const active = store.pollSession;
+  store.pollSession = null;
+  if (!settled && active && navigationSafeId(active.threadId) && navigationSafeId(active.runId)) {
+    const session = runSessionRecord(active.threadId);
+    if (session && ["submitting", "running"].includes(session.phase)) runSessionUpdate(active.threadId, {
+      phase: "uncertain", runId: active.runId,
+      message: `Studio stopped following run ${shortId(active.runId)}. The run may still be active; load its exact journal instead of starting duplicate work.`,
+    });
+  }
 }
 
 /* ---------------- run: wait ---------------- */
@@ -7099,6 +7589,7 @@ async function runWait(payloadOverride, reportOutcome = false, applyRunOptions =
   if (payload === null) return null;
   const prepared = payloadOverride === undefined ? registryBindingPrepare(payload) : { payload, plan: null };
   if (!prepared) return null;
+  if (!runSessionBegin(t.thread_id, "wait")) { if (connectionOperationCurrent(operation)) toast("This thread already has a run in progress. Follow it before starting another mission.", "warn"); return null; }
   registryBindingSubmitted(prepared.plan);
   setRunStatus("running", "runs/wait");
   try {
@@ -7108,6 +7599,7 @@ async function runWait(payloadOverride, reportOutcome = false, applyRunOptions =
     const runId = registryBindingRunReceipt(res, t.thread_id, REGISTRY_TERMINAL_STATUSES);
     if (!runId) throw new Error("Rusty returned a run result outside the exact thread-bound contract. The submission may have been accepted; review server evidence before retrying.");
     registryBindingAccepted(runId, prepared.plan);
+    runSessionUpdate(t.thread_id, { phase: runSessionTerminalPhase(res.status), runId, status: res.status, attempt: res.attempt ?? null, message: "" });
     if (!connectionOperationCurrent(operation)) return runOperationResult(reportOutcome, res);
     setRunStatus(res.status, `run ${shortId(runId)}`);
     if (!reportOutcome) showRunResult(res);
@@ -7118,6 +7610,10 @@ async function runWait(payloadOverride, reportOutcome = false, applyRunOptions =
   } catch (e) {
     if (!connectionOperationIdentityCurrent(operation)) return null;
     registryBindingFailed(e, prepared.plan);
+    runSessionUpdate(t.thread_id, {
+      phase: interruptFailureUncertain(e) ? "uncertain" : "failed", status: "error",
+      message: runProofVisibleMessage(e && e.message),
+    });
     if (!connectionOperationCurrent(operation)) return runOperationResult(reportOutcome, null, e);
     setRunStatus(null);
     toast(e.message, "err");
@@ -7154,14 +7650,17 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
   if (payload === null) return null;
   const prepared = payloadOverride === undefined ? registryBindingPrepare(payload) : { payload, plan: null };
   if (!prepared) return null;
+  if (runSessionLaunchBlocked(t.thread_id)) { if (connectionOperationCurrent(operation)) toast("This thread already has a run in progress. Follow it before starting another mission.", "warn"); return null; }
+  abortStream();
+  if (!runSessionBegin(t.thread_id, "stream")) return null;
   registryBindingSubmitted(prepared.plan);
   prepared.payload.stream_mode = selectedStreamModes();
   if (applyRunOptions) withRunOpts(prepared.payload);
 
-  abortStream();
   const ctrl = new AbortController();
   store.streamAbort = ctrl;
   store.streamRunId = null;
+  store.streamSession = { threadId: t.thread_id, runId: "" };
   clearFeed();
   feedEvent("metadata", { note: `POST /threads/${t.thread_id}/runs/stream`, stream_mode: prepared.payload.stream_mode }, "-");
   setRunStatus("running", "streaming");
@@ -7178,6 +7677,7 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
     if (!registryBindingStreamCurrent(ctrl, operation, prepared.plan)) return;
     const error = new ApiError(0, { error: e.name === "AbortError" ? "aborted" : "network", message: e.message });
     registryBindingFailed(error, prepared.plan);
+    runSessionUpdate(t.thread_id, { phase: "uncertain", status: "error", message: runProofVisibleMessage(error.message) });
     if (e.name !== "AbortError") {
       feedEvent("error", { error: "network", message: e.message }, "-");
       setRunStatus(null);
@@ -7193,6 +7693,9 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
     setRunStatus(null);
     const error = new ApiError(res.status, body);
     registryBindingFailed(error, prepared.plan);
+    runSessionUpdate(t.thread_id, {
+      phase: interruptFailureUncertain(error) ? "uncertain" : "failed", status: "error", message: runProofVisibleMessage(error.message),
+    });
     return runOperationResult(reportOutcome, null, error);
   }
 
@@ -7219,7 +7722,9 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
           const runId = registryBindingStreamMetadata(frame.data, t.thread_id, store.streamRunId);
           if (!runId) { reader.cancel().catch(() => {}); throw new Error("The stream metadata did not bind one exact new run to the initiating thread."); }
           store.streamRunId = runId; noteRunId(runId);
+          if (store.streamSession) store.streamSession.runId = runId;
           registryBindingAccepted(runId, prepared.plan);
+          runSessionUpdate(t.thread_id, { phase: "running", runId, status: "running", message: "" });
         }
         feedEvent(frame.event, frame.data, frame.id);
         if (frame.event === "end") endData = frame.data;
@@ -7234,7 +7739,9 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
         const runId = registryBindingStreamMetadata(tail.data, t.thread_id, store.streamRunId);
         if (!runId) throw new Error("The stream metadata did not bind one exact new run to the initiating thread.");
         store.streamRunId = runId; noteRunId(runId);
+        if (store.streamSession) store.streamSession.runId = runId;
         registryBindingAccepted(runId, prepared.plan);
+        runSessionUpdate(t.thread_id, { phase: "running", runId, status: "running", message: "" });
       }
       feedEvent(tail.event, tail.data, tail.id);
       if (tail.event === "end") endData = tail.data;
@@ -7276,6 +7783,9 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
   }
 
   if (endData) {
+    runSessionUpdate(t.thread_id, {
+      phase: runSessionTerminalPhase(endData.status), runId: store.streamRunId || "", status: endData.status, message: "",
+    });
     setRunStatus(endData.status, "stream ended");
     if (endData.status === "interrupted") {
       const runId = store.streamRunId;
@@ -7315,6 +7825,7 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
         endData = { ...endData, run_id: runId || "", thread_id: t.thread_id, boundary_error: boundaryError };
       }
     }
+    if (endData.status !== "interrupted" && !reportOutcome) showRunResult(endData);
   } else {
     setRunStatus(null);
   }
@@ -7322,16 +7833,31 @@ async function runStream(payloadOverride, reportOutcome = false, applyRunOptions
   refreshHistory();
   if (store.streamRunId) recAutoLoad(store.streamRunId);
   store.streamAbort = null;
+  store.streamSession = null;
   if (!endData) {
     const error = streamError || new ApiError(0, { error: "stream_incomplete", message: "The event stream ended without a terminal frame." });
     registryBindingFailed(error, prepared.plan, store.streamRunId);
+    runSessionUpdate(t.thread_id, {
+      phase: "uncertain", runId: store.streamRunId || "", status: "error", message: runProofVisibleMessage(error.message),
+    });
     return runOperationResult(reportOutcome, null, error);
   }
   return runOperationResult(reportOutcome, endData);
 }
 
-function abortStream() {
+function abortStream(settled = false) {
+  const active = store.streamSession;
   if (store.streamAbort) { store.streamAbort.abort(); store.streamAbort = null; }
+  store.streamSession = null;
+  if (!settled && active && navigationSafeId(active.threadId)) {
+    const session = runSessionRecord(active.threadId);
+    if (session && ["submitting", "running"].includes(session.phase)) runSessionUpdate(active.threadId, {
+      phase: "uncertain", runId: navigationSafeId(active.runId) || session.runId,
+      message: active.runId
+        ? `Studio stopped the live connection to run ${shortId(active.runId)}. The run may continue; load its exact journal before repeating work.`
+        : "Studio lost the live connection before receiving one exact run identity. The mission may have been accepted; do not repeat it until server evidence is checked.",
+    });
+  }
 }
 
 function parseSseFrame(raw) {
@@ -7376,6 +7902,13 @@ function feedEvent(kind, data, id) {
 function showRunResult(res, options = {}) {
   const el = $("run-result");
   el.innerHTML = `${badge(res.status)}<pre class="json">${escapeHtml(pretty(res))}</pre>`;
+  const threadId = currentThread()?.thread_id;
+  if (threadId && res && res.thread_id === threadId && navigationSafeId(res.run_id) && typeof res.status === "string") {
+    runSessionUpdate(threadId, {
+      phase: runSessionTerminalPhase(res.status), runId: res.run_id, status: res.status,
+      attempt: res.attempt ?? null, message: "",
+    });
+  }
   if (res.status === "interrupted") {
     const evidence = interruptBoundaryFromRun(res, { threadId: currentThread()?.thread_id, runId: res.run_id, interrupt: res.interrupt });
     showInterrupt(res.interrupt, evidence, { replace: Boolean(options.replaceInterrupt) });
@@ -7540,6 +8073,7 @@ function interruptRender() {
   card.setAttribute("aria-busy", draft && draft.submitting ? "true" : "false");
   card.innerHTML = draft ? interruptRenderHtml(draft) : "";
   for (const id of ["btn-run", "btn-run-wait", "btn-run-stream", "btn-replay"]) $(id).disabled = Boolean(draft);
+  runSessionRender();
 }
 
 function showInterrupt(value, evidence = {}, options = {}) {
@@ -8250,6 +8784,7 @@ function recAutoLoad(runId) {
 
 function recRender() {
   journeyRender();
+  runSessionRender();
   const body = $("rec-body"), detail = $("rec-detail"), scrub = $("rec-scrub");
   const investigation = $("rec-investigation");
   const r = store.recorder;
@@ -14012,13 +14547,13 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
 
 function agentsUpdateSidebar() {
   const el = $("agent-side-count");
-  if (!store.conn) { el.textContent = "Connect to load assistant configurations."; return; }
-  if (store.agentsUnsupported) { el.textContent = "Assistant API unavailable on this server."; return; }
+  if (!store.conn) { el.textContent = "Offline"; return; }
+  if (store.agentsUnsupported) { el.textContent = "Unavailable"; return; }
   const list = store.agents && store.agents.list || [];
   const active = list.filter((agent) => agentLifecycleState(agent) === "active").length;
   const archived = list.filter((agent) => agentLifecycleState(agent) === "archived").length;
   const unavailable = list.length - active - archived;
-  el.textContent = `${active} active assistant${active === 1 ? "" : "s"}${archived ? ` · ${archived} archived` : ""}${unavailable ? ` · ${unavailable} unavailable` : ""}`;
+  el.textContent = `${active} active${archived ? ` · ${archived} archived` : ""}${unavailable ? ` · ${unavailable} unavailable` : ""}`;
 }
 
 async function agentsLoad(quiet) {
@@ -15342,6 +15877,7 @@ async function agentOpenThread(threadId, runId, graph, options = {}) {
   }
   store.selected = threadId;
   store.view = "thread";
+  store.threadStage = runId ? "trace" : "run";
   saveThreads();
   renderThreads();
   renderMain();
@@ -15351,6 +15887,7 @@ async function agentOpenThread(threadId, runId, graph, options = {}) {
     await recLoad(runId, true);
     if (!connectionOperationCurrent(operation) || options.current && !options.current()) return false;
     const recorder = $("flight-recorder-card");
+    threadStageRender();
     if (recorder) recorder.scrollIntoView({ block: "start" });
     const recorderTitle = $("flight-recorder-title");
     if (recorderTitle) recorderTitle.focus({ preventScroll: true });
@@ -17064,11 +17601,10 @@ function fabricErrorHtml(status, body, subject) {
 
 function fabricUpdateSidebar() {
   const el = $("fabric-side-count");
-  if (!store.conn) { el.textContent = "Connect to discover durable identities."; return; }
-  if (store.fabricUnsupported) { el.textContent = "Agent Fabric unavailable on this server."; return; }
-  const count = store.fabric && store.fabric.list ? store.fabric.list.length : 0;
+  if (!store.conn) { el.textContent = "Offline"; return; }
+  if (store.fabricUnsupported) { el.textContent = "Unavailable"; return; }
   const teams = fabricGroups(store.fabric && store.fabric.list).filter((group) => group.teamId).length;
-  el.textContent = `${count} durable identit${count === 1 ? "y" : "ies"} · ${teams} team label${teams === 1 ? "" : "s"}`;
+  el.textContent = `${teams} team${teams === 1 ? "" : "s"}`;
 }
 
 function fabricComposerContext() {
@@ -20418,7 +20954,7 @@ async function memoryLoad(quiet) {
       loadedAt: null, loading: false, totalRecords: 0, snapshotTruncated: false,
       totalConflicts: null, superseded: new Set(), searchIndex: new Map(), error: memoryErrorHtml(error.status, error.body),
     };
-    $("memory-side-count").textContent = noRoute ? "Memory is unavailable on this server build." : "Memory could not be loaded.";
+    $("memory-side-count").textContent = noRoute ? "Unavailable" : "Needs attention";
     if (!quiet && !noRoute) toast(error.message || "Memory could not be loaded.", "err");
     memoryRender();
     if (store.view === "home") homeRender();
@@ -20452,8 +20988,8 @@ async function memoryLoad(quiet) {
     loadedAt: new Date().toISOString(), loading: false, error: null,
     totalRecords: rawRecords.length, snapshotTruncated, totalConflicts, superseded, searchIndex,
   };
-  $("memory-side-count").textContent = `${rawRecords.length} retained record${rawRecords.length === 1 ? "" : "s"} · ` +
-    (Array.isArray(conflicts) ? `${totalConflicts} conflict${totalConflicts === 1 ? "" : "s"}` : "conflict status unavailable");
+  $("memory-side-count").textContent = `${rawRecords.length} memor${rawRecords.length === 1 ? "y" : "ies"}` +
+    (Array.isArray(conflicts) && totalConflicts ? ` · ${totalConflicts} need review` : "");
   memoryRender();
   if (store.view === "home") homeRender();
 }
@@ -21862,7 +22398,7 @@ async function learnLoad(quiet) {
     store.learn = { records: [], versions: [], selected: null, drafts: previous.drafts || Object.create(null), action: null,
       loading: false, error: learnErrorHtml(error.status, error.body), versionsError: null,
       totalCandidates: 0, totalVersions: 0, snapshotTruncated: false, searchIndex: new Map(), notice: null };
-    $("learn-side-count").textContent = noRoute ? "Learning is unavailable on this server build." : "Learning evidence could not be loaded.";
+    $("learn-side-count").textContent = noRoute ? "Unavailable" : "Needs attention";
     if (!quiet && !noRoute) toast(error.message || "Learning evidence could not be loaded.", "err");
     learnRender();
     if (store.view === "home") homeRender();
@@ -21873,7 +22409,7 @@ async function learnLoad(quiet) {
     store.learn = { records: [], versions: [], selected: null, drafts: previous.drafts || Object.create(null), action: null,
       loading: false, error: `<div class="note learn-action-error">${escapeHtml(candidates.error)}</div>`, versionsError: null,
       totalCandidates: candidates.total, totalVersions: 0, snapshotTruncated: candidates.truncated, searchIndex: new Map(), notice: null };
-    $("learn-side-count").textContent = "Learning evidence violates the expected contract.";
+    $("learn-side-count").textContent = "Needs attention";
     learnRender();
     if (store.view === "home") homeRender();
     return { candidates: false, versions: false };
@@ -21897,8 +22433,7 @@ async function learnLoad(quiet) {
     loading: false, error: null, versionsError, totalCandidates: candidates.total, totalVersions,
     snapshotTruncated: candidates.truncated, searchIndex: learnBuildSearchIndex(records), notice: null,
   };
-  $("learn-side-count").textContent = `${candidates.total} candidate${candidates.total === 1 ? "" : "s"} · ` +
-    (versionsError ? "serving state unavailable" : `${totalVersions} serving surface${totalVersions === 1 ? "" : "s"}`);
+  $("learn-side-count").textContent = `${candidates.total} proposal${candidates.total === 1 ? "" : "s"}`;
   learnRender();
   if (store.view === "home") homeRender();
   return { candidates: true, versions: !versionsError };
@@ -22461,7 +22996,7 @@ async function registryLoad(quiet, loadSelection = true) {
     const selected = previous.selected && artifacts.some((item) => item.surface === previous.selected) ? previous.selected : artifacts[0]?.surface || null;
     store.registryUnsupported = false;
     store.registry = { artifacts, selected, loading: false, error: null, history: null, detailLoading: false, detailError: null, from: "", to: "", diff: null, diffLoading: false, diffError: null };
-    $("registry-side-count").textContent = `${artifacts.length} named artifact${artifacts.length === 1 ? "" : "s"} · ${artifacts.reduce((sum, item) => sum + item.commits.length, 0)} commits`;
+    $("registry-side-count").textContent = `${artifacts.length} item${artifacts.length === 1 ? "" : "s"}`;
     registryRender();
     if (loadSelection && store.registry.selected) registryLoadHistory(store.registry.selected, false, false);
     return true;
@@ -22469,7 +23004,7 @@ async function registryLoad(quiet, loadSelection = true) {
     if (!registryCurrent(request, connection)) return false;
     const noRoute = error.status === 404 && (!error.body || error.body.raw !== undefined);
     store.registryUnsupported = noRoute; store.registry = { artifacts: [], selected: null, loading: false, error, history: null, diff: null };
-    $("registry-side-count").textContent = noRoute ? "Extensions are unavailable on this server build." : "Extension catalog could not be loaded.";
+    $("registry-side-count").textContent = noRoute ? "Unavailable" : "Needs attention";
     registryRender(); if (!quiet && !noRoute) toast(error.message || "Extension catalog could not be loaded.", "err"); return false;
   }
 }
@@ -22488,7 +23023,7 @@ async function registryLoadHistory(surface, focusDetail, restoreFocus = true) {
     const appended = commits.length - artifact.commits.length;
     if (appended) artifact.commits = commits.map((item) => ({ candidate_id: item.candidate_id, committed_at: item.committed_at }));
     state.detailLoading = false; state.history = { surface, commits, appended }; state.from = commits.length >= 2 ? commits[commits.length - 2].candidate_id : commits[0]?.candidate_id || ""; state.to = commits.at(-1)?.candidate_id || "";
-    $("registry-side-count").textContent = `${state.artifacts.length} named artifact${state.artifacts.length === 1 ? "" : "s"} · ${state.artifacts.reduce((sum, item) => sum + item.commits.length, 0)} commits`;
+    $("registry-side-count").textContent = `${state.artifacts.length} item${state.artifacts.length === 1 ? "" : "s"}`;
     if (store.view === "registry") {
       registryRender();
       if (restoreFocus) (focusDetail ? $("registry-detail-title") : $("registry-list")?.querySelector('[aria-selected="true"]'))?.focus({ preventScroll: true });
@@ -22809,12 +23344,12 @@ function automationRequestCurrent(request, connection) {
 function automationUpdateSidebar() {
   const el = $("automations-side-count");
   if (!el) return;
-  if (!store.conn) { el.textContent = "Connect to inspect signed webhook bindings."; return; }
-  if (!store.automations) { el.textContent = "Open the desk to load server automations."; return; }
-  if (store.automations.loading) { el.textContent = "Loading server automations…"; return; }
-  if (store.automations.error) { el.textContent = store.automationsUnsupported ? "Automation routes unavailable." : "Automation registry needs attention."; return; }
+  if (!store.conn) { el.textContent = "Offline"; return; }
+  if (!store.automations) { el.textContent = "Not loaded"; return; }
+  if (store.automations.loading) { el.textContent = "Loading…"; return; }
+  if (store.automations.error) { el.textContent = store.automationsUnsupported ? "Unavailable" : "Needs attention"; return; }
   const enabled = store.automations.list.filter((item) => item.enabled).length;
-  el.textContent = `${enabled} enabled · ${store.automations.list.length - enabled} paused.`;
+  el.textContent = `${enabled} on`;
 }
 
 async function automationsLoad(quiet = false) {
@@ -23592,11 +24127,11 @@ function schedulesRender() {
 function scheduleUpdateSidebar() {
   const el = $("schedules-side-count");
   if (!el) return;
-  if (!store.schedules) { el.textContent = "Open the desk to load server schedules."; return; }
-  if (store.schedules.loading) { el.textContent = "Loading server schedules…"; return; }
-  if (store.schedules.error) { el.textContent = store.schedulesUnsupported ? "Schedule routes unavailable." : "Schedule catalog needs attention."; return; }
+  if (!store.schedules) { el.textContent = store.conn ? "Not loaded" : "Offline"; return; }
+  if (store.schedules.loading) { el.textContent = "Loading…"; return; }
+  if (store.schedules.error) { el.textContent = store.schedulesUnsupported ? "Unavailable" : "Needs attention"; return; }
   const recurring = store.schedules.list.filter((item) => item.on_run_completed === "keep").length;
-  el.textContent = `${recurring} recurring · ${store.schedules.list.length - recurring} one-shot.`;
+  el.textContent = `${recurring} active`;
 }
 
 function scheduleRequestCurrent(request, connection) {
@@ -24184,6 +24719,17 @@ function init() {
   $("btn-run").onclick = runBackground;
   $("btn-run-wait").onclick = () => runWait();
   $("btn-run-stream").onclick = () => runStream();
+  $("btn-run-session-next").onclick = () => runSessionAction();
+  $("btn-run-session-abandon").onclick = runSessionAbandonUncertainty;
+  $("thread-stage-nav").addEventListener("click", (event) => {
+    const target = event.target.closest("[data-thread-stage]");
+    if (target && !target.disabled) threadStageOpen(target.getAttribute("data-thread-stage"));
+  });
+  $("thread-stage-nav").addEventListener("keydown", threadStageKeyboard);
+  $("sel-evaluate-tool").addEventListener("change", (event) => {
+    store.qualityTool = event.target.value;
+    threadEvaluateToolRender(true);
+  });
   $("interrupt-card").addEventListener("input", interruptEditCustom);
   $("interrupt-card").addEventListener("click", (event) => {
     const mode = event.target.closest("[data-interrupt-mode]");

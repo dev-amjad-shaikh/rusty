@@ -24,12 +24,11 @@ studio/
 
 ## What it does
 
-- **Mission board** — the default Studio Home summarizes the same persistent
-  **Shape → Run → Inspect → Evaluate → Govern → Operate** evidence thread. It recommends the next honest action, combines only bounded connection-scoped
-  run metadata, and can continue into the latest agent or team evidence without copying an identifier.
+- **Mission control** — the default Home leads with the user's next task, a compact system snapshot, and recent
+  work. It can continue into the latest agent or team evidence without copying an identifier.
   Server catalog counts, browser-scoped blueprints and run recall, and not-yet-loaded memory evidence
   are labelled distinctly; prompts, results, and connection credentials never enter the Home model.
-- **Persistent evidence thread** — every workspace now sits beneath one six-stage
+- **Lifecycle evidence thread** — active workspaces sit beneath one six-stage
   **Shape → Run → Inspect → Evaluate → Govern → Operate** rail. It derives only bounded agent,
   active-version, thread, and run identities from the existing workspace state; it never copies prompts,
   payloads, results, credentials, or evaluation inputs into a second model. A selected thread resolves its
@@ -37,8 +36,8 @@ studio/
   inspection available, but only a complete exact same-thread Recorder envelope proves Inspect and unlocks
   Evaluate. Memory/candidate and automation/schedule/task summaries retain their own loaded, page-memory,
   and server-evidence boundaries. Native stage buttons, Left/Right/Home/End navigation, stable destination
-  focus, a 3 × 2 mobile layout, and one explicit next-safe-move action make the journey continuous without
-  pretending that the rail is an authoritative catalog.
+  focus, a 3 × 2 mobile layout, and one explicit next-safe-move action make the journey continuous. Mission
+  control omits the rail so the starting experience stays focused on action rather than product narration.
 - **Progressive mission dossier** — the expandable dossier beneath that rail turns the current context into
   one decision at a time: the evidence already in hand, the proof still missing, the next safe move, and the
   workspace that owns the authoritative follow-up. It advances from the current workspace when possible, so
@@ -57,6 +56,20 @@ studio/
   still requires a fresh live Extension Catalog read and the existing one-run admission acknowledgement.
   A malformed or uncertain create receipt locks the stable thread ID for explicit attach/check recovery
   instead of offering a potentially duplicating retry.
+- **Unified Run Session** — the prepared mission now enters one continuous **Prepare → Execute → Resolve →
+  Prove** cockpit instead of a stack of unrelated controls. Live streaming is the primary launch because it
+  carries progress and pauses into the workspace; background and wait modes remain available as deliberate
+  alternatives. The session does not create a second execution authority: it retains only bounded thread,
+  run, mode, and status facts in connection-bound page memory, while the existing run routes, human-decision
+  boundary, Flight Recorder, and Case Foundry remain authoritative. It never copies payloads or event bodies.
+  A known terminal run directs the operator to its exact journal; only a complete same-thread Recorder envelope
+  unlocks evaluation. One thread owns one Studio mission at a time. Transport, polling, or workspace-following
+  loss preserves the known run identity, locks every launch mode, and marks the outcome uncertain instead of
+  making a duplicate launch look safe. The operator must load exact evidence or deliberately abandon that
+  uncertainty before another run can start. Changing connection clears every local session;
+  switching threads keeps their bounded progress independent. The thread workspace shows only one primary
+  surface at a time: **Run**, **Trace**, or **Evaluate**. Evaluation then exposes one selected tool at a time,
+  so the default journey is not a wall of quality and release utilities.
 - **Connection Hub** — a guided **Reach server → Verify identity → Inspect features** handshake replaces
   the raw connection form. Reusable profiles remember only non-secret server metadata by default. Access
   keys stay in the browser session unless the user explicitly accepts a device-local plaintext warning;
@@ -296,7 +309,9 @@ studio/
   server already knows, and offers to re-create it with the same id when the in-memory thread registry has
   forgotten it (e.g. after a server restart — on-disk checkpoints then re-attach). ✕ *forget* only removes
   the entry from your local list; nothing is deleted server-side.
-- **Per-thread workspace**
+- **Per-thread workspace** — one task-scoped switcher separates **Run**, **Trace**, and **Evaluate**. Run is
+  the default, Trace owns journal/state/checkpoint evidence, and Evaluate becomes available only after a
+  complete same-thread journal. Its tool chooser keeps one evaluation utility visible at a time.
   - **Current state** — `GET /threads/{id}/state`, pretty-printed JSON grouped by channel, with `next`
     nodes and the current checkpoint ref (step, id, timestamp).
   - **Checkpoint history** — `POST /threads/{id}/history` rendered as a newest-first timeline (step,
