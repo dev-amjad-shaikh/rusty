@@ -1,0 +1,11 @@
+{
+  "tenant": "default",
+  "environment": "prod",
+  "revision_id": "c2c01e8fae3bdbc5ec82f6edae7ab68cc13d9fb150bd69d060018596999489b4",
+  "previous": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "author": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "promoted_at": "2025-10-09T08:55:00Z"
+}

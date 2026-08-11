@@ -33,6 +33,10 @@ use std::path::{Path, PathBuf};
 use rusty_agent_runtime::artifact::RunArtifact;
 use rusty_agent_runtime::broker::StoredConnection;
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
+use rusty_agent_runtime::deploy::{
+    DeploymentPointer, DeploymentRevision, EnvSecretRecord, Environment, RevisionId,
+    StoredEnvSecret,
+};
 use rusty_agent_runtime::durable::resolve_timeout_bound_ms;
 use rusty_agent_runtime::journal::{ArtifactStore, FileArtifactStore, JournalSnapshot};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
@@ -58,6 +62,7 @@ use crate::capsule_policy::{
 use crate::capsules::{self, CapsuleRecord, CapsuleWrite};
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
+use crate::deploy;
 use crate::journals;
 use crate::learn;
 use crate::memory;
@@ -969,6 +974,139 @@ pub(crate) trait ServerStore: Send + Sync {
     /// it was not there). Real deletion — the memory-forget posture —
     /// reached only through `Broker::delete`, which revokes first.
     async fn delete_connection(&self, tenant: &str, connection_id: &str) -> StoreResult<bool>;
+
+    // -- Deployments (R0.12 wave 3) ------------------------------------- //
+
+    /// Insert a deployment revision; `false` (no write) when the
+    /// tenant-scoped content address already exists. Revisions are
+    /// immutable content-addressed objects — an existing row is always
+    /// the same declaration (the route converges it), never an update.
+    async fn put_revision(
+        &self,
+        tenant: &str,
+        record: &rusty_agent_runtime::deploy::DeploymentRevision,
+    ) -> StoreResult<bool>;
+
+    /// Fetch one revision (`None` for unknown or cross-tenant ids).
+    async fn get_revision(
+        &self,
+        tenant: &str,
+        revision_id: &str,
+    ) -> StoreResult<Option<rusty_agent_runtime::deploy::DeploymentRevision>>;
+
+    /// Every revision the tenant holds (order unspecified; callers sort).
+    async fn list_revisions(
+        &self,
+        tenant: &str,
+    ) -> StoreResult<Vec<rusty_agent_runtime::deploy::DeploymentRevision>>;
+
+    /// Insert an environment record; `false` (no write) when the
+    /// tenant-scoped name is taken. Environments are declared once and
+    /// never edited this wave — a changed declaration conflicts at the
+    /// route, so the record an audit reads is the one in force.
+    async fn put_environment(
+        &self,
+        tenant: &str,
+        record: &rusty_agent_runtime::deploy::Environment,
+    ) -> StoreResult<bool>;
+
+    /// Fetch one environment by name (`None` for unknown or
+    /// cross-tenant names).
+    async fn get_environment(
+        &self,
+        tenant: &str,
+        name: &str,
+    ) -> StoreResult<Option<rusty_agent_runtime::deploy::Environment>>;
+
+    /// Every environment the tenant holds (order unspecified; callers
+    /// sort).
+    async fn list_environments(
+        &self,
+        tenant: &str,
+    ) -> StoreResult<Vec<rusty_agent_runtime::deploy::Environment>>;
+
+    /// Fetch one environment's deployment pointer (`None` when nothing
+    /// was ever promoted into it — the environment serves nothing).
+    /// `environment` is the deployment surface (`deployment:{env}`),
+    /// the pointer key — not the bare environment name.
+    async fn get_deployment_pointer(
+        &self,
+        tenant: &str,
+        environment: &str,
+    ) -> StoreResult<Option<rusty_agent_runtime::deploy::DeploymentPointer>>;
+
+    /// The control-plane move: compare-and-swap the environment's
+    /// pointer from `expect` (the caller's read of the live `active`)
+    /// to `next`, committing the journaled transition `journal` in the
+    /// same transaction — the R0.6 outbox discipline: a state transition
+    /// and the evidence that caused it must not split-brain, so a crash
+    /// cannot leave a promoted revision whose pointer never moved.
+    /// `environment` is the deployment surface (`deployment:{env}`, the
+    /// [`rusty_agent_runtime::deploy::deployment_surface`] grammar) —
+    /// the pointer key — not the bare environment name.
+    /// [`DeploymentTransition`] is the three-way answer; anything but
+    /// `Applied` changes nothing.
+    async fn transition_deployment(
+        &self,
+        tenant: &str,
+        environment: &str,
+        expect: Option<rusty_agent_runtime::deploy::RevisionId>,
+        next: &rusty_agent_runtime::deploy::DeploymentPointer,
+        journal: &JournalSnapshot,
+    ) -> StoreResult<DeploymentTransition>;
+
+    /// Insert or replace a stored env-secret beneath its stable scoped
+    /// name (`true` when created, `false` when rotated — rotation is
+    /// replacement, journaled by the caller before the write: nothing
+    /// reaches the store the journal did not record first). The store
+    /// only ever holds the sealed envelope.
+    async fn set_env_secret(
+        &self,
+        tenant: &str,
+        record: &rusty_agent_runtime::deploy::StoredEnvSecret,
+    ) -> StoreResult<bool>;
+
+    /// Fetch one stored env-secret (`None` for unknown or cross-tenant
+    /// scoped names).
+    async fn get_env_secret(
+        &self,
+        tenant: &str,
+        name: &str,
+        environment: &str,
+    ) -> StoreResult<Option<rusty_agent_runtime::deploy::StoredEnvSecret>>;
+
+    /// Every env-secret metadata record the tenant holds (never the
+    /// envelopes — a listing is an audit view; order unspecified,
+    /// callers sort).
+    async fn list_env_secrets(
+        &self,
+        tenant: &str,
+    ) -> StoreResult<Vec<rusty_agent_runtime::deploy::EnvSecretRecord>>;
+
+    /// Erase a stored env-secret, sealed envelope included (`false`
+    /// when it was not there). Real deletion — revocation is deletion,
+    /// journaled by the caller before the write.
+    async fn delete_env_secret(
+        &self,
+        tenant: &str,
+        name: &str,
+        environment: &str,
+    ) -> StoreResult<bool>;
+}
+
+/// The outcome of a deployment pointer move
+/// ([`ServerStore::transition_deployment`]) — the store's mutation
+/// convention: anything but `Applied` changes nothing, and a live
+/// pointer that no longer matches the caller's read is a conflict
+/// carrying the serving revision (the loser retries against the moved
+/// pointer or fails with a typed conflict — never a lost move).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DeploymentTransition {
+    /// The journaled transition and the pointer move committed together.
+    Applied,
+    /// The environment's live `active` is not the expected one (a
+    /// concurrent move won the race). Carries the live value.
+    Conflict(Option<rusty_agent_runtime::deploy::RevisionId>),
 }
 
 /// The outcome of a candidate lifecycle transition
@@ -1156,6 +1294,26 @@ pub(crate) struct JsonFileStore {
     /// records dir, so the recursive record loader never picks up a
     /// blob — the `memory_artifacts` discipline).
     artifact_blobs: FileArtifactStore,
+    /// The deployment control plane (R0.12 wave 3): revisions keyed by
+    /// tenant-scoped content address and environments keyed by
+    /// tenant-scoped name, one file per record under
+    /// `{store_path}/deployments/{revisions,environments}/` (path-keyed
+    /// tenancy, the learn-candidates rule). Both are written once and
+    /// never edited.
+    revisions: Mutex<HashMap<String, DeploymentRevision>>,
+    environments: Mutex<HashMap<String, Environment>>,
+    /// Deployment pointers keyed by tenant-scoped surface
+    /// (`{tenant}/deployment:{env}`), one hash-named envelope file per
+    /// pointer under `{store_path}/deployments/pointers/`. The lock
+    /// serializes the whole transition — the CAS read, the journal
+    /// write, the pointer write, and the index swap — the file
+    /// backend's transaction.
+    deployment_pointers: Mutex<HashMap<String, DeploymentPointer>>,
+    /// Environment secrets keyed by tenant-scoped secret id
+    /// (`{tenant}/{name}@{env}`), one hash-named envelope file per
+    /// secret under `{store_path}/env-secrets/`. This index only ever
+    /// holds ciphertext; the deploy module owns the cryptography.
+    env_secrets: Mutex<HashMap<String, StoredEnvSecret>>,
 }
 
 impl JsonFileStore {
@@ -1196,6 +1354,10 @@ impl JsonFileStore {
             run_artifacts: Mutex::new(crate::artifacts::load_records(root)),
             run_artifact_names: Mutex::new(crate::artifacts::load_names(root)),
             artifact_blobs: crate::artifacts::blob_store(root),
+            revisions: Mutex::new(deploy::load_revisions(root)),
+            environments: Mutex::new(deploy::load_environments(root)),
+            deployment_pointers: Mutex::new(deploy::load_pointers(root)),
+            env_secrets: Mutex::new(deploy::load_env_secrets(root)),
         }
     }
 }
@@ -3188,6 +3350,174 @@ impl ServerStore for JsonFileStore {
         map.remove(&scoped);
         Ok(true)
     }
+
+    // -- Deployments (R0.12 wave 3) ------------------------------------- //
+
+    async fn put_revision(&self, tenant: &str, record: &DeploymentRevision) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, record.revision_id.as_str());
+        let mut map = self.revisions.lock().await;
+        if map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        deploy::persist_revision(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist revision"))?;
+        map.insert(scoped, record.clone());
+        Ok(true)
+    }
+
+    async fn get_revision(
+        &self,
+        tenant: &str,
+        revision_id: &str,
+    ) -> StoreResult<Option<DeploymentRevision>> {
+        let scoped = crate::auth::scope_id(tenant, revision_id);
+        Ok(self.revisions.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_revisions(&self, tenant: &str) -> StoreResult<Vec<DeploymentRevision>> {
+        let map = self.revisions.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn put_environment(&self, tenant: &str, record: &Environment) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, record.name.as_str());
+        let mut map = self.environments.lock().await;
+        if map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        deploy::persist_environment(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist environment"))?;
+        map.insert(scoped, record.clone());
+        Ok(true)
+    }
+
+    async fn get_environment(&self, tenant: &str, name: &str) -> StoreResult<Option<Environment>> {
+        let scoped = crate::auth::scope_id(tenant, name);
+        Ok(self.environments.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_environments(&self, tenant: &str) -> StoreResult<Vec<Environment>> {
+        let map = self.environments.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn get_deployment_pointer(
+        &self,
+        tenant: &str,
+        environment: &str,
+    ) -> StoreResult<Option<DeploymentPointer>> {
+        let scoped = crate::auth::scope_id(tenant, environment);
+        Ok(self.deployment_pointers.lock().await.get(&scoped).cloned())
+    }
+
+    async fn transition_deployment(
+        &self,
+        tenant: &str,
+        environment: &str,
+        expect: Option<RevisionId>,
+        next: &DeploymentPointer,
+        journal: &JournalSnapshot,
+    ) -> StoreResult<DeploymentTransition> {
+        let scoped = crate::auth::scope_id(tenant, environment);
+        // The pointer lock is the file backend's transaction: the CAS
+        // read, the journal write, the pointer write, and the index swap
+        // cannot interleave with another transition. Two files cannot
+        // land atomically — the journal goes first (the artifacts commit
+        // rule), so a crash between the writes leaves the transition
+        // journaled but the pointer unmoved, and the caller's retry
+        // converges: the CAS expectation still matches, and the chain
+        // dedupe keeps a retried act from journaling twice. Postgres
+        // makes the pair one transaction instead.
+        let mut pointers = self.deployment_pointers.lock().await;
+        let live = pointers
+            .get(&scoped)
+            .and_then(|pointer| pointer.active.clone());
+        if live != expect {
+            return Ok(DeploymentTransition::Conflict(live));
+        }
+        journals::persist(&self.root, journal)
+            .await
+            .map_err(io_err("persist deployment journal"))?;
+        deploy::persist_pointer(&self.root, &scoped, next)
+            .await
+            .map_err(io_err("persist deployment pointer"))?;
+        pointers.insert(scoped, next.clone());
+        Ok(DeploymentTransition::Applied)
+    }
+
+    async fn set_env_secret(&self, tenant: &str, record: &StoredEnvSecret) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(
+            tenant,
+            &rusty_agent_runtime::deploy::scoped_secret_name(
+                &record.record.name,
+                &record.record.environment,
+            ),
+        );
+        let mut map = self.env_secrets.lock().await;
+        let created = !map.contains_key(&scoped);
+        deploy::persist_env_secret(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist env secret"))?;
+        map.insert(scoped, record.clone());
+        Ok(created)
+    }
+
+    async fn get_env_secret(
+        &self,
+        tenant: &str,
+        name: &str,
+        environment: &str,
+    ) -> StoreResult<Option<StoredEnvSecret>> {
+        let tag = rusty_agent_runtime::learn::EnvironmentTag::new(environment)
+            .map_err(|e| e.to_string())?;
+        let scoped = crate::auth::scope_id(
+            tenant,
+            &rusty_agent_runtime::deploy::scoped_secret_name(name, &tag),
+        );
+        Ok(self.env_secrets.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_env_secrets(&self, tenant: &str) -> StoreResult<Vec<EnvSecretRecord>> {
+        let map = self.env_secrets.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, stored)| stored.record.clone())
+            .collect())
+    }
+
+    async fn delete_env_secret(
+        &self,
+        tenant: &str,
+        name: &str,
+        environment: &str,
+    ) -> StoreResult<bool> {
+        let tag = rusty_agent_runtime::learn::EnvironmentTag::new(environment)
+            .map_err(|e| e.to_string())?;
+        let scoped = crate::auth::scope_id(
+            tenant,
+            &rusty_agent_runtime::deploy::scoped_secret_name(name, &tag),
+        );
+        let mut map = self.env_secrets.lock().await;
+        if !map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        deploy::delete_env_secret_file(&self.root, &scoped)
+            .await
+            .map_err(io_err("delete env secret"))?;
+        map.remove(&scoped);
+        Ok(true)
+    }
 }
 
 impl JsonFileStore {
@@ -3288,6 +3618,10 @@ mod postgres {
     use rusty_agent_runtime::artifact::RunArtifact;
     use rusty_agent_runtime::broker::StoredConnection;
     use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
+    use rusty_agent_runtime::deploy::{
+        DeploymentPointer, DeploymentRevision, EnvSecretRecord, Environment, RevisionId,
+        StoredEnvSecret,
+    };
     use rusty_agent_runtime::journal::{ArtifactStore, JournalSnapshot};
     use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
     use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
@@ -3299,8 +3633,8 @@ mod postgres {
     use tokio::sync::OnceCell;
 
     use super::{
-        ArtifactCommitOutcome, CandidateTransition, ConnectionUpdate, RunArtifactVersionWrite,
-        RunArtifactWrite, ServerStore, StoreResult,
+        ArtifactCommitOutcome, CandidateTransition, ConnectionUpdate, DeploymentTransition,
+        RunArtifactVersionWrite, RunArtifactWrite, ServerStore, StoreResult,
     };
     use crate::agents::{
         self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
@@ -3885,6 +4219,57 @@ mod postgres {
         CREATE INDEX IF NOT EXISTS server_connections_listing
             ON server_connections (tenant, connection_id)";
 
+    /// The deployment control plane (R0.12 wave 3): one row per record —
+    /// revisions, environments, and the per-environment pointers share
+    /// one table because they share one lifecycle (tenant-scoped,
+    /// insert-mostly, listed together); the `kind` column
+    /// (`revision` / `environment` / `pointer`) tells them apart, and
+    /// the key grammar makes cross-kind collisions impossible (revisions
+    /// key by bare content address, environments by
+    /// `environment:{name}`, pointers by `deployment:{env}`). The
+    /// `environment` column carries the environment name for
+    /// environment/pointer rows and the revision's source environment —
+    /// the listing's leading filter. Records travel as JSONB, the
+    /// `server_registry_artifacts` discipline. Additive for pre-R0.12
+    /// databases: a new table, never an alteration of an existing one.
+    pub(crate) const CREATE_DEPLOYMENTS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_deployments (
+            deployment_key TEXT PRIMARY KEY,
+            tenant         TEXT NOT NULL,
+            kind           TEXT NOT NULL,
+            environment    TEXT,
+            payload        JSONB NOT NULL,
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The deployment listing's leading columns: every control-plane
+    /// query is tenant-scoped, most filter on one environment.
+    pub(crate) const CREATE_DEPLOYMENTS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_deployments_listing
+            ON server_deployments (tenant, environment)";
+
+    /// Environment-scoped secrets (R0.12 wave 3): one row per secret,
+    /// keyed by tenant-scoped `name@environment`. The payload carries
+    /// the metadata record plus the sealed envelope — ciphertext and
+    /// wrapped data keys only, the `server_connections` custody shape:
+    /// plaintext enters this table never, and the master key lives in
+    /// host key files, not in the database.
+    pub(crate) const CREATE_ENV_SECRETS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_env_secrets (
+            secret_key  TEXT PRIMARY KEY,
+            tenant      TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            environment TEXT NOT NULL,
+            payload     JSONB NOT NULL,
+            updated_at  TIMESTAMPTZ NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The tenant's secrets by environment (the list route's scan).
+    pub(crate) const CREATE_ENV_SECRETS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_env_secrets_listing
+            ON server_env_secrets (tenant, environment)";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -3938,6 +4323,10 @@ mod postgres {
         CREATE_CONNECTIONS_TENANT_INDEX_SQL,
         CREATE_RUN_ARTIFACTS_SQL,
         CREATE_RUN_ARTIFACTS_INDEX_SQL,
+        CREATE_DEPLOYMENTS_SQL,
+        CREATE_DEPLOYMENTS_INDEX_SQL,
+        CREATE_ENV_SECRETS_SQL,
+        CREATE_ENV_SECRETS_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -4807,6 +5196,56 @@ mod postgres {
     pub(crate) const DELETE_CONNECTION_SQL: &str = r#"
         DELETE FROM server_connections WHERE connection_id = $1 AND tenant = $2
         RETURNING connection_id"#;
+
+    /// Insert-only revision and environment registration; returns no row
+    /// on conflict → the record already exists (the route converges an
+    /// identical re-declaration, never updates).
+    pub(crate) const INSERT_DEPLOYMENT_SQL: &str = r#"
+        INSERT INTO server_deployments (deployment_key, tenant, kind, environment, payload)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (deployment_key) DO NOTHING
+        RETURNING deployment_key"#;
+
+    pub(crate) const SELECT_DEPLOYMENT_SQL: &str =
+        "SELECT payload FROM server_deployments WHERE deployment_key = $1 AND kind = $2";
+
+    /// The transition's lock: the pointer row, `FOR UPDATE` inside the
+    /// move's transaction — the CAS read the upsert's write must not
+    /// race.
+    pub(crate) const LOCK_DEPLOYMENT_SQL: &str = r#"
+        SELECT payload FROM server_deployments WHERE deployment_key = $1 AND kind = 'pointer'
+        FOR UPDATE"#;
+
+    pub(crate) const LIST_DEPLOYMENTS_SQL: &str =
+        "SELECT payload FROM server_deployments WHERE tenant = $1 AND kind = $2";
+
+    /// The pointer move, inside the transition's transaction: upsert the
+    /// serving picture. The `environment` column travels so the listing
+    /// index keeps serving per-environment scans.
+    pub(crate) const UPSERT_DEPLOYMENT_SQL: &str = r#"
+        INSERT INTO server_deployments (deployment_key, tenant, kind, environment, payload)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (deployment_key) DO UPDATE SET payload = EXCLUDED.payload"#;
+
+    /// The env-secret write: rotation is replacement beneath the stable
+    /// scoped key. `RETURNING (xmax = 0)` reports the insert case, so
+    /// the caller learns created-vs-rotated from the row itself, not a
+    /// racy pre-read.
+    pub(crate) const UPSERT_ENV_SECRET_SQL: &str = r#"
+        INSERT INTO server_env_secrets (secret_key, tenant, name, environment, payload, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (secret_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = $6
+        RETURNING (xmax = 0) AS created"#;
+
+    pub(crate) const SELECT_ENV_SECRET_SQL: &str =
+        "SELECT payload FROM server_env_secrets WHERE secret_key = $1";
+
+    pub(crate) const LIST_ENV_SECRETS_SQL: &str =
+        "SELECT payload FROM server_env_secrets WHERE tenant = $1";
+
+    pub(crate) const DELETE_ENV_SECRET_SQL: &str = r#"
+        DELETE FROM server_env_secrets WHERE secret_key = $1 AND tenant = $2
+        RETURNING secret_key"#;
 
     pub(crate) const UPDATE_COORDINATION_SQL: &str = "
         UPDATE server_coordinations SET payload = $2
@@ -8016,6 +8455,251 @@ mod postgres {
                 .map_err(db_err("delete connection"))?;
             Ok(row.is_some())
         }
+
+        // -- Deployments (R0.12 wave 3) --------------------------------- //
+
+        async fn put_revision(
+            &self,
+            tenant: &str,
+            record: &DeploymentRevision,
+        ) -> StoreResult<bool> {
+            let row = sqlx::query(INSERT_DEPLOYMENT_SQL)
+                .bind(crate::auth::scope_id(tenant, record.revision_id.as_str()))
+                .bind(tenant)
+                .bind("revision")
+                .bind(record.content.source_environment.as_str())
+                .bind(record_to_payload(record)?)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("insert revision"))?;
+            Ok(row.is_some())
+        }
+
+        async fn get_revision(
+            &self,
+            tenant: &str,
+            revision_id: &str,
+        ) -> StoreResult<Option<DeploymentRevision>> {
+            let row = sqlx::query(SELECT_DEPLOYMENT_SQL)
+                .bind(crate::auth::scope_id(tenant, revision_id))
+                .bind("revision")
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select revision"))?;
+            row.map(|row| record_from_payload("revision", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_revisions(&self, tenant: &str) -> StoreResult<Vec<DeploymentRevision>> {
+            let rows = sqlx::query(LIST_DEPLOYMENTS_SQL)
+                .bind(tenant)
+                .bind("revision")
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list revisions"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("revision", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn put_environment(&self, tenant: &str, record: &Environment) -> StoreResult<bool> {
+            let row = sqlx::query(INSERT_DEPLOYMENT_SQL)
+                .bind(crate::auth::scope_id(
+                    tenant,
+                    &format!("environment:{}", record.name.as_str()),
+                ))
+                .bind(tenant)
+                .bind("environment")
+                .bind(record.name.as_str())
+                .bind(record_to_payload(record)?)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("insert environment"))?;
+            Ok(row.is_some())
+        }
+
+        async fn get_environment(
+            &self,
+            tenant: &str,
+            name: &str,
+        ) -> StoreResult<Option<Environment>> {
+            let row = sqlx::query(SELECT_DEPLOYMENT_SQL)
+                .bind(crate::auth::scope_id(
+                    tenant,
+                    &format!("environment:{name}"),
+                ))
+                .bind("environment")
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select environment"))?;
+            row.map(|row| record_from_payload("environment", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_environments(&self, tenant: &str) -> StoreResult<Vec<Environment>> {
+            let rows = sqlx::query(LIST_DEPLOYMENTS_SQL)
+                .bind(tenant)
+                .bind("environment")
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list environments"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("environment", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn get_deployment_pointer(
+            &self,
+            tenant: &str,
+            environment: &str,
+        ) -> StoreResult<Option<DeploymentPointer>> {
+            let row = sqlx::query(SELECT_DEPLOYMENT_SQL)
+                .bind(crate::auth::scope_id(tenant, environment))
+                .bind("pointer")
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select deployment pointer"))?;
+            row.map(|row| record_from_payload("deployment pointer", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn transition_deployment(
+            &self,
+            tenant: &str,
+            environment: &str,
+            expect: Option<RevisionId>,
+            next: &DeploymentPointer,
+            journal: &JournalSnapshot,
+        ) -> StoreResult<DeploymentTransition> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, environment);
+            // The journaled transition and the pointer move in one
+            // transaction: a crash cannot leave a promoted revision
+            // whose pointer never moved — the file backend's
+            // journal-then-pointer rule, exact here.
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin deployment transition"))?;
+            let row = sqlx::query(LOCK_DEPLOYMENT_SQL)
+                .bind(&scoped)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("lock deployment pointer"))?;
+            let live: Option<DeploymentPointer> = row
+                .map(|row| {
+                    record_from_payload("deployment pointer", row.get::<Value, _>("payload"))
+                })
+                .transpose()?;
+            let live_active = live.and_then(|pointer| pointer.active);
+            if live_active != expect {
+                return Ok(DeploymentTransition::Conflict(live_active));
+            }
+            sqlx::query(UPSERT_JOURNAL_SQL)
+                .bind(&journal.run_id)
+                .bind(record_to_payload(journal)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("journal deployment transition"))?;
+            sqlx::query(UPSERT_DEPLOYMENT_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind("pointer")
+                .bind(
+                    environment
+                        .strip_prefix("deployment:")
+                        .unwrap_or(environment),
+                )
+                .bind(record_to_payload(next)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("move deployment pointer"))?;
+            tx.commit()
+                .await
+                .map_err(db_err("commit deployment transition"))?;
+            Ok(DeploymentTransition::Applied)
+        }
+
+        async fn set_env_secret(
+            &self,
+            tenant: &str,
+            record: &StoredEnvSecret,
+        ) -> StoreResult<bool> {
+            let row = sqlx::query(UPSERT_ENV_SECRET_SQL)
+                .bind(crate::auth::scope_id(
+                    tenant,
+                    &rusty_agent_runtime::deploy::scoped_secret_name(
+                        &record.record.name,
+                        &record.record.environment,
+                    ),
+                ))
+                .bind(tenant)
+                .bind(&record.record.name)
+                .bind(record.record.environment.as_str())
+                .bind(record_to_payload(record)?)
+                .bind(record.envelope.sealed_at)
+                .fetch_one(self.pool().await?)
+                .await
+                .map_err(db_err("upsert env secret"))?;
+            Ok(row.get::<bool, _>("created"))
+        }
+
+        async fn get_env_secret(
+            &self,
+            tenant: &str,
+            name: &str,
+            environment: &str,
+        ) -> StoreResult<Option<StoredEnvSecret>> {
+            let tag = rusty_agent_runtime::learn::EnvironmentTag::new(environment)
+                .map_err(|e| e.to_string())?;
+            let row = sqlx::query(SELECT_ENV_SECRET_SQL)
+                .bind(crate::auth::scope_id(
+                    tenant,
+                    &rusty_agent_runtime::deploy::scoped_secret_name(name, &tag),
+                ))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select env secret"))?;
+            row.map(|row| record_from_payload("env secret", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_env_secrets(&self, tenant: &str) -> StoreResult<Vec<EnvSecretRecord>> {
+            let rows = sqlx::query(LIST_ENV_SECRETS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list env secrets"))?;
+            rows.into_iter()
+                .map(|row| {
+                    record_from_payload::<StoredEnvSecret>(
+                        "env secret",
+                        row.get::<Value, _>("payload"),
+                    )
+                    .map(|stored| stored.record)
+                })
+                .collect()
+        }
+
+        async fn delete_env_secret(
+            &self,
+            tenant: &str,
+            name: &str,
+            environment: &str,
+        ) -> StoreResult<bool> {
+            let tag = rusty_agent_runtime::learn::EnvironmentTag::new(environment)
+                .map_err(|e| e.to_string())?;
+            let row = sqlx::query(DELETE_ENV_SECRET_SQL)
+                .bind(crate::auth::scope_id(
+                    tenant,
+                    &rusty_agent_runtime::deploy::scoped_secret_name(name, &tag),
+                ))
+                .bind(tenant)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("delete env secret"))?;
+            Ok(row.is_some())
+        }
     }
 
     impl PostgresStore {
@@ -8161,7 +8845,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 51);
+            assert_eq!(MIGRATION_SQL.len(), 55);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -8303,6 +8987,20 @@ mod postgres {
             assert!(CREATE_CONNECTIONS_SQL.contains("connection_id TEXT PRIMARY KEY"));
             assert!(CREATE_CONNECTIONS_SQL.contains("payload       JSONB"));
             assert!(CREATE_CONNECTIONS_TENANT_INDEX_SQL.contains("server_connections"));
+            // R0.12 wave 3: the deployment control plane — one table for
+            // revisions, environments, and pointers, told apart by `kind`,
+            // the record inside the JSONB payload; and the env-secret
+            // custody table (sealed envelopes only, never plaintext).
+            assert!(CREATE_DEPLOYMENTS_SQL.contains("server_deployments"));
+            assert!(CREATE_DEPLOYMENTS_SQL.contains("deployment_key TEXT PRIMARY KEY"));
+            assert!(CREATE_DEPLOYMENTS_SQL.contains("kind           TEXT NOT NULL"));
+            assert!(CREATE_DEPLOYMENTS_SQL.contains("payload        JSONB"));
+            assert!(CREATE_DEPLOYMENTS_INDEX_SQL.contains("(tenant, environment)"));
+            assert!(CREATE_ENV_SECRETS_SQL.contains("server_env_secrets"));
+            assert!(CREATE_ENV_SECRETS_SQL.contains("secret_key  TEXT PRIMARY KEY"));
+            assert!(CREATE_ENV_SECRETS_SQL.contains("payload     JSONB"));
+            assert!(!CREATE_ENV_SECRETS_SQL.contains("BYTEA"));
+            assert!(CREATE_ENV_SECRETS_INDEX_SQL.contains("(tenant, environment)"));
         }
 
         #[test]
@@ -8854,8 +9552,547 @@ mod postgres {
                 .unwrap()
                 .is_none());
         }
+
+        // --------------------------------------------------------- //
+        // Live-Postgres deployment tests (`--ignored`, DATABASE_URL)
+        // --------------------------------------------------------- //
+
+        /// A deployment revision under a unique graph hash (the content
+        /// address differs per call, so repeated runs against the shared
+        /// scratch database never collide).
+        fn live_revision(hash_seed: &str) -> DeploymentRevision {
+            use rusty_agent_runtime::deploy::RevisionContent;
+            use rusty_agent_runtime::learn::EnvironmentTag;
+            use rusty_agent_runtime::memory::ProvenanceAuthor;
+            DeploymentRevision::new(
+                RevisionContent {
+                    graph: "pipeline".into(),
+                    graph_hash: rusty_agent_runtime::record::sha256_hex(hash_seed.as_bytes()),
+                    assistant: None,
+                    source_environment: EnvironmentTag::new("staging").unwrap(),
+                    pins: Vec::new(),
+                },
+                ProvenanceAuthor::Human {
+                    human_id: "test".into(),
+                },
+                Utc::now(),
+            )
+            .unwrap()
+        }
+
+        /// An environment record under `name`.
+        fn live_environment(name: &str) -> Environment {
+            use rusty_agent_runtime::learn::EnvironmentTag;
+            use rusty_agent_runtime::memory::ProvenanceAuthor;
+            Environment {
+                name: EnvironmentTag::new(name).unwrap(),
+                gate: None,
+                approval_required: false,
+                created_by: ProvenanceAuthor::Human {
+                    human_id: "test".into(),
+                },
+                created_at: Utc::now(),
+            }
+        }
+
+        /// A stored env-secret beneath a stable scoped name; the envelope
+        /// is a real seal (fresh data key per call, so a rotation is a
+        /// different ciphertext).
+        fn live_env_secret(name: &str, environment: &str) -> StoredEnvSecret {
+            use rusty_agent_runtime::broker::{hex_encode, SEALED_FORMAT_VERSION};
+            use rusty_agent_runtime::learn::EnvironmentTag;
+            use rusty_agent_runtime::memory::ProvenanceAuthor;
+            StoredEnvSecret {
+                record: rusty_agent_runtime::deploy::EnvSecretRecord {
+                    name: name.into(),
+                    environment: EnvironmentTag::new(environment).unwrap(),
+                    set_by: ProvenanceAuthor::Human {
+                        human_id: "test".into(),
+                    },
+                    created_at: Utc::now(),
+                    rotated_at: None,
+                },
+                envelope: rusty_agent_runtime::broker::SealedCredential {
+                    format_version: SEALED_FORMAT_VERSION,
+                    key_id: format!("esk-{}", uniq()),
+                    wrapped_data_key: hex_encode(&[7u8; 48]),
+                    wrap_nonce: hex_encode(&[1u8; 24]),
+                    nonce: hex_encode(&[2u8; 24]),
+                    ciphertext: hex_encode(format!("sealed-{}", uniq()).as_bytes()),
+                    sealed_at: Utc::now(),
+                },
+            }
+        }
+
+        #[tokio::test]
+        #[ignore = "requires a live Postgres (DATABASE_URL)"]
+        async fn live_deployment_records_and_transition_round_trip() {
+            use rusty_agent_runtime::journal::Clock as JournalClock;
+            let _guard = LIVE_DB_LOCK.lock().await;
+            let store = PostgresStore::new(database_url());
+            let tenant = format!("t-{}", uniq());
+            let surface = format!("deployment:staging-{}", uniq());
+            let chain = format!("deployment-control-{}", uniq());
+
+            let rev_a = live_revision(&uniq());
+            let rev_b = live_revision(&uniq());
+
+            // Registration converges; reads stay tenant-scoped.
+            assert!(store.put_revision(&tenant, &rev_a).await.unwrap());
+            assert!(!store.put_revision(&tenant, &rev_a).await.unwrap());
+            assert!(store
+                .get_revision(&tenant, rev_a.revision_id.as_str())
+                .await
+                .unwrap()
+                .is_some());
+            assert!(store
+                .get_revision("t-other", rev_a.revision_id.as_str())
+                .await
+                .unwrap()
+                .is_none());
+            assert_eq!(store.list_revisions(&tenant).await.unwrap().len(), 1);
+
+            let environment = live_environment(&format!("staging-{}", uniq()));
+            assert!(store.put_environment(&tenant, &environment).await.unwrap());
+            assert!(!store.put_environment(&tenant, &environment).await.unwrap());
+            assert!(store
+                .get_environment(&tenant, environment.name.as_str())
+                .await
+                .unwrap()
+                .is_some());
+            assert_eq!(store.list_environments(&tenant).await.unwrap().len(), 1);
+
+            // The move: nothing serves yet, the first promotion applies
+            // and the journal commits in the same transaction.
+            assert!(store
+                .get_deployment_pointer(&tenant, &surface)
+                .await
+                .unwrap()
+                .is_none());
+            let base = DeploymentPointer::new(rusty_agent_runtime::learn::SurfaceKey::new(
+                surface.clone(),
+            ));
+            let promoted_a = DeploymentPointer {
+                active: Some(rev_a.revision_id.clone()),
+                ..base.clone()
+            };
+            let journal =
+                rusty_agent_runtime::journal::Journal::new(&chain, &chain, JournalClock::System)
+                    .snapshot();
+            let outcome = store
+                .transition_deployment(&tenant, &surface, None, &promoted_a, &journal)
+                .await
+                .unwrap();
+            assert_eq!(outcome, DeploymentTransition::Applied);
+            assert_eq!(
+                store
+                    .get_deployment_pointer(&tenant, &surface)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .active,
+                Some(rev_a.revision_id.clone())
+            );
+            assert!(store.get_journal(&chain).await.unwrap().is_some());
+
+            // A stale expectation conflicts and changes nothing.
+            let promoted_b = DeploymentPointer {
+                active: Some(rev_b.revision_id.clone()),
+                ..base.clone()
+            };
+            let outcome = store
+                .transition_deployment(&tenant, &surface, None, &promoted_b, &journal)
+                .await
+                .unwrap();
+            assert_eq!(
+                outcome,
+                DeploymentTransition::Conflict(Some(rev_a.revision_id.clone()))
+            );
+            let outcome = store
+                .transition_deployment(
+                    &tenant,
+                    &surface,
+                    Some(rev_a.revision_id.clone()),
+                    &promoted_b,
+                    &journal,
+                )
+                .await
+                .unwrap();
+            assert_eq!(outcome, DeploymentTransition::Applied);
+            assert_eq!(
+                store
+                    .get_deployment_pointer(&tenant, &surface)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .active,
+                Some(rev_b.revision_id.clone())
+            );
+        }
+
+        #[tokio::test]
+        #[ignore = "requires a live Postgres (DATABASE_URL)"]
+        async fn live_env_secrets_set_rotate_list_and_delete() {
+            let _guard = LIVE_DB_LOCK.lock().await;
+            let store = PostgresStore::new(database_url());
+            let tenant = format!("t-{}", uniq());
+            let name = format!("database-url-{}", uniq());
+
+            let stored = live_env_secret(&name, "staging");
+            assert!(
+                store.set_env_secret(&tenant, &stored).await.unwrap(),
+                "the first set creates"
+            );
+            assert!(
+                !store.set_env_secret(&tenant, &stored).await.unwrap(),
+                "the second set rotates (xmax reports the update)"
+            );
+            assert!(store
+                .get_env_secret(&tenant, &name, "staging")
+                .await
+                .unwrap()
+                .is_some());
+            assert!(store
+                .get_env_secret("t-other", &name, "staging")
+                .await
+                .unwrap()
+                .is_none());
+            let listed = store.list_env_secrets(&tenant).await.unwrap();
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].name, name);
+
+            let rotated = live_env_secret(&name, "staging");
+            assert!(!store.set_env_secret(&tenant, &rotated).await.unwrap());
+            assert_eq!(
+                store
+                    .get_env_secret(&tenant, &name, "staging")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .envelope,
+                rotated.envelope,
+                "rotation replaces the envelope beneath the stable scoped key"
+            );
+
+            assert!(store
+                .delete_env_secret(&tenant, &name, "staging")
+                .await
+                .unwrap());
+            assert!(!store
+                .delete_env_secret(&tenant, &name, "staging")
+                .await
+                .unwrap());
+            assert!(store
+                .get_env_secret(&tenant, &name, "staging")
+                .await
+                .unwrap()
+                .is_none());
+        }
     }
 }
 
 #[cfg(feature = "postgres")]
 pub(crate) use postgres::{LazyPostgresCheckpointer, PostgresStore};
+
+// --------------------------------------------------------------------- //
+// Deployment store tests (R0.12 wave 3, file backend)
+// --------------------------------------------------------------------- //
+
+#[cfg(test)]
+mod deploy_store_tests {
+    use super::*;
+    use chrono::{DateTime, Utc};
+    use rusty_agent_runtime::deploy::RevisionContent;
+    use rusty_agent_runtime::journal::{Clock, Journal};
+    use rusty_agent_runtime::learn::{EnvironmentTag, SurfaceKey};
+    use rusty_agent_runtime::memory::ProvenanceAuthor;
+
+    fn temp_root() -> PathBuf {
+        std::env::temp_dir().join(format!("rusty-deploy-store-test-{}", uuid::Uuid::new_v4()))
+    }
+
+    fn ts(millis: i64) -> DateTime<Utc> {
+        DateTime::<Utc>::from_timestamp_millis(millis).unwrap()
+    }
+
+    fn tag(name: &str) -> EnvironmentTag {
+        EnvironmentTag::new(name).unwrap()
+    }
+
+    /// A revision under the given graph hash (distinct hashes make
+    /// distinct content addresses).
+    fn revision(graph_hash: &str) -> DeploymentRevision {
+        DeploymentRevision::new(
+            RevisionContent {
+                graph: "pipeline".into(),
+                graph_hash: graph_hash.into(),
+                assistant: None,
+                source_environment: tag("staging"),
+                pins: Vec::new(),
+            },
+            ProvenanceAuthor::Human {
+                human_id: "amjad".into(),
+            },
+            ts(1_760_000_000_000),
+        )
+        .unwrap()
+    }
+
+    fn environment(name: &str) -> Environment {
+        Environment {
+            name: tag(name),
+            gate: None,
+            approval_required: false,
+            created_by: ProvenanceAuthor::Human {
+                human_id: "amjad".into(),
+            },
+            created_at: ts(1_760_000_000_000),
+        }
+    }
+
+    /// A stored env-secret sealed under the root's master key (fresh
+    /// data key per call, so a rotation is a different ciphertext).
+    async fn sealed(root: &Path, name: &str) -> StoredEnvSecret {
+        let keys = deploy::master_secrets(root).await.unwrap();
+        let (key_id, master) = &keys[0];
+        let scoped = rusty_agent_runtime::deploy::scoped_secret_name(name, &tag("staging"));
+        StoredEnvSecret {
+            record: EnvSecretRecord {
+                name: name.into(),
+                environment: tag("staging"),
+                set_by: ProvenanceAuthor::Human {
+                    human_id: "amjad".into(),
+                },
+                created_at: ts(1_760_000_000_000),
+                rotated_at: None,
+            },
+            envelope: deploy::seal_env_secret(key_id, master, &scoped, b"hunter2").unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn revisions_and_environments_stay_tenant_scoped_and_survive_a_restart() {
+        let root = temp_root();
+        let store = JsonFileStore::load(&root);
+
+        let rev = revision(&"a".repeat(64));
+        assert!(store.put_revision("acme", &rev).await.unwrap());
+        assert!(
+            !store.put_revision("acme", &rev).await.unwrap(),
+            "an existing address converges — no rewrite"
+        );
+        assert!(store
+            .get_revision("acme", rev.revision_id.as_str())
+            .await
+            .unwrap()
+            .is_some());
+        assert!(
+            store
+                .get_revision("globex", rev.revision_id.as_str())
+                .await
+                .unwrap()
+                .is_none(),
+            "cross-tenant ids are absent, not leaked"
+        );
+        assert_eq!(store.list_revisions("acme").await.unwrap().len(), 1);
+        assert!(store.list_revisions("globex").await.unwrap().is_empty());
+
+        let environment = environment("staging");
+        assert!(store.put_environment("acme", &environment).await.unwrap());
+        assert!(!store.put_environment("acme", &environment).await.unwrap());
+        assert!(store
+            .get_environment("acme", "staging")
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .get_environment("globex", "staging")
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(store.list_environments("acme").await.unwrap().len(), 1);
+
+        // A restart reloads both record sets from disk.
+        let reloaded = JsonFileStore::load(&root);
+        assert!(reloaded
+            .get_revision("acme", rev.revision_id.as_str())
+            .await
+            .unwrap()
+            .is_some());
+        assert!(reloaded
+            .get_environment("acme", "staging")
+            .await
+            .unwrap()
+            .is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn transition_moves_the_pointer_or_conflicts_and_commits_the_journal() {
+        let root = temp_root();
+        let store = JsonFileStore::load(&root);
+        let rev_a = revision(&"a".repeat(64));
+        let rev_b = revision(&"b".repeat(64));
+        let surface = "deployment:staging";
+        let base = DeploymentPointer::new(SurfaceKey::new(surface));
+        let promoted_a = DeploymentPointer {
+            active: Some(rev_a.revision_id.clone()),
+            ..base.clone()
+        };
+        let promoted_b = DeploymentPointer {
+            active: Some(rev_b.revision_id.clone()),
+            ..base.clone()
+        };
+
+        // Nothing promoted yet: the environment serves nothing.
+        assert!(store
+            .get_deployment_pointer("acme", surface)
+            .await
+            .unwrap()
+            .is_none());
+
+        let journal =
+            Journal::new("deployment-control", "deployment-control", Clock::System).snapshot();
+
+        // The first promotion applies from nothing-serves, and the
+        // journaled transition lands with the move.
+        let outcome = store
+            .transition_deployment("acme", surface, None, &promoted_a, &journal)
+            .await
+            .unwrap();
+        assert_eq!(outcome, DeploymentTransition::Applied);
+        assert_eq!(
+            store
+                .get_deployment_pointer("acme", surface)
+                .await
+                .unwrap()
+                .unwrap()
+                .active,
+            Some(rev_a.revision_id.clone())
+        );
+        assert!(store
+            .get_journal("deployment-control")
+            .await
+            .unwrap()
+            .is_some());
+
+        // A stale expectation conflicts and changes nothing.
+        let outcome = store
+            .transition_deployment("acme", surface, None, &promoted_b, &journal)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            DeploymentTransition::Conflict(Some(rev_a.revision_id.clone()))
+        );
+        assert_eq!(
+            store
+                .get_deployment_pointer("acme", surface)
+                .await
+                .unwrap()
+                .unwrap()
+                .active,
+            Some(rev_a.revision_id.clone()),
+            "a conflict writes neither the pointer nor a new journal"
+        );
+
+        // The matching expectation applies.
+        let outcome = store
+            .transition_deployment(
+                "acme",
+                surface,
+                Some(rev_a.revision_id.clone()),
+                &promoted_b,
+                &journal,
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, DeploymentTransition::Applied);
+
+        // A restart reloads the moved pointer from disk.
+        let reloaded = JsonFileStore::load(&root);
+        assert_eq!(
+            reloaded
+                .get_deployment_pointer("acme", surface)
+                .await
+                .unwrap()
+                .unwrap()
+                .active,
+            Some(rev_b.revision_id.clone())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn env_secrets_set_rotate_list_and_delete_tenant_scoped() {
+        let root = temp_root();
+        let store = JsonFileStore::load(&root);
+
+        let stored = sealed(&root, "database-url").await;
+        assert!(
+            store.set_env_secret("acme", &stored).await.unwrap(),
+            "the first set creates"
+        );
+        assert!(
+            !store.set_env_secret("acme", &stored).await.unwrap(),
+            "the second set rotates"
+        );
+        assert!(store
+            .get_env_secret("acme", "database-url", "staging")
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .get_env_secret("globex", "database-url", "staging")
+            .await
+            .unwrap()
+            .is_none());
+        let listed = store.list_env_secrets("acme").await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "database-url");
+
+        // Rotation replaces the envelope beneath the stable scoped key.
+        let mut rotated = sealed(&root, "database-url").await;
+        rotated.record.rotated_at = Some(ts(1_760_000_100_000));
+        assert!(!store.set_env_secret("acme", &rotated).await.unwrap());
+        assert_eq!(
+            store
+                .get_env_secret("acme", "database-url", "staging")
+                .await
+                .unwrap()
+                .unwrap()
+                .envelope,
+            rotated.envelope
+        );
+
+        // A restart resolves the rotated envelope byte-exact.
+        let reloaded = JsonFileStore::load(&root);
+        assert_eq!(
+            reloaded
+                .get_env_secret("acme", "database-url", "staging")
+                .await
+                .unwrap()
+                .unwrap()
+                .envelope,
+            rotated.envelope
+        );
+
+        assert!(store
+            .delete_env_secret("acme", "database-url", "staging")
+            .await
+            .unwrap());
+        assert!(
+            !store
+                .delete_env_secret("acme", "database-url", "staging")
+                .await
+                .unwrap(),
+            "delete reports absence"
+        );
+        assert!(store
+            .get_env_secret("acme", "database-url", "staging")
+            .await
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

@@ -131,12 +131,30 @@
 //! | `DELETE /connections/{id}` | R0.11 (wave 3): revoke-then-erase → `200 {deleted: true}`; the sealed material is really deleted, and resolution fails closed `unknown_connection` thereafter |
 //! | `GET /connections/{id}/health` | R0.11 (wave 3): the connection's status and health counters (last failure class, consecutive failures, last refresh) |
 //! | `GET /broker/journal` | R0.11 (wave 3): the deployment's broker evidence chain — registrations, consents, refreshes, revocations, issuances, uses, denials, and (wave 4) `connection_needs_reauth` terminal-refusal transitions, integrity re-verified on read (the `receipt_keys/journal` precedent for a second control plane) |
+//! | `POST /deployments/revisions` | R0.12 (wave 3): register an immutable, content-addressed revision `{graph, assistant?, source_environment, surfaces, author}` → `201 {created, revision}` (`200` + `created: false` converged on an identical re-registration — the content address makes it the same declaration; `404` unknown graph/assistant or undeclared source environment; `422` a surface with no active version there to freeze, or a declaration outside the contract). The pins freeze the source environment's ACTIVE pointers; the server computes the graph's current topology hash at registration. The `revision_registered` act journals before the store write (hard-fail) |
+//! | `GET /deployments/revisions` / `GET /deployments/revisions/{id}` | R0.12 (wave 3): the tenant's revisions (sorted by id) / fetch one (`404` unknown/cross-tenant) |
+//! | `POST /deployments/environments` | R0.12 (wave 3): declare an environment `{name, gate?, approval_required, author}` → `201 {created, environment}` (`200` + `created: false` converged on an identical re-declaration; `409` a different rule under the same name — declarations are immutable; `400` invalid name). Gate and approval declarations are recorded this wave, enforced in wave 4. The `environment_declared` act journals before the store write (hard-fail) |
+//! | `GET /deployments/environments` / `GET /deployments/environments/{name}` | R0.12 (wave 3): the tenant's environments (sorted by name) / fetch one (`404` unknown/cross-tenant) |
+//! | `POST /deployments/environments/{name}/promote` | R0.12 (wave 3): move the environment's deployment pointer to a registered revision `{revision_id, author}` → `201 {applied, journaled, event_id, pointer}` (`200 {applied: false}` on a converged re-issue — no journal noise; `404` undeclared environment or unknown revision; `422` a revision failing its content-address check; `409` a lost race after exactly one rebuild — re-read and retry, never a lost move). Journal-then-pointer under the chain lock; the store's CAS arbitrates the move |
+//! | `POST /deployments/environments/{name}/rollback` | R0.12 (wave 3): re-point the environment byte-exactly at what served before `{author, cause}` → `201` with the moved pointer (`200` converged; `400` empty cause — a rollback names its cause; `404` undeclared environment; `409` nothing serves, or no journaled history to restore to). The target re-derives from the chain's transition replay — the immutable revision that served, never a reconstruction |
+//! | `GET /deployments/environments/{name}/pointer` | R0.12 (wave 3): the environment's serving picture (`404` undeclared environment, or nothing ever promoted into it) |
+//! | `GET /deployments/journal` | R0.12 (wave 3): the deployment evidence chain — revision registrations, environment declarations, promotions, rollbacks, secret acts and denials — integrity re-verified on read (`422` when it does not verify; the `receipt_keys/journal` and `broker/journal` precedent for a control plane) |
+//! | `PUT /deployments/secrets` | R0.12 (wave 3): set or rotate an environment secret `{name, environment, value, author}` → `201 {created, record}` (`200` + `created: false` on rotation — `rotated_at` marks it; `404` undeclared environment; `422` a name outside the naming rules). The value seals (XChaCha20-Poly1305 envelope under the deployment's `esk-` master key) before anything writes; the store only ever holds the envelope, the `env_secret_set` act journals before the write, and the response is metadata — the value never comes back through this route |
+//! | `GET /deployments/secrets?environment=` | R0.12 (wave 3): the tenant's secret metadata (never envelopes — a listing is an audit view), optionally one environment's, sorted by (environment, name) |
+//! | `POST /deployments/secrets/resolve` | R0.12 (wave 3): open a secret at use, inside its declared scope `{name, environment, holder}` → `200 {name, environment, value}`; `403 environment_scope_denied` — typed AND journaled — when the holder is not the scope; `404` unknown secret; `500` when this host does not hold the sealing key. Every failure fails closed |
+//! | `DELETE /deployments/secrets/{environment}/{name}` | R0.12 (wave 3): revoke by deletion `{author}` → `204` (`404` unknown/cross-tenant); the `env_secret_revoked` tombstone journals before the delete — the tombstone is the evidence the scope once held a value |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
 //! `assistant_id` (resolved to its bound graph, with the assistant's
 //! `config.recursion_limit` as a default), and `checkpoint.checkpoint_id`
 //! (time-travel replay from that checkpoint instead of the latest).
+//! Runs may also declare their configuration at submission: `registry`
+//! (R0.11 wave 2) binds named artifacts through their environment-tagged
+//! version pointers, and `deployment` (R0.12 wave 3) binds the revision
+//! an environment serves — each resolved at admission (a resolution
+//! failure stops the run before it starts) and journaled ahead of the
+//! run's own events, so the evidence names exactly what served.
 
 mod a2a;
 mod agents;
@@ -148,6 +166,7 @@ pub mod capsule_policy;
 mod capsules;
 mod coordination;
 mod crons;
+mod deploy;
 mod error;
 mod journals;
 mod learn;
@@ -199,7 +218,8 @@ pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::fro
 
 /// Names the JSON-file layout already owns at the store root
 /// (`agent_leases/`, `agents/`, `artifacts/`, `assistants/`, `capsules/`,
-/// `capsule_policies/`, `coordinations/`, `crons/`, `journals/`, `learn/`,
+/// `capsule_policies/`, `coordinations/`, `crons/`, `deployments/`,
+/// `env-secrets/`, `journals/`, `learn/`,
 /// `memory/`, `memory_artifacts/`, `outbox/`, `policy/`, `registry/`,
 /// `store/`,
 /// `tasks/`, `threads/`, `trigger_events/`, `triggers/`, plus the
@@ -218,6 +238,8 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "connections",
     "coordinations",
     "crons",
+    "deployments",
+    "env-secrets",
     "journals",
     "keys",
     "learn",

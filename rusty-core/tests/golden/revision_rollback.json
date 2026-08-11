@@ -1,0 +1,12 @@
+{
+  "tenant": "default",
+  "environment": "prod",
+  "from": "c2c01e8fae3bdbc5ec82f6edae7ab68cc13d9fb150bd69d060018596999489b4",
+  "to": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "cause": "canary regression",
+  "author": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "rolled_back_at": "2025-10-09T08:56:40Z"
+}

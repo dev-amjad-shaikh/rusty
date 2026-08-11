@@ -133,6 +133,13 @@ pub(crate) struct AppState {
     /// ([`crate::artifacts::ARTIFACTS_JOURNAL_RUN_ID`]), never the
     /// producing run's receipt-covered journal.
     pub artifact_retention: Arc<crate::artifacts::ArtifactRetention>,
+    /// The deployment control plane (R0.12 wave 3): revisions,
+    /// environments, pointer moves, and environment-secret custody over
+    /// the same store, with every control-plane act journaled onto the
+    /// deployment's evidence chain
+    /// ([`crate::deploy::DEPLOYMENT_JOURNAL_RUN_ID`]) — the broker's
+    /// chain discipline lifted to deployments.
+    pub deployment: Arc<crate::deploy::DeploymentControl>,
     /// The MCP bridge's in-flight `tools/call` map (R0.9 wave 4): request
     /// id → run id, the lookup `notifications/cancelled` resolves. Lives
     /// on the state (not inside the handler) so the cancellation
@@ -240,6 +247,9 @@ pub(crate) fn build_router(
     let artifact_retention = Arc::new(crate::artifacts::ArtifactRetention::new(Arc::clone(
         &server_store,
     )));
+    let deployment = Arc::new(crate::deploy::DeploymentControl::new(Arc::clone(
+        &server_store,
+    )));
     let state = Arc::new(AppState {
         registry,
         config,
@@ -254,6 +264,7 @@ pub(crate) fn build_router(
         receipt_keyring,
         broker: Arc::clone(&broker),
         artifact_retention,
+        deployment,
         mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
@@ -519,6 +530,57 @@ pub(crate) fn build_router(
         .route(
             "/artifacts/journal",
             get(crate::artifacts::get_artifacts_journal),
+        )
+        // The deployment control plane (R0.12 Operations Plane, wave 3):
+        // content-addressed revisions, declared environments, pointer
+        // moves (promote / byte-exact rollback), and environment-scoped
+        // secret custody. Mutations journal first onto the deployment
+        // evidence chain; reads serve records and metadata only —
+        // plaintext secret material crosses just
+        // `POST /deployments/secrets/resolve`, inside its declared scope.
+        .route(
+            "/deployments/revisions",
+            post(crate::deploy::create_revision).get(crate::deploy::list_revisions),
+        )
+        .route(
+            "/deployments/revisions/{revision_id}",
+            get(crate::deploy::get_revision),
+        )
+        .route(
+            "/deployments/environments",
+            post(crate::deploy::declare_environment).get(crate::deploy::list_environments),
+        )
+        .route(
+            "/deployments/environments/{name}",
+            get(crate::deploy::get_environment),
+        )
+        .route(
+            "/deployments/environments/{name}/promote",
+            post(crate::deploy::promote_revision),
+        )
+        .route(
+            "/deployments/environments/{name}/rollback",
+            post(crate::deploy::rollback_revision),
+        )
+        .route(
+            "/deployments/environments/{name}/pointer",
+            get(crate::deploy::get_environment_pointer),
+        )
+        .route(
+            "/deployments/journal",
+            get(crate::deploy::get_deployment_journal),
+        )
+        .route(
+            "/deployments/secrets",
+            put(crate::deploy::set_env_secret).get(crate::deploy::list_env_secrets),
+        )
+        .route(
+            "/deployments/secrets/resolve",
+            post(crate::deploy::resolve_env_secret),
+        )
+        .route(
+            "/deployments/secrets/{environment}/{name}",
+            delete(crate::deploy::revoke_env_secret),
         )
         // The executor-policy registry (R0.8 wave 4): versioned,
         // immutable policy bodies; the append-only activation log moving

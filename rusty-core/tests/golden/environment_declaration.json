@@ -1,0 +1,12 @@
+{
+  "tenant": "default",
+  "environment": {
+    "name": "dev",
+    "approval_required": false,
+    "created_by": {
+      "type": "human",
+      "human_id": "amjad"
+    },
+    "created_at": "2025-10-09T08:53:20Z"
+  }
+}

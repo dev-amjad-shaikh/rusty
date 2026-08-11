@@ -637,6 +637,54 @@ and its signed receipt walks to the bound revision; an environment secret resolv
 with ciphertext only in both stores (the Postgres assertion reads the raw row); a
 cross-environment secret request fails closed, typed and journaled.
 
+> **Wave 3 status: implemented (2026-08-11).** The contracts landed in
+> `rusty-core/src/deploy.rs` (`DeploymentRevision` / `RevisionContent` /
+> `RegistryPin`-based pin sets with `pin_set_digest`, `Environment` with
+> its declaration and gate records, `DeploymentPointer` with the canary
+> slot, the promotion / rollback / registration / declaration / secret
+> act payloads, `DeploymentResolved`, `deployment_admission`, and the
+> env-secret custody functions — twelve goldens in
+> `rusty-core/tests/golden/`), the additive `RunEventKind` variants, and
+> the `/deployments` routes with the `server_deployments` and
+> `server_env_secrets` migrations in `rusty-server`, exercised end to end
+> by `rusty-server/tests/deployments.rs` (promote/rollback byte-exactness,
+> admission and the receipt walk, secret custody and scope, restart, and
+> the Postgres raw-row assertion) — with twelve settled refinements: the
+> seven event variants live in `record.rs` where `RunEventKind` is
+> defined (the wave-1/wave-2 precedent), not a new module; the revision's
+> `graph_hash` is server-computed at registration from the registered
+> graph's current topology hash and re-checked at admission (name and
+> hash drift both refuse 422), so a build the revision no longer
+> describes is never run; the pin set freezes the source environment's
+> ACTIVE pointers only — a canary binding never freezes into a revision;
+> the rollback target re-derives from the chain's transition replay with
+> an installed-stack snapshot, so a crash in the journal-written /
+> pointer-unmoved window re-derives `to` and the rebuilt act dedupes into
+> the orphaned entry; the file backend moves journal-then-pointer under
+> the chain lock with act dedupe (timestamps excluded) for crash-retry
+> convergence — a re-issued or converged move answers `200 {applied:
+> false}` without journaling — while the Postgres backend moves in one
+> exact transaction (`SELECT … FOR UPDATE` on the pointer row); the
+> env-secret master keys are a new `esk-` family minted beside the
+> broker's `bmk-` keys under the store root (the broker's custody is
+> untouched), and the XChaCha20-Poly1305 envelope construction is
+> duplicated from the broker's private functions — one construction, two
+> key families; the resolve route carries an explicit `holder` field —
+> the tenant is the HTTP trust boundary while the authoritative
+> run-binding seam (the run's journaled admission environment answering
+> for the holder) is in-process — and a cross-scope request fails closed
+> `403 environment_scope_denied`, typed AND journaled (best-effort, the
+> broker's denial discipline); the pointer shape ships its canary slot
+> and admission's seeded draw reuses `canary_admits`, but the canary-bind
+> routes land in wave 4; the environment's gate and approval declarations
+> are recorded, not enforced — enforcement wires in wave 4; a revision's
+> optional assistant binding is recorded at registration (the assistant
+> must exist), not cross-checked against the run's assistant at
+> admission; and `MIGRATION_SQL` grows 51 → 55 statements (the two tables
+> plus their listing indexes). The `deployment-control` chain the release
+> proof names is the wave's evidence chain, one journal per deployment,
+> the broker's `broker-control` precedent.
+
 **Wave 4 — release gates, canary, shadow, and health.** The gate seam over
 `evaluate_gate` with journaled decisions, canary binding by seeded draw at admission, the
 shadow admission context refusing effects above `ReadOnly` with recorded-outcome serving,

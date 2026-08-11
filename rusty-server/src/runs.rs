@@ -134,6 +134,17 @@ pub struct RunPayload {
     /// manifest, no new events.
     #[serde(default)]
     pub registry: Option<crate::registry::RegistryRunBinding>,
+
+    /// The run's deployment declaration (R0.12 Operations Plane, wave 3):
+    /// the environment the run is admitted to. At admission the
+    /// environment's deployment pointer binds a revision — identity and
+    /// topology checked against the registered graph — with one
+    /// `deployment_resolved` event journaled ahead of the run's own
+    /// events (chained after the registry resolutions, one causal unit).
+    /// Absent is the pre-R0.12 behavior, byte-identically: no
+    /// resolution, no new event.
+    #[serde(default)]
+    pub deployment: Option<crate::deploy::DeploymentRunBinding>,
 }
 
 /// How a second run on a busy thread is handled.
@@ -301,6 +312,8 @@ pub(crate) struct RunSnapshot {
     pub payload: RunPayload,
     /// The registry binding resolved at admission (R0.11 wave 2).
     pub admission: Option<crate::registry::RegistryAdmission>,
+    /// The deployment binding resolved at admission (R0.12 wave 3).
+    pub deployment: Option<crate::deploy::DeploymentAdmission>,
     pub sink: FrameSink,
     pub checkpoint_ids: Arc<StdMutex<Vec<String>>>,
     /// This run's own cancellation token (R0.7 wave 2): a child of the
@@ -347,6 +360,9 @@ pub struct RunHandle {
     /// The registry binding resolved at admission (R0.11 wave 2) — `None`
     /// for an unbound run, which behaves byte-identically to before.
     pub(crate) admission: Option<crate::registry::RegistryAdmission>,
+    /// The deployment binding resolved at admission (R0.12 wave 3) —
+    /// `None` for an undeclared run, byte-identical to before.
+    pub(crate) deployment: Option<crate::deploy::DeploymentAdmission>,
     sink: FrameSink,
     terminal: watch::Sender<Option<Value>>,
     checkpoint_ids: Arc<StdMutex<Vec<String>>>,
@@ -499,6 +515,7 @@ impl RunManager {
             attempt: h.attempt,
             payload: h.payload.clone(),
             admission: h.admission.clone(),
+            deployment: h.deployment.clone(),
             sink: h.sink.clone(),
             checkpoint_ids: Arc::clone(&h.checkpoint_ids),
             cancel: h.cancel.clone(),
@@ -765,6 +782,34 @@ pub(crate) async fn schedule(
         ),
         None => None,
     };
+    // Deployment admission (R0.12 wave 3): the environment's pointer
+    // binds a revision now, at admission — a promotion landing afterwards
+    // never reaches this run (the registry admission's conservatism,
+    // lifted to deployments). The revision's identity checks against the
+    // registered graph (name and current topology hash), so a build the
+    // revision no longer describes is refused, never run. A resolution
+    // failure is an admission failure: the run never enters the manager.
+    let deployment = match &payload.deployment {
+        Some(binding) => {
+            let (graph_obj, _spec) = deps.registry.get(graph).ok_or_else(|| {
+                ApiError::internal(format!(
+                    "graph `{graph}` left the registry between route validation and admission"
+                ))
+            })?;
+            Some(
+                crate::deploy::resolve_admission(
+                    &deps.server_store,
+                    crate::auth::tenant_of_internal(thread_id),
+                    &run_id,
+                    binding,
+                    graph,
+                    &graph_obj.topology_hash(),
+                )
+                .await?,
+            )
+        }
+        None => None,
+    };
     let (bcast_tx, _bcast_rx) = broadcast::channel(256);
     let (terminal_tx, terminal_rx) = watch::channel(None);
     let handle = RunHandle {
@@ -776,6 +821,7 @@ pub(crate) async fn schedule(
         status: RunStatus::Pending,
         payload,
         admission,
+        deployment,
         sink: FrameSink::new(deps.log_capacity, bcast_tx),
         terminal: terminal_tx,
         checkpoint_ids: Arc::new(StdMutex::new(Vec::new())),
@@ -889,8 +935,8 @@ async fn execute(deps: RunDeps, run_id: String) {
     // will run, so the events are read-only (the `CapsuleResolved`
     // precedent); a serialization failure here is a bug, not a runtime
     // condition — the payload type is the server's own.
+    let mut parent = None;
     if let Some(admission) = &snap.admission {
-        let mut parent = None;
         for resolution in &admission.resolutions {
             let output =
                 serde_json::to_value(resolution).expect("ConfigResolution always serializes");
@@ -902,6 +948,21 @@ async fn execute(deps: RunDeps, run_id: String) {
             parent = Some(journal.record(draft));
         }
         config = config.with_manifest(admission.manifest.clone());
+    }
+    // Deployment admission (R0.12 wave 3): the revision the environment's
+    // pointer bound becomes evidence the same way — one
+    // `deployment_resolved`, chained after the registry resolutions, so
+    // the receipt's walk reads journal head → this event → the bound
+    // revision → its frozen pins. Read-only, like the resolutions above.
+    if let Some(deployment) = &snap.deployment {
+        let output =
+            serde_json::to_value(&deployment.resolution).expect("DeploymentResolved serializes");
+        let mut draft =
+            EventDraft::new(RunEventKind::DeploymentResolved, Effect::ReadOnly).output(output);
+        if let Some(parent) = parent {
+            draft = draft.parent(parent);
+        }
+        journal.record(draft);
     }
     if let Some(command) = &snap.payload.command {
         if let Some(resume) = &command.resume {

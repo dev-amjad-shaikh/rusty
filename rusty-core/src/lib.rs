@@ -193,6 +193,7 @@ pub mod capsule_host;
 pub mod checkpoint;
 #[cfg(feature = "postgres")]
 pub mod checkpoint_postgres;
+pub mod deploy;
 pub mod durable;
 pub mod effects;
 pub mod error;
@@ -257,6 +258,14 @@ pub mod prelude {
     };
     #[cfg(feature = "postgres")]
     pub use crate::checkpoint_postgres::PostgresCheckpointer;
+    pub use crate::deploy::{
+        deployment_admission, deployment_surface, derive_revision_id, pin_set_digest,
+        scoped_secret_name, validate_secret_name, CanaryDeployment, DeployError, DeploymentPointer,
+        DeploymentResolved, DeploymentRevision, EnvSecretAct, EnvSecretDenial, EnvSecretRecord,
+        EnvSecretRevocation, Environment, EnvironmentDeclaration, GateDeclaration, RegistryPin,
+        RevisionContent, RevisionId, RevisionPromotion, RevisionRegistration, RevisionRollback,
+        StoredEnvSecret, MAX_SECRET_NAME_LEN,
+    };
     pub use crate::durable::{
         backoff_delay_ms, backoff_delay_ms_with, classify_retry, classify_retry_with_policy,
         resolve_retry_parameters, resolve_timeout_bound_ms, retry_decision_event,

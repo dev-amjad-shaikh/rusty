@@ -706,6 +706,99 @@ pub enum RunEventKind {
     /// — the address, the tenant and name, the surface that missed, and
     /// the observation instant.
     ArtifactUnavailable,
+
+    /// A run was admitted under a deployment revision (R0.12 Operations
+    /// Plane, wave 3): the run declared an environment at submission, and
+    /// the environment's deployment pointer bound a revision for it (the
+    /// full-traffic `active`, or the `canary` when the seeded draw
+    /// admitted). An [`Effect::ReadOnly`] record (a pointer lookup), the
+    /// [`RunEventKind::ConfigResolved`] precedent lifted from
+    /// configuration to deployments. Output carries the journaled
+    /// [`crate::deploy::DeploymentResolved`] — the environment, the bound
+    /// `revision_id`, the pointer slot, and the pin-set digest. This is
+    /// the audit walk's hinge: signed receipt → journal head → this event
+    /// → the content-addressed revision → the frozen pin set → the
+    /// candidates and their authors, every hop signature-covered. A
+    /// pointer serving nothing binds nothing — the run fails admission
+    /// instead (there is no implicit "latest"), so the journaled event
+    /// only ever names a revision that served.
+    DeploymentResolved,
+
+    /// A deployment revision was registered (R0.12 wave 3): an immutable,
+    /// content-addressed declaration of what may serve landed in the
+    /// control plane. Journaled onto the deployment evidence chain (the
+    /// run id `deployment-control` — the `receipt-keys` /
+    /// `credential-broker` precedent for a third control plane), never a
+    /// run's journal: a deployment transition is not any run's event.
+    /// An [`Effect::Pure`] record: registration is local control-plane
+    /// state, so the event is the lineage evidence. Output carries the
+    /// journaled [`crate::deploy::RevisionRegistration`] — the tenant and
+    /// the revision, whose own fields carry the author and the frozen
+    /// pin set.
+    RevisionRegistered,
+
+    /// A revision was promoted into an environment (R0.12 wave 3): the
+    /// environment's deployment pointer moved `active` and cleared any
+    /// canary — a full promotion supersedes the experiment it graduated
+    /// from. The journaled transition and the pointer move commit in one
+    /// transaction (the learn store's rule: a crash cannot leave a
+    /// promoted revision whose pointer never moved). An [`Effect::Pure`]
+    /// record on the deployment evidence chain. Output carries the
+    /// journaled [`crate::deploy::RevisionPromotion`] — the environment,
+    /// the promoted revision, the displaced `previous` (the rollback
+    /// path's whole story), the author, and the instant.
+    RevisionPromoted,
+
+    /// A serving revision was rolled back (R0.12 wave 3): the
+    /// environment's pointer re-pointed `active` to the previously
+    /// serving revision — byte-exact, because the restored revision is
+    /// the immutable record that served before, re-derived from the
+    /// chain's own transition history, never a reconstruction. An
+    /// [`Effect::Pure`] record on the deployment evidence chain. Output
+    /// carries the journaled [`crate::deploy::RevisionRollback`] — the
+    /// environment, from, to, the cause, and the author. New runs bind
+    /// the re-pointed revision at admission; in-flight runs keep the
+    /// revision their journaled resolution names.
+    RevisionRolledBack,
+
+    /// An environment was declared (R0.12 wave 3): an R0.11 promotion
+    /// tag became a first-class record — the name, the gate and approval
+    /// declarations that will govern promotions into it (wired in
+    /// wave 4), and the creation metadata. An [`Effect::Pure`] record on
+    /// the deployment evidence chain, so an audit reads the declaration
+    /// in force when a promotion happened, not a later edit. Output
+    /// carries the journaled [`crate::deploy::EnvironmentDeclaration`].
+    EnvironmentDeclared,
+
+    /// An environment-scoped secret was set or rotated (R0.12 wave 3):
+    /// custody, not brokerage — a static value envelope-encrypted at
+    /// rest under the deployment master key, stored as ciphertext on
+    /// both backends, rotated by replacement beneath the stable scoped
+    /// name. An [`Effect::Pure`] record on the deployment evidence
+    /// chain, metadata by construction: output carries the journaled
+    /// [`crate::deploy::EnvSecretAct`] — the record, never the bytes;
+    /// `rotated_at` marks a rotation beneath the stable name.
+    EnvSecretSet,
+
+    /// An environment-scoped secret was revoked by deletion (R0.12
+    /// wave 3): the only revocation path — there is no disable flag to
+    /// forget, and the tombstone is the evidence the scope once held a
+    /// value. An [`Effect::Pure`] record on the deployment evidence
+    /// chain. Output carries the journaled
+    /// [`crate::deploy::EnvSecretRevocation`] — the scoped name, the
+    /// revoker, and the instant.
+    EnvSecretRevoked,
+
+    /// An environment-secret resolution was refused on scope (R0.12
+    /// wave 3): the request asked for a scope outside the environment
+    /// the requester holds — the `CapsuleDenied` discipline (attributable
+    /// to a declaration, not a stack trace) applied to environment scope.
+    /// An [`Effect::Pure`] record: nothing resolved, so there is no
+    /// external effect to classify — the event is the evidence that
+    /// nothing happened. Output carries the journaled
+    /// [`crate::deploy::EnvSecretDenial`], naming the scope requested
+    /// and the scope the holder holds.
+    EnvSecretDenied,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

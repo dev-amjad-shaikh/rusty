@@ -1,0 +1,8 @@
+{
+  "surface": "deployment:staging",
+  "active": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "canary": {
+    "revision_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "fraction": 0.1
+  }
+}
