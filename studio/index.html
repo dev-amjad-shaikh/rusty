@@ -1099,6 +1099,36 @@
   .studio-journey-stage.current strong { color: #f2e8dc; }
   .studio-journey-stage.attention .studio-journey-node { border-color: var(--err); color: #efc0b9; }
   .studio-journey-boundary { margin: 6px 0 0; color: #736b5e; font: 8.5px/1.25 var(--mono); }
+  .studio-mission { margin-top: 7px; border: 1px solid #4b4135; background: linear-gradient(112deg,#191816 0%,#171a17 100%); }
+  .studio-mission summary {
+    display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 9px; align-items: center;
+    min-height: 34px; padding: 7px 9px; cursor: pointer; list-style: none; color: #d8d0c2;
+  }
+  .studio-mission summary::-webkit-details-marker { display: none; }
+  .studio-mission summary::before { content: "+"; display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid #665644; color: #d19a71; font: 700 12px var(--mono); }
+  .studio-mission[open] summary::before { content: "−"; }
+  .studio-mission summary:focus-visible { outline: 2px solid #d1a066; outline-offset: -2px; }
+  .studio-mission-summary { min-width: 0; }
+  .studio-mission-summary span, .studio-mission-summary strong { display: block; }
+  .studio-mission-summary span { color: #a68c70; font: 700 8px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .studio-mission-summary strong { margin-top: 1px; font-size: 10px; overflow-wrap: anywhere; }
+  .studio-mission-progress { color: #9e9587; font: 8.5px var(--mono); white-space: nowrap; }
+  .studio-mission-body { display: grid; grid-template-columns: minmax(210px,.85fr) minmax(0,1.5fr); gap: 12px; padding: 12px; border-top: 1px solid #38332b; }
+  .studio-mission-decision { padding-right: 12px; border-right: 1px solid #38332b; }
+  .studio-mission-stage { color: #d19a71; font: 700 8.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+  .studio-mission-decision h3 { margin: 5px 0 7px; color: #f0e8dc; font-size: 15px; line-height: 1.25; }
+  .studio-mission-decision p { margin: 0; color: #958c7f; font-size: 10px; line-height: 1.45; }
+  .studio-mission-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+  .studio-mission-card { min-width: 0; padding: 8px; border: 1px solid #38352f; background: rgba(14,15,13,.62); }
+  .studio-mission-card h4 { margin: 0 0 5px; color: #8e8578; font: 700 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  .studio-mission-card p { margin: 0; color: #c5bdb0; font-size: 9.5px; line-height: 1.4; overflow-wrap: anywhere; }
+  .studio-mission-evidence { display: grid; gap: 3px; margin: 0; }
+  .studio-mission-evidence div { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 5px; }
+  .studio-mission-evidence dt { color: #797166; font: 8px var(--mono); text-transform: uppercase; }
+  .studio-mission-evidence dd { min-width: 0; margin: 0; color: #b7cddd; font: 8.5px var(--mono); overflow-wrap: anywhere; }
+  .studio-mission-action { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 9px; }
+  .studio-mission-action span { color: #746c60; font: 8px/1.35 var(--mono); }
+  .studio-mission-action button { white-space: nowrap; }
 
   /* ---------- Studio home ---------- */
   .home-hero {
@@ -2285,6 +2315,13 @@
     .studio-journey-stage:nth-child(-n+3) button { border-bottom: 1px solid #38332b; }
     .studio-journey-stage button { min-height: 51px; padding: 7px; }
     .studio-journey-boundary { font-size: 8px; }
+    .studio-mission summary { grid-template-columns: auto minmax(0,1fr); }
+    .studio-mission-progress { grid-column: 2; }
+    .studio-mission-body { grid-template-columns: 1fr; gap: 9px; padding: 10px; }
+    .studio-mission-decision { padding: 0 0 9px; border-right: 0; border-bottom: 1px solid #38332b; }
+    .studio-mission-grid { grid-template-columns: 1fr; }
+    .studio-mission-action { align-items: stretch; flex-direction: column; }
+    .studio-mission-action button { width: 100%; }
     .home-hero { grid-template-columns: 1fr; padding: 18px; }
     .home-hero-action { min-width: 0; text-align: left; }
     .home-signals { grid-template-columns: 1fr; }
@@ -2682,6 +2719,10 @@
           <div class="studio-journey-next" id="studio-journey-next"></div>
         </div>
         <ol class="studio-journey-rail" id="studio-journey-rail" aria-label="Agent lifecycle stages"></ol>
+        <details class="studio-mission" id="studio-mission" open>
+          <summary><span class="studio-mission-summary"><span>Mission dossier</span><strong id="studio-mission-label">Next decision, assembled from current evidence</strong></span><span class="studio-mission-progress" id="studio-mission-progress"></span></summary>
+          <div class="studio-mission-body" id="studio-mission-body" aria-labelledby="studio-mission-label"></div>
+        </details>
         <p class="studio-journey-boundary" id="studio-journey-boundary">Identity-only page context. Each destination reloads or preserves its own authoritative evidence; the rail never upgrades browser recall into server truth.</p>
         <span class="sr-only" id="studio-journey-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
       </section>
@@ -3820,6 +3861,100 @@ function journeyEvidenceLabel(value) {
   return registryEvidencePreview(value, 160);
 }
 
+const JOURNEY_MISSION_DECISIONS = {
+  connect: { label: "Connect", question: "Which Rusty system are we prepared to trust?" },
+  shape: { label: "Shape", question: "What responsibility should this agent own?" },
+  run: { label: "Run", question: "Can this exact configuration handle real work?" },
+  inspect: { label: "Inspect", question: "What actually happened, and why?" },
+  evaluate: { label: "Evaluate", question: "Is this behavior good enough to keep?" },
+  govern: { label: "Govern", question: "What should the system remember or change?" },
+  operate: { label: "Operate", question: "What should continue without a human present?" },
+  home: { label: "Review", question: "Is the complete mission ready for another decision?" },
+};
+
+function journeyMissionDestination(key, snapshot, state) {
+  if (key === "connect") return "Connection Hub";
+  if (key === "shape") return "Agent Workbench";
+  if (key === "run") return snapshot.threadId ? "Local Run" : "Agent Workbench";
+  if (key === "inspect") return "Flight Recorder";
+  if (key === "evaluate") return "Case Foundry";
+  if (key === "govern") return snapshot.candidateCount && !state.learnUnsupported ? "Learning Inbox" : state.memoryUnsupported ? "Learning Inbox" : "Memory Lab";
+  if (key === "operate") {
+    if (state.view === "schedules" && !state.schedulesUnsupported) return "Schedule Desk";
+    if (state.view === "automations" && !state.automationsUnsupported) return "Automation Desk";
+    if (state.view === "tasks" && !state.tasksUnsupported) return "Task Queue";
+    if (!state.schedulesUnsupported && state.schedules && Array.isArray(state.schedules.list) && state.schedules.list.length) return "Schedule Desk";
+    if (!state.automationsUnsupported && state.automations && Array.isArray(state.automations.list) && state.automations.list.length) return "Automation Desk";
+    if (!state.tasksUnsupported && state.tasks && Array.isArray(state.tasks.list) && state.tasks.list.length) return "Task Queue";
+    if (!state.schedulesUnsupported) return "Schedule Desk";
+    if (!state.automationsUnsupported) return "Automation Desk";
+    return "Task Queue";
+  }
+  return "Mission board";
+}
+
+function journeyMissionDossier(snapshot, state) {
+  const source = state && typeof state === "object" ? state : {};
+  const stageKeys = new Set(JOURNEY_STAGE_KEYS);
+  const activeIndex = snapshot.stages.findIndex((item) => item.key === snapshot.active);
+  const activeStage = activeIndex >= 0 ? snapshot.stages[activeIndex] : null;
+  const laterMissing = activeIndex >= 0 ? snapshot.stages.slice(activeIndex + 1).find((item) => !item.complete && item.available) : null;
+  const globalNext = stageKeys.has(snapshot.next.key) ? snapshot.stages.find((item) => item.key === snapshot.next.key) : null;
+  const targetStage = activeStage && !activeStage.complete && activeStage.available ? activeStage : laterMissing || globalNext;
+  const key = !snapshot.connected ? "connect" : targetStage ? targetStage.key : "home";
+  const decision = JOURNEY_MISSION_DECISIONS[key] || JOURNEY_MISSION_DECISIONS.home;
+  const stage = snapshot.stages.find((item) => item.key === key) || null;
+  const evidence = [];
+  if (snapshot.connected) evidence.push(["System", "Verified connection"]);
+  if (snapshot.agentId) evidence.push(["Agent", snapshot.agentId]);
+  if (snapshot.versionId) evidence.push(["Version", snapshot.versionId]);
+  if (snapshot.threadId) evidence.push(["Thread", snapshot.threadId]);
+  if (snapshot.runId) evidence.push([snapshot.exactRecorder ? "Exact run" : "Known run", snapshot.runId]);
+  if (snapshot.qualityEvidence) evidence.push(["Evaluation", "Reviewed case in page memory"]);
+  const destination = journeyMissionDestination(key, snapshot, source);
+  const proofGaps = {
+    connect: "Verified Rusty server identity and feature compatibility.",
+    shape: "A selected durable agent whose active behavior is available on this server.",
+    run: snapshot.threadId ? "A real run receipt for the selected thread." : "A real run and thread bound to the selected agent.",
+    inspect: "A complete exact journal bound to this run and thread.",
+    evaluate: "A frozen reviewed case derived from the exact journal.",
+    govern: "Loaded memory or candidate evidence for a governed change.",
+    operate: "Loaded durable operation records with their lifecycle evidence.",
+    home: "No missing checkpoint is claimed by the current page model.",
+  };
+  const safeMoves = {
+    connect: "Verify server identity and features before selecting mission evidence.",
+    shape: "Open the durable agent record and make its responsibility, runtime, and limits explicit.",
+    run: snapshot.threadId ? "Run a real task in the selected local thread without copying its identity."
+      : snapshot.agentId ? "Start a real task with the selected agent and retain the resulting thread identity."
+        : "Choose a runnable agent, then create a real thread for the mission.",
+    inspect: "Load the exact same-thread journal before drawing a causal conclusion.",
+    evaluate: "Freeze a reviewed case from the exact journal before comparing or releasing behavior.",
+    govern: "Review memory or learning evidence before promoting any retained change.",
+    operate: "Choose a durable operation only after its inputs, lifecycle, and evidence boundary are visible.",
+    home: "Return to the mission board and choose the next evidence-led improvement.",
+  };
+  return {
+    key, label: decision.label, question: decision.question, destination,
+    evidence: evidence.slice(-5),
+    gap: proofGaps[key] || (stage ? stage.detail : proofGaps.home),
+    safeMove: safeMoves[key] || safeMoves.home,
+    actionLabel: key === "home" ? "Review mission board" : `Continue in ${destination}`,
+    checkpoints: snapshot.stages.filter((item) => item.complete).length,
+  };
+}
+
+function journeyMissionHtml(dossier) {
+  const evidence = dossier.evidence.length
+    ? `<dl class="studio-mission-evidence">${dossier.evidence.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(journeyEvidenceLabel(value))}</dd></div>`).join("")}</dl>`
+    : `<p>No mission identity has been selected.</p>`;
+  return `<section class="studio-mission-decision"><span class="studio-mission-stage">${escapeHtml(dossier.label)} decision</span><h3>${escapeHtml(dossier.question)}</h3><p>One decision at a time. The dossier carries bounded identity and status only; the destination remains authoritative.</p></section>` +
+    `<div><div class="studio-mission-grid"><section class="studio-mission-card"><h4>Evidence in hand</h4>${evidence}</section>` +
+    `<section class="studio-mission-card"><h4>Still unproved</h4><p>${escapeHtml(dossier.gap)}</p></section>` +
+    `<section class="studio-mission-card"><h4>Next safe move</h4><p>${escapeHtml(dossier.safeMove)}</p></section></div>` +
+    `<div class="studio-mission-action"><span>${escapeHtml(dossier.destination)} reloads or preserves its own evidence; this summary never approves a change.</span><button class="small primary" type="button" data-mission-primary data-journey-next="${escapeHtml(dossier.key)}">${escapeHtml(dossier.actionLabel)}</button></div></div>`;
+}
+
 function journeyHtml(snapshot) {
   return snapshot.stages.map((stage, index) => {
     const classes = [stage.complete ? "proved" : stage.available ? "available" : "", stage.current ? "current" : "", stage.attention ? "attention" : ""].filter(Boolean).join(" ");
@@ -3837,19 +3972,26 @@ function journeyContextHtml(snapshot) {
 function journeyRender() {
   const panel = $("studio-journey");
   const rail = $("studio-journey-rail"), context = $("studio-journey-context"), next = $("studio-journey-next"), label = $("studio-journey-label");
+  const missionBody = $("studio-mission-body"), missionProgress = $("studio-mission-progress");
   if (!panel || !rail || !context || !next || !label || typeof panel.contains !== "function" || typeof rail.querySelectorAll !== "function") return null;
   const active = document.activeElement;
   const focusedStage = active && panel.contains(active) && active.getAttribute ? active.getAttribute("data-journey-stage") : "";
-  const focusedNext = Boolean(active && panel.contains(active) && active.getAttribute && active.hasAttribute("data-journey-next"));
+  const focusedMission = Boolean(active && panel.contains(active) && active.hasAttribute && active.hasAttribute("data-mission-primary"));
+  const focusedNext = Boolean(!focusedMission && active && panel.contains(active) && active.getAttribute && active.hasAttribute("data-journey-next"));
   const snapshot = journeySnapshot(store);
+  const dossier = journeyMissionDossier(snapshot, store);
   label.textContent = journeyEvidenceLabel(snapshot.title);
   context.innerHTML = journeyContextHtml(snapshot);
   rail.innerHTML = journeyHtml(snapshot);
   next.innerHTML = `<span>${escapeHtml(snapshot.next.hint)}</span><button class="small primary" type="button" data-journey-next="${snapshot.next.key}">${escapeHtml(snapshot.next.label)}</button>`;
-  if (focusedStage || focusedNext) {
+  if (missionProgress) missionProgress.textContent = `${dossier.checkpoints}/6 evidence checkpoints`;
+  if (missionBody) missionBody.innerHTML = journeyMissionHtml(dossier);
+  if (focusedStage || focusedNext || focusedMission) {
     const exactStage = focusedStage ? rail.querySelector(`[data-journey-stage="${CSS.escape(focusedStage)}"]:not(:disabled)`) : null;
+    const exactMission = focusedMission && missionBody ? missionBody.querySelector("[data-mission-primary]:not(:disabled)") : null;
+    const exactNext = focusedNext ? next.querySelector("[data-journey-next]:not(:disabled)") : null;
     const fallback = next.querySelector("[data-journey-next]:not(:disabled)") || rail.querySelector("[data-journey-stage]:not(:disabled)");
-    (exactStage || fallback)?.focus({ preventScroll: true });
+    (exactStage || exactMission || exactNext || fallback)?.focus({ preventScroll: true });
   }
   return snapshot;
 }

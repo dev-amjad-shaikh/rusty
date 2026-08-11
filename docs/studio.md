@@ -39,6 +39,13 @@ studio/
   and server-evidence boundaries. Native stage buttons, Left/Right/Home/End navigation, stable destination
   focus, a 3 × 2 mobile layout, and one explicit next-safe-move action make the journey continuous without
   pretending that the rail is an authoritative catalog.
+- **Progressive mission dossier** — the expandable dossier beneath that rail turns the current context into
+  one decision at a time: the evidence already in hand, the proof still missing, the next safe move, and the
+  workspace that owns the authoritative follow-up. It advances from the current workspace when possible, so
+  an exact journal leads directly to evaluation instead of restarting an earlier catalog step. The dossier is
+  derived on render, retains at most five bounded identity/status facts, and never copies prompts, payloads,
+  results, credentials, or evaluation inputs. Collapsing it is a page-only display choice; every action still
+  reloads or preserves evidence in the destination and never approves a mutation from summary state.
 - **Connection Hub** — a guided **Reach server → Verify identity → Inspect features** handshake replaces
   the raw connection form. Reusable profiles remember only non-secret server metadata by default. Access
   keys stay in the browser session unless the user explicitly accepts a device-local plaintext warning;
@@ -753,6 +760,9 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   agent/version/thread/run ownership, exact Recorder gating, page-memory evaluation and governance truth,
   operations discovery, next-safe-action progression, content exclusion, hostile identity escaping,
   disabled destinations, keyboard navigation, single-rail semantics, and the responsive 3 × 2 layout.
+- `node studio/test-mission.mjs` — focused contracts for the progressive mission dossier: one-decision
+  guidance, evidence minimization, supported authoritative destinations, focus continuity, native disclosure,
+  hostile identity handling, and mobile stacking.
 - `node studio/test-connection.mjs` — 63 assertions over strict URL and server-identity validation,
   bounded non-secret profiles, session-only and explicit device-local secret boundaries, legacy-key
   migration and damaged-secret cleanup warnings, blocked-storage containment, tenant-scoped recall,

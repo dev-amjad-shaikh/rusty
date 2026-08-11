@@ -96,6 +96,10 @@ Studio is a useful engineering console, not yet the complete experience describe
   loaded journal, unlocks evaluation only from complete same-thread evidence, and recommends the next safe
   stage without retaining prompts, payloads, results, credentials, or evaluation inputs. The rail is native-
   keyboard operable, focus-preserving, and becomes a deliberate 3 × 2 control on narrow screens.
+- Expand one progressive mission dossier directly beneath the evidence thread. It explains the current
+  decision, bounded evidence in hand, missing proof, and next safe move, then hands off to the workspace that
+  owns the authoritative evidence. It follows the operator's current stage before returning to earlier gaps,
+  retains no separate mission record, and can be collapsed without losing the underlying workspace state.
 - Start from a coherent Home mission board that shows the complete evidence-led journey, distinguishes
   current server catalog state from bounded browser recall, recommends the next action, and continues
   directly into the latest remembered agent or team evidence without retaining prompts or results.
