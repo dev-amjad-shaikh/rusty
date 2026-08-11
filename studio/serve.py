@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Rusty Studio dev server — same-origin static host + API proxy.
+"""Rusty Studio local server — typed product app + API proxy.
 
-Why this exists: rusty-server v0.3+ sends permissive CORS headers, so
-studio/index.html can be opened straight from disk and talk to the server
-directly — this proxy is *optional*. It remains useful for older servers
-without CORS headers and for setups where same-origin is simply more
-convenient: it serves studio/index.html AND proxies /api/* to the real
-server, making the Studio and the API same-origin — no CORS involved.
+The typed application under ``studio/ui`` is the default experience. This
+lightweight host serves its deep routes and proxies ``/api/*`` to a Rusty
+server for same-origin local development. The specialist console remains
+available at ``/advanced/legacy`` while its workflows migrate.
 
 Usage:
     python3 studio/serve.py [--port 8000] [--target http://127.0.0.1:8100]
 
-Then open http://127.0.0.1:8000/ and connect to base URL  /api  (the field
-accepts relative URLs; the page defaults to the real server, so type /api).
+Then open http://127.0.0.1:8000/. The default connection points directly to
+http://127.0.0.1:8100; the proxy remains available at /api/*.
 """
 
 import argparse
@@ -21,12 +19,15 @@ import http.server
 import pathlib
 import urllib.parse
 
-ROOT = pathlib.Path(__file__).resolve().parent
+STUDIO_ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = STUDIO_ROOT / "ui" / "dist"
+LEGACY = STUDIO_ROOT / "index.html"
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     target_host = "127.0.0.1"
     target_port = 8100
+    target_secure = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -36,10 +37,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/api" or path.startswith("/api/"):
             self._proxy()
+        elif path in ("/advanced/legacy", "/advanced/legacy/"):
+            self._serve_legacy()
         else:
-            if path in ("/", ""):
-                self.path = "/index.html"
+            target = ROOT / path.lstrip("/")
+            if path in ("/", "") or not target.is_file():
+                self.path = "/index.html"  # SPA route fallback
             super().do_GET()
+
+    def _serve_legacy(self):
+        try:
+            body = LEGACY.read_bytes()
+        except OSError:
+            self.send_error(404, "legacy Studio is unavailable")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     # -- proxy ------------------------------------------------------------
     def do_POST(self):
@@ -60,7 +76,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         body = self.rfile.read(length) if length else None
 
-        conn = http.client.HTTPConnection(self.target_host, self.target_port, timeout=600)
+        connection_type = http.client.HTTPSConnection if self.target_secure else http.client.HTTPConnection
+        conn = connection_type(self.target_host, self.target_port, timeout=600)
         headers = {}
         for name in ("Content-Type", "X-Api-Key", "Accept", "Last-Event-ID"):
             if self.headers.get(name):
@@ -105,14 +122,21 @@ def main():
     ap.add_argument("--target", default="http://127.0.0.1:8100")
     args = ap.parse_args()
 
+    if not (ROOT / "index.html").is_file():
+        raise SystemExit("typed Studio build is missing — run `npm ci && npm run build` in studio/ui")
+
     parsed = urllib.parse.urlparse(args.target)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password \
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise SystemExit("--target must be an http(s) origin without credentials, path, query, or fragment")
     Handler.target_host = parsed.hostname or "127.0.0.1"
-    Handler.target_port = parsed.port or 80
+    Handler.target_secure = parsed.scheme == "https"
+    Handler.target_port = parsed.port or (443 if Handler.target_secure else 80)
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"Rusty Studio       →  http://127.0.0.1:{args.port}/")
+    print(f"Advanced legacy    →  http://127.0.0.1:{args.port}/advanced/legacy")
     print(f"proxying /api/*    →  {args.target}")
-    print(f"connect with base URL:  /api")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

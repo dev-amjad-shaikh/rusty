@@ -175,8 +175,9 @@ check("detail: missing fields render defensively (partial record)",
 
 /* -- error notes ------------------------------------------------------------ */
 
-check("error: non-JSON 404 → route-missing note for a pre-R0.6 server",
-  T.tasksErrorHtml(404, null).includes("no <code>/tasks</code> routes"));
+check("error: unavailable task support gives one user-facing recovery direction",
+  T.tasksErrorHtml(404, null).includes("Task queue is unavailable on this server") &&
+  !T.tasksErrorHtml(404, null).includes("R0."));
 check("error: JSON failure → server message verbatim",
   T.tasksErrorHtml(500, { error: "internal", message: "store offline" }).includes("store offline"));
 

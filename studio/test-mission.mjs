@@ -150,9 +150,9 @@ function connectedState() {
   ]);
   sandbox.document.activeElement = oldMission;
   Object.assign(M.store, connectedState());
-  M.store.view = "agents";
+  M.store.view = "memory";
   const snapshot = M.journeyRender();
-  check("mission focus: evidence refresh restores the dossier action rather than jumping to the header",
+  check("mission focus: a specialist evidence refresh restores the dossier action rather than jumping to the header",
     snapshot && focused === "mission" && missionBody.innerHTML.includes("studio-mission-decision"));
   sandbox.document.activeElement = null;
 }

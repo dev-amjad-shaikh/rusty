@@ -78,7 +78,7 @@ Which package pairs must agree, and on what:
 | `rusty-agent-runtime` (RemoteNode) | `rusty-worker` | `PROTOCOL_VERSION` = 1 | Worker rejects tasks with an unsupported `protocol_version`. Both sides currently speak v1. Keep worker and runtime on compatible protocol majors. |
 | `rusty-agent-server` | `@rusty-runtime/client`, `rusty_client` (PyPI) | same-cycle pairing (no constant yet) | SDK 0.4.x ↔ server 0.11.x is the tested pairing. Cross-cycle use is unvalidated. |
 | `rusty-agent-runtime` | `rusty-agent-server`, `rusty-worker`, `rusty-otel` | crate versions | All three are path-dependents built in lockstep from this monorepo; a published crate pair must satisfy SemVer on the Rust API, which is unstable at 0.x (see [stability.md](stability.md)). |
-| `rusty-agent-server` | Rusty Studio (`studio/`) | same-cycle pairing | Studio is a zero-build UI distributed in-repo; it calls the same-cycle server API and notes fallbacks for older servers in-line. |
+| `rusty-agent-server` | Rusty Studio (`studio/ui`) | same-cycle pairing | Studio's typed wire schemas and committed production bundle are distributed in-repo; CI validates them against the same-cycle server contract. The legacy console remains a temporary advanced compatibility surface. |
 | checkpoint writers (`JsonFileCheckpointer`, `PostgresCheckpointer`) | checkpoint readers | `rusty-agent-runtime` minor version | Checkpoints written by one `0.x.*` line are guaranteed readable by that same minor line only. See [stability.md](stability.md). |
 
 ## MSRV

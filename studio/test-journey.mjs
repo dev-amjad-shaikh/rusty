@@ -266,7 +266,7 @@ function connectedState() {
     ["studio-journey-next", next], ["studio-journey-label", label]]);
   sandbox.document.activeElement = oldNext;
   Object.assign(J.store, connectedState());
-  J.store.view = "agents";
+  J.store.view = "memory";
   J.journeyRender();
   const nextPreserved = focused === "next";
   focused = ""; sandbox.document.activeElement = oldStage;
@@ -301,18 +301,18 @@ function connectedState() {
     moved && event.prevented && focused.join(",") === "govern,shape");
 }
 
-check("journey markup: the lifecycle rail is available inside active workspaces with one stable announcer",
+check("journey markup: the secondary lifecycle rail stays out of primary destinations",
   html.indexOf('id="studio-journey"') < html.indexOf('id="home-view"') &&
   html.includes('id="studio-journey-announcer" role="status" aria-live="polite" aria-atomic="true"') &&
-  html.includes('panel.hidden = store.view === "home" || store.view === "thread"'));
+  html.includes('panel.hidden = ["home", "thread", "agents", "operations"].includes(store.view)'));
 check("journey interaction: one delegated action path owns stage and next-safe-move routing",
   html.includes('target.closest("[data-journey-stage],[data-journey-next]")') &&
   html.includes('$("studio-journey-rail").addEventListener("keydown", journeyKeyboard)'));
 check("journey responsive: mobile uses a deliberate three-by-two rail and stacked identity context",
   html.includes('.studio-journey-rail { grid-template-columns: repeat(3,minmax(0,1fr));') &&
   html.includes('.studio-journey-context { grid-column: 1 / -1; grid-row: 2; }'));
-check("journey singularity: Mission control and the focused thread flow omit duplicate lifecycle rails",
-  !html.includes('class="home-evidence-rail"') && html.includes('store.view === "home" || store.view === "thread"'));
+check("journey singularity: primary destinations omit duplicate lifecycle rails",
+  !html.includes('class="home-evidence-rail"') && html.includes('["home", "thread", "agents", "operations"].includes(store.view)'));
 check("journey calmness: implementation-boundary commentary is absent from the primary workspace",
   !html.includes("Identity-only page context") && !html.includes("the rail never upgrades browser recall into server truth"));
 

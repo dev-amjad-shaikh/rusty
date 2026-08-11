@@ -48,8 +48,8 @@ function connectedState() {
   check("home onboarding: disconnected state leads with a local connection", !snapshot.connected &&
     snapshot.next.action === "connect" && snapshot.service === "Not connected");
   const markup = H.homeHtml(snapshot);
-  check("home onboarding: the empty mission board leads with the user's first agent task",
-    markup.includes("Create your first agent") && markup.includes("Define its job, connect the capabilities it needs") &&
+  check("home onboarding: the disconnected workspace offers one calm path into real work",
+    markup.includes("Build an agent that can do real work") && markup.includes("Connect your Rusty server") &&
     markup.includes('data-home-action="connect"') && !markup.includes("evidence-led workspace") && !markup.includes("registered behavior"));
 }
 

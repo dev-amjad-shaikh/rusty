@@ -260,9 +260,11 @@ check("session lifecycle: changing connection clears every page-memory run sessi
 
 check("markup: Run Session makes live execution primary while retaining advanced background and wait modes",
   html.includes('id="run-session"') && html.includes('id="btn-run-stream" type="button">Start live run') && html.includes("Other execution modes and delivery controls") && html.includes('id="btn-run-session-next"'));
-check("shell: navigation is grouped around Create, Improve, and Operate rather than endpoint commentary",
-  html.includes('id="studio-nav-create">Create') && html.includes('id="studio-nav-improve">Improve') && html.includes('id="studio-nav-operate">Operate') &&
-  html.includes('<b>Task queue</b></button>') && !html.includes("The R0.6 task queue is tenant-wide") && !html.includes("no list-threads endpoint"));
+check("shell: navigation presents Agents, Work, and Operations while specialist tools stay secondary",
+  html.includes('class="studio-nav-primary" aria-label="Primary destinations"') &&
+  html.includes('id="btn-agents-open"') && html.includes('id="btn-home-open"') && html.includes('id="btn-operations-open"') &&
+  html.includes('<details class="studio-tool-drawer">') && html.includes('<b>Task queue</b></button>') &&
+  !html.includes("The R0.6 task queue is tenant-wide") && !html.includes("no list-threads endpoint"));
 check("shell: primary chrome uses task language instead of implementation and privacy narration",
   html.includes('id="btn-copy-view-link" type="button" aria-describedby="view-link-status">Copy link</button>') &&
   html.includes('<small class="sr-only" id="view-link-status">Copy a link to this workspace</small>') &&

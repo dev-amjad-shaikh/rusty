@@ -249,3 +249,14 @@ jobs:
 
       - name: Studio tests
         run: node studio/test-all.mjs
+
+      - name: Install typed Studio dependencies
+        working-directory: studio/ui
+        run: npm ci
+
+      - name: Typed Studio checks
+        working-directory: studio/ui
+        run: npm run typecheck && npm test && npm run build
+
+      - name: Typed Studio distribution is current
+        run: git diff --exit-code -- studio/ui/dist

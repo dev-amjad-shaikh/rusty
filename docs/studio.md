@@ -1,12 +1,38 @@
 # Rusty Studio
 
-A **zero-build, single-file debug UI** for [`rusty-agent-server`](../rusty-server). One HTML file, vanilla
-JS + CSS, no npm, no framework, no bundler — open it and point it at a running server.
+Rusty Studio is the product workspace for creating agents, doing real work with them, understanding what
+happened, and intervening when durable operations need attention. It runs locally against
+[`rusty-agent-server`](../rusty-server) without requiring a hosted control plane.
+
+## Product structure
+
+Studio has three primary destinations:
+
+- **Agents** — create, configure, version, and choose an agent. The creation flow begins with one visual
+  capability map spanning purpose, model, knowledge, tools, output, and guardrails. Exact manifests and
+  configuration evidence remain available through deliberate review surfaces.
+- **Work** — prepare a goal, run it, follow progress, inspect the exact trace, and turn that trace into an
+  evaluation without changing workspaces or losing run ownership.
+- **Operations** — handle failures, recurring work, automation delivery, governance, and multi-agent
+  coordination. Routine work does not open on an operations dashboard; specialist tools remain available
+  through contextual handoffs and progressive disclosure.
+
+The first disconnected screen leads with one connection action. System counts and technical compatibility
+evidence are secondary details, not the product's opening message.
+
+## Development layout
+
+Studio 1.0 is a typed React application. The production bundle is committed so the local launch remains
+one command and does not require Node.js. The previous single-file console remains available only as an
+advanced compatibility surface while its specialist workflows migrate.
 
 ```
 studio/
-├── index.html         ← the entire UI (open this)
-├── serve.py           ← optional same-origin static host + API proxy
+├── ui/                ← React, TypeScript, routes, feature modules, and production bundle
+│   ├── src/           ← Agents, Work, Operations, shared contracts, and design system
+│   └── dist/          ← committed self-hostable production assets
+├── index.html         ← legacy console at /advanced/legacy
+├── serve.py           ← typed Studio host + same-origin API proxy
 ├── test-recorder.mjs  ← node unit tests for the Flight Recorder timeline helpers
 ├── test-receipts.mjs  ← signed run-proof contract, trust-boundary, and interaction tests
 ├── test-tasks.mjs     ← node unit tests for the durable-tasks view helpers
@@ -19,13 +45,18 @@ studio/
 ├── test-navigation.mjs ← non-secret workspace/evidence link and async ownership tests
 ├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
 ├── test-connection.mjs ← node unit tests for connection profiles, secrets, and compatibility evidence
+├── test-product-shell.mjs ← three-destination shell, Operations, and capability-map tests
 └── test-all.mjs       ← discovers and runs every Studio test suite
 ```
 
+See [Studio 1.0 product architecture](studio-1.0-architecture.md) for route ownership, state boundaries,
+the visual trace model, and release gates. The legacy tests remain required until the corresponding
+advanced workflows have typed parity.
+
 ## What it does
 
-- **Mission control** — the default Home leads with the user's next task, a compact system snapshot, and recent
-  work. It can continue into the latest agent or team evidence without copying an identifier.
+- **Work** — the default destination leads with the user's next task and recent work. Workspace status is
+  available on demand instead of occupying the opening screen. It can continue into the latest agent or team evidence without copying an identifier.
   Server catalog counts, browser-scoped blueprints and run recall, and not-yet-loaded memory evidence
   are labelled distinctly; prompts, results, and connection credentials never enter the Home model.
 - **Lifecycle evidence thread** — active workspaces sit beneath one six-stage
@@ -522,7 +553,7 @@ studio/
     work rather than claims hidden in browser storage.
 - **Status badges** — `pending` / `running` / `success` / `interrupted` / `error`, mapped from the wire
   values returned by `GET /runs/{run_id}`, `runs/wait`, and SSE `end` frames.
-- **Durable tasks view (R0.6)** — **Open task queue** in the sidebar swaps the main panel to the
+- **Task queue** — **Open task queue** from Operations or More workspaces to inspect the
   tenant-wide task queue (it belongs to no thread, so it is reachable with no thread selected). A status
   filter (`queued` / `leased` / `failed` / `completed` / `dead` / `cancelled` — `dead` is the DLQ) drives
   `GET /tasks?status=…`; the list shows each task's kind, status badge, attempt counter, retry schedule,
@@ -549,23 +580,31 @@ cargo run --example server_demo          # http://127.0.0.1:8100
 python3 studio/serve.py                  # http://127.0.0.1:8000/
 ```
 
-Open `http://127.0.0.1:8000/` and connect with base URL **`/api`** (the proxy forwards `/api/*` to
-`127.0.0.1:8100`; override with `--target` / `--port`). The proxy also flushes SSE per chunk and sets
+Open `http://127.0.0.1:8000/` and connect to **`http://127.0.0.1:8100`**. During local Vite development,
+Studio proxies that origin through `/api`; users always enter the server origin, never the proxy path. The local
+host also flushes SSE per chunk and sets
 `X-Accel-Buffering: no`, so streams render live.
 
-### Option B — `python3 -m http.server` or any static host
+The typed product is served at `/`. The legacy console is available at `/advanced/legacy` during migration.
+
+### Option B — serve the production bundle from any static host
 
 ```bash
-cd studio && python3 -m http.server 8000     # → http://localhost:8000/index.html
+cd studio/ui/dist && python3 -m http.server 8000
 ```
 
 Then connect to `http://127.0.0.1:8100`. Since `rusty-agent-server` (v0.3 and later) sends permissive CORS headers
 (see below), plain cross-origin calls from any static host just work.
 
-### Option C — double-click `index.html` (file://)
+### Option C — build Studio after changing the typed source
 
-Works too: the page runs from `file://` (origin `null`) and the server's permissive CORS layer answers
-those cross-origin calls as well.
+```bash
+cd studio/ui
+npm ci
+npm run typecheck && npm test && npm run build
+```
+
+The build must leave `studio/ui/dist` synchronized. CI verifies the typed source, tests, and committed bundle.
 
 ## CORS
 
@@ -584,7 +623,7 @@ remains a valid workaround in all three cases — the browser only ever talks to
 The demo registers two graphs on `127.0.0.1:8100`: `pipeline` (channel `log`, two nodes `first → second`,
 no network) and `react_agent` (channel `messages`, scripted model + echo tool, no network).
 
-1. Start both processes (Option A above). Open `http://127.0.0.1:8000/`, set the base URL to `/api`,
+1. Start both processes (Option A above). Open `http://127.0.0.1:8000/`, connect to `http://127.0.0.1:8100`,
    **Connect** — the header shows the server version and both graphs.
 2. **Graphs → pipeline → New thread.** The thread appears in the local list; state is empty (no
    checkpoints yet).

@@ -5,13 +5,13 @@
 
 **The durable agent runtime built in Rust.**
 
-**Rusty is a full-Rust agentic platform**: a LangGraph-style execution core (Rusty Core), an axum HTTP/SSE server (Rusty Server) that serves compiled graphs from a single static binary, a worker SDK for remote nodes (Rusty Worker), an OpenTelemetry export crate, zero-dependency Python and TypeScript client SDKs (Rusty SDK), and a zero-build debug UI (Rusty Studio). Dual-licensed under MIT OR Apache-2.0. Public repo: [github.com/dev-amjad-shaikh/rusty](https://github.com/dev-amjad-shaikh/rusty).
+**Rusty is a full-Rust agentic platform**: a LangGraph-style execution core (Rusty Core), an axum HTTP/SSE server (Rusty Server) that serves compiled graphs from a single static binary, a worker SDK for remote nodes (Rusty Worker), an OpenTelemetry export crate, zero-dependency Python and TypeScript client SDKs (Rusty SDK), and a typed, self-hostable product workspace (Rusty Studio). Dual-licensed under MIT OR Apache-2.0. Public repo: [github.com/dev-amjad-shaikh/rusty](https://github.com/dev-amjad-shaikh/rusty).
 
 ```bash
 git clone https://github.com/dev-amjad-shaikh/rusty.git
 cd rusty/rusty-server
 cargo run --example server_demo   # serves a scripted ReAct agent on http://127.0.0.1:8100
-# then open studio/index.html in a browser and connect to 127.0.0.1:8100
+# in another terminal: python3 studio/serve.py, then open http://127.0.0.1:8000/
 ```
 
 ---
@@ -31,7 +31,7 @@ flowchart LR
     E -->|"HTTP, protocol v1"| WRK["Rusty Worker"]
     OTL["rusty-otel"] -.->|"tracing spans"| E
     SDK["Rusty SDK — Python + TS clients"] -->|"HTTP + SSE"| SRV
-    STU["Rusty Studio debug UI"] -->|"HTTP + SSE"| SRV
+    STU["Rusty Studio product workspace"] -->|"HTTP + SSE"| SRV
     E -->|"ChatModel"| LLM["OpenAI-compatible LLM endpoint"]
     E -->|"MCP over stdio"| MCP["MCP tool servers"]
 ```
@@ -43,7 +43,7 @@ flowchart LR
 | [`rusty-worker`](../rusty-worker/) | 0.1.0 | The worker SDK: serves your node handlers over HTTP so the core's `RemoteNode` can execute graph nodes on remote services. HITL interrupts cross the wire. |
 | [`rusty-otel`](../rusty-otel/) | 0.1.0 | One-call `tracing` subscriber setup for Rusty Core executors, with optional OTLP span export (OpenTelemetry 0.32, HTTP/protobuf). |
 
-Around the crates: the Rusty SDK — [`sdks/python/`](../sdks/python/) (PyPI `rusty-agent-runtime`, imported as `rusty_client`) and [`sdks/typescript/`](../sdks/typescript/) (npm `@rusty-runtime/client`), zero-dependency clients, each verified by an e2e suite that boots the real server binary — and [`studio/`](../studio/) (Rusty Studio: a zero-build, single-file debug UI — connect, run, inspect state and checkpoint history, fork and replay). The server is the polyglot interop layer by design: native bindings (PyO3, napi-rs, C ABI) were considered and rejected — see [docs/roadmap.md](roadmap.md#explicitly-rejected).
+Around the crates: the Rusty SDK — [`sdks/python/`](../sdks/python/) (PyPI `rusty-agent-runtime`, imported as `rusty_client`) and [`sdks/typescript/`](../sdks/typescript/) (npm `@rusty-runtime/client`), zero-dependency clients, each verified by an e2e suite that boots the real server binary — and [`studio/`](../studio/) (Rusty Studio: a React/TypeScript product workspace for Agents, Work, and Operations, shipped as committed static assets; its former single-file console remains at `/advanced/legacy` during migration). The server is the polyglot interop layer by design: native bindings (PyO3, napi-rs, C ABI) were considered and rejected — see [docs/roadmap.md](roadmap.md#explicitly-rejected).
 
 ## 2. The mental model — an agent is a graph over shared state, executed in super-steps
 

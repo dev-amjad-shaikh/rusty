@@ -1290,7 +1290,7 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes("store.agentCopySource = agentCopySourceSnapshot(source)") &&
     html.includes("This agent cannot be copied without changing a stored JSON number token."));
   check("configuration workshop labels descriptive fields honestly and announces validation",
-    html.includes("The current runtime does not inject it as instructions") &&
+    html.includes("Describe the job clearly enough that a teammate can choose the right agent") &&
     html.includes("Guided fields changed · refresh JSON before editing it") &&
     html.includes("JSON edited · apply or refresh before creating or exporting") &&
     html.includes("Discard unapplied JSON edits") &&
@@ -1305,8 +1305,8 @@ check("run ledger: invalid time is explicit", W.agentRunTimeLabel("invalid") ===
     html.includes('id="inp-agent-budget-tokens"') && html.includes('id="inp-agent-budget-cost"') &&
     html.includes('id="inp-agent-budget-latency"'));
   check("visual intent canvas never claims portable requirements are already runtime-enforced",
-    html.includes("Model, tool, memory, approval, output, and budget fields remain declarations") &&
-    html.includes("becomes executable only after Studio prepares a thread") &&
+    html.includes("These requirements travel with the agent") &&
+    html.includes("Before governed work starts") &&
     html.includes("A declared requirement, not a browser-side permission grant") &&
     html.includes("Use an identifier or registry reference, not a URL or credential") &&
     html.includes('id="inp-agent-binding-environment"') && html.includes('id="agent-binding-picker"'));

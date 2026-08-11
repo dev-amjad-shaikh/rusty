@@ -148,7 +148,7 @@
 
   #body { display: flex; flex: 1; min-height: 0; }
   aside {
-    width: 300px; flex: 0 0 300px;
+    width: 264px; flex: 0 0 264px;
     background: var(--bg-panel);
     border-right: 1px solid var(--border);
     overflow-y: auto; padding: 12px;
@@ -202,6 +202,24 @@
 
   /* ---------- sidebar ---------- */
   .studio-nav { display: grid; gap: 15px; }
+  .studio-nav-primary { display: grid; gap: 7px; }
+  .studio-nav-primary .studio-nav-button { min-height: 48px; padding: 9px 11px; }
+  .studio-nav-primary .studio-nav-button > b { font-size: 13px; }
+  .studio-nav-primary .studio-nav-button > span { grid-column: 2; align-self: center; text-align: right; }
+  .studio-nav-primary .studio-nav-button > span:empty { display: none; }
+  .studio-nav-primary .studio-nav-button.active { background: #332d21; border-color: #625536; }
+  .studio-tool-drawer, .studio-thread-drawer {
+    border-top: 1px solid var(--border); padding-top: 12px;
+  }
+  .studio-tool-drawer > summary, .studio-thread-drawer > summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 6px 5px; color: var(--text-dim); font-size: 11px; cursor: pointer; list-style: none;
+  }
+  .studio-tool-drawer > summary::-webkit-details-marker, .studio-thread-drawer > summary::-webkit-details-marker { display: none; }
+  .studio-tool-drawer > summary::after, .studio-thread-drawer > summary::after { content: "+"; color: var(--text-faint); font: 13px var(--mono); }
+  .studio-tool-drawer[open] > summary::after, .studio-thread-drawer[open] > summary::after { content: "−"; }
+  .studio-tool-list { display: grid; gap: 3px; margin-top: 5px; }
+  .studio-tool-list .studio-nav-button { padding-block: 6px; }
   .studio-nav-group { display: grid; gap: 5px; }
   .studio-nav-group h2 {
     margin: 0 5px 3px; color: var(--text-faint); font: 9px var(--mono);
@@ -242,6 +260,59 @@
     border: 1px solid var(--border); border-radius: 6px;
     padding: 5px 8px; font-family: var(--mono); font-size: 11.5px;
   }
+
+  /* ---------- Studio 1.0 product shell ---------- */
+  .operations-hero {
+    display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 18px; align-items: end;
+    padding: 20px 22px; margin-bottom: 14px; border: 1px solid #454035; border-radius: 10px;
+    background: linear-gradient(135deg, #27231d, #1c1a17 62%, #20261f);
+  }
+  .operations-kicker { color: var(--accent); font: 9px var(--mono); letter-spacing: 1.45px; text-transform: uppercase; }
+  .operations-hero h1 { margin: 6px 0 5px; font-size: clamp(24px,3vw,36px); letter-spacing: -1px; }
+  .operations-hero p { max-width: 690px; margin: 0; color: var(--text-dim); }
+  .operations-hero > button { min-width: 150px; }
+  .operations-attention {
+    display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center;
+    padding: 14px 16px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel);
+  }
+  .operations-attention strong, .operations-attention span { display: block; }
+  .operations-attention span { margin-top: 3px; color: var(--text-dim); font-size: 11.5px; }
+  .operations-attention[data-tone="attention"] { border-color: #73443d; background: #291d19; }
+  .operations-tools { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+  .operations-tool {
+    display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 5px 12px; min-height: 108px;
+    padding: 14px; text-align: left; background: var(--bg-panel); border-color: var(--border);
+  }
+  .operations-tool b { font-size: 14px; }
+  .operations-tool p { grid-column: 1/-1; margin: 0; color: var(--text-dim); font-size: 11.5px; line-height: 1.45; }
+  .operations-tool span { color: var(--text-faint); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .6px; }
+
+  .agent-capability-map {
+    position: relative; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px;
+    padding: 12px; margin-bottom: 16px; border: 1px solid #4f4633; border-radius: 10px;
+    background: radial-gradient(circle at 50% 48%, rgba(201,162,39,.11), transparent 28%), var(--bg-inset);
+  }
+  .agent-capability-core {
+    grid-column: 2; grid-row: 1 / span 2; align-self: stretch; display: grid; place-content: center; text-align: center;
+    min-height: 136px; padding: 14px; border: 1px solid #75633b; border-radius: 50%; background: #2f291d;
+  }
+  .agent-capability-core span { color: var(--accent); font: 8.5px var(--mono); text-transform: uppercase; letter-spacing: 1.2px; }
+  .agent-capability-core strong { margin: 3px 0; font-size: 20px; }
+  .agent-capability-core small { color: var(--text-dim); font-size: 10px; }
+  .agent-capability {
+    display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 2px 8px; min-height: 62px;
+    padding: 10px 11px; text-align: left; background: #24211c; border-color: #443d32;
+  }
+  .agent-capability b { font-size: 12px; }
+  .agent-capability small { grid-column: 1/-1; color: var(--text-faint); font-size: 9.5px; }
+  .agent-capability::after { content: "Add"; color: var(--text-faint); font: 8.5px var(--mono); text-transform: uppercase; }
+  .agent-capability[data-state="ready"] { border-color: #526248; background: #22291f; }
+  .agent-capability[data-state="ready"]::after { content: "Set"; color: var(--ok); }
+  .agent-capability:nth-of-type(1), .agent-capability:nth-of-type(2), .agent-capability:nth-of-type(3) { grid-column: 1; }
+  .agent-capability:nth-of-type(4), .agent-capability:nth-of-type(5), .agent-capability:nth-of-type(6) { grid-column: 3; }
+  .agent-capability:nth-of-type(1), .agent-capability:nth-of-type(4) { grid-row: 1; }
+  .agent-capability:nth-of-type(2), .agent-capability:nth-of-type(5) { grid-row: 2; }
+  .agent-capability:nth-of-type(3), .agent-capability:nth-of-type(6) { grid-row: 3; }
 
   /* ---------- main thread panel ---------- */
   #thread-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
@@ -1260,7 +1331,11 @@
   .home-hero-action { position: relative; z-index: 1; min-width: 190px; text-align: right; }
   .home-hero-action span { display: block; margin-bottom: 7px; color: var(--text-dim); font: 10px var(--mono); }
   .home-hero-action button { width: 100%; }
-  .home-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); gap: 14px; }
+  .home-system-details { padding: 0; overflow: hidden; }
+  .home-system-details > summary { padding: 13px 15px; color: var(--text-dim); cursor: pointer; font-weight: 650; }
+  .home-system-details > .home-panel-head, .home-system-details > .home-signals { margin-inline: 14px; }
+  .home-system-details > .home-signals { margin-bottom: 14px; }
+  .home-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); gap: 14px; align-items: start; }
   .home-panel { padding: 15px; }
   .home-panel-head { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 11px; }
   .home-panel-head h2 { margin: 0; font-size: 15px; }
@@ -1416,7 +1491,6 @@
   .agent-intent-card::after { content: ""; position: absolute; top: -21px; left: calc(50% - 3px); width: 7px; height: 7px; border: 1px solid #6fa8dc; border-radius: 50%; background: #151d23; }
   .agent-intent-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 9px; }
   .agent-intent-head b { color: #eef7ff; font-size: 12px; }
-  .agent-intent-state { color: #d4bf82; font: 700 8.5px var(--mono); letter-spacing: .55px; text-transform: uppercase; }
   .agent-intent-card label { margin-top: 7px; }
   .agent-intent-card label:first-of-type { margin-top: 0; }
   .agent-intent-card textarea { min-height: 76px; }
@@ -2484,6 +2558,12 @@
     .agent-intent-shell { grid-column: auto; padding-top: 0; }
     .agent-intent-shell::before, .agent-intent-card::before, .agent-intent-card::after { display: none; }
     .agent-intent-grid { grid-template-columns: 1fr; }
+    .operations-hero, .operations-attention { grid-template-columns: 1fr; align-items: start; }
+    .operations-hero > button { min-width: 0; justify-self: start; }
+    .operations-tools { grid-template-columns: 1fr; }
+    .agent-capability-map { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .agent-capability-core { grid-column: 1/-1; grid-row: 1; min-height: 94px; border-radius: 8px; }
+    .agent-capability:nth-of-type(n) { grid-column: auto; grid-row: auto; }
     .agent-intent-budget { grid-template-columns: 1fr; }
     .agent-binding-fields, .agent-binding-options { grid-template-columns: 1fr; }
     .agent-binding-order li { grid-template-columns: 24px minmax(0, 1fr); }
@@ -2717,6 +2797,13 @@
     .run-contract-pin:last-child { border-bottom: 0; }
   }
 
+  @media (max-width: 420px) {
+    .agent-capability-map { grid-template-columns: 1fr; }
+    .agent-capability-core { grid-column: 1; min-height: 84px; }
+    .agent-capability { min-height: 68px; }
+    .operations-hero, .operations-attention, .operations-tool { padding: 13px; }
+  }
+
   :is(button, input, select, textarea, summary):focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px;
   }
@@ -2803,39 +2890,34 @@
   <div id="body">
     <aside>
       <nav class="studio-nav" aria-label="Studio workspaces">
-        <section class="studio-nav-group" aria-labelledby="studio-nav-create">
-          <h2 id="studio-nav-create">Create</h2>
-          <button class="studio-nav-button nav-primary" id="btn-home-open" type="button"><b>Mission control</b></button>
-          <button class="studio-nav-button" id="btn-agents-open" type="button"><b>Agents</b><span id="agent-side-count">Not loaded</span></button>
-          <button class="studio-nav-button" id="btn-fabric-open" type="button"><b>Teams</b><span id="fabric-side-count">Not loaded</span></button>
-        </section>
-        <section class="studio-nav-group" aria-labelledby="studio-nav-improve">
-          <h2 id="studio-nav-improve">Improve</h2>
-          <button class="studio-nav-button" id="btn-memory-open" type="button"><b>Memory</b><span id="memory-side-count">Not loaded</span></button>
-          <button class="studio-nav-button" id="btn-learn-open" type="button"><b>Learning</b><span id="learn-side-count">Not loaded</span></button>
-          <button class="studio-nav-button" id="btn-registry-open" type="button"><b>Configuration</b><span id="registry-side-count">Not loaded</span></button>
-        </section>
-        <section class="studio-nav-group" aria-labelledby="studio-nav-operate">
-          <h2 id="studio-nav-operate">Operate</h2>
-          <button class="studio-nav-button" id="btn-automations-open" type="button"><b>Automations</b><span id="automations-side-count">Not loaded</span></button>
-          <button class="studio-nav-button" id="btn-schedules-open" type="button"><b>Schedules</b><span id="schedules-side-count">Not loaded</span></button>
-          <button class="studio-nav-button" id="btn-tasks-open" type="button"><b>Task queue</b></button>
+        <section class="studio-nav-primary" aria-label="Primary destinations">
+          <button class="studio-nav-button" id="btn-agents-open" type="button"><b>Agents</b><span id="agent-side-count"></span></button>
+          <button class="studio-nav-button" id="btn-home-open" type="button"><b>Work</b></button>
+          <button class="studio-nav-button" id="btn-operations-open" type="button"><b>Operations</b></button>
         </section>
       </nav>
+        <details class="studio-tool-drawer">
+          <summary>More workspaces</summary>
+          <div class="studio-tool-list">
+            <button class="studio-nav-button" id="btn-fabric-open" type="button"><b>Teams</b><span id="fabric-side-count">Not loaded</span></button>
+            <button class="studio-nav-button" id="btn-memory-open" type="button"><b>Memory</b><span id="memory-side-count">Not loaded</span></button>
+            <button class="studio-nav-button" id="btn-learn-open" type="button"><b>Learning</b><span id="learn-side-count">Not loaded</span></button>
+            <button class="studio-nav-button" id="btn-registry-open" type="button"><b>Configuration</b><span id="registry-side-count">Not loaded</span></button>
+            <button class="studio-nav-button" id="btn-automations-open" type="button"><b>Automations</b><span id="automations-side-count">Not loaded</span></button>
+            <button class="studio-nav-button" id="btn-schedules-open" type="button"><b>Schedules</b><span id="schedules-side-count">Not loaded</span></button>
+            <button class="studio-nav-button" id="btn-tasks-open" type="button"><b>Task queue</b></button>
+          </div>
+      </details>
 
-      <section class="studio-sidebar-section" aria-labelledby="studio-behaviors-title">
-        <h2 class="section" id="studio-behaviors-title">Start a thread</h2>
-        <div id="graph-list"><div class="empty">Connect to choose a behavior.</div></div>
-      </section>
-
-      <section class="studio-sidebar-section" aria-labelledby="studio-threads-title">
-        <h2 class="section" id="studio-threads-title">Recent threads</h2>
+      <details class="studio-sidebar-section studio-thread-drawer">
+        <summary id="studio-threads-title">Recent work</summary>
         <div id="thread-list"></div>
-        <div class="attach-row">
-          <input id="inp-attach" type="text" spellcheck="false" aria-label="Thread ID" placeholder="Thread ID">
-          <button class="small" id="btn-attach" type="button">Attach</button>
-        </div>
-      </section>
+        <div class="attach-row"><input id="inp-attach" type="text" spellcheck="false" aria-label="Thread ID" placeholder="Thread ID"><button class="small" id="btn-attach" type="button">Attach</button></div>
+      </details>
+      <details class="studio-sidebar-section studio-thread-drawer">
+        <summary id="studio-behaviors-title">Direct thread</summary>
+        <div id="graph-list"><div class="empty">Connect to choose a behavior.</div></div>
+      </details>
     </aside>
 
     <main id="main">
@@ -2853,7 +2935,8 @@
         </details>
         <span class="sr-only" id="studio-journey-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
       </section>
-      <div id="home-view" aria-labelledby="home-title"><div class="empty">Loading the Studio mission board.</div></div>
+      <div id="home-view" aria-labelledby="home-title"><div class="empty">Preparing Studio.</div></div>
+      <div id="operations-view" style="display:none" aria-labelledby="operations-title"><div class="empty">Loading operations.</div></div>
       <div class="empty" id="main-empty" style="display:none">Choose a Studio workspace or a local thread.</div>
 
       <div id="agents-view" style="display:none" aria-labelledby="agents-title">
@@ -2872,47 +2955,56 @@
 
         <div class="card" id="agent-create-panel" role="region" aria-labelledby="agent-create-title" style="display:none">
           <h2 class="section" id="agent-create-title" style="margin-top:0">Configure an agent</h2>
-          <div class="note tiny" id="agent-create-note">Shape the durable configuration Rusty stores, then review exactly what the runtime will honor.</div>
+          <div class="note tiny" id="agent-create-note">Design what the agent does, what it can use, and how its work should be delivered.</div>
           <div class="agent-copy-receipt" id="agent-copy-context" role="note" hidden></div>
           <div class="agent-workshop">
             <form class="agent-form" id="agent-create-form" novalidate>
               <span class="sr-only" id="agent-form-error" role="alert"></span>
+              <nav class="agent-capability-map" aria-label="Agent capability map">
+                <button class="agent-capability" type="button" data-agent-capability="purpose" data-agent-capability-target="inp-agent-description"><b>Purpose</b><small>Job and identity</small></button>
+                <button class="agent-capability" type="button" data-agent-capability="knowledge" data-agent-capability-target="sel-agent-memory-mode"><b>Knowledge</b><small>Memory and context</small></button>
+                <button class="agent-capability" type="button" data-agent-capability="tools" data-agent-capability-target="inp-agent-tools"><b>Tools</b><small>Actions and effects</small></button>
+                <div class="agent-capability-core"><span>Capability map</span><strong>Agent</strong><small id="agent-capability-summary">Start with its purpose</small></div>
+                <button class="agent-capability" type="button" data-agent-capability="model" data-agent-capability-target="inp-agent-model"><b>Model</b><small>Reasoning runtime</small></button>
+                <button class="agent-capability" type="button" data-agent-capability="output" data-agent-capability-target="sel-agent-output-mode"><b>Output</b><small>Result contract</small></button>
+                <button class="agent-capability" type="button" data-agent-capability="guardrails" data-agent-capability-target="sel-agent-approval"><b>Guardrails</b><small>Approval and limits</small></button>
+              </nav>
               <div class="agent-form-section"><span>01 · Purpose</span><b>What is this agent responsible for?</b></div>
               <label>Name <input id="inp-agent-name" type="text" autocomplete="off" maxlength="512" placeholder="Research coordinator"></label>
               <label>Tags <input id="inp-agent-tags" type="text" placeholder="research, production"><span class="field-help">Catalog labels only; they do not change execution.</span></label>
-              <label class="wide">Responsibility <textarea id="inp-agent-description" placeholder="Research a question and return a concise, sourced answer."></textarea><span class="field-help">A human-readable catalog description. The current runtime does not inject it as instructions.</span></label>
+              <label class="wide">Responsibility <textarea id="inp-agent-description" placeholder="Research a question and return a concise, sourced answer."></textarea><span class="field-help">Describe the job clearly enough that a teammate can choose the right agent.</span></label>
 
-              <div class="agent-form-section"><span>02 · Runtime</span><b>Which registered behavior runs it?</b></div>
-              <label>Behavior <select id="sel-agent-graph" aria-describedby="agent-graph-help"></select><span class="field-help" id="agent-graph-help">A registered graph binding enforced on every assistant run.</span></label>
-              <label>Step limit <input id="inp-agent-limit" type="number" min="0" step="1" inputmode="numeric" placeholder="Runtime default" aria-describedby="agent-limit-help"><span class="field-help" id="agent-limit-help">The only assistant config field the current server applies as a run default. Zero allows no graph steps.</span></label>
+              <div class="agent-form-section"><span>02 · Foundation</span><b>Choose its core behavior and execution limit.</b></div>
+              <label>Core behavior <select id="sel-agent-graph" aria-describedby="agent-graph-help"></select><span class="field-help" id="agent-graph-help">The execution pattern this agent follows on every run.</span></label>
+              <label>Step limit <input id="inp-agent-limit" type="number" min="0" step="1" inputmode="numeric" placeholder="Runtime default" aria-describedby="agent-limit-help"><span class="field-help" id="agent-limit-help">Maximum graph steps per run. Leave blank to use the deployment default.</span></label>
 
-              <div class="agent-form-section"><span>03 · Intent</span><b>What runtime capabilities should this agent require?</b></div>
+              <div class="agent-form-section"><span>03 · Capabilities</span><b>Choose its model, knowledge, tools, output, and guardrails.</b></div>
               <div class="agent-intent-shell" aria-describedby="agent-intent-truth">
                 <div class="agent-intent-grid">
                   <section class="agent-intent-card" aria-labelledby="agent-intent-model-title">
-                    <div class="agent-intent-head"><b id="agent-intent-model-title">Model</b><span class="agent-intent-state">portable intent</span></div>
+                    <div class="agent-intent-head"><b id="agent-intent-model-title">Model</b></div>
                     <label>Model binding <input id="inp-agent-model" type="text" maxlength="256" spellcheck="false" placeholder="provider/model or registry ref" aria-describedby="agent-model-help agent-intent-truth agent-intent-lock"><span class="field-help" id="agent-model-help">Use an identifier or registry reference, not a URL or credential. Secrets belong in a broker.</span></label>
                   </section>
                   <section class="agent-intent-card" aria-labelledby="agent-intent-tools-title">
-                    <div class="agent-intent-head"><b id="agent-intent-tools-title">Tools</b><span class="agent-intent-state">portable intent</span></div>
+                    <div class="agent-intent-head"><b id="agent-intent-tools-title">Tools</b></div>
                     <label>Tool contracts <textarea id="inp-agent-tools" maxlength="4096" spellcheck="false" placeholder="search | read_only&#10;publish | non_idempotent" aria-describedby="agent-tools-help agent-intent-truth agent-intent-lock"></textarea><span class="field-help" id="agent-tools-help">One <code>name | effect</code> per line. Effects use Rusty's replay-safety taxonomy.</span></label>
                   </section>
                   <section class="agent-intent-card" aria-labelledby="agent-intent-memory-title">
-                    <div class="agent-intent-head"><b id="agent-intent-memory-title">Memory</b><span class="agent-intent-state">portable intent</span></div>
+                    <div class="agent-intent-head"><b id="agent-intent-memory-title">Memory</b></div>
                     <label>Memory access <select id="sel-agent-memory-mode" aria-describedby="agent-intent-truth agent-intent-lock"><option value="none">No declared memory</option><option value="read_only">Read only</option><option value="read_write">Read and write</option></select></label>
                     <fieldset class="agent-intent-scopes" aria-describedby="agent-intent-truth agent-intent-lock"><legend>Allowed scopes</legend><label><input type="checkbox" data-agent-scope="run"> Run</label><label><input type="checkbox" data-agent-scope="agent"> Agent</label><label><input type="checkbox" data-agent-scope="team"> Team</label><label><input type="checkbox" data-agent-scope="user"> User</label><label><input type="checkbox" data-agent-scope="tenant"> Tenant</label></fieldset>
                   </section>
                   <section class="agent-intent-card" aria-labelledby="agent-intent-guard-title">
-                    <div class="agent-intent-head"><b id="agent-intent-guard-title">Guardrail</b><span class="agent-intent-state">portable intent</span></div>
+                    <div class="agent-intent-head"><b id="agent-intent-guard-title">Guardrail</b></div>
                     <label>Required approval boundary <select id="sel-agent-approval" aria-describedby="agent-approval-help agent-intent-truth agent-intent-lock"><option value="runtime_policy">Use runtime policy</option><option value="irreversible">Before irreversible effects</option><option value="external_effect">Before every external effect</option></select><span class="field-help" id="agent-approval-help">A declared requirement, not a browser-side permission grant.</span></label>
                   </section>
                   <section class="agent-intent-card" aria-labelledby="agent-intent-output-title">
-                    <div class="agent-intent-head"><b id="agent-intent-output-title">Output contract</b><span class="agent-intent-state">portable intent</span></div>
+                    <div class="agent-intent-head"><b id="agent-intent-output-title">Output contract</b></div>
                     <label>Required output <select id="sel-agent-output-mode" aria-describedby="agent-output-help agent-intent-truth agent-intent-lock"><option value="runtime_default">Use runtime default</option><option value="text">Text</option><option value="json_object">JSON object</option><option value="json_schema">Named JSON schema</option></select><span class="field-help" id="agent-output-help">Choose the shape consumers should receive. A named schema requires an identifier below.</span></label>
                     <label>Schema binding <input id="inp-agent-output-schema" type="text" maxlength="256" spellcheck="false" placeholder="registry/schema-v1" aria-describedby="agent-output-schema-help agent-intent-truth agent-intent-lock"><span class="field-help" id="agent-output-schema-help">A portable identifier or registry reference—not inline schema JSON, a URL, or a credential.</span></label>
                   </section>
                   <section class="agent-intent-card" aria-labelledby="agent-intent-budget-title">
-                    <div class="agent-intent-head"><b id="agent-intent-budget-title">Run budget</b><span class="agent-intent-state">portable intent</span></div>
+                    <div class="agent-intent-head"><b id="agent-intent-budget-title">Run budget</b></div>
                     <div class="agent-intent-budget">
                       <label>Model tokens <input id="inp-agent-budget-tokens" type="text" inputmode="numeric" maxlength="20" placeholder="Runtime default" aria-describedby="agent-budget-help agent-intent-truth agent-intent-lock"></label>
                       <label>Cost · USD <input id="inp-agent-budget-cost" type="text" inputmode="decimal" maxlength="16" placeholder="Runtime default" aria-describedby="agent-budget-help agent-intent-truth agent-intent-lock"></label>
@@ -2921,7 +3013,7 @@
                     <span class="field-help" id="agent-budget-help">Exact decimal strings avoid browser rounding. Blank keeps each runtime default; zero is an explicit zero budget.</span>
                   </section>
                   <section class="agent-intent-card agent-intent-binding" aria-labelledby="agent-intent-binding-title">
-                    <div class="agent-intent-head"><b id="agent-intent-binding-title">Governed run preset</b><span class="agent-intent-state">portable · admitted later</span></div>
+                    <div class="agent-intent-head"><b id="agent-intent-binding-title">Governed run preset</b></div>
                     <div class="agent-binding-fields">
                       <label>Environment tag <input id="inp-agent-binding-environment" type="text" maxlength="64" spellcheck="false" placeholder="Deployment default" aria-describedby="agent-binding-environment-help agent-intent-truth agent-intent-lock"><span class="field-help" id="agent-binding-environment-help">The server resolves this environment when a prepared run is admitted. Blank uses the deployment default or untagged surface.</span></label>
                       <span class="field-help">Choose prompt, tool-contract, and model-settings artifacts from the connected catalog. Selection order is preserved in the assistant manifest.</span>
@@ -2932,11 +3024,11 @@
                     <div class="field-help" id="agent-binding-help">Studio stores at most 120 exact artifact surfaces. Creating or versioning the assistant does not resolve pointers. Prepare governed run opens the selected thread planner, where current catalog drift and a fresh one-run acknowledgement are required.</div>
                   </section>
                 </div>
-                <div class="agent-intent-truth" id="agent-intent-truth"><b>Execution boundary</b><span>The server stores this versioned intent exactly. Model, tool, memory, approval, output, and budget fields remain declarations. A governed run preset becomes executable only after Studio prepares a thread and the existing admission planner rechecks the current catalog, shows exact order, and collects a fresh one-run acknowledgement.</span></div>
+                <div class="agent-intent-truth" id="agent-intent-truth"><b>What happens at run time</b><span>These requirements travel with the agent. Before governed work starts, Studio shows the exact current bindings and asks for one fresh acknowledgement.</span></div>
                 <div class="agent-intent-lock" id="agent-intent-lock" role="note" hidden></div>
               </div>
 
-              <div class="agent-form-section"><span>04 · Portability</span><b>Keep the exact configuration reviewable.</b></div>
+              <div class="agent-form-section"><span>04 · Review</span><b>Review or move the exact configuration.</b></div>
               <div class="agent-manifest-tools">
                 <button type="button" class="small" id="btn-agent-import">Import manifest</button>
                 <button type="button" class="small" id="btn-agent-export-draft">Export draft</button>
@@ -3573,11 +3665,11 @@
       <div id="tasks-view" style="display:none" aria-labelledby="tasks-title">
         <div class="card">
           <h2 class="section" id="tasks-title" tabindex="-1" style="margin-top:0">
-            Durable tasks
-            <button class="small" id="btn-tasks-refresh" style="float:right">refresh</button>
+            Task queue
+            <button class="small" id="btn-tasks-refresh" style="float:right">Refresh</button>
           </h2>
           <div class="rec-controls">
-            <span class="muted tiny">status:</span>
+            <span class="muted tiny">Status</span>
             <select id="sel-task-status">
               <option value="">all</option>
               <option value="queued">queued</option>
@@ -3587,7 +3679,7 @@
               <option value="dead">dead (DLQ)</option>
               <option value="cancelled">cancelled</option>
             </select>
-            <span class="muted tiny">select a task for its envelope, attempts, and lease</span>
+            <span class="muted tiny">Choose a task to inspect its history and current owner.</span>
             <span class="muted tiny" id="tasks-statusline"></span>
           </div>
           <div class="rec-split">
@@ -3604,7 +3696,7 @@
 <script>
 "use strict";
 /* ============================================================
- * Rusty Studio — zero-build debug UI for Rusty Server (`rusty-server`).
+ * Rusty Studio — single-file product client for Rusty Server (`rusty-server`).
  * Single file, no framework. State that survives reloads lives in
  * localStorage under the `ags:` prefix.
  * ========================================================== */
@@ -3753,6 +3845,7 @@ const store = {
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, evidenceState }
   view: "home",        // active Studio workspace
+  operationsLoading: false, // derived overview load; specialist stores remain authoritative
   threadStage: "run",  // one calm thread surface at a time: run, trace, or evaluate
   qualityTool: "case", // one evaluation workspace at a time
   journeyPhase: "",    // optional Run-workspace focus: run, inspect, or evaluate
@@ -3844,7 +3937,7 @@ const store = {
  * one exact thread from the server journal before Studio opens Recorder.
  * ------------------------------------------------------------------------- */
 
-const NAVIGATION_VIEWS = new Set(["home", "agents", "thread", "fabric", "memory", "learn", "registry", "automations", "schedules", "tasks"]);
+const NAVIGATION_VIEWS = new Set(["home", "agents", "operations", "thread", "fabric", "memory", "learn", "registry", "automations", "schedules", "tasks"]);
 const NAVIGATION_KEYS = ["studio", "agent", "thread", "run", "automation", "schedule"];
 
 function navigationSafeId(value) {
@@ -4285,7 +4378,7 @@ function journeyRender() {
   const rail = $("studio-journey-rail"), context = $("studio-journey-context"), next = $("studio-journey-next"), label = $("studio-journey-label");
   const missionBody = $("studio-mission-body"), missionProgress = $("studio-mission-progress");
   if (!panel || !rail || !context || !next || !label || typeof panel.contains !== "function" || typeof rail.querySelectorAll !== "function") return null;
-  panel.hidden = store.view === "home" || store.view === "thread";
+  panel.hidden = ["home", "thread", "agents", "operations"].includes(store.view);
   if (panel.hidden) return journeySnapshot(store);
   const active = document.activeElement;
   const focusedStage = active && panel.contains(active) && active.getAttribute ? active.getAttribute("data-journey-stage") : "";
@@ -4853,7 +4946,7 @@ async function navigationApplyPending(options = {}) {
     scheduleSelect(route.schedule, false);
     return navigationFinish(`Opened schedule ${shortId(route.schedule)}`, options.focus === false ? null : "schedules-title");
   }
-  const open = { home: openHome, fabric: openFabric, memory: openMemory, learn: openLearn, registry: openRegistry, tasks: openTasks }[route.view];
+  const open = { home: openHome, operations: openOperations, fabric: openFabric, memory: openMemory, learn: openLearn, registry: openRegistry, tasks: openTasks }[route.view];
   if (!open) return false;
   open(options.focus !== false);
   return navigationFinish(`Opened the ${route.view} workspace`, null);
@@ -5874,6 +5967,13 @@ function homeAttentionRoute(record) {
 
 function homeHtml(snapshot) {
   const connected = snapshot.connected;
+  if (!connected) {
+    return `<section class="home-hero home-first-run"><div><span class="home-kicker">Rusty Studio</span>` +
+      `<h1 id="home-title" tabindex="-1">Build an agent that can do real work</h1>` +
+      `<p>Connect your Rusty server, shape the agent, then give it a goal and follow the result in one workspace.</p></div>` +
+      `<div class="home-hero-action"><span>Start with the server you control</span>` +
+      `<button class="primary" type="button" data-home-action="connect">Connect Rusty</button></div></section>`;
+  }
   const latest = snapshot.latest;
   let continueHtml;
   if (!latest) {
@@ -5909,19 +6009,18 @@ function homeHtml(snapshot) {
   const teamState = snapshot.team_known
     ? `${snapshot.blueprint_count} blueprint${snapshot.blueprint_count === 1 ? "" : "s"}`
     : snapshot.team_loading ? "Loading…" : connected ? "Needs refresh" : "Not loaded";
-  return `<section class="home-hero"><div><span class="home-kicker">Mission control</span>` +
+  return `<section class="home-hero"><div><span class="home-kicker">Work</span>` +
     `<h1 id="home-title" tabindex="-1">${homeTitle}</h1>` +
     `<p>${homeCopy}</p></div>` +
     `<div class="home-hero-action"><span>${connected ? `Connected · ${snapshot.graph_count} behavior${snapshot.graph_count === 1 ? "" : "s"}` : "Connect to begin"}</span>` +
     `<button class="primary" type="button" data-home-action="${snapshot.next.action}">${escapeHtml(snapshot.next.label)}</button></div></section>` +
-    `<div class="home-grid"><section class="card home-panel" aria-labelledby="home-system-title"><div class="home-panel-head"><h2 id="home-system-title">Your system</h2><span>now</span></div>` +
-      `<div class="home-signals">` +
+    `<div class="home-grid"><section class="card home-panel" aria-labelledby="home-continue-title"><div class="home-panel-head"><h2 id="home-continue-title">Recent work</h2><span>${snapshot.thread_count} thread${snapshot.thread_count === 1 ? "" : "s"}</span></div>${continueHtml}</section>` +
+      `<details class="card home-panel home-system-details"><summary id="home-system-title">Workspace status</summary><div class="home-panel-head"><h2>Your system</h2><span>on demand</span></div><div class="home-signals">` +
         `<button class="home-signal" type="button" data-home-action="${snapshot.assistant_unavailable_count ? "unavailable-agents" : "agents"}" aria-label="Agents: ${snapshot.assistant_count || 0} active, ${snapshot.assistant_archived_count || 0} archived, ${snapshot.assistant_unavailable_count || 0} unavailable"><b>${snapshot.assistant_known ? snapshot.assistant_count : "—"}</b><span>Agents</span><small>${agentState}</small></button>` +
         `<button class="home-signal" type="button" data-home-action="fabric"><b>${snapshot.team_known ? snapshot.team_count : "—"}</b><span>Teams</span><small>${teamState}</small></button>` +
         `<button class="home-signal" type="button" data-home-action="continue"><b>${snapshot.run_count}</b><span>Runs</span><small>${snapshot.attention_count ? `${snapshot.attention_count} need attention` : "No open issues"}</small></button>` +
         `<button class="home-signal" type="button" data-home-action="memory"><b>${memoryValue}</b><span>Memory</span><small>${snapshot.memory_known ? escapeHtml(memoryNote) : "Not loaded"}</small></button>` +
-      `</div></section>` +
-      `<section class="card home-panel" aria-labelledby="home-continue-title"><div class="home-panel-head"><h2 id="home-continue-title">Recent work</h2><span>${snapshot.thread_count} thread${snapshot.thread_count === 1 ? "" : "s"}</span></div>${continueHtml}</section></div>`;
+      `</div></details></div>`;
 }
 
 function homeFocusIdentity(view) {
@@ -5963,6 +6062,76 @@ function openHome(focus = true) {
   renderMain();
   $("main").scrollTop = 0;
   if (focus) $("home-title")?.focus({ preventScroll: true });
+}
+
+function operationsSnapshot(state = store) {
+  const connected = Boolean(state && state.conn && state.info);
+  const tasks = state && state.tasks;
+  const automations = state && state.automations;
+  const schedules = state && state.schedules;
+  const taskKnown = Boolean(tasks && !tasks.loading && !tasks.error && Array.isArray(tasks.list));
+  const automationKnown = Boolean(automations && !automations.loading && !automations.error && Array.isArray(automations.list));
+  const scheduleKnown = Boolean(schedules && !schedules.loading && !schedules.error && Array.isArray(schedules.list));
+  const failedTasks = taskKnown ? tasks.list.filter((item) => item && ["failed", "error", "dead_letter"].includes(String(item.status || ""))).length : 0;
+  const deadLetters = automationKnown && Array.isArray(automations.deadLetter) ? automations.deadLetter.length : 0;
+  const attention = failedTasks + deadLetters;
+  const attentionAction = failedTasks ? "tasks" : deadLetters ? "automations" : "";
+  return {
+    connected, loading: Boolean(state && state.operationsLoading), known: Number(taskKnown) + Number(automationKnown) + Number(scheduleKnown),
+    attention, attentionAction, failedTasks, deadLetters,
+    tools: [
+      { key: "automations", label: "Automations", count: automationKnown ? automations.list.length : null, copy: "Start work from signed external events and review failed deliveries." },
+      { key: "schedules", label: "Schedules", count: scheduleKnown ? schedules.list.length : null, copy: "Run recurring work and change cadence only when the operation requires it." },
+      { key: "tasks", label: "Task queue", count: taskKnown ? tasks.list.length : null, copy: "Inspect durable work that is waiting, running, or needs intervention." },
+      { key: "memory", label: "Memory", count: null, copy: "Review conflicts, corrections, and retained context for active agents." },
+      { key: "fabric", label: "Teams", count: null, copy: "Coordinate durable agents when one agent is not enough." },
+    ],
+  };
+}
+
+function operationsHtml(snapshot) {
+  const state = snapshot || operationsSnapshot({});
+  const status = !state.connected ? { tone: "", title: "Connect to manage operations", copy: "Operations appear when a verified Rusty server is available." }
+    : state.attention ? { tone: "attention", title: `${state.attention} item${state.attention === 1 ? "" : "s"} need attention`, copy: `${state.failedTasks} failed task${state.failedTasks === 1 ? "" : "s"} · ${state.deadLetters} failed automation event${state.deadLetters === 1 ? "" : "s"}` }
+      : state.known === 3 ? { tone: "", title: "No loaded failure evidence", copy: "Open a specialist tool for its current authoritative state." }
+        : { tone: "", title: state.loading ? "Checking operational state" : "Operational state is not loaded", copy: "Load current queues, schedules, and automations before relying on this overview." };
+  return `<section class="operations-hero"><div><span class="operations-kicker">Operations</span><h1 id="operations-title" tabindex="-1">Intervene only when work needs you</h1><p>Routine agent work stays in Work. Use these tools for failures, recurring execution, governance, and multi-agent coordination.</p></div>` +
+    (!state.connected ? `<button class="primary" type="button" data-operations-action="connect">Connect a server</button>` : `<button type="button" data-operations-action="refresh">Refresh overview</button>`) + `</section>` +
+    `<section class="operations-attention" data-tone="${status.tone}" aria-live="polite"><div><strong>${escapeHtml(status.title)}</strong><span>${escapeHtml(status.copy)}</span></div>` +
+    (state.attention ? `<button class="primary" type="button" data-operations-action="${state.attentionAction}">Review exceptions</button>` : "") + `</section>` +
+    `<section class="operations-tools" aria-label="Operations tools">${state.tools.map((tool) => `<button class="operations-tool" type="button" data-operations-action="${tool.key}"><b>${tool.label}</b><span>${tool.count === null ? "Open" : `${tool.count} known`}</span><p>${tool.copy}</p></button>`).join("")}</section>`;
+}
+
+function operationsRender() {
+  const view = $("operations-view");
+  if (view) view.innerHTML = operationsHtml(operationsSnapshot(store));
+}
+
+async function operationsLoad() {
+  if (!store.conn || store.operationsLoading) return false;
+  store.operationsLoading = true;
+  operationsRender();
+  await Promise.allSettled([tasksLoad(true), automationsLoad(true), schedulesLoad(true)]);
+  store.operationsLoading = false;
+  if (store.view === "operations") operationsRender();
+  return true;
+}
+
+function openOperations(focus = true) {
+  navigationCancelPending("operations");
+  store.view = "operations";
+  renderMain();
+  $("main").scrollTop = 0;
+  if (focus) $("operations-title")?.focus({ preventScroll: true });
+}
+
+function operationsNavigate(action) {
+  const routes = { automations: openAutomations, schedules: openSchedules, tasks: openTasks, memory: openMemory, learn: openLearn, fabric: openFabric };
+  if (action === "connect") { connectionOpen(); return true; }
+  if (action === "refresh") { operationsLoad(); return true; }
+  if (!routes[action]) return false;
+  routes[action]();
+  return true;
 }
 
 function homeNavigate(action, id, owner) {
@@ -6358,6 +6527,7 @@ function connectionResetWorkspace() {
   store.agentsUnsupported = false;
   store.agentFocusRecord = null;
   store.tasks = null;
+  store.operationsLoading = false;
   store.tasksUnsupported = false;
   store.runSessions = Object.create(null);
   store.threadStage = "run";
@@ -6728,9 +6898,9 @@ function renderThreads() {
 
 function studioNavRender() {
   const activeByView = {
-    home: "btn-home-open", agents: "btn-agents-open", fabric: "btn-fabric-open",
-    memory: "btn-memory-open", learn: "btn-learn-open", registry: "btn-registry-open",
-    automations: "btn-automations-open", schedules: "btn-schedules-open", tasks: "btn-tasks-open",
+    home: "btn-home-open", thread: "btn-home-open", agents: "btn-agents-open", operations: "btn-operations-open",
+    fabric: "btn-operations-open", memory: "btn-operations-open", learn: "btn-operations-open", registry: "btn-operations-open",
+    automations: "btn-operations-open", schedules: "btn-operations-open", tasks: "btn-operations-open",
   };
   const activeId = activeByView[store.view] || "";
   document.querySelectorAll(".studio-nav-button").forEach((button) => {
@@ -6825,6 +6995,7 @@ function renderMain(options = {}) {
   studioNavRender();
   journeyRender();
   const home = store.view === "home";
+  const operations = store.view === "operations";
   const tasks = store.view === "tasks";
   const agents = store.view === "agents";
   const fabric = store.view === "fabric";
@@ -6846,6 +7017,7 @@ function renderMain(options = {}) {
     store.memoryFollowTimer = null;
   }
   $("home-view").style.display = home ? "block" : "none";
+  $("operations-view").style.display = operations ? "block" : "none";
   $("tasks-view").style.display = tasks ? "block" : "none";
   $("agents-view").style.display = agents ? "block" : "none";
   $("fabric-view").style.display = fabric ? "block" : "none";
@@ -6855,12 +7027,19 @@ function renderMain(options = {}) {
   $("automations-view").style.display = automations ? "block" : "none";
   $("schedules-view").style.display = schedules ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && !schedules && !t ? "block" : "none";
-  $("thread-view").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && !schedules && t ? "block" : "none";
+  $("main-empty").style.display = !home && !operations && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && !schedules && !t ? "block" : "none";
+  $("thread-view").style.display = !home && !operations && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && !schedules && t ? "block" : "none";
   if (home) {
     stopPoll();
     abortStream();
     homeRender();
+    return;
+  }
+  if (operations) {
+    stopPoll();
+    abortStream();
+    operationsRender();
+    if (store.conn && !store.operationsLoading && (!store.tasks || !store.automations || !store.schedules)) operationsLoad();
     return;
   }
   if (tasks) {
@@ -14547,8 +14726,7 @@ function agentDetailHtml(agent, readiness, testRun, runHistory, info) {
 
 function agentsUpdateSidebar() {
   const el = $("agent-side-count");
-  if (!store.conn) { el.textContent = "Offline"; return; }
-  if (store.agentsUnsupported) { el.textContent = "Unavailable"; return; }
+  if (!store.conn || store.agentsUnsupported) { el.textContent = ""; return; }
   const list = store.agents && store.agents.list || [];
   const active = list.filter((agent) => agentLifecycleState(agent) === "active").length;
   const archived = list.filter((agent) => agentLifecycleState(agent) === "archived").length;
@@ -15168,6 +15346,34 @@ function agentFormFields() {
   };
 }
 
+function agentCapabilityMapState(fields) {
+  const source = fields && typeof fields === "object" ? fields : {};
+  const states = {
+    purpose: Boolean(String(source.name || "").trim() || String(source.description || "").trim()),
+    model: Boolean(String(source.model || "").trim()),
+    knowledge: String(source.memoryMode || "none") !== "none" || (Array.isArray(source.bindingSurfaces) && source.bindingSurfaces.length > 0),
+    tools: Boolean(String(source.tools || "").trim()),
+    output: String(source.outputMode || "runtime_default") !== "runtime_default" || Boolean(String(source.outputSchema || "").trim()),
+    guardrails: String(source.approval || "runtime_policy") !== "runtime_policy" ||
+      [source.budgetTokens, source.budgetCost, source.budgetLatency].some((value) => Boolean(String(value || "").trim())),
+  };
+  const ready = Object.values(states).filter(Boolean).length;
+  return { states, ready, total: Object.keys(states).length,
+    summary: ready ? `${ready} of ${Object.keys(states).length} capabilities shaped` : "Start with its purpose" };
+}
+
+function agentCapabilityMapRender(fields) {
+  const root = document.querySelector(".agent-capability-map");
+  if (!root) return null;
+  const state = agentCapabilityMapState(fields || agentFormFields());
+  root.querySelectorAll("[data-agent-capability]").forEach((button) => {
+    button.dataset.state = state.states[button.getAttribute("data-agent-capability")] ? "ready" : "open";
+  });
+  const summary = $("agent-capability-summary");
+  if (summary) summary.textContent = state.summary;
+  return state;
+}
+
 function agentPopulateDraft(draft) {
   const value = draft && typeof draft === "object" ? draft : {};
   $("inp-agent-name").value = value.name || "";
@@ -15332,6 +15538,7 @@ function agentDraftRecord() {
 }
 
 function agentRefreshContract() {
+  agentCapabilityMapRender();
   let record;
   let draftError = "";
   try { record = agentDraftRecord(); }
@@ -24536,9 +24743,7 @@ function taskDetailHtml(task) {
 function tasksErrorHtml(status, body) {
   const msg = escapeHtml((body && body.message) || `HTTP ${status || "?"}`);
   if (status === 404 && !(body && body.error)) {
-    return `<div class="note">This server build has no <code>/tasks</code> routes yet — the durable ` +
-      `task queue lands with the R0.6 server wave. Rebuild rusty-server from the R0.6 branch ` +
-      `to use this view.</div>`;
+    return `<div class="note">Task queue is unavailable on this server. Connect a deployment that supports durable work to use this tool.</div>`;
   }
   return `<div class="note">${msg}</div>`;
 }
@@ -24862,6 +25067,11 @@ function init() {
     homeNavigate(target.getAttribute("data-home-action"), target.getAttribute("data-home-id") || "",
       target.getAttribute("data-home-owner") || "");
   });
+  $("btn-operations-open").onclick = () => openOperations();
+  $("operations-view").addEventListener("click", (event) => {
+    const target = event.target.closest("[data-operations-action]");
+    if (target) operationsNavigate(target.getAttribute("data-operations-action"));
+  });
   $("btn-agents-open").onclick = openAgents;
   $("btn-agents-refresh").onclick = () => agentsLoad(false);
   $("inp-agent-search").addEventListener("input", agentsRender);
@@ -24908,6 +25118,13 @@ function init() {
   });
   $("btn-agent-binding-refresh").onclick = agentBindingRefreshCatalog;
   $("agent-create-form").addEventListener("click", (event) => {
+    const capability = event.target.closest("[data-agent-capability-target]");
+    if (capability) {
+      const target = $(capability.getAttribute("data-agent-capability-target"));
+      target?.scrollIntoView({ block: "center", behavior: "smooth" });
+      target?.focus({ preventScroll: true });
+      return;
+    }
     const action = event.target.closest("[data-agent-binding-move],[data-agent-binding-remove]");
     if (!action) return;
     const surface = action.getAttribute("data-agent-binding-target");

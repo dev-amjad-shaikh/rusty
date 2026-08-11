@@ -1,0 +1,38 @@
+.loading { min-height: 220px; display: grid; place-items: center; color: var(--text-muted); }
+.attention { min-height: 220px; padding: 28px; border: 1px solid var(--line); border-radius: 16px; background: radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--danger) 8%, transparent), transparent 35%), var(--surface-1); box-shadow: var(--shadow); }
+.attention > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.attention h2 { margin: 5px 0 0; font-size: 25px; letter-spacing: -.04em; }
+.attention p { color: var(--text-muted); line-height: 1.55; }
+.unknown, .observed { max-width: 320px; padding: 7px 10px; border-radius: 999px; font-size: 11px; line-height: 1.35; }
+.unknown { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--warning); }
+.observed { background: color-mix(in srgb, var(--success) 10%, transparent); color: var(--success); }
+.attentionList { display: grid; gap: 8px; margin: 24px 0 0; padding: 0; list-style: none; }
+.attentionList li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 82%, transparent); }
+.attentionList b { font-size: 13px; }
+.attentionList p { margin: 3px 0 4px; overflow-wrap: anywhere; }
+.attentionList small { color: var(--text-faint); }
+.attentionList button { min-height: 36px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; }
+.attentionList button:hover { background: var(--surface-3); }
+.severity { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); font-weight: 800; }
+.clearCopy { max-width: 600px; margin: 28px 0 0; }
+.evidence { margin-top: 12px; padding: 24px 28px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-2); }
+.evidenceHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.evidence h2 { margin: 5px 0 0; font-size: 20px; }
+.evidence > p { color: var(--text-muted); overflow-wrap: anywhere; }
+.evidence dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 20px 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--line); }
+.evidence dl div { min-width: 0; padding: 11px 13px; background: var(--surface-1); }
+.evidence dt { margin-bottom: 4px; color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .09em; }
+.evidence dd { margin: 0; font: 11px/1.45 var(--font-mono); overflow-wrap: anywhere; }
+.noRun { max-width: 620px; font-size: 12px; }
+.systems { margin-top: 28px; }
+.systemsHead { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 12px; }
+.systemsHead h2 { margin: 0; font-size: 17px; }
+.systemsHead span { color: var(--text-faint); font-size: 10px; }
+.systemGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.systemCard { position: relative; min-height: 112px; display: grid; align-content: start; gap: 8px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-1); color: var(--text); text-decoration: none; }
+.systemCard:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.systemCard b { font-size: 12px; }
+.systemCard span { max-width: calc(100% - 32px); color: var(--text-muted); font-size: 10px; line-height: 1.45; }
+.systemCard i { position: absolute; right: 13px; bottom: 11px; color: var(--text-faint); font-style: normal; }
+@media (max-width: 760px) { .attention > header, .evidenceHead { align-items: flex-start; flex-direction: column; } .attentionList li { grid-template-columns: auto minmax(0, 1fr); } .attentionList button { grid-column: 2; justify-self: start; } .evidence dl { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .attention { min-height: 200px; padding: 22px 17px; } .systemsHead { align-items: flex-start; flex-direction: column; } .systemGrid { grid-template-columns: 1fr; } .systemCard { min-height: 90px; } .evidence { padding: 20px 17px; } }

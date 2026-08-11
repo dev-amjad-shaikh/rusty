@@ -575,29 +575,31 @@ If a required server contract is actively changing, work proceeds on the highest
 
 ## Experience architecture
 
-The current zero-build Studio proved the contracts quickly. The next stage should preserve its instant local launch while making the UI maintainable.
+The original zero-build Studio proved the contracts quickly. Studio 1.0 now uses a typed component architecture while preserving an instant local launch through committed static assets. The old console is an advanced migration surface, not the default product.
 
-Target architecture:
+Current architecture:
 
 - Static, self-hostable application served by `rusty-agent-server` or the existing local proxy.
-- Framework choice made only after a short migration spike; no runtime dependency is added merely for styling.
-- Feature modules aligned to workspace surfaces, with a shared API client, state model, router, design tokens, and test utilities.
+- React 19, TypeScript, Vite, TanStack Router, TanStack Query, Zod, Zustand, and CSS modules, with every dependency pinned.
+- Feature modules aligned to Agents, Work, and Operations, with a shared API client, state model, router, design tokens, and test utilities.
 - A versioned capabilities document exposed by `GET /info`, covering supported routes, feature-contract versions, optional evaluators, authentication mode, and service limits. The current information response is insufficient for reliable negotiation and must be extended before Studio relies on it.
 - Generated or hand-validated wire types pinned to server contracts.
 - URL-addressable views are delivered for workspaces, catalog agents and automations, remembered threads,
   and server-corroborated runs. Version, experiment, candidate, and deployment routes remain.
 - Local preferences separated from durable platform state; browser storage never masquerades as the source of truth.
 - Progressive loading, cancellable requests, bounded polling/stream reconnect, and explicit stale-data indicators.
-- Sensitive values redacted by default. Local Studio keeps them in memory unless the user explicitly chooses persistence after a warning; deployed Studio uses a server-side session or equivalent credential boundary.
+- Exact trace payloads stay behind a deliberate disclosure with a sensitive-data warning and bounded preview.
+  Secret-aware field redaction still requires a server-supported classification contract; it is a target, not a
+  current guarantee. Access keys remain in page memory.
 
-The migration should happen incrementally behind the existing local launch command. A rewrite that pauses product delivery is not a milestone.
+Migration continues behind the existing local launch command. A legacy workflow leaves `/advanced/legacy` only after the typed feature has strict contract tests, browser proof, and parity for its safety invariants.
 
 ## Visual and interaction direction
 
 Rusty should feel like an instrument for operating a live system: precise, grounded, and calm under failure.
 
 - Preserve the current industrial rust/amber identity, but reserve bright color for state and risk rather than decoration.
-- Use the evidence rail as the signature element across Build, Run, Evaluate, and Learn.
+- Use the capability map as the signature creation element and the evidence rail as the signature across Run, Evaluate, and Learn.
 - Prefer readable topology, causal paths, and state transitions over decorative node canvases.
 - Keep dense evidence available without making the default path feel like an operations console.
 - Motion communicates execution, transfer, and state change; reduced-motion users receive an equivalent static state.
@@ -664,4 +666,5 @@ Completing one slice never means the Studio roadmap is complete. Roadmap status 
 | Learning appears after evaluation in the primary journey | Rusty's governing rule is replay and evidence before promotion |
 | Local-first remains a release requirement | It is a practical adoption advantage and keeps private agent data under user control |
 | Architecture migration is incremental | Product progress and verification must continue while maintainability improves |
+| Studio has three primary destinations | Agents, Work, and Operations match the user's mental model; specialist platform surfaces remain contextual tools rather than equal navigation choices |
 | Signed proof is narrower than quality or external truth | A cryptographic chain can establish evidence integrity and local signer provenance without overstating model correctness, provider honesty, or remote attestation |
