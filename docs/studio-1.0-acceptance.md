@@ -22,7 +22,7 @@ Studio 1.0 is ready when the product reads as three primary destinations — **A
 
 ## 2. Test results
 
-Run on `feat/studio-1.0-experience-acceptance` against `c42e255` (current `main`).
+### 2.1 Against current `main` (`c42e255`)
 
 ```
 FAIL: 7 failed, 26 passed
@@ -39,6 +39,23 @@ Failing assertions:
 5. `v1 disconnected: the rendered view exposes exactly one call-to-action` — disconnected view renders a dashboard (Mission control, Your system, Recent work) with multiple signal buttons.
 6. `v1 disconnected: no dashboard or status commentary` — contains "Mission control", "Your system", "Recent work".
 7. `v1 operations: operational tools are not equal top-level destinations` — Automations, Schedules, Task queue are currently top-level nav buttons.
+
+### 2.2 Against the in-progress `feat/studio-product-shell` implementation
+
+```
+PASS: 33 Studio 1.0 experience assertions
+```
+
+The acceptance suite passes against Codex's local product-shell branch. The implementation introduces:
+
+- `studio-nav-primary` with exactly **Agents / Work / Operations**.
+- `studio-tool-drawer` details that keeps specialist workspaces reachable but not equal.
+- A disconnected Work view that offers one `Connect a server` action.
+- An `agentCapabilityMapState` / capability-map UI that frames agent creation as purpose, knowledge, model, tools, output, guardrails.
+- An `operationsSnapshot` / `operationsHtml` path that surfaces attention-first failures and keeps routine tools secondary.
+- No release-number or endpoint path narration in primary chrome.
+
+Remaining item for the implementation stream: `test-home.mjs` needs a one-line wording update because the Home/Work onboarding copy changed from "Create your first agent" to the Work-first framing. This is expected fallout from the shell redesign and is owned by the product-shell stream.
 
 ## 3. Five most damaging experience gaps
 
