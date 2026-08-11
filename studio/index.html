@@ -583,6 +583,68 @@
   .automation-replay label input { width:auto; margin-top:1px; }
   .automation-replay-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:9px; }
 
+  /* ---------- schedule desk ---------- */
+  .schedule-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
+  .schedule-head h1 { margin:0 0 4px; }
+  .schedule-head p { margin:0; max-width:760px; color:var(--text-dim); font-size:12px; line-height:1.5; }
+  .schedule-head-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+  .schedule-rhythm { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin-bottom:14px; border:1px solid #514936; border-radius:9px; overflow:hidden; background:#1b1915; }
+  .schedule-rhythm-step { position:relative; min-width:0; padding:14px 14px 14px 39px; border-right:1px solid #423b2d; }
+  .schedule-rhythm-step:last-child { border-right:0; }
+  .schedule-rhythm-step::before { content:""; position:absolute; left:15px; top:15px; width:9px; height:9px; border:1px solid #d1a55f; border-radius:2px; background:#5c4525; box-shadow:0 12px 0 -3px #8d744d,0 22px 0 -3px #5a5140; }
+  .schedule-rhythm-step b,.schedule-rhythm-step span { display:block; }
+  .schedule-rhythm-step b { color:#eadfc9; font-size:11px; }
+  .schedule-rhythm-step span { margin-top:3px; color:var(--text-faint); font-size:10px; line-height:1.4; }
+  .schedule-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+  .schedule-summary div { padding:10px 11px; border:1px solid var(--border); border-radius:7px; background:var(--bg-raised); }
+  .schedule-summary b,.schedule-summary span { display:block; }
+  .schedule-summary b { min-width:0; overflow-wrap:anywhere; color:#e7d9bc; font:700 18px var(--mono); }
+  .schedule-summary span { margin-top:2px; color:var(--text-faint); font-size:10px; }
+  .schedule-compose { margin-bottom:14px; border-color:#554a34; background:linear-gradient(145deg,#282319,#1b1915); }
+  .schedule-compose[hidden] { display:none; }
+  .schedule-compose-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px; }
+  .schedule-compose-head h2 { margin:0 0 3px; font-size:16px; }
+  .schedule-compose-head p { margin:0; color:var(--text-dim); font-size:10.5px; }
+  .schedule-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .schedule-form label,.schedule-form fieldset { min-width:0; color:var(--text-dim); font-size:10.5px; }
+  .schedule-form label { display:grid; gap:4px; }
+  .schedule-form .wide,.schedule-form-actions,.schedule-form-error { grid-column:1/-1; }
+  .schedule-mode { display:flex; gap:12px; align-items:center; margin:0; padding:8px 10px; border:1px solid var(--border); border-radius:6px; }
+  .schedule-mode label { display:flex; grid-auto-flow:column; align-items:center; gap:6px; }
+  .schedule-mode input { width:auto; }
+  .schedule-interval-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(120px,.45fr); gap:7px; }
+  .schedule-form textarea { min-height:120px; resize:vertical; font-family:var(--mono); }
+  .schedule-form-actions { display:flex; justify-content:flex-end; gap:8px; align-items:center; flex-wrap:wrap; }
+  .schedule-form-error { border-left-color:var(--err); }
+  .schedule-toolbar { display:grid; grid-template-columns:minmax(220px,1fr) minmax(170px,.4fr) auto; align-items:end; gap:8px; margin-bottom:10px; }
+  .schedule-toolbar label { display:grid; gap:4px; color:var(--text-dim); font-size:10.5px; }
+  .schedule-layout { display:grid; grid-template-columns:minmax(285px,.72fr) minmax(0,1.28fr); min-height:410px; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .schedule-list { max-height:720px; overflow:auto; border-right:1px solid var(--border); background:#181714; }
+  .schedule-row { width:100%; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 10px; padding:12px; border:0; border-bottom:1px solid var(--border); border-radius:0; background:transparent; color:inherit; text-align:left; }
+  .schedule-row:hover { background:#232019; }
+  .schedule-row[aria-selected="true"] { background:#2b261d; box-shadow:inset 3px 0 #d0a260; }
+  .schedule-row b { min-width:0; overflow:hidden; color:#eadfc9; text-overflow:ellipsis; white-space:nowrap; }
+  .schedule-row code { grid-column:1/-1; color:var(--text-faint); font-size:9.5px; overflow-wrap:anywhere; }
+  .schedule-row small { color:var(--text-dim); }
+  .schedule-detail { min-width:0; padding:15px; }
+  .schedule-detail-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+  .schedule-detail-head h2 { margin:0 0 3px; font-size:17px; overflow-wrap:anywhere; }
+  .schedule-detail-actions { display:flex; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+  .schedule-cadence { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 12px; align-items:center; margin:12px 0; padding:11px; border:1px solid #51462f; border-radius:7px; background:#211d16; }
+  .schedule-cadence-mark { width:34px; height:34px; display:grid; place-items:center; border:1px solid #9d7d48; border-radius:50%; color:#e1bd7d; font:700 9px var(--mono); }
+  .schedule-cadence b,.schedule-cadence span { display:block; }
+  .schedule-cadence span { margin-top:2px; color:var(--text-dim); font-size:10px; }
+  .schedule-kv { display:grid; grid-template-columns:115px minmax(0,1fr); gap:5px 11px; margin:12px 0; }
+  .schedule-kv dt { color:var(--text-faint); font:700 9.5px var(--mono); letter-spacing:.45px; text-transform:uppercase; }
+  .schedule-kv dd { margin:0; min-width:0; overflow-wrap:anywhere; color:#d7cec0; font:11px var(--mono); }
+  .schedule-input { max-height:260px; overflow:auto; }
+  .schedule-removal { margin-top:13px; padding:11px; border:1px solid #65483a; border-radius:7px; background:#261b18; }
+  .schedule-removal h3 { margin:0 0 4px; font-size:13px; }
+  .schedule-removal p { margin:0 0 8px; color:var(--text-dim); font-size:10.5px; line-height:1.45; }
+  .schedule-removal label { display:flex; align-items:flex-start; gap:7px; color:#e2c8bc; font-size:10.5px; line-height:1.4; }
+  .schedule-removal label input { width:auto; margin-top:1px; }
+  .schedule-removal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:9px; }
+
   /* ---------- recorder replay banner & run comparison -------- */
   .rec-banner {
     border: 1px solid var(--border-hi); border-left-width: 3px; border-radius: 6px;
@@ -2086,6 +2148,9 @@
     .automation-layout { grid-template-columns:1fr; }
     .automation-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); max-height:340px; border-right:0; border-bottom:1px solid var(--border); }
     .automation-row { border-right:1px solid var(--border); }
+    .schedule-layout { grid-template-columns:1fr; }
+    .schedule-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); max-height:340px; border-right:0; border-bottom:1px solid var(--border); }
+    .schedule-row { border-right:1px solid var(--border); }
   }
   @media (max-width: 900px) {
     .connection-body { grid-template-columns: 220px minmax(0, 1fr); }
@@ -2122,6 +2187,10 @@
     .automation-head-actions { justify-content:flex-start; }
     .automation-toolbar { grid-template-columns:minmax(0,1fr) minmax(145px,.45fr); }
     .automation-toolbar button { grid-column:1/-1; justify-self:start; }
+    .schedule-head { flex-direction:column; }
+    .schedule-head-actions { justify-content:flex-start; }
+    .schedule-toolbar { grid-template-columns:minmax(0,1fr) minmax(170px,.45fr); }
+    .schedule-toolbar button { grid-column:1/-1; justify-self:start; }
     .learn-seal-plate { position: static; }
     .memory-correction-body { grid-template-columns: 1fr; }
     .memory-correction-form { border-right: 0; border-bottom: 1px solid #544824; }
@@ -2329,6 +2398,18 @@
     .automation-kv dd { margin-bottom:6px; }
     .automation-event { grid-template-columns:auto minmax(0,1fr); }
     .automation-event > span:last-of-type { grid-column:1/-1; }
+    .schedule-rhythm,.schedule-toolbar,.schedule-form { grid-template-columns:1fr; }
+    .schedule-rhythm-step { border-right:0; border-bottom:1px solid #423b2d; }
+    .schedule-rhythm-step:last-child { border-bottom:0; }
+    .schedule-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .schedule-toolbar button,.schedule-form .wide,.schedule-form-actions,.schedule-form-error { grid-column:auto; }
+    .schedule-list { grid-template-columns:1fr; max-height:300px; }
+    .schedule-row { border-right:0; }
+    .schedule-detail-head { flex-direction:column; }
+    .schedule-detail-actions { justify-content:flex-start; }
+    .schedule-kv { grid-template-columns:1fr; gap:2px; }
+    .schedule-kv dd { margin-bottom:6px; }
+    .schedule-interval-fields { grid-template-columns:1fr; }
     .rec-story-head { flex-direction: column; gap: 8px; }
     .rec-story-spine { grid-template-columns: 1fr; }
     .rec-story-step { padding-top: 10px; padding-left: 27px; }
@@ -2515,6 +2596,10 @@
       <h2 class="section">Automations</h2>
       <button class="small primary" id="btn-automations-open" style="width:100%">Open automation desk</button>
       <div class="muted tiny" id="automations-side-count" style="margin:6px 2px 0">Connect to inspect signed webhook bindings.</div>
+
+      <h2 class="section">Schedules</h2>
+      <button class="small primary" id="btn-schedules-open" style="width:100%">Open schedule desk</button>
+      <div class="muted tiny" id="schedules-side-count" style="margin:6px 2px 0">Connect to inspect recurring server work.</div>
 
       <h2 class="section">Graphs</h2>
       <div id="graph-list"><div class="empty">Connect to a server.</div></div>
@@ -3157,6 +3242,55 @@
         <span class="sr-only" id="automation-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
       </div>
 
+      <div id="schedules-view" style="display:none" aria-labelledby="schedules-title">
+        <div class="schedule-head">
+          <div>
+            <h1 id="schedules-title" tabindex="-1">Schedule desk</h1>
+            <p>Plan recurring or one-shot work in UTC, then inspect the durable server record and its firing counters. At each due time the scheduler attempts a fresh thread and background run; this API exposes neither the run identity nor the scheduling result.</p>
+          </div>
+          <div class="schedule-head-actions">
+            <span class="muted tiny" id="schedules-statusline" role="status" aria-live="polite"></span>
+            <button class="small primary" id="btn-schedule-create" type="button" aria-expanded="false" aria-controls="schedule-compose">Create schedule</button>
+            <button class="small" id="btn-schedules-refresh" type="button">Refresh</button>
+          </div>
+        </div>
+
+        <div class="schedule-rhythm" role="img" aria-label="A UTC cadence makes the scheduler attempt a fresh thread and background run; the durable record reports its last firing time and firing count but not the run identity or scheduling result">
+          <div class="schedule-rhythm-step"><b>UTC cadence</b><span>Choose a bounded interval or a five-field cron expression evaluated in UTC.</span></div>
+          <div class="schedule-rhythm-step"><b>Fresh attempt</b><span>At each due time Rusty persists a new thread, then attempts one background run on the selected graph.</span></div>
+          <div class="schedule-rhythm-step"><b>Durable pulse</b><span>The record survives restart and exposes last-run time plus an exact firing counter.</span></div>
+        </div>
+        <div class="note danger" id="schedule-mutation-error" role="alert" tabindex="-1" hidden></div>
+
+        <section class="card schedule-compose" id="schedule-compose" aria-labelledby="schedule-compose-title" hidden>
+          <div class="schedule-compose-head"><div><h2 id="schedule-compose-title" tabindex="-1">Create durable schedule</h2><p>The reviewed JSON input is reused for every firing. Studio generates a stable ID so an uncertain response can be reconciled safely.</p></div><button class="small" id="btn-schedule-create-close" type="button">Close</button></div>
+          <form class="schedule-form" id="schedule-form" novalidate>
+            <label>Schedule ID · optional<input id="inp-schedule-id" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="Generated by Studio"></label>
+            <label>Graph<select id="sel-schedule-graph" aria-describedby="schedule-graph-help"></select><span class="field-help" id="schedule-graph-help">Only graphs advertised by the connected server are offered.</span></label>
+            <fieldset class="schedule-mode wide"><legend>Cadence type</legend><label><input type="radio" name="schedule-mode" value="interval" checked> Repeat every interval</label><label><input type="radio" name="schedule-mode" value="cron"> Cron expression in UTC</label></fieldset>
+            <label id="schedule-interval-group">Interval<span class="schedule-interval-fields"><input id="inp-schedule-interval" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="15" aria-describedby="schedule-interval-help"><select id="sel-schedule-unit" aria-label="Interval unit"><option value="1">seconds</option><option value="60" selected>minutes</option><option value="3600">hours</option><option value="86400">days</option></select></span><span class="field-help" id="schedule-interval-help">Exact whole seconds after conversion; minimum 1 second, maximum 1 year.</span></label>
+            <label id="schedule-cron-group" hidden>Cron expression · UTC<input id="inp-schedule-cron" type="text" maxlength="512" autocomplete="off" spellcheck="false" placeholder="0 9 * * 1-5" aria-describedby="schedule-cron-help"><span class="field-help" id="schedule-cron-help">Five fields: minute, hour, day of month, month, day of week. Rusty performs the authoritative parse.</span></label>
+            <label>After a scheduled run settles<select id="sel-schedule-completion"><option value="keep">Keep firing on this cadence</option><option value="delete">Remove after the first scheduled run reaches terminal</option></select></label>
+            <label class="wide">Initial run state · exact JSON object<textarea id="inp-schedule-input" maxlength="65536" spellcheck="false" aria-describedby="schedule-input-help">{}</textarea><span class="field-help" id="schedule-input-help">Durably stored in the tenant schedule and reused for every run attempt. Do not put credentials or secrets here. Studio keeps only the unsaved draft in page memory.</span></label>
+            <label class="wide"><span><input id="chk-schedule-review" type="checkbox"> I reviewed the graph, cadence, completion behavior, and exact reusable input. This schedule can start effectful work without another Studio confirmation.</span></label>
+            <div class="note schedule-form-error" id="schedule-form-error" role="alert" tabindex="-1" hidden></div>
+            <div class="schedule-form-actions"><span class="muted tiny">Times are UTC. Creating does not fire immediately.</span><button class="primary" id="btn-schedule-submit" type="submit">Create durable schedule</button></div>
+          </form>
+        </section>
+
+        <div class="schedule-summary" id="schedule-summary" aria-label="Schedule summary"></div>
+        <div class="schedule-toolbar" role="search" aria-label="Filter schedules">
+          <label>Find schedule<input id="inp-schedule-search" type="search" autocomplete="off" placeholder="ID, graph, or cadence"></label>
+          <label>Completion behavior<select id="sel-schedule-filter"><option value="all">All schedules</option><option value="keep">Recurring</option><option value="delete">Remove after first run</option></select></label>
+          <button class="small" id="btn-schedule-clear" type="button">Clear filters</button>
+        </div>
+        <div class="schedule-layout">
+          <div class="schedule-list" id="schedule-list" role="listbox" aria-label="Durable schedules" aria-describedby="schedules-statusline"><div class="empty">Open the desk to load schedules.</div></div>
+          <section class="schedule-detail" id="schedule-detail" aria-live="off"><div class="empty">Select a schedule to inspect its exact cadence, input, and firing evidence.</div></section>
+        </div>
+        <span class="sr-only" id="schedule-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+      </div>
+
       <div id="tasks-view" style="display:none" aria-labelledby="tasks-title">
         <div class="card">
           <h2 class="section" id="tasks-title" tabindex="-1" style="margin-top:0">
@@ -3409,6 +3543,10 @@ const store = {
   automationRequest: 0,
   automationMutationRequest: 0,
   automationsUnsupported: false,
+  schedules: null,     // tenant schedule catalog, selected durable record, and removal review
+  scheduleRequest: 0,
+  scheduleMutationRequest: 0,
+  schedulesUnsupported: false,
 };
 
 /* ---------------- shareable evidence navigation ----------------
@@ -3418,8 +3556,8 @@ const store = {
  * one exact thread from the server journal before Studio opens Recorder.
  * ------------------------------------------------------------------------- */
 
-const NAVIGATION_VIEWS = new Set(["home", "agents", "thread", "fabric", "memory", "learn", "registry", "automations", "tasks"]);
-const NAVIGATION_KEYS = ["studio", "agent", "thread", "run", "automation"];
+const NAVIGATION_VIEWS = new Set(["home", "agents", "thread", "fabric", "memory", "learn", "registry", "automations", "schedules", "tasks"]);
+const NAVIGATION_KEYS = ["studio", "agent", "thread", "run", "automation", "schedule"];
 
 function navigationSafeId(value) {
   const id = typeof value === "string" ? value : "";
@@ -3442,13 +3580,14 @@ function navigationParseSearch(search) {
   const unknown = [...params.keys()].find((key) => !NAVIGATION_KEYS.includes(key));
   if (unknown) return { route: null, error: `The shared Studio link contains an unsupported \`${unknown}\` field.`, managed: true };
   if (!NAVIGATION_VIEWS.has(view)) return { route: null, error: "The shared Studio link names an unsupported workspace.", managed: true };
-  const values = Object.fromEntries(["agent", "thread", "run", "automation"].map((key) => [key, params.get(key)]));
+  const values = Object.fromEntries(["agent", "thread", "run", "automation", "schedule"].map((key) => [key, params.get(key)]));
   for (const [key, value] of Object.entries(values)) {
     if (value != null && !navigationSafeId(value)) return { route: null, error: `The shared Studio link has an unsafe or oversized \`${key}\` identity.`, managed: true };
   }
   const allowed = view === "agents" ? new Set(["agent"])
     : view === "thread" ? new Set(["thread", "run"])
       : view === "automations" ? new Set(["automation"])
+        : view === "schedules" ? new Set(["schedule"])
         : new Set();
   const unexpected = Object.entries(values).find(([key, value]) => value != null && !allowed.has(key));
   if (unexpected) return { route: null, error: `The shared Studio link cannot target \`${unexpected[0]}\` inside the ${view} workspace.`, managed: true };
@@ -3461,7 +3600,7 @@ function navigationParseSearch(search) {
 function navigationBuildUrl(route, href) {
   const candidate = new URLSearchParams();
   if (route && route.view) candidate.set("studio", route.view);
-  for (const key of ["agent", "thread", "run", "automation"]) {
+  for (const key of ["agent", "thread", "run", "automation", "schedule"]) {
     if (route && route[key]) candidate.set(key, route[key]);
   }
   const parsed = navigationParseSearch(`?${candidate.toString()}`);
@@ -3472,7 +3611,7 @@ function navigationBuildUrl(route, href) {
   url.search = "";
   url.hash = "";
   url.searchParams.set("studio", parsed.route.view);
-  for (const key of ["agent", "thread", "run", "automation"]) {
+  for (const key of ["agent", "thread", "run", "automation", "schedule"]) {
     if (parsed.route[key]) url.searchParams.set(key, parsed.route[key]);
   }
   return url.href;
@@ -3483,6 +3622,7 @@ function navigationRouteForStore(state) {
   const route = { view };
   if (view === "agents" && navigationSafeId(state.agents && state.agents.selected)) route.agent = state.agents.selected;
   if (view === "automations" && navigationSafeId(state.automations && state.automations.selected)) route.automation = state.automations.selected;
+  if (view === "schedules" && navigationSafeId(state.schedules && state.schedules.selected)) route.schedule = state.schedules.selected;
   if (view === "thread" && navigationSafeId(state.selected)) {
     route.thread = state.selected;
     const recorder = state.recorder;
@@ -3518,7 +3658,7 @@ function navigationRouteMessage(message = "", tone = "wait") {
 function navigationCancelPending(nextView, nextId = "") {
   const pending = store.navigationPending;
   if (!pending) return false;
-  const expectedId = pending.agent || pending.thread || pending.automation || "";
+  const expectedId = pending.agent || pending.thread || pending.automation || pending.schedule || "";
   if (pending.view === nextView && (!expectedId || nextId === expectedId)) return false;
   store.navigationRequest += 1;
   store.navigationPending = null;
@@ -3567,7 +3707,7 @@ async function navigationCopyCurrent() {
     }
     try { history.replaceState({ studioRoute: route }, "", url); store.navigationManaged = true; } catch { /* the copied URL remains valid */ }
     const target = route.run ? `run ${shortId(route.run)}` : route.agent ? `agent ${shortId(route.agent)}`
-      : route.automation ? `automation ${shortId(route.automation)}` : `${route.view} workspace`;
+      : route.automation ? `automation ${shortId(route.automation)}` : route.schedule ? `schedule ${shortId(route.schedule)}` : `${route.view} workspace`;
     navigationStatus(`Copied ${target} link · identifiers only`, true);
     toast("Evidence link copied without connection details or content.", "ok");
   } catch (error) {
@@ -3714,6 +3854,22 @@ async function navigationApplyPending(options = {}) {
     await automationLoadEvidence(route.automation, true);
     if (store.navigationPending !== route || !store.automations || store.automations.selected !== route.automation) return false;
     return navigationFinish(`Opened automation ${shortId(route.automation)}`, options.focus === false ? null : "automations-title");
+  }
+  if (route.view === "schedules") {
+    store.view = "schedules"; renderMain();
+    if (!route.schedule) return navigationFinish("Opened the schedule desk", options.focus === false ? null : "schedules-title");
+    if (!store.conn || !store.schedules || store.schedules.loading) {
+      const message = "Connect and load the schedule catalog to open this exact schedule.";
+      navigationStatus(message, true); navigationRouteMessage(message);
+      if (store.conn && !store.schedules) schedulesLoad(true);
+      return false;
+    }
+    if (!store.schedules.list.some((item) => item.cron_id === route.schedule)) {
+      const message = "The connected schedule catalog does not contain this shared schedule.";
+      navigationStatus(message, true); navigationRouteMessage(message, "error"); return false;
+    }
+    scheduleSelect(route.schedule, false);
+    return navigationFinish(`Opened schedule ${shortId(route.schedule)}`, options.focus === false ? null : "schedules-title");
   }
   const open = { home: openHome, fabric: openFabric, memory: openMemory, learn: openLearn, registry: openRegistry, tasks: openTasks }[route.view];
   if (!open) return false;
@@ -4562,7 +4718,7 @@ async function apiResponseText(res, maxBytes = 0) {
   }
 }
 
-async function apiForConnection(connection, method, path, body, maxResponseBytes = 0, exactBodyText = "") {
+async function apiForConnection(connection, method, path, body, maxResponseBytes = 0, exactBodyText = "", includeStatus = false) {
   const headers = {};
   if (body !== undefined || exactBodyText) headers["Content-Type"] = "application/json";
   if (connection && connection.apiKey) headers["X-Api-Key"] = connection.apiKey;
@@ -4580,7 +4736,7 @@ async function apiForConnection(connection, method, path, body, maxResponseBytes
   let json = null;
   try { json = text ? agentParseJsonWithNumberKinds(text) : null; } catch { json = { raw: text }; }
   if (!res.ok) throw new ApiError(res.status, json);
-  return json;
+  return includeStatus ? { status: res.status, body: json } : json;
 }
 
 /* ---------------- small helpers ---------------- */
@@ -5206,6 +5362,8 @@ function connectionResetWorkspace() {
   store.registryRequest += 1;
   store.automationRequest += 1;
   store.automationMutationRequest += 1;
+  store.scheduleRequest += 1;
+  store.scheduleMutationRequest += 1;
   clearTimeout(store.memorySearchTimer);
   store.memorySearchTimer = null;
   clearTimeout(store.memoryLifecycleTimer);
@@ -5297,12 +5455,20 @@ function connectionResetWorkspace() {
   store.registryBindings = Object.create(null);
   store.automations = null;
   store.automationsUnsupported = false;
+  store.schedules = null;
+  store.schedulesUnsupported = false;
   $("automation-compose").hidden = true;
   $("btn-automation-create").setAttribute("aria-expanded", "false");
   $("btn-automation-submit").disabled = false;
   $("btn-automation-submit").textContent = "Create signed automation";
   $("automation-form").reset();
   $("inp-automation-template").value = '{\n  "event": "{{event}}"\n}';
+  $("schedule-compose").hidden = true;
+  $("btn-schedule-create").setAttribute("aria-expanded", "false");
+  $("btn-schedule-submit").disabled = false;
+  $("btn-schedule-submit").textContent = "Create durable schedule";
+  $("schedule-form").reset();
+  $("inp-schedule-input").value = "{}";
   $("agent-create-panel").style.display = "none";
   $("btn-agent-create").disabled = false;
   $("btn-rec-replay").disabled = false;
@@ -5383,6 +5549,7 @@ async function connect(options = {}) {
   fabricLoad(true);
   learnLoad(true);
   automationUpdateSidebar();
+  scheduleUpdateSidebar();
   renderMain();
   navigationApplyPending({ focus: false });
   connectionRender();
@@ -5583,6 +5750,7 @@ function renderMain() {
   const learn = store.view === "learn";
   const registry = store.view === "registry";
   const automations = store.view === "automations";
+  const schedules = store.view === "schedules";
   if (!fabric) {
     clearTimeout(store.fabricLeaseTimer);
     store.fabricLeaseTimer = null;
@@ -5603,9 +5771,10 @@ function renderMain() {
   $("learn-view").style.display = learn ? "block" : "none";
   $("registry-view").style.display = registry ? "block" : "none";
   $("automations-view").style.display = automations ? "block" : "none";
+  $("schedules-view").style.display = schedules ? "block" : "none";
   const t = currentThread();
-  $("main-empty").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && !t ? "block" : "none";
-  $("thread-view").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && t ? "block" : "none";
+  $("main-empty").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && !schedules && !t ? "block" : "none";
+  $("thread-view").style.display = !home && !tasks && !agents && !fabric && !memory && !learn && !registry && !automations && !schedules && t ? "block" : "none";
   if (home) {
     stopPoll();
     abortStream();
@@ -5634,6 +5803,14 @@ function renderMain() {
   }
   if (registry) {
     registryLoad(true);
+    return;
+  }
+  if (automations) {
+    if (!store.automations) automationsLoad(true);
+    return;
+  }
+  if (schedules) {
+    if (!store.schedules) schedulesLoad(true);
     return;
   }
   if (!t) {
@@ -22305,6 +22482,555 @@ function openAutomations() {
   $("automations-title").focus({ preventScroll: true });
 }
 
+/* ---------------- schedule desk ----------------
+ * The server's CronRecord is a durable schedule, not a run index: it
+ * exposes cadence, last_run_at, and runs_fired, but no thread/run identity.
+ * Studio therefore makes creation/removal exact and keeps investigation
+ * claims out of the view until the platform carries a discovery join.
+ * ------------------------------------------------------------------------- */
+const SCHEDULE_RESPONSE_LIMIT = 8 * 1024 * 1024;
+const SCHEDULE_RENDER_LIMIT = 200;
+const SCHEDULE_INPUT_LIMIT = 64 * 1024;
+const SCHEDULE_MAX_INTERVAL = 31_536_000;
+const SCHEDULE_UNITS = new Set([1, 60, 3600, 86400]);
+
+function scheduleTimestamp(value) {
+  return typeof value === "string" && registryTimestamp(value) === value ? value : null;
+}
+
+function scheduleSafeId(value) {
+  const id = automationSafeId(value);
+  return id && registryText(id, 256) === id ? id : "";
+}
+
+function scheduleContract(value) {
+  if (!registryKeys(value, ["cron_id", "graph", "interval_secs", "cron_expr", "input", "metadata", "on_run_completed", "created_at", "last_run_at", "runs_fired"],
+    ["cron_id", "graph", "input", "metadata", "on_run_completed", "created_at", "last_run_at", "runs_fired"])) return null;
+  const cronId = scheduleSafeId(value.cron_id), graph = registryString(value.graph, SCHEDULE_RESPONSE_LIMIT);
+  if (!cronId || !graph || !scheduleTimestamp(value.created_at)) return null;
+  const hasInterval = Object.prototype.hasOwnProperty.call(value, "interval_secs");
+  const hasExpression = Object.prototype.hasOwnProperty.call(value, "cron_expr");
+  if (hasInterval === hasExpression) return null;
+  let interval = null, expression = null;
+  if (hasInterval) {
+    const exact = recExactUnsigned(value, "interval_secs");
+    if (exact === null || exact < 1n || exact > BigInt(SCHEDULE_MAX_INTERVAL)) return null;
+    interval = exact;
+  } else {
+    expression = registryString(value.cron_expr, SCHEDULE_RESPONSE_LIMIT);
+    if (!expression || expression.trim() !== expression) return null;
+  }
+  if (value.input !== null && !agentPlainObject(value.input)) return null;
+  if (!Object.prototype.hasOwnProperty.call(value, "metadata") || !["keep", "delete"].includes(value.on_run_completed)) return null;
+  if (value.last_run_at !== null && !scheduleTimestamp(value.last_run_at)) return null;
+  const runs = recExactUnsigned(value, "runs_fired");
+  if (runs === null || (runs === 0n) !== (value.last_run_at === null)) return null;
+  return { record: value, cronId, graph, interval, expression, runs };
+}
+
+function scheduleListContract(value) {
+  if (!Array.isArray(value)) return null;
+  const ids = new Set(), records = [];
+  for (const item of value) {
+    const checked = scheduleContract(item);
+    if (!checked || ids.has(checked.cronId)) return null;
+    ids.add(checked.cronId); records.push(checked.record);
+  }
+  return records;
+}
+
+function scheduleCadence(record) {
+  const checked = scheduleContract(record);
+  if (!checked) return "Schedule unavailable";
+  if (checked.interval !== null) {
+    const seconds = checked.interval;
+    const units = [[86400n, "day"], [3600n, "hour"], [60n, "minute"]];
+    for (const [unit, label] of units) {
+      if (seconds % unit === 0n) {
+        const count = seconds / unit;
+        return `Every ${count} ${label}${count === 1n ? "" : "s"}`;
+      }
+    }
+    return `Every ${seconds} second${seconds === 1n ? "" : "s"}`;
+  }
+  return `${checked.expression} · UTC`;
+}
+
+function scheduleStableValue(record) {
+  const checked = scheduleContract(record);
+  if (!checked) return "";
+  return automationExactValue({ cron_id: checked.cronId, graph: checked.graph,
+    interval_secs: checked.interval === null ? null : checked.interval.toString(), cron_expr: checked.expression,
+    input: record.input, metadata: record.metadata, on_run_completed: record.on_run_completed, created_at: record.created_at });
+}
+
+function scheduleCatalogContainsExact(list, expected) {
+  const checked = scheduleListContract(list);
+  if (!checked) return null;
+  const match = checked.find((item) => item.cron_id === expected.cron_id);
+  return match && scheduleStableValue(match) === scheduleStableValue(expected) ? match : null;
+}
+
+function scheduleCreatedRecordMatches(value, draft, cronId, requireFresh = false) {
+  const checked = scheduleContract(value);
+  if (!checked || checked.cronId !== cronId || checked.graph !== draft.graph || value.on_run_completed !== draft.completion ||
+      automationExactValue(value.input) !== automationExactValue(draft.input) ||
+      automationExactValue(value.metadata) !== automationExactValue({ source: "studio_schedule_desk" })) return null;
+  if (draft.mode === "interval") {
+    if (checked.interval !== BigInt(draft.intervalSecs) || checked.expression !== null) return null;
+  } else if (checked.expression !== draft.cronExpr || checked.interval !== null) return null;
+  if (requireFresh && (checked.runs !== 0n || value.last_run_at !== null)) return null;
+  if ((checked.runs === 0n) !== (value.last_run_at === null)) return null;
+  return value;
+}
+
+function scheduleCreateDraft(fields, graphs) {
+  const errors = {};
+  const cronId = String(fields && fields.cronId || "");
+  const graph = String(fields && fields.graph || "");
+  const mode = fields && fields.mode === "cron" ? "cron" : "interval";
+  if (cronId && !scheduleSafeId(cronId)) errors.cronId = "Schedule ID must be a safe 1–256 byte resource identity without slashes, controls, hidden formatting, or reserved names.";
+  if (!registryString(graph, 1024) || (Array.isArray(graphs) && !graphs.includes(graph))) errors.graph = "Choose a graph advertised by the connected server.";
+  let intervalSecs = null, cronExpr = null;
+  if (mode === "interval") {
+    const raw = String(fields && fields.interval || "");
+    const unit = Number(fields && fields.unit);
+    if (!/^(?:0|[1-9][0-9]*)$/.test(raw) || !SCHEDULE_UNITS.has(unit)) errors.interval = "Enter a whole interval using the selected unit.";
+    else {
+      const seconds = BigInt(raw) * BigInt(unit);
+      if (seconds < 1n || seconds > BigInt(SCHEDULE_MAX_INTERVAL)) errors.interval = "Converted interval must be between 1 second and 1 year.";
+      else intervalSecs = Number(seconds);
+    }
+  } else {
+    const raw = String(fields && fields.cronExpr || "");
+    if (!registryText(raw, 512) || raw.trim() !== raw || raw.split(/\s+/).length !== 5) errors.cronExpr = "Enter exactly five visible cron fields with no leading or trailing whitespace.";
+    else cronExpr = raw;
+  }
+  const rawInput = String(fields && fields.rawInput || "");
+  let input = null;
+  if (agentUtf8Length(rawInput) > SCHEDULE_INPUT_LIMIT) errors.rawInput = "Initial state must fit Studio’s 64 KiB authoring boundary.";
+  else {
+    try { input = agentParseJsonWithNumberKinds(rawInput); }
+    catch { errors.rawInput = "Initial state must be valid JSON."; }
+    if (!errors.rawInput && !agentPlainObject(input)) errors.rawInput = "Initial state must be a JSON object.";
+  }
+  const completion = fields && fields.completion === "delete" ? "delete" : "keep";
+  if (!fields || fields.acknowledged !== true) errors.acknowledged = "Review and acknowledge the durable schedule before creating it.";
+  const order = ["cronId", "graph", "interval", "cronExpr", "rawInput", "acknowledged"];
+  const first = order.find((key) => errors[key]) || "";
+  return { value: first ? null : { cronId, graph, mode, intervalSecs, cronExpr, input, rawInput, completion }, errors, first };
+}
+
+function scheduleGeneratedId(now = Date.now(), random = Math.random()) {
+  return `schedule-${now.toString(36)}-${random().toString(36).slice(2, 10)}`;
+}
+
+function scheduleCreateBody(draft, cronId) {
+  const prefix = [`"cron_id":${JSON.stringify(cronId)}`, `"graph":${JSON.stringify(draft.graph)}`];
+  prefix.push(draft.mode === "interval" ? `"interval_secs":${draft.intervalSecs}` : `"cron_expr":${JSON.stringify(draft.cronExpr)}`);
+  prefix.push(`"input":${draft.rawInput}`, `"metadata":{"source":"studio_schedule_desk"}`, `"on_run_completed":${JSON.stringify(draft.completion)}`);
+  return `{${prefix.join(",")}}`;
+}
+
+function scheduleCreateReceipt(value, draft, cronId) {
+  return scheduleCreatedRecordMatches(value, draft, cronId, true);
+}
+
+function scheduleDeleteReceipt(value, cronId) {
+  return agentPlainObject(value) && value.cron_id === cronId && value.deleted === true && Object.keys(value).every((key) => ["cron_id", "deleted"].includes(key)) ? value : null;
+}
+
+function scheduleErrorHtml(error) {
+  if (error && error.status === 404 && !(error.body && error.body.error)) {
+    return `<div class="note">This server build does not expose durable schedule routes. Upgrade the connected Rusty server to use the Schedule Desk.</div>`;
+  }
+  return `<div class="note danger">${escapeHtml(registryEvidencePreview(error && error.message || "The schedule catalog could not be loaded."))}</div>`;
+}
+
+function scheduleVisibleList(state) {
+  const query = String(state && state.query || "").trim().toLocaleLowerCase();
+  const filter = state && state.filter || "all";
+  return (state && state.list || []).filter((record) => {
+    if (filter !== "all" && record.on_run_completed !== filter) return false;
+    if (!query) return true;
+    return [record.cron_id, record.graph, scheduleCadence(record)].some((value) => String(value).toLocaleLowerCase().includes(query));
+  });
+}
+
+function scheduleRenderWindow(records, selected) {
+  const windowed = records.slice(0, SCHEDULE_RENDER_LIMIT);
+  if (selected && !windowed.some((item) => item.cron_id === selected)) {
+    const exact = records.find((item) => item.cron_id === selected);
+    if (exact) { if (windowed.length >= SCHEDULE_RENDER_LIMIT) windowed.pop(); windowed.push(exact); }
+  }
+  return windowed;
+}
+
+function scheduleRowHtml(record, selected, tabbable = false) {
+  const runs = recExactUnsigned(record, "runs_fired");
+  const behavior = record.on_run_completed === "delete" ? "one-shot removal" : "recurring";
+  const accessible = [record.cron_id, scheduleCadence(record), record.graph].map((value) => registryEvidencePreview(value, 512));
+  return `<button class="schedule-row" type="button" role="option" data-schedule-id="${escapeHtml(record.cron_id)}" aria-selected="${selected}" tabindex="${tabbable ? "0" : "-1"}" aria-label="${escapeHtml(`${accessible.join(", ")}, server firing count ${runs === null ? "unknown" : runs.toString()}`)}">` +
+    `<b>${escapeHtml(registryEvidencePreview(record.cron_id))}</b><span class="badge ${record.on_run_completed === "delete" ? "interrupted" : "running"}">${behavior}</span>` +
+    `<small>${escapeHtml(registryEvidencePreview(scheduleCadence(record)))}</small><small>${escapeHtml(`${runs === null ? "?" : runs} server firing count`)}</small>` +
+    `<code>${escapeHtml(registryEvidencePreview(record.graph))}</code></button>`;
+}
+
+function scheduleRemovalHtml(state, record) {
+  const review = state && state.removal;
+  if (!review || review.cronId !== record.cron_id) return "";
+  const busy = review.submitting ? " disabled" : "";
+  return `<section class="schedule-removal" aria-labelledby="schedule-removal-title"${review.submitting ? ' aria-busy="true"' : ""}>` +
+    `<h3 id="schedule-removal-title" tabindex="-1">Stop future firings</h3><p>Deleting this durable record prevents later firings. It does not cancel a run that is already scheduled or executing, and it does not delete prior thread or journal evidence.</p>` +
+    (review.error ? `<div class="note danger" id="schedule-removal-error" role="alert" tabindex="-1">${escapeHtml(review.error)}</div>` : "") +
+    `<label><input type="checkbox" data-schedule-remove-ack${review.acknowledged ? " checked" : ""}${busy}> I reviewed schedule ${escapeHtml(record.cron_id)} and understand that existing run work is untouched.</label>` +
+    `<div class="schedule-removal-actions"><button class="small" type="button" data-schedule-remove-cancel${busy}>Cancel</button><button class="small danger" type="button" data-schedule-remove-submit${!review.acknowledged || review.ambiguous ? " disabled" : busy}>${review.submitting ? "Stopping…" : "Stop future firings"}</button></div></section>`;
+}
+
+function scheduleDetailHtml(state, record) {
+  if (!record) return `<div class="empty">Select a schedule to inspect its exact cadence, input, and firing evidence.</div>`;
+  const runs = recExactUnsigned(record, "runs_fired");
+  const kind = record.interval_secs !== undefined ? "INTERVAL" : "CRON";
+  return `<div class="schedule-detail-head"><div><h2 id="schedule-detail-title" tabindex="-1">${escapeHtml(registryEvidencePreview(record.cron_id))}</h2><p class="muted tiny">Durable server schedule · created ${escapeHtml(record.created_at)}</p></div>` +
+    `<div class="schedule-detail-actions"><button class="small danger" type="button" data-schedule-remove="${escapeHtml(record.cron_id)}">Review removal</button></div></div>` +
+    `<div class="schedule-cadence"><span class="schedule-cadence-mark">${kind}</span><div><b>${escapeHtml(registryEvidencePreview(scheduleCadence(record)))}</b><span>${record.on_run_completed === "delete" ? "The record removes itself after its first successfully scheduled run reaches a terminal state." : "The record remains active until an operator removes it."}</span></div></div>` +
+    `<dl class="schedule-kv"><dt>Graph</dt><dd>${escapeHtml(registryEvidencePreview(record.graph))}</dd><dt>Server firing count</dt><dd>${escapeHtml(runs === null ? "unavailable" : runs.toString())}</dd>` +
+    `<dt>Last firing</dt><dd>${escapeHtml(record.last_run_at || "not observed yet")}</dd><dt>Created</dt><dd>${escapeHtml(record.created_at)}</dd><dt>Completion</dt><dd>${escapeHtml(record.on_run_completed)}</dd></dl>` +
+    `<div class="note tiny">The schedule API does not carry the fresh thread or run IDs. The firing count records a scheduling attempt after a fresh thread was persisted; it does not prove that the run was accepted, succeeded, or completed an effect.</div>` +
+    `<h3 class="section">Reusable initial state</h3><pre class="json schedule-input">${escapeHtml(automationJsonText(record.input, 16 * 1024))}</pre>` +
+    scheduleRemovalHtml(state, record);
+}
+
+function scheduleSummaryHtml(state) {
+  const list = state && state.list || [];
+  const recurring = list.filter((item) => item.on_run_completed === "keep").length;
+  const oneShot = list.length - recurring;
+  let firings = 0n;
+  for (const record of list) { const exact = recExactUnsigned(record, "runs_fired"); if (exact !== null) firings += exact; }
+  const fired = list.filter((item) => item.last_run_at !== null).length;
+  return `<div><b>${list.length}</b><span>durable schedules</span></div><div><b>${recurring} / ${oneShot}</b><span>recurring / one-shot</span></div>` +
+    `<div><b>${firings}</b><span>server firing count</span></div><div><b>${fired}</b><span>have a firing timestamp</span></div>`;
+}
+
+function scheduleFocusIdentity() {
+  const active = document.activeElement;
+  if (!active || !active.closest || !active.closest("#schedules-view")) return null;
+  const row = active.closest("[data-schedule-id]");
+  if (row) return { attr: "data-schedule-id", value: row.getAttribute("data-schedule-id") };
+  return active.id ? { id: active.id } : null;
+}
+
+function scheduleRestoreFocus(identity) {
+  if (!identity || store.view !== "schedules") return false;
+  const target = identity.id ? $(identity.id) : $("schedules-view").querySelector(`[${identity.attr}="${CSS.escape(identity.value)}"]`);
+  (target || $("inp-schedule-search") || $("schedules-title"))?.focus({ preventScroll: true });
+  return Boolean(target);
+}
+
+function schedulesRender() {
+  const state = store.schedules, focus = scheduleFocusIdentity();
+  $("btn-schedules-refresh").disabled = Boolean(state && (state.loading || state.removal && state.removal.submitting));
+  const mutationError = $("schedule-mutation-error");
+  mutationError.textContent = state && state.mutationError ? registryEvidencePreview(state.mutationError) : "";
+  mutationError.hidden = !mutationError.textContent;
+  $("schedule-summary").innerHTML = scheduleSummaryHtml(state);
+  if (!state) {
+    $("schedules-statusline").textContent = "";
+    $("schedule-list").innerHTML = `<div class="empty">Open the desk to load schedules.</div>`;
+    $("schedule-detail").innerHTML = scheduleDetailHtml(null, null); return;
+  }
+  $("inp-schedule-search").value = state.query || "";
+  $("sel-schedule-filter").value = state.filter || "all";
+  if (state.loading) {
+    $("schedules-statusline").textContent = "Loading server schedules…";
+    $("schedule-list").innerHTML = `<div class="empty">Loading durable cadence records…</div>`;
+  } else if (state.error) {
+    $("schedules-statusline").textContent = "Schedule catalog unavailable";
+    $("schedule-list").innerHTML = scheduleErrorHtml(state.error);
+  } else {
+    const visible = scheduleVisibleList(state), rendered = scheduleRenderWindow(visible, state.selected);
+    $("schedules-statusline").textContent = visible.length > rendered.length ? `${rendered.length} rendered · ${visible.length} match · ${state.list.length} server record(s)` : `${visible.length} shown · ${state.list.length} server record(s)`;
+    const selectedVisible = visible.some((item) => item.cron_id === state.selected);
+    $("schedule-list").innerHTML = rendered.length ? rendered.map((item, index) => scheduleRowHtml(item, item.cron_id === state.selected, item.cron_id === state.selected || (!selectedVisible && index === 0))).join("") :
+      `<div class="empty">No schedules match these filters. Clear filters or create a durable cadence.</div>`;
+  }
+  const selected = state.list.find((item) => item.cron_id === state.selected);
+  $("schedule-detail").innerHTML = scheduleDetailHtml(state, selected);
+  if (focus) scheduleRestoreFocus(focus);
+}
+
+function scheduleUpdateSidebar() {
+  const el = $("schedules-side-count");
+  if (!el) return;
+  if (!store.schedules) { el.textContent = "Open the desk to load server schedules."; return; }
+  if (store.schedules.loading) { el.textContent = "Loading server schedules…"; return; }
+  if (store.schedules.error) { el.textContent = store.schedulesUnsupported ? "Schedule routes unavailable." : "Schedule catalog needs attention."; return; }
+  const recurring = store.schedules.list.filter((item) => item.on_run_completed === "keep").length;
+  el.textContent = `${recurring} recurring · ${store.schedules.list.length - recurring} one-shot.`;
+}
+
+function scheduleRequestCurrent(request, connection) {
+  return request === store.scheduleRequest && !connectionIdentityChanged(connection, store.conn);
+}
+
+async function schedulesLoad(quiet = false) {
+  const operation = connectionOperation(), request = ++store.scheduleRequest;
+  if (!operation) {
+    store.schedules = { list: [], selected: "", loading: false, error: new Error("Connect to a verified Rusty server before opening schedules."), query: "", filter: "all", removal: null, mutationError: "" };
+    schedulesRender(); scheduleUpdateSidebar(); return false;
+  }
+  const connection = { ...operation.connection }, prior = store.schedules;
+  store.schedules = { list: prior && prior.list || [], selected: prior && prior.selected || "", loading: true, error: null,
+    query: prior && prior.query || "", filter: prior && prior.filter || "all", removal: prior && prior.removal || null,
+    mutationError: prior && prior.mutationError || "" };
+  schedulesRender(); scheduleUpdateSidebar();
+  try {
+    const raw = await apiForConnection(connection, "GET", "/crons", undefined, SCHEDULE_RESPONSE_LIMIT);
+    if (!scheduleRequestCurrent(request, connection)) return false;
+    const list = scheduleListContract(raw);
+    if (!list) throw new Error("Rusty returned a schedule catalog outside the supported CronRecord contract.");
+    const keep = store.schedules.selected;
+    store.schedules.list = list;
+    store.schedules.selected = keep && list.some((item) => item.cron_id === keep) ? keep : "";
+    let replacementMessage = "";
+    if (store.schedules.removal) {
+      const reviewed = list.find((item) => item.cron_id === store.schedules.removal.cronId);
+      if (!reviewed) store.schedules.removal = null;
+      else if (scheduleStableValue(reviewed) !== store.schedules.removal.snapshot) {
+        replacementMessage = `A newer durable schedule now uses ID ${store.schedules.removal.cronId}. The prior removal review was discarded.`;
+        store.schedules.removal = null;
+      }
+    }
+    store.schedules.loading = false; store.schedules.error = null; store.schedules.mutationError = replacementMessage; store.schedulesUnsupported = false;
+    schedulesRender(); scheduleUpdateSidebar();
+    if (store.navigationPending && store.navigationPending.view === "schedules") await navigationApplyPending({ focus: false });
+    if (store.view === "schedules") navigationReplaceManagedAddress();
+    return true;
+  } catch (error) {
+    if (!scheduleRequestCurrent(request, connection)) return false;
+    store.schedules.loading = false; store.schedules.error = error;
+    store.schedulesUnsupported = error.status === 404 && !(error.body && error.body.error);
+    schedulesRender(); scheduleUpdateSidebar();
+    if (!quiet && !store.schedulesUnsupported) toast(error.message, "err");
+    return false;
+  }
+}
+
+function scheduleSelect(cronId, focus = true) {
+  navigationCancelPending("schedules", cronId);
+  if (!store.schedules || !store.schedules.list.some((item) => item.cron_id === cronId)) return false;
+  store.schedules.selected = cronId; store.schedules.removal = null; schedulesRender();
+  if (focus) $("schedule-detail-title")?.focus({ preventScroll: true });
+  navigationReplaceManagedAddress(); return true;
+}
+
+function scheduleKeyboardMove(row, key) {
+  const list = $("schedule-list"), rows = Array.from(list.querySelectorAll("[data-schedule-id]"));
+  const index = rows.indexOf(row); let next = null;
+  if (key === "ArrowDown" || key === "ArrowRight") next = rows[(index + 1) % rows.length];
+  else if (key === "ArrowUp" || key === "ArrowLeft") next = rows[(index - 1 + rows.length) % rows.length];
+  else if (key === "Home") next = rows[0];
+  else if (key === "End") next = rows[rows.length - 1];
+  if (!next) return false;
+  const nextId = next.getAttribute("data-schedule-id");
+  scheduleSelect(nextId, false);
+  list.querySelector(`[data-schedule-id="${CSS.escape(nextId)}"]`)?.focus({ preventScroll: true });
+  return true;
+}
+
+function schedulePopulateGraphs() {
+  const prior = $("sel-schedule-graph").value;
+  const graphs = agentGraphNames();
+  $("sel-schedule-graph").innerHTML = graphs.map((graph) => `<option value="${escapeHtml(graph)}">${escapeHtml(registryEvidencePreview(graph))}</option>`).join("");
+  if (graphs.includes(prior)) $("sel-schedule-graph").value = prior;
+}
+
+function scheduleCreateOpen() {
+  const panel = $("schedule-compose"), opening = panel.hidden;
+  panel.hidden = !opening; $("btn-schedule-create").setAttribute("aria-expanded", String(opening));
+  if (opening) { schedulePopulateGraphs(); scheduleModeRender(); $("schedule-compose-title").focus({ preventScroll: true }); }
+  else $("btn-schedule-create").focus({ preventScroll: true });
+}
+
+function scheduleModeRender() {
+  const mode = document.querySelector('input[name="schedule-mode"]:checked')?.value === "cron" ? "cron" : "interval";
+  $("schedule-interval-group").hidden = mode !== "interval";
+  $("schedule-cron-group").hidden = mode !== "cron";
+}
+
+function scheduleFormValues() {
+  return { cronId: $("inp-schedule-id").value, graph: $("sel-schedule-graph").value,
+    mode: document.querySelector('input[name="schedule-mode"]:checked')?.value || "interval",
+    interval: $("inp-schedule-interval").value, unit: $("sel-schedule-unit").value,
+    cronExpr: $("inp-schedule-cron").value, completion: $("sel-schedule-completion").value,
+    rawInput: $("inp-schedule-input").value, acknowledged: $("chk-schedule-review").checked };
+}
+
+function scheduleShowFormError(validation, message = "", focus = true) {
+  const error = $("schedule-form-error"), mapping = { cronId: "inp-schedule-id", graph: "sel-schedule-graph", interval: "inp-schedule-interval", cronExpr: "inp-schedule-cron", rawInput: "inp-schedule-input", acknowledged: "chk-schedule-review" };
+  const priorFocus = document.activeElement;
+  $("schedule-form").setAttribute("data-validated", "true");
+  error.textContent = registryEvidencePreview(message || validation.errors[validation.first] || "Review the marked schedule fields."); error.hidden = false;
+  for (const [field, id] of Object.entries(mapping)) {
+    const node = $(id), invalid = Boolean(validation.errors[field]);
+    node.setAttribute("aria-invalid", String(invalid)); automationDescriptionToken(node, "schedule-form-error", invalid && field === validation.first);
+  }
+  (focus ? error : priorFocus)?.focus?.({ preventScroll: true });
+}
+
+function scheduleFormEdited(target) {
+  const form = $("schedule-form"), acknowledgement = $("chk-schedule-review");
+  if (target !== acknowledgement && acknowledgement.checked) {
+    acknowledgement.checked = false;
+    $("schedule-announcer").textContent = "Schedule choices changed. Review and acknowledge the exact schedule again.";
+  }
+  if (form.getAttribute("data-validated") !== "true") return;
+  const validation = scheduleCreateDraft(scheduleFormValues(), agentGraphNames());
+  if (!validation.value) { scheduleShowFormError(validation, "", false); return; }
+  form.removeAttribute("data-validated");
+  $("schedule-form-error").textContent = ""; $("schedule-form-error").hidden = true;
+  for (const node of form.querySelectorAll("[aria-invalid], [aria-describedby]")) {
+    node.removeAttribute("aria-invalid"); automationDescriptionToken(node, "schedule-form-error", false);
+  }
+}
+
+async function scheduleCreateSubmit() {
+  const graphs = agentGraphNames(), validation = scheduleCreateDraft(scheduleFormValues(), graphs);
+  if (!validation.value) { scheduleShowFormError(validation); return false; }
+  const operation = connectionOperation(); if (!operation || !store.schedules) return false;
+  const draft = validation.value, cronId = draft.cronId || scheduleGeneratedId();
+  $("inp-schedule-id").value = cronId;
+  const interaction = { state: store.schedules, view: store.view, selected: store.schedules.selected,
+    query: store.schedules.query, filter: store.schedules.filter, form: JSON.stringify(scheduleFormValues()) };
+  const button = $("btn-schedule-submit"); button.disabled = true; button.textContent = "Creating…"; $("schedule-form-error").hidden = true;
+  let response = null, responseStatus = 0, originalError = null;
+  try {
+    const envelope = await apiForConnection(operation.connection, "POST", "/crons", undefined, SCHEDULE_RESPONSE_LIMIT, scheduleCreateBody(draft, cronId), true);
+    if (!agentPlainObject(envelope) || !Number.isInteger(envelope.status) || !Object.prototype.hasOwnProperty.call(envelope, "body")) {
+      throw new Error("Rusty returned schedule creation without an HTTP status envelope.");
+    }
+    response = envelope.body; responseStatus = envelope.status;
+  }
+  catch (error) { originalError = error; }
+  if (!connectionOperationCurrent(operation)) return false;
+  let receipt = responseStatus === 201 && response && scheduleCreateReceipt(response, draft, cronId);
+  const creationProven = Boolean(receipt);
+  const mayHaveCommitted = responseStatus >= 200 && responseStatus < 300 ||
+    (originalError && ![400, 401, 403, 404, 409, 422].includes(Number(originalError.status)));
+  if (!receipt && mayHaveCommitted) {
+    try {
+      const list = await apiForConnection(operation.connection, "GET", "/crons", undefined, SCHEDULE_RESPONSE_LIMIT);
+      if (!connectionOperationCurrent(operation)) return false;
+      const checked = scheduleListContract(list);
+      if (checked) receipt = scheduleCreatedRecordMatches(checked.find((item) => item.cron_id === cronId), draft, cronId, false);
+    } catch {}
+  }
+  button.disabled = false; button.textContent = "Create durable schedule";
+  if (!receipt) {
+    const ambiguous = originalError && ![400, 401, 403, 409, 422].includes(Number(originalError.status));
+    scheduleShowFormError(validation, ambiguous ? `Creation outcome is uncertain. Studio could not corroborate schedule ${cronId}; keep this exact ID and reviewed payload before retrying.` : originalError ? originalError.message : "Rusty returned a schedule receipt that did not match the reviewed cadence.");
+    return false;
+  }
+  const state = store.schedules;
+  state.list = [...state.list.filter((item) => item.cron_id !== cronId), receipt].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.cron_id.localeCompare(b.cron_id));
+  const foreground = state === interaction.state && store.view === interaction.view && state.selected === interaction.selected &&
+    state.query === interaction.query && state.filter === interaction.filter && JSON.stringify(scheduleFormValues()) === interaction.form;
+  if (foreground) {
+    state.selected = cronId; $("schedule-compose").hidden = true; $("btn-schedule-create").setAttribute("aria-expanded", "false");
+    $("schedule-form").reset(); $("schedule-form").removeAttribute("data-validated"); $("inp-schedule-input").value = "{}"; schedulesRender();
+    $("schedule-announcer").textContent = creationProven
+      ? `Schedule ${cronId} created and selected. It has not fired yet.`
+      : `Matching durable schedule ${cronId} is present and selected. The catalog cannot prove this request created it.`;
+    toast(creationProven ? "Durable schedule created." : "Matching durable schedule reconciled; creation provenance is unavailable.", "ok");
+    $("schedule-detail-title")?.focus({ preventScroll: true });
+    navigationReplaceManagedAddress();
+  } else if (store.view === "schedules") { schedulesRender(); navigationReplaceManagedAddress(); }
+  scheduleUpdateSidebar(); return true;
+}
+
+function scheduleRemovalOpen(cronId) {
+  const state = store.schedules, record = state && state.list.find((item) => item.cron_id === cronId);
+  if (!record) return false;
+  state.removal = { cronId, snapshot: scheduleStableValue(record), acknowledged: false, submitting: false, ambiguous: false, error: "" };
+  schedulesRender(); $("schedule-removal-title")?.focus({ preventScroll: true }); return true;
+}
+
+async function scheduleRemovalSubmit() {
+  const state = store.schedules, review = state && state.removal;
+  const expected = state && state.list.find((item) => item.cron_id === review?.cronId);
+  const operation = connectionOperation();
+  if (!state || !review || !expected || review.snapshot !== scheduleStableValue(expected) || !review.acknowledged || review.submitting || review.ambiguous || !operation) return false;
+  const request = ++store.scheduleMutationRequest;
+  const interaction = { state, review, view: store.view, selected: state.selected, query: state.query, filter: state.filter };
+  review.submitting = true; review.error = ""; schedulesRender(); $("schedule-removal-title")?.focus({ preventScroll: true });
+  let response = null, originalError = null;
+  try { response = await apiForConnection(operation.connection, "DELETE", `/crons/${encodeURIComponent(review.cronId)}`, undefined, SCHEDULE_RESPONSE_LIMIT); }
+  catch (error) { originalError = error; }
+  if (request !== store.scheduleMutationRequest || !connectionOperationCurrent(operation)) return false;
+  const exactReceipt = Boolean(scheduleDeleteReceipt(response, review.cronId));
+  const catalogRequest = ++store.scheduleRequest;
+  let list = null;
+  try {
+    const raw = await apiForConnection(operation.connection, "GET", "/crons", undefined, SCHEDULE_RESPONSE_LIMIT);
+    const checked = scheduleListContract(raw);
+    if (!checked) throw new Error("The post-removal catalog did not match the CronRecord contract.");
+    list = checked;
+  } catch {}
+  if (request !== store.scheduleMutationRequest || !connectionOperationCurrent(operation) || catalogRequest !== store.scheduleRequest) return false;
+  const current = store.schedules;
+  if (!current) return false;
+  const foreground = current === interaction.state && current.removal === interaction.review && store.view === interaction.view &&
+    current.selected === interaction.selected && current.query === interaction.query && current.filter === interaction.filter;
+  if (!list) {
+    const deterministic = originalError && [400, 401, 403, 409, 422].includes(Number(originalError.status)) && !exactReceipt;
+    const message = deterministic ? originalError.message :
+      `Removal outcome for ${review.cronId} is uncertain because Studio could not read the post-removal catalog. Do not assume future firings stopped.`;
+    current.mutationError = registryEvidencePreview(message);
+    if (current.removal === review) {
+      review.submitting = false; review.ambiguous = !deterministic; review.error = current.mutationError;
+    }
+    if (store.view === "schedules") schedulesRender();
+    if (foreground) $(current.removal === review ? "schedule-removal-error" : "schedule-mutation-error")?.focus({ preventScroll: true });
+    return false;
+  }
+  const sameId = list.find((item) => item.cron_id === review.cronId) || null;
+  current.loading = false; current.error = null;
+  if (sameId) {
+    current.list = [...current.list.filter((item) => item.cron_id !== review.cronId), sameId]
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.cron_id.localeCompare(b.cron_id));
+    const replacement = scheduleStableValue(sameId) !== review.snapshot;
+    current.mutationError = registryEvidencePreview(replacement
+      ? `The reviewed schedule was removed, but a newer durable schedule now uses ID ${review.cronId}. Future firings are not stopped for that replacement.`
+      : exactReceipt
+        ? `Rusty acknowledged removal, but the authoritative catalog still contains the reviewed schedule ${review.cronId}. Studio preserved the server record.`
+        : originalError ? originalError.message : `Schedule ${review.cronId} remains in the authoritative catalog.`);
+    if (current.removal === review) current.removal = null;
+    if (store.view === "schedules") { schedulesRender(); navigationReplaceManagedAddress(); }
+    scheduleUpdateSidebar();
+    if (foreground) { $("schedule-announcer").textContent = registryEvidencePreview(current.mutationError); $("schedule-mutation-error")?.focus({ preventScroll: true }); }
+    return false;
+  }
+  current.mutationError = "";
+  current.list = current.list.filter((item) => item.cron_id !== review.cronId);
+  if (current.removal && current.removal.cronId === review.cronId) current.removal = null;
+  if (!current.list.some((item) => item.cron_id === current.selected)) current.selected = scheduleVisibleList(current)[0]?.cron_id || current.list[0]?.cron_id || "";
+  if (store.view === "schedules") { schedulesRender(); navigationReplaceManagedAddress(); }
+  scheduleUpdateSidebar();
+  if (foreground) {
+    $("schedule-announcer").textContent = `Schedule ${review.cronId} is absent from the refreshed catalog. Already scheduled or running work was not cancelled.`;
+    toast("Future schedule firings stopped for the reviewed ID.", "warn");
+    (current.selected ? $("schedule-detail-title") : $("schedules-title"))?.focus({ preventScroll: true });
+  }
+  return true;
+}
+
+function openSchedules() {
+  navigationCancelPending("schedules");
+  store.view = "schedules"; renderMain(); $("main").scrollTop = 0;
+  if (!store.schedules || (!store.schedules.loading && store.schedules.error)) schedulesLoad(false);
+  $("schedules-title").focus({ preventScroll: true });
+}
+
 /* ---------------- durable tasks (R0.6) ----------------
  * Control-plane view over the task queue: GET /tasks?status=… (the list
  * payload doubles as the detail source — GET /tasks/{id} returns the same
@@ -23423,6 +24149,59 @@ function init() {
     }
     const run = event.target.closest("[data-automation-run]");
     if (run) automationInspectRun(run.getAttribute("data-automation-run"), run.getAttribute("data-automation-run-event"));
+  });
+
+  // Schedules: durable UTC cadence records. Creation uses a client-stable
+  // ID for lost-receipt reconciliation; removal never claims to cancel an
+  // already scheduled or executing run.
+  $("btn-schedules-open").onclick = openSchedules;
+  $("btn-schedules-refresh").onclick = () => schedulesLoad(false);
+  $("btn-schedule-create").onclick = scheduleCreateOpen;
+  $("btn-schedule-create-close").onclick = scheduleCreateOpen;
+  for (const radio of document.querySelectorAll('input[name="schedule-mode"]')) radio.addEventListener("change", scheduleModeRender);
+  $("schedule-form").addEventListener("input", (event) => scheduleFormEdited(event.target));
+  $("schedule-form").addEventListener("submit", (event) => { event.preventDefault(); scheduleCreateSubmit(); });
+  $("inp-schedule-search").addEventListener("input", (event) => {
+    if (!store.schedules || event.isComposing) return;
+    store.schedules.query = event.target.value; schedulesRender();
+  });
+  $("inp-schedule-search").addEventListener("compositionend", (event) => {
+    if (!store.schedules) return;
+    store.schedules.query = event.target.value; schedulesRender(); $("inp-schedule-search").focus({ preventScroll: true });
+  });
+  $("sel-schedule-filter").addEventListener("change", (event) => {
+    if (!store.schedules) return;
+    store.schedules.filter = ["all", "keep", "delete"].includes(event.target.value) ? event.target.value : "all";
+    schedulesRender();
+  });
+  $("btn-schedule-clear").onclick = () => {
+    if (!store.schedules) return;
+    store.schedules.query = ""; store.schedules.filter = "all"; schedulesRender(); $("inp-schedule-search").focus({ preventScroll: true });
+  };
+  const scheduleActivate = (event) => {
+    const row = event.target.closest("[data-schedule-id]");
+    if (!row || !store.schedules) return;
+    const id = row.getAttribute("data-schedule-id");
+    if (event.type === "click") { scheduleSelect(id, true); return; }
+    if (["Enter", " "].includes(event.key)) { event.preventDefault(); scheduleSelect(id, true); return; }
+    if (scheduleKeyboardMove(row, event.key)) event.preventDefault();
+  };
+  $("schedule-list").addEventListener("click", scheduleActivate);
+  $("schedule-list").addEventListener("keydown", scheduleActivate);
+  $("schedule-detail").addEventListener("change", (event) => {
+    if (!event.target.matches("[data-schedule-remove-ack]") || !store.schedules?.removal) return;
+    store.schedules.removal.acknowledged = event.target.checked;
+    store.schedules.removal.error = ""; store.schedules.removal.ambiguous = false;
+    schedulesRender(); $("schedule-detail").querySelector("[data-schedule-remove-ack]")?.focus({ preventScroll: true });
+  });
+  $("schedule-detail").addEventListener("click", (event) => {
+    const open = event.target.closest("[data-schedule-remove]");
+    if (open) { scheduleRemovalOpen(open.getAttribute("data-schedule-remove")); return; }
+    if (event.target.closest("[data-schedule-remove-cancel]")) {
+      if (store.schedules) store.schedules.removal = null;
+      schedulesRender(); $("schedule-detail").querySelector("[data-schedule-remove]")?.focus({ preventScroll: true }); return;
+    }
+    if (event.target.closest("[data-schedule-remove-submit]")) scheduleRemovalSubmit();
   });
 
   // Durable tasks: open the tenant-wide queue view, filter, refresh, and

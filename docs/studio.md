@@ -241,6 +241,28 @@ studio/
   replay is never retried automatically: the desk locks the action and directs the operator to refresh for a
   new `replayed_from` record. Events with a run identity can open that exact journal in Flight Recorder after
   its thread identity is corroborated from the server event envelope.
+- **Schedule desk** — a tenant-scoped operations workspace over `POST /crons`, `GET /crons`, and
+  `DELETE /crons/{id}`. A guided, acknowledgement-gated composer creates either a fixed interval
+  (1 second through 1 year) or an exact five-field UTC cron expression for a graph advertised by the
+  connected server. Initial run state is reviewed as an exact JSON object within Studio's 64 KiB
+  authoring boundary; unsafe 64-bit JSON integer tokens remain exact on the wire. This input is durable,
+  tenant-visible, and reused for every run attempt, so Studio explicitly warns that it is not a credential
+  or secret store. Operators can search
+  and filter recurring (`keep`) versus one-shot (`delete`) records, inspect strict server timestamps and
+  exact firing counters, and share a content-free link containing only the schedule identity. Creation
+  uses a stable client ID so an untrusted or lost receipt can converge on matching authoritative tenant
+  state without blind duplication; only the exact fresh `201` proves this operation created the record,
+  while GET reconciliation proves presence but not creation provenance. A deterministic ID conflict is
+  never claimed as a successful create. Removal requires a second explicit review and stops future firings
+  only after a post-delete catalog read proves the reviewed ID is absent. A concurrently recreated same-ID
+  record remains visible and is explicitly reported as still able to fire. Removal does not cancel a
+  run already scheduled or executing, and it does not delete prior thread or journal evidence. The cron
+  wire carries `runs_fired` and `last_run_at` but no fired thread, run ID, or scheduling result. The server
+  advances those fields after persisting a fresh thread and attempting run scheduling, even when scheduling
+  returns an error, so Studio labels them as firing-attempt evidence—not accepted-run, success,
+  effect-completion, or investigation evidence. A one-shot record removes itself only after its first
+  successfully scheduled run reaches a terminal state. Catalog and
+  composer state are connection-bound page memory; changing connection or reloading clears them.
 - **Threads panel (local-only)** — the server API (as of v0.4) has **no list-threads endpoint**, so threads you create or
   attach are remembered in your browser, isolated by server and access boundary. **Attach by id** re-connects a thread the
   server already knows, and offers to re-create it with the same id when the in-memory thread registry has
