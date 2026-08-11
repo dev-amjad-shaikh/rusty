@@ -1,11 +1,13 @@
 //! The run artifact plane integration tests (R0.12 Operations Plane,
-//! wave 1): the `/artifacts` surface over the default JSON-file backend —
-//! the declared commit path, the journaled-spill commit path, lineage
-//! resolution (run → effect → bytes), convergence and conflict rules,
-//! tenant isolation, restart durability, and the fail-closed reads
-//! (corruption refused, the typed miss for gone bytes). Live-Postgres
-//! coverage of the same semantics is the gated section at the bottom
-//! (`RUSTY_TEST_DATABASE_URL`).
+//! waves 1 and 2): the `/artifacts` surface over the default JSON-file
+//! backend — the declared commit path, the journaled-spill commit path,
+//! lineage resolution (run → effect → bytes), convergence and conflict
+//! rules, tenant isolation, restart durability, and the fail-closed
+//! reads (corruption refused, the typed miss for gone bytes); wave 2
+//! adds version accumulation, derived previews, the retention sweeper,
+//! the release act, and the deployment evidence chain read. Live-
+//! Postgres coverage of the same semantics is the gated section at the
+//! bottom (`RUSTY_TEST_DATABASE_URL`, or `DATABASE_URL` for gate parity).
 //!
 //! Driven in-process via `tower::ServiceExt::oneshot` (no sockets), the
 //! `registry.rs` convention. R0.7 compatibility — journal artifacts and
@@ -370,8 +372,8 @@ async fn conflicting_names_and_bytes_answer_409() {
     let (status, v) = call(&app, "POST", "/artifacts/commits", Some(payload)).await;
     assert_eq!(status, StatusCode::CONFLICT, "expected 409: {v}");
 
-    // A different output under the taken name: version accumulation is
-    // Wave 2.
+    // A different output under the taken name is a version, not a
+    // conflict (wave 2): the new head joins the sequence and journals.
     let payload = commit_payload(
         &run_id,
         &event_id,
@@ -379,15 +381,18 @@ async fn conflicting_names_and_bytes_answer_409() {
         Some("weekly-report"),
     );
     let (status, v) = call(&app, "POST", "/artifacts/commits", Some(payload)).await;
-    assert_eq!(status, StatusCode::CONFLICT, "expected 409: {v}");
+    assert_eq!(status, StatusCode::CREATED, "expected 201: {v}");
+    assert_eq!(v["commitment"]["version"], json!(1));
+    assert_eq!(v["artifact"]["versions"].as_array().unwrap().len(), 2);
 
-    // Neither conflict journaled: exactly one commitment event stands.
+    // The conflict journaled nothing; the version did: the base commit
+    // plus the version append, exactly two commitment events.
     let events = run_events(&app, &run_id).await;
     let commits = events
         .iter()
         .filter(|event| event["kind"] == "artifact_committed")
         .count();
-    assert_eq!(commits, 1);
+    assert_eq!(commits, 2);
 
     let _ = std::fs::remove_dir_all(store);
 }
@@ -884,6 +889,667 @@ async fn list_filters_by_name_media_kind_and_run() {
 }
 
 // --------------------------------------------------------------------- //
+// Wave 2: versions, previews, the sweeper, the release act, and the
+// deployment evidence chain
+// --------------------------------------------------------------------- //
+
+/// A commit payload with explicit media and retention — the wave-1
+/// helper is pinned to image/png + days(30); wave 2 commits text, JSON,
+/// BMP, WAV, pinned, and receipt-bound bytes.
+fn commit_payload_full(
+    run_id: &str,
+    event_id: &str,
+    bytes: &[u8],
+    name: Option<&str>,
+    media_kind: &str,
+    media_type: Option<&str>,
+    retention: Option<Value>,
+) -> Value {
+    json!({
+        "bytes_hex": hex_encode(bytes),
+        "name": name,
+        "media_kind": media_kind,
+        "media_type": media_type,
+        "retention": retention,
+        "lineage": {
+            "run_id": run_id,
+            "effect_id": effect_id_for(run_id),
+            "event_id": event_id,
+        },
+    })
+}
+
+/// Commit through the full payload; returns the 201 response body.
+async fn commit_full(app: &Router, payload: Value) -> Value {
+    let (status, v) = call(app, "POST", "/artifacts/commits", Some(payload)).await;
+    assert_eq!(status, StatusCode::CREATED, "commit failed: {v}");
+    v
+}
+
+/// A 4×2 24-bit `BI_RGB` BMP: top row red, bottom row blue (stored
+/// bottom-up) — the dependency-free image decodable, mirrored from
+/// core's preview fixture.
+fn tiny_bmp() -> Vec<u8> {
+    let stride = 12; // (4 px * 3 B) padded to a 4-byte boundary
+    let mut bmp = Vec::new();
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&(54u32 + 2 * stride as u32).to_le_bytes()); // file size
+    bmp.extend_from_slice(&0u32.to_le_bytes()); // reserved
+    bmp.extend_from_slice(&54u32.to_le_bytes()); // data offset
+    bmp.extend_from_slice(&40u32.to_le_bytes()); // DIB size
+    bmp.extend_from_slice(&4u32.to_le_bytes()); // width
+    bmp.extend_from_slice(&2i32.to_le_bytes()); // height (bottom-up)
+    bmp.extend_from_slice(&1u16.to_le_bytes()); // planes
+    bmp.extend_from_slice(&24u16.to_le_bytes()); // bpp
+    bmp.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
+    bmp.extend_from_slice(&(2 * stride as u32).to_le_bytes()); // image size
+    bmp.extend_from_slice(&0u32.to_le_bytes()); // x ppm
+    bmp.extend_from_slice(&0u32.to_le_bytes()); // y ppm
+    bmp.extend_from_slice(&0u32.to_le_bytes()); // palette colors
+    bmp.extend_from_slice(&0u32.to_le_bytes()); // important colors
+    for _ in 0..4 {
+        bmp.extend_from_slice(&[255, 0, 0]); // bottom row: blue (BGR)
+    }
+    for _ in 0..4 {
+        bmp.extend_from_slice(&[0, 0, 255]); // top row: red (BGR)
+    }
+    bmp
+}
+
+/// A 16-sample mono 8-bit PCM WAV at 8000 Hz, ramping — the
+/// dependency-free audio decodable, mirrored from core's fixture.
+fn tiny_wav() -> Vec<u8> {
+    let samples: Vec<u8> = (0..16).map(|i| i * 16).collect();
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36u32 + samples.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&8000u32.to_le_bytes()); // rate
+    wav.extend_from_slice(&8000u32.to_le_bytes()); // byte rate
+    wav.extend_from_slice(&1u16.to_le_bytes()); // block align
+    wav.extend_from_slice(&8u16.to_le_bytes()); // bits
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&samples);
+    wav
+}
+
+/// The deployment evidence chain's events (`GET /artifacts/journal`).
+async fn chain_events(app: &Router) -> Vec<Value> {
+    let (status, v) = call(app, "GET", "/artifacts/journal", None).await;
+    assert_eq!(status, StatusCode::OK, "chain read failed: {v}");
+    assert_eq!(v["run_id"], "run-artifacts");
+    assert_eq!(v["complete"], false);
+    v["events"].as_array().unwrap().clone()
+}
+
+/// The payload of every chain event of `kind`.
+fn chain_payloads<'a>(events: &'a [Value], kind: &str) -> Vec<&'a Value> {
+    events
+        .iter()
+        .filter(|event| event["kind"] == kind)
+        .map(|event| &event["output"]["value"])
+        .collect()
+}
+
+#[tokio::test]
+async fn named_artifact_accumulates_three_versions_and_serves_each_by_address() {
+    let store = temp_store();
+    let first = app_with(store.clone(), |config| config);
+    let run_id = run_pipeline(&first).await;
+
+    // Three commits under one name: the base plus two appends, each
+    // journaling its own commitment with the sequence index.
+    let mut addresses = Vec::new();
+    for (index, bytes) in [
+        b"report v1".as_slice(),
+        b"report v2".as_slice(),
+        b"report v3".as_slice(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let events = run_events(&first, &run_id).await;
+        let payload = commit_payload(
+            &run_id,
+            &last_event_id(&events),
+            bytes,
+            Some("weekly-report"),
+        );
+        let v = commit_full(&first, payload).await;
+        assert_eq!(v["commitment"]["version"], json!(index as u64));
+        assert_eq!(
+            v["artifact"]["versions"].as_array().unwrap().len(),
+            index + 1
+        );
+        addresses.push(v["artifact_id"].as_str().unwrap().to_string());
+    }
+
+    // The name resolves the head; the history carries all three, oldest
+    // first.
+    let (status, by_name) = call(&first, "GET", "/artifacts/names/weekly-report", None).await;
+    assert_eq!(status, StatusCode::OK, "by-name failed: {by_name}");
+    assert_eq!(by_name["artifact_id"], json!(addresses[2]));
+    let (status, versions) = call(
+        &first,
+        "GET",
+        "/artifacts/names/weekly-report/versions",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "versions failed: {versions}");
+    assert_eq!(versions["current"], json!(addresses[2]));
+    let sequence = versions["versions"].as_array().unwrap();
+    assert_eq!(sequence.len(), 3);
+    for (index, entry) in sequence.iter().enumerate() {
+        assert_eq!(entry["sha256"], json!(addresses[index]));
+    }
+
+    // Every version keeps serving by address — the old record is never
+    // edited, so v1's record still carries the sequence prefix it was
+    // committed under.
+    for (index, bytes) in [
+        b"report v1".as_slice(),
+        b"report v2".as_slice(),
+        b"report v3".as_slice(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (status, _, body) = get_bytes(
+            &first,
+            None,
+            &format!("/artifacts/{}/bytes", addresses[index]),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "version {index} bytes failed");
+        assert_eq!(body.as_ref(), bytes);
+    }
+    let (status, v1_record) =
+        call(&first, "GET", &format!("/artifacts/{}", addresses[0]), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v1_record["versions"].as_array().unwrap().len(), 1);
+
+    // The restart: a fresh app over the same store re-points the name at
+    // the head and serves every version.
+    drop(first);
+    let second = app_with(store.clone(), |config| config);
+    let (status, by_name) = call(&second, "GET", "/artifacts/names/weekly-report", None).await;
+    assert_eq!(status, StatusCode::OK, "name lost on restart: {by_name}");
+    assert_eq!(by_name["artifact_id"], json!(addresses[2]));
+    assert_eq!(by_name["versions"].as_array().unwrap().len(), 3);
+    let (status, _, body) =
+        get_bytes(&second, None, &format!("/artifacts/{}/bytes", addresses[0])).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_ref(), b"report v1");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn previews_derive_and_underivable_kinds_answer_empty() {
+    let (app, store) = app();
+    let run_id = run_pipeline(&app).await;
+    // The preview subjects commit `pinned` so the sweep at the end
+    // prunes exactly the one `days(0)` artifact it is meant to.
+
+    // BMP → a real thumbnail with the source dims and P6 PPM pixels.
+    let events = run_events(&app, &run_id).await;
+    let event_id = last_event_id(&events);
+    let bmp_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &event_id,
+            &tiny_bmp(),
+            None,
+            "image",
+            Some("image/bmp"),
+            Some(json!({"policy": "pinned"})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, v) = call(&app, "GET", &format!("/artifacts/{bmp_id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK, "preview failed: {v}");
+    let preview = &v["preview"];
+    assert_eq!(preview["kind"], "image");
+    assert_eq!(preview["format"], "bmp");
+    assert_eq!(preview["width"], 4);
+    assert_eq!(preview["height"], 2);
+    assert_eq!(preview["thumb_width"], 4);
+    assert_eq!(preview["thumb_height"], 2);
+    let ppm_hex = preview["pixels_ppm_hex"].as_str().unwrap();
+    assert!(
+        ppm_hex.starts_with(&hex_encode(b"P6\n4 2\n255\n")),
+        "the thumbnail is a P6 PPM of the source dims: {ppm_hex}"
+    );
+
+    // Text → a bounded text window.
+    let events = run_events(&app, &run_id).await;
+    let event_id = last_event_id(&events);
+    let text_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &event_id,
+            b"quarterly export, plain text",
+            None,
+            "file",
+            Some("text/plain"),
+            Some(json!({"policy": "pinned"})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, v) = call(&app, "GET", &format!("/artifacts/{text_id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["preview"]["kind"], "text");
+    assert_eq!(v["preview"]["text"], "quarterly export, plain text");
+    assert_eq!(v["preview"]["truncated"], false);
+
+    // Whole JSON inside the window → the parsed document.
+    let events = run_events(&app, &run_id).await;
+    let event_id = last_event_id(&events);
+    let json_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &event_id,
+            br#"{"rows":[1,2,3]}"#,
+            None,
+            "data",
+            Some("application/json"),
+            Some(json!({"policy": "pinned"})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, v) = call(&app, "GET", &format!("/artifacts/{json_id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["preview"]["kind"], "json");
+    assert_eq!(v["preview"]["value"], json!({"rows": [1, 2, 3]}));
+
+    // WAV → waveform metadata (duration, rate, the peak envelope).
+    let events = run_events(&app, &run_id).await;
+    let event_id = last_event_id(&events);
+    let wav_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &event_id,
+            &tiny_wav(),
+            None,
+            "audio",
+            Some("audio/wav"),
+            Some(json!({"policy": "pinned"})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, v) = call(&app, "GET", &format!("/artifacts/{wav_id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["preview"]["kind"], "audio");
+    assert_eq!(v["preview"]["format"], "wav");
+    assert_eq!(v["preview"]["sample_rate"], 8000);
+    assert_eq!(v["preview"]["channels"], 1);
+    assert_eq!(v["preview"]["peaks"].as_array().unwrap().len(), 64);
+
+    // Compressed formats and undecodable bytes answer the honest empty —
+    // a codec dependency is the measured-need seam, never a half-parse.
+    let events = run_events(&app, &run_id).await;
+    let event_id = last_event_id(&events);
+    let png_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &event_id,
+            b"\x89PNG pretend compressed image",
+            None,
+            "image",
+            Some("image/png"),
+            Some(json!({"policy": "pinned"})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, v) = call(&app, "GET", &format!("/artifacts/{png_id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["preview"]["kind"], "empty");
+    assert!(v["preview"]["reason"].as_str().unwrap().contains("BMP"));
+
+    let events = run_events(&app, &run_id).await;
+    let event_id = last_event_id(&events);
+    let mp3_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &event_id,
+            b"ID3 pretend compressed audio",
+            None,
+            "audio",
+            Some("audio/mpeg"),
+            Some(json!({"policy": "pinned"})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, v) = call(&app, "GET", &format!("/artifacts/{mp3_id}/preview"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["preview"]["kind"], "empty");
+
+    // A pruned artifact's preview answers the typed miss (and journals
+    // it on the `preview` surface).
+    let events = run_events(&app, &run_id).await;
+    let event_id = last_event_id(&events);
+    let expired_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &event_id,
+            b"short-lived",
+            None,
+            "file",
+            None,
+            Some(json!({"policy": "days", "days": 0})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, report) = call(&app, "POST", "/artifacts/sweep", None).await;
+    assert_eq!(status, StatusCode::OK, "sweep failed: {report}");
+    assert_eq!(report["pruned"], 1);
+    let (status, v) = call(
+        &app,
+        "GET",
+        &format!("/artifacts/{expired_id}/preview"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::GONE, "expected 410: {v}");
+    assert_eq!(v["error"], "artifact_unavailable");
+    let chain = chain_events(&app).await;
+    let misses = chain_payloads(&chain, "artifact_unavailable");
+    assert_eq!(misses.len(), 1);
+    assert_eq!(misses[0]["artifact_id"], json!(expired_id));
+    assert_eq!(misses[0]["surface"], "preview");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn sweeper_prunes_expired_and_the_replay_read_fails_closed_journaled() {
+    let (app, store) = app();
+    let run_id = run_pipeline(&app).await;
+    let events = run_events(&app, &run_id).await;
+    let bytes = b"expiring export".as_slice();
+    let artifact_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &last_event_id(&events),
+            bytes,
+            Some("daily-digest"),
+            "file",
+            None,
+            Some(json!({"policy": "days", "days": 0})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Live before the pass.
+    let (status, _, body) = get_bytes(&app, None, &format!("/artifacts/{artifact_id}/bytes")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_ref(), bytes);
+
+    // The operator-triggered pass prunes the expired address and reports
+    // it deterministically.
+    let (status, report) = call(&app, "POST", "/artifacts/sweep", None).await;
+    assert_eq!(status, StatusCode::OK, "sweep failed: {report}");
+    assert_eq!(report["scanned"], 1);
+    assert_eq!(report["pruned"], 1);
+    assert_eq!(report["failed"], 0);
+    assert!(report["unverifiable_receipts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    // The prune intention journaled before the byte moved — the chain
+    // carries the cause the audit reads.
+    let chain = chain_events(&app).await;
+    let prunes = chain_payloads(&chain, "artifact_pruned");
+    assert_eq!(prunes.len(), 1);
+    assert_eq!(prunes[0]["artifact_id"], json!(artifact_id));
+    assert_eq!(prunes[0]["name"], "daily-digest");
+    assert_eq!(prunes[0]["cause"], "expired");
+
+    // The replay's byte read fails closed: the record is live, the bytes
+    // are gone — the typed `410`, never a 404, and the miss journals
+    // (this read *is* an exact replay's byte source; server-side
+    // `/runs/replay` replays control flow from the journal and never
+    // touches blob bytes, the design's stated split).
+    let (status, _, body) = get_bytes(&app, None, &format!("/artifacts/{artifact_id}/bytes")).await;
+    assert_eq!(status, StatusCode::GONE);
+    let error: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"], "artifact_unavailable");
+    let events = chain_events(&app).await;
+    let misses = chain_payloads(&events, "artifact_unavailable");
+    assert_eq!(misses.len(), 1);
+    assert_eq!(misses[0]["artifact_id"], json!(artifact_id));
+    assert_eq!(misses[0]["surface"], "bytes");
+
+    // A repeat pass converges: the intention is already journaled, the
+    // bytes already gone.
+    let (status, report) = call(&app, "POST", "/artifacts/sweep", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(report["pruned"], 0);
+    assert_eq!(report["already_gone"], 1);
+    assert_eq!(
+        chain_payloads(&chain_events(&app).await, "artifact_pruned").len(),
+        1
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn receipt_pinned_survives_sweep_and_release_is_the_only_prune() {
+    let (app, store) = app();
+    let run_id = run_pipeline(&app).await;
+    let events = run_events(&app, &run_id).await;
+    let bytes = b"receipt-bound evidence".as_slice();
+    // The default retention: receipt_bound.
+    let artifact_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &last_event_id(&events),
+            bytes,
+            Some("audit-report"),
+            "file",
+            None,
+            None,
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Mint the run's receipt *after* the commit: the covered events name
+    // the address, so the receipt pins it.
+    let (status, receipt) = call(&app, "GET", &format!("/runs/{run_id}/receipt"), None).await;
+    assert_eq!(status, StatusCode::OK, "receipt mint failed: {receipt}");
+
+    // The sweep cannot prune a receipt-pinned address.
+    let (status, report) = call(&app, "POST", "/artifacts/sweep", None).await;
+    assert_eq!(status, StatusCode::OK, "sweep failed: {report}");
+    assert_eq!(report["pruned"], 0);
+    assert_eq!(report["protected"], 1);
+    let (status, _, body) = get_bytes(&app, None, &format!("/artifacts/{artifact_id}/bytes")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_ref(), bytes);
+
+    // The release is the only path that prunes it: journaled with the
+    // operator's name, then the prune tail deletes the bytes.
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/artifacts/{artifact_id}/release"),
+        Some(json!({"released_by": "human:test", "reason": "retention review closed"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "release failed: {v}");
+    assert_eq!(v["released"], true);
+    assert_eq!(v["converged"], false);
+    assert_eq!(v["pruned"], true);
+    let event_id = v["journal_event_id"].as_str().unwrap().to_string();
+
+    let (status, _, body) = get_bytes(&app, None, &format!("/artifacts/{artifact_id}/bytes")).await;
+    assert_eq!(status, StatusCode::GONE);
+    let error: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"], "artifact_unavailable");
+
+    // The chain carries the release (with the operator's identity and
+    // reason), the prune intention, and the miss — on the deployment
+    // chain, never the producing run's receipt-covered journal.
+    let events = chain_events(&app).await;
+    let releases = chain_payloads(&events, "artifact_retention_released");
+    assert_eq!(releases.len(), 1);
+    assert_eq!(releases[0]["artifact_id"], json!(artifact_id));
+    assert_eq!(releases[0]["released_by"], "human:test");
+    assert_eq!(releases[0]["reason"], "retention review closed");
+    let prunes = chain_payloads(&events, "artifact_pruned");
+    assert_eq!(prunes.len(), 1);
+    assert_eq!(prunes[0]["cause"], "released");
+    assert_eq!(chain_payloads(&events, "artifact_unavailable").len(), 1);
+    let run_journal = run_events(&app, &run_id).await;
+    for kind in [
+        "artifact_retention_released",
+        "artifact_pruned",
+        "artifact_unavailable",
+    ] {
+        assert!(
+            run_journal.iter().all(|event| event["kind"] != kind),
+            "retention acts never join the producing run's journal ({kind})"
+        );
+    }
+
+    // A repeat release converges on the first act's event.
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/artifacts/{artifact_id}/release"),
+        Some(json!({"released_by": "human:test"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "repeat release failed: {v}");
+    assert_eq!(v["converged"], true);
+    assert_eq!(v["journal_event_id"], json!(event_id));
+    assert_eq!(
+        chain_payloads(&chain_events(&app).await, "artifact_retention_released").len(),
+        1,
+        "the repeat journaled nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn pinned_retention_survives_sweep_until_the_release_act() {
+    let (app, store) = app();
+    let run_id = run_pipeline(&app).await;
+    let events = run_events(&app, &run_id).await;
+    let bytes = b"pinned forever, until a human says otherwise".as_slice();
+    let artifact_id = commit_full(
+        &app,
+        commit_payload_full(
+            &run_id,
+            &last_event_id(&events),
+            bytes,
+            Some("golden-master"),
+            "file",
+            None,
+            Some(json!({"policy": "pinned"})),
+        ),
+    )
+    .await["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Pinned is protected no matter the clock or the coverage.
+    let (status, report) = call(&app, "POST", "/artifacts/sweep", None).await;
+    assert_eq!(status, StatusCode::OK, "sweep failed: {report}");
+    assert_eq!(report["pruned"], 0);
+    assert_eq!(report["protected"], 1);
+    let (status, _, _) = get_bytes(&app, None, &format!("/artifacts/{artifact_id}/bytes")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The release act is the way out — a governance decision with a name
+    // on it, never housekeeping.
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/artifacts/{artifact_id}/release"),
+        Some(json!({"released_by": "human:ops-lead"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "release failed: {v}");
+    assert_eq!(v["pruned"], true);
+    let (status, _, _) = get_bytes(&app, None, &format!("/artifacts/{artifact_id}/bytes")).await;
+    assert_eq!(status, StatusCode::GONE);
+
+    // An empty operator identity is refused — the act carries a name.
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/artifacts/{artifact_id}/release"),
+        Some(json!({"released_by": "  "})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "expected 422: {v}"
+    );
+
+    // An unknown address 404s (unknown and cross-tenant are
+    // indistinguishable).
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/artifacts/{}/release", "0".repeat(64)),
+        Some(json!({"released_by": "human:ops-lead"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+// --------------------------------------------------------------------- //
 // Gated on `RUSTY_TEST_DATABASE_URL`; every test is `#[ignore]` so the
 // default suite stays green without a database (the `postgres_*.rs`
 // convention). Every run uses a dedicated tenant, so repeated runs
@@ -896,7 +1562,11 @@ mod postgres {
     use super::*;
 
     fn pg_url() -> Option<String> {
-        std::env::var("RUSTY_TEST_DATABASE_URL").ok()
+        // `RUSTY_TEST_DATABASE_URL` is the repo convention; `DATABASE_URL`
+        // is honored too so the gate's single env var drives every suite.
+        std::env::var("RUSTY_TEST_DATABASE_URL")
+            .ok()
+            .or_else(|| std::env::var("DATABASE_URL").ok())
     }
 
     /// Wave-1 exit criteria on Postgres: an effect commits a named
@@ -1074,5 +1744,167 @@ mod postgres {
         assert_eq!(status, StatusCode::GONE);
         let error: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(error["error"], "artifact_unavailable");
+    }
+
+    /// Wave-2 exit criteria on Postgres: version accumulation CAS-appends
+    /// under the advisory-locked name, the sweeper protects a
+    /// receipt-pinned address, the release act is the only prune, and the
+    /// deployment evidence chain carries every act — all through the same
+    /// routes the file backend serves.
+    #[tokio::test]
+    #[ignore = "requires RUSTY_TEST_DATABASE_URL (scratch Postgres)"]
+    async fn postgres_versions_sweep_and_release_hold() {
+        use sqlx::Row;
+
+        let Some(url) = pg_url() else {
+            eprintln!("RUSTY_TEST_DATABASE_URL unset; skipping");
+            return;
+        };
+        let tenant = format!("artifactpg-{}", uuid::Uuid::new_v4());
+        let auth = Some(("x-api-key", "pg-secret"));
+        let app = app_with(temp_store(), |config| {
+            config
+                .with_postgres(url.clone())
+                .with_tenant_key(tenant.clone(), "pg-secret")
+        });
+
+        let run_id = run_pipeline_as(&app, auth).await;
+
+        // The bytes carry the tenant so repeated gate runs against one
+        // scratch database mint distinct addresses — content addressing
+        // makes byte storage global, and a re-run's identical bytes would
+        // share an address another tenant's record still protects (the
+        // cross-tenant rule, working as designed, would then correctly
+        // answer `pruned: false`).
+        let v1_bytes = format!("pg report v1 {tenant}").into_bytes();
+        let v2_bytes = format!("pg report v2 {tenant}").into_bytes();
+
+        // Version accumulation: two commits under one name — the head
+        // re-points and the sequence grows to two.
+        let mut addresses = Vec::new();
+        for bytes in [&v1_bytes, &v2_bytes] {
+            let events = {
+                let (status, v) =
+                    call_as(&app, auth, "GET", &format!("/runs/{run_id}/events"), None).await;
+                assert_eq!(status, StatusCode::OK, "events failed: {v}");
+                v["events"].as_array().unwrap().clone()
+            };
+            let payload = commit_payload(
+                &run_id,
+                &last_event_id(&events),
+                bytes,
+                Some("pg-versioned"),
+            );
+            let (status, v) =
+                call_as(&app, auth, "POST", "/artifacts/commits", Some(payload)).await;
+            assert_eq!(status, StatusCode::CREATED, "commit failed: {v}");
+            addresses.push(v["artifact_id"].as_str().unwrap().to_string());
+        }
+        let (status, versions) = call_as(
+            &app,
+            auth,
+            "GET",
+            "/artifacts/names/pg-versioned/versions",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "versions failed: {versions}");
+        assert_eq!(versions["current"], json!(addresses[1]));
+        let sequence = versions["versions"].as_array().unwrap();
+        assert_eq!(sequence.len(), 2);
+        assert_eq!(sequence[0]["sha256"], json!(addresses[0]));
+        assert_eq!(sequence[1]["sha256"], json!(addresses[1]));
+
+        // The raw head row: the payload carries the full sequence (both
+        // version entries) and never the byte material — the design's
+        // asymmetry holds on the version path too.
+        let pool = sqlx::PgPool::connect(&url).await.unwrap();
+        let row = sqlx::query("SELECT payload FROM server_run_artifacts WHERE artifact_key = $1")
+            .bind(format!("{tenant}/{}", addresses[1]))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let payload: Value = row.get("payload");
+        assert_eq!(payload["versions"].as_array().unwrap().len(), 2);
+        let payload_text = payload.to_string();
+        for bytes in [&v1_bytes, &v2_bytes] {
+            assert!(
+                !payload_text.contains(&hex_encode(bytes)),
+                "the metadata payload must never carry the artifact bytes"
+            );
+        }
+        // Every version keeps serving by address.
+        let (status, _, body) =
+            get_bytes(&app, auth, &format!("/artifacts/{}/bytes", addresses[0])).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_ref(), v1_bytes.as_slice());
+
+        // The sweeper protects the receipt-pinned addresses once the
+        // run's receipt is minted (the covered events name both commits).
+        // The scratch database is shared with the other gated tests, so
+        // the report's deployment-wide counts are not exact here — the
+        // assertion is the semantic one: both addresses still serve.
+        let (status, receipt) =
+            call_as(&app, auth, "GET", &format!("/runs/{run_id}/receipt"), None).await;
+        assert_eq!(status, StatusCode::OK, "receipt mint failed: {receipt}");
+        let (status, report) = call_as(&app, auth, "POST", "/artifacts/sweep", None).await;
+        assert_eq!(status, StatusCode::OK, "sweep failed: {report}");
+        for (address, bytes) in [(&addresses[0], &v1_bytes), (&addresses[1], &v2_bytes)] {
+            let (status, _, body) =
+                get_bytes(&app, auth, &format!("/artifacts/{address}/bytes")).await;
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "the sweep pruned a receipt-pinned address: {report}"
+            );
+            assert_eq!(body.as_ref(), bytes.as_slice());
+        }
+
+        // The release act prunes the head's address — journaled on the
+        // deployment chain, the only path past a live receipt.
+        let (status, v) = call_as(
+            &app,
+            auth,
+            "POST",
+            &format!("/artifacts/{}/release", addresses[1]),
+            Some(json!({"released_by": "human:pg-test"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "release failed: {v}");
+        assert_eq!(v["pruned"], true);
+        let (status, _, body) =
+            get_bytes(&app, auth, &format!("/artifacts/{}/bytes", addresses[1])).await;
+        assert_eq!(status, StatusCode::GONE);
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "artifact_unavailable");
+        // v1's bytes are a distinct address, still receipt-pinned.
+        let (status, _, body) =
+            get_bytes(&app, auth, &format!("/artifacts/{}/bytes", addresses[0])).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_ref(), v1_bytes.as_slice());
+
+        // The chain carries this tenant's release and the typed miss.
+        // The chain is deployment-wide (shared across every gated run
+        // against the scratch database), so the assertions filter to
+        // this run's address.
+        let (status, v) = call_as(&app, auth, "GET", "/artifacts/journal", None).await;
+        assert_eq!(status, StatusCode::OK, "chain read failed: {v}");
+        let events = v["events"].as_array().unwrap();
+        let releases: Vec<&Value> = events
+            .iter()
+            .filter(|event| event["kind"] == "artifact_retention_released")
+            .map(|event| &event["output"]["value"])
+            .filter(|release| release["artifact_id"] == json!(addresses[1]))
+            .collect();
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0]["tenant"], json!(tenant));
+        assert_eq!(releases[0]["released_by"], "human:pg-test");
+        assert!(
+            events.iter().any(|event| {
+                event["kind"] == "artifact_unavailable"
+                    && event["output"]["value"]["artifact_id"] == json!(addresses[1])
+            }),
+            "the typed miss journaled"
+        );
     }
 }

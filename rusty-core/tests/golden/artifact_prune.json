@@ -1,0 +1,18 @@
+[
+  {
+    "artifact_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "weekly-report",
+    "cause": "expired",
+    "swept_at": "2025-10-12T20:13:20Z"
+  },
+  {
+    "artifact_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "cause": "unbound",
+    "swept_at": "2025-10-12T20:13:20Z"
+  },
+  {
+    "artifact_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "cause": "released",
+    "swept_at": "2025-10-12T20:13:20Z"
+  }
+]

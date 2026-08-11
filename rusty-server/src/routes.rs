@@ -126,6 +126,13 @@ pub(crate) struct AppState {
     /// ([`crate::broker::BROKER_JOURNAL_RUN_ID`]) every registration,
     /// consent, revocation, issuance, use, and denial appends to.
     pub broker: Arc<crate::broker::Broker>,
+    /// The artifact retention plane (R0.12 wave 2): the sweeper and the
+    /// release act over the same store, with every retention act —
+    /// releases, prune intentions, and typed misses — journaled onto the
+    /// deployment's artifact evidence chain
+    /// ([`crate::artifacts::ARTIFACTS_JOURNAL_RUN_ID`]), never the
+    /// producing run's receipt-covered journal.
+    pub artifact_retention: Arc<crate::artifacts::ArtifactRetention>,
     /// The MCP bridge's in-flight `tools/call` map (R0.9 wave 4): request
     /// id → run id, the lookup `notifications/cancelled` resolves. Lives
     /// on the state (not inside the handler) so the cancellation
@@ -229,6 +236,10 @@ pub(crate) fn build_router(
     let broker_sweep_interval = config
         .broker_sweep_interval
         .filter(|_| config.oauth_provider.is_some());
+    let artifact_sweep_interval = config.artifact_sweep_interval;
+    let artifact_retention = Arc::new(crate::artifacts::ArtifactRetention::new(Arc::clone(
+        &server_store,
+    )));
     let state = Arc::new(AppState {
         registry,
         config,
@@ -242,6 +253,7 @@ pub(crate) fn build_router(
         capsule_plane,
         receipt_keyring,
         broker: Arc::clone(&broker),
+        artifact_retention,
         mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
@@ -280,6 +292,18 @@ pub(crate) fn build_router(
     // never to expiry.
     if let Some(interval) = broker_sweep_interval {
         crate::broker::spawn_sweeper(Arc::clone(&state.broker), interval, state.shutdown.clone());
+    }
+    // The artifact retention sweeper (R0.12 wave 2): retention evaluated
+    // over every artifact address on an interval. Off by default —
+    // `POST /artifacts/sweep` and the release act's prune tail run the
+    // same evaluation, so no sweeper degrades to operator-triggered
+    // passes, never to unprotected pruning.
+    if let Some(interval) = artifact_sweep_interval {
+        crate::artifacts::spawn_sweeper(
+            Arc::clone(&state.artifact_retention),
+            interval,
+            state.shutdown.clone(),
+        );
     }
 
     let authed = Router::new()
@@ -477,6 +501,24 @@ pub(crate) fn build_router(
         .route(
             "/artifacts/{artifact_id}/bytes",
             get(crate::artifacts::get_run_artifact_bytes),
+        )
+        // Wave 2: previews, the release act, the operator-triggered
+        // sweep pass, and the deployment evidence chain read. The static
+        // segments (`sweep`, `journal`) win over the `{artifact_id}`
+        // parameter, the same routing rule `commits`/`spills`/`names`
+        // already rely on.
+        .route(
+            "/artifacts/{artifact_id}/preview",
+            get(crate::artifacts::get_run_artifact_preview),
+        )
+        .route(
+            "/artifacts/{artifact_id}/release",
+            post(crate::artifacts::release_run_artifact),
+        )
+        .route("/artifacts/sweep", post(crate::artifacts::sweep_artifacts))
+        .route(
+            "/artifacts/journal",
+            get(crate::artifacts::get_artifacts_journal),
         )
         // The executor-policy registry (R0.8 wave 4): versioned,
         // immutable policy bodies; the append-only activation log moving

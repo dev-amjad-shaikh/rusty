@@ -207,6 +207,35 @@ pub(crate) async fn load_run_receipt(root: &Path, run_id: &str) -> io::Result<Op
     }
 }
 
+/// Load every minted receipt under the receipts directory, paired with
+/// its run id — the retention sweeper's coverage scan (R0.12 wave 2).
+/// An unreadable file is a hard error, never a skip: coverage the
+/// sweeper cannot check is coverage it must assume, so a corrupt
+/// receipts directory fails the sweep pass (nothing prunes) rather than
+/// quietly unpinning the bytes that receipt may cover.
+pub(crate) fn load_all_run_receipts(root: &Path) -> io::Result<Vec<(String, RunReceipt)>> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(receipts_dir(root)) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(run_id) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        let bytes = std::fs::read(&path)?;
+        let receipt = serde_json::from_slice::<RunReceipt>(&bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        out.push((run_id, receipt));
+    }
+    Ok(out)
+}
+
 // --------------------------------------------------------------------- //
 // Secret files — local only, never through the store abstraction
 // --------------------------------------------------------------------- //

@@ -584,6 +584,48 @@ miss; an address pinned by a live signed receipt survives the sweep, and the ope
 journaled release is the only path that prunes it; a Postgres dump asserts metadata holds
 no byte payload.
 
+> **Wave 2 status: implemented (2026-08-10).** Version accumulation
+> landed as `append_artifact_version` plus a store-level
+> compare-and-swap (`put_run_artifact_version`), previews as
+> `derive_preview` behind `GET /artifacts/{id}/preview`, and retention
+> as the `ArtifactRetention` plane behind `POST /artifacts/{id}/release`,
+> `POST /artifacts/sweep`, and `GET /artifacts/journal`, with the three
+> retention payloads (`ArtifactPrune` / `ArtifactRelease` /
+> `ArtifactUnavailability`) and the preview wire shapes golden-pinned in
+> `rusty-core` — with ten settled refinements: the three event variants
+> live in `record.rs` appended after `artifact_committed` (the wave-1
+> precedent), not a new module; previews are dependency-free (BMP/PNM
+> thumbnails, WAV PCM metadata, the 4 KB text/JSON window), so
+> compressed formats answer the honest `empty` per open question 7 — a
+> codec dependency stays the measured-need seam; every retention act
+> (releases, prune intentions, typed misses) journals onto the
+> deployment's `run-artifacts` evidence chain, never the producing
+> run's journal, so a retention act cannot rewrite receipt-covered
+> evidence; receipt coverage verifies with the new
+> `verify_receipt_prefix` — a receipt pins the addresses its covered
+> events name however much the journal grew since the mint (whole-
+> journal verification would pin-all forever after any post-mint
+> commit); coverage the sweeper cannot verify (a missing journal, an
+> unknown signer key, a failed verification, an unparseable covered
+> commitment) pins *everything* that pass — fail closed, never prune
+> what a receipt may cover; `POST /artifacts/sweep` was added as the
+> operator-triggered pass (deterministic for a given store state, so
+> tests and audits reproduce it), with the interval sweeper off by
+> default behind `artifact_sweep_interval`; miss journaling converges on
+> the first observation per (tenant, address) and is best-effort — the
+> typed 410 is the contract and stands either way, the broker's
+> `journal_denial` precedent; the release journals hard-fail but its
+> prune tail is best-effort (the sweeper converges a failed delete,
+> and the journaled intention is never re-journaled); the Postgres
+> version CAS rides a per-name advisory lock and needs no new migration
+> — versions accumulate inside the record's JSONB payload, so
+> `MIGRATION_SQL` stays at 51 statements; and the "exact replay fails
+> closed" exit is realized as the artifact byte read, which *is* the
+> replay's byte source — server-side `/runs/replay` replays control flow
+> from the journal and never touches blob bytes, the split this design
+> states. The 8-bit PCM waveform magnitude fix (8-bit samples are
+> unsigned-offset) is an internal correction, not a deviation.
+
 **Wave 3 — revisions, environments, and environment secrets.** The `DeploymentRevision`
 and `Environment` records with the frozen pin set, the per-environment `DeploymentPointer`
 with byte-exact rollback and one-transaction moves, `DeploymentResolved` journaled at

@@ -563,15 +563,24 @@ SELECT payload FROM rusty_artifacts WHERE sha256 = $1";
 const HAS_ARTIFACT_SQL: &str = "\
 SELECT EXISTS (SELECT 1 FROM rusty_artifacts WHERE sha256 = $1)";
 
+/// Byte deletion by content address (R0.12 wave 2): the retention
+/// sweeper's prune. `rows_affected` is the converge signal — a retried
+/// prune of an already-deleted address affects zero rows.
+const DELETE_ARTIFACT_SQL: &str = "\
+DELETE FROM rusty_artifacts WHERE sha256 = $1";
+
 /// Postgres-backed [`ArtifactStore`] (R0.7 wave 4): content-addressed blobs
 /// in `rusty_artifacts`, suitable for multi-process deployments where the
 /// file backend's one-writer precondition does not hold. Clone freely —
 /// clones share the connection pool.
 ///
-/// Garbage collection is deliberately NOT here: reachability from live
-/// threads, tasks, and journals is an operator decision (a reaper deleting
-/// an artifact a crashed run still needs is a durability bug), so deletion
-/// stays a manual, SQL-level operation in R0.7.
+/// Garbage collection was deliberately absent in R0.7: reachability from
+/// live threads, tasks, and journals is an operator decision (a reaper
+/// deleting an artifact a crashed run still needs is a durability bug).
+/// R0.12 wave 2 adds [`ArtifactStore::delete`] as the *mechanism*; the
+/// decision stays with the retention sweeper's pinning rule, which prunes
+/// an address only when no unexpired record and no verified signed
+/// receipt still names it.
 #[derive(Debug, Clone)]
 pub struct PostgresArtifactStore {
     pool: PgPool,
@@ -665,6 +674,15 @@ impl ArtifactStore for PostgresArtifactStore {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| map_sqlx_error("check artifact", e))
+    }
+
+    async fn delete(&self, sha256: &str) -> Result<bool> {
+        let result = sqlx::query(DELETE_ARTIFACT_SQL)
+            .bind(sha256)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| map_sqlx_error("delete artifact", e))?;
+        Ok(result.rows_affected() > 0)
     }
 }
 

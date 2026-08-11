@@ -679,6 +679,47 @@ pub(crate) trait ServerStore: Send + Sync {
     /// blob conflict's `starts_with` precedent.
     async fn get_run_artifact_bytes(&self, sha256: &str) -> StoreResult<Vec<u8>>;
 
+    /// Append a version to a taken name's sequence (R0.12 wave 2): the
+    /// name must currently resolve to `expect_head` — a
+    /// compare-and-swap, so two concurrent version commits cannot fork
+    /// the sequence (the candidate commit's count-CAS discipline, one
+    /// lock pair on the file backend, one advisory-locked transaction on
+    /// Postgres). The new head record and the re-pointed name index
+    /// commit together on both backends.
+    /// [`RunArtifactVersionWrite::Versioned`] when the append landed;
+    /// [`RunArtifactVersionWrite::NameUnknown`] when the name resolves
+    /// to nothing (the route should have taken the fresh-commit path);
+    /// [`RunArtifactVersionWrite::HeadMoved`] with the live head when a
+    /// concurrent commit won — the route answers 409 and the loser
+    /// retries against the new head.
+    async fn put_run_artifact_version(
+        &self,
+        tenant: &str,
+        expect_head: &str,
+        record: &RunArtifact,
+    ) -> StoreResult<RunArtifactVersionWrite>;
+
+    /// Every artifact record across every tenant, each paired with its
+    /// tenant (order unspecified). The retention sweeper's scan (wave
+    /// 2): retention enforcement is a deployment-wide duty, the
+    /// `list_all_connections` precedent — and pruning is decided per
+    /// *address*, which only a cross-tenant view can decide honestly
+    /// (one tenant's expired record must not prune bytes another
+    /// tenant's pinned record still protects).
+    async fn list_all_run_artifacts(&self) -> StoreResult<Vec<(String, RunArtifact)>>;
+
+    /// Every minted run receipt, paired with its run id (order
+    /// unspecified). The sweeper's coverage scan: a receipt commits to
+    /// a journal head, and the journal names the artifact addresses the
+    /// receipt therefore pins.
+    async fn list_all_run_receipts(&self) -> StoreResult<Vec<(String, RunReceipt)>>;
+
+    /// Delete the bytes behind an address through the backend's
+    /// [`rusty_agent_runtime::journal::ArtifactStore`]: the sweeper's
+    /// prune and the release act's tail. `true` when bytes were present,
+    /// `false` when already gone — a retried prune converges.
+    async fn delete_run_artifact_bytes(&self, sha256: &str) -> StoreResult<bool>;
+
     // -- The executor policy registry (R0.8 Rusty Learn, wave 4) -------- //
 
     /// Register one immutable policy body under its tenant-scoped version.
@@ -979,6 +1020,21 @@ pub(crate) enum RunArtifactWrite {
     /// (version accumulation is Wave 2). Carries the address the name
     /// resolves to.
     NameTaken(String),
+}
+
+/// The outcome of a version append
+/// ([`ServerStore::put_run_artifact_version`]) — the store's mutation
+/// convention: anything but `Versioned` changes nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RunArtifactVersionWrite {
+    /// The new head record committed and the name re-pointed.
+    Versioned,
+    /// The name resolves to nothing — the route should have taken the
+    /// fresh-commit path; treated as a conflict there.
+    NameUnknown,
+    /// The name's head moved since the caller read it (a concurrent
+    /// version commit won). Carries the live head's address.
+    HeadMoved(String),
 }
 
 /// The outcome of a connection compare-and-swap
@@ -2563,6 +2619,70 @@ impl ServerStore for JsonFileStore {
         })
     }
 
+    async fn put_run_artifact_version(
+        &self,
+        tenant: &str,
+        expect_head: &str,
+        record: &RunArtifact,
+    ) -> StoreResult<RunArtifactVersionWrite> {
+        let Some(name) = &record.name else {
+            return Ok(RunArtifactVersionWrite::NameUnknown);
+        };
+        let scoped = crate::auth::scope_id(tenant, &record.artifact_id);
+        let scoped_name = crate::auth::scope_id(tenant, name);
+        // One lock pair, held across the head check, the file writes,
+        // and the index swaps: the new head and the re-pointed name
+        // commit together — two concurrent version commits cannot fork
+        // the sequence.
+        let mut records = self.run_artifacts.lock().await;
+        let mut names = self.run_artifact_names.lock().await;
+        match names.get(&scoped_name) {
+            None => Ok(RunArtifactVersionWrite::NameUnknown),
+            Some(head) if head != expect_head => {
+                Ok(RunArtifactVersionWrite::HeadMoved(head.clone()))
+            }
+            Some(_) => {
+                // Record file before name file before index swaps (the
+                // commit convention): a crash leaves either the old head
+                // serving or an addressable record whose name pointer
+                // never moved, both consistent on read.
+                crate::artifacts::persist_record(&self.root, &scoped, record)
+                    .await
+                    .map_err(io_err("persist run artifact version"))?;
+                crate::artifacts::persist_name(&self.root, &scoped_name, &record.artifact_id)
+                    .await
+                    .map_err(io_err("re-point artifact name"))?;
+                names.insert(scoped_name, record.artifact_id.clone());
+                records.insert(scoped, record.clone());
+                Ok(RunArtifactVersionWrite::Versioned)
+            }
+        }
+    }
+
+    async fn list_all_run_artifacts(&self) -> StoreResult<Vec<(String, RunArtifact)>> {
+        let map = self.run_artifacts.lock().await;
+        Ok(map
+            .iter()
+            .map(|(scoped, record)| {
+                (
+                    crate::auth::tenant_of_internal(scoped).to_owned(),
+                    record.clone(),
+                )
+            })
+            .collect())
+    }
+
+    async fn list_all_run_receipts(&self) -> StoreResult<Vec<(String, RunReceipt)>> {
+        crate::receipts::load_all_run_receipts(&self.root).map_err(io_err("list run receipts"))
+    }
+
+    async fn delete_run_artifact_bytes(&self, sha256: &str) -> StoreResult<bool> {
+        self.artifact_blobs
+            .delete(sha256)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     async fn put_policy(&self, tenant: &str, record: &PolicyRecord) -> StoreResult<PolicyWrite> {
         let scoped = crate::auth::scope_id(tenant, record.version.as_str());
         let mut map = self.policies.lock().await;
@@ -3179,8 +3299,8 @@ mod postgres {
     use tokio::sync::OnceCell;
 
     use super::{
-        ArtifactCommitOutcome, CandidateTransition, ConnectionUpdate, RunArtifactWrite,
-        ServerStore, StoreResult,
+        ArtifactCommitOutcome, CandidateTransition, ConnectionUpdate, RunArtifactVersionWrite,
+        RunArtifactWrite, ServerStore, StoreResult,
     };
     use crate::agents::{
         self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
@@ -4462,6 +4582,33 @@ mod postgres {
 
     pub(crate) const LIST_RUN_ARTIFACTS_SQL: &str =
         "SELECT payload FROM server_run_artifacts WHERE tenant = $1";
+
+    /// The current head of a name's version sequence (R0.12 wave 2):
+    /// version rows share the name, and the latest `(created_at,
+    /// artifact_key)` is the head — the by-name read's ordering rule,
+    /// reused by the append path's compare-and-swap.
+    pub(crate) const SELECT_RUN_ARTIFACT_HEAD_SQL: &str = r#"
+        SELECT artifact_key FROM server_run_artifacts
+        WHERE tenant = $1 AND name = $2
+        ORDER BY created_at DESC, artifact_key DESC
+        LIMIT 1"#;
+
+    /// Serialize concurrent version commits on one name inside the
+    /// appending transaction (R0.12 wave 2): the migration advisory
+    /// lock's convention applied per name — the head check and the
+    /// insert must see one sequence, or two commits fork it.
+    pub(crate) const LOCK_RUN_ARTIFACT_NAME_SQL: &str =
+        "SELECT pg_advisory_xact_lock(hashtext($1))";
+
+    /// The retention sweeper's scan (R0.12 wave 2): every record across
+    /// every tenant — pruning is decided per address, which only a
+    /// cross-tenant view decides honestly.
+    pub(crate) const LIST_ALL_RUN_ARTIFACTS_SQL: &str =
+        "SELECT tenant, payload FROM server_run_artifacts";
+
+    /// The sweeper's coverage scan: every minted receipt with its run.
+    pub(crate) const LIST_ALL_RUN_RECEIPTS_SQL: &str =
+        "SELECT run_id, payload FROM server_run_receipts";
 
     /// Policy registry statements (R0.8 wave 4). Registration is
     /// insert-only on the tenant-scoped version (immutability: a conflict
@@ -7128,6 +7275,112 @@ mod postgres {
                     message
                 }
             })
+        }
+
+        async fn put_run_artifact_version(
+            &self,
+            tenant: &str,
+            expect_head: &str,
+            record: &RunArtifact,
+        ) -> StoreResult<RunArtifactVersionWrite> {
+            let Some(name) = &record.name else {
+                return Ok(RunArtifactVersionWrite::NameUnknown);
+            };
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, &record.artifact_id);
+            // The advisory lock, the head check, and the insert in one
+            // transaction: the new head and the name's resolution commit
+            // together, and two concurrent appends cannot fork the
+            // sequence — the file backend's lock-pair rule, exact here.
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin run artifact version"))?;
+            sqlx::query(LOCK_RUN_ARTIFACT_NAME_SQL)
+                .bind(format!("{tenant}/{name}"))
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err("lock artifact name"))?;
+            let head = sqlx::query(SELECT_RUN_ARTIFACT_HEAD_SQL)
+                .bind(tenant)
+                .bind(name)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("select artifact head"))?;
+            let Some(head) = head else {
+                return Ok(RunArtifactVersionWrite::NameUnknown);
+            };
+            let head_key: String = head.get("artifact_key");
+            let bare = crate::auth::strip_owned(tenant, &head_key)
+                .unwrap_or(&head_key)
+                .to_owned();
+            if bare != expect_head {
+                return Ok(RunArtifactVersionWrite::HeadMoved(bare));
+            }
+            let media_kind = serde_json::to_value(record.media_kind)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .ok_or_else(|| "media kind does not serialize to its wire name".to_string())?;
+            let inserted = sqlx::query(INSERT_RUN_ARTIFACT_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind(&record.name)
+                .bind(&media_kind)
+                .bind(&record.lineage.run_id)
+                .bind(record_to_payload(record)?)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("insert run artifact version"))?;
+            if inserted.is_none() {
+                // The address already names a record: the route's
+                // convergence pre-check should have caught it. Rows are
+                // insert-only — refuse rather than overwrite.
+                return Err(
+                    "run artifact version insert conflicted on an existing address".to_string(),
+                );
+            }
+            tx.commit()
+                .await
+                .map_err(db_err("commit run artifact version"))?;
+            Ok(RunArtifactVersionWrite::Versioned)
+        }
+
+        async fn list_all_run_artifacts(&self) -> StoreResult<Vec<(String, RunArtifact)>> {
+            let rows = sqlx::query(LIST_ALL_RUN_ARTIFACTS_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list all run artifacts"))?;
+            rows.into_iter()
+                .map(|row| {
+                    record_from_payload("run artifact", row.get::<Value, _>("payload"))
+                        .map(|record| (row.get::<String, _>("tenant"), record))
+                })
+                .collect()
+        }
+
+        async fn list_all_run_receipts(&self) -> StoreResult<Vec<(String, RunReceipt)>> {
+            let rows = sqlx::query(LIST_ALL_RUN_RECEIPTS_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list all run receipts"))?;
+            rows.into_iter()
+                .map(|row| {
+                    record_from_payload("run receipt", row.get::<Value, _>("payload"))
+                        .map(|receipt| (row.get::<String, _>("run_id"), receipt))
+                })
+                .collect()
+        }
+
+        async fn delete_run_artifact_bytes(&self, sha256: &str) -> StoreResult<bool> {
+            // The same `rusty_artifacts` table the writes go through —
+            // byte storage is global by content address, so the prune is
+            // too (the protection decision is the caller's, made over
+            // every tenant's records before this ever runs).
+            self.memory_artifacts()
+                .await?
+                .delete(sha256)
+                .await
+                .map_err(|e| e.to_string())
         }
 
         async fn put_policy(

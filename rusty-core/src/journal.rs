@@ -751,6 +751,16 @@ pub trait ArtifactStore: Send + Sync {
     /// Whether the store holds an address (existence only, no integrity
     /// check — use [`ArtifactStore::get`] when the bytes matter).
     async fn contains(&self, sha256: &str) -> crate::error::Result<bool>;
+
+    /// Remove the bytes behind an address (R0.12 Operations Plane, wave
+    /// 2 — the retention sweeper's mechanism). `true` when the address
+    /// was present, `false` when it was already gone, so a retried prune
+    /// converges. The trait provides the mechanism only; the *policy* —
+    /// which addresses may be pruned, and which a live receipt still
+    /// pins — belongs to the caller, because deleting bytes a recorded
+    /// run or a signed receipt still names is an evidence decision, not
+    /// a storage detail.
+    async fn delete(&self, sha256: &str) -> crate::error::Result<bool>;
 }
 
 /// Map an IO error into the journal module's error convention.
@@ -836,6 +846,14 @@ impl ArtifactStore for FileArtifactStore {
         tokio::fs::try_exists(self.artifact_path(sha256))
             .await
             .map_err(|e| artifact_io_error(format!("stat artifact `{sha256}`"), e))
+    }
+
+    async fn delete(&self, sha256: &str) -> crate::error::Result<bool> {
+        match tokio::fs::remove_file(self.artifact_path(sha256)).await {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(artifact_io_error(format!("delete artifact `{sha256}`"), e)),
+        }
     }
 }
 

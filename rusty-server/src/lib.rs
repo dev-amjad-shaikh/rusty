@@ -528,6 +528,15 @@ pub struct ServerConfig {
     /// expiry; the sweeper exists so idle connections are fresh before
     /// the next call asks. See [`ServerConfig::with_broker_sweep_interval`].
     pub broker_sweep_interval: Option<std::time::Duration>,
+
+    /// The artifact retention sweep interval (R0.12 wave 2), default
+    /// `None` (off): how often the background sweeper evaluates every
+    /// artifact address in the deployment against its declared
+    /// retention. Off is safe — `POST /artifacts/sweep` and the release
+    /// act's prune tail run the same evaluation, so no sweeper degrades
+    /// to operator-triggered passes, never to unprotected pruning. See
+    /// [`ServerConfig::with_artifact_sweep_interval`].
+    pub artifact_sweep_interval: Option<std::time::Duration>,
 }
 
 impl Default for ServerConfig {
@@ -556,6 +565,7 @@ impl Default for ServerConfig {
             oauth_provider: None,
             broker_refresh_window: broker::DEFAULT_REFRESH_WINDOW,
             broker_sweep_interval: None,
+            artifact_sweep_interval: None,
         }
     }
 }
@@ -852,6 +862,16 @@ impl ServerConfig {
     /// plugged in (without one there is nothing to sweep).
     pub fn with_broker_sweep_interval(mut self, interval: std::time::Duration) -> Self {
         self.broker_sweep_interval = Some(interval);
+        self
+    }
+
+    /// Builder-style: run the artifact retention sweeper on this interval
+    /// (R0.12 wave 2). Off by default; `POST /artifacts/sweep` and the
+    /// release act's prune tail run the same evaluation, so a stopped
+    /// sweeper degrades to operator-triggered passes, never to
+    /// unprotected pruning.
+    pub fn with_artifact_sweep_interval(mut self, interval: std::time::Duration) -> Self {
+        self.artifact_sweep_interval = Some(interval);
         self
     }
 }

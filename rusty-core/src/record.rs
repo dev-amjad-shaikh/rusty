@@ -667,6 +667,45 @@ pub enum RunEventKind {
     /// retention. The bytes never enter the journal; the journal carries
     /// the reference and the commitment, and the plane carries the rest.
     ArtifactCommitted,
+
+    /// The retention sweeper pruned an artifact's bytes (R0.12
+    /// Operations Plane, wave 2): every record naming the address was
+    /// expired or released, and no verified signed receipt still covered
+    /// it. Journaled onto the deployment's artifact evidence chain (the
+    /// run id `run-artifacts`, not any tenant's run — the
+    /// `receipt-keys` / `credential-broker` precedent) *before* the
+    /// bytes are deleted, so a crash mid-sweep leaves the intention
+    /// auditable and the bytes recoverable. An [`Effect::Pure`] record:
+    /// the event is the evidence of the enforcement act. Output carries
+    /// the journaled [`crate::artifact::ArtifactPrune`] — the address,
+    /// the name when named, the cause, and the sweep instant.
+    ArtifactPruned,
+
+    /// An operator released an artifact's retention pin (R0.12 wave 2):
+    /// the explicit, attributed act that is the *only* path pruning an
+    /// address a live signed receipt covers or a `pinned` policy holds.
+    /// Shortening evidence retention is a governance decision with a
+    /// name on it, never a sweeper optimization, so the act journals
+    /// onto the deployment's artifact evidence chain before any byte
+    /// moves. An [`Effect::Pure`] record. Output carries the journaled
+    /// [`crate::artifact::ArtifactRelease`] — the address, the tenant
+    /// and name, the operator identity, the optional reason, and the
+    /// release instant.
+    ArtifactRetentionReleased,
+
+    /// A read found a live artifact record whose bytes are gone (R0.12
+    /// wave 2): the typed miss (`410 artifact_unavailable`) a retention
+    /// audit reads as the difference between "no such artifact" and "the
+    /// record exists, the bytes do not" — and the shape an exact replay
+    /// against pruned bytes fails closed with. Journaled onto the
+    /// deployment's artifact evidence chain (best-effort; the read's
+    /// typed answer is the contract, the event is the evidence) so the
+    /// miss is attributable without rewriting the producing run's
+    /// receipt-covered journal. An [`Effect::Pure`] record. Output
+    /// carries the journaled [`crate::artifact::ArtifactUnavailability`]
+    /// — the address, the tenant and name, the surface that missed, and
+    /// the observation instant.
+    ArtifactUnavailable,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

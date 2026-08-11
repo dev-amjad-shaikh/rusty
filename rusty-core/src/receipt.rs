@@ -913,6 +913,90 @@ pub fn verify_receipt(
     })
 }
 
+/// Verify a receipt's authenticity and its head *as a prefix of a
+/// journal that may have grown since the mint* (R0.12 wave 2 — the
+/// retention sweeper's coverage check).
+///
+/// [`verify_receipt`] answers "does this receipt attest this exact
+/// journal?"; this answers the retention question "does this receipt
+/// still pin the addresses its covered events name?". A receipt is a
+/// statement about the events under its head, and the journal's
+/// append-only hash chain makes that statement durable: recomputing the
+/// head over the current journal's first `journal_head.events` events
+/// and matching it against the signed head proves the covered prefix is
+/// byte-identical to what was signed, however much the journal grew
+/// since. Ledger components (effects, capsules, denials) are whole-
+/// journal derivations and are deliberately *not* recomputed here — the
+/// coverage question is about the prefix, not the tail.
+///
+/// The fail-closed rule matches [`verify_receipt`]'s: authenticity
+/// (signer key id plus the strict signature over the canonical
+/// statement), run identity, and the prefix head are all checked, and
+/// any mismatch is a typed rejection — a sweeper that cannot verify a
+/// receipt's coverage of an address must assume the coverage stands.
+pub fn verify_receipt_prefix(
+    snapshot: &JournalSnapshot,
+    receipt: &RunReceipt,
+    public_key: &PublicKey,
+) -> Result<(), ReceiptRejection> {
+    if receipt.format_version != RECEIPT_FORMAT_VERSION {
+        return Err(ReceiptRejection::FormatVersion {
+            claimed: receipt.format_version,
+            supported: RECEIPT_FORMAT_VERSION,
+        });
+    }
+    if receipt.run_id != snapshot.run_id {
+        return Err(ReceiptRejection::RunId {
+            claimed: receipt.run_id.clone(),
+            snapshot: snapshot.run_id.clone(),
+        });
+    }
+    let covered = receipt.journal_head.events as usize;
+    if covered > snapshot.events.len() {
+        return Err(ReceiptRejection::JournalLength {
+            claimed: receipt.journal_head.events,
+            actual: snapshot.events.len() as u64,
+        });
+    }
+    let recomputed =
+        crate::journal::recompute_head_hash(&snapshot.events[..covered]).map_err(|e| {
+            ReceiptRejection::Signature(format!("the covered events cannot be hashed: {e}"))
+        })?;
+    if recomputed != receipt.journal_head.sha256 {
+        return Err(ReceiptRejection::JournalHead {
+            claimed: receipt.journal_head.sha256.clone(),
+            recomputed,
+        });
+    }
+    let derived_key_id = public_key.key_id();
+    if derived_key_id != receipt.signer {
+        return Err(ReceiptRejection::SignerKeyId {
+            claimed: receipt.signer.clone(),
+            derived: derived_key_id,
+        });
+    }
+    let canonical = receipt
+        .canonical_bytes()
+        .map_err(|e| ReceiptRejection::Signature(format!("the statement cannot be hashed: {e}")))?;
+    let signature_bytes = hex_decode(&receipt.signature)
+        .and_then(|bytes| <[u8; 64]>::try_from(bytes.as_slice()).ok())
+        .ok_or_else(|| {
+            ReceiptRejection::Signature("the signature is not 64 bytes of hex".to_string())
+        })?;
+    let signature = ed25519_dalek::Signature::from_bytes(&signature_bytes);
+    // `verify_strict`, as in `verify_receipt`: one valid encoding per
+    // signature, the posture a witnessed statement wants.
+    public_key
+        .0
+        .verify_strict(&canonical, &signature)
+        .map_err(|_| {
+            ReceiptRejection::Signature(
+                "the signature does not verify over the canonical statement".to_string(),
+            )
+        })?;
+    Ok(())
+}
+
 /// The first divergence between a claimed and recomputed sequence, phrased
 /// for the rejection message.
 fn sequence_diff(what: &str, claimed: &[String], recomputed: &[String]) -> String {
@@ -1005,5 +1089,55 @@ mod tests {
             .0
             .verify_strict(b"canonical bytes", &signature)
             .unwrap();
+    }
+
+    #[test]
+    fn prefix_verification_survives_journal_growth() {
+        use crate::journal::{Clock, EventDraft, Journal};
+        use crate::record::{Effect, RunEventKind};
+
+        let signing = SigningKey::from_bytes(&[9u8; 32]);
+        let journal = Journal::new("run-prefix", "thread-prefix", Clock::System);
+        journal.record(
+            EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure)
+                .output(serde_json::json!({"step": 0})),
+        );
+        journal.record(
+            EventDraft::new(RunEventKind::NodeOutput, Effect::Pure)
+                .output(serde_json::json!({"value": 1})),
+        );
+        let minted = journal.snapshot();
+        let receipt = mint_receipt(&minted, None, None, &signing).unwrap();
+        // Whole-journal verification agrees at mint time.
+        verify_receipt(&minted, &receipt, &signing.public_key()).unwrap();
+
+        // The journal grows after the mint — post-mint commits must not
+        // stale the coverage the receipt attests.
+        journal.record(
+            EventDraft::new(RunEventKind::SuperStepEnd, Effect::Pure)
+                .output(serde_json::json!({"step": 0})),
+        );
+        let grown = journal.snapshot();
+        verify_receipt_prefix(&grown, &receipt, &signing.public_key()).unwrap();
+        // The whole-journal check *does* reject the grown journal — the
+        // prefix check is the sweeper's answer, not a loosening.
+        assert!(matches!(
+            verify_receipt(&grown, &receipt, &signing.public_key()),
+            Err(ReceiptRejection::JournalHead { .. })
+        ));
+
+        // A tampered covered event changes the recomputed prefix head.
+        let mut tampered = grown.clone();
+        tampered.events[0].seq = 99;
+        assert!(matches!(
+            verify_receipt_prefix(&tampered, &receipt, &signing.public_key()),
+            Err(ReceiptRejection::JournalHead { .. })
+        ));
+        // The wrong key never verifies, however the journal stands.
+        let other = SigningKey::from_bytes(&[10u8; 32]);
+        assert!(matches!(
+            verify_receipt_prefix(&grown, &receipt, &other.public_key()),
+            Err(ReceiptRejection::SignerKeyId { .. })
+        ));
     }
 }

@@ -1,3 +1,6 @@
 [
-  "artifact_committed"
+  "artifact_committed",
+  "artifact_pruned",
+  "artifact_retention_released",
+  "artifact_unavailable"
 ]
