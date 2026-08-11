@@ -1,0 +1,12 @@
+[
+  {
+    "policy": "pinned"
+  },
+  {
+    "policy": "days",
+    "days": 30
+  },
+  {
+    "policy": "receipt_bound"
+  }
+]

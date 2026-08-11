@@ -446,6 +446,38 @@ pub(crate) fn build_router(
             "/registry/artifacts/{family}/{name}/diff",
             get(diff_artifact),
         )
+        // The run artifact plane (R0.12 wave 1): run-produced outputs
+        // made operable — content-addressed, lineage-carrying,
+        // retainable. Deliberately distinct from `/registry/artifacts`
+        // (human-authored configuration): the route grammar says which
+        // concept a caller addresses. The static segments win over
+        // `/artifacts/{artifact_id}` — commits, spills, and the name
+        // index are operations, not record addresses.
+        .route("/artifacts", get(crate::artifacts::list_run_artifacts))
+        .route(
+            "/artifacts/commits",
+            post(crate::artifacts::commit_run_artifact),
+        )
+        .route(
+            "/artifacts/spills",
+            post(crate::artifacts::commit_spilled_artifact),
+        )
+        .route(
+            "/artifacts/names/{name}",
+            get(crate::artifacts::get_run_artifact_named),
+        )
+        .route(
+            "/artifacts/names/{name}/versions",
+            get(crate::artifacts::list_run_artifact_versions),
+        )
+        .route(
+            "/artifacts/{artifact_id}",
+            get(crate::artifacts::get_run_artifact),
+        )
+        .route(
+            "/artifacts/{artifact_id}/bytes",
+            get(crate::artifacts::get_run_artifact_bytes),
+        )
         // The executor-policy registry (R0.8 wave 4): versioned,
         // immutable policy bodies; the append-only activation log moving
         // the active-version pointer; the active read; and the derived

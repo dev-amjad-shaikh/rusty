@@ -553,6 +553,27 @@ resolves run → effect → bytes on both backends; a restart preserves records 
 goldens pin every new wire shape; a read that fails integrity is refused as corruption;
 R0.7 journal artifacts and snapshots keep deserializing unchanged.
 
+> **Wave 1 status: implemented (2026-08-10).** The contracts landed in
+> `rusty-core/src/artifact.rs` (`RunArtifact` / `ArtifactVersion` /
+> `ArtifactLineage` / `RetentionPolicy` / `MediaKind`, the `commit_artifact`
+> constructor, goldens in `rusty-core/tests/golden/` with the golden asserts
+> in the module's unit tests), the additive `RunEventKind::ArtifactCommitted`
+> variant, and the `/artifacts` routes with the `server_run_artifacts`
+> migration in `rusty-server` — with eight settled refinements: the event
+> variant lives in `record.rs` where `RunEventKind` is defined, not
+> `journal.rs` as the plan's phrasing suggested; commit bytes ride the
+> payloads hex-encoded (the repo's dependency-free `broker` codec — no base64
+> dependency); the effect id is caller-declared and checked for the
+> digest-derived shape at commit, with the full verification at audit; a
+> second name for the same bytes, a taken name with different bytes, or
+> different bytes on the same lineage answer 409 — version accumulation is
+> wave 2; name uniqueness on Postgres is advisory in this wave (no unique
+> constraint, a documented edge the file store enforces by layout); the typed
+> 410 miss for gone bytes is not journaled here — the journaled miss is wave
+> 2's exit criterion; spill commits inherit the post-hoc journal-append
+> caveat for live runs (the executor seam is follow-up work); and identical
+> re-commits converge to 200 without a second journal event.
+
 **Wave 2 — permissions, previews, versions, retention.** Named-artifact version
 sequences, previews derived on read per media kind, the retention sweeper as durable work
 with receipt-coverage pinning, and the journaled retention-release act. Exit: a named

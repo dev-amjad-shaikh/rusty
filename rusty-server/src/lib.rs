@@ -140,6 +140,7 @@
 
 mod a2a;
 mod agents;
+mod artifacts;
 mod assistants;
 mod auth;
 mod broker;
@@ -197,7 +198,7 @@ pub use runs::RunStatus;
 pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
 
 /// Names the JSON-file layout already owns at the store root
-/// (`agent_leases/`, `agents/`, `assistants/`, `capsules/`,
+/// (`agent_leases/`, `agents/`, `artifacts/`, `assistants/`, `capsules/`,
 /// `capsule_policies/`, `coordinations/`, `crons/`, `journals/`, `learn/`,
 /// `memory/`, `memory_artifacts/`, `outbox/`, `policy/`, `registry/`,
 /// `store/`,
@@ -210,6 +211,7 @@ pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::fro
 pub(crate) const RESERVED_NAMES: &[&str] = &[
     "agent_leases",
     "agents",
+    "artifacts",
     "assistants",
     "capsules",
     "capsule_policies",

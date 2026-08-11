@@ -30,13 +30,15 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use rusty_agent_runtime::artifact::RunArtifact;
 use rusty_agent_runtime::broker::StoredConnection;
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
 use rusty_agent_runtime::durable::resolve_timeout_bound_ms;
-use rusty_agent_runtime::journal::{FileArtifactStore, JournalSnapshot};
+use rusty_agent_runtime::journal::{ArtifactStore, FileArtifactStore, JournalSnapshot};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
 use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
 use rusty_agent_runtime::receipt::RunReceipt;
+use rusty_agent_runtime::record::ArtifactRef;
 use rusty_agent_runtime::registry::{ArtifactCommit, ArtifactRecord};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -628,6 +630,55 @@ pub(crate) trait ServerStore: Send + Sync {
         commit: &ArtifactCommit,
     ) -> StoreResult<ArtifactCommitOutcome>;
 
+    // -- The run artifact plane (R0.12 Operations Plane, wave 1) ------- //
+
+    /// Commit one run-artifact record under its tenant-scoped content
+    /// address. Insert-only: [`RunArtifactWrite::Created`] when the
+    /// address is new; [`RunArtifactWrite::Converged`] when it already
+    /// names exactly this object (same address, same name — an
+    /// idempotent re-commit, the byte store's dedupe applied to
+    /// metadata); [`RunArtifactWrite::Conflict`] when it names a
+    /// different name (one object carries one logical name);
+    /// [`RunArtifactWrite::NameTaken`] when the record's name already
+    /// points at a different address (version accumulation is Wave 2).
+    /// The name index updates with the record, atomically on both
+    /// backends — one lock on the file backend, one transaction on
+    /// Postgres.
+    async fn put_run_artifact(
+        &self,
+        tenant: &str,
+        record: &RunArtifact,
+    ) -> StoreResult<RunArtifactWrite>;
+    /// Fetch one record by content address, tenant-scoped (`None` for
+    /// unknown or cross-tenant addresses — the two are indistinguishable
+    /// by design).
+    async fn get_run_artifact(
+        &self,
+        tenant: &str,
+        artifact_id: &str,
+    ) -> StoreResult<Option<RunArtifact>>;
+    /// The record a logical name currently resolves to, tenant-scoped.
+    async fn get_run_artifact_by_name(
+        &self,
+        tenant: &str,
+        name: &str,
+    ) -> StoreResult<Option<RunArtifact>>;
+    /// The tenant's artifact records (order unspecified; routes sort).
+    async fn list_run_artifacts(&self, tenant: &str) -> StoreResult<Vec<RunArtifact>>;
+    /// Store artifact bytes through the backend's
+    /// [`rusty_agent_runtime::journal::ArtifactStore`], returning their
+    /// content address. Bytes are not tenant-namespaced — content
+    /// addressing makes byte storage global, and the tenant-scoped
+    /// metadata layer is the only path that lists or resolves.
+    async fn put_run_artifact_bytes(&self, bytes: &[u8]) -> StoreResult<ArtifactRef>;
+    /// Fetch artifact bytes, integrity-verified on read. Fail closed:
+    /// an integrity failure is an error prefixed `artifact corrupt:`; a
+    /// missing address an error prefixed `artifact unavailable:` — the
+    /// routes map the prefixes to the typed refusals (`422`
+    /// `artifact_corrupt`, `410` `artifact_unavailable`), the capsule
+    /// blob conflict's `starts_with` precedent.
+    async fn get_run_artifact_bytes(&self, sha256: &str) -> StoreResult<Vec<u8>>;
+
     // -- The executor policy registry (R0.8 Rusty Learn, wave 4) -------- //
 
     /// Register one immutable policy body under its tenant-scoped version.
@@ -910,6 +961,26 @@ pub(crate) enum ArtifactCommitOutcome {
     Conflict(usize),
 }
 
+/// The outcome of a run-artifact commit ([`ServerStore::put_run_artifact`])
+/// — the policy registry's immutability convention: same object
+/// converges, different object under a taken key conflicts, and anything
+/// but `Created` changes nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RunArtifactWrite {
+    /// The record (and its name pointer, when named) committed.
+    Created,
+    /// The address already names exactly this object (same name): the
+    /// commit converged, carrying the settled record.
+    Converged(RunArtifact),
+    /// The address already carries a *different* name — one object
+    /// carries one logical name.
+    Conflict(RunArtifact),
+    /// The record's name already points at a different content address
+    /// (version accumulation is Wave 2). Carries the address the name
+    /// resolves to.
+    NameTaken(String),
+}
+
 /// The outcome of a connection compare-and-swap
 /// ([`ServerStore::update_connection`]) — the store's mutation
 /// convention: unknown and cross-tenant ids are indistinguishable, a
@@ -1017,6 +1088,18 @@ pub(crate) struct JsonFileStore {
     /// envelope's rule). The broker owns the cryptography; this index
     /// only ever holds ciphertext.
     connections: Mutex<HashMap<String, StoredConnection>>,
+    /// The run artifact plane (R0.12 wave 1): records keyed by
+    /// tenant-scoped content address, one file per record under
+    /// `{store_path}/artifacts/records/` (path-keyed tenancy, the
+    /// learn-candidates rule), plus the name index (scoped name →
+    /// address) as hash-named envelope files under
+    /// `{store_path}/artifacts/names/`.
+    run_artifacts: Mutex<HashMap<String, RunArtifact>>,
+    run_artifact_names: Mutex<HashMap<String, String>>,
+    /// The byte store run-artifact blobs live in (a sibling of the
+    /// records dir, so the recursive record loader never picks up a
+    /// blob — the `memory_artifacts` discipline).
+    artifact_blobs: FileArtifactStore,
 }
 
 impl JsonFileStore {
@@ -1054,6 +1137,9 @@ impl JsonFileStore {
             #[cfg(feature = "capsules")]
             capsule_overlays: Mutex::new(capsule_policy::load_capsule_overlays(root)),
             connections: Mutex::new(crate::broker::load_connections(root)),
+            run_artifacts: Mutex::new(crate::artifacts::load_records(root)),
+            run_artifact_names: Mutex::new(crate::artifacts::load_names(root)),
+            artifact_blobs: crate::artifacts::blob_store(root),
         }
     }
 }
@@ -2374,6 +2460,109 @@ impl ServerStore for JsonFileStore {
         Ok(ArtifactCommitOutcome::Applied)
     }
 
+    async fn put_run_artifact(
+        &self,
+        tenant: &str,
+        record: &RunArtifact,
+    ) -> StoreResult<RunArtifactWrite> {
+        let scoped = crate::auth::scope_id(tenant, &record.artifact_id);
+        // One lock pair, held across the checks, the file writes, and the
+        // index swaps: the record and its name pointer commit together —
+        // two concurrent commits cannot split them.
+        let mut records = self.run_artifacts.lock().await;
+        let mut names = self.run_artifact_names.lock().await;
+        if let Some(existing) = records.get(&scoped) {
+            return Ok(if existing.name == record.name {
+                RunArtifactWrite::Converged(existing.clone())
+            } else {
+                RunArtifactWrite::Conflict(existing.clone())
+            });
+        }
+        if let Some(name) = &record.name {
+            let scoped_name = crate::auth::scope_id(tenant, name);
+            if let Some(other) = names.get(&scoped_name) {
+                return Ok(RunArtifactWrite::NameTaken(other.clone()));
+            }
+        }
+        // Record file before name file before index swaps (the
+        // transition convention): a failed write never leaves state a
+        // restart would silently rewind — a crash between the two files
+        // leaves either nothing or an addressable record whose name
+        // pointer never landed, both consistent on read.
+        crate::artifacts::persist_record(&self.root, &scoped, record)
+            .await
+            .map_err(io_err("persist run artifact"))?;
+        if let Some(name) = &record.name {
+            let scoped_name = crate::auth::scope_id(tenant, name);
+            crate::artifacts::persist_name(&self.root, &scoped_name, &record.artifact_id)
+                .await
+                .map_err(io_err("persist artifact name"))?;
+            names.insert(scoped_name, record.artifact_id.clone());
+        }
+        records.insert(scoped, record.clone());
+        Ok(RunArtifactWrite::Created)
+    }
+
+    async fn get_run_artifact(
+        &self,
+        tenant: &str,
+        artifact_id: &str,
+    ) -> StoreResult<Option<RunArtifact>> {
+        let scoped = crate::auth::scope_id(tenant, artifact_id);
+        Ok(self.run_artifacts.lock().await.get(&scoped).cloned())
+    }
+
+    async fn get_run_artifact_by_name(
+        &self,
+        tenant: &str,
+        name: &str,
+    ) -> StoreResult<Option<RunArtifact>> {
+        let scoped_name = crate::auth::scope_id(tenant, name);
+        let names = self.run_artifact_names.lock().await;
+        let Some(address) = names.get(&scoped_name) else {
+            return Ok(None);
+        };
+        let scoped = crate::auth::scope_id(tenant, address);
+        Ok(self.run_artifacts.lock().await.get(&scoped).cloned())
+    }
+
+    async fn list_run_artifacts(&self, tenant: &str) -> StoreResult<Vec<RunArtifact>> {
+        let map = self.run_artifacts.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    async fn put_run_artifact_bytes(&self, bytes: &[u8]) -> StoreResult<ArtifactRef> {
+        self.artifact_blobs
+            .put(bytes)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn get_run_artifact_bytes(&self, sha256: &str) -> StoreResult<Vec<u8>> {
+        if !self
+            .artifact_blobs
+            .contains(sha256)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            return Err(format!(
+                "artifact unavailable: `{sha256}` is not in the byte store"
+            ));
+        }
+        self.artifact_blobs.get(sha256).await.map_err(|e| {
+            let message = e.to_string();
+            if message.contains("integrity failure") {
+                format!("artifact corrupt: {message}")
+            } else {
+                message
+            }
+        })
+    }
+
     async fn put_policy(&self, tenant: &str, record: &PolicyRecord) -> StoreResult<PolicyWrite> {
         let scoped = crate::auth::scope_id(tenant, record.version.as_str());
         let mut map = self.policies.lock().await;
@@ -2976,20 +3165,22 @@ impl JsonFileStore {
 #[cfg(feature = "postgres")]
 mod postgres {
     use chrono::{DateTime, Utc};
+    use rusty_agent_runtime::artifact::RunArtifact;
     use rusty_agent_runtime::broker::StoredConnection;
     use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
-    use rusty_agent_runtime::journal::JournalSnapshot;
+    use rusty_agent_runtime::journal::{ArtifactStore, JournalSnapshot};
     use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
     use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
     use rusty_agent_runtime::receipt::RunReceipt;
-    use rusty_agent_runtime::record::PolicyVersion;
+    use rusty_agent_runtime::record::{ArtifactRef, PolicyVersion};
     use rusty_agent_runtime::registry::{ArtifactCommit, ArtifactRecord};
     use serde_json::Value;
     use sqlx::{PgPool, Row};
     use tokio::sync::OnceCell;
 
     use super::{
-        ArtifactCommitOutcome, CandidateTransition, ConnectionUpdate, ServerStore, StoreResult,
+        ArtifactCommitOutcome, CandidateTransition, ConnectionUpdate, RunArtifactWrite,
+        ServerStore, StoreResult,
     };
     use crate::agents::{
         self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
@@ -3355,6 +3546,34 @@ mod postgres {
         CREATE INDEX IF NOT EXISTS server_registry_artifacts_listing
             ON server_registry_artifacts (tenant, family, name)";
 
+    /// Run artifacts (R0.12 wave 1): one row per artifact record, keyed
+    /// by tenant-scoped content address — the metadata layer is
+    /// tenant-scoped even though the bytes are not (two tenants
+    /// producing identical bytes share one object in `rusty_artifacts`;
+    /// their records are two rows). Name, media kind, and producing run
+    /// are real columns (the listing's filters); the record — versions
+    /// and lineage included — travels as JSONB, the
+    /// `server_registry_artifacts` discipline. Additive for pre-R0.12
+    /// databases: a new table, never an alteration of an existing one.
+    pub(crate) const CREATE_RUN_ARTIFACTS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_run_artifacts (
+            artifact_key TEXT PRIMARY KEY,
+            tenant       TEXT NOT NULL,
+            name         TEXT,
+            media_kind   TEXT NOT NULL,
+            run_id       TEXT NOT NULL,
+            payload      JSONB NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
+    /// The run-artifact listing's leading columns: every artifact query
+    /// is tenant-scoped, and the name index serves the by-name read —
+    /// the `server_registry_artifacts` `(tenant, family, name)` rule
+    /// with one less column.
+    pub(crate) const CREATE_RUN_ARTIFACTS_INDEX_SQL: &str = "
+        CREATE INDEX IF NOT EXISTS server_run_artifacts_listing
+            ON server_run_artifacts (tenant, name)";
+
     /// The executor policy registry (R0.8 wave 4): one row per immutable
     /// policy body, keyed by tenant-scoped version. Immutability is the
     /// insert's `ON CONFLICT DO NOTHING` plus a payload comparison in
@@ -3597,6 +3816,8 @@ mod postgres {
         CREATE_RUN_RECEIPTS_SQL,
         CREATE_CONNECTIONS_SQL,
         CREATE_CONNECTIONS_TENANT_INDEX_SQL,
+        CREATE_RUN_ARTIFACTS_SQL,
+        CREATE_RUN_ARTIFACTS_INDEX_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -4208,6 +4429,39 @@ mod postgres {
             COALESCE(payload->'commits', '[]'::jsonb) || $2::jsonb
         )
         WHERE artifact_key = $1"#;
+
+    /// Run-artifact statements (R0.12 wave 1). Commit is insert-only on
+    /// the tenant-scoped content address (the record is written once,
+    /// never edited: a conflict returns no row, and the same-transaction
+    /// read-back decides converge vs conflict, the policy-registry rule).
+    /// The name-taken check runs inside the same transaction so the
+    /// record and its name resolution commit together.
+    pub(crate) const INSERT_RUN_ARTIFACT_SQL: &str = r#"
+        INSERT INTO server_run_artifacts (
+            artifact_key, tenant, name, media_kind, run_id, payload
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (artifact_key) DO NOTHING
+        RETURNING artifact_key"#;
+
+    pub(crate) const SELECT_RUN_ARTIFACT_SQL: &str =
+        "SELECT payload FROM server_run_artifacts WHERE artifact_key = $1";
+
+    /// The name-taken check / by-name read: Wave 1 assigns a name once,
+    /// so at most one row is current; the ordering keeps the answer
+    /// deterministic until Wave 2's version accumulation redefines it.
+    pub(crate) const SELECT_RUN_ARTIFACT_BY_NAME_SQL: &str = r#"
+        SELECT payload FROM server_run_artifacts
+        WHERE tenant = $1 AND name = $2
+        ORDER BY created_at DESC, artifact_key DESC
+        LIMIT 1"#;
+
+    pub(crate) const SELECT_RUN_ARTIFACT_NAME_SQL: &str = r#"
+        SELECT artifact_key FROM server_run_artifacts
+        WHERE tenant = $1 AND name = $2
+        LIMIT 1"#;
+
+    pub(crate) const LIST_RUN_ARTIFACTS_SQL: &str =
+        "SELECT payload FROM server_run_artifacts WHERE tenant = $1";
 
     /// Policy registry statements (R0.8 wave 4). Registration is
     /// insert-only on the tenant-scoped version (immutability: a conflict
@@ -6739,6 +6993,143 @@ mod postgres {
             Ok(ArtifactCommitOutcome::Applied)
         }
 
+        async fn put_run_artifact(
+            &self,
+            tenant: &str,
+            record: &RunArtifact,
+        ) -> StoreResult<RunArtifactWrite> {
+            let pool = self.pool().await?;
+            let scoped = crate::auth::scope_id(tenant, &record.artifact_id);
+            // The name check, the insert, and the converge/conflict
+            // read-back in one transaction: the record and its name
+            // resolution commit together — the file backend's lock-pair
+            // rule, exact here.
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(db_err("begin run artifact commit"))?;
+            if let Some(name) = &record.name {
+                let taken = sqlx::query(SELECT_RUN_ARTIFACT_NAME_SQL)
+                    .bind(tenant)
+                    .bind(name)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(db_err("check artifact name"))?;
+                if let Some(row) = taken {
+                    let other: String = row.get("artifact_key");
+                    let bare = crate::auth::strip_owned(tenant, &other)
+                        .unwrap_or(&other)
+                        .to_owned();
+                    return Ok(RunArtifactWrite::NameTaken(bare));
+                }
+            }
+            let media_kind = serde_json::to_value(record.media_kind)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .ok_or_else(|| "media kind does not serialize to its wire name".to_string())?;
+            let inserted = sqlx::query(INSERT_RUN_ARTIFACT_SQL)
+                .bind(&scoped)
+                .bind(tenant)
+                .bind(&record.name)
+                .bind(&media_kind)
+                .bind(&record.lineage.run_id)
+                .bind(record_to_payload(record)?)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("insert run artifact"))?;
+            if inserted.is_some() {
+                tx.commit().await.map_err(db_err("commit run artifact"))?;
+                return Ok(RunArtifactWrite::Created);
+            }
+            // The address is taken: same name converges, a different
+            // name conflicts — the file backend's immutability rule,
+            // exact here.
+            let existing = sqlx::query(SELECT_RUN_ARTIFACT_SQL)
+                .bind(&scoped)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("select run artifact"))?
+                .ok_or_else(|| "run artifact insert conflicted but the row is gone".to_string())?;
+            let existing: RunArtifact =
+                record_from_payload("run artifact", existing.get::<Value, _>("payload"))?;
+            tx.commit()
+                .await
+                .map_err(db_err("commit run artifact read-back"))?;
+            Ok(if existing.name == record.name {
+                RunArtifactWrite::Converged(existing)
+            } else {
+                RunArtifactWrite::Conflict(existing)
+            })
+        }
+
+        async fn get_run_artifact(
+            &self,
+            tenant: &str,
+            artifact_id: &str,
+        ) -> StoreResult<Option<RunArtifact>> {
+            let row = sqlx::query(SELECT_RUN_ARTIFACT_SQL)
+                .bind(crate::auth::scope_id(tenant, artifact_id))
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select run artifact"))?;
+            row.map(|row| record_from_payload("run artifact", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn get_run_artifact_by_name(
+            &self,
+            tenant: &str,
+            name: &str,
+        ) -> StoreResult<Option<RunArtifact>> {
+            let row = sqlx::query(SELECT_RUN_ARTIFACT_BY_NAME_SQL)
+                .bind(tenant)
+                .bind(name)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select run artifact by name"))?;
+            row.map(|row| record_from_payload("run artifact", row.get::<Value, _>("payload")))
+                .transpose()
+        }
+
+        async fn list_run_artifacts(&self, tenant: &str) -> StoreResult<Vec<RunArtifact>> {
+            let rows = sqlx::query(LIST_RUN_ARTIFACTS_SQL)
+                .bind(tenant)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list run artifacts"))?;
+            rows.into_iter()
+                .map(|row| record_from_payload("run artifact", row.get::<Value, _>("payload")))
+                .collect()
+        }
+
+        async fn put_run_artifact_bytes(&self, bytes: &[u8]) -> StoreResult<ArtifactRef> {
+            // The same `rusty_artifacts` table memory bodies spill into
+            // — byte storage is global by content address (the design's
+            // deliberate asymmetry), so one table serves both planes.
+            self.memory_artifacts()
+                .await?
+                .put(bytes)
+                .await
+                .map_err(|e| e.to_string())
+        }
+
+        async fn get_run_artifact_bytes(&self, sha256: &str) -> StoreResult<Vec<u8>> {
+            let store = self.memory_artifacts().await?;
+            if !store.contains(sha256).await.map_err(|e| e.to_string())? {
+                return Err(format!(
+                    "artifact unavailable: `{sha256}` is not in the byte store"
+                ));
+            }
+            store.get(sha256).await.map_err(|e| {
+                let message = e.to_string();
+                if message.contains("integrity failure") {
+                    format!("artifact corrupt: {message}")
+                } else {
+                    message
+                }
+            })
+        }
+
         async fn put_policy(
             &self,
             tenant: &str,
@@ -7517,7 +7908,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 49);
+            assert_eq!(MIGRATION_SQL.len(), 51);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -7606,6 +7997,18 @@ mod postgres {
             assert!(CREATE_REGISTRY_ARTIFACTS_SQL.contains("artifact_key TEXT PRIMARY KEY"));
             assert!(CREATE_REGISTRY_ARTIFACTS_SQL.contains("payload      JSONB"));
             assert!(CREATE_REGISTRY_ARTIFACTS_INDEX_SQL.contains("(tenant, family, name)"));
+            // R0.12 wave 1: run artifacts — one row per tenant-scoped
+            // content address, column-mapped on the listing's filters
+            // (name, media kind, producing run), the record inside the
+            // JSONB payload; the bytes never appear (they live in core's
+            // `rusty_artifacts`).
+            assert!(CREATE_RUN_ARTIFACTS_SQL.contains("server_run_artifacts"));
+            assert!(CREATE_RUN_ARTIFACTS_SQL.contains("artifact_key TEXT PRIMARY KEY"));
+            assert!(CREATE_RUN_ARTIFACTS_SQL.contains("payload      JSONB"));
+            assert!(CREATE_RUN_ARTIFACTS_SQL.contains("media_kind   TEXT NOT NULL"));
+            assert!(CREATE_RUN_ARTIFACTS_SQL.contains("run_id       TEXT NOT NULL"));
+            assert!(!CREATE_RUN_ARTIFACTS_SQL.contains("BYTEA"));
+            assert!(CREATE_RUN_ARTIFACTS_INDEX_SQL.contains("(tenant, name)"));
             // R0.8 wave 4: the policy registry — immutable bodies keyed by
             // tenant-scoped version, an append-only activation log ordered
             // by its serial key, and the denormalized binding index.

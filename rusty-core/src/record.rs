@@ -650,6 +650,23 @@ pub enum RunEventKind {
     /// connection, the classified failure that decided the flip, and the
     /// consent set that stopped being servable.
     ConnectionNeedsReauth,
+
+    /// A run artifact was committed (R0.12 Operations Plane, wave 1): an
+    /// output the run produced — a generated file, image, audio, an
+    /// exported dataset — became a content-addressed, retainable object
+    /// in the artifact plane, committed from an SDK-declared output or
+    /// from a journaled [`PayloadRef::Artifact`] the producing node
+    /// opted into. An [`Effect::Pure`] record: the event *is* the
+    /// commitment, so the signed receipt's head covers it transitively —
+    /// the audit walk is signed receipt → journal head → this event →
+    /// the producing [`crate::effects::EffectId`] → the effect's
+    /// journaled record → the bytes behind the address. Output carries
+    /// the journaled [`crate::artifact::ArtifactCommitment`] — the
+    /// content address, the name and version index when named, the media
+    /// kind, the byte count, the producing effect id, and the declared
+    /// retention. The bytes never enter the journal; the journal carries
+    /// the reference and the commitment, and the plane carries the rest.
+    ArtifactCommitted,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

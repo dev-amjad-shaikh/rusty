@@ -1,0 +1,12 @@
+{
+  "artifact_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "name": "weekly-report",
+  "version": 0,
+  "media_kind": "image",
+  "bytes": 41312,
+  "effect_id": "0dad4eabd62f3c00f1e22ee7c7fe176f1cb0e3abfe62a60669792e0c8257e9dd",
+  "retention": {
+    "policy": "days",
+    "days": 30
+  }
+}

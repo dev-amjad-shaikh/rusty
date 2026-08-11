@@ -185,6 +185,7 @@
 
 pub mod a2a;
 pub mod agents;
+pub mod artifact;
 pub mod broker;
 pub mod capsule;
 #[cfg(feature = "wasm")]
@@ -228,6 +229,10 @@ pub mod prelude {
         QuorumOutcome, QuorumResolver, QuorumResolverRecord, QuorumTally, RaceContract,
         RestartPolicy, StateScope, SupervisionAttempt, SupervisionPolicy, SupervisionTrigger,
         AGENT_RECIPIENT_PREFIX, COORDINATION_RESULT_KIND, ESCALATION_MESSAGE_KIND,
+    };
+    pub use crate::artifact::{
+        commit_artifact, ArtifactCommitment, ArtifactError, ArtifactLineage, ArtifactVersion,
+        CommitDeclaration, MediaKind, RetentionPolicy, RunArtifact,
     };
     #[cfg(feature = "wasm")]
     pub use crate::broker::BrokeredCapsuleHost;
