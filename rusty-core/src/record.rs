@@ -799,6 +799,57 @@ pub enum RunEventKind {
     /// [`crate::deploy::EnvSecretDenial`], naming the scope requested
     /// and the scope the holder holds.
     EnvSecretDenied,
+
+    /// A release gate evaluated a promotion into a gated environment
+    /// (R0.12 wave 4): the decision journals **before** the pointer move
+    /// it governs, allowed or refused — a gate whose refusals leave no
+    /// evidence is a gate an audit cannot distinguish from never having
+    /// run. An [`Effect::Pure`] record on the deployment evidence chain.
+    /// Output carries the journaled [`crate::deploy::GateDecisionRecord`]:
+    /// policy, dataset version, every check observed, and the verdict.
+    GateDecisionRecorded,
+
+    /// A canary was declared on an environment's pointer (R0.12 wave 4):
+    /// one revision bound to a declared fraction of new runs while the
+    /// active revision serves the rest. An [`Effect::Pure`] record on the
+    /// deployment evidence chain. Output carries the journaled
+    /// [`crate::deploy::CanaryDeclaration`] — the binding and its author,
+    /// so the seeded draw an audit replays has a declared origin.
+    CanaryDeclared,
+
+    /// A canary was cleared from an environment's pointer (R0.12 wave
+    /// 4): the experiment ended without graduating (graduation is a
+    /// promotion, which clears the slot itself). An [`Effect::Pure`]
+    /// record on the deployment evidence chain. Output carries the
+    /// journaled [`crate::deploy::CanaryClearance`], naming the revision
+    /// the slot held — the clearance is evidence about a specific
+    /// binding, not a bare "slot emptied".
+    CanaryCleared,
+
+    /// A shadow run started against a recorded source run (R0.12 wave
+    /// 4): the twin of the source under a candidate revision, executed
+    /// against the shadow admission boundary. An [`Effect::Pure`] record
+    /// in the shadow run's own journal. Output carries the journaled
+    /// [`crate::deploy::ShadowRunStarted`] — naming the source run and
+    /// pinning `role: shadow`, so the twin-pair discipline is data the
+    /// journal carries, not a comment.
+    ShadowRunStarted,
+
+    /// A shadow run's admission boundary refused an effect above
+    /// read-only (R0.12 wave 4): the refusal is the shadow's reason to
+    /// exist — proof the candidate cannot touch the world — so it
+    /// journals served-or-not with the request it refused. An
+    /// [`Effect::Pure`] record in the shadow run's journal: nothing
+    /// executed, so there is no external effect to classify. Output
+    /// carries the journaled [`crate::effects::ShadowRefusal`].
+    ShadowEffectRefused,
+
+    /// A shadow run completed and its verdict journaled (R0.12 wave 4):
+    /// refusals, how many were served from the recorded world, and which
+    /// recorded calls the candidate never requested — the divergence
+    /// evidence. An [`Effect::Pure`] record in the shadow run's journal.
+    /// Output carries the journaled [`crate::deploy::ShadowVerdict`].
+    ShadowVerdict,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

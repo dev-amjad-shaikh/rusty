@@ -133,16 +133,20 @@
 //! | `GET /broker/journal` | R0.11 (wave 3): the deployment's broker evidence chain — registrations, consents, refreshes, revocations, issuances, uses, denials, and (wave 4) `connection_needs_reauth` terminal-refusal transitions, integrity re-verified on read (the `receipt_keys/journal` precedent for a second control plane) |
 //! | `POST /deployments/revisions` | R0.12 (wave 3): register an immutable, content-addressed revision `{graph, assistant?, source_environment, surfaces, author}` → `201 {created, revision}` (`200` + `created: false` converged on an identical re-registration — the content address makes it the same declaration; `404` unknown graph/assistant or undeclared source environment; `422` a surface with no active version there to freeze, or a declaration outside the contract). The pins freeze the source environment's ACTIVE pointers; the server computes the graph's current topology hash at registration. The `revision_registered` act journals before the store write (hard-fail) |
 //! | `GET /deployments/revisions` / `GET /deployments/revisions/{id}` | R0.12 (wave 3): the tenant's revisions (sorted by id) / fetch one (`404` unknown/cross-tenant) |
-//! | `POST /deployments/environments` | R0.12 (wave 3): declare an environment `{name, gate?, approval_required, author}` → `201 {created, environment}` (`200` + `created: false` converged on an identical re-declaration; `409` a different rule under the same name — declarations are immutable; `400` invalid name). Gate and approval declarations are recorded this wave, enforced in wave 4. The `environment_declared` act journals before the store write (hard-fail) |
+//! | `POST /deployments/environments` | R0.12 (wave 3): declare an environment `{name, gate?, approval_required, author}` → `201 {created, environment}` (`200` + `created: false` converged on an identical re-declaration; `409` a different rule under the same name — declarations are immutable; `400` invalid name). Gate and approval declarations are enforced from wave 4 (below). The `environment_declared` act journals before the store write (hard-fail) |
 //! | `GET /deployments/environments` / `GET /deployments/environments/{name}` | R0.12 (wave 3): the tenant's environments (sorted by name) / fetch one (`404` unknown/cross-tenant) |
-//! | `POST /deployments/environments/{name}/promote` | R0.12 (wave 3): move the environment's deployment pointer to a registered revision `{revision_id, author}` → `201 {applied, journaled, event_id, pointer}` (`200 {applied: false}` on a converged re-issue — no journal noise; `404` undeclared environment or unknown revision; `422` a revision failing its content-address check; `409` a lost race after exactly one rebuild — re-read and retry, never a lost move). Journal-then-pointer under the chain lock; the store's CAS arbitrates the move |
+//! | `POST /deployments/environments/{name}/promote` | R0.12 (wave 3): move the environment's deployment pointer to a registered revision `{revision_id, author, approval?}` → `201 {applied, journaled, event_id, pointer}` (`200 {applied: false}` on a converged re-issue — no journal noise; `404` undeclared environment or unknown revision; `422` a revision failing its content-address check; `409` a lost race after exactly one rebuild — re-read and retry, never a lost move). Journal-then-pointer under the chain lock; the store's CAS arbitrates the move. Wave 4: a declared gate runs first — the decision journaled, allowed or refused (`422` a blocking verdict, `409` an unavailable gate — the fail-closed read); an approval-required environment then demands a token scoped to this revision's promotion effect id (`403` otherwise — a token minted for any other revision admits nothing here) |
 //! | `POST /deployments/environments/{name}/rollback` | R0.12 (wave 3): re-point the environment byte-exactly at what served before `{author, cause}` → `201` with the moved pointer (`200` converged; `400` empty cause — a rollback names its cause; `404` undeclared environment; `409` nothing serves, or no journaled history to restore to). The target re-derives from the chain's transition replay — the immutable revision that served, never a reconstruction |
 //! | `GET /deployments/environments/{name}/pointer` | R0.12 (wave 3): the environment's serving picture (`404` undeclared environment, or nothing ever promoted into it) |
+//! | `PUT /deployments/environments/{name}/canary` | R0.12 (wave 4): bind a revision to the environment's canary slot `{revision_id, fraction, author}` → `201` with the moved pointer (`200 {applied: false}` on an identical re-declaration — the binding already holds; `404` undeclared environment or unknown revision; `422` a fraction outside (0, 1] — never a clamp). A declared gate runs first, exactly as on promote — the gate protects the environment, not the pointer slot. The active keeps serving; bound runs split by the seeded draw, journaled on each run's own resolution |
+//! | `DELETE /deployments/environments/{name}/canary` | R0.12 (wave 4): clear the canary slot `{author}` → `201` with the moved pointer (`200 {applied: false}` when the slot is already empty — an empty slot is the state, not an error). The `canary_cleared` act names the binding it ended |
 //! | `GET /deployments/journal` | R0.12 (wave 3): the deployment evidence chain — revision registrations, environment declarations, promotions, rollbacks, secret acts and denials — integrity re-verified on read (`422` when it does not verify; the `receipt_keys/journal` and `broker/journal` precedent for a control plane) |
 //! | `PUT /deployments/secrets` | R0.12 (wave 3): set or rotate an environment secret `{name, environment, value, author}` → `201 {created, record}` (`200` + `created: false` on rotation — `rotated_at` marks it; `404` undeclared environment; `422` a name outside the naming rules). The value seals (XChaCha20-Poly1305 envelope under the deployment's `esk-` master key) before anything writes; the store only ever holds the envelope, the `env_secret_set` act journals before the write, and the response is metadata — the value never comes back through this route |
 //! | `GET /deployments/secrets?environment=` | R0.12 (wave 3): the tenant's secret metadata (never envelopes — a listing is an audit view), optionally one environment's, sorted by (environment, name) |
 //! | `POST /deployments/secrets/resolve` | R0.12 (wave 3): open a secret at use, inside its declared scope `{name, environment, holder}` → `200 {name, environment, value}`; `403 environment_scope_denied` — typed AND journaled — when the holder is not the scope; `404` unknown secret; `500` when this host does not hold the sealing key. Every failure fails closed |
 //! | `DELETE /deployments/secrets/{environment}/{name}` | R0.12 (wave 3): revoke by deletion `{author}` → `204` (`404` unknown/cross-tenant); the `env_secret_revoked` tombstone journals before the delete — the tombstone is the evidence the scope once held a value |
+//! | `POST /deployments/shadows` | R0.12 (wave 4): run a recorded run's twin under a candidate revision, behind the shadow admission boundary `{revision_id, source, input?, author}` — `source` is the journal snapshot, inline, so shadow evidence is self-contained → `201 {shadow_run_id, verdict}`; `404` unknown revision; `422` a revision failing its content-address check, a source snapshot failing integrity, or a failed run (the verdict journals either way — a failed shadow is evidence about the candidate). Pure and read-only effects execute; everything above is refused (typed, classified, journaled) and served from the recorded world when the source journal holds the outcome; the verdict names matched, unserved, and unrequested outcomes. The shadow journals under its own run id and holds no thread — a receipt request for it is a `404` by construction |
+//! | `GET /deployments/health` | R0.12 (wave 4): the health board — every environment's pointer, canary state with its bound-run tally, and the last gate decision the chain recorded for it, derived from journaled data alone (no new store) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -168,6 +172,7 @@ mod coordination;
 mod crons;
 mod deploy;
 mod error;
+mod gate;
 mod journals;
 mod learn;
 mod mcp_bridge;
@@ -194,12 +199,16 @@ use std::sync::Arc;
 
 use axum::Router;
 use rusty_agent_runtime::capsule::ResourceBudget;
+use rusty_agent_runtime::deploy::RevisionGateEvaluator;
 use rusty_agent_runtime::graph::Graph;
 use rusty_agent_runtime::learn::{CandidateEvaluator, EnvironmentTag, PromotionEnvelope};
 use rusty_agent_runtime::state::StateSpec;
 use tokio_util::sync::CancellationToken;
 
 pub use error::ApiError;
+pub use gate::{
+    DirectoryGatePolicySource, EvalRevisionGateEvaluator, GatePolicySource, RevisionEvaluationAgent,
+};
 pub use learn::{DatasetSource, DirectoryDatasetSource, EvalCandidateEvaluator, EvaluationAgent};
 pub use runs::RunStatus;
 
@@ -476,6 +485,14 @@ pub struct ServerConfig {
     /// [`ServerConfig::with_candidate_evaluator`].
     pub candidate_evaluator: Option<Arc<dyn CandidateEvaluator>>,
 
+    /// The revision gate evaluator (R0.12 wave 4): the release-gate
+    /// composition promotions into a gated environment drive. `None`
+    /// (the default) fails closed — a promotion into an environment
+    /// declaring a gate answers `409`, because a gate that cannot run
+    /// is a gate that did not pass. See
+    /// [`ServerConfig::with_revision_gate_evaluator`].
+    pub revision_gate_evaluator: Option<Arc<dyn RevisionGateEvaluator>>,
+
     /// The deployment's default environment tag (R0.11 Extension Plane,
     /// wave 2): the promotion target a run resolves against when its
     /// registry binding declares no environment of its own. `None` (the
@@ -578,6 +595,7 @@ impl Default for ServerConfig {
             tenant_task_quotas: HashMap::new(),
             promotion_envelope: PromotionEnvelope::r08_default(),
             candidate_evaluator: None,
+            revision_gate_evaluator: None,
             default_environment_tag: None,
             capsule_policy_files: Vec::new(),
             capsule_budget_ceiling: None,
@@ -795,6 +813,19 @@ impl ServerConfig {
     /// on evidence, and evidence requires an evaluator.
     pub fn with_candidate_evaluator(mut self, evaluator: Arc<dyn CandidateEvaluator>) -> Self {
         self.candidate_evaluator = Some(evaluator);
+        self
+    }
+
+    /// Builder-style: register the revision gate evaluator (R0.12 wave
+    /// 4) — the release-gate composition promotions into gated
+    /// environments drive. Without one a gated promotion answers `409`:
+    /// the gate fails closed, so an unavailable evaluator is a refusal,
+    /// never a skip.
+    pub fn with_revision_gate_evaluator(
+        mut self,
+        evaluator: Arc<dyn RevisionGateEvaluator>,
+    ) -> Self {
+        self.revision_gate_evaluator = Some(evaluator);
         self
     }
 

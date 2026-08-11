@@ -1,0 +1,12 @@
+{
+  "tenant": "default",
+  "shadow_run_id": "shadow-run-1-abcdef123456-7f3a",
+  "source_run_id": "run-1",
+  "revision_id": "04a44aff303e1efb2d988bbc93e98a2570852d3f7725abb69cc97a87dc6ab163",
+  "role": "shadow",
+  "author": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "started_at": "2025-10-09T09:01:40Z"
+}

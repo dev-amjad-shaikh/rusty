@@ -230,6 +230,17 @@ pub struct RunConfig {
     /// dispatched through that path then fails admission before its body
     /// runs.
     pub effect_approvals: Vec<crate::effects::ApprovalToken>,
+
+    /// Shadow runs (R0.12 wave 4): an explicit admission context for this
+    /// run, overriding the one the executor would otherwise build from
+    /// [`Executor::with_effect_admission`]. A shadow deployment builds a
+    /// context whose boundary refuses every effect above read-only and serves
+    /// refused calls from the recorded world (see
+    /// [`crate::effects::EffectAdmissionContext::shadow`]); injecting it here
+    /// is what makes the run execute against that boundary instead of the
+    /// production one. `None` (the default) is byte-identical to prior
+    /// behavior.
+    pub effect_admission: Option<EffectAdmissionContext>,
 }
 
 impl Default for RunConfig {
@@ -259,6 +270,7 @@ impl RunConfig {
             cancellation: None,
             manifest: None,
             effect_approvals: Vec::new(),
+            effect_admission: None,
         }
     }
 
@@ -349,6 +361,15 @@ impl RunConfig {
         approvals: impl IntoIterator<Item = crate::effects::ApprovalToken>,
     ) -> Self {
         self.effect_approvals = approvals.into_iter().collect();
+        self
+    }
+
+    /// Builder-style: inject an explicit admission context for this run (see
+    /// the [`RunConfig::effect_admission`] field docs). Shadow deployments
+    /// use it to run the graph against the shadow boundary instead of the
+    /// production one.
+    pub fn with_effect_admission_context(mut self, context: EffectAdmissionContext) -> Self {
+        self.effect_admission = Some(context);
         self
     }
 
@@ -788,11 +809,15 @@ impl Executor {
 
         // One shared context for the whole run: clones handed to parallel
         // nodes share its approval ledger, and later super-steps observe
-        // tokens already consumed by earlier calls.
-        let effect_admission = self.effect_compensations.as_ref().map(|compensations| {
-            EffectAdmissionContext::new(config.thread_id.clone())
-                .with_approvals(config.effect_approvals.clone())
-                .with_compensations(compensations.clone())
+        // tokens already consumed by earlier calls. An explicitly injected
+        // context (R0.12 shadow runs) wins over the production one derived
+        // from the executor's compensation registry.
+        let effect_admission = config.effect_admission.clone().or_else(|| {
+            self.effect_compensations.as_ref().map(|compensations| {
+                EffectAdmissionContext::new(config.thread_id.clone())
+                    .with_approvals(config.effect_approvals.clone())
+                    .with_compensations(compensations.clone())
+            })
         });
 
         // ---- super-step loop ----

@@ -260,11 +260,14 @@ pub mod prelude {
     pub use crate::checkpoint_postgres::PostgresCheckpointer;
     pub use crate::deploy::{
         deployment_admission, deployment_surface, derive_revision_id, pin_set_digest,
-        scoped_secret_name, validate_secret_name, CanaryDeployment, DeployError, DeploymentPointer,
-        DeploymentResolved, DeploymentRevision, EnvSecretAct, EnvSecretDenial, EnvSecretRecord,
-        EnvSecretRevocation, Environment, EnvironmentDeclaration, GateDeclaration, RegistryPin,
-        RevisionContent, RevisionId, RevisionPromotion, RevisionRegistration, RevisionRollback,
-        StoredEnvSecret, MAX_SECRET_NAME_LEN,
+        revision_promotion_effect_id, scoped_secret_name, validate_secret_name, CanaryClearance,
+        CanaryDeclaration, CanaryDeployment, DeployError, DeploymentPointer, DeploymentResolved,
+        DeploymentRevision, EnvSecretAct, EnvSecretDenial, EnvSecretRecord, EnvSecretRevocation,
+        Environment, EnvironmentDeclaration, GateCheckRecord, GateDecisionRecord, GateDeclaration,
+        GateEvaluation, GateVerdict, RegistryPin, RevisionContent, RevisionGateEvaluator,
+        RevisionId, RevisionPromotion, RevisionRegistration, RevisionRollback, ShadowRunOutcome,
+        ShadowRunStarted, ShadowVerdict, StoredEnvSecret, MAX_SECRET_NAME_LEN,
+        REVISION_PROMOTION_EFFECT_KIND,
     };
     pub use crate::durable::{
         backoff_delay_ms, backoff_delay_ms_with, classify_retry, classify_retry_with_policy,
@@ -278,7 +281,7 @@ pub mod prelude {
         admit_compensatable, admit_irreversible, admit_retry, admit_speculation, derive_effect_id,
         ApprovalToken, CompensatableEffect, CompensationHandler, CompensationRegistry, EffectId,
         EffectViolation, IdempotentEffect, IrreversibleEffect, PureEffect, ReadOnlyEffect,
-        TypedEffect, EFFECT_ID_DOMAIN,
+        ShadowOutcomeSource, ShadowRefusal, ShadowRefusalSink, TypedEffect, EFFECT_ID_DOMAIN,
     };
     pub use crate::error::{Result, RustyError};
     pub use crate::executor::{ExecutionOutcome, Executor, GraphEvent, RunConfig};
@@ -339,9 +342,9 @@ pub mod prelude {
         RegistryError, TextDiffLine, MAX_ARTIFACT_NAME_LEN,
     };
     pub use crate::replay::{
-        BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, LogicalClockParams,
-        RecordingChatModel, RecordingTool, ReplayFixture, ReplayOutcome, ReplayParams,
-        ReplaySource, ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
+        BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, JournalShadowSource,
+        LogicalClockParams, RecordingChatModel, RecordingTool, ReplayFixture, ReplayOutcome,
+        ReplayParams, ReplaySource, ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
         FIXTURE_FORMAT_VERSION,
     };
     pub use crate::state::{Reducer, State, StateSpec};

@@ -189,6 +189,12 @@ pub(crate) trait ServerStore: Send + Sync {
     /// persisted — e.g. a queued run, or one that failed before its first
     /// checkpoint boundary).
     async fn get_journal(&self, run_id: &str) -> StoreResult<Option<JournalSnapshot>>;
+    /// Every persisted journal snapshot, sorted by run id. A snapshot that
+    /// fails to deserialize is skipped with a warning rather than failing
+    /// the listing — readers (the health board) derive state from journals,
+    /// and one corrupt record must not blind them to the rest; the corrupt
+    /// record's own read path still surfaces its error.
+    async fn list_journals(&self) -> StoreResult<Vec<JournalSnapshot>>;
 
     // -- Durable task queue (R0.6) -------------------------------------- //
 
@@ -1766,6 +1772,12 @@ impl ServerStore for JsonFileStore {
         journals::get(&self.root, run_id)
             .await
             .map_err(io_err("get journal"))
+    }
+
+    async fn list_journals(&self) -> StoreResult<Vec<JournalSnapshot>> {
+        journals::list(&self.root)
+            .await
+            .map_err(io_err("list journals"))
     }
 
     async fn enqueue_task(&self, record: &TaskRecord) -> StoreResult<(TaskRecord, bool)> {
@@ -4468,6 +4480,11 @@ mod postgres {
     pub(crate) const SELECT_JOURNAL_SQL: &str =
         "SELECT payload FROM server_journals WHERE run_id = $1";
 
+    /// Every journaled snapshot, in run-id order (the file backend's
+    /// listing order, so both backends answer identically).
+    pub(crate) const SELECT_JOURNALS_SQL: &str =
+        "SELECT payload FROM server_journals ORDER BY run_id";
+
     // -- Task queue statements (R0.6) ------------------------------------ //
 
     /// Insert-only enqueue; `ON CONFLICT DO NOTHING` absorbs both the
@@ -6207,6 +6224,27 @@ mod postgres {
                 .map_err(db_err("select journal"))?;
             row.map(|r| record_from_payload("journal", r.get::<Value, _>("payload")))
                 .transpose()
+        }
+
+        async fn list_journals(&self) -> StoreResult<Vec<JournalSnapshot>> {
+            let rows = sqlx::query(SELECT_JOURNALS_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list journals"))?;
+            let mut snapshots = Vec::with_capacity(rows.len());
+            for row in rows {
+                match record_from_payload::<JournalSnapshot>(
+                    "journal",
+                    row.get::<Value, _>("payload"),
+                ) {
+                    Ok(snapshot) => snapshots.push(snapshot),
+                    // A corrupt row must not blind the health board to
+                    // every other journal (the trait contract); its own
+                    // read path still surfaces the error.
+                    Err(e) => tracing::warn!("skipping corrupt journal row: {e}"),
+                }
+            }
+            Ok(snapshots)
         }
 
         async fn enqueue_task(&self, record: &TaskRecord) -> StoreResult<(TaskRecord, bool)> {

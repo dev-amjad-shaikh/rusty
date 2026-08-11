@@ -49,16 +49,40 @@
 //! deployment evidence chain. A request outside the holder's environment
 //! is a typed, journaled [`EnvSecretDenial`]: scoping is enforcement, not
 //! convention.
+//!
+//! Wave 4 turns the declared rules into enforced ones. The gate an
+//! [`Environment`] declares is evaluated through the
+//! [`RevisionGateEvaluator`] seam — core owns the contract, never the
+//! evaluator, so the runtime keeps its distance from `rusty-eval` (the
+//! workspace's dependency direction) — and the decision journals as a
+//! [`GateDecisionRecord`] *before* the pointer move it governs, allowed
+//! or refused: a gate whose refusals leave no evidence is a gate an
+//! audit cannot tell apart from never having run. Approval-required
+//! environments gate promotion behind a token scoped to the revision's
+//! own promotion effect id ([`revision_promotion_effect_id`]) — a token
+//! minted for one revision admits no other, so an approval is a fact
+//! about a specific deploy, not a standing permission. Canary declare
+//! and clear are journaled acts ([`CanaryDeclaration`],
+//! [`CanaryClearance`]) on the same chain, so the experiment's whole
+//! lifecycle — declared, drawn against, graduated or cleared — reads
+//! from one evidence trail. And a shadow run replays a recorded run's
+//! twin against a candidate revision behind the shadow admission
+//! boundary, journaling its start ([`ShadowRunStarted`]), every refusal
+//! the boundary served or not, and its [`ShadowVerdict`]: divergence as
+//! evidence, with no path to the world.
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::broker::SealedCredential;
+use crate::effects::{derive_effect_id, EffectId, ShadowRefusal};
 use crate::error::Result;
 use crate::learn::{canary_admits, CanaryBinding, CandidateId, EnvironmentTag, SurfaceKey};
 use crate::memory::ProvenanceAuthor;
-use crate::record::sha256_hex;
+use crate::record::{sha256_hex, DecisionRole};
 use crate::registry::PointerBinding;
 
 // --------------------------------------------------------------------- //
@@ -253,9 +277,10 @@ impl DeploymentRevision {
 
 /// The gate declaration governing promotions into an environment: the
 /// gate policy's name and the dataset version the gate replays. Names
-/// only — the gate seam itself wires in wave 4; what lands here is the
-/// declaration, so the rule in force when a promotion happens is data an
-/// audit reads, not code it infers.
+/// only — the declaration, not the evaluator: the rule in force when a
+/// promotion happens is data an audit reads, not code it infers. Wave 4
+/// evaluates it through the [`RevisionGateEvaluator`] seam before any
+/// pointer moves.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GateDeclaration {
     /// The gate policy's name (the `rusty-eval` `GatePolicy` the control
@@ -283,16 +308,16 @@ pub struct Environment {
     pub name: EnvironmentTag,
 
     /// The gate declaration promotions into this environment must clear,
-    /// when one is declared (enforced in wave 4; recorded from the
-    /// start). Absent: promotion is an operator act with no gate — the
-    /// `dev` floor.
+    /// when one is declared (enforced by the control plane since wave 4;
+    /// recorded from the start). Absent: promotion is an operator act
+    /// with no gate — the `dev` floor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<GateDeclaration>,
 
     /// Whether promotions into this environment require a human approval
-    /// token scoped to the revision's promotion effect id (checked in
-    /// wave 4; the `prod` stance). Recorded as data so the declaration is
-    /// auditable before it is enforced.
+    /// token scoped to the revision's promotion effect id (enforced
+    /// since wave 4; the `prod` stance). Recorded as data so the
+    /// declaration is auditable before it is enforced.
     #[serde(default)]
     pub approval_required: bool,
 
@@ -787,6 +812,339 @@ pub enum DeployError {
 }
 
 // --------------------------------------------------------------------- //
+// Wave 4: the release gate
+// --------------------------------------------------------------------- //
+
+/// One gate check, journaled: the core mirror of `rusty-eval`'s
+/// `GateCheck`, serde-mapped at the seam so the runtime never links the
+/// eval crate (the workspace's dependency direction is `rusty-eval` →
+/// runtime, never the reverse — the
+/// [`crate::learn::CompareThresholdsRecord`] precedent). `metric` is the
+/// eval metric's own serde form (`snake_case`-tagged), carried as a
+/// string so a new eval metric needs no core release to journal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateCheckRecord {
+    /// The check's metric, in `rusty-eval`'s serde form.
+    pub metric: String,
+
+    /// Whether the check passed.
+    pub passed: bool,
+
+    /// What the candidate measured.
+    pub observed: Value,
+
+    /// What the policy required.
+    pub required: Value,
+
+    /// The check's explanation — the journaled why, so an audit reads
+    /// the refusal without re-running the gate.
+    pub detail: String,
+}
+
+/// A gate's verdict. Two states and no third: a gate that cannot say
+/// `allow` says `block` — unevaluable comparisons fail closed (the
+/// `ComparisonAvailable` precedent in `rusty-eval`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateVerdict {
+    /// Every check passed; the promotion may proceed.
+    Allow,
+
+    /// At least one check failed — or the gate could not be evaluated;
+    /// the promotion is refused.
+    Block,
+}
+
+/// The gate evaluation the [`RevisionGateEvaluator`] seam returns: the
+/// verdict and every check behind it, naming the policy and dataset
+/// version it ran under. The seam's contract requires the evaluator to
+/// name back the declaration it was handed — an evaluation that cannot
+/// say what it evaluated is not evidence about this promotion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateEvaluation {
+    /// The policy the evaluation ran (must equal the declaration's).
+    pub policy: String,
+
+    /// The dataset version the evaluation replayed (must equal the
+    /// declaration's).
+    pub dataset_version: String,
+
+    /// The verdict.
+    pub outcome: GateVerdict,
+
+    /// Every check the verdict stands on.
+    pub checks: Vec<GateCheckRecord>,
+}
+
+impl GateEvaluation {
+    /// Whether the promotion may proceed: the verdict allows **and**
+    /// every check passed. The conjunction is deliberate — a verdict
+    /// and its checks disagreeing is a broken evaluator, and a broken
+    /// evaluator fails closed.
+    pub fn allowed(&self) -> bool {
+        self.outcome == GateVerdict::Allow && self.checks.iter().all(|check| check.passed)
+    }
+}
+
+/// A gate decision, journaled: the payload of a
+/// [`crate::record::RunEventKind::GateDecisionRecorded`] event on the
+/// deployment evidence chain. The decision journals before the pointer
+/// move it governs — and journals when it *refuses*, so the chain holds
+/// the gate's refusals, not only its permissions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateDecisionRecord {
+    /// The tenant the decision governs.
+    pub tenant: String,
+
+    /// The gated environment.
+    pub environment: EnvironmentTag,
+
+    /// The revision the gate evaluated.
+    pub revision_id: RevisionId,
+
+    /// The revision the gate compared against — the environment's
+    /// serving revision at decision time (`None`: nothing served, so
+    /// comparative checks ran baseline-less and failed closed where the
+    /// policy needed a comparison).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_revision_id: Option<RevisionId>,
+
+    /// The policy the gate ran — the declaration's, echoed.
+    pub policy: String,
+
+    /// The dataset version the gate replayed — the declaration's,
+    /// echoed.
+    pub dataset_version: String,
+
+    /// The verdict.
+    pub outcome: GateVerdict,
+
+    /// Every check the verdict stands on.
+    pub checks: Vec<GateCheckRecord>,
+
+    /// When the gate decided.
+    pub decided_at: DateTime<Utc>,
+}
+
+/// The release-gate seam: core owns the contract, the server composes
+/// the evaluator over `rusty-eval` (the [`crate::learn::CandidateEvaluator`]
+/// precedent — the runtime declares what a gate must answer; the
+/// composition that answers it lives one crate out, where the eval
+/// dependency is allowed).
+///
+/// The contract: `baseline` is the environment's serving revision at
+/// decision time (`None` when nothing serves); the returned evaluation
+/// **must** name `gate.policy` and `gate.dataset_version` back — the
+/// control plane refuses an evaluation that cannot say what it
+/// evaluated. Errors are refusals of the evaluation itself (the dataset
+/// is unreadable, the policy unknown); the control plane fails closed
+/// on one — a gate that could not run is a gate that did not pass.
+#[async_trait]
+pub trait RevisionGateEvaluator: Send + Sync + std::fmt::Debug {
+    /// Evaluate `revision` against `gate`, comparing against `baseline`
+    /// when one serves.
+    async fn evaluate(
+        &self,
+        revision: &DeploymentRevision,
+        baseline: Option<&DeploymentRevision>,
+        gate: &GateDeclaration,
+    ) -> Result<GateEvaluation>;
+}
+
+/// The effect kind a revision promotion is admitted under: distinct
+/// from the learn plane's `candidate_promotion`, because the acts are
+/// distinct — promoting a candidate changes what the registry *points
+/// at*; promoting a revision changes what an environment *serves*.
+pub const REVISION_PROMOTION_EFFECT_KIND: &str = "revision_promotion";
+
+/// The promotion effect id for a revision into an environment: the
+/// approval-token scope for approval-required environments, derived by
+/// the [`crate::learn::promotion_effect_id`] rule over the deployment
+/// surface. Scoped to the revision's own content address, so a token
+/// minted for one revision admits no other — an approval is a fact
+/// about a specific deploy, not a standing permission.
+pub fn revision_promotion_effect_id(
+    environment: &EnvironmentTag,
+    revision: &DeploymentRevision,
+) -> EffectId {
+    derive_effect_id(
+        deployment_surface(environment).as_str(),
+        REVISION_PROMOTION_EFFECT_KIND,
+        revision.revision_id.as_str(),
+        Some(&format!("promotion:{}", revision.revision_id.as_str())),
+    )
+}
+
+// --------------------------------------------------------------------- //
+// Wave 4: canary acts
+// --------------------------------------------------------------------- //
+
+/// A canary was declared on an environment's pointer: the journaled
+/// payload of a [`crate::record::RunEventKind::CanaryDeclared`] event,
+/// and the move [`DeploymentPointer::canaried`] applies. The binding
+/// journals whole — revision and fraction — because the seeded draw an
+/// audit replays is a function of exactly these fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanaryDeclaration {
+    /// The tenant the canary governs.
+    pub tenant: String,
+
+    /// The environment canarying.
+    pub environment: EnvironmentTag,
+
+    /// The canaried revision.
+    pub revision_id: RevisionId,
+
+    /// The fraction of new runs the revision serves.
+    pub fraction: f64,
+
+    /// Who declared the canary (`human:{id}`).
+    pub author: ProvenanceAuthor,
+
+    /// When the canary journaled.
+    pub declared_at: DateTime<Utc>,
+}
+
+/// A canary was cleared without graduating: the journaled payload of a
+/// [`crate::record::RunEventKind::CanaryCleared`] event, and the move
+/// [`DeploymentPointer::cleared_canary`] applies. Naming the cleared
+/// revision is the point — a bare "slot emptied" would leave the
+/// experiment's end unattributable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanaryClearance {
+    /// The tenant the clearance governs.
+    pub tenant: String,
+
+    /// The environment clearing its canary.
+    pub environment: EnvironmentTag,
+
+    /// The revision the canary slot held.
+    pub cleared_revision_id: RevisionId,
+
+    /// Who cleared the canary (`human:{id}`).
+    pub author: ProvenanceAuthor,
+
+    /// When the clearance journaled.
+    pub cleared_at: DateTime<Utc>,
+}
+
+impl DeploymentPointer {
+    /// The pointer after a canary declaration: the canary slot binds the
+    /// revision and `active` keeps serving the rest — a canary is an
+    /// experiment alongside the serving revision, not a move of it.
+    pub fn canaried(&self, declaration: &CanaryDeclaration) -> DeploymentPointer {
+        let mut next = self.clone();
+        next.canary = Some(CanaryDeployment {
+            revision_id: declaration.revision_id.clone(),
+            fraction: declaration.fraction,
+        });
+        next
+    }
+
+    /// The pointer after a canary clearance: the slot empties and
+    /// `active` serves everything again.
+    pub fn cleared_canary(&self) -> DeploymentPointer {
+        let mut next = self.clone();
+        next.canary = None;
+        next
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Wave 4: shadow runs
+// --------------------------------------------------------------------- //
+
+/// A shadow run started: the journaled payload of a
+/// [`crate::record::RunEventKind::ShadowRunStarted`] event in the shadow
+/// run's own journal. Naming the source run and pinning
+/// `role: shadow` makes the twin-pair discipline data the journal
+/// carries: the shadow's evidence names what it shadows, and its role
+/// can never be confused with the acting twin's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowRunStarted {
+    /// The tenant the shadow runs under.
+    pub tenant: String,
+
+    /// The shadow run's id.
+    pub shadow_run_id: String,
+
+    /// The recorded run this shadow replays.
+    pub source_run_id: String,
+
+    /// The candidate revision under test.
+    pub revision_id: RevisionId,
+
+    /// The decision role — always [`DecisionRole::Shadow`]; pinned in
+    /// the payload so the discipline survives any caller.
+    pub role: DecisionRole,
+
+    /// Who launched the shadow (`human:{id}`).
+    pub author: ProvenanceAuthor,
+
+    /// When the shadow started.
+    pub started_at: DateTime<Utc>,
+}
+
+/// How a shadow run ended.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShadowRunOutcome {
+    /// The graph ran to completion behind the shadow boundary.
+    Completed,
+
+    /// The run failed — a graph error, not an admission refusal
+    /// (refusals are the shadow's normal path, journaled as they
+    /// happen). The verdict still journals: a failed shadow is evidence
+    /// about the candidate, not a run to sweep away.
+    Failed {
+        /// The executor's error, surfaced verbatim.
+        error: String,
+    },
+}
+
+/// A shadow run's verdict: the journaled payload of a
+/// [`crate::record::RunEventKind::ShadowVerdict`] event, and the answer
+/// the shadow exists to give — what the candidate tried to do to the
+/// world, what the recorded world served back, and where the candidate
+/// diverged from the run it shadows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowVerdict {
+    /// The tenant the shadow ran under.
+    pub tenant: String,
+
+    /// The shadow run's id.
+    pub shadow_run_id: String,
+
+    /// The recorded run this shadow replayed.
+    pub source_run_id: String,
+
+    /// The candidate revision under test.
+    pub revision_id: RevisionId,
+
+    /// Every effect the boundary refused, journaled served-or-not as it
+    /// happened — the shadow's reason to exist, verbatim.
+    pub refusals: Vec<ShadowRefusal>,
+
+    /// How many refused calls were served from the recorded world.
+    pub matched: usize,
+
+    /// How many refused calls the recorded world could not serve — the
+    /// candidate asked for something its source never did.
+    pub unserved: usize,
+
+    /// Recorded effect kinds with calls the candidate never requested —
+    /// divergence in the other direction, evidence the candidate does
+    /// *less* than the run it shadows.
+    pub unrequested: Vec<String>,
+
+    /// How the run ended.
+    pub outcome: ShadowRunOutcome,
+
+    /// When the verdict journaled.
+    pub completed_at: DateTime<Utc>,
+}
+
+// --------------------------------------------------------------------- //
 // Tests
 // --------------------------------------------------------------------- //
 
@@ -1244,6 +1602,217 @@ mod tests {
                 requested_environment: tag("prod"),
                 held_environment: tag("staging"),
                 denied_at: ts(1_760_000_300_000),
+            },
+        );
+    }
+
+    // ---------- wave 4: gates, canary acts, shadows ----------
+
+    fn gate_evaluation(outcome: GateVerdict, checks: Vec<GateCheckRecord>) -> GateEvaluation {
+        GateEvaluation {
+            policy: "r0.12-default".into(),
+            dataset_version: "support-v3".into(),
+            outcome,
+            checks,
+        }
+    }
+
+    fn passing_check() -> GateCheckRecord {
+        GateCheckRecord {
+            metric: "\"pass_rate\"".into(),
+            passed: true,
+            observed: serde_json::json!(0.91),
+            required: serde_json::json!(0.85),
+            detail: "pass rate clears the floor".into(),
+        }
+    }
+
+    #[test]
+    fn the_gate_allows_only_when_verdict_and_every_check_agree() {
+        // Fail-closed twice over: a blocked verdict refuses however the
+        // checks read, and an allow verdict with one failing check
+        // refuses too — a verdict and its checks disagreeing is a broken
+        // evaluator, and a broken evaluator does not ship revisions.
+        assert!(gate_evaluation(GateVerdict::Allow, vec![passing_check()]).allowed());
+        assert!(!gate_evaluation(GateVerdict::Block, vec![passing_check()]).allowed());
+        let mut failing = passing_check();
+        failing.passed = false;
+        assert!(!gate_evaluation(GateVerdict::Allow, vec![passing_check(), failing]).allowed());
+    }
+
+    #[test]
+    fn canary_moves_keep_the_active_revision_serving() {
+        // Declare: the canary slot binds, active keeps serving the rest.
+        // Clear: the slot empties, active is untouched. Promotion still
+        // supersedes the experiment it graduated from (wave 3 semantics,
+        // unchanged).
+        let pointer = DeploymentPointer {
+            canary: None,
+            ..DeploymentPointer::new(deployment_surface(&tag("staging")))
+        };
+        let declaration = CanaryDeclaration {
+            tenant: "default".into(),
+            environment: tag("staging"),
+            revision_id: revision('b').revision_id.clone(),
+            fraction: 0.1,
+            author: author(),
+            declared_at: ts(1_760_000_100_000),
+        };
+        let canaried = pointer.canaried(&declaration);
+        assert_eq!(
+            canaried.canary,
+            Some(CanaryDeployment {
+                revision_id: revision('b').revision_id.clone(),
+                fraction: 0.1,
+            })
+        );
+        assert_eq!(
+            canaried.active, pointer.active,
+            "a canary moves nothing serving"
+        );
+        let cleared = canaried.cleared_canary();
+        assert_eq!(cleared, pointer, "clearing restores the pre-canary pointer");
+    }
+
+    #[test]
+    fn the_revision_promotion_effect_id_is_scoped_to_the_revision() {
+        // Deterministic for one revision into one environment; different
+        // for any other revision or any other environment — a token
+        // minted for this deploy admits no other.
+        let rev = revision('a');
+        let staging = tag("staging");
+        let id = revision_promotion_effect_id(&staging, &rev);
+        assert_eq!(id, revision_promotion_effect_id(&staging, &rev));
+        assert_ne!(
+            id,
+            revision_promotion_effect_id(&staging, &revision('b')),
+            "another revision is another approval"
+        );
+        assert_ne!(
+            id,
+            revision_promotion_effect_id(&tag("prod"), &rev),
+            "another environment is another approval"
+        );
+    }
+
+    fn gate_decision_record() -> GateDecisionRecord {
+        GateDecisionRecord {
+            tenant: "default".into(),
+            environment: tag("staging"),
+            revision_id: revision('b').revision_id.clone(),
+            baseline_revision_id: Some(revision('a').revision_id.clone()),
+            policy: "r0.12-default".into(),
+            dataset_version: "support-v3".into(),
+            outcome: GateVerdict::Allow,
+            checks: vec![passing_check()],
+            decided_at: ts(1_760_000_200_000),
+        }
+    }
+
+    fn shadow_refusal() -> ShadowRefusal {
+        ShadowRefusal {
+            kind: "charge".into(),
+            effect: crate::record::Effect::NonIdempotent,
+            effect_id: derive_effect_id(
+                "shadow-run-1",
+                "charge",
+                &sha256_hex(b"{\"tool\":\"charge\"}"),
+                Some("shadow-run-1:7"),
+            ),
+            input_hash: sha256_hex(b"{\"tool\":\"charge\"}"),
+            served: true,
+        }
+    }
+
+    #[test]
+    fn golden_gate_event_kinds_shape() {
+        // Wave 4's additive RunEventKind wire names, pinned beside wave
+        // 3's (`deployment_event_kinds.json`) — appended after
+        // `EnvSecretDenied`, in wire order.
+        use crate::record::RunEventKind;
+        assert_golden(
+            "deployment_gate_event_kinds.json",
+            &vec![
+                RunEventKind::GateDecisionRecorded,
+                RunEventKind::CanaryDeclared,
+                RunEventKind::CanaryCleared,
+                RunEventKind::ShadowRunStarted,
+                RunEventKind::ShadowEffectRefused,
+                RunEventKind::ShadowVerdict,
+            ],
+        );
+    }
+
+    #[test]
+    fn golden_gate_decision_record_shape() {
+        assert_golden("gate_decision_record.json", &gate_decision_record());
+    }
+
+    #[test]
+    fn golden_canary_declaration_shape() {
+        assert_golden(
+            "canary_declaration.json",
+            &CanaryDeclaration {
+                tenant: "default".into(),
+                environment: tag("staging"),
+                revision_id: revision('b').revision_id.clone(),
+                fraction: 0.1,
+                author: author(),
+                declared_at: ts(1_760_000_100_000),
+            },
+        );
+    }
+
+    #[test]
+    fn golden_canary_clearance_shape() {
+        assert_golden(
+            "canary_clearance.json",
+            &CanaryClearance {
+                tenant: "default".into(),
+                environment: tag("staging"),
+                cleared_revision_id: revision('b').revision_id.clone(),
+                author: author(),
+                cleared_at: ts(1_760_000_400_000),
+            },
+        );
+    }
+
+    #[test]
+    fn golden_shadow_run_started_shape() {
+        assert_golden(
+            "shadow_run_started.json",
+            &ShadowRunStarted {
+                tenant: "default".into(),
+                shadow_run_id: "shadow-run-1-abcdef123456-7f3a".into(),
+                source_run_id: "run-1".into(),
+                revision_id: revision('b').revision_id.clone(),
+                role: DecisionRole::Shadow,
+                author: author(),
+                started_at: ts(1_760_000_500_000),
+            },
+        );
+    }
+
+    #[test]
+    fn golden_shadow_effect_refusal_shape() {
+        assert_golden("shadow_effect_refusal.json", &shadow_refusal());
+    }
+
+    #[test]
+    fn golden_shadow_verdict_shape() {
+        assert_golden(
+            "shadow_verdict.json",
+            &ShadowVerdict {
+                tenant: "default".into(),
+                shadow_run_id: "shadow-run-1-abcdef123456-7f3a".into(),
+                source_run_id: "run-1".into(),
+                revision_id: revision('b').revision_id.clone(),
+                refusals: vec![shadow_refusal()],
+                matched: 1,
+                unserved: 0,
+                unrequested: vec!["lookup".into()],
+                outcome: ShadowRunOutcome::Completed,
+                completed_at: ts(1_760_000_600_000),
             },
         );
     }

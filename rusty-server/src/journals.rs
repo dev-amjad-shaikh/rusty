@@ -49,6 +49,34 @@ pub(crate) async fn get(root: &Path, run_id: &str) -> io::Result<Option<JournalS
     Ok(Some(snapshot))
 }
 
+/// Load every persisted snapshot, in file-name (run-id) order. A file
+/// that fails to parse is skipped with a warning rather than failing the
+/// listing — the health board reads journals to *derive* state, and one
+/// corrupt file must not blind it to everything else (the corrupt file's
+/// own read path still surfaces the error).
+pub(crate) async fn list(root: &Path) -> io::Result<Vec<JournalSnapshot>> {
+    let dir = dir(root);
+    let mut entries = match tokio::fs::read_dir(&dir).await {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut snapshots: Vec<JournalSnapshot> = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".json") || name.starts_with('.') {
+            continue;
+        }
+        let bytes = tokio::fs::read(entry.path()).await?;
+        match serde_json::from_slice::<JournalSnapshot>(&bytes) {
+            Ok(snapshot) => snapshots.push(snapshot),
+            Err(e) => tracing::warn!("skipping unparsable journal file {name}: {e}"),
+        }
+    }
+    snapshots.sort_by(|a, b| a.run_id.cmp(&b.run_id));
+    Ok(snapshots)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

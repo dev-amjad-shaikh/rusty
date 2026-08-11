@@ -394,6 +394,28 @@ pub enum EffectViolation {
         /// The effect id the presented token approves.
         presented: EffectId,
     },
+
+    /// An effect above [`Effect::ReadOnly`] was attempted under a shadow
+    /// admission context (R0.12 Operations Plane, wave 4). The shadow's
+    /// whole promise is that the candidate's effects never reach the
+    /// world, and "idempotent" means safe to retry under one key — not
+    /// safe to execute twice from two revisions — so `Idempotent` is
+    /// refused alongside the classes above it. The violation carries the
+    /// classification and the derived id because it is evidence, not a
+    /// stack trace: the shadow's report shows which effects the candidate
+    /// would have attempted, classified, never executed.
+    #[error(
+        "shadow admission refused {effect:?} effect kind `{kind}` ({effect_id}): a shadow \
+         admits Pure and ReadOnly effects only — the candidate's effects never reach the world"
+    )]
+    ShadowRefused {
+        /// The effect's kind identifier.
+        kind: String,
+        /// The wire-level safety class the shadow refused.
+        effect: Effect,
+        /// The effect id the occurrence derived.
+        effect_id: EffectId,
+    },
 }
 
 /// An explicit, scoped approval to execute one irreversible effect
@@ -517,16 +539,84 @@ impl CompensationRegistry {
     }
 }
 
+/// One shadow refusal, structured for journaling (R0.12 wave 4): the
+/// effect the candidate would have attempted, classified, with the
+/// recorded-outcome disposition. The shadow's report is built from these
+/// — which effects it refused, and which of them the source run's journal
+/// could answer for.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowRefusal {
+    /// The refused effect's kind identifier.
+    pub kind: String,
+
+    /// The wire-level safety class the shadow refused.
+    pub effect: Effect,
+
+    /// The effect id the occurrence derived in the shadow's scope.
+    pub effect_id: EffectId,
+
+    /// The canonical input digest of the refused call.
+    pub input_hash: String,
+
+    /// Whether the recorded world answered for the refused effect: the
+    /// source run's journal held a matching outcome, and the shadow
+    /// served it (the hybrid-replay rule — pin the effect, re-run the
+    /// decision). `false` means the candidate diverged from the
+    /// recording at this call: the journal has no answer to a call the
+    /// recorded world never received.
+    pub served: bool,
+}
+
+/// The recorded world a shadow serves refused effects from (R0.12
+/// wave 4). Implemented over a source run's journal
+/// ([`crate::replay::JournalShadowSource`]); the kernel owns the
+/// boundary, the journal owns the evidence.
+///
+/// `recorded_request` is the request payload in the *recorded* shape the
+/// journal holds (for tools, [`crate::replay::tool_call_request`]) — the
+/// caller builds it from the live call so the source can match name and
+/// arguments, not merely the effect kind.
+pub trait ShadowOutcomeSource: Send + Sync + std::fmt::Debug {
+    /// The recorded outcome of one refused call, when the source run
+    /// recorded it. `None` is a divergence, not an error: the candidate
+    /// attempted something the recorded world never saw.
+    fn serve(&self, kind: &str, recorded_request: &Value) -> Option<Value>;
+}
+
+/// Where a shadow's refusals go the moment they happen: the shadow run's
+/// own journal, in the server's construction. A refusal the shadow did
+/// not record is a refusal that can be retroactively denied.
+pub type ShadowRefusalSink = Arc<dyn Fn(&ShadowRefusal) + Send + Sync>;
+
 /// A run-scoped, fail-closed admission boundary for runtime effect requests.
 ///
 /// The scope is normally a thread id. Approvals are indexed by their exact
 /// deterministic [`EffectId`], and compensations are captured when a request
 /// is admitted so the rollback path remains alive for the entire call.
+///
+/// A context built by [`EffectAdmissionContext::shadow`] is the R0.12
+/// shadow boundary: it admits [`Effect::Pure`] and [`Effect::ReadOnly`]
+/// and refuses everything above — `Idempotent` included, because
+/// "idempotent" means safe to retry under one key, not safe to execute
+/// twice from two revisions, and a shadowed charge is a charge. The
+/// shadow holds no approval tokens to consume and no retry path around
+/// the refusal: there is no code path through a shadow context that
+/// executes an effect above `ReadOnly`.
 #[derive(Clone)]
 pub struct EffectAdmissionContext {
     scope: String,
     approvals: Arc<Mutex<BTreeMap<EffectId, ApprovalToken>>>,
     compensations: CompensationRegistry,
+    /// Present only for shadow contexts: the recorded world refused
+    /// effects are served from, and the sink refusals report to.
+    shadow: Option<ShadowBoundary>,
+}
+
+/// The shadow half of an [`EffectAdmissionContext`], cloned cheaply.
+#[derive(Clone)]
+struct ShadowBoundary {
+    source: Arc<dyn ShadowOutcomeSource>,
+    sink: ShadowRefusalSink,
 }
 
 impl std::fmt::Debug for EffectAdmissionContext {
@@ -536,6 +626,7 @@ impl std::fmt::Debug for EffectAdmissionContext {
             .field("scope", &self.scope)
             .field("approval_effect_ids", &approvals.keys())
             .field("compensations", &self.compensations)
+            .field("shadow", &self.shadow.is_some())
             .finish()
     }
 }
@@ -549,6 +640,26 @@ impl EffectAdmissionContext {
             scope: scope.into(),
             approvals: Arc::new(Mutex::new(BTreeMap::new())),
             compensations: CompensationRegistry::new(),
+            shadow: None,
+        }
+    }
+
+    /// Start a shadow admission boundary for `scope` (R0.12 wave 4):
+    /// admits `Pure` and `ReadOnly`, refuses everything above with
+    /// [`EffectViolation::ShadowRefused`]. `source` is the recorded world
+    /// refused effects are served from; `sink` receives every refusal the
+    /// moment it happens, served or not — the refusal is the shadow's
+    /// primary evidence.
+    pub fn shadow(
+        scope: impl Into<String>,
+        source: Arc<dyn ShadowOutcomeSource>,
+        sink: ShadowRefusalSink,
+    ) -> Self {
+        Self {
+            scope: scope.into(),
+            approvals: Arc::new(Mutex::new(BTreeMap::new())),
+            compensations: CompensationRegistry::new(),
+            shadow: Some(ShadowBoundary { source, sink }),
         }
     }
 
@@ -574,6 +685,12 @@ impl EffectAdmissionContext {
         &self.scope
     }
 
+    /// Whether this is a shadow boundary (built by
+    /// [`EffectAdmissionContext::shadow`]).
+    pub fn is_shadow(&self) -> bool {
+        self.shadow.is_some()
+    }
+
     /// Admit one effect occurrence, or reject it before its body runs.
     ///
     /// Pure and read-only calls require no additional evidence. Idempotent
@@ -582,8 +699,21 @@ impl EffectAdmissionContext {
     /// approval token for this exact content-addressed occurrence. Cloned
     /// contexts share the same approval ledger, so one token admits one call
     /// across parallel nodes and later super-steps.
+    ///
+    /// Under a shadow boundary every class above `ReadOnly` refuses with
+    /// [`EffectViolation::ShadowRefused`] — the idempotency-key,
+    /// compensation, and approval rules never come into play, because the
+    /// shadow executes nothing above `ReadOnly` however well-declared it
+    /// is.
     pub fn admit(&self, request: &EffectRequest) -> Result<EffectPermit, EffectViolation> {
         let effect_id = request.effect_id(self.scope());
+        if self.is_shadow() && !matches!(request.effect(), Effect::Pure | Effect::ReadOnly) {
+            return Err(EffectViolation::ShadowRefused {
+                kind: request.kind().to_owned(),
+                effect: request.effect(),
+                effect_id,
+            });
+        }
         let (compensation, approval) = match request.effect() {
             Effect::Pure | Effect::ReadOnly => (None, None),
             Effect::Idempotent => {
@@ -623,6 +753,46 @@ impl EffectAdmissionContext {
             compensation,
             approval,
         })
+    }
+
+    /// Serve a refused effect from the recorded world (R0.12 wave 4, the
+    /// hybrid-replay rule): only meaningful for a shadow boundary and a
+    /// [`EffectViolation::ShadowRefused`] violation — anything else is not
+    /// the shadow's to serve, and answers `None`.
+    ///
+    /// Every shadow refusal reports to the sink, served or not, because
+    /// the refusal is the evidence; the recorded outcome is the
+    /// convenience that lets the shadow's decisions continue against the
+    /// recorded world. Returns the recorded outcome when the source run's
+    /// journal held one (`None`: the candidate diverged — the journal has
+    /// no answer to a call the recorded world never received, and the
+    /// caller surfaces the violation instead).
+    pub fn serve_shadow(
+        &self,
+        request: &EffectRequest,
+        recorded_request: &Value,
+        violation: &EffectViolation,
+    ) -> Option<Value> {
+        let Some(boundary) = &self.shadow else {
+            return None;
+        };
+        let EffectViolation::ShadowRefused {
+            kind,
+            effect,
+            effect_id,
+        } = violation
+        else {
+            return None;
+        };
+        let served = boundary.source.serve(kind, recorded_request);
+        (boundary.sink)(&ShadowRefusal {
+            kind: kind.clone(),
+            effect: *effect,
+            effect_id: effect_id.clone(),
+            input_hash: request.input_hash().to_owned(),
+            served: served.is_some(),
+        });
+        served
     }
 }
 
@@ -798,5 +968,123 @@ mod tests {
         assert_eq!(value, serde_json::json!(id.as_str()));
         let back: EffectId = serde_json::from_value(value).unwrap();
         assert_eq!(back, id);
+    }
+
+    // ---------- the shadow boundary (R0.12 wave 4) ----------
+
+    #[derive(Debug)]
+    struct MapSource {
+        outcomes: BTreeMap<String, Value>,
+    }
+
+    impl ShadowOutcomeSource for MapSource {
+        fn serve(&self, kind: &str, _recorded_request: &Value) -> Option<Value> {
+            self.outcomes.get(kind).cloned()
+        }
+    }
+
+    fn shadow_context() -> (EffectAdmissionContext, Arc<Mutex<Vec<ShadowRefusal>>>) {
+        let refusals = Arc::new(Mutex::new(Vec::new()));
+        let sink = {
+            let refusals = Arc::clone(&refusals);
+            Arc::new(move |refusal: &ShadowRefusal| {
+                refusals.lock().unwrap().push(refusal.clone());
+            }) as ShadowRefusalSink
+        };
+        let source = Arc::new(MapSource {
+            outcomes: BTreeMap::from([(
+                "charge_card".to_owned(),
+                serde_json::json!({"id": "ch_1"}),
+            )]),
+        });
+        (
+            EffectAdmissionContext::shadow("shadow-run", source, sink),
+            refusals,
+        )
+    }
+
+    #[test]
+    fn shadow_admits_pure_and_read_only_and_refuses_everything_above() {
+        let (shadow, _refusals) = shadow_context();
+        for effect in [Effect::Pure, Effect::ReadOnly] {
+            let request = EffectRequest::new("lookup", effect, &serde_json::json!({}), None);
+            assert!(
+                shadow.admit(&request).is_ok(),
+                "{effect:?} is admitted under a shadow"
+            );
+        }
+        // Idempotent included: "safe to retry under one key" is not "safe
+        // to execute twice from two revisions". No key, handler, or
+        // approval changes the answer — the shadow holds none of them.
+        for effect in [
+            Effect::Idempotent,
+            Effect::Compensatable,
+            Effect::NonIdempotent,
+        ] {
+            let request = EffectRequest::new(
+                "charge_card",
+                effect,
+                &serde_json::json!({"amount": 5}),
+                Some("key-1".to_owned()),
+            );
+            match shadow.admit(&request) {
+                Err(EffectViolation::ShadowRefused {
+                    kind,
+                    effect: refused,
+                    ..
+                }) => {
+                    assert_eq!(kind, "charge_card");
+                    assert_eq!(refused, effect);
+                }
+                other => panic!("{effect:?} must refuse under a shadow, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn shadow_refusals_report_and_serve_only_from_the_recorded_world() {
+        let (shadow, refusals) = shadow_context();
+        let request = EffectRequest::new(
+            "charge_card",
+            Effect::NonIdempotent,
+            &serde_json::json!({"amount": 5}),
+            None,
+        );
+        let violation = shadow.admit(&request).unwrap_err();
+        let served = shadow.serve_shadow(&request, &serde_json::json!({}), &violation);
+        assert_eq!(served, Some(serde_json::json!({"id": "ch_1"})));
+
+        // A kind the recorded world never saw is a divergence: the
+        // refusal still reports, with `served: false`.
+        let unknown = EffectRequest::new(
+            "send_email",
+            Effect::NonIdempotent,
+            &serde_json::json!({}),
+            None,
+        );
+        let violation = shadow.admit(&unknown).unwrap_err();
+        assert_eq!(
+            shadow.serve_shadow(&unknown, &serde_json::json!({}), &violation),
+            None
+        );
+
+        let refusals = refusals.lock().unwrap();
+        assert_eq!(refusals.len(), 2);
+        assert!(refusals[0].served);
+        assert!(!refusals[1].served);
+        assert_eq!(refusals[1].kind, "send_email");
+
+        // Non-shadow contexts and non-shadow violations are not the
+        // shadow's to serve.
+        let plain = EffectAdmissionContext::new("run-1");
+        let violation = EffectViolation::ShadowRefused {
+            kind: "charge_card".to_owned(),
+            effect: Effect::NonIdempotent,
+            effect_id: request.effect_id("run-1"),
+        };
+        assert_eq!(
+            plain.serve_shadow(&request, &serde_json::json!({}), &violation),
+            None
+        );
     }
 }

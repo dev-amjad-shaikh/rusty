@@ -76,16 +76,26 @@ use rusty_agent_runtime::broker::{
     hex_decode, hex_encode, SealedCredential, SEALED_FORMAT_VERSION,
 };
 use rusty_agent_runtime::deploy::{
-    deployment_admission, deployment_surface, pin_set_digest, scoped_secret_name,
-    validate_secret_name, DeployError, DeploymentPointer, DeploymentResolved, DeploymentRevision,
-    EnvSecretAct, EnvSecretDenial, EnvSecretRecord, EnvSecretRevocation, Environment,
-    EnvironmentDeclaration, GateDeclaration, RegistryPin, RevisionContent, RevisionId,
-    RevisionPromotion, RevisionRegistration, RevisionRollback, StoredEnvSecret,
+    deployment_admission, deployment_surface, pin_set_digest, revision_promotion_effect_id,
+    scoped_secret_name, validate_secret_name, CanaryClearance, CanaryDeclaration, CanaryDeployment,
+    DeployError, DeploymentPointer, DeploymentResolved, DeploymentRevision, EnvSecretAct,
+    EnvSecretDenial, EnvSecretRecord, EnvSecretRevocation, Environment, EnvironmentDeclaration,
+    GateDecisionRecord, GateDeclaration, RegistryPin, RevisionContent, RevisionId,
+    RevisionPromotion, RevisionRegistration, RevisionRollback, ShadowRunOutcome, ShadowRunStarted,
+    ShadowVerdict, StoredEnvSecret,
 };
-use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
+use rusty_agent_runtime::effects::{
+    ApprovalToken, EffectAdmissionContext, ShadowRefusal, ShadowRefusalSink,
+};
+use rusty_agent_runtime::executor::{Executor, RunConfig};
+use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot};
 use rusty_agent_runtime::learn::{EnvironmentTag, SurfaceKey};
 use rusty_agent_runtime::memory::ProvenanceAuthor;
-use rusty_agent_runtime::record::{sha256_hex, Effect, PayloadRef, RunEvent, RunEventKind};
+use rusty_agent_runtime::record::{
+    sha256_hex, DecisionRole, Effect, EventStatus, PayloadRef, RunEvent, RunEventKind,
+};
+use rusty_agent_runtime::replay::JournalShadowSource;
+use rusty_agent_runtime::state::State as GraphState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -590,6 +600,12 @@ pub(crate) enum DeploymentAct {
     Promotion(RevisionPromotion),
     /// A rollback: `active` re-points to the previously serving revision.
     Rollback(RevisionRollback),
+    /// A canary declaration: the canary slot binds a revision while
+    /// `active` keeps serving (R0.12 wave 4).
+    CanaryDeclare(CanaryDeclaration),
+    /// A canary clearance: the slot empties without graduating (R0.12
+    /// wave 4).
+    CanaryClear(CanaryClearance),
 }
 
 impl DeploymentAct {
@@ -597,6 +613,8 @@ impl DeploymentAct {
         match self {
             DeploymentAct::Promotion(_) => RunEventKind::RevisionPromoted,
             DeploymentAct::Rollback(_) => RunEventKind::RevisionRolledBack,
+            DeploymentAct::CanaryDeclare(_) => RunEventKind::CanaryDeclared,
+            DeploymentAct::CanaryClear(_) => RunEventKind::CanaryCleared,
         }
     }
 
@@ -604,74 +622,119 @@ impl DeploymentAct {
         match self {
             DeploymentAct::Promotion(act) => serde_json::to_value(act).map_err(|e| e.to_string()),
             DeploymentAct::Rollback(act) => serde_json::to_value(act).map_err(|e| e.to_string()),
+            DeploymentAct::CanaryDeclare(act) => {
+                serde_json::to_value(act).map_err(|e| e.to_string())
+            }
+            DeploymentAct::CanaryClear(act) => serde_json::to_value(act).map_err(|e| e.to_string()),
         }
     }
 
-    /// Crash-retry convergence: whether the chain's LAST transition for
-    /// this act's (tenant, environment) is semantically this act —
-    /// timestamps excluded, so the retry of a move whose journal write
-    /// landed but whose pointer move did not completes the move instead
-    /// of double-journaling it, and an operator re-issuing an identical
-    /// move converges.
+    /// The (tenant, environment) the act governs.
+    fn scope(&self) -> (&str, &EnvironmentTag) {
+        match self {
+            DeploymentAct::Promotion(act) => (&act.tenant, &act.environment),
+            DeploymentAct::Rollback(act) => (&act.tenant, &act.environment),
+            DeploymentAct::CanaryDeclare(act) => (&act.tenant, &act.environment),
+            DeploymentAct::CanaryClear(act) => (&act.tenant, &act.environment),
+        }
+    }
+
+    /// Whether this act's dedupe family includes `kind`. Two families:
+    /// the active-moves ({promoted, rolled back}) and the canary acts
+    /// ({declared, cleared}). A canary declare must not dedupe against a
+    /// promotion — they move different slots, and a crash-retry of one
+    /// must never converge on the other's journaled entry.
+    fn in_family(&self, kind: RunEventKind) -> bool {
+        match self {
+            DeploymentAct::Promotion(_) | DeploymentAct::Rollback(_) => {
+                matches!(
+                    kind,
+                    RunEventKind::RevisionPromoted | RunEventKind::RevisionRolledBack
+                )
+            }
+            DeploymentAct::CanaryDeclare(_) | DeploymentAct::CanaryClear(_) => {
+                matches!(
+                    kind,
+                    RunEventKind::CanaryDeclared | RunEventKind::CanaryCleared
+                )
+            }
+        }
+    }
+
+    /// Crash-retry convergence: whether the chain's LAST transition in
+    /// this act's family for this act's (tenant, environment) is
+    /// semantically this act — timestamps excluded, so the retry of a
+    /// move whose journal write landed but whose pointer move did not
+    /// completes the move instead of double-journaling it, and an
+    /// operator re-issuing an identical move converges.
     fn is_last_for_environment(&self, events: &[RunEvent]) -> bool {
+        let (tenant, environment) = self.scope();
         for event in events.iter().rev() {
+            if !self.in_family(event.kind) {
+                continue;
+            }
             let Some(PayloadRef::Inline(value)) = &event.output else {
                 continue;
             };
-            let (same_environment, same_act) = match event.kind {
+            // (same scope, same act) for the recorded payload — `None`
+            // when it does not parse: corrupt evidence is skipped, never
+            // deduped against.
+            let recorded: Option<(bool, bool)> = match event.kind {
                 RunEventKind::RevisionPromoted => {
-                    match serde_json::from_value::<RevisionPromotion>(value.clone()) {
-                        Ok(recorded) => {
-                            let same_environment = match self {
-                                DeploymentAct::Promotion(act) => {
-                                    recorded.tenant == act.tenant
-                                        && recorded.environment == act.environment
-                                }
-                                DeploymentAct::Rollback(act) => {
-                                    recorded.tenant == act.tenant
-                                        && recorded.environment == act.environment
-                                }
-                            };
-                            let same_act = match self {
-                                DeploymentAct::Promotion(act) => {
-                                    recorded.revision_id == act.revision_id
-                                        && recorded.previous == act.previous
-                                        && recorded.author == act.author
-                                }
-                                DeploymentAct::Rollback(_) => false,
-                            };
-                            (same_environment, same_act)
-                        }
-                        Err(_) => continue,
-                    }
+                    serde_json::from_value::<RevisionPromotion>(value.clone())
+                        .ok()
+                        .map(|r| {
+                            (
+                                r.tenant == tenant && r.environment == *environment,
+                                matches!(self, DeploymentAct::Promotion(act) if
+                            r.revision_id == act.revision_id
+                                && r.previous == act.previous
+                                && r.author == act.author),
+                            )
+                        })
                 }
                 RunEventKind::RevisionRolledBack => {
-                    match serde_json::from_value::<RevisionRollback>(value.clone()) {
-                        Ok(recorded) => {
-                            let same_environment = match self {
-                                DeploymentAct::Promotion(act) => {
-                                    recorded.tenant == act.tenant
-                                        && recorded.environment == act.environment
-                                }
-                                DeploymentAct::Rollback(act) => {
-                                    recorded.tenant == act.tenant
-                                        && recorded.environment == act.environment
-                                }
-                            };
-                            let same_act = match self {
-                                DeploymentAct::Promotion(_) => false,
-                                DeploymentAct::Rollback(act) => {
-                                    recorded.from == act.from
-                                        && recorded.to == act.to
-                                        && recorded.author == act.author
-                                }
-                            };
-                            (same_environment, same_act)
-                        }
-                        Err(_) => continue,
-                    }
+                    serde_json::from_value::<RevisionRollback>(value.clone())
+                        .ok()
+                        .map(|r| {
+                            (
+                                r.tenant == tenant && r.environment == *environment,
+                                matches!(self, DeploymentAct::Rollback(act) if
+                            r.from == act.from
+                                && r.to == act.to
+                                && r.author == act.author),
+                            )
+                        })
                 }
-                _ => continue,
+                RunEventKind::CanaryDeclared => {
+                    serde_json::from_value::<CanaryDeclaration>(value.clone())
+                        .ok()
+                        .map(|r| {
+                            (
+                                r.tenant == tenant && r.environment == *environment,
+                                matches!(self, DeploymentAct::CanaryDeclare(act) if
+                            r.revision_id == act.revision_id
+                                && r.fraction == act.fraction
+                                && r.author == act.author),
+                            )
+                        })
+                }
+                RunEventKind::CanaryCleared => {
+                    serde_json::from_value::<CanaryClearance>(value.clone())
+                        .ok()
+                        .map(|r| {
+                            (
+                                r.tenant == tenant && r.environment == *environment,
+                                matches!(self, DeploymentAct::CanaryClear(act) if
+                            r.cleared_revision_id == act.cleared_revision_id
+                                && r.author == act.author),
+                            )
+                        })
+                }
+                _ => None,
+            };
+            let Some((same_environment, same_act)) = recorded else {
+                continue;
             };
             if same_environment {
                 return same_act;
@@ -1284,14 +1347,17 @@ pub(crate) async fn get_environment(
 }
 
 /// `POST /deployments/environments/{name}/promote` body: the revision to
-/// serve and the mandatory author. The gate and approval declarations on
-/// the environment are recorded, not enforced — enforcement wires in
-/// wave 4; what this wave guarantees is the move itself: journaled, CAS,
-/// byte-exact.
+/// serve, the mandatory author, and — for approval-required environments
+/// — the approval token scoped to this revision's promotion effect id
+/// ([`revision_promotion_effect_id`]). A token minted for one revision
+/// admits no other: an approval is a fact about a specific deploy, not a
+/// standing permission.
 #[derive(Deserialize)]
 pub(crate) struct PromotePayload {
     revision_id: String,
     author: ProvenanceAuthor,
+    #[serde(default)]
+    approval: Option<ApprovalToken>,
 }
 
 /// `POST /deployments/environments/{name}/rollback` body: the mandatory
@@ -1304,13 +1370,129 @@ pub(crate) struct RollbackPayload {
     cause: String,
 }
 
-/// The promote/rollback handler core: read the pointer, rebuild the act
-/// against fresh chain events, commit through the chain-locked CAS; on a
-/// lost race, rebuild against the moved pointer exactly once before
-/// answering the typed conflict. `build` yields the act, the pointer
-/// after it, and the act's desired end state (the convergence check: a
-/// re-issued move whose serving state already holds answers `200
-/// {applied: false}` without journaling).
+/// Run the environment's declared gate against a revision entering it
+/// (R0.12 wave 4), journal the decision on the deployment evidence
+/// chain, and refuse the move when the gate blocks. Shared by promotion
+/// and canary declaration: a canary into a gated environment serves real
+/// traffic — the gate protects the environment, not the pointer slot.
+///
+/// The decision journals BEFORE the pointer moves and journals when it
+/// refuses: a gate whose refusals leave no evidence is a gate an audit
+/// cannot tell apart from never having run. Fail-closed at every step:
+/// no configured evaluator is a `409` (a gate that cannot run is a gate
+/// that did not pass), an evaluation error is a `422`, and an evaluation
+/// that cannot name back the policy and dataset version it was handed
+/// violates the seam contract — refused, because an evaluation that
+/// cannot say what it evaluated is not evidence about this promotion.
+async fn run_gate(
+    state: &AppState,
+    tenant_id: &str,
+    tag: &EnvironmentTag,
+    revision: &DeploymentRevision,
+    gate: &GateDeclaration,
+) -> Result<(), ApiError> {
+    let Some(evaluator) = state.config.revision_gate_evaluator.clone() else {
+        return Err(ApiError::conflict(format!(
+            "environment `{tag}` declares gate `{}` but no revision gate evaluator is \
+             configured — a gate that cannot run is a gate that did not pass",
+            gate.policy
+        )));
+    };
+    // The baseline is the serving revision at decision time (`None`:
+    // nothing serves — comparative checks run baseline-less and fail
+    // closed where the policy needs a comparison).
+    let surface = deployment_surface(tag);
+    let pointer = state
+        .server_store
+        .get_deployment_pointer(tenant_id, surface.as_str())
+        .await
+        .map_err(internal_err)?;
+    let baseline = match pointer.as_ref().and_then(|p| p.active.as_ref()) {
+        Some(active) => {
+            let baseline = state
+                .server_store
+                .get_revision(tenant_id, active.as_str())
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::unprocessable(format!(
+                        "the deployment pointer for `{tag}` names revision `{}`, which the \
+                         store does not hold — the gate has no trustworthy baseline; refused",
+                        active.as_str()
+                    ))
+                })?;
+            baseline
+                .verify_address()
+                .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+            Some(baseline)
+        }
+        None => None,
+    };
+    let evaluation = evaluator
+        .evaluate(revision, baseline.as_ref(), gate)
+        .await
+        .map_err(|e| {
+            ApiError::unprocessable(format!(
+                "gate `{}` could not evaluate revision `{}`: {e} — an unevaluated gate fails \
+                 closed",
+                gate.policy,
+                revision.revision_id.as_str()
+            ))
+        })?;
+    if evaluation.policy != gate.policy || evaluation.dataset_version != gate.dataset_version {
+        return Err(ApiError::unprocessable(format!(
+            "the gate evaluator answered for policy `{}` / dataset `{}`, not the declared \
+             `{}` / `{}` — an evaluation that cannot say what it evaluated is not evidence \
+             about this promotion",
+            evaluation.policy, evaluation.dataset_version, gate.policy, gate.dataset_version
+        )));
+    }
+    let record = GateDecisionRecord {
+        tenant: tenant_id.to_owned(),
+        environment: tag.clone(),
+        revision_id: revision.revision_id.clone(),
+        baseline_revision_id: baseline.as_ref().map(|b| b.revision_id.clone()),
+        policy: evaluation.policy.clone(),
+        dataset_version: evaluation.dataset_version.clone(),
+        outcome: evaluation.outcome,
+        checks: evaluation.checks.clone(),
+        decided_at: Utc::now(),
+    };
+    state
+        .deployment
+        .journal_act(
+            RunEventKind::GateDecisionRecorded,
+            serde_json::to_value(&record).map_err(|e| internal_err(e.to_string()))?,
+        )
+        .await
+        .map_err(internal_err)?;
+    if !evaluation.allowed() {
+        let failures: Vec<String> = evaluation
+            .checks
+            .iter()
+            .filter(|check| !check.passed)
+            .map(|check| check.detail.clone())
+            .collect();
+        return Err(ApiError::unprocessable(format!(
+            "gate `{}` refused revision `{}` for `{tag}` (verdict {:?}): {} — the decision \
+             is journaled on the deployment chain",
+            gate.policy,
+            revision.revision_id.as_str(),
+            record.outcome,
+            failures.join("; ")
+        )));
+    }
+    Ok(())
+}
+
+/// The promote/rollback/canary handler core: read the pointer, rebuild
+/// the act against fresh chain events, commit through the chain-locked
+/// CAS; on a lost race, rebuild against the moved pointer exactly once
+/// before answering the typed conflict. `build` yields the act, the
+/// pointer after it, and the act's convergence check against the live
+/// pointer (a re-issued move whose end state already holds answers `200
+/// {applied: false}` without journaling — promotion converges on the
+/// `active` slot, the canary acts on the `canary` slot).
 async fn move_pointer(
     state: &AppState,
     tenant_id: &str,
@@ -1319,7 +1501,7 @@ async fn move_pointer(
     build: impl Fn(
         Option<&DeploymentPointer>,
         &[RunEvent],
-    ) -> Result<(DeploymentAct, DeploymentPointer, Option<RevisionId>), ApiError>,
+    ) -> Result<(DeploymentAct, DeploymentPointer, bool), ApiError>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let surface = deployment_surface(tag);
     for attempt in 0..2 {
@@ -1336,10 +1518,10 @@ async fn move_pointer(
             .chain_events()
             .await
             .map_err(internal_err)?;
-        let (act, next, desired) = build(pointer.as_ref(), &events)?;
-        if current == desired {
-            // State-converged: the asked-for serving state already holds
-            // — no journal noise for a re-issued move.
+        let (act, next, converged) = build(pointer.as_ref(), &events)?;
+        if converged {
+            // State-converged: the asked-for end state already holds —
+            // no journal noise for a re-issued move.
             let pointer = pointer.unwrap_or_else(|| DeploymentPointer::new(surface.clone()));
             return Ok((
                 StatusCode::OK,
@@ -1388,9 +1570,12 @@ async fn move_pointer(
 }
 
 /// `POST /deployments/environments/{name}/promote` — move the
-/// environment's pointer to a registered revision. `201` with the moved
-/// pointer; a re-issued or state-converged promotion answers `200
-/// {applied: false}`; a lost race retries once, then `409`.
+/// environment's pointer to a registered revision. A declared gate runs
+/// first (the decision journaled, allowed or refused); an
+/// approval-required environment then demands a token scoped to this
+/// revision's promotion effect id. `201` with the moved pointer; a
+/// re-issued or state-converged promotion answers `200 {applied:
+/// false}`; a lost race retries once, then `409`.
 pub(crate) async fn promote_revision(
     State(state): State<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
@@ -1400,7 +1585,7 @@ pub(crate) async fn promote_revision(
     let tenant_id = tenant.tenant();
     let tag = EnvironmentTag::new(name.clone())
         .map_err(|e| ApiError::bad_request(format!("invalid environment name `{name}`: {e}")))?;
-    state_must_declare(&state.server_store, tenant_id, &tag).await?;
+    let environment = state_must_declare(&state.server_store, tenant_id, &tag).await?;
     let revision = state
         .server_store
         .get_revision(tenant_id, &payload.revision_id)
@@ -1412,6 +1597,24 @@ pub(crate) async fn promote_revision(
     revision
         .verify_address()
         .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+    if let Some(gate) = &environment.gate {
+        run_gate(&state, tenant_id, &tag, &revision, gate).await?;
+    }
+    if environment.approval_required {
+        let effect_id = revision_promotion_effect_id(&tag, &revision);
+        let admitted = payload
+            .approval
+            .as_ref()
+            .is_some_and(|token| token.admits(&effect_id));
+        if !admitted {
+            return Err(ApiError::forbidden(format!(
+                "environment `{name}` requires an approval token scoped to revision `{}`'s \
+                 promotion effect id — a token minted for any other revision admits nothing \
+                 here",
+                revision.revision_id.as_str()
+            )));
+        }
+    }
     let surface = deployment_surface(&tag);
     move_pointer(&state, tenant_id, &name, &tag, |pointer, _events| {
         let base = pointer
@@ -1426,8 +1629,8 @@ pub(crate) async fn promote_revision(
             promoted_at: Utc::now(),
         };
         let next = base.promoted(&promotion);
-        let desired = Some(revision.revision_id.clone());
-        Ok((DeploymentAct::Promotion(promotion), next, desired))
+        let converged = base.active.as_ref() == Some(&revision.revision_id);
+        Ok((DeploymentAct::Promotion(promotion), next, converged))
     })
     .await
 }
@@ -1481,9 +1684,448 @@ pub(crate) async fn rollback_revision(
             rolled_back_at: Utc::now(),
         };
         let next = base.rolled_back(&rollback);
-        Ok((DeploymentAct::Rollback(rollback), next, to))
+        let converged = base.active == to;
+        Ok((DeploymentAct::Rollback(rollback), next, converged))
     })
     .await
+}
+
+/// `PUT /deployments/environments/{name}/canary` body: the revision to
+/// canary, the fraction of new runs it serves, and the mandatory author.
+#[derive(Deserialize)]
+pub(crate) struct CanaryPayload {
+    revision_id: String,
+    fraction: f64,
+    author: ProvenanceAuthor,
+}
+
+/// `DELETE /deployments/environments/{name}/canary` body: the mandatory
+/// author — a clearance is a deployment act with a name on it, same as
+/// the declaration.
+#[derive(Deserialize)]
+pub(crate) struct ClearCanaryPayload {
+    author: ProvenanceAuthor,
+}
+
+/// `PUT /deployments/environments/{name}/canary` — bind a revision to a
+/// declared fraction of new runs while the active revision serves the
+/// rest. A declared gate runs first: a canary into a gated environment
+/// serves real traffic, so the gate protects the environment, not the
+/// pointer slot. `201` with the moved pointer (`200 {applied: false}`
+/// when the asked-for binding already holds); `422` on an invalid
+/// fraction.
+pub(crate) async fn declare_canary(
+    State(state): State<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    AxumPath(name): AxumPath<String>,
+    Json(payload): Json<CanaryPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let tenant_id = tenant.tenant();
+    let tag = EnvironmentTag::new(name.clone())
+        .map_err(|e| ApiError::bad_request(format!("invalid environment name `{name}`: {e}")))?;
+    let environment = state_must_declare(&state.server_store, tenant_id, &tag).await?;
+    let revision = state
+        .server_store
+        .get_revision(tenant_id, &payload.revision_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("revision `{}` not found", payload.revision_id))
+        })?;
+    revision
+        .verify_address()
+        .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+    if let Some(gate) = &environment.gate {
+        run_gate(&state, tenant_id, &tag, &revision, gate).await?;
+    }
+    let canary = CanaryDeployment::new(revision.revision_id.clone(), payload.fraction)
+        .map_err(|e| deploy_err(&e))?;
+    let surface = deployment_surface(&tag);
+    move_pointer(&state, tenant_id, &name, &tag, |pointer, _events| {
+        let base = pointer
+            .cloned()
+            .unwrap_or_else(|| DeploymentPointer::new(surface.clone()));
+        let declaration = CanaryDeclaration {
+            tenant: tenant_id.to_owned(),
+            environment: tag.clone(),
+            revision_id: revision.revision_id.clone(),
+            fraction: canary.fraction,
+            author: payload.author.clone(),
+            declared_at: Utc::now(),
+        };
+        let next = base.canaried(&declaration);
+        let converged = base.canary.as_ref() == Some(&canary);
+        Ok((DeploymentAct::CanaryDeclare(declaration), next, converged))
+    })
+    .await
+}
+
+/// `DELETE /deployments/environments/{name}/canary` — clear the canary
+/// slot without graduating it (graduation is a promotion, which clears
+/// the slot itself). `201` with the moved pointer; `200 {applied:
+/// false}` when the slot is already empty — clearing nothing is a
+/// converged state, not an error.
+pub(crate) async fn clear_canary(
+    State(state): State<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    AxumPath(name): AxumPath<String>,
+    Json(payload): Json<ClearCanaryPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let tenant_id = tenant.tenant();
+    let tag = EnvironmentTag::new(name.clone())
+        .map_err(|e| ApiError::bad_request(format!("invalid environment name `{name}`: {e}")))?;
+    state_must_declare(&state.server_store, tenant_id, &tag).await?;
+    let surface = deployment_surface(&tag);
+    // An empty slot is the converged state — answer it directly, because
+    // there is no binding to build the clearance from.
+    let pointer = state
+        .server_store
+        .get_deployment_pointer(tenant_id, surface.as_str())
+        .await
+        .map_err(internal_err)?;
+    if pointer.as_ref().and_then(|p| p.canary.as_ref()).is_none() {
+        let pointer = pointer.unwrap_or_else(|| DeploymentPointer::new(surface.clone()));
+        return Ok((
+            StatusCode::OK,
+            Json(json!({ "applied": false, "journaled": false, "pointer": pointer })),
+        ));
+    }
+    move_pointer(&state, tenant_id, &name, &tag, |pointer, _events| {
+        let base = pointer
+            .cloned()
+            .unwrap_or_else(|| DeploymentPointer::new(surface.clone()));
+        let Some(canary) = base.canary.clone() else {
+            return Err(ApiError::conflict(format!(
+                "environment `{name}` has no canary to clear — the slot moved under this \
+                 act; re-read and retry"
+            )));
+        };
+        let clearance = CanaryClearance {
+            tenant: tenant_id.to_owned(),
+            environment: tag.clone(),
+            cleared_revision_id: canary.revision_id,
+            author: payload.author.clone(),
+            cleared_at: Utc::now(),
+        };
+        let next = base.cleared_canary();
+        // A present canary is never the converged state for a clear.
+        Ok((DeploymentAct::CanaryClear(clearance), next, false))
+    })
+    .await
+}
+
+/// `POST /deployments/shadows` body: the candidate revision, the
+/// recorded run to replay (`source` — a journal snapshot, inline, the
+/// `EvaluationRequest` fixture precedent: shadow evidence is
+/// self-contained), the optional initial state, and the mandatory
+/// author.
+#[derive(Deserialize)]
+pub(crate) struct ShadowPayload {
+    revision_id: String,
+    source: JournalSnapshot,
+    #[serde(default)]
+    input: Option<Value>,
+    author: ProvenanceAuthor,
+}
+
+/// Sanitize a run id for the shadow id's readable prefix: alphanumerics
+/// and dashes pass, everything else becomes a dash — the shadow id rides
+/// journal filenames, so it stays path-safe.
+fn shadow_id_part(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// `POST /deployments/shadows` — run a recorded run's twin under a
+/// candidate revision, behind the shadow admission boundary: pure and
+/// read-only effects execute, everything above is refused and served
+/// from the recorded world when the source run's journal holds the
+/// outcome. `201` with the shadow's id and verdict; `422` when the
+/// revision no longer describes the graph it would run (the admission
+/// rule — a shadow executes the same code admission would serve), when
+/// the source snapshot fails integrity, and when the run itself fails
+/// (the verdict journals either way — a failed shadow is evidence about
+/// the candidate, not a run to sweep away).
+///
+/// The shadow's journal is its whole evidence: started (with
+/// `role: shadow` pinned), every refusal served-or-not, and the verdict.
+/// It has no thread record, so the receipts route refuses it — shadows
+/// never sign production receipts, by construction.
+pub(crate) async fn create_shadow(
+    State(state): State<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ShadowPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let tenant_id = tenant.tenant();
+    let revision = state
+        .server_store
+        .get_revision(tenant_id, &payload.revision_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("revision `{}` not found", payload.revision_id))
+        })?;
+    revision
+        .verify_address()
+        .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+    let Some((graph, spec)) = state.registry.get(&revision.content.graph) else {
+        return Err(ApiError::unprocessable(format!(
+            "revision `{}` serves graph `{}`, which is not registered — a shadow runs the \
+             same code admission would serve, and that graph is absent",
+            revision.revision_id.as_str(),
+            revision.content.graph
+        )));
+    };
+    let actual_hash = graph.topology_hash();
+    if actual_hash != revision.content.graph_hash {
+        return Err(ApiError::unprocessable(format!(
+            "revision `{}` records topology hash `{}` for graph `{}`, but the registered \
+             graph hashes to `{actual_hash}` — the build drifted from the revision's record; \
+             register a fresh revision, never drift silently",
+            revision.revision_id.as_str(),
+            revision.content.graph_hash,
+            revision.content.graph
+        )));
+    }
+    // The recorded world must verify before anything replays it — a
+    // shadow served from tampered evidence proves nothing.
+    Journal::from_snapshot(payload.source.clone(), Clock::System).map_err(|e| {
+        ApiError::unprocessable(format!(
+            "the source journal failed its integrity check: {e} — refused, never replayed"
+        ))
+    })?;
+    let shadow_run_id = format!(
+        "shadow-{}-{}-{}",
+        shadow_id_part(&payload.source.run_id),
+        &revision.revision_id.as_str()[..12],
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let journal = Journal::new(shadow_run_id.clone(), shadow_run_id.clone(), Clock::System);
+    let started = ShadowRunStarted {
+        tenant: tenant_id.to_owned(),
+        shadow_run_id: shadow_run_id.clone(),
+        source_run_id: payload.source.run_id.clone(),
+        revision_id: revision.revision_id.clone(),
+        role: DecisionRole::Shadow,
+        author: payload.author.clone(),
+        started_at: Utc::now(),
+    };
+    journal.record(
+        EventDraft::new(RunEventKind::ShadowRunStarted, Effect::Pure).output(json!(started)),
+    );
+    // The boundary: the recorded world behind the source, every refusal
+    // journaled the moment it happens — a refusal the shadow did not
+    // record is a refusal that can be retroactively denied.
+    let source = Arc::new(JournalShadowSource::new(&payload.source));
+    let sink_journal = journal.clone();
+    let sink: ShadowRefusalSink = Arc::new(move |refusal: &ShadowRefusal| {
+        sink_journal.record(
+            EventDraft::new(RunEventKind::ShadowEffectRefused, Effect::Pure).output(json!(refusal)),
+        );
+    });
+    let context = EffectAdmissionContext::shadow(shadow_run_id.clone(), source.clone(), sink);
+    let initial = payload
+        .input
+        .clone()
+        .and_then(|v| GraphState::from_value(v).ok())
+        .unwrap_or_default();
+    let config = RunConfig::new(shadow_run_id.clone())
+        .with_journal(journal.clone())
+        .with_effect_admission_context(context);
+    let result = Executor::new().run(&graph, &spec, initial, config).await;
+
+    // The verdict journals on every outcome.
+    let refusals: Vec<ShadowRefusal> = journal
+        .events()
+        .iter()
+        .filter(|event| event.kind == RunEventKind::ShadowEffectRefused)
+        .filter_map(|event| match &event.output {
+            Some(PayloadRef::Inline(value)) => {
+                serde_json::from_value::<ShadowRefusal>(value.clone()).ok()
+            }
+            _ => None,
+        })
+        .collect();
+    let matched = refusals.iter().filter(|refusal| refusal.served).count();
+    let outcome = match &result {
+        Ok(_) => ShadowRunOutcome::Completed,
+        Err(e) => ShadowRunOutcome::Failed {
+            error: e.to_string(),
+        },
+    };
+    let verdict = ShadowVerdict {
+        tenant: tenant_id.to_owned(),
+        shadow_run_id: shadow_run_id.clone(),
+        source_run_id: payload.source.run_id.clone(),
+        revision_id: revision.revision_id.clone(),
+        refusals: refusals.clone(),
+        matched,
+        unserved: refusals.len() - matched,
+        unrequested: source.unrequested(),
+        outcome,
+        completed_at: Utc::now(),
+    };
+    journal
+        .record(EventDraft::new(RunEventKind::ShadowVerdict, Effect::Pure).output(json!(verdict)));
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(internal_err)?;
+    match result {
+        Ok(_) => Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "shadow_run_id": shadow_run_id,
+                "verdict": verdict,
+            })),
+        )),
+        Err(e) => Err(ApiError::unprocessable(format!(
+            "shadow run `{shadow_run_id}` failed: {e} — the verdict is journaled under the \
+             shadow's id"
+        ))),
+    }
+}
+
+/// `GET /deployments/health` — the deployment health board, derived on
+/// read from journaled data alone: every environment's serving pointer
+/// and canary, the last gate decision the chain recorded for it, and
+/// recent-run tallies per pointer slot (the runs whose journaled
+/// resolutions name the environment), plus the evidence chain's head
+/// hash. No new store: the board is a read lens over the chain and the
+/// run journals, so it can never drift from the evidence it reports.
+///
+/// A run journal that fails its integrity check is skipped — unchecked
+/// health is absent, never served as fact (the health board's version of
+/// the chain's verify-on-read rule).
+pub(crate) async fn get_deployment_health(
+    State(state): State<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let tenant_id = tenant.tenant();
+    let mut environments = state
+        .server_store
+        .list_environments(tenant_id)
+        .await
+        .map_err(internal_err)?;
+    environments.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+    let chain_head = state
+        .server_store
+        .get_journal(DEPLOYMENT_JOURNAL_RUN_ID)
+        .await
+        .map_err(internal_err)?
+        .map(|snapshot| snapshot.head_hash);
+    let chain_events = state
+        .deployment
+        .chain_events()
+        .await
+        .map_err(internal_err)?;
+    let journals = state
+        .server_store
+        .list_journals()
+        .await
+        .map_err(internal_err)?;
+
+    // Recent-run tallies per (environment, slot), from the runs whose
+    // journaled resolutions name the environment. A run's outcome reads
+    // from its events' statuses — errored and interrupted counted beside
+    // the tally, because a canary's value is exactly what its runs did.
+    let mut tallies: HashMap<(String, String), (usize, usize, usize)> = HashMap::new();
+    for snapshot in journals {
+        if snapshot.run_id == DEPLOYMENT_JOURNAL_RUN_ID {
+            continue;
+        }
+        let Ok(journal) = Journal::from_snapshot(snapshot, Clock::System) else {
+            continue;
+        };
+        let events = journal.events();
+        let Some(resolution) = events.iter().find_map(|event| {
+            if event.kind != RunEventKind::DeploymentResolved {
+                return None;
+            }
+            match &event.output {
+                Some(PayloadRef::Inline(value)) => {
+                    serde_json::from_value::<DeploymentResolved>(value.clone()).ok()
+                }
+                _ => None,
+            }
+        }) else {
+            continue;
+        };
+        let slot = match resolution.pointer {
+            rusty_agent_runtime::registry::PointerBinding::Active => "active",
+            rusty_agent_runtime::registry::PointerBinding::Canary => "canary",
+        };
+        let entry = tallies
+            .entry((resolution.environment.to_string(), slot.to_owned()))
+            .or_insert((0, 0, 0));
+        entry.0 += 1;
+        if events.iter().any(|e| e.status == EventStatus::Error) {
+            entry.1 += 1;
+        }
+        if events.iter().any(|e| e.status == EventStatus::Interrupted) {
+            entry.2 += 1;
+        }
+    }
+
+    let tally_json = |environment: &str, slot: &str| {
+        let (runs, errored, interrupted) = tallies
+            .get(&(environment.to_owned(), slot.to_owned()))
+            .copied()
+            .unwrap_or((0, 0, 0));
+        json!({ "runs": runs, "errored": errored, "interrupted": interrupted })
+    };
+
+    let mut board = Vec::with_capacity(environments.len());
+    for environment in &environments {
+        let surface = deployment_surface(&environment.name);
+        let pointer = state
+            .server_store
+            .get_deployment_pointer(tenant_id, surface.as_str())
+            .await
+            .map_err(internal_err)?;
+        // The chain's last gate decision for this environment, payload
+        // verbatim — the board reports the journaled fact, not a
+        // recomputation.
+        let last_gate_decision = chain_events.iter().rev().find_map(|event| {
+            if event.kind != RunEventKind::GateDecisionRecorded {
+                return None;
+            }
+            match &event.output {
+                Some(PayloadRef::Inline(value)) => {
+                    match serde_json::from_value::<GateDecisionRecord>(value.clone()) {
+                        Ok(record) if record.environment == environment.name => Some(value.clone()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        });
+        let name = environment.name.to_string();
+        board.push(json!({
+            "environment": environment.name,
+            "gate": environment.gate,
+            "approval_required": environment.approval_required,
+            "active_revision": pointer.as_ref().and_then(|p| p.active.clone()),
+            "canary": pointer.as_ref().and_then(|p| p.canary.clone()),
+            "last_gate_decision": last_gate_decision,
+            "recent_runs": {
+                "active": tally_json(&name, "active"),
+                "canary": tally_json(&name, "canary"),
+            },
+        }));
+    }
+    Ok(Json(json!({
+        "environments": board,
+        "deployment_chain_head": chain_head,
+    })))
 }
 
 /// `GET /deployments/environments/{name}/pointer` — the environment's

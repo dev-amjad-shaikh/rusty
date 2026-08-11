@@ -695,6 +695,55 @@ effects refused — typed, classified, journaled as shadow evidence — and its 
 compared against the recorded world; the health board reports both environments'
 pointers, canary state, and last gate decision from journaled data alone.
 
+> **Wave 4 status: implemented (2026-08-11).** The shadow kernel landed in
+> `rusty-core/src/effects.rs` (`EffectAdmissionContext::shadow` /
+> `serve_shadow`, `EffectViolation::ShadowRefused`, `ShadowRefusal`,
+> `ShadowOutcomeSource` — a refusal typed, classified, and served
+> from the recorded world when the source journal holds the outcome),
+> with `JournalShadowSource` in `replay.rs` and the executor's
+> `RunConfig.effect_admission` seam; the wave-4 contracts landed in
+> `rusty-core/src/deploy.rs` (the `RevisionGateEvaluator` seam with
+> `GateDeclaration` / `GateEvaluation` / `GateVerdict` /
+> `GateCheckRecord` / `GateDecisionRecord`, `CanaryDeployment` /
+> `CanaryDeclaration` / `CanaryClearance`, the `ShadowRunStarted` /
+> `ShadowVerdict` payloads — seven goldens in
+> `rusty-core/tests/golden/`), with six additive `RunEventKind`
+> variants in `record.rs` (the wave-3 precedent); the server grew
+> `list_journals` on both backends, the `with_revision_gate_evaluator`
+> config seam, the `evaluate_gate`-backed `EvalRevisionGateEvaluator`
+> (`rusty-server/src/gate.rs`), the gate and approval checks wired
+> into promote, the canary declare/clear routes,
+> `POST /deployments/shadows`, and `GET /deployments/health` —
+> exercised end to end by `rusty-server/tests/release_gates.rs` (five
+> exit-clause tests) and the release proof in
+> `rusty-server/tests/operations_release.rs` — with these settled
+> refinements: the gate runs ahead of the approval check on EVERY
+> promote attempt and journals each decision, so a refused token
+> leaves its allowed gate decision on the chain (attribution of the
+> attempt, not just the outcome); a canary into a gated environment
+> runs the gate — the gate protects the environment, not the pointer
+> slot; the `statistical_power` gate check passes only on
+> `StatisticalDecision::NoRegression` — an observed regression blocks
+> even when the coarse policy thresholds miss it, and insufficient
+> evidence fails closed (the sketch's `!= InsufficientEvidence` read
+> would have let a regression through); `GateCheckRecord.metric`
+> carries the eval metric's serde JSON form as a string, so the record
+> names exactly what the evaluator measured; the approval token scopes
+> to the revision's own promotion effect id
+> (`revision_promotion_effect_id`) — a token minted for one revision
+> admits no other; canary declare and clear converge the promotion way
+> (`200 {applied: false}`, nothing journaled — an identical binding
+> and an empty slot are states, not errors); a full promotion
+> supersedes the canary it graduates from — the slot clears with the
+> pointer move, no separate clearance act; the shadow's journal is its
+> whole evidence and holds no thread record, so the receipts route
+> refuses a shadow run id by construction — shadows never sign
+> production receipts; the health board derives pointers, canary
+> tallies, and last gate decisions from the journaled chains alone —
+> no new store; and the release proof's "manifest digest" hop reads as
+> the receipt-signed journal head hash equaling the exported
+> snapshot's recomputed `head_hash`.
+
 **Release proof (the whole release).** The roadmap's sentence, automated as an
 integration test in the release-proof family (`rusty-server/tests/operations_release.rs`):
 **ship a graph change to staging, evaluate it against a recorded dataset, canary it at

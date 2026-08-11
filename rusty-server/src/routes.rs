@@ -566,6 +566,19 @@ pub(crate) fn build_router(
             "/deployments/environments/{name}/pointer",
             get(crate::deploy::get_environment_pointer),
         )
+        // Wave 4: the release gate (journaled ahead of every gated
+        // move), canary declare / clear on the same chain, shadow runs
+        // behind the shadow admission boundary, and the health board
+        // derived from journaled data alone.
+        .route(
+            "/deployments/environments/{name}/canary",
+            put(crate::deploy::declare_canary).delete(crate::deploy::clear_canary),
+        )
+        .route("/deployments/shadows", post(crate::deploy::create_shadow))
+        .route(
+            "/deployments/health",
+            get(crate::deploy::get_deployment_health),
+        )
         .route(
             "/deployments/journal",
             get(crate::deploy::get_deployment_journal),

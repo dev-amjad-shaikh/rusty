@@ -1,0 +1,7 @@
+{
+  "kind": "charge",
+  "effect": "non_idempotent",
+  "effect_id": "6db958c0cd2768daeed387078fbd71c19ad66e8787a1af719a3e2f94420469d5",
+  "input_hash": "f5326d6440b0819c676b274fb58aadd9b70b8642559d91b5e59bdbf638b3c3e3",
+  "served": true
+}

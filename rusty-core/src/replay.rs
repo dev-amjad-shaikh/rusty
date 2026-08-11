@@ -53,7 +53,7 @@
 //! schedule, so byte-identical replay is guaranteed for runs whose steps run
 //! one node at a time.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
@@ -1440,6 +1440,93 @@ impl ReplayFixture {
     }
 }
 
+// --------------------------------------------------------------------- //
+// The shadow's recorded world (R0.12 wave 4)
+// --------------------------------------------------------------------- //
+
+/// One source run's journal, indexed as the recorded world a shadow run
+/// serves refused effects from — the [`crate::effects::ShadowOutcomeSource`]
+/// over the Flight Recorder's own evidence.
+///
+/// The index is per-tool, in sequence order: every recorded
+/// [`RunEventKind::ToolCall`] queues its request hash and recorded output
+/// under the tool's name. Serving pops the **front** of the tool's queue
+/// and only when the live request hashes to the same value — the hybrid
+/// rule applied to ordering: the shadow serves the recorded outcome of
+/// exactly the call the source made next under that tool, never a later
+/// one and never a different argument set. A call the recorded world
+/// never saw, or saw in a different order, is a divergence and answers
+/// `None`.
+///
+/// After the run, [`JournalShadowSource::unrequested`] names the tools
+/// whose recorded calls the shadow never made — divergence in the other
+/// direction, journaled into the shadow's verdict.
+#[derive(Debug)]
+pub struct JournalShadowSource {
+    queues: Mutex<BTreeMap<String, VecDeque<(String, Value)>>>,
+}
+
+impl JournalShadowSource {
+    /// Index a recorded run's journal for shadow serving. Events whose
+    /// payloads the snapshot cannot resolve (externalized artifact
+    /// references) are skipped rather than guessed at: an unresolvable
+    /// recorded call is one the shadow cannot serve, and serving it
+    /// anyway would fabricate evidence.
+    pub fn new(snapshot: &JournalSnapshot) -> Self {
+        let mut queues: BTreeMap<String, VecDeque<(String, Value)>> = BTreeMap::new();
+        for event in &snapshot.events {
+            if event.kind != RunEventKind::ToolCall {
+                continue;
+            }
+            let Some(input) = event.input.as_ref().and_then(|p| resolve_in(snapshot, p)) else {
+                continue;
+            };
+            let Some(tool) = input.get("tool").and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+            let Ok(hash) = PayloadRef::Inline(input).content_hash() else {
+                continue;
+            };
+            let output = event
+                .output
+                .as_ref()
+                .and_then(|p| resolve_in(snapshot, p))
+                .unwrap_or(Value::Null);
+            queues.entry(tool).or_default().push_back((hash, output));
+        }
+        Self {
+            queues: Mutex::new(queues),
+        }
+    }
+
+    /// The tools holding recorded calls no shadow requested, sorted.
+    /// Called once the shadow's run has ended — while it runs, a
+    /// non-empty queue is simply the recorded future.
+    pub fn unrequested(&self) -> Vec<String> {
+        let queues = self.queues.lock().unwrap_or_else(|p| p.into_inner());
+        queues
+            .iter()
+            .filter(|(_, queue)| !queue.is_empty())
+            .map(|(tool, _)| tool.clone())
+            .collect()
+    }
+}
+
+impl crate::effects::ShadowOutcomeSource for JournalShadowSource {
+    fn serve(&self, kind: &str, recorded_request: &Value) -> Option<Value> {
+        let hash = PayloadRef::Inline(recorded_request.clone())
+            .content_hash()
+            .ok()?;
+        let mut queues = self.queues.lock().unwrap_or_else(|p| p.into_inner());
+        let queue = queues.get_mut(kind)?;
+        if queue.front().is_some_and(|(front, _)| *front == hash) {
+            queue.pop_front().map(|(_, output)| output)
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1747,5 +1834,97 @@ mod tests {
         value["format_version"] = json!(99);
         let error = ReplayFixture::import(&value.to_string()).unwrap_err();
         assert!(error.to_string().contains("format version 99"));
+    }
+
+    // ---------- the shadow's recorded world (R0.12 wave 4) ----------
+
+    fn tool_draft(name: &str, arguments: Value, result: Value) -> EventDraft {
+        EventDraft::new(RunEventKind::ToolCall, Effect::NonIdempotent)
+            .node("tools")
+            .input(tool_call_request(name, &arguments))
+            .output(result)
+    }
+
+    fn shadow_snapshot() -> JournalSnapshot {
+        snapshot_with(vec![
+            tool_draft("charge", json!({"amount": 10}), json!({"receipt": "r-1"})),
+            tool_draft("charge", json!({"amount": 20}), json!({"receipt": "r-2"})),
+            tool_draft("lookup", json!({"id": 7}), json!({"row": "x"})),
+        ])
+    }
+
+    #[test]
+    fn the_shadow_source_serves_in_sequence_and_only_the_matching_call() {
+        use crate::effects::ShadowOutcomeSource;
+        let source = JournalShadowSource::new(&shadow_snapshot());
+
+        // The recorded next call under the tool serves; canonicalization
+        // makes argument key order irrelevant.
+        assert_eq!(
+            source.serve(
+                "charge",
+                &tool_call_request("charge", &json!({"amount": 10}))
+            ),
+            Some(json!({"receipt": "r-1"}))
+        );
+        // A replay of the same call now diverges — the front of the queue
+        // is the second charge, and a mismatch never pops it.
+        assert_eq!(
+            source.serve(
+                "charge",
+                &tool_call_request("charge", &json!({"amount": 10}))
+            ),
+            None
+        );
+        assert_eq!(
+            source.serve(
+                "charge",
+                &tool_call_request("charge", &json!({"amount": 20}))
+            ),
+            Some(json!({"receipt": "r-2"}))
+        );
+        // A tool the recorded world never called answers None.
+        assert_eq!(
+            source.serve("refund", &tool_call_request("refund", &json!({}))),
+            None
+        );
+    }
+
+    #[test]
+    fn the_shadow_source_reports_what_the_candidate_never_requested() {
+        use crate::effects::ShadowOutcomeSource;
+        let source = JournalShadowSource::new(&shadow_snapshot());
+        assert_eq!(source.unrequested(), vec!["charge", "lookup"]);
+        source.serve(
+            "charge",
+            &tool_call_request("charge", &json!({"amount": 10})),
+        );
+        source.serve(
+            "charge",
+            &tool_call_request("charge", &json!({"amount": 20})),
+        );
+        assert_eq!(
+            source.unrequested(),
+            vec!["lookup"],
+            "served calls leave the queue; the rest is divergence evidence"
+        );
+        source.serve("lookup", &tool_call_request("lookup", &json!({"id": 7})));
+        assert!(source.unrequested().is_empty());
+    }
+
+    #[test]
+    fn the_shadow_source_ignores_non_tool_events() {
+        use crate::effects::ShadowOutcomeSource;
+        let snapshot = snapshot_with(vec![model_draft(
+            model_call_request(&[ChatMessage::user("a")], &[]),
+            json!({"r": 1}),
+        )]);
+        let source = JournalShadowSource::new(&snapshot);
+        assert_eq!(
+            source.serve("agent", &json!({"tool": "agent", "arguments": {}})),
+            None,
+            "only recorded tool calls are servable"
+        );
+        assert!(source.unrequested().is_empty());
     }
 }

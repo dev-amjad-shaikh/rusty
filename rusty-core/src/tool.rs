@@ -303,6 +303,14 @@ impl ToolExecutor {
 /// function only after its before-hooks have settled the tool name and
 /// arguments, so admission cannot be bypassed by rewriting a call after it
 /// was approved.
+///
+/// Under a shadow boundary (R0.12 wave 4) a refused call is not an error
+/// by default: the admission context serves the recorded outcome from the
+/// source run's journal — the hybrid-replay rule, pin the effect and
+/// re-run the decision — and reports the refusal to its sink either way.
+/// Only a call the recorded world never saw surfaces as a failure, and a
+/// non-shadow context answers `None` from
+/// [`EffectAdmissionContext::serve_shadow`] unchanged.
 async fn dispatch_tool(
     registry: &ToolRegistry,
     call: &ToolCall,
@@ -311,10 +319,21 @@ async fn dispatch_tool(
     let tool = registry
         .get(&call.name)
         .ok_or_else(|| RustyError::Tool(format!("unknown tool `{}`", call.name)))?;
-    let _permit = effect_admission
-        .map(|context| context.admit(&tool.effect_request(call)))
-        .transpose()
-        .map_err(|violation| RustyError::Tool(format!("effect admission denied: {violation}")))?;
+    if let Some(context) = effect_admission {
+        let request = tool.effect_request(call);
+        if let Err(violation) = context.admit(&request) {
+            return match context.serve_shadow(
+                &request,
+                &crate::replay::tool_call_request(&call.name, &call.arguments),
+                &violation,
+            ) {
+                Some(recorded) => Ok(recorded),
+                None => Err(RustyError::Tool(format!(
+                    "effect admission denied: {violation}"
+                ))),
+            };
+        }
+    }
     tool.call(call.arguments.clone()).await
 }
 
