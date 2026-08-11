@@ -24,11 +24,21 @@ studio/
 
 ## What it does
 
-- **Mission board** — the default Studio Home connects **Shape → Run → Understand → Improve → Govern**
-  on one evidence rail. It recommends the next honest action, combines only bounded connection-scoped
+- **Mission board** — the default Studio Home summarizes the same persistent
+  **Shape → Run → Inspect → Evaluate → Govern → Operate** evidence thread. It recommends the next honest action, combines only bounded connection-scoped
   run metadata, and can continue into the latest agent or team evidence without copying an identifier.
   Server catalog counts, browser-scoped blueprints and run recall, and not-yet-loaded memory evidence
   are labelled distinctly; prompts, results, and connection credentials never enter the Home model.
+- **Persistent evidence thread** — every workspace now sits beneath one six-stage
+  **Shape → Run → Inspect → Evaluate → Govern → Operate** rail. It derives only bounded agent,
+  active-version, thread, and run identities from the existing workspace state; it never copies prompts,
+  payloads, results, credentials, or evaluation inputs into a second model. A selected thread resolves its
+  known run owner instead of carrying an unrelated catalog selection. Browser-recalled runs can make
+  inspection available, but only a complete exact same-thread Recorder envelope proves Inspect and unlocks
+  Evaluate. Memory/candidate and automation/schedule/task summaries retain their own loaded, page-memory,
+  and server-evidence boundaries. Native stage buttons, Left/Right/Home/End navigation, stable destination
+  focus, a 3 × 2 mobile layout, and one explicit next-safe-move action make the journey continuous without
+  pretending that the rail is an authoritative catalog.
 - **Connection Hub** — a guided **Reach server → Verify identity → Inspect features** handshake replaces
   the raw connection form. Reusable profiles remember only non-secret server metadata by default. Access
   keys stay in the browser session unless the user explicitly accepts a device-local plaintext warning;
@@ -735,10 +745,14 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   durable-task corroboration, deduplicated retries, connection isolation, exact task-to-summary follow-through,
   duplicate/mismatch/terminal outcome handling, visibility-aware polling, responsive consequence rendering,
   and queued-versus-resolved truthfulness.
-- `node studio/test-home.mjs` — 26 assertions over disconnected onboarding, honest server-versus-browser
+- `node studio/test-home.mjs` — 27 assertions over disconnected onboarding, honest server-versus-browser
   evidence, privacy-minimized run summaries, deterministic recency and attention routing, bounded hostile
   history, memory-unknown semantics, next-action guidance, identifier escaping, responsive layout,
   labelled journey stages, asynchronous focus continuity, and labelled focus handoff into every workspace.
+- `node studio/test-journey.mjs` — focused contracts for the persistent lifecycle rail: coherent
+  agent/version/thread/run ownership, exact Recorder gating, page-memory evaluation and governance truth,
+  operations discovery, next-safe-action progression, content exclusion, hostile identity escaping,
+  disabled destinations, keyboard navigation, single-rail semantics, and the responsive 3 × 2 layout.
 - `node studio/test-connection.mjs` — 63 assertions over strict URL and server-identity validation,
   bounded non-secret profiles, session-only and explicit device-local secret boundaries, legacy-key
   migration and damaged-secret cleanup warnings, blocked-storage containment, tenant-scoped recall,

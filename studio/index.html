@@ -1047,6 +1047,59 @@
     color: var(--interrupt); padding: 4px 0; border-bottom: 1px solid var(--border);
   }
 
+  /* ---------- persistent evidence thread ---------- */
+  .studio-journey {
+    position: sticky; z-index: 12; top: 0; margin: -14px -18px 15px; padding: 10px 18px 11px;
+    border-bottom: 1px solid #4b4135; background: rgba(23,21,18,.96);
+    box-shadow: 0 10px 24px rgba(8,7,6,.22); backdrop-filter: blur(10px);
+  }
+  .studio-journey-head {
+    display: grid; grid-template-columns: minmax(180px,.45fr) minmax(0,1.55fr) auto;
+    gap: 12px; align-items: center; margin-bottom: 8px;
+  }
+  .studio-journey-title span, .studio-journey-title strong { display: block; }
+  .studio-journey-title span { color: #d19a71; font: 700 8.5px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .studio-journey-title strong { margin-top: 2px; color: #eee7dc; font-size: 12px; overflow-wrap: anywhere; }
+  .studio-journey-context { display: flex; min-width: 0; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .studio-journey-context span {
+    display: inline-flex; min-width: 0; gap: 5px; align-items: baseline; padding: 3px 6px;
+    border: 1px solid #3f3a32; background: #171714; color: #9e9587; font: 8.5px var(--mono);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .studio-journey-context code { color: #d8d0c2; font-size: 9px; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+  .studio-journey-next { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+  .studio-journey-next span { max-width: 220px; color: var(--text-dim); font-size: 9.5px; line-height: 1.3; text-align: right; }
+  .studio-journey-next button { white-space: nowrap; }
+  .studio-journey-rail {
+    position: relative; display: grid; grid-template-columns: repeat(6,minmax(0,1fr));
+    gap: 0; margin: 0; padding: 0; list-style: none; border: 1px solid #3e382f; background: #121311;
+  }
+  .studio-journey-rail::before { content: ""; position: absolute; left: 7%; right: 7%; top: 16px; height: 1px; background: #544735; pointer-events: none; }
+  .studio-journey-stage { position: relative; min-width: 0; }
+  .studio-journey-stage button {
+    position: relative; display: grid; grid-template-columns: 21px minmax(0,1fr); grid-template-rows: auto auto;
+    gap: 1px 7px; width: 100%; min-height: 48px; padding: 7px 8px; text-align: left;
+    border: 0; border-right: 1px solid #38332b; border-radius: 0; background: transparent;
+  }
+  .studio-journey-stage:last-child button { border-right: 0; }
+  .studio-journey-stage button:hover:not(:disabled) { background: #252119; }
+  .studio-journey-stage button:focus-visible { z-index: 2; outline: 2px solid #d1a066; outline-offset: -2px; }
+  .studio-journey-node {
+    grid-row: 1 / 3; align-self: start; display: grid; place-items: center; width: 18px; height: 18px;
+    border: 2px solid #5c5448; border-radius: 50%; background: #151613; color: #8d8476;
+    font: 700 8px var(--mono);
+  }
+  .studio-journey-stage strong { min-width: 0; color: #b8b0a2; font-size: 10px; }
+  .studio-journey-stage small { min-width: 0; color: #746c60; font: 8.5px/1.25 var(--mono); overflow-wrap: anywhere; }
+  .studio-journey-stage.proved .studio-journey-node { border-color: #6fa8dc; background: #233949; color: #dceeff; }
+  .studio-journey-stage.proved strong { color: #9fc3e3; }
+  .studio-journey-stage.available .studio-journey-node { border-color: #78916f; color: #c6dbbe; }
+  .studio-journey-stage.current button { background: #30271d; box-shadow: inset 0 -3px #c79767; }
+  .studio-journey-stage.current .studio-journey-node { border-color: #d19a71; background: #4a2e20; color: #f4ddca; box-shadow: 0 0 0 4px rgba(209,154,113,.09); }
+  .studio-journey-stage.current strong { color: #f2e8dc; }
+  .studio-journey-stage.attention .studio-journey-node { border-color: var(--err); color: #efc0b9; }
+  .studio-journey-boundary { margin: 6px 0 0; color: #736b5e; font: 8.5px/1.25 var(--mono); }
+
   /* ---------- Studio home ---------- */
   .home-hero {
     position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto;
@@ -1060,16 +1113,6 @@
   .home-hero-action { position: relative; z-index: 1; min-width: 190px; text-align: right; }
   .home-hero-action span { display: block; margin-bottom: 7px; color: var(--text-dim); font: 10px var(--mono); }
   .home-hero-action button { width: 100%; }
-  .home-evidence-rail { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 14px 0; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-inset); list-style: none; overflow: hidden; }
-  .home-evidence-rail::before { content: ""; position: absolute; top: 25px; left: 9%; right: 9%; height: 1px; background: #5a4938; }
-  .home-stage { position: relative; min-width: 0; padding: 41px 12px 12px; border-right: 1px solid var(--border); }
-  .home-stage:last-child { border-right: 0; }
-  .home-stage::before { content: ""; position: absolute; z-index: 1; top: 19px; left: 13px; width: 11px; height: 11px; border: 2px solid #64584c; border-radius: 50%; background: var(--bg-inset); }
-  .home-stage.ready::before { border-color: #8dac7b; background: #263623; }
-  .home-stage.current::before { border-color: #d19a71; background: #4a2e20; box-shadow: 0 0 0 4px rgba(209,154,113,.1); }
-  .home-stage b, .home-stage span { display: block; }
-  .home-stage b { font-size: 11.5px; }
-  .home-stage span { margin-top: 3px; color: var(--text-dim); font-size: 9.5px; line-height: 1.35; }
   .home-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); gap: 14px; }
   .home-panel { padding: 15px; }
   .home-panel-head { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 11px; }
@@ -2230,13 +2273,20 @@
       border-right: 0; border-bottom: 1px solid var(--border);
     }
     main { overflow: visible; }
+    .studio-journey { position: relative; margin: -14px -18px 14px; padding: 10px; backdrop-filter: none; }
+    .studio-journey-head { grid-template-columns: 1fr auto; gap: 8px; }
+    .studio-journey-title { grid-column: 1; }
+    .studio-journey-context { grid-column: 1 / -1; grid-row: 2; }
+    .studio-journey-next { grid-column: 2; grid-row: 1; }
+    .studio-journey-next span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .studio-journey-rail { grid-template-columns: repeat(3,minmax(0,1fr)); }
+    .studio-journey-rail::before { display: none; }
+    .studio-journey-stage:nth-child(3) button { border-right: 0; }
+    .studio-journey-stage:nth-child(-n+3) button { border-bottom: 1px solid #38332b; }
+    .studio-journey-stage button { min-height: 51px; padding: 7px; }
+    .studio-journey-boundary { font-size: 8px; }
     .home-hero { grid-template-columns: 1fr; padding: 18px; }
     .home-hero-action { min-width: 0; text-align: left; }
-    .home-evidence-rail { grid-template-columns: 1fr; }
-    .home-evidence-rail::before { top: 18px; bottom: 18px; left: 18px; right: auto; width: 1px; height: auto; }
-    .home-stage { padding: 11px 12px 11px 41px; border-right: 0; border-bottom: 1px solid var(--border); }
-    .home-stage:last-child { border-bottom: 0; }
-    .home-stage::before { top: 14px; left: 12px; }
     .home-signals { grid-template-columns: 1fr; }
     .agent-form { grid-template-columns: 1fr; }
     .agent-form label.wide, .agent-form-actions { grid-column: auto; }
@@ -2625,6 +2675,16 @@
 
     <main id="main">
       <div id="view-link-message" class="view-link-message" role="note" hidden></div>
+      <section class="studio-journey" id="studio-journey" aria-labelledby="studio-journey-label">
+        <div class="studio-journey-head">
+          <div class="studio-journey-title"><span>Evidence thread</span><strong id="studio-journey-label">One system, one continuous journey</strong></div>
+          <div class="studio-journey-context" id="studio-journey-context" aria-label="Current agent, version, thread, and run context"></div>
+          <div class="studio-journey-next" id="studio-journey-next"></div>
+        </div>
+        <ol class="studio-journey-rail" id="studio-journey-rail" aria-label="Agent lifecycle stages"></ol>
+        <p class="studio-journey-boundary" id="studio-journey-boundary">Identity-only page context. Each destination reloads or preserves its own authoritative evidence; the rail never upgrades browser recall into server truth.</p>
+        <span class="sr-only" id="studio-journey-announcer" role="status" aria-live="polite" aria-atomic="true"></span>
+      </section>
       <div id="home-view" aria-labelledby="home-title"><div class="empty">Loading the Studio mission board.</div></div>
       <div class="empty" id="main-empty" style="display:none">Choose a Studio workspace or a local thread.</div>
 
@@ -3471,6 +3531,8 @@ const store = {
   recUnsupported: false, // server build has no GET /runs/{id}/events route (pre-R0.5 server wave)
   compare: null,       // { baseId, branchId, baseEvents, branchEvents, diff, evidenceState }
   view: "home",        // active Studio workspace
+  journeyPhase: "",    // optional Run-workspace focus: run, inspect, or evaluate
+  journeyRequest: 0,   // generation guard for deferred journey handoffs
   navigationPending: null, // parsed non-secret workspace/evidence target waiting for local or server truth
   navigationRequest: 0, // generation guard for an in-flight shared run handoff
   navigationCopyRequest: 0, // generation guard for clipboard completion after workspace changes
@@ -3632,6 +3694,260 @@ function navigationRouteForStore(state) {
     }
   }
   return route;
+}
+
+/* ---------------- persistent evidence thread ----------------
+ * One identity-only journey model connects the existing workspaces. It is
+ * derived from their retained evidence; it never becomes a second source of
+ * truth and never carries prompts, payloads, results, or credentials.
+ * ------------------------------------------------------------------------- */
+
+const JOURNEY_STAGE_KEYS = ["shape", "run", "inspect", "evaluate", "govern", "operate"];
+
+function journeyRunTime(run) {
+  const value = Date.parse(String(run && (run.finished_at || run.started_at || run.observed_at) || ""));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function journeyRunEntries(state) {
+  const source = state && typeof state === "object" ? state : {};
+  const history = source.agentRunHistory && typeof source.agentRunHistory === "object" ? source.agentRunHistory : {};
+  const session = source.agentRuns && typeof source.agentRuns === "object" ? source.agentRuns : {};
+  const entries = [];
+  for (const [assistantId, runs] of Object.entries(history).slice(0, AGENT_RUN_GLOBAL_ASSISTANT_LIMIT)) {
+    for (const run of (Array.isArray(runs) ? runs : []).slice(0, AGENT_RUN_HISTORY_LIMIT)) entries.push({ assistantId, run });
+  }
+  for (const [assistantId, run] of Object.entries(session).slice(0, AGENT_RUN_GLOBAL_ASSISTANT_LIMIT)) {
+    if (run) entries.push({ assistantId, run });
+  }
+  return entries.sort((left, right) => journeyRunTime(right.run) - journeyRunTime(left.run));
+}
+
+function journeyRecorderContext(recorder, selectedThread) {
+  if (!recorder || recorder.error || recorder.exactEnvelope !== true || recorder.complete !== true ||
+      !navigationSafeId(recorder.runId) || !Array.isArray(recorder.events) || !recorder.events.length) return null;
+  let threadId = "";
+  for (const event of recorder.events) {
+    if (!event || event.run_id !== recorder.runId || !navigationSafeId(event.thread_id)) return null;
+    if (!threadId) threadId = event.thread_id;
+    else if (threadId !== event.thread_id) return null;
+  }
+  if (selectedThread && threadId !== selectedThread) return null;
+  return { runId: recorder.runId, threadId };
+}
+
+function journeyQualityEvidence(state, exactRecorder) {
+  if (!state || typeof state !== "object" || !exactRecorder) return false;
+  const draft = state.qualityCase;
+  return Boolean(draft && draft.phase === "locked" && draft.source &&
+    draft.source.recorder === state.recorder && draft.source.runId === exactRecorder.runId &&
+    draft.source.threadId === exactRecorder.threadId);
+}
+
+function journeyActiveStage(state, exactRecorder) {
+  const view = state && state.view;
+  if (["agents", "fabric", "registry"].includes(view)) return "shape";
+  if (view === "thread") {
+    if (["run", "inspect", "evaluate"].includes(state.journeyPhase)) return state.journeyPhase;
+    return exactRecorder ? "inspect" : "run";
+  }
+  if (["memory", "learn"].includes(view)) return "govern";
+  if (["automations", "schedules", "tasks"].includes(view)) return "operate";
+  return "";
+}
+
+function journeySnapshot(state) {
+  const source = state && typeof state === "object" ? state : {};
+  const connected = Boolean(source.conn && source.info);
+  const assistantList = Array.isArray(source.agents && source.agents.list) ? source.agents.list : [];
+  const selectedThread = navigationSafeId(source.selected);
+  const exactRecorder = journeyRecorderContext(source.recorder, selectedThread);
+  const runs = journeyRunEntries(source);
+  let agentId = navigationSafeId(source.agents && source.agents.selected);
+  let runEntry = exactRecorder
+    ? runs.find((entry) => entry.run && entry.run.run_id === exactRecorder.runId && entry.run.thread_id === exactRecorder.threadId) || null
+    : selectedThread ? runs.find((entry) => entry.run && entry.run.thread_id === selectedThread) || null
+      : agentId ? runs.find((entry) => entry.assistantId === agentId) || null : null;
+  if (source.view === "thread") agentId = runEntry ? navigationSafeId(runEntry.assistantId) : null;
+  const agent = assistantList.find((item) => item && item.assistant_id === agentId) || null;
+  const threadId = exactRecorder ? exactRecorder.threadId : selectedThread || navigationSafeId(runEntry && runEntry.run && runEntry.run.thread_id);
+  const runId = exactRecorder ? exactRecorder.runId : navigationSafeId(runEntry && runEntry.run && runEntry.run.run_id);
+  const selectedThreadRecord = selectedThread && Array.isArray(source.threads)
+    ? source.threads.find((item) => item && item.thread_id === selectedThread) : null;
+  const graph = String((selectedThreadRecord && selectedThreadRecord.graph) ||
+    (runEntry && runEntry.run && runEntry.run.graph) || (agent && agent.graph) || "");
+  const versionId = navigationSafeId(agent && agent.active_version_id);
+  const qualityEvidence = journeyQualityEvidence(source, exactRecorder);
+  const memoryCount = source.memory && !source.memory.loading && !source.memory.error && Number.isSafeInteger(Number(source.memory.totalRecords))
+    ? Math.max(0, Number(source.memory.totalRecords)) : null;
+  const candidateCount = source.learn && !source.learn.loading && !source.learn.error && Array.isArray(source.learn.records)
+    ? source.learn.records.length : null;
+  const governed = (memoryCount !== null && memoryCount > 0) || (candidateCount !== null && candidateCount > 0);
+  const schedulesKnown = Boolean(source.schedules && !source.schedules.loading && !source.schedules.error && Array.isArray(source.schedules.list));
+  const automationsKnown = Boolean(source.automations && !source.automations.loading && !source.automations.error && Array.isArray(source.automations.list));
+  const tasksKnown = Boolean(source.tasks && !source.tasks.loading && !source.tasks.error && Array.isArray(source.tasks.list));
+  const operationCatalogs = Number(schedulesKnown) + Number(automationsKnown) + Number(tasksKnown);
+  const operationCount = (schedulesKnown ? source.schedules.list.length : 0) +
+    (automationsKnown ? source.automations.list.length : 0) + (tasksKnown ? source.tasks.list.length : 0);
+  const runStatus = String(runEntry && runEntry.run && runEntry.run.status || "");
+  const runAttention = ["error", "failed", "interrupted", "cancelled", "unreachable"].includes(runStatus);
+  const registeredGraphs = new Set((((source.info && source.info.graphs) || []).map((item) => item && item.name).filter(Boolean)));
+  const agentRunnable = Boolean(agent && agentLifecycleState(agent) === "active" && registeredGraphs.has(agent.graph));
+  const runnable = Boolean(threadId ? registeredGraphs.has(graph) : agentRunnable);
+  const governAvailable = connected && !(source.memoryUnsupported && source.learnUnsupported);
+  const operateAvailable = connected && !(source.schedulesUnsupported && source.automationsUnsupported && source.tasksUnsupported);
+  const active = journeyActiveStage(source, exactRecorder);
+  const stages = [
+    { key: "shape", label: "Shape", detail: agent ? (versionId ? "active version selected" : "agent selected") : agentId ? "browser-recalled owner" : assistantList.length ? `${assistantList.length} agents available` : "define one responsibility", complete: Boolean(agent), available: connected && !source.agentsUnsupported },
+    { key: "run", label: "Run", detail: runId ? `${runStatus || "remembered"} run` : runnable ? "ready for real work" : "select a runnable agent", complete: Boolean(runId), available: connected && runnable, attention: runAttention },
+    { key: "inspect", label: "Inspect", detail: exactRecorder ? "exact journal loaded" : runId ? "load causal evidence" : "run evidence required", complete: Boolean(exactRecorder), available: connected && Boolean(runId && threadId), attention: runAttention && !exactRecorder },
+    { key: "evaluate", label: "Evaluate", detail: qualityEvidence ? "review evidence in page memory" : exactRecorder ? "build a reviewed case" : "exact journal required", complete: qualityEvidence, available: connected && Boolean(exactRecorder) },
+    { key: "govern", label: "Govern", detail: governed ? `${memoryCount || 0} memory · ${candidateCount || 0} candidates` : governAvailable ? "review memory and changes" : "governance unavailable", complete: governed, available: governAvailable },
+    { key: "operate", label: "Operate", detail: operationCatalogs ? `${operationCount} records · ${operationCatalogs}/3 desks loaded` : operateAvailable ? "load durable operations" : "operations unavailable", complete: operationCatalogs > 0, available: operateAvailable },
+  ].map((stage) => ({ ...stage, current: stage.key === active }));
+  const firstMissing = stages.find((stage) => !stage.complete && stage.available) || stages.find((stage) => stage.available) || null;
+  const next = !connected ? { key: "connect", label: "Connect", hint: "Verify one Rusty server to begin the journey." }
+    : firstMissing ? { key: firstMissing.key, label: firstMissing.label, hint: firstMissing.detail }
+      : { key: "home", label: "Mission board", hint: "Review the complete system signal." };
+  return {
+    connected, active, stages, next, agentId, agentName: String(agent && agent.name || ""), versionId,
+    threadId, runId, graph, exactRecorder: Boolean(exactRecorder), qualityEvidence, memoryCount, candidateCount,
+    title: agent ? String(agent.name || agent.assistant_id) : agentId || threadId || "No system selected",
+  };
+}
+
+function journeyEvidenceLabel(value) {
+  return registryEvidencePreview(value, 160);
+}
+
+function journeyHtml(snapshot) {
+  return snapshot.stages.map((stage, index) => {
+    const classes = [stage.complete ? "proved" : stage.available ? "available" : "", stage.current ? "current" : "", stage.attention ? "attention" : ""].filter(Boolean).join(" ");
+    return `<li class="studio-journey-stage ${classes}"><button type="button" data-journey-stage="${stage.key}"${stage.current ? ' aria-current="step"' : ""}${stage.available ? "" : " disabled"} aria-describedby="studio-journey-boundary"><span class="studio-journey-node" aria-hidden="true">${index + 1}</span><strong>${escapeHtml(stage.label)}</strong><small>${escapeHtml(stage.detail)}</small></button></li>`;
+  }).join("");
+}
+
+function journeyContextHtml(snapshot) {
+  const values = [["agent", snapshot.agentId], ["version", snapshot.versionId], ["thread", snapshot.threadId], ["run", snapshot.runId]];
+  const present = values.filter(([, value]) => value);
+  if (!present.length) return `<span><code>No selected identity</code></span>`;
+  return present.map(([label, value]) => `<span>${label}<code>${escapeHtml(journeyEvidenceLabel(value))}</code></span>`).join("");
+}
+
+function journeyRender() {
+  const panel = $("studio-journey");
+  const rail = $("studio-journey-rail"), context = $("studio-journey-context"), next = $("studio-journey-next"), label = $("studio-journey-label");
+  if (!panel || !rail || !context || !next || !label || typeof panel.contains !== "function" || typeof rail.querySelectorAll !== "function") return null;
+  const active = document.activeElement;
+  const focusedStage = active && panel.contains(active) && active.getAttribute ? active.getAttribute("data-journey-stage") : "";
+  const focusedNext = Boolean(active && panel.contains(active) && active.getAttribute && active.hasAttribute("data-journey-next"));
+  const snapshot = journeySnapshot(store);
+  label.textContent = journeyEvidenceLabel(snapshot.title);
+  context.innerHTML = journeyContextHtml(snapshot);
+  rail.innerHTML = journeyHtml(snapshot);
+  next.innerHTML = `<span>${escapeHtml(snapshot.next.hint)}</span><button class="small primary" type="button" data-journey-next="${snapshot.next.key}">${escapeHtml(snapshot.next.label)}</button>`;
+  if (focusedStage || focusedNext) {
+    const exactStage = focusedStage ? rail.querySelector(`[data-journey-stage="${CSS.escape(focusedStage)}"]:not(:disabled)`) : null;
+    const fallback = next.querySelector("[data-journey-next]:not(:disabled)") || rail.querySelector("[data-journey-stage]:not(:disabled)");
+    (exactStage || fallback)?.focus({ preventScroll: true });
+  }
+  return snapshot;
+}
+
+function journeyFocus(id, scroll = true) {
+  const target = $(id);
+  if (!target) return false;
+  if (scroll) target.scrollIntoView({ block: "start", behavior: "smooth" });
+  target.focus({ preventScroll: true });
+  return true;
+}
+
+async function journeyOpenStage(key) {
+  const request = ++store.journeyRequest;
+  const snapshot = journeySnapshot(store);
+  if (key === "connect") { connectionOpen(); return true; }
+  if (key === "home") { openHome(); return true; }
+  const stage = snapshot.stages.find((item) => item.key === key);
+  if (!stage || !stage.available) {
+    $("studio-journey-announcer").textContent = stage ? `${stage.label} is not available yet: ${stage.detail}.` : "That journey stage is unavailable.";
+    return false;
+  }
+  if (key === "shape") { store.journeyPhase = ""; openAgents(); return true; }
+  if (key === "run") {
+    store.journeyPhase = "run";
+    if (snapshot.threadId) {
+      const alreadyVisible = store.view === "thread";
+      const preserve = snapshot.threadId === store.selected && Boolean(journeyRecorderContext(store.recorder, snapshot.threadId));
+      store.selected = snapshot.threadId; store.view = "thread";
+      if (preserve && alreadyVisible) journeyRender();
+      else { renderThreads(); renderMain({ preserveThreadEvidence: preserve }); }
+      journeyFocus("inp-payload", false); return true;
+    }
+    openAgents();
+    const run = $("agent-detail")?.querySelector("[data-agent-run]:not(:disabled)");
+    (run || $("agents-title"))?.focus({ preventScroll: true }); return true;
+  }
+  if (key === "inspect") {
+    store.journeyPhase = "inspect";
+    const operation = connectionOperation(snapshot.threadId);
+    const current = () => request === store.journeyRequest && connectionOperationIdentityCurrent(operation) &&
+      store.view === "thread" && store.selected === snapshot.threadId && store.journeyPhase === "inspect";
+    if (snapshot.exactRecorder && snapshot.threadId === store.selected) {
+      const alreadyVisible = store.view === "thread";
+      store.view = "thread";
+      if (alreadyVisible) journeyRender(); else renderMain({ preserveThreadEvidence: true });
+      journeyFocus("flight-recorder-title"); return true;
+    }
+    return Boolean(await agentOpenThread(snapshot.threadId, snapshot.runId, snapshot.graph, { current }));
+  }
+  if (key === "evaluate") {
+    store.journeyPhase = "evaluate";
+    const operation = connectionOperation(snapshot.threadId);
+    const current = () => request === store.journeyRequest && connectionOperationIdentityCurrent(operation) &&
+      store.view === "thread" && store.selected === snapshot.threadId && store.journeyPhase === "evaluate";
+    if (snapshot.threadId !== store.selected) {
+      if (!await agentOpenThread(snapshot.threadId, snapshot.runId, snapshot.graph, { current })) return false;
+    } else {
+      const alreadyVisible = store.view === "thread";
+      store.view = "thread";
+      if (alreadyVisible) journeyRender(); else renderMain({ preserveThreadEvidence: true });
+    }
+    if (!current()) return false;
+    journeyFocus("quality-foundry-title"); return true;
+  }
+  if (key === "govern") {
+    store.journeyPhase = "";
+    if (snapshot.candidateCount && !store.learnUnsupported) openLearn();
+    else if (!store.memoryUnsupported) openMemory(); else openLearn();
+    return true;
+  }
+  if (key === "operate") {
+    store.journeyPhase = "";
+    if (store.view === "schedules" && !store.schedulesUnsupported) { journeyFocus("schedules-title"); return true; }
+    if (store.view === "automations" && !store.automationsUnsupported) { journeyFocus("automations-title"); return true; }
+    if (store.view === "tasks" && !store.tasksUnsupported) { journeyFocus("tasks-title"); return true; }
+    if (!store.schedulesUnsupported && store.schedules && Array.isArray(store.schedules.list) && store.schedules.list.length) openSchedules();
+    else if (!store.automationsUnsupported && store.automations && Array.isArray(store.automations.list) && store.automations.list.length) openAutomations();
+    else if (!store.tasksUnsupported && store.tasks && Array.isArray(store.tasks.list) && store.tasks.list.length) openTasks();
+    else if (!store.schedulesUnsupported) openSchedules();
+    else if (!store.automationsUnsupported) openAutomations();
+    else openTasks();
+    return true;
+  }
+  return false;
+}
+
+function journeyKeyboard(event) {
+  const current = event.target.closest && event.target.closest("[data-journey-stage]");
+  if (!current || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return false;
+  const buttons = Array.from($("studio-journey-rail").querySelectorAll("[data-journey-stage]:not(:disabled)"));
+  if (!buttons.length) return false;
+  event.preventDefault();
+  const index = Math.max(0, buttons.indexOf(current));
+  const next = event.key === "Home" ? buttons[0] : event.key === "End" ? buttons[buttons.length - 1]
+    : buttons[(index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length];
+  next.focus({ preventScroll: true });
+  return true;
 }
 
 function navigationRecorderThread(recorder, runId) {
@@ -4890,19 +5206,8 @@ function homeAttentionRoute(record) {
   return { action: "continue", id: "", owner: "" };
 }
 
-function homeStageHtml(name, detail, tone) {
-  return `<li class="home-stage ${tone}" aria-label="${escapeHtml(`${name}: ${detail}`)}"><b>${escapeHtml(name)}</b><span>${escapeHtml(detail)}</span></li>`;
-}
-
 function homeHtml(snapshot) {
   const connected = snapshot.connected;
-  const shaped = (snapshot.assistant_count || 0) + (snapshot.assistant_archived_count || 0) +
-    (snapshot.assistant_unavailable_count || 0) + snapshot.blueprint_count > 0;
-  const ran = snapshot.run_count > 0;
-  const understood = ran && snapshot.attention_count === 0;
-  const improved = snapshot.memory_records > 0 || snapshot.candidate_count > 0;
-  const governed = snapshot.candidate_count > 0;
-  const stageTone = (ready, current) => ready ? "ready" : current ? "current" : "";
   const latest = snapshot.latest;
   let continueHtml;
   if (!latest) {
@@ -4928,21 +5233,12 @@ function homeHtml(snapshot) {
   const memoryNote = snapshot.memory_known
     ? `${snapshot.memory_conflicts == null ? "conflict state unavailable" : `${snapshot.memory_conflicts} conflict${snapshot.memory_conflicts === 1 ? "" : "s"}`}`
     : "open ledger to load server truth";
-  const memoryStage = snapshot.memory_known ? `${snapshot.memory_records} memory` : "memory not loaded";
-  const candidateStage = snapshot.candidate_known ? `${snapshot.candidate_count} candidates` : snapshot.candidate_note;
-  const agentStage = snapshot.assistant_known ? `${snapshot.assistant_count} active${snapshot.assistant_archived_count ? ` · ${snapshot.assistant_archived_count} archived` : ""}${snapshot.assistant_unavailable_count ? ` · ${snapshot.assistant_unavailable_count} unavailable` : ""}` : snapshot.assistant_note;
   return `<section class="home-hero"><div><span class="home-kicker">Rusty Studio · evidence-led workspace</span>` +
     `<h1 id="home-title" tabindex="-1">Build the system. Keep the proof beside it.</h1>` +
     `<p>Move from a real configuration to a real run, causal evidence, governed memory, and reversible learning without copying identifiers between tools.</p></div>` +
     `<div class="home-hero-action"><span>${escapeHtml(snapshot.service)} · ${connected ? `${snapshot.graph_count} registered behavior${snapshot.graph_count === 1 ? "" : "s"}` : "local first"}</span>` +
     `<button class="primary" type="button" data-home-action="${snapshot.next.action}">${escapeHtml(snapshot.next.label)}</button></div></section>` +
-    `<ol class="home-evidence-rail" aria-label="Rusty Studio journey">` +
-      homeStageHtml("Shape", shaped ? `${agentStage} · ${snapshot.blueprint_count} team blueprints` : (snapshot.assistant_known ? "Define one useful responsibility" : agentStage), stageTone(shaped, connected && snapshot.assistant_known)) +
-      homeStageHtml("Run", ran ? `${snapshot.run_count} remembered runs` : "Test with real work", stageTone(ran, shaped)) +
-      homeStageHtml("Understand", ran ? (snapshot.attention_count ? `${snapshot.attention_count} need review` : "Evidence ready") : "Follow causal execution", stageTone(understood, ran)) +
-      homeStageHtml("Improve", improved ? `${memoryStage} · ${candidateStage}` : "Correct memory or propose change", stageTone(improved, understood)) +
-      homeStageHtml("Govern", governed ? "Candidate decisions available" : (snapshot.candidate_known ? "Evaluate before promotion" : snapshot.candidate_note), stageTone(governed, improved)) +
-    `</ol>` +
+    `<div class="home-truth">The evidence thread above is the primary journey: Shape → Run → Inspect → Evaluate → Govern → Operate. It carries only bounded identities and routes every stage back to its own authoritative workspace.</div>` +
     `<div class="home-grid"><section class="card home-panel" aria-labelledby="home-system-title"><div class="home-panel-head"><h2 id="home-system-title">System signals</h2><span>current connection</span></div>` +
       `<div class="home-signals">` +
         `<button class="home-signal" type="button" data-home-action="${snapshot.assistant_unavailable_count ? "unavailable-agents" : "agents"}"><b>${snapshot.assistant_known ? `${snapshot.assistant_count} / ${snapshot.assistant_archived_count} / ${snapshot.assistant_unavailable_count}` : "—"}</b><span>Active / archived / unavailable agents</span><small>${connected ? snapshot.assistant_note : "connect to discover"}</small></button>` +
@@ -5740,8 +6036,9 @@ function renderThreads() {
 
 /* ---------------- main panel ---------------- */
 
-function renderMain() {
+function renderMain(options = {}) {
   navigationReplaceManagedAddress();
+  journeyRender();
   const home = store.view === "home";
   const tasks = store.view === "tasks";
   const agents = store.view === "agents";
@@ -5815,6 +6112,20 @@ function renderMain() {
   }
   if (!t) {
     qualityClearThreadBoundState();
+    return;
+  }
+
+  const preserveThreadEvidence = options.preserveThreadEvidence === true &&
+    Boolean(journeyRecorderContext(store.recorder, t.thread_id));
+  if (preserveThreadEvidence) {
+    stopPoll();
+    abortStream();
+    hideInterrupt(false);
+    $("th-id").textContent = t.thread_id;
+    $("th-graph").textContent = t.graph;
+    $("th-created").textContent = t.created_at ? `created ${t.created_at}` : "";
+    recRender();
+    qualityRender();
     return;
   }
 
@@ -7435,6 +7746,7 @@ function recAutoLoad(runId) {
 }
 
 function recRender() {
+  journeyRender();
   const body = $("rec-body"), detail = $("rec-detail"), scrub = $("rec-scrub");
   const investigation = $("rec-investigation");
   const r = store.recorder;
@@ -8326,6 +8638,7 @@ function qualityHtml(recorder, draft) {
 }
 
 function qualityRender(focusSelector = "") {
+  journeyRender();
   const body = $("quality-foundry-body");
   if (!body) return;
   body.innerHTML = qualityHtml(store.recorder, store.qualityCase);
@@ -8916,6 +9229,7 @@ function qualityLibraryHtml(dataset) {
 }
 
 function qualityLibraryRender(focusSelector = "") {
+  journeyRender();
   const body = $("quality-dataset-body");
   if (!body) return;
   body.innerHTML = qualityLibraryHtml(store.qualityDataset);
@@ -9228,6 +9542,7 @@ function qualityGateHtml(draft) {
 }
 
 function qualityGateRender(focusSelector = "") {
+  journeyRender();
   const body = $("quality-gate-body");
   if (!body) return;
   if (!store.qualityGate) store.qualityGate = qualityGateDraft();
@@ -9758,6 +10073,7 @@ function qualityReportHtml(report) {
 }
 
 function qualityReportRender(focusSelector = "", selection = null) {
+  journeyRender();
   const body = $("quality-report-body"); if (!body) return;
   body.innerHTML = qualityReportHtml(store.qualityReport);
   $("quality-report-mark").textContent = !store.qualityReport || store.qualityReport.invalid ? "No report" :
@@ -10126,6 +10442,7 @@ function qualityFailureAtlasHtml(atlas, report) {
 }
 
 function qualityFailureAtlasRender(focusSelector = "") {
+  journeyRender();
   const body = $("quality-atlas-body"); if (!body) return;
   body.innerHTML = qualityFailureAtlasHtml(store.qualityFailureAtlas, store.qualityReport);
   const atlas = store.qualityFailureAtlas, report = store.qualityReport;
@@ -10389,6 +10706,7 @@ function qualityRegressionHtml(value) {
 }
 
 function qualityRegressionRender(focusSelector = "", selection = null) {
+  journeyRender();
   const body = $("quality-regression-body"); if (!body) return;
   body.innerHTML = qualityRegressionHtml(store.qualityRegression);
   const draft = store.qualityRegression;
@@ -10683,6 +11001,7 @@ function qualityDecisionHtml(value) {
 }
 
 function qualityDecisionRender(focusSelector = "") {
+  journeyRender();
   const body = $("quality-decision-body"); if (!body) return;
   body.innerHTML = qualityDecisionHtml(store.qualityDecision);
   const decision = store.qualityDecision, current = qualityDecisionCurrent(decision);
@@ -13623,6 +13942,7 @@ function agentsRenderPreservingFocus() {
 }
 
 function agentsRender() {
+  journeyRender();
   if (!store.agents) store.agents = { list: [], selected: null, error: null };
   const state = store.agents;
   const list = state.list || [];
@@ -14506,7 +14826,7 @@ async function agentRunTest(assistantId) {
   }
 }
 
-async function agentOpenThread(threadId, runId, graph) {
+async function agentOpenThread(threadId, runId, graph, options = {}) {
   navigationCancelPending("thread", threadId);
   if (!store.threads.some((thread) => thread.thread_id === threadId)) {
     if (!graph) return;
@@ -14526,7 +14846,7 @@ async function agentOpenThread(threadId, runId, graph) {
   if (runId) {
     noteRunId(runId);
     await recLoad(runId, true);
-    if (!connectionOperationCurrent(operation)) return;
+    if (!connectionOperationCurrent(operation) || options.current && !options.current()) return false;
     const recorder = $("flight-recorder-card");
     if (recorder) recorder.scrollIntoView({ block: "start" });
     const recorderTitle = $("flight-recorder-title");
@@ -14534,6 +14854,7 @@ async function agentOpenThread(threadId, runId, graph) {
   } else {
     $("main").scrollTop = 0;
   }
+  return true;
 }
 
 function openAgents() {
@@ -16879,6 +17200,7 @@ async function fabricSubmitComposer() {
 }
 
 function fabricRender() {
+  journeyRender();
   if (!store.fabric) return;
   const focusIdentity = fabricFocusIdentity(document.activeElement);
   const disclosures = fabricDisclosureState($("fabric-view"));
@@ -19718,6 +20040,7 @@ function memoryRestoreDynamicFocus(target) {
 }
 
 function memoryRender() {
+  journeyRender();
   const state = store.memory;
   const listEl = $("memory-list"), detailEl = $("memory-detail");
   const correctionBusy = Boolean(store.memoryCorrection && store.memoryCorrection.submitting);
@@ -21083,6 +21406,7 @@ function learnFilters() {
 }
 
 function learnRender() {
+  journeyRender();
   const state = store.learn;
   const list = $("learn-list"), detail = $("learn-detail");
   learnFoundryRender();
@@ -21585,6 +21909,7 @@ function registryFilters() {
 }
 
 function registryRender() {
+  journeyRender();
   const state = store.registry, list = $("registry-list"), detail = $("registry-detail"), workspace = $("registry-workspace");
   if (!state || state.loading) {
     $("registry-summary").innerHTML = ""; $("registry-statusline").textContent = "loading catalog…"; $("btn-registry-refresh").disabled = true;
@@ -22182,6 +22507,7 @@ function automationRestoreFocus(identity) {
 }
 
 function automationsRender() {
+  journeyRender();
   const state = store.automations;
   const focus = typeof document !== "undefined" ? automationFocusIdentity() : null;
   $("automation-summary").innerHTML = automationSummaryHtml(state);
@@ -22728,6 +23054,7 @@ function scheduleRestoreFocus(identity) {
 }
 
 function schedulesRender() {
+  journeyRender();
   const state = store.schedules, focus = scheduleFocusIdentity();
   $("btn-schedules-refresh").disabled = Boolean(state && (state.loading || state.removal && state.removal.submitting));
   const mutationError = $("schedule-mutation-error");
@@ -23187,12 +23514,15 @@ async function tasksLoad(quiet) {
   const connection = store.conn && { ...store.conn };
   if (!connection) {
     store.tasks = { list: [], selected: null,
-      error: `<div class="note">Connect to a verified Rusty server before opening durable work.</div>` };
+      loading: false, error: `<div class="note">Connect to a verified Rusty server before opening durable work.</div>` };
     tasksRender();
     return false;
   }
   const status = $("sel-task-status").value;
   $("tasks-statusline").textContent = "loading…";
+  store.tasks = { list: Array.isArray(store.tasks && store.tasks.list) ? store.tasks.list : [],
+    selected: store.tasks && store.tasks.selected || null, loading: true, error: null };
+  journeyRender();
   try {
     const list = await apiForConnection(connection, "GET", tasksListPath(status));
     if (!tasksRequestCurrent(request, connection)) return false;
@@ -23202,7 +23532,7 @@ async function tasksLoad(quiet) {
       list: arr,
       // Keep the selection across refreshes while the task still exists.
       selected: keep && arr.some((t) => t && t.task_id === keep) ? keep : null,
-      error: null,
+      loading: false, error: null,
     };
     store.tasksUnsupported = false;
   } catch (e) {
@@ -23212,7 +23542,7 @@ async function tasksLoad(quiet) {
     // any other error renders verbatim.
     const noRoute = e.status === 404 && !(e.body && e.body.error);
     if (noRoute) store.tasksUnsupported = true;
-    store.tasks = { list: [], selected: null, error: tasksErrorHtml(e.status, e.body) };
+    store.tasks = { list: [], selected: null, loading: false, error: tasksErrorHtml(e.status, e.body) };
     if (!quiet && !noRoute) toast(e.message, "err");
   }
   tasksRender();
@@ -23220,6 +23550,7 @@ async function tasksLoad(quiet) {
 }
 
 function tasksRender() {
+  journeyRender();
   const body = $("tasks-body"), detail = $("tasks-detail");
   const ts = store.tasks;
   detail.style.display = "none";
@@ -23307,6 +23638,14 @@ function init() {
 
   $("btn-connection-open").onclick = connectionOpen;
   $("btn-copy-view-link").onclick = navigationCopyCurrent;
+  $("studio-journey").addEventListener("click", (event) => {
+    const target = event.target.closest("[data-journey-stage],[data-journey-next]");
+    if (!target || target.disabled) return;
+    journeyOpenStage(target.getAttribute("data-journey-stage") || target.getAttribute("data-journey-next")).catch((error) => {
+      $("studio-journey-announcer").textContent = `The journey destination did not open: ${runProofVisibleMessage(error && error.message)}.`;
+    });
+  });
+  $("studio-journey-rail").addEventListener("keydown", journeyKeyboard);
   window.addEventListener("popstate", () => navigationActivateLocation({ focus: true }));
   $("btn-connection-close").onclick = connectionClose;
   $("btn-connection-new").onclick = () => connectionNewDraft();

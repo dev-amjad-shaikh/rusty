@@ -21,7 +21,7 @@ const sandbox = { localStorage: {
 } };
 vm.createContext(sandbox);
 vm.runInContext(src + `
-globalThis.__home = { store, homeTime, homeSnapshot, homePrimaryAction, homeAttentionRoute, homeStageHtml, homeHtml,
+globalThis.__home = { store, homeTime, homeSnapshot, homePrimaryAction, homeAttentionRoute, homeHtml,
   homeFocusIdentity, homeRestoreFocus, agentsLoad };
 `, sandbox, { filename: "index.html<script>" });
 const H = sandbox.__home;
@@ -49,8 +49,8 @@ function connectedState() {
     snapshot.next.action === "connect" && snapshot.service === "Not connected");
   const markup = H.homeHtml(snapshot);
   check("home onboarding: the empty mission board still explains the full evidence journey",
-    markup.includes("Shape") && markup.includes("Run") && markup.includes("Understand") &&
-    markup.includes("Improve") && markup.includes("Govern") && markup.includes('data-home-action="connect"') &&
+    markup.includes("Shape") && markup.includes("Run") && markup.includes("Inspect") &&
+    markup.includes("Evaluate") && markup.includes("Govern") && markup.includes("Operate") && markup.includes('data-home-action="connect"') &&
     markup.includes("connect to load") && !markup.includes("loading server"));
 }
 
@@ -112,7 +112,7 @@ function connectedState() {
   state.learn.records = [{ candidate_id: "candidate-1", status: "created" }];
   const markup = H.homeHtml(H.homeSnapshot(state));
   check("home truth: candidate evidence never turns unloaded memory into a false zero",
-    markup.includes("memory not loaded · 1 candidates") && !markup.includes("0 memory · 1 candidates"));
+    markup.includes(">—</b><span>Governed memory</span>") && !markup.includes(">0</b><span>Governed memory</span>"));
 }
 
 {
@@ -241,13 +241,13 @@ check("home interaction: one delegated handler routes every mission-board action
   check("home focus: async replacement restores the same action and disappearing actions fall back to Home",
     replaced && focused === "title");
 }
-check("home responsive: hero, evidence rail, and signals collapse without hiding the journey",
+check("home responsive: hero, persistent evidence thread, and signals collapse without hiding the journey",
   html.includes(".home-hero { grid-template-columns: 1fr;") &&
-  html.includes(".home-evidence-rail { grid-template-columns: 1fr;") &&
+  html.includes(".studio-journey-rail { grid-template-columns: repeat(3,minmax(0,1fr));") &&
   html.includes(".home-signals { grid-template-columns: 1fr;"));
-check("home accessibility: the signature rail is a named ordered journey and Home receives focus",
-  html.includes('<ol class="home-evidence-rail" aria-label="Rusty Studio journey">') &&
-  html.includes('aria-label="${escapeHtml(`${name}: ${detail}`)}"') &&
+check("home accessibility: the persistent signature rail is a named ordered journey and Home receives focus",
+  html.includes('<ol class="studio-journey-rail" id="studio-journey-rail" aria-label="Agent lifecycle stages"></ol>') &&
+  html.includes('aria-current="step"') &&
   html.includes('id="home-title" tabindex="-1"') && html.includes('$("home-title")?.focus'));
 check("home accessibility: every Home destination receives a visible labelled focus target",
   html.includes('id="agents-title" tabindex="-1"') && html.includes('$("agents-title").focus') &&

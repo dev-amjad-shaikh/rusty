@@ -14,6 +14,10 @@ The core journey is:
 
 > **Shape → Run → Understand → Improve → Govern → Operate**
 
+That sentence describes the broad product outcome. The persistent operator rail uses the more actionable
+**Shape → Run → Inspect → Evaluate → Govern → Operate** vocabulary: Inspect is the evidence-reading part of
+Understand, while Evaluate is the executable decision part of Improve.
+
 Rusty Studio is complete only when this journey works for single agents and durable agent teams, on a laptop and in a deployed environment, with evidence and safety visible at every decision point.
 
 ## Product position
@@ -75,12 +79,23 @@ Studio is organized around a persistent **agent workspace**, not around API endp
 
 The same version identity and evidence rail appear across all surfaces. A person can move from a failed run to its configuration, from the configuration to a comparison experiment, and from an experiment to a promotion without copying identifiers.
 
+The persistent journey vocabulary is **Shape → Run → Inspect → Evaluate → Govern → Operate**.
+Shape groups the Build, Team, and extension-selection workspaces; Govern groups memory and learning.
+Those workspaces remain distinct sources of truth, while the journey rail carries only their current bounded
+agent, version, thread, and run identities. A rail stage is a safe handoff, not a claim that its destination
+has already loaded authoritative evidence.
+
 ## Current state — August 2026
 
 Studio is a useful engineering console, not yet the complete experience described above.
 
 ### Available now
 
+- Follow one persistent evidence thread across every workspace. It shows the selected agent and active
+  version when known, keeps thread/run ownership coherent, distinguishes browser-recalled runs from an exact
+  loaded journal, unlocks evaluation only from complete same-thread evidence, and recommends the next safe
+  stage without retaining prompts, payloads, results, credentials, or evaluation inputs. The rail is native-
+  keyboard operable, focus-preserving, and becomes a deliberate 3 × 2 control on narrow screens.
 - Start from a coherent Home mission board that shows the complete evidence-led journey, distinguishes
   current server catalog state from bounded browser recall, recommends the next action, and continues
   directly into the latest remembered agent or team evidence without retaining prompts or results.
@@ -229,7 +244,9 @@ Each milestone is a complete user outcome. A milestone is not complete because i
 **Outcome:** connect, create an agent, run a task, and inspect the run.
 
 Status: **usable foundation delivered**. The guided path and evidence-led Home mission board work,
-including honest local/server signals and direct continuation into recent agent or team evidence.
+including honest local/server signals and direct continuation into recent agent or team evidence. The same
+six-stage evidence thread now persists above Home, Agent Workbench, thread/Recorder, quality, governance,
+and operations surfaces, replacing the prior Home-only journey summary with one continuous navigation model.
 The Connection Hub now delivers guided onboarding, bounded non-secret server profiles, session-only
 secrets by default, explicit device-local opt-in, verified server identity, safe compatibility evidence,
 and recovery-preserving connection switching. Workspace and evidence navigation is now URL-addressable
