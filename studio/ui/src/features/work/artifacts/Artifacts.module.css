@@ -248,6 +248,50 @@
   font-size: 13px;
 }
 
+.viewTabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.viewTabs button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-0);
+  color: var(--text-muted);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.viewTabs button[aria-selected="true"] {
+  background: var(--accent);
+  color: #17130a;
+  border-color: var(--accent);
+}
+
+.versionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.versionList li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-0);
+}
+
 .actions {
   display: flex;
   gap: 10px;

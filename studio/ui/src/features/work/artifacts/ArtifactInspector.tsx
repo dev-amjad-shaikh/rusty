@@ -1,5 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { getRunArtifactBytes, getRunArtifactPreview, type ArtifactPreview, type RunArtifact } from "../../../lib/api/artifacts";
+import { useState } from "react";
+import { ArtifactImage } from "./ArtifactImage";
+import { getRunArtifactBytes, getRunArtifactNamed, getRunArtifactPreview, listRunArtifactVersions, releaseRunArtifact, type ArtifactPreview, type RunArtifact } from "../../../lib/api/artifacts";
 import { useConnectionStore } from "../../../state/connection";
 import { bytePreview } from "../../../lib/text";
 import styles from "./Artifacts.module.css";
@@ -33,15 +35,13 @@ function PreviewView({ preview }: { preview: ArtifactPreview }) {
           <pre className={styles.jsonPreview}>{JSON.stringify(preview.value, null, 2)}</pre>
         </div>
       );
-    case "image": {
-      const src = `data:image/x-portable-pixmap;base64,${btoa(preview.pixels_ppm_hex.match(/.{1,2}/g)!.map((hex) => String.fromCharCode(parseInt(hex, 16))).join(""))}`;
+    case "image":
       return (
         <div className={styles.preview}>
           <h4>Image preview · {preview.width}×{preview.height}</h4>
-          <div className={styles.imagePreview}><img src={src} alt="Derived thumbnail" /></div>
+          <ArtifactImage ppmHex={preview.pixels_ppm_hex} alt="Derived thumbnail" />
         </div>
       );
-    }
     case "audio": {
       const max = Math.max(1, ...preview.peaks);
       return (
@@ -89,12 +89,68 @@ async function streamDownload(response: Response, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function VersionsPanel({ name }: { name: string }) {
+  const { connection } = useConnectionStore();
+  const versions = useQuery({
+    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-versions", name] : ["artifact-versions", "idle"],
+    queryFn: () => listRunArtifactVersions(connection!, name),
+    enabled: Boolean(connection && name),
+  });
+  if (versions.isLoading) return <p className={styles.emptyPreview}>Loading version history…</p>;
+  if (versions.isError) return <p className={styles.emptyPreview}>Version history could not be loaded.</p>;
+  if (!versions.data?.versions.length) return null;
+  return (
+    <div className={styles.preview}>
+      <h4>Version history · {versions.data.versions.length}</h4>
+      <ol className={styles.versionList}>
+        {versions.data.versions.map((version, index) => (
+          <li key={version.sha256}>
+            <span>v{index}</span>
+            <code>{bytePreview(version.sha256, 24).text}</code>
+            <span>{formatBytes(Number(version.bytes))}</span>
+            <span>{new Date(version.committed_at).toLocaleDateString()}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ReleasePanel({ artifact, onReleased }: { artifact: RunArtifact; onReleased: () => void }) {
+  const { connection } = useConnectionStore();
+  const [author, setAuthor] = useState("");
+  const [reason, setReason] = useState("");
+  const release = useMutation({
+    mutationFn: () => {
+      if (!connection) throw new Error("Not connected.");
+      return releaseRunArtifact(connection, artifact.artifact_id, { released_by: author, reason: reason || undefined });
+    },
+    onSuccess: () => { setAuthor(""); setReason(""); onReleased(); },
+  });
+  return (
+    <div className={styles.preview}>
+      <h4>Release stored bytes</h4>
+      <p className={styles.emptyPreview}>This shortens evidence retention. Preview and download may stop while metadata and lineage remain.</p>
+      <label>Author<input type="text" value={author} onChange={(event) => setAuthor(event.target.value)} placeholder="operator id" /></label>
+      <label>Reason (optional)<input type="text" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="why this release is safe" /></label>
+      {release.isError && <p className={styles.emptyPreview} role="alert">{release.error instanceof Error ? release.error.message : "Release failed."}</p>}
+      <button type="button" className="secondary-button" onClick={() => release.mutate()} disabled={!author.trim() || release.isPending}>{release.isPending ? "Releasing…" : "Release stored bytes"}</button>
+    </div>
+  );
+}
+
 export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact; onClose: () => void }) {
   const { connection } = useConnectionStore();
+  const [view, setView] = useState<"preview" | "versions" | "release">("preview");
   const preview = useQuery({
     queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-preview", artifact.artifact_id] : ["artifact-preview", "idle"],
     queryFn: () => getRunArtifactPreview(connection!, artifact.artifact_id),
     enabled: Boolean(connection),
+  });
+  const named = useQuery({
+    queryKey: connection && artifact.name ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-named", artifact.name] : ["artifact-named", "idle"],
+    queryFn: () => getRunArtifactNamed(connection!, artifact.name!),
+    enabled: Boolean(connection && artifact.name),
   });
   const download = useMutation({
     mutationFn: async () => {
@@ -105,6 +161,8 @@ export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact
       await streamDownload(response, `${filename}${extension}`);
     },
   });
+
+  const current = named.data ?? artifact;
 
   return (
     <div className={styles.inspectorBackdrop} role="dialog" aria-modal="true" aria-labelledby="artifact-title" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -118,22 +176,29 @@ export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact
         </header>
         <div className={styles.body}>
           <dl>
-            <div><dt>Identity</dt><dd><code>{bytePreview(artifact.artifact_id, 48).text}</code></dd></div>
-            <div><dt>Media kind</dt><dd>{artifact.media_kind}</dd></div>
-            <div><dt>Declared type</dt><dd>{artifact.media_type ?? "Not declared"}</dd></div>
-            <div><dt>Size</dt><dd>{formatBytes(Number(artifact.versions[0]?.bytes ?? 0))}</dd></div>
-            <div><dt>Retention</dt><dd>{retentionLabel(artifact.retention)}</dd></div>
-            <div><dt>Committed</dt><dd>{new Date(artifact.created_at).toLocaleString()}</dd></div>
+            <div><dt>Identity</dt><dd><code>{bytePreview(current.artifact_id, 48).text}</code></dd></div>
+            <div><dt>Media kind</dt><dd>{current.media_kind}</dd></div>
+            <div><dt>Declared type</dt><dd>{current.media_type ?? "Not declared"}</dd></div>
+            <div><dt>Size</dt><dd>{formatBytes(Number(current.versions[0]?.bytes ?? 0))}</dd></div>
+            <div><dt>Retention</dt><dd>{retentionLabel(current.retention)}</dd></div>
+            <div><dt>Committed</dt><dd>{new Date(current.created_at).toLocaleString()}</dd></div>
           </dl>
           <div className={styles.lineage}>
             <h4>Lineage</h4>
             <ol>
-              <li>Run <code>{bytePreview(artifact.lineage.run_id, 24).text}</code></li>
-              <li>Effect <code>{bytePreview(String(artifact.lineage.effect_id), 24).text}</code></li>
-              <li>Event <code>{bytePreview(artifact.lineage.event_id, 24).text}</code></li>
+              <li>Run <code>{bytePreview(current.lineage.run_id, 24).text}</code></li>
+              <li>Effect <code>{bytePreview(String(current.lineage.effect_id), 24).text}</code></li>
+              <li>Event <code>{bytePreview(current.lineage.event_id, 24).text}</code></li>
             </ol>
           </div>
-          {preview.isLoading ? <p className={styles.emptyPreview}>Loading preview…</p> : preview.isError ? <p className={styles.emptyPreview}>Preview could not be loaded.</p> : preview.data ? <PreviewView preview={preview.data.preview} /> : null}
+          <div className={styles.viewTabs} role="tablist" aria-label="Artifact views">
+            <button type="button" role="tab" aria-selected={view === "preview"} onClick={() => setView("preview")}>Preview</button>
+            {artifact.name && <button type="button" role="tab" aria-selected={view === "versions"} onClick={() => setView("versions")}>Versions</button>}
+            <button type="button" role="tab" aria-selected={view === "release"} onClick={() => setView("release")}>Release</button>
+          </div>
+          {view === "preview" && (preview.isLoading ? <p className={styles.emptyPreview}>Loading preview…</p> : preview.isError ? <p className={styles.emptyPreview}>Preview could not be loaded.</p> : preview.data ? <PreviewView preview={preview.data.preview} /> : null)}
+          {view === "versions" && artifact.name && <VersionsPanel name={artifact.name} />}
+          {view === "release" && <ReleasePanel artifact={current} onReleased={() => setView("preview")} />}
         </div>
         <div className={styles.actions}>
           <button type="button" className="secondary-button" onClick={() => download.mutate()} disabled={download.isPending}>{download.isPending ? "Downloading…" : "Download exact bytes"}</button>
