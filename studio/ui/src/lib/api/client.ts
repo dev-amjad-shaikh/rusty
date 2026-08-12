@@ -46,7 +46,7 @@ export class StudioApiError extends Error {
   }
 }
 
-function endpoint(connection: ConnectionIdentity, path: string) {
+export function endpoint(connection: ConnectionIdentity, path: string) {
   const normalized = connection.origin.replace(/\/$/, "");
   if (import.meta.env.DEV && normalized === "http://127.0.0.1:8100") return `/api${path}`;
   return `${normalized}${path}`;
@@ -86,7 +86,7 @@ function errorMessage(text: string, status: number) {
   return `Rusty returned HTTP ${status}.`;
 }
 
-async function requestText(
+export async function requestText(
   connection: ConnectionIdentity,
   path: string,
   init: RequestInit = {},
@@ -111,7 +111,7 @@ async function requestText(
   return { status: response.status, text };
 }
 
-function parseJson<T>(text: string, schema: z.ZodType<T>, context: string): T {
+export function parseJson<T>(text: string, schema: z.ZodType<T>, context: string): T {
   try {
     return schema.parse(JSON.parse(text));
   } catch (error) {
@@ -120,7 +120,7 @@ function parseJson<T>(text: string, schema: z.ZodType<T>, context: string): T {
   }
 }
 
-function parseMutationJson<T>(text: string, schema: z.ZodType<T>, context: string, status: number): T {
+export function parseMutationJson<T>(text: string, schema: z.ZodType<T>, context: string, status: number): T {
   try { return parseJson(text, schema, context); }
   catch (caught) {
     throw new StudioApiError(caught instanceof Error ? caught.message : `${context} was not trustworthy.`, status, true);
