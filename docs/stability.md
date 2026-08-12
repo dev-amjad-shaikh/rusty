@@ -136,4 +136,122 @@ R1.0 — Unleashed (see [roadmap.md](roadmap.md)) flips the default from
   least one minor release of `#[deprecated]` warnings (Rust) or
   documented deprecation notices (SDKs, HTTP fields).
 
-Until R1.0 ships, the v0.x rules above are the whole contract.
+## The R1.0 freeze inventory
+
+What follows enumerates, concretely, what R1.0 freezes. Where a surface
+is already pinned by golden-file tests, the pin is the enforcement
+mechanism: drift fails CI before it ships.
+
+**A. Evidence and record formats.** `RunEvent`, `RunEventKind` (59
+variants, snake_case), `EventStatus`, `PayloadRef`, `ArtifactRef`, the
+`Effect` taxonomy, `DecisionEvent`, and `CheckpointHeader` (all in
+`rusty-core/src/record.rs`), plus `JournalSnapshot` (`journal.rs`) and
+the `ReplayFixture` envelope (`replay.rs`). These are pinned by the
+golden files in `rusty-core/tests/golden/`. At 1.x:
+
+- Shapes evolve additively via serde defaults. A field removal, rename,
+  or meaning change is a major-version event.
+- New `RunEventKind` variants may still arrive in minor releases — the
+  kind set has grown with every plane, and honesty requires saying so up
+  front. Serde consumers must tolerate unknown variant strings; Rust
+  consumers must match with a wildcard arm. Downstream exhaustive
+  matching is not covered by the guarantee; the runtime's own replay
+  paths, which match exhaustively by design, are updated in the same
+  release that adds a variant.
+- The format constants stay frozen as boundary checks:
+  `CURRENT_FORMAT_VERSION`, `FIXTURE_FORMAT_VERSION`,
+  `RECEIPT_FORMAT_VERSION`, `TASK_ENVELOPE_FORMAT_VERSION`, and
+  `SEALED_FORMAT_VERSION` (all `u32`, currently 1). A reader that meets
+  an unsupported version rejects at the boundary — that rejection is
+  part of the contract, not an error to work around.
+  `MEMORY_SCHEMA_VERSION` (`"memory-v1"`) and the MCP / A2A protocol
+  strings follow the same additive rule even though they are strings
+  rather than integers.
+
+**B. Checkpoint format.** The `Checkpoint` struct
+(`rusty-core/src/checkpoint.rs`) with its `CheckpointHeader`, the
+delta-checkpoint chain encoding, and the Postgres tables
+`rusty_checkpoints` / `rusty_artifacts`. At 1.0: a 1.x runtime reads
+checkpoints written by any earlier 1.x release — restore, `get_by_id`
+replay, and forks included — and a documented migration path crosses
+the 0.x → 1.0 boundary for `JsonFileCheckpointer` and
+`PostgresCheckpointer`. Schema evolution stays what it is today:
+ordered, idempotent migration statements, oldest first, additive within
+a major line.
+
+**C. Capsule manifest.** `CapsuleManifest` (`rusty-core/src/capsule.rs`):
+identity, version, build digest, interface, declared effects, capability
+grants (internally tagged serde), and resource budget, content-addressed
+by `derive_capsule_id`. The interface contract is the WIT world string —
+`WORLD_V1 = "rusty:capsule/world@0.1.0"` — and new worlds arrive as new
+strings, never by mutating an existing one. Manifest fields evolve
+additively at 1.x; grant kinds are additive. Narrowing a grant is always
+safe; widening one is a policy decision journaled at admission, not a
+format change.
+
+**D. Remote-execution wire protocol.** Already stable at v1 (above). Its
+rules do not change at R1.0.
+
+**E. HTTP/SSE API.** At R1.0 the full route surface — today 133 paths
+across 21 groups (`rusty-server/src/routes.rs`) — freezes: paths,
+request fields, and response fields are additive-only within HTTP API
+v1. The SSE families `metadata`, `values`, `updates`, `error`, and `end`
+become frozen names; their payload fields are additive-only. The
+long-standing client rule stands, and becomes mandatory in the other
+direction: clients must ignore unknown events and unknown fields, and
+the server must never remove what an older client might read. One gate
+remains before this freeze takes effect — the server needs an explicit
+API version, reported by `/info` and carried as a constant, which
+replaces the same-cycle pairing rule in
+[versioning.md](versioning.md).
+
+**F. SDK surfaces.** Frozen at 1.0 for the groups both SDKs cover today:
+threads, runs (including SSE streaming, fixtures, replay, and diff),
+assistants, crons, the KV store, and tasks. The advanced groups —
+memory, learn, registry, broker, capsules, deployments, coordination,
+agents, triggers, receipts — remain HTTP-only at 1.0; typed SDK methods
+for them arrive additively in 1.x minor releases. A method removal or
+signature change on the frozen groups is a major-version event.
+
+**G. Rust crate APIs.** Full SemVer on all five crates from 1.0.0. The
+documented surface is each crate's public API, including its prelude
+re-exports where one exists; the feature-flag names `postgres` and
+`wasm` are part of that surface. Removals are preceded by at least one
+minor release of `#[deprecated]` warnings.
+
+## Known limitations carried into 1.0
+
+A contract that hides its gaps is not a contract. These ship with 1.0,
+documented:
+
+- **Capsule interface validation is declared, not enforced.**
+  `CapsuleInterface` input/output types are checked structurally at
+  admission, but the deep validator noted in `capsule.rs` lands
+  post-1.0. Capability enforcement — the actual security boundary — is
+  not affected.
+- **The server schema has no version constant.** Postgres evolution is
+  the ordered `MIGRATION_SQL` statement list in
+  `rusty-server/src/server_store.rs`; idempotency and order are the
+  mechanism, and CI asserts the list only grows.
+- **SSE payloads are pinned by integration tests, not golden files.**
+  The golden-file discipline covers the core record formats; server SSE
+  shapes are covered by the server and SDK test suites instead.
+- **Tenant id-prefixing stays private.** Cross-tenant semantics (404,
+  never 403) are contractual; the `{tenant}/` prefix layout is not.
+
+## Gates before R1.0
+
+The freeze inventory above is necessary but not sufficient. R1.0 ships
+when every gate below closes:
+
+| Gate | Owner | Evidence |
+|---|---|---|
+| HTTP API version constant + `/info` reporting | maintainers | code; the same-cycle pairing row in [versioning.md](versioning.md) is rewritten |
+| Durable pending-run queue | maintainers | code; restart-survival test in the server suite |
+| Capacity envelope | maintainers | load-test harness plus published numbers in [benchmarks.md](benchmarks.md) |
+| Provider-layer integration | maintainers | one integrated provider layer instead of hand-built adapters |
+| Independent security review | external | published report or summary |
+| Three production-shaped case studies | community | documented deployments on real workloads |
+
+Until R1.0 ships, the v0.x rules above are the whole contract; the
+inventory and gates are the plan, not yet the promise.

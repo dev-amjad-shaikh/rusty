@@ -23,23 +23,28 @@ If you want a batteries-included Python ecosystem or a fully managed control pla
 
 ## Status
 
-Rusty is **v0.x** under active development. Packages version independently — see [docs/versioning.md](docs/versioning.md) for the scheme and [docs/stability.md](docs/stability.md) for what each package promises not to break. The crates are implemented but **not yet published to any registry** — crates.io / npm / PyPI publishing is on the R1.0 roadmap. History lives in [CHANGELOG.md](CHANGELOG.md); the plan lives in [docs/roadmap.md](docs/roadmap.md).
+Rusty is **v0.x** under active development. Packages version independently — see [docs/versioning.md](docs/versioning.md) for the scheme and [docs/stability.md](docs/stability.md) for what each package promises not to break. All seven packages are published: five crates on crates.io, the TypeScript client on npm, and the Python client on PyPI. History lives in [CHANGELOG.md](CHANGELOG.md); the plan lives in [docs/roadmap.md](docs/roadmap.md).
 
-Latest release: **R0.5 — Flight Recorder** (2026-08-07) — every run is journaled as replayable evidence (canonical `RunEvent` contracts, causal effect journal, tamper-evident head hash), and exact replay re-drives a recorded run with zero outbound calls, verified event-for-event. Portable fixtures replay any recorded run in CI.
+Latest release: **R0.12 — Operations Plane** (2026-08-11) — content-addressed run artifacts with lineage, previews, and retention, plus a deployment control plane: immutable revisions, dev/staging/prod environments, canary and shadow deployments wired to evaluation release gates, byte-exact rollback. Earlier cycles shipped the Flight Recorder, durable work, the Agent Fabric, governed learning, capsule isolation, and signed run receipts — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
-Registry publishing is pending, so depend on the git repo for now (Cargo resolves the crate from `rusty-core/` in the repo):
-
 ```toml
 [dependencies]
-rusty-agent-runtime = { git = "https://github.com/dev-amjad-shaikh/rusty" }
+rusty-agent-runtime = "0.12"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 serde_json = "1"
 ```
 
-Once published, this becomes `cargo add rusty-agent-runtime`. Optional crate features: `postgres` (Postgres checkpointer) and `wasm` (sandboxed WASM nodes). MSRV is **Rust 1.86**, declared at the workspace root and checked in CI.
+or `cargo add rusty-agent-runtime`. The server is `cargo add rusty-agent-server`. Optional crate features: `postgres` (Postgres checkpointer) and `wasm` (sandboxed WASM nodes). MSRV is **Rust 1.86**, declared at the workspace root and checked in CI.
+
+The clients install from npm and PyPI:
+
+```bash
+npm install @rusty-runtime/client   # TypeScript / JavaScript
+pip install rusty-agent-runtime     # Python (imported as rusty_client)
+```
 
 ### Try it in one command
 
