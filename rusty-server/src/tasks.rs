@@ -1583,6 +1583,8 @@ mod tests {
             prompt_tokens: 120,
             completion_tokens: 30,
             total_tokens: 150,
+            cached_tokens: None,
+            reasoning_tokens: None,
         };
         let cost = SettlementCost {
             tokens: Some(usage),

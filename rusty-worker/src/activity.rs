@@ -417,17 +417,26 @@ struct FailResponse {
 ///
 /// - `error_class` — the frozen [`ErrorClass`] taxonomy shared with the
 ///   server scheduler. `Llm` and `Tool` failures are upstream
-///   ([`ErrorClass::DependencyFailure`]); `Graph` and `InvalidUpdate` are
+///   ([`ErrorClass::DependencyFailure`]); a classified
+///   [`RustyError::LlmFailure`] keeps its finer class through the
+///   provider-layer mapping (`From<LlmErrorClass>`), so a rate limit
+///   retries as a rate limit and a rejected credential fails instead of
+///   burning the attempt budget. `Graph` and `InvalidUpdate` are
 ///   contract violations ([`ErrorClass::InvalidInput`]); everything
 ///   unclassifiable is [`ErrorClass::Unknown`]. An `Interrupt` error is
 ///   [`ErrorClass::Cancelled`]: the task-queue protocol has no suspend
 ///   semantics (HITL wiring is the run-outbox wave's concern), so a handler
 ///   interrupt settles as a non-retryable cancellation.
 /// - `retryable` — the executor's own taxonomy: `Llm` and `Tool` are the
-///   transient classes; everything else is a hard failure.
+///   transient classes; a classified LLM failure retries iff its mapped
+///   class does; everything else is a hard failure.
 fn classify_error(error: &RustyError) -> (ErrorClass, bool) {
     match error {
         RustyError::Llm(_) => (ErrorClass::DependencyFailure, true),
+        RustyError::LlmFailure { class, .. } => {
+            let class = ErrorClass::from(*class);
+            (class, class.is_retryable())
+        }
         RustyError::Tool(_) => (ErrorClass::DependencyFailure, true),
         RustyError::Node(_) => (ErrorClass::Unknown, false),
         RustyError::Graph(_) => (ErrorClass::InvalidInput, false),
@@ -1102,6 +1111,7 @@ impl ActivityWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusty_agent_runtime::error::LlmErrorClass;
     use serde_json::json;
 
     #[test]
@@ -1222,6 +1232,30 @@ mod tests {
         assert_eq!(
             classify_error(&RustyError::Llm("rate limited".into())),
             (ErrorClass::DependencyFailure, true)
+        );
+        // A classified LLM failure keeps its finer class: rate limits and
+        // provider outages retry as such; credentials and undecodable
+        // responses fail without burning the attempt budget.
+        assert_eq!(
+            classify_error(&RustyError::LlmFailure {
+                class: LlmErrorClass::RateLimited,
+                message: "429".into(),
+            }),
+            (ErrorClass::RateLimited, true)
+        );
+        assert_eq!(
+            classify_error(&RustyError::LlmFailure {
+                class: LlmErrorClass::Server,
+                message: "503".into(),
+            }),
+            (ErrorClass::DependencyFailure, true)
+        );
+        assert_eq!(
+            classify_error(&RustyError::LlmFailure {
+                class: LlmErrorClass::Auth,
+                message: "401".into(),
+            }),
+            (ErrorClass::InvalidInput, false)
         );
         assert_eq!(
             classify_error(&RustyError::Tool("backend exploded".into())),

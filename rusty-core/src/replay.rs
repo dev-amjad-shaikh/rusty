@@ -471,6 +471,13 @@ impl ChatModel for RecordingChatModel {
                 let mut draft = draft.output(model_call_response(&response));
                 if let Some(usage) = response.usage {
                     draft = draft.tokens(usage);
+                    // The cost producer: pricing is operator configuration on
+                    // the model, so a priced model's journaled calls carry
+                    // `cost_usd` and cost gates have a real input; an
+                    // unpriced model journals nothing, exactly as before.
+                    if let Some(pricing) = self.inner.pricing() {
+                        draft = draft.cost_usd(pricing.cost_usd(&usage));
+                    }
                 }
                 self.journal.record(draft);
                 Ok(response)
@@ -488,6 +495,10 @@ impl ChatModel for RecordingChatModel {
 
     fn effect(&self) -> Effect {
         self.inner.effect()
+    }
+
+    fn pricing(&self) -> Option<crate::llm::ModelPricing> {
+        self.inner.pricing()
     }
 }
 
@@ -565,6 +576,13 @@ impl ChatModel for ReplayingChatModel {
 
     fn effect(&self) -> Effect {
         self.inner.effect()
+    }
+
+    /// Identity only: replay re-journals the *recorded* `cost_usd` and never
+    /// recomputes it, so this is consulted only when something inspects the
+    /// wrapper rather than serves from it.
+    fn pricing(&self) -> Option<crate::llm::ModelPricing> {
+        self.inner.pricing()
     }
 }
 
@@ -1551,7 +1569,83 @@ mod tests {
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,
+                cached_tokens: None,
+                reasoning_tokens: None,
             })
+    }
+
+    // ---------- cost journaling (provider layer) ----------
+
+    /// A mock model reporting usage, optionally priced.
+    struct PricedMock {
+        pricing: Option<crate::llm::ModelPricing>,
+    }
+
+    #[async_trait]
+    impl ChatModel for PricedMock {
+        async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
+            Ok(ChatResponse {
+                message: ChatMessage::assistant("pong"),
+                model: None,
+                usage: Some(Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    total_tokens: 15,
+                    cached_tokens: None,
+                    reasoning_tokens: None,
+                }),
+            })
+        }
+
+        fn pricing(&self) -> Option<crate::llm::ModelPricing> {
+            self.pricing
+        }
+    }
+
+    #[tokio::test]
+    async fn recording_a_priced_model_journals_cost() {
+        let journal = Journal::new("run-t", "thread-t", Clock::logical(1_000_000, 5));
+        let pricing = crate::llm::ModelPricing::new(2.0, 8.0);
+        let model = RecordingChatModel::new(
+            Arc::new(PricedMock {
+                pricing: Some(pricing),
+            }),
+            journal.clone(),
+            "parent-0",
+        );
+        model.chat(&[ChatMessage::user("ping")], &[]).await.unwrap();
+
+        let snapshot = journal.snapshot();
+        let event = snapshot
+            .events
+            .iter()
+            .find(|e| e.kind == RunEventKind::ModelCall)
+            .expect("the call was journaled");
+        let usage = event.tokens.expect("usage is stamped");
+        assert_eq!(usage.prompt_tokens, 10);
+        // cost = 10 * $2/M + 5 * $8/M
+        assert_eq!(event.cost_usd, Some(pricing.cost_usd(&usage)));
+    }
+
+    #[tokio::test]
+    async fn recording_an_unpriced_model_journals_no_cost() {
+        let journal = Journal::new("run-t", "thread-t", Clock::logical(1_000_000, 5));
+        let model = RecordingChatModel::new(
+            Arc::new(PricedMock { pricing: None }),
+            journal.clone(),
+            "parent-0",
+        );
+        model.chat(&[ChatMessage::user("ping")], &[]).await.unwrap();
+
+        let snapshot = journal.snapshot();
+        let event = snapshot
+            .events
+            .iter()
+            .find(|e| e.kind == RunEventKind::ModelCall)
+            .expect("the call was journaled");
+        // Usage still lands; the cost field stays additively absent.
+        assert!(event.tokens.is_some());
+        assert_eq!(event.cost_usd, None);
     }
 
     #[test]

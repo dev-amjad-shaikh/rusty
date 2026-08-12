@@ -1921,6 +1921,8 @@ mod tests {
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,
+                cached_tokens: None,
+                reasoning_tokens: None,
             }),
             cost_usd: Some(0.0001),
             status: EventStatus::Ok,

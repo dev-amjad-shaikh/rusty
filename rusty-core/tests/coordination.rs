@@ -172,6 +172,8 @@ fn golden_coordination_outcome_shape() {
                     prompt_tokens: 120,
                     completion_tokens: 30,
                     total_tokens: 150,
+                    cached_tokens: None,
+                    reasoning_tokens: None,
                 }),
                 cost_usd: Some(0.0042),
             },

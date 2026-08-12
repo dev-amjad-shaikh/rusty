@@ -77,6 +77,8 @@ impl ChatModel for MockModel {
                 prompt_tokens: 12,
                 completion_tokens: 3,
                 total_tokens: 15,
+                cached_tokens: None,
+                reasoning_tokens: None,
             }),
         })
     }

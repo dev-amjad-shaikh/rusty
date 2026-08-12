@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 
-use crate::error::{Result, RustyError};
+use crate::error::{LlmErrorClass, Result, RustyError};
 
 /// Maximum characters of an HTTP error body embedded in an error message:
 /// enough for diagnosis, bounded so a verbose server cannot bloat logs.
@@ -211,6 +211,12 @@ impl<'de> Deserialize<'de> for ToolCall {
 }
 
 /// Token usage accounting from the provider.
+///
+/// `cached_tokens` and `reasoning_tokens` are the detail providers report
+/// beyond the three headline counts (Anthropic's cache reads, OpenAI's
+/// `prompt_tokens_details` / `completion_tokens_details`, Gemini's thoughts):
+/// optional and absent on the wire when unset, so the pinned serde shape of
+/// the headline fields is unchanged.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
     /// Tokens in the prompt.
@@ -222,6 +228,68 @@ pub struct Usage {
     /// Total tokens billed.
     #[serde(default)]
     pub total_tokens: u64,
+    /// Prompt tokens served from the provider's cache. A *subset* of
+    /// `prompt_tokens`, usually billed at a lower rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_tokens: Option<u64>,
+    /// Completion tokens spent on reasoning rather than visible output.
+    /// A *subset* of `completion_tokens`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+}
+
+/// Per-million-token pricing for a model, supplied by whoever constructs it.
+///
+/// The crate ships no built-in price list: a vendor table would be stale the
+/// week it ships, so rates are operator configuration attached to the model
+/// (see [`OpenAiCompatibleClient::with_pricing`]). The journaling path turns
+/// `pricing × usage` into the `cost_usd` evidence the run aggregates.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ModelPricing {
+    /// USD per million uncached prompt tokens.
+    pub input_per_million: f64,
+    /// USD per million completion tokens.
+    pub output_per_million: f64,
+    /// USD per million cache-served prompt tokens. When absent, cached
+    /// tokens bill at the full input rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_per_million: Option<f64>,
+}
+
+impl ModelPricing {
+    /// Pricing with uncached input and output rates only.
+    pub fn new(input_per_million: f64, output_per_million: f64) -> Self {
+        Self {
+            input_per_million,
+            output_per_million,
+            cached_input_per_million: None,
+        }
+    }
+
+    /// Builder-style: a distinct rate for cache-served prompt tokens.
+    pub fn with_cached_input(mut self, cached_input_per_million: f64) -> Self {
+        self.cached_input_per_million = Some(cached_input_per_million);
+        self
+    }
+
+    /// The cost of `usage` in USD.
+    ///
+    /// Cached tokens are a subset of `prompt_tokens`, so they are charged at
+    /// the cached rate *instead of* — never in addition to — the input rate.
+    /// A provider reporting more cached than prompt tokens is clamped rather
+    /// than trusted.
+    pub fn cost_usd(&self, usage: &Usage) -> f64 {
+        let cached = usage.cached_tokens.unwrap_or(0).min(usage.prompt_tokens);
+        let uncached = usage.prompt_tokens - cached;
+        let cached_rate = self
+            .cached_input_per_million
+            .unwrap_or(self.input_per_million);
+        let million = 1_000_000.0;
+        (uncached as f64 * self.input_per_million
+            + cached as f64 * cached_rate
+            + usage.completion_tokens as f64 * self.output_per_million)
+            / million
+    }
 }
 
 /// One chat-completion response (single choice; multi-choice responses are
@@ -323,6 +391,17 @@ pub trait ChatModel: Send + Sync {
         crate::record::Effect::NonIdempotent
     }
 
+    /// The model's per-token pricing, when known.
+    ///
+    /// The journaling path multiplies this by each call's reported [`Usage`]
+    /// to produce the `cost_usd` on model-call events — the field's only
+    /// producer, and the input `rusty-eval`'s cost gates read. The default
+    /// is `None`: a model that cannot price itself journals no cost and
+    /// behaves exactly as before.
+    fn pricing(&self) -> Option<ModelPricing> {
+        None
+    }
+
     /// Produce the next assistant message, streaming token deltas through
     /// `on_token` as they arrive.
     ///
@@ -377,6 +456,8 @@ pub struct OpenAiCompatibleClient {
     max_retries: u32,
     /// Base delay for exponential backoff.
     base_backoff: Duration,
+    /// Operator-supplied pricing; `None` means cost is not computed.
+    pricing: Option<ModelPricing>,
 }
 
 // Hand-written because the derived impl would print `api_key` in cleartext
@@ -390,6 +471,7 @@ impl std::fmt::Debug for OpenAiCompatibleClient {
             .field("client", &self.client)
             .field("max_retries", &self.max_retries)
             .field("base_backoff", &self.base_backoff)
+            .field("pricing", &self.pricing)
             .finish()
     }
 }
@@ -409,6 +491,7 @@ impl OpenAiCompatibleClient {
             client: reqwest::Client::new(),
             max_retries: DEFAULT_MAX_RETRIES,
             base_backoff: DEFAULT_BASE_BACKOFF,
+            pricing: None,
         }
     }
 
@@ -449,6 +532,13 @@ impl OpenAiCompatibleClient {
     /// `base * 2^n`, exponent capped and jittered).
     pub fn with_backoff(mut self, base_backoff: Duration) -> Self {
         self.base_backoff = base_backoff;
+        self
+    }
+
+    /// Attach per-token pricing so journaled model calls carry `cost_usd`.
+    /// Rates are operator configuration — the crate ships no price list.
+    pub fn with_pricing(mut self, pricing: ModelPricing) -> Self {
+        self.pricing = Some(pricing);
         self
     }
 
@@ -505,8 +595,19 @@ impl OpenAiCompatibleClient {
         request: reqwest::RequestBuilder,
     ) -> std::result::Result<reqwest::Response, AttemptError> {
         let response = request.send().await.map_err(|e| {
-            let err = RustyError::Llm(format!("request to {} failed: {e}", self.base_url));
-            if e.is_timeout() || e.is_connect() {
+            // Connect failures and timeouts never produced a response, so
+            // they are retryable; anything else at this layer (redirect,
+            // body, builder errors) is treated as definitive.
+            let class = if e.is_timeout() || e.is_connect() {
+                LlmErrorClass::Timeout
+            } else {
+                LlmErrorClass::Unknown
+            };
+            let err = RustyError::LlmFailure {
+                class,
+                message: format!("request to {} failed: {e}", self.base_url),
+            };
+            if class == LlmErrorClass::Timeout {
                 AttemptError::Retryable {
                     error: err,
                     retry_after: None,
@@ -527,10 +628,13 @@ impl OpenAiCompatibleClient {
             .and_then(|s| s.trim().parse::<u64>().ok())
             .map(Duration::from_secs);
         let body = response.text().await.unwrap_or_default();
-        let err = RustyError::Llm(format!(
-            "chat completions returned {status}: {}",
-            truncate_body(&body)
-        ));
+        let err = RustyError::LlmFailure {
+            class: classify_status(status),
+            message: format!(
+                "chat completions returned {status}: {}",
+                truncate_body(&body)
+            ),
+        };
         // 5xx and 408/429 are transient by convention; other 4xx are
         // definitive (bad request, auth failure, ...).
         let retryable = status.is_server_error()
@@ -544,6 +648,25 @@ impl OpenAiCompatibleClient {
         } else {
             AttemptError::Fatal(err)
         })
+    }
+}
+
+/// Map an HTTP failure status onto the LLM error taxonomy: 429 is a rate
+/// limit, 408 and 5xx are the provider's own failure, 401/403 are
+/// credentials, and every other 4xx is the request's fault.
+fn classify_status(status: reqwest::StatusCode) -> LlmErrorClass {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        LlmErrorClass::RateLimited
+    } else if status.is_server_error() || status == reqwest::StatusCode::REQUEST_TIMEOUT {
+        LlmErrorClass::Server
+    } else if status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
+        LlmErrorClass::Auth
+    } else if status.is_client_error() {
+        LlmErrorClass::InvalidRequest
+    } else {
+        LlmErrorClass::Unknown
     }
 }
 
@@ -658,10 +781,11 @@ impl StreamAccumulator {
                 // arguments" from "bytes were lost".
                 Value::Object(serde_json::Map::new())
             } else {
-                serde_json::from_str(&acc.arguments).map_err(|e| {
-                    RustyError::Llm(format!(
+                serde_json::from_str(&acc.arguments).map_err(|e| RustyError::LlmFailure {
+                    class: LlmErrorClass::Decode,
+                    message: format!(
                         "malformed tool-call arguments in stream (index {index}): {e}"
-                    ))
+                    ),
                 })?
             };
             tool_calls.push(ToolCall::new(acc.id, acc.name, arguments));
@@ -848,10 +972,12 @@ fn handle_sse_payload(
         return Ok(false);
     }
 
-    let value: Value = serde_json::from_str(trimmed)
-        .map_err(|e| RustyError::Llm(format!("malformed stream chunk: {e}")))?;
-    let chunk: WireStreamChunk = serde_json::from_value(value.clone())
-        .map_err(|e| RustyError::Llm(format!("malformed stream chunk: {e}")))?;
+    let malformed = |e: serde_json::Error| RustyError::LlmFailure {
+        class: LlmErrorClass::Decode,
+        message: format!("malformed stream chunk: {e}"),
+    };
+    let value: Value = serde_json::from_str(trimmed).map_err(malformed)?;
+    let chunk: WireStreamChunk = serde_json::from_value(value.clone()).map_err(malformed)?;
 
     if chunk.model.is_some() {
         acc.model = chunk.model;
@@ -898,6 +1024,10 @@ fn handle_sse_payload(
 
 #[async_trait]
 impl ChatModel for OpenAiCompatibleClient {
+    fn pricing(&self) -> Option<ModelPricing> {
+        self.pricing
+    }
+
     async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
         let mut body = json!({
             "model": self.model,
@@ -917,16 +1047,19 @@ impl ChatModel for OpenAiCompatibleClient {
             })
             .await?;
 
-        let wire: WireResponse = response
-            .json()
-            .await
-            .map_err(|e| RustyError::Llm(format!("malformed chat completions response: {e}")))?;
+        let wire: WireResponse = response.json().await.map_err(|e| RustyError::LlmFailure {
+            class: LlmErrorClass::Decode,
+            message: format!("malformed chat completions response: {e}"),
+        })?;
 
         let choice = wire
             .choices
             .into_iter()
             .next()
-            .ok_or_else(|| RustyError::Llm("chat completions returned zero choices".into()))?;
+            .ok_or_else(|| RustyError::LlmFailure {
+                class: LlmErrorClass::Decode,
+                message: "chat completions returned zero choices".into(),
+            })?;
 
         Ok(ChatResponse {
             message: choice.message,
@@ -975,10 +1108,14 @@ impl ChatModel for OpenAiCompatibleClient {
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => break, // end of body
                 Err(e) => {
-                    return Err(RustyError::Llm(format!(
-                        "stream read from {} failed: {e}",
-                        self.base_url
-                    )))
+                    return Err(RustyError::LlmFailure {
+                        class: if e.is_timeout() {
+                            LlmErrorClass::Timeout
+                        } else {
+                            LlmErrorClass::Unknown
+                        },
+                        message: format!("stream read from {} failed: {e}", self.base_url),
+                    })
                 }
             };
             for payload in decoder.feed_bytes(&bytes) {
@@ -1330,5 +1467,169 @@ mod tests {
         assert!(err.to_string().contains("429"), "got: {err}");
         // 1 initial + 1 retry = 2 attempts.
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    // ---------- usage detail, pricing, classified errors (provider layer) ----------
+
+    #[test]
+    fn usage_detail_fields_are_absent_when_unset() {
+        let usage = Usage {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            cached_tokens: None,
+            reasoning_tokens: None,
+        };
+        // The pinned shape is exactly the three headline fields — nothing
+        // new appears on the wire until a provider reports it.
+        let value = serde_json::to_value(usage).unwrap();
+        assert_eq!(
+            value,
+            json!({"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15})
+        );
+        // Payloads written before the detail fields existed still decode.
+        let back: Usage = serde_json::from_value(value).unwrap();
+        assert_eq!(back, usage);
+    }
+
+    #[test]
+    fn usage_detail_fields_round_trip_when_set() {
+        let usage = Usage {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            cached_tokens: Some(4),
+            reasoning_tokens: Some(2),
+        };
+        let value = serde_json::to_value(usage).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "cached_tokens": 4,
+                "reasoning_tokens": 2,
+            })
+        );
+        let back: Usage = serde_json::from_value(value).unwrap();
+        assert_eq!(back, usage);
+    }
+
+    fn assert_cost(pricing: ModelPricing, usage: Usage, expected: f64) {
+        let cost = pricing.cost_usd(&usage);
+        assert!(
+            (cost - expected).abs() < 1e-12,
+            "expected ${expected}, got ${cost}"
+        );
+    }
+
+    #[test]
+    fn pricing_cost_math_charges_input_and_output() {
+        let pricing = ModelPricing::new(2.0, 8.0);
+        let usage = Usage {
+            prompt_tokens: 1_000_000,
+            completion_tokens: 500_000,
+            total_tokens: 1_500_000,
+            cached_tokens: None,
+            reasoning_tokens: None,
+        };
+        assert_cost(pricing, usage, 2.0 + 4.0);
+        // Zero usage costs zero.
+        assert_cost(pricing, Usage::default(), 0.0);
+    }
+
+    #[test]
+    fn cached_tokens_bill_at_the_cached_rate_never_twice() {
+        let pricing = ModelPricing::new(2.0, 8.0).with_cached_input(0.5);
+        // 1M prompt tokens, 400k of them cache-served: the cached subset
+        // leaves the input-rate pool instead of being charged twice.
+        let usage = Usage {
+            prompt_tokens: 1_000_000,
+            completion_tokens: 0,
+            total_tokens: 1_000_000,
+            cached_tokens: Some(400_000),
+            reasoning_tokens: None,
+        };
+        assert_cost(
+            pricing,
+            usage,
+            600_000.0 * 2.0 / 1e6 + 400_000.0 * 0.5 / 1e6,
+        );
+        // Without a cached rate the subset bills at the full input rate —
+        // still exactly once.
+        let flat = ModelPricing::new(2.0, 8.0);
+        assert_cost(flat, usage, 2.0);
+        // A provider reporting more cached tokens than prompt tokens is
+        // clamped, not trusted.
+        let absurd = Usage {
+            cached_tokens: Some(1_000_000),
+            ..usage
+        };
+        assert_cost(pricing, absurd, 1_000_000.0 * 0.5 / 1e6);
+    }
+
+    #[test]
+    fn client_pricing_is_operator_supplied() {
+        let client = OpenAiCompatibleClient::new("http://localhost", None, "m");
+        assert_eq!(client.pricing(), None);
+        let pricing = ModelPricing::new(2.0, 8.0).with_cached_input(0.5);
+        let client = client.with_pricing(pricing);
+        assert_eq!(client.pricing(), Some(pricing));
+    }
+
+    #[tokio::test]
+    async fn http_failures_carry_a_retry_relevant_class() {
+        for (status, class) in [
+            (429u16, LlmErrorClass::RateLimited),
+            (500, LlmErrorClass::Server),
+            (503, LlmErrorClass::Server),
+            (401, LlmErrorClass::Auth),
+            (403, LlmErrorClass::Auth),
+            (400, LlmErrorClass::InvalidRequest),
+            (422, LlmErrorClass::InvalidRequest),
+        ] {
+            let (addr, _attempts) =
+                start_http_mock(move |_n| (status, r#"{"error":"x"}"#.to_string()));
+            let client =
+                OpenAiCompatibleClient::new(format!("http://{addr}"), None, "m").with_retries(0);
+            let err = client
+                .chat(&[ChatMessage::user("hi")], &[])
+                .await
+                .unwrap_err();
+            // The helper accessor agrees with the variant's payload.
+            assert_eq!(err.llm_class(), class, "status {status}");
+            match err {
+                RustyError::LlmFailure {
+                    class: got,
+                    message,
+                } => {
+                    assert_eq!(got, class, "status {status}");
+                    assert!(message.contains(&status.to_string()), "got: {message}");
+                }
+                other => panic!("status {status}: expected LlmFailure, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn undecodable_response_classifies_as_decode() {
+        let (addr, _attempts) = start_http_mock(|_n| (200, "not json".to_string()));
+        let client =
+            OpenAiCompatibleClient::new(format!("http://{addr}"), None, "m").with_retries(0);
+        let err = client
+            .chat(&[ChatMessage::user("hi")], &[])
+            .await
+            .unwrap_err();
+        assert_eq!(err.llm_class(), LlmErrorClass::Decode);
+        assert!(err.to_string().contains("malformed"), "got: {err}");
+    }
+
+    #[test]
+    fn malformed_stream_chunk_classifies_as_decode() {
+        let mut acc = StreamAccumulator::default();
+        let mut on_token = |_chunk: TokenChunk| {};
+        let err = handle_sse_payload("{not json", &mut acc, &mut on_token).unwrap_err();
+        assert_eq!(err.llm_class(), LlmErrorClass::Decode);
     }
 }

@@ -1115,7 +1115,10 @@ impl Executor {
                     );
                     // LLM and tool failures are the transient, retryable
                     // error classes; everything else is a hard failure.
-                    let retryable = matches!(e, RustyError::Llm(_) | RustyError::Tool(_));
+                    let retryable = matches!(
+                        e,
+                        RustyError::Llm(_) | RustyError::LlmFailure { .. } | RustyError::Tool(_)
+                    );
                     tracing::warn!(
                         node = %name,
                         step = step,

@@ -93,6 +93,8 @@ fn sample_run_event() -> RunEvent {
             prompt_tokens: 128,
             completion_tokens: 32,
             total_tokens: 160,
+            cached_tokens: None,
+            reasoning_tokens: None,
         }),
         cost_usd: Some(0.00042),
         status: EventStatus::Ok,
@@ -314,6 +316,8 @@ impl ChatModel for MockModel {
                 prompt_tokens: 12,
                 completion_tokens: 3,
                 total_tokens: 15,
+                cached_tokens: None,
+                reasoning_tokens: None,
             }),
         })
     }
@@ -498,6 +502,8 @@ async fn journal_records_ordered_causally_linked_classified_events() {
             prompt_tokens: 12,
             completion_tokens: 3,
             total_tokens: 15,
+            cached_tokens: None,
+            reasoning_tokens: None,
         })
     );
     assert_eq!(model.node_id.as_deref(), Some("agent"));

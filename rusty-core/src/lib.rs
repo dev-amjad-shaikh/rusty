@@ -283,7 +283,7 @@ pub mod prelude {
         EffectViolation, IdempotentEffect, IrreversibleEffect, PureEffect, ReadOnlyEffect,
         ShadowOutcomeSource, ShadowRefusal, ShadowRefusalSink, TypedEffect, EFFECT_ID_DOMAIN,
     };
-    pub use crate::error::{Result, RustyError};
+    pub use crate::error::{LlmErrorClass, Result, RustyError};
     pub use crate::executor::{ExecutionOutcome, Executor, GraphEvent, RunConfig};
     pub use crate::graph::{ConditionalRouter, Edge, Graph, GraphBuilder, Route, Send};
     pub use crate::journal::{
@@ -304,7 +304,8 @@ pub mod prelude {
         SURFACE_TAG_SEPARATOR,
     };
     pub use crate::llm::{
-        ChatMessage, ChatModel, ChatResponse, OpenAiCompatibleClient, Role, ToolCall, Usage,
+        ChatMessage, ChatModel, ChatResponse, ModelPricing, OpenAiCompatibleClient, Role, ToolCall,
+        Usage,
     };
     pub use crate::memory::{
         apply_query, assemble, derive_memory_id, estimated_tokens, memory_effect_key,

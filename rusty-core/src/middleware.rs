@@ -39,8 +39,9 @@
 //!   failure-isolation contract and becomes an `ERROR:` tool message the
 //!   model can observe and recover from.
 //! - **Model calls** — wrap a [`crate::llm::ChatModel`] in
-//!   [`MiddlewareChatModel`]; every `chat` (and, via the default fallback,
-//!   `chat_stream`) is intercepted.
+//!   [`MiddlewareChatModel`]; every `chat` and `chat_stream` is intercepted
+//!   (streaming forwards token deltas live and runs the hooks around the
+//!   stream).
 //!
 //! Two reference layers ship here: [`RequestLogger`] (tracing-based
 //! observation) and [`ToolCallBlocklist`] (reject-by-policy).
@@ -54,7 +55,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Result, RustyError};
-use crate::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
+use crate::llm::{ChatMessage, ChatModel, ChatResponse, TokenChunk, ToolCall};
 use crate::node::NodeOutput;
 use crate::state::State;
 
@@ -581,8 +582,11 @@ impl MiddlewareChain {
 /// [`crate::node::NodeContext::middleware`]. The optional `thread`/`node`
 /// labels flow into the [`ModelCall`] context.
 ///
-/// `chat_stream` needs no override: the [`ChatModel`] default falls back to
-/// `chat`, so streamed calls are intercepted identically.
+/// `chat_stream` is intercepted with the same onion as `chat`: before-hooks
+/// run (and may reject) before the provider is called, the caller's token
+/// callback forwards straight to the inner model's stream, and after-hooks
+/// run on the accumulated final [`ChatResponse`]. Token deltas themselves
+/// are not intercepted — interception is per-response, not per-token.
 #[derive(Clone)]
 pub struct MiddlewareChatModel {
     inner: Arc<dyn ChatModel>,
@@ -637,8 +641,40 @@ impl ChatModel for MiddlewareChatModel {
             .await
     }
 
+    async fn chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        if self.chain.is_empty() {
+            return self.inner.chat_stream(messages, tools, on_token).await;
+        }
+        let mut call = ModelCall::new(
+            self.thread_id.clone(),
+            self.node.clone(),
+            messages.to_vec(),
+            tools.to_vec(),
+        );
+        self.chain
+            .run_model(&mut call, move |call| {
+                let inner = Arc::clone(&self.inner);
+                let messages = call.messages().to_vec();
+                let tools = call.tools().to_vec();
+                // The caller's callback passes straight through: deltas are
+                // delivered live, and the after-hooks below see the
+                // accumulated response the stream produced.
+                async move { inner.chat_stream(&messages, &tools, on_token).await }
+            })
+            .await
+    }
+
     fn effect(&self) -> crate::record::Effect {
         self.inner.effect()
+    }
+
+    fn pricing(&self) -> Option<crate::llm::ModelPricing> {
+        self.inner.pricing()
     }
 }
 
@@ -1311,6 +1347,143 @@ mod tests {
         let response = model.chat(&[ChatMessage::user("hi")], &[]).await.unwrap();
         assert_eq!(response.message.content.as_deref(), Some("saw 1 messages"));
         assert_eq!(*seen.lock().unwrap(), Some(1));
+    }
+
+    // ---------- streaming interception (provider layer) ----------
+
+    /// A model with a genuine `chat_stream`: records the message count of
+    /// every invocation and emits two delta chunks before the terminal one.
+    struct ScriptedStreamModel {
+        calls: Arc<Mutex<Vec<usize>>>,
+    }
+
+    #[async_trait]
+    impl ChatModel for ScriptedStreamModel {
+        async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
+            panic!("a streamed test must not degrade to the chat fallback");
+        }
+
+        async fn chat_stream(
+            &self,
+            messages: &[ChatMessage],
+            _tools: &[Value],
+            on_token: &mut (dyn FnMut(TokenChunk) + Send),
+        ) -> Result<ChatResponse> {
+            self.calls.lock().unwrap().push(messages.len());
+            for delta in ["Hel", "lo"] {
+                on_token(TokenChunk {
+                    delta: delta.into(),
+                    finish: false,
+                    raw: None,
+                });
+            }
+            on_token(TokenChunk {
+                delta: String::new(),
+                finish: true,
+                raw: None,
+            });
+            Ok(ChatResponse {
+                message: ChatMessage::assistant("Hello"),
+                model: Some("scripted".into()),
+                usage: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn wrapped_streaming_model_still_streams_real_tokens() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let model = MiddlewareChatModel::new(
+            Arc::new(ScriptedStreamModel {
+                calls: calls.clone(),
+            }),
+            MiddlewareChain::new().layer(ModelMutate),
+        );
+
+        let mut chunks: Vec<TokenChunk> = Vec::new();
+        let response = model
+            .chat_stream(&[ChatMessage::user("hi")], &[], &mut |chunk| {
+                chunks.push(chunk)
+            })
+            .await
+            .unwrap();
+
+        // The inner model's real deltas arrive live — before the override,
+        // a wrapped model degraded to the single-chunk `chat` fallback.
+        let deltas: Vec<&str> = chunks.iter().map(|c| c.delta.as_str()).collect();
+        assert_eq!(deltas, ["Hel", "lo", ""]);
+        assert!(chunks.last().unwrap().finish);
+        // Request hooks ran inbound (ModelMutate injected a system
+        // message)...
+        assert_eq!(*calls.lock().unwrap(), vec![2]);
+        // ...and the after-hook's rewrite of the accumulated response is
+        // what returns.
+        assert_eq!(response.message.content.as_deref(), Some("intercepted"));
+    }
+
+    #[tokio::test]
+    async fn streaming_rejection_prevents_the_inner_call() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let model = MiddlewareChatModel::new(
+            Arc::new(ScriptedStreamModel {
+                calls: calls.clone(),
+            }),
+            MiddlewareChain::new().layer(ModelReject),
+        );
+
+        let mut chunks: Vec<TokenChunk> = Vec::new();
+        let err = model
+            .chat_stream(&[], &[], &mut |chunk| chunks.push(chunk))
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("model_blocked"), "got: {err}");
+        // The provider is never called and no tokens flow.
+        assert!(calls.lock().unwrap().is_empty());
+        assert!(chunks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn streaming_short_circuit_returns_the_substitute_response() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let model = MiddlewareChatModel::new(
+            Arc::new(ScriptedStreamModel {
+                calls: calls.clone(),
+            }),
+            MiddlewareChain::new().layer(ModelCache),
+        );
+
+        let mut chunks: Vec<TokenChunk> = Vec::new();
+        let response = model
+            .chat_stream(&[], &[], &mut |chunk| chunks.push(chunk))
+            .await
+            .unwrap();
+
+        assert_eq!(response.message.content.as_deref(), Some("cached"));
+        assert!(calls.lock().unwrap().is_empty());
+        assert!(chunks.is_empty());
+    }
+
+    /// An empty chain forwards the stream untouched.
+    #[tokio::test]
+    async fn streaming_wrapper_with_empty_chain_delegates() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let model = MiddlewareChatModel::new(
+            Arc::new(ScriptedStreamModel {
+                calls: calls.clone(),
+            }),
+            MiddlewareChain::new(),
+        );
+        let mut chunks: Vec<TokenChunk> = Vec::new();
+        let response = model
+            .chat_stream(&[ChatMessage::user("hi")], &[], &mut |chunk| {
+                chunks.push(chunk)
+            })
+            .await
+            .unwrap();
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(response.message.content.as_deref(), Some("Hello"));
+        assert_eq!(*calls.lock().unwrap(), vec![1]);
     }
 
     struct EchoTool;

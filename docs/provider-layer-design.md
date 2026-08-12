@@ -172,3 +172,30 @@ or Gemini) before the gate is called closed.
 3. Whether `rusty-eval`'s judge benefits from `LlmErrorClass` for
    judge-failure taxonomy — likely, but eval-side changes wait for a
    concrete need.
+
+> **Wave 1 status: implemented.** The three additive core changes landed
+> as written: `Usage` carries `cached_tokens` / `reasoning_tokens`
+> (serde-skipped when unset — every golden, including
+> `tests/golden/run_event.json`, is byte-unchanged), `ModelPricing` plus
+> the defaulted `ChatModel::pricing()` and
+> `OpenAiCompatibleClient::with_pricing` make cost computable, and
+> `RecordingChatModel` is the `cost_usd` producer — priced models journal
+> cost, unpriced models journal exactly what they journaled before (the
+> executor and server never stamp `tokens` on model-call events outside
+> the recording wrapper, so no second site needed the change).
+> `RustyError::LlmFailure { class, message }` with `LlmErrorClass` now
+> crosses the provider boundary from `OpenAiCompatibleClient`'s retry
+> classifier (retry behavior unchanged; `Llm(String)` stays and
+> classifies as `Unknown` via `RustyError::llm_class`), and
+> `From<LlmErrorClass> for durable::ErrorClass` maps the classes onto the
+> retry taxonomy — `Auth` / `InvalidRequest` / `Decode` land on
+> `InvalidInput`, the taxonomy's one never-retried failure class.
+> `MiddlewareChatModel` overrides `chat_stream`: hooks run around the
+> stream, token deltas forward live, and a rejection prevents the inner
+> call, proven by scripted-stream tests in
+> `rusty-core/src/middleware.rs`. One follow-up noted for the adapter
+> wave: the OpenAI client's wire decode does not yet hoist
+> `prompt_tokens_details.cached_tokens` /
+> `completion_tokens_details.reasoning_tokens` into the new `Usage`
+> fields — the type has the home, the mapping lands with the genai
+> adapter's usage translation.

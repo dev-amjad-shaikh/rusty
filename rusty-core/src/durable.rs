@@ -30,6 +30,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::error::LlmErrorClass;
 use crate::record::{
     DecisionAction, DecisionEvent, DecisionFamily, DecisionOutcome, Effect, PayloadRef,
     PolicyVersion,
@@ -121,6 +122,30 @@ impl ErrorClass {
     /// [`Effect`].
     pub fn is_retryable(self) -> bool {
         !matches!(self, ErrorClass::InvalidInput | ErrorClass::Cancelled)
+    }
+}
+
+/// Classify an LLM provider failure for the durable-work taxonomy, so a task
+/// wrapping a model call retries with the right policy instead of the
+/// stringly-typed default.
+///
+/// The mappings follow each class's retry semantics: a rate limit stays a
+/// rate limit, a provider outage is a dependency failure (the taxonomy's own
+/// example for `DependencyFailure` is "model endpoint 5xx"), and the classes
+/// reissuing identical bytes cannot fix — bad credentials, a refused request,
+/// an undecodable response — land on the one never-retried failure class,
+/// `InvalidInput`.
+impl From<LlmErrorClass> for ErrorClass {
+    fn from(class: LlmErrorClass) -> Self {
+        match class {
+            LlmErrorClass::RateLimited => ErrorClass::RateLimited,
+            LlmErrorClass::Timeout => ErrorClass::Timeout,
+            LlmErrorClass::Server => ErrorClass::DependencyFailure,
+            LlmErrorClass::Auth | LlmErrorClass::InvalidRequest | LlmErrorClass::Decode => {
+                ErrorClass::InvalidInput
+            }
+            LlmErrorClass::Unknown => ErrorClass::Unknown,
+        }
     }
 }
 
@@ -827,6 +852,39 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ErrorClass::ResourceExhausted).unwrap(),
             json!("resource_exhausted")
+        );
+    }
+
+    #[test]
+    fn llm_error_classes_map_onto_the_retry_taxonomy() {
+        assert_eq!(
+            ErrorClass::from(LlmErrorClass::RateLimited),
+            ErrorClass::RateLimited
+        );
+        assert_eq!(
+            ErrorClass::from(LlmErrorClass::Timeout),
+            ErrorClass::Timeout
+        );
+        assert_eq!(
+            ErrorClass::from(LlmErrorClass::Server),
+            ErrorClass::DependencyFailure
+        );
+        // The classes a reissued request cannot fix land on the one
+        // never-retried failure class.
+        for class in [
+            LlmErrorClass::Auth,
+            LlmErrorClass::InvalidRequest,
+            LlmErrorClass::Decode,
+        ] {
+            assert_eq!(
+                ErrorClass::from(class),
+                ErrorClass::InvalidInput,
+                "{class:?}"
+            );
+        }
+        assert_eq!(
+            ErrorClass::from(LlmErrorClass::Unknown),
+            ErrorClass::Unknown
         );
     }
 

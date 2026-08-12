@@ -1236,6 +1236,9 @@ fn error_kind(error: &RustyError) -> &'static str {
         RustyError::Interrupt { .. } => "interrupted",
         RustyError::Checkpoint(_) => "checkpoint_error",
         RustyError::Llm(_) => "llm_error",
+        // The classified variant is the same wire kind; the class travels
+        // in the message, not the label.
+        RustyError::LlmFailure { .. } => "llm_error",
         RustyError::Tool(_) => "tool_error",
         RustyError::Serialization(_) => "serialization_error",
         RustyError::InvalidUpdate(_) => "invalid_update",
