@@ -4,11 +4,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "../../state/connection";
-import { useWorkStore } from "../../state/work";
+import { evaluationDatasetJsonl, useWorkStore } from "../../state/work";
 import { durableConnectionScope, rememberRecentWork } from "../../state/recentWork";
 import { mutationScope } from "../../lib/api/client";
 import type { RunEvent } from "../../lib/contracts";
-import { evaluationDatasetJsonl, traceGraphLayout, traceWindow, WorkPage } from "./WorkPage";
+import { traceGraphLayout, traceWindow, WorkPage } from "./WorkPage";
 
 function testRouter(initialEntry = "/work") {
   const root = createRootRoute({ component: Outlet });
@@ -75,7 +75,7 @@ describe("continuous Work journey", () => {
 
   it("exports the page-memory dataset in Rust evaluation JSONL shape", () => {
     const text = evaluationDatasetJsonl([{ connectionKey: "1|https://rusty.example|a", id: "local-1", caseId: "release", runId: "run-1", threadId: "thread-1", agentName: "Analyst", objective: "Verify release", pointer: "/answer", expected: "verified", createdAt: "2026-08-11T00:00:00Z" }]);
-    const [header, item] = text.trim().split("\n").map((line) => JSON.parse(line));
+    const [header, item] = text.trim().split("\n").map((line: string) => JSON.parse(line));
     expect(header).toEqual({ kind: "header", format_version: 1, name: "rusty-studio-evaluations", version: "v1" });
     expect(item).toMatchObject({ kind: "case", id: "release", input: { objective: "Verify release" }, expect: { state: [{ pointer: "/answer", expected: "verified" }] } });
   });

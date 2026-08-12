@@ -51,7 +51,7 @@ use rusty_agent_runtime::registry::{diff_candidates, ArtifactRecord, RegistryErr
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
@@ -68,6 +68,7 @@ use crate::capsules::{CapsuleRecord, CapsuleWrite};
 use crate::coordination;
 use crate::crons::{self, CronRecord, OnRunCompleted};
 use crate::error::ApiError;
+use crate::evaluations;
 use crate::learn::ServerMemoryStore;
 use crate::policy::{self, PolicyActivation, PolicyRecord, PolicySource, PolicyWrite};
 use crate::runs::{
@@ -158,6 +159,10 @@ pub(crate) struct AppState {
     /// clobber a sibling's freshly journaled events. Mirrors
     /// `state_locks`' shape and reasoning.
     pub journal_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Studio evaluation workbench state (Phase 3): tenant-isolated
+    /// dataset, experiment, and gate records persisted under
+    /// `{store_path}/evaluations/`.
+    pub evaluation_state: crate::evaluations::EvaluationState,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -252,7 +257,7 @@ pub(crate) fn build_router(
     )));
     let state = Arc::new(AppState {
         registry,
-        config,
+        config: config.clone(),
         checkpointer,
         run_deps,
         server_store,
@@ -268,6 +273,7 @@ pub(crate) fn build_router(
         mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
+        evaluation_state: crate::evaluations::init_evaluation_state(&config.store_path),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // Warm the capsule authorization plane (R0.9 wave 2): register any
@@ -462,6 +468,31 @@ pub(crate) fn build_router(
             post(rollback_candidate),
         )
         .route("/learn/versions", get(list_version_pointers))
+        // Studio evaluation workbench (Phase 3): tenant-isolated durable
+        // datasets, experiments, comparisons, and gates. Canonicalization,
+        // comparison, and gate semantics remain in `rusty-eval`.
+        .route("/datasets", post(create_dataset).get(list_datasets))
+        .route("/datasets/{name}", get(get_dataset))
+        .route(
+            "/datasets/{name}/versions/{version}",
+            get(get_dataset_version),
+        )
+        .route(
+            "/datasets/{name}/versions/{version}/cases",
+            get(list_dataset_cases),
+        )
+        .route(
+            "/experiments",
+            post(create_experiment).get(list_experiments),
+        )
+        .route("/experiments/{experiment_id}", get(get_experiment))
+        .route(
+            "/experiments/{experiment_id}/report",
+            get(get_experiment_report),
+        )
+        .route("/experiments/compare", get(compare_experiments))
+        .route("/gates", post(create_gate).get(list_gates))
+        .route("/gates/{gate_name}", get(get_gate))
         // The configuration registry (R0.11 wave 1): named, owned
         // artifacts indexing the candidate pipeline (never a fork of it),
         // the append-only commit history, and diff views computed on
@@ -8903,4 +8934,273 @@ async fn get_coordination_trace(
         "connected": trace.is_connected(),
         "trace": trace,
     })))
+}
+
+// ------------------------------------------------------------------
+// Studio evaluation workbench (Phase 3): datasets, experiments,
+// comparisons, gates. Canonical evaluation/comparison/gate semantics
+// live in `rusty-eval`; these routes store the Studio-facing records.
+// ------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CreateDatasetPayload {
+    name: String,
+    version: String,
+    cases: Vec<rusty_eval::EvalCase>,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateDatasetResponse {
+    name: String,
+    version: String,
+    created: bool,
+    case_count: usize,
+    digest: String,
+}
+
+async fn create_dataset(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateDatasetPayload>,
+) -> Result<(StatusCode, Json<CreateDatasetResponse>), ApiError> {
+    let record = evaluations::persist_dataset(
+        &state.evaluation_state,
+        &state.config.store_path,
+        tenant.tenant(),
+        &payload.name,
+        &payload.version,
+        payload.cases,
+    )
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateDatasetResponse {
+            name: record.name,
+            version: record.version,
+            created: true,
+            case_count: record.case_count,
+            digest: record.digest,
+        }),
+    ))
+}
+
+async fn list_datasets(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let datasets = evaluations::list_datasets(&state.evaluation_state, tenant.tenant()).await;
+    Ok(Json(json!({ "datasets": datasets })))
+}
+
+async fn get_dataset(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let versions = evaluations::get_dataset_versions(&state.evaluation_state, tenant.tenant(), &name).await;
+    if versions.is_empty() {
+        return Err(ApiError::not_found(format!("dataset `{name}` not found")));
+    }
+    Ok(Json(json!({ "name": name, "versions": versions })))
+}
+
+async fn get_dataset_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let dataset = evaluations::load_dataset(
+        &state.config.store_path,
+        tenant.tenant(),
+        &name,
+        &version,
+    )
+    .await?;
+    Ok(Json(json!({
+        "name": dataset.name(),
+        "version": dataset.version(),
+        "case_count": dataset.cases().len(),
+    })))
+}
+
+async fn list_dataset_cases(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let dataset = evaluations::load_dataset(
+        &state.config.store_path,
+        tenant.tenant(),
+        &name,
+        &version,
+    )
+    .await?;
+    let cases: Vec<Value> = dataset
+        .cases()
+        .iter()
+        .map(|case| {
+            json!({
+                "id": case.id,
+                "input": case.input,
+                "expect": case.expect,
+                "tags": case.tags,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "cases": cases })))
+}
+
+// Experiment records store configuration, status, and any captured
+// evaluation report. The actual evaluation currently reuses the existing
+// `/learn/candidates/{candidate_id}/evaluate` path; these routes keep the
+// Studio workbench state durable and tenant-isolated.
+
+#[derive(Debug, Deserialize)]
+struct CreateExperimentPayload {
+    #[serde(default)]
+    experiment_id: Option<String>,
+    candidate_id: String,
+    dataset_name: String,
+    dataset_version: String,
+    target_metric: String,
+    thresholds: Value,
+    #[serde(default)]
+    _baseline_experiment_id: Option<String>,
+}
+
+async fn create_experiment(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateExperimentPayload>,
+) -> Result<(StatusCode, Json<evaluations::ExperimentRecord>), ApiError> {
+    let id = payload.experiment_id.unwrap_or_else(|| format!("exp-{}", uuid::Uuid::new_v4()));
+    validate_client_id("experiment_id", &id)?;
+    let record = evaluations::ExperimentRecord {
+        experiment_id: id,
+        dataset_name: payload.dataset_name,
+        dataset_version: payload.dataset_version,
+        candidate_id: payload.candidate_id,
+        target_metric: payload.target_metric,
+        thresholds: payload.thresholds,
+        status: evaluations::ExperimentStatus::Queued,
+        created_at: Utc::now(),
+        evaluation: None,
+    };
+    evaluations::persist_experiment(
+        &state.evaluation_state,
+        &state.config.store_path,
+        tenant.tenant(),
+        &record,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+async fn list_experiments(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let experiments = evaluations::list_experiments(&state.evaluation_state, tenant.tenant()).await;
+    Ok(Json(json!({ "experiments": experiments })))
+}
+
+async fn get_experiment(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(experiment_id): Path<String>,
+) -> Result<Json<evaluations::ExperimentRecord>, ApiError> {
+    evaluations::get_experiment(&state.evaluation_state, tenant.tenant(), &experiment_id)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))
+}
+
+async fn get_experiment_report(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(experiment_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = evaluations::get_experiment(&state.evaluation_state, tenant.tenant(), &experiment_id)
+        .await
+        .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))?;
+    match &record.evaluation {
+        Some(evaluation) => Ok(Json(json!({ "report": evaluation }))),
+        None => Err(ApiError::not_found(format!(
+            "experiment `{experiment_id}` has no report yet"
+        ))),
+    }
+}
+
+async fn compare_experiments(
+    Extension(_tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    Err(ApiError::new(
+        axum::http::StatusCode::NOT_IMPLEMENTED,
+        "not_implemented",
+        "experiment comparison is not yet exposed through the Studio workbench".to_string(),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateGatePayload {
+    name: String,
+    blocked_target: String,
+    metric: String,
+    threshold: f64,
+    #[serde(default = "default_min_evidence")]
+    min_evidence: usize,
+    #[serde(default)]
+    require_approval: bool,
+    dataset_version: String,
+    #[serde(default)]
+    baseline_experiment_id: Option<String>,
+}
+
+fn default_min_evidence() -> usize {
+    1
+}
+
+async fn create_gate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateGatePayload>,
+) -> Result<(StatusCode, Json<evaluations::GateRecord>), ApiError> {
+    let record = evaluations::GateRecord {
+        name: payload.name,
+        blocked_target: payload.blocked_target,
+        metric: payload.metric,
+        threshold: payload.threshold,
+        min_evidence: payload.min_evidence,
+        require_approval: payload.require_approval,
+        dataset_version: payload.dataset_version,
+        baseline_experiment_id: payload.baseline_experiment_id,
+        created_at: Utc::now(),
+    };
+    evaluations::persist_gate(
+        &state.evaluation_state,
+        &state.config.store_path,
+        tenant.tenant(),
+        &record,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+async fn list_gates(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let gates = evaluations::list_gates(&state.evaluation_state, tenant.tenant()).await;
+    Ok(Json(json!({ "gates": gates })))
+}
+
+async fn get_gate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(gate_name): Path<String>,
+) -> Result<Json<evaluations::GateRecord>, ApiError> {
+    evaluations::get_gate(&state.evaluation_state, tenant.tenant(), &gate_name)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("gate `{gate_name}` not found")))
 }

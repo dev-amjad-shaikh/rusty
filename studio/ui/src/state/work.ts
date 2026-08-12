@@ -66,3 +66,9 @@ export const useWorkStore = create<WorkState>((set) => ({
   }),
   clear: () => set({ assistant: null, objective: "", thread: null, receipt: null }),
 }));
+
+export function evaluationDatasetJsonl(cases: EvaluationCase[]) {
+  const header = JSON.stringify({ kind: "header", format_version: 1, name: "rusty-studio-evaluations", version: "v1" });
+  const lines = cases.map((item) => JSON.stringify({ kind: "case", id: item.caseId, input: { objective: item.objective }, expect: { state: [{ pointer: item.pointer, expected: item.expected }] }, tags: ["studio"] }));
+  return `${[header, ...lines].join("\n")}\n`;
+}

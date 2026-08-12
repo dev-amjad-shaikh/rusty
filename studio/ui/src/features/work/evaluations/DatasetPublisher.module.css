@@ -1,0 +1,74 @@
+.publisher {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--surface-2, #2a2f33);
+  border-radius: 0.5rem;
+  background: var(--surface-1, #1a1d20);
+}
+
+.publisher h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.publisher p {
+  margin: 0 0 0.75rem;
+  color: var(--text-2, #a0a8b0);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.fields input {
+  padding: 0.5rem;
+  border: 1px solid var(--surface-2, #2a2f33);
+  border-radius: 0.25rem;
+  background: var(--canvas, #101214);
+  color: inherit;
+}
+
+.hint {
+  color: var(--text-2, #a0a8b0);
+  font-size: 0.875rem;
+}
+
+.error {
+  color: var(--danger, #ef4444);
+  margin-top: 0.5rem;
+}
+
+.success {
+  color: var(--ok, #22c55e);
+  margin-top: 0.5rem;
+}
+
+.list {
+  margin-top: 1rem;
+}
+
+.list ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.list li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.875rem;
+}

@@ -172,6 +172,7 @@ mod coordination;
 mod crons;
 mod deploy;
 mod error;
+mod evaluations;
 mod gate;
 mod journals;
 mod learn;
