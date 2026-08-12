@@ -12,4 +12,10 @@ ignore = [
     # Marvin Attack: rsa is only reachable via sqlx's disabled `mysql`
     # feature; not present in any compiled artifact.
     "RUSTSEC-2023-0071",
+    # paste is flagged unmaintained (no vulnerability). It is a
+    # compile-time proc macro pulled in by genai 0.6 itself — not
+    # optional for us to drop short of forking genai, and it never
+    # appears in runtime code. Revisit when genai's 0.7 line stabilizes
+    # (it may drop the dependency) or if a real advisory lands.
+    "RUSTSEC-2024-0436",
 ]
