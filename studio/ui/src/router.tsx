@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { lazy } from "react";
 import {
   createRootRouteWithContext,
   createRoute,
@@ -6,11 +7,12 @@ import {
   redirect,
 } from "@tanstack/react-router";
 import { AppShell } from "./app/AppShell";
-import { AgentsPage } from "./features/agents/AgentsPage";
-import { PromptStudio } from "./features/prompts/PromptStudio";
-import { WorkPage } from "./features/work/WorkPage";
-import { RunComparePage } from "./features/work/RunComparePage";
-import { OperationsPage } from "./features/operations/OperationsPage";
+
+const AgentsPage = lazy(() => import("./features/agents/AgentsPage").then((module) => ({ default: module.AgentsPage })));
+const PromptStudio = lazy(() => import("./features/prompts/PromptStudio").then((module) => ({ default: module.PromptStudio })));
+const WorkPage = lazy(() => import("./features/work/WorkPage").then((module) => ({ default: module.WorkPage })));
+const RunComparePage = lazy(() => import("./features/work/RunComparePage").then((module) => ({ default: module.RunComparePage })));
+const OperationsPage = lazy(() => import("./features/operations/OperationsPage").then((module) => ({ default: module.OperationsPage })));
 
 interface RouterContext {
   queryClient: QueryClient;

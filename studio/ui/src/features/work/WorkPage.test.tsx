@@ -47,7 +47,7 @@ describe("continuous Work journey", () => {
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/threads" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ thread_id: "thread-1", tenant: "default", graph: "research", metadata: { assistant_id: "agent-1" }, created_at: "2026-08-11T00:00:00Z" }), { status: 201 }));
       if (path === "/threads/thread-1/runs" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", thread_id: "thread-1", status: "running" }), { status: 202 }));
-      if (path === "/runs/run-1") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", thread_id: "thread-1", graph: "research", attempt: 1, status: "success", output: { answer: "done" } })));
+      if (path === "/runs/run-1") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", thread_id: "thread-1", graph: "research", assistant_id: "agent-1", metadata: { studio: { objective: "Verify the release claim" } }, attempt: 1, status: "success", output: { answer: "done" } })));
       if (path === "/runs/run-1/events") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", events, complete: true })));
       throw new Error(`unexpected ${path}`);
     });
@@ -67,14 +67,19 @@ describe("continuous Work journey", () => {
     await userEvent.click(screen.getByRole("button", { name: "Evaluate this run" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Turn this run into a reusable test" })).toBeVisible());
     expect(screen.getByLabelText("Frozen input")).toHaveValue("Verify the release claim");
-    await userEvent.type(screen.getByLabelText("Expected answer"), "The release claim is verified.");
+    expect(screen.getByLabelText("Final-state path")).toHaveValue("/answer");
+    expect(screen.getByLabelText(/Expected value/)).toHaveValue('"done"');
+    await userEvent.clear(screen.getByLabelText(/Expected value/));
+    await userEvent.type(screen.getByLabelText(/Expected value/), '"The release claim is verified."');
     await userEvent.click(screen.getByRole("checkbox"));
     await userEvent.click(screen.getByRole("button", { name: "Add evaluation case" }));
-    expect(screen.getByRole("heading", { name: "1 saved case" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "1 reviewed case" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Prove the next version is better" })).toBeVisible();
+    expect(useWorkStore.getState().cases[0]).toMatchObject({ pointer: "/answer", expected: "The release claim is verified." });
   });
 
   it("exports the page-memory dataset in Rust evaluation JSONL shape", () => {
-    const text = evaluationDatasetJsonl([{ connectionKey: "1|https://rusty.example|a", id: "local-1", caseId: "release", runId: "run-1", threadId: "thread-1", agentName: "Analyst", objective: "Verify release", pointer: "/answer", expected: "verified", createdAt: "2026-08-11T00:00:00Z" }]);
+    const text = evaluationDatasetJsonl([{ connectionKey: "1|https://rusty.example|a", id: "local-1", caseId: "release", runId: "run-1", threadId: "thread-1", agentName: "Analyst", agentId: "assistant-analyst", objective: "Verify release", pointer: "/answer", expected: "verified", createdAt: "2026-08-11T00:00:00Z" }]);
     const [header, item] = text.trim().split("\n").map((line: string) => JSON.parse(line));
     expect(header).toEqual({ kind: "header", format_version: 1, name: "rusty-studio-evaluations", version: "v1" });
     expect(item).toMatchObject({ kind: "case", id: "release", input: { objective: "Verify release" }, expect: { state: [{ pointer: "/answer", expected: "verified" }] } });
@@ -126,6 +131,33 @@ describe("continuous Work journey", () => {
     expect(screen.getByLabelText("Frozen input")).toHaveValue("Input is available in the run evidence.");
     expect(screen.getByText("Run identity only")).toBeVisible();
     expect(screen.queryByText("Objective B")).not.toBeInTheDocument();
+  });
+
+  it("resets every evaluation draft and acknowledgement when the exact run changes", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      const path = new URL(input).pathname;
+      if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
+      const match = path.match(/^\/runs\/(run-[ab])(?:\/events)?$/);
+      if (!match) throw new Error(`unexpected ${path}`);
+      const runId = match[1], threadId = runId === "run-a" ? "thread-a" : "thread-b";
+      if (path.endsWith("/events")) {
+        const exactEvents = events.map((event, index) => ({ ...event, id: `${runId}:${index}`, run_id: runId, thread_id: threadId, parent: index ? `${runId}:${index - 1}` : null }));
+        return Promise.resolve(new Response(JSON.stringify({ run_id: runId, events: exactEvents, complete: true })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ run_id: runId, thread_id: threadId, graph: "research", assistant_id: "agent-1", metadata: { studio: { objective: `Objective ${runId.at(-1)?.toUpperCase()}` } }, attempt: 1, status: "success", output: { answer: runId === "run-a" ? "A" : "B" } })));
+    }));
+    const { router } = renderPage("/work/thread-a/runs/run-a/evaluate");
+    expect(await screen.findByLabelText("Case name")).toHaveValue("run-run-a");
+    await userEvent.clear(screen.getByLabelText("Case name"));
+    await userEvent.type(screen.getByLabelText("Case name"), "edited-a");
+    await userEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("checkbox")).toBeChecked();
+
+    await router.navigate({ to: "/work/$threadId/runs/$runId/evaluate", params: { threadId: "thread-b", runId: "run-b" } });
+    await waitFor(() => expect(screen.getByLabelText("Case name")).toHaveValue("run-run-b"));
+    expect(screen.getByLabelText("Frozen input")).toHaveValue("Objective B");
+    expect(screen.getByLabelText(/Expected value/)).toHaveValue('"B"');
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
   });
 
   it("locks retry when launch acceptance is uncertain", async () => {

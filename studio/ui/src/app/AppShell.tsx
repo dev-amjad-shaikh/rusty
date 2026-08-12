@@ -1,7 +1,9 @@
 import { Link, Outlet } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { Suspense } from "react";
 import { ConnectionDialog } from "../features/connection/ConnectionDialog";
 import { useConnectionStore } from "../state/connection";
+import { useWorkStore } from "../state/work";
 import { primaryDestinations as destinations } from "./navigation";
 import styles from "./AppShell.module.css";
 
@@ -11,6 +13,7 @@ export function AppShell() {
 
   function leave() {
     queryClient.clear();
+    useWorkStore.getState().clear();
     disconnect();
   }
 
@@ -38,7 +41,9 @@ export function AppShell() {
           </nav>
         </aside>
         <main className={styles.main}>
-          <Outlet />
+          <Suspense fallback={<div className="route-loading" role="status">Opening workspace…</div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
       <ConnectionDialog />

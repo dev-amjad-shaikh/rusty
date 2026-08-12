@@ -399,16 +399,21 @@ Exit criteria:
 
 **Outcome:** prove that a proposed agent version is better before promotion.
 
-Status: **comparison, review, portable-dataset, report-inspection, matched-regression, and release-policy foundation delivered**. The Flight Recorder now turns two persisted run journals
+Status: **durable evaluation lane delivered; human review and promotion enforcement remain**. The typed Work
+workspace now turns proven terminal runs into reviewed cases, publishes immutable tenant-scoped datasets,
+runs one exact catalog candidate against the serving baseline, presents the paired result, links every case
+back to its source trace, and saves Rust's durable gate decision after complete-policy review. Dataset admission
+proves the exact tenant/run/thread/agent/input relationship; bounded execution prevents accidental work
+explosion; recent experiment summaries load separately from selected report evidence. The earlier portable
+quality tools remain available in the advanced compatibility surface. The Flight Recorder can also turn two persisted run journals
 into an evidence-led baseline-versus-candidate report: atomic structural divergence, state-channel
 changes, exact resource totals, reconciled finalized/live journal signals, repeat-risk, and a deliberate
 no-winner boundary when no quality evaluator exists. Matching finalized evidence unlocks a human verdict
 docket with a fixed task-outcome/correctness/safety rubric, explicit pairwise judgment, exact run binding,
 fresh edit acknowledgement, and a bounded page-memory review-packet export. Reload or workspace switch
 discards the docket. The packet does not automatically include raw event payloads, exports reviewer notes
-exactly as entered, and declares that it is neither durable nor a promotion gate. Durable datasets,
-review assignment and disagreement handling, evaluators, experiment execution, durable statistical
-reports, gates, and feedback queues still require the platform resources below.
+exactly as entered, and declares that it is neither durable nor a promotion gate. Review assignment,
+disagreement handling, feedback queues, evaluator-specific journals, and promotion enforcement remain.
 One finalized exact journal can also become a reviewed format-v1 `rusty-eval` JSONL case: the first-node
 state is frozen and fully disclosed as portable input, observed tool calls remain an opt-in ordered
 subsequence expectation (extra calls stay legal), and operators can add explicit
@@ -461,8 +466,8 @@ Scope:
 
 Platform dependencies:
 
-- Durable server resources and APIs for datasets, evaluators, experiments, reports, gates, and feedback queues.
-- Background execution and progress streaming for experiments.
+- Durable review assignment, feedback queues, and attributed approval authority.
+- Evaluator callbacks for per-run progress and evaluation-execution journals.
 - Attributed human/service principals, scoped reviewer roles, approval authority, and immutable review audit records.
 
 Exit criteria:
@@ -566,8 +571,8 @@ The milestones overlap in enabling contracts, but delivery remains vertical and 
 | 8 | Durable agent/team inventory and read-only TeamTrace visualization | Usable foundation delivered — declared-team inventory, bounded member health, supervision evidence, browser-scoped Team Run Desk, selected-run live follow, coordination evidence, and connected/incomplete TeamTrace states; durable discovery and team lifecycle remain | Exposes the already-shipped Agent Fabric before adding editing complexity |
 | 9 | Visual team creation for delegate and fan-out | Usable launch and reusable-structure foundation delivered — selected-group roster, per-role pinned contract, topology-score blueprints, safe structural import/export, live-roster drift gates, reviewed immutable local blueprint revisions, stable retry/deduplication identity, bounded effect/context preflight, fan-out policy, explicit acknowledgement, and direct evidence handoff; server-persisted team definitions and shared topology lifecycle remain | Delivers the most common multi-agent patterns first |
 | 10 | Race, quorum, supervision, recovery, and team preflight | Partial — race effect admission, quorum threshold/resolver, cancellation/waste guidance, exact receipt checks, direct evidence handoff, bounded run reconciliation, and stale-evidence recovery delivered; supervision control, operator recovery actions, topology-wide preflight, and replay remain | Completes safe multi-agent construction |
-| 11 | Evaluation experiment workspace and comparison report | Partial — evidence-led run comparison, exact-pair page-memory verdict docket, bounded review export, finalized-run-to-versioned-JSONL case foundry, portable multi-case Dataset Workbench, exact aggregate-reconciling Experiment Report Explorer, deterministic privacy-safe Failure Atlas, paired statistical regression evidence, release-policy authoring, and deterministic local gate-decision preview delivered; durable reviews/dataset catalogs/report discovery, evaluators, experiment execution, durable statistical reports, trusted provenance, and version-attributed decisions still need platform APIs | Converts the existing quality library into a product workflow |
-| 12 | Failure clusters, annotation queues, and release gates | Local failure-clustering, policy-authoring, and portable gate-decision foundations delivered; durable cluster reports, queues, approval identity, gate decisions, and promotion enforcement need platform APIs | Closes the human quality loop |
+| 11 | Evaluation experiment workspace and comparison report | Delivered — exact run provenance, immutable dataset versions, bounded asynchronous evaluation, selected-report loading, paired Rust comparison, source-run drill-down, and durable gate decisions are one Work lane; evaluator journals and human-review assignment remain | Converts the quality library into a product workflow |
+| 12 | Failure clusters, annotation queues, and release gates | Partial — durable release-gate decisions and local failure clustering are delivered; durable cluster reports, queues, approval identity, and promotion enforcement remain | Closes the human quality loop |
 | 13 | Learning candidate inbox, proposal foundry, promotion, canary, and rollback | Usable governance foundation delivered — immutable dossiers, guided prompt/policy/tool proposal creation with exact content seals and finalized evidence, replay-fixture evaluation, exact scoped approval, serving pointers, and rollback; automatic and memory-set distillation, drift automation, attributed authority, and complete policy activation remain | Delivers governed self-improvement on top of identity, evidence, review, and evaluation |
 | 14 | Environment, deployment, and fleet surfaces | Webhook and schedule operations foundations delivered — signed webhook creation, pause/resume, event/dead-letter evidence, safe replay, run handoff, and reviewed durable cron creation/inventory/removal; fired-run discovery, environments, deployments, fleet health, and shared credential contracts remain | Builds operations on stable identity, version, quality, and audit concepts |
 

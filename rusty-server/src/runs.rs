@@ -333,6 +333,14 @@ pub(crate) struct RunInfo {
     /// External thread id for wire responses.
     pub wire_thread_id: String,
     pub graph: String,
+    /// External assistant identity captured in the accepted run payload.
+    pub assistant_id: Option<String>,
+    /// Accepted run metadata, including Studio's exact objective when present.
+    pub metadata: Option<Value>,
+    /// Exact accepted input used to bind derived evaluation cases.
+    pub input: Option<Value>,
+    /// Stable server acceptance time used to bind downstream evidence.
+    pub created_at: chrono::DateTime<chrono::Utc>,
     pub attempt: usize,
     pub status: RunStatus,
     /// The terminal JSON once the run has finished (`None` while active).
@@ -357,6 +365,7 @@ pub struct RunHandle {
     pub(crate) status: RunStatus,
     /// Original run payload.
     pub(crate) payload: RunPayload,
+    pub(crate) created_at: chrono::DateTime<chrono::Utc>,
     /// The registry binding resolved at admission (R0.11 wave 2) — `None`
     /// for an unbound run, which behaves byte-identically to before.
     pub(crate) admission: Option<crate::registry::RegistryAdmission>,
@@ -529,6 +538,10 @@ impl RunManager {
             thread_id: h.thread_id.clone(),
             wire_thread_id: h.wire_thread_id.clone(),
             graph: h.graph.clone(),
+            assistant_id: h.payload.assistant_id.clone(),
+            metadata: h.payload.metadata.clone(),
+            input: h.payload.input.clone(),
+            created_at: h.created_at,
             attempt: h.attempt,
             status: h.status,
             terminal: h.terminal.borrow().clone(),
@@ -820,6 +833,7 @@ pub(crate) async fn schedule(
         attempt: 0, // assigned by RunManager::insert
         status: RunStatus::Pending,
         payload,
+        created_at: chrono::Utc::now(),
         admission,
         deployment,
         sink: FrameSink::new(deps.log_capacity, bcast_tx),

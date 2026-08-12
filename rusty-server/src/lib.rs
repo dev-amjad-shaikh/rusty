@@ -207,6 +207,10 @@ use rusty_agent_runtime::state::StateSpec;
 use tokio_util::sync::CancellationToken;
 
 pub use error::ApiError;
+pub use evaluations::{
+    EvalStudioExperimentEvaluator, ExperimentConfig as StudioExperimentConfig, ExperimentOutcome,
+    StudioExperimentEvaluator,
+};
 pub use gate::{
     DirectoryGatePolicySource, EvalRevisionGateEvaluator, GatePolicySource, RevisionEvaluationAgent,
 };
@@ -486,6 +490,13 @@ pub struct ServerConfig {
     /// [`ServerConfig::with_candidate_evaluator`].
     pub candidate_evaluator: Option<Arc<dyn CandidateEvaluator>>,
 
+    /// The Studio experiment evaluator: the application-owned adapter that
+    /// turns one exact candidate and one durable dataset into Rust-authored
+    /// baseline and candidate reports. Without one, Studio can curate
+    /// datasets and inspect prior results but starting an experiment fails
+    /// closed with `409`.
+    pub studio_experiment_evaluator: Option<Arc<dyn StudioExperimentEvaluator>>,
+
     /// The revision gate evaluator (R0.12 wave 4): the release-gate
     /// composition promotions into a gated environment drive. `None`
     /// (the default) fails closed — a promotion into an environment
@@ -596,6 +607,7 @@ impl Default for ServerConfig {
             tenant_task_quotas: HashMap::new(),
             promotion_envelope: PromotionEnvelope::r08_default(),
             candidate_evaluator: None,
+            studio_experiment_evaluator: None,
             revision_gate_evaluator: None,
             default_environment_tag: None,
             capsule_policy_files: Vec::new(),
@@ -814,6 +826,16 @@ impl ServerConfig {
     /// on evidence, and evidence requires an evaluator.
     pub fn with_candidate_evaluator(mut self, evaluator: Arc<dyn CandidateEvaluator>) -> Self {
         self.candidate_evaluator = Some(evaluator);
+        self
+    }
+
+    /// Register the application-specific execution adapter used by Studio's
+    /// durable evaluation lane.
+    pub fn with_studio_experiment_evaluator(
+        mut self,
+        evaluator: Arc<dyn StudioExperimentEvaluator>,
+    ) -> Self {
+        self.studio_experiment_evaluator = Some(evaluator);
         self
     }
 

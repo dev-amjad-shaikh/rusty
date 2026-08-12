@@ -1,0 +1,70 @@
+.lab { margin-top: 28px; border: 1px solid var(--line); border-radius: 15px; overflow: hidden; background: var(--surface-1); }
+.labHeader { display: flex; align-items: center; justify-content: space-between; gap: 28px; padding: 24px 26px; border-bottom: 1px solid var(--line); background: linear-gradient(120deg, var(--surface-0), var(--blue-soft)); }
+.labHeader h2 { margin: 3px 0 0; font-size: 24px; letter-spacing: -.04em; }
+.steps { display: flex; align-items: center; gap: 0; margin: 0; padding: 0; list-style: none; }
+.steps li { display: flex; align-items: center; gap: 7px; color: var(--text-faint); font: 700 9px var(--mono); }
+.steps li:not(:last-child)::after { content: ""; width: clamp(16px, 3vw, 38px); height: 1px; margin: 0 6px; background: var(--line-strong); }
+.steps span { display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid var(--line-strong); border-radius: 50%; }
+.steps li[data-state="current"] { color: var(--accent); }
+.steps li[data-state="current"] span { border-color: var(--accent); background: var(--accent-soft); }
+.steps li[data-state="done"] { color: var(--moss); }
+.steps li[data-state="done"] span { border-color: var(--moss); background: var(--moss-soft); }
+.status, .error { margin: 0; padding: 10px 26px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.status { color: var(--moss); background: var(--moss-soft); }
+.error { color: #f4b7aa; background: var(--danger-soft); }
+.queryError { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 26px; border-bottom: 1px solid var(--line); color: #f4b7aa; background: var(--danger-soft); font-size: 10px; }
+.loading { padding: 24px 26px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 10px; }
+.actionRow { display: grid; grid-template-columns: minmax(210px, .55fr) minmax(440px, 1.45fr); gap: 32px; align-items: end; padding: 23px 26px; border-bottom: 1px solid var(--line); }
+.actionRow h3, .gate h3, .results h3, .running h3, .settled h3 { margin: 3px 0 0; font-size: 17px; letter-spacing: -.025em; }
+.actionRow p { margin: 7px 0 0; color: var(--text-muted); font-size: 10px; }
+.inlineFields, .runFields { display: grid; gap: 9px; align-items: end; }
+.inlineFields { grid-template-columns: 1fr 1fr auto; }
+.runFields { grid-template-columns: minmax(150px, 1.3fr) minmax(145px, 1fr) 90px 90px auto; }
+.inlineFields label, .runFields label, .gateGrid label { display: grid; gap: 6px; color: var(--text-muted); font-size: 9px; font-weight: 700; }
+.inlineFields input, .runFields input, .runFields select, .gateGrid input { min-width: 0; width: 100%; min-height: 39px; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--canvas); color: var(--text); }
+.inlineFields button, .runFields button { white-space: nowrap; }
+.experimentTabs { display: flex; gap: 6px; overflow-x: auto; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface-0); }
+.experimentTabs button { flex: none; display: grid; gap: 3px; min-width: 150px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; }
+.experimentTabs button[aria-pressed="true"] { border-color: var(--accent-border); background: var(--accent-soft); color: var(--text); }
+.experimentTabs span { font-size: 9px; }
+.experimentTabs small { color: var(--text-faint); font: 7px var(--mono); }
+.experimentTabs b { font: 8px var(--mono); text-transform: uppercase; }
+.catalogBoundary { margin: 0; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--surface-0); color: var(--text-faint); font: 8px var(--mono); }
+.running { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 28px 26px; border-bottom: 1px solid var(--line); }
+.running progress { width: min(480px, 60vw); height: 7px; margin-top: 15px; accent-color: var(--accent); }
+.settled { padding: 28px 26px; border-bottom: 1px solid var(--line); background: var(--danger-soft); }
+.results { border-bottom: 1px solid var(--line); }
+.results > header, .gate > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px 26px 18px; }
+.score { display: flex; align-items: center; gap: 13px; }
+.score span { display: grid; gap: 2px; color: var(--text-faint); font-size: 8px; text-transform: uppercase; }
+.score b { color: var(--text); font: 18px var(--mono); }
+.score i { color: var(--accent); font-style: normal; }
+.resultMetrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 26px 20px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.resultMetrics > span { display: grid; gap: 4px; min-width: 0; padding: 12px; border-right: 1px solid var(--line); }
+.resultMetrics > span:last-child { border-right: 0; }
+.resultMetrics small { color: var(--text-faint); font: 8px var(--mono); text-transform: uppercase; }
+.resultMetrics b { overflow-wrap: anywhere; font-size: 11px; }
+.resultMetrics [data-danger] { background: var(--danger-soft); color: #f4b7aa; }
+.caseTable { margin: 0 26px 26px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.caseHead, .caseRow { display: grid; grid-template-columns: minmax(150px, 1.3fr) repeat(3, minmax(80px, .7fr)) minmax(120px, 1fr); gap: 12px; align-items: center; padding: 10px 12px; }
+.caseHead { background: var(--surface-0); color: var(--text-faint); font: 8px var(--mono); text-transform: uppercase; }
+.caseRow { border-top: 1px solid var(--line); font-size: 10px; }
+.caseRow b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.caseRow [data-change="regressed"] { color: var(--danger); }
+.caseRow [data-change="improved"] { color: var(--moss); }
+.caseRow a { color: var(--accent); }
+.casePager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: -12px 26px 26px; }
+.casePager span { color: var(--text-muted); font: 9px var(--mono); }
+.gate { padding-bottom: 24px; background: linear-gradient(160deg, var(--surface-1), var(--moss-soft)); }
+.gate strong { padding: 7px 10px; border: 1px solid var(--moss); border-radius: 99px; color: var(--moss); font: 8px var(--mono); text-transform: uppercase; }
+.gate strong[data-outcome="block"] { border-color: var(--danger); color: var(--danger); }
+.gateGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 26px 16px; }
+.gate details { margin: 0 26px 16px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.gate summary { color: var(--text-muted); font-size: 10px; cursor: pointer; }
+.gate pre { max-height: 260px; overflow: auto; white-space: pre-wrap; font: 9px/1.55 var(--mono); }
+.ack { display: flex; align-items: flex-start; gap: 9px; margin: 0 26px 16px; color: var(--text-muted); font-size: 10px; }
+.ack input { margin-top: 1px; accent-color: var(--accent); }
+.gate > button { margin-left: 26px; }
+@media (max-width: 1320px) { .actionRow { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .labHeader { align-items: flex-start; flex-direction: column; } .runFields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .runFields button { grid-column: 1 / -1; } }
+@media (max-width: 680px) { .labHeader, .actionRow, .results > header, .gate > header { padding-inline: 16px; } .steps { width: 100%; justify-content: space-between; } .steps li { gap: 4px; font-size: 7px; } .steps li:not(:last-child)::after { width: 10px; margin: 0 2px; } .inlineFields, .runFields, .gateGrid { grid-template-columns: 1fr; } .inlineFields button, .runFields button { grid-column: auto; width: 100%; } .resultMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-inline: 16px; } .resultMetrics > span:nth-child(2) { border-right: 0; } .resultMetrics > span:nth-child(-n+2) { border-bottom: 1px solid var(--line); } .caseTable { margin-inline: 16px; overflow-x: auto; } .caseHead, .caseRow { min-width: 650px; } .casePager { justify-content: space-between; margin-inline: 16px; } .gateGrid, .gate details, .ack { margin-inline: 16px; } .gate > button { width: calc(100% - 32px); margin-left: 16px; } }

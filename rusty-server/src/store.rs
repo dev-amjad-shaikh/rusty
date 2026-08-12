@@ -53,6 +53,64 @@ fn item_path(store_root: &Path, namespace: &str, key: &str) -> PathBuf {
     namespace_dir(store_root, namespace).join(format!("{key}.json"))
 }
 
+fn lock_path(store_root: &Path, namespace: &str, key: &str) -> PathBuf {
+    namespace_dir(store_root, namespace).join(format!(".{key}.lock"))
+}
+
+async fn acquire_item_lock(
+    store_root: &Path,
+    namespace: &str,
+    key: &str,
+) -> std::io::Result<PathBuf> {
+    let dir = namespace_dir(store_root, namespace);
+    tokio::fs::create_dir_all(&dir).await?;
+    let path = lock_path(store_root, namespace, key);
+    for _ in 0..2_000 {
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+        {
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let stale = tokio::fs::metadata(&path)
+                    .await
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|modified| modified.elapsed().ok())
+                    .is_some_and(|elapsed| elapsed > std::time::Duration::from_secs(30));
+                if stale {
+                    let _ = tokio::fs::remove_file(&path).await;
+                    continue;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        format!("timed out acquiring store lock for {namespace}/{key}"),
+    ))
+}
+
+async fn release_item_lock(path: PathBuf) -> std::io::Result<()> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+async fn write_item(store_root: &Path, item: &StoreItem) -> std::io::Result<()> {
+    let raw = serde_json::to_vec_pretty(item).expect("store item serialization is infallible");
+    let path = item_path(store_root, &item.namespace, &item.key);
+    let temporary = path.with_extension(format!("json.tmp-{}", uuid::Uuid::new_v4()));
+    tokio::fs::write(&temporary, raw).await?;
+    tokio::fs::rename(temporary, path).await
+}
+
 /// Read one item (`None` when absent). A corrupt item file reads as absent
 /// — but loudly, matching `list`'s warn-and-skip behavior, since silent
 /// corruption would make a later `put` answer `201` and reset `created_at`.
@@ -99,6 +157,72 @@ pub(crate) async fn put(
     let raw = serde_json::to_vec_pretty(&item).expect("store item serialization is infallible");
     tokio::fs::write(item_path(store_root, namespace, key), raw).await?;
     Ok((item, created))
+}
+
+/// Atomically insert one item when the key is absent. This operation is
+/// process-safe for the file backend and is used by durable ownership claims.
+pub(crate) async fn create(
+    store_root: &Path,
+    namespace: &str,
+    key: &str,
+    value: Value,
+) -> std::io::Result<Option<StoreItem>> {
+    let lock = acquire_item_lock(store_root, namespace, key).await?;
+    let result = async {
+        if get(store_root, namespace, key).await?.is_some() {
+            return Ok(None);
+        }
+        let now = Utc::now();
+        let item = StoreItem {
+            namespace: namespace.to_string(),
+            key: key.to_string(),
+            value,
+            created_at: now,
+            updated_at: now,
+        };
+        write_item(store_root, &item).await?;
+        Ok(Some(item))
+    }
+    .await;
+    let release = release_item_lock(lock).await;
+    match (result, release) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
+}
+
+/// Atomically replace one item only when its revision is still current.
+pub(crate) async fn compare_and_swap(
+    store_root: &Path,
+    namespace: &str,
+    key: &str,
+    expected_updated_at: DateTime<Utc>,
+    value: Value,
+) -> std::io::Result<Option<StoreItem>> {
+    let lock = acquire_item_lock(store_root, namespace, key).await?;
+    let result = async {
+        let Some(existing) = get(store_root, namespace, key).await? else {
+            return Ok(None);
+        };
+        if existing.updated_at != expected_updated_at {
+            return Ok(None);
+        }
+        let item = StoreItem {
+            namespace: namespace.to_string(),
+            key: key.to_string(),
+            value,
+            created_at: existing.created_at,
+            updated_at: Utc::now(),
+        };
+        write_item(store_root, &item).await?;
+        Ok(Some(item))
+    }
+    .await;
+    let release = release_item_lock(lock).await;
+    match (result, release) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
 }
 
 /// Delete one item. Returns `true` when it existed.

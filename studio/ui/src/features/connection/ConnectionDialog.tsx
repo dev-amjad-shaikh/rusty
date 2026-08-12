@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getServerInfo, StudioApiError } from "../../lib/api/client";
 import { useConnectionStore } from "../../state/connection";
+import { useWorkStore } from "../../state/work";
 import styles from "./ConnectionDialog.module.css";
 
 export function ConnectionDialog() {
@@ -45,6 +46,7 @@ export function ConnectionDialog() {
       const provisional = { epoch: 0, origin: normalized, apiKey, tenantFingerprint: "checking" };
       const info = await getServerInfo(provisional);
       queryClient.clear();
+      useWorkStore.getState().clear();
       await connect(normalized, apiKey, info);
     } catch (caught) {
       setError(caught instanceof StudioApiError ? caught.message : "Rusty could not be reached.");

@@ -98,6 +98,9 @@
 .traceFooter span { color: var(--text-faint); font-size: 10px; }
 .traceFooter code { color: var(--text-muted); font-family: var(--mono); }
 
+.evaluationShell { padding-bottom: 28px; }
+.evaluationShell > .evaluateWorkspace { margin: 0; }
+.evaluationShell > :last-child { margin-inline: 24px; }
 .evaluateWorkspace { display: grid; grid-template-columns: minmax(260px, .7fr) minmax(420px, 1.3fr); }
 .evaluationIntro, .evaluationForm { padding: clamp(24px, 4vw, 44px); }
 .evaluationIntro { border-right: 1px solid var(--line); background: var(--blue-soft); }
@@ -109,10 +112,10 @@
 .evaluationIntro dd { overflow: hidden; margin: 0; font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .evaluationForm { display: grid; gap: 18px; }
 .evaluationForm > label { display: grid; gap: 7px; color: var(--text-muted); font-size: 11px; font-weight: 700; }
-.evaluationForm textarea, .evaluationForm input { width: 100%; min-height: 43px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--canvas); color: var(--text); resize: vertical; }
+.evaluationForm textarea, .evaluationForm input, .evaluationForm select { width: 100%; min-height: 43px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--canvas); color: var(--text); resize: vertical; }
 .evaluationForm textarea[readonly] { color: var(--text-muted); }
 .evaluationForm .ack { display: flex; grid-auto-flow: column; align-items: flex-start; gap: 9px; font-weight: 500; line-height: 1.5; }
-.ack input { flex: none; margin-top: 2px; accent-color: var(--accent); }
+.evaluationForm .ack input { flex: none; width: 16px; height: 16px; min-height: 0; margin-top: 2px; padding: 0; accent-color: var(--accent); }
 .evaluationForm > p { margin: -8px 0 0; color: var(--text-faint); font-size: 9px; }
 .dataset { margin-top: 32px; padding-top: 22px; border-top: 1px solid color-mix(in srgb, var(--blue) 18%, transparent); }
 .dataset header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
@@ -124,6 +127,7 @@
 .dataset li span { flex: none; color: var(--text-faint); }
 @media (max-width: 860px) { .runGrid { grid-template-columns: 1fr; } .composer { border-right: 0; border-bottom: 1px solid var(--line); } }
 @media (max-width: 980px) { .traceHeader { align-items: stretch; flex-direction: column; } .metrics { width: 100%; } .traceGrid { grid-template-columns: 1fr; } .graphViewport { max-height: 430px; border-right: 0; border-bottom: 1px solid var(--line); } .evaluateWorkspace { grid-template-columns: 1fr; } .evaluationIntro { border-right: 0; border-bottom: 1px solid var(--line); } }
+@media (max-width: 620px) { .evaluationShell > :last-child { margin-inline: 10px; } }
 @media (max-width: 620px) { .contextBar { grid-template-columns: repeat(2, minmax(0, 1fr)); } .identity { grid-column: 1 / -1; text-align: left; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .traceFooter { align-items: stretch; flex-direction: column; } .traceFooter button { width: 100%; } }
 @media (max-width: 700px) { .traceTools { align-items: stretch; flex-direction: column; } .tracePager { justify-content: space-between; } }
 @media (max-width: 520px) { .stages button span { display: none; } .runActions { align-items: stretch; flex-direction: column; } .runActions button { width: 100%; } .runSummary dl { grid-template-columns: 1fr; } .runSummary dl div { border-right: 0; border-bottom: 1px solid var(--line); } .runSummary dl div:last-child { border-bottom: 0; } .eventDetail dl { grid-template-columns: 1fr; } .eventDetail dl div, .eventDetail dl div:nth-child(2n), .eventDetail dl div:nth-last-child(-n+2) { border-right: 0; border-bottom: 1px solid var(--line); } .eventDetail dl div:last-child { border-bottom: 0; } }

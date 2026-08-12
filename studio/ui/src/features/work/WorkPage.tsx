@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { parse as parseLossless, stringify as stringifyLossless } from "lossless-json";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { connectionScope, createThread, getRun, getRunEvidence, listAssistants, mutationScope, startRun, StudioApiError } from "../../lib/api/client";
 import type { Assistant, RunEvent, RunEvidence, RunSnapshot } from "../../lib/contracts";
@@ -8,8 +9,7 @@ import { type EvaluationCase, evaluationDatasetJsonl, useWorkStore } from "../..
 import { durableConnectionScope, readRecentWork, rememberRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
 import { bytePreview } from "../../lib/text";
 import { ArtifactTray } from "./artifacts/ArtifactTray";
-import { DatasetPublisher } from "./evaluations/DatasetPublisher";
-import { ExperimentWorkbench } from "./evaluations/ExperimentWorkbench";
+import { EvaluationLane } from "./evaluations/EvaluationLane";
 import styles from "./WorkPage.module.css";
 
 const stages = ["run", "trace", "evaluate"] as const;
@@ -122,8 +122,11 @@ export function WorkPage() {
   const envelopeMismatch = Boolean((run.data && !exactRun) || (evidence.data && !exactEvidence));
   const traceReady = Boolean(exactRun && exactEvidence?.events.length);
   const evaluationReady = Boolean(exactEvidence?.complete && exactRun && ["success", "error", "interrupted", "cancelled"].includes(exactRun.status));
-  const activeAgent = (ownsRoute ? work.assistant : null) ?? (!params.runId ? assistants.data?.find((item) => item.assistant_id === selectedAgentId) : null) ?? null;
-  const routeObjective = ownsRoute ? work.objective : "";
+  const activeAgent = (ownsRoute ? work.assistant : null)
+    ?? (exactRun?.assistant_id ? assistants.data?.find((item) => item.assistant_id === exactRun.assistant_id) : null)
+    ?? (!params.runId ? assistants.data?.find((item) => item.assistant_id === selectedAgentId) : null)
+    ?? null;
+  const routeObjective = ownsRoute ? work.objective : runStudioObjective(exactRun);
   useEffect(() => {
     if (!exactRun || exactRun.run_id !== params.runId || exactRun.thread_id !== params.threadId) return;
     if (recentIds.some((item) => item.runId === exactRun.run_id && item.threadId === exactRun.thread_id)) return;
@@ -153,7 +156,7 @@ export function WorkPage() {
           {routedRun && (run.isError || evidence.isError || envelopeMismatch) && <div className="empty-state" role="alert"><span className="eyebrow">Run evidence unavailable</span><h2>This workspace could not prove the requested run</h2><p>{envelopeMismatch ? "The run status and journal did not agree with this exact thread and run." : run.error instanceof Error ? run.error.message : evidence.error instanceof Error ? evidence.error.message : "Reload the exact run evidence."}</p><button className="secondary-button" type="button" onClick={() => { run.refetch(); evidence.refetch(); }}>Retry evidence</button></div>}
           {routedRun && !run.isError && !evidence.isError && !envelopeMismatch && (!exactRun || !exactEvidence) && <div className={styles.loading} aria-live="polite">Loading exact run evidence…</div>}
           {stage === "trace" && exactRun && exactEvidence && !run.isError && !evidence.isError && !envelopeMismatch && <TraceWorkspace evidence={exactEvidence} run={exactRun} openEvaluate={() => openStage("evaluate")} />}
-          {stage === "evaluate" && exactEvidence && exactRun && params.threadId && !run.isError && !evidence.isError && !envelopeMismatch && <EvaluateWorkspace connectionKey={scope} evidence={exactEvidence} run={exactRun} threadId={params.threadId} agent={activeAgent} objective={routeObjective} />}
+          {stage === "evaluate" && exactEvidence && exactRun && params.threadId && !run.isError && !evidence.isError && !envelopeMismatch && <EvaluateWorkspace key={`${params.threadId}\0${exactRun.run_id}`} connectionKey={scope} evidence={exactEvidence} run={exactRun} threadId={params.threadId} agent={activeAgent} objective={routeObjective} />}
           {routedRun && stage !== "evaluate" && exactRun && exactEvidence && !run.isError && !evidence.isError && !envelopeMismatch && params.runId && <ArtifactTray runId={params.runId} />}
         </div>
       )}
@@ -241,20 +244,27 @@ function EvaluateWorkspace({ connectionKey, evidence, run, threadId, agent, obje
   const allCases = useWorkStore((state) => state.cases);
   const cases = useMemo(() => allCases.filter((item) => item.connectionKey === connectionKey), [allCases, connectionKey]);
   const [caseId, setCaseId] = useState(`run-${run.run_id.slice(0, 8)}`);
-  const [expected, setExpected] = useState("");
+  const outputOptions = useMemo(() => evaluationOutputOptions(run.output), [run.output]);
+  const [pointer, setPointer] = useState(outputOptions[0]?.pointer ?? "");
+  const [expected, setExpected] = useState(() => outputOptions[0] ? evaluationValueText(outputOptions[0].value) : "");
   const [reviewed, setReviewed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [caseError, setCaseError] = useState("");
-  const caseReady = reviewed && Boolean(expected.trim()) && Boolean(caseId.trim());
+  const caseReady = reviewed && Boolean(expected.trim()) && Boolean(caseId.trim()) && Boolean(pointer);
   function save(event: FormEvent) {
     event.preventDefault();
     if (!caseReady) return;
     const cleanId = caseId.trim(), cleanExpected = expected.trim();
     if (utf8(cleanId) > 256 || /[\u0000-\u001f\u007f]/.test(cleanId)) { setCaseError("Use a short case name without control characters."); return; }
-    if (utf8(cleanExpected) > 16 * 1024) { setCaseError("Expected answer must be 16 KiB or smaller."); return; }
+    if (!validJsonPointer(pointer) || utf8(pointer) > 1_024) { setCaseError("Choose a valid final-state path from this run."); return; }
+    if (utf8(cleanExpected) > 16 * 1024) { setCaseError("Expected JSON must be 16 KiB or smaller."); return; }
+    let expectedValue: unknown;
+    try { expectedValue = parseLossless(cleanExpected); }
+    catch { setCaseError("Expected value must be valid JSON."); return; }
     if (cases.some((item) => item.caseId === cleanId)) { setCaseError("Each case name must be unique in this dataset."); return; }
     if (cases.length >= 100) { setCaseError("Download this 100-case dataset before starting another."); return; }
-    const value = { connectionKey, caseId: cleanId, runId: run.run_id, threadId, agentName: agent?.name ?? "Unknown agent", objective, pointer: "/answer", expected: cleanExpected };
+    if (!run.assistant_id) { setCaseError("This run does not carry an exact agent identity, so it cannot be published as an agent evaluation case."); return; }
+    const value = { connectionKey, caseId: cleanId, runId: run.run_id, threadId, agentName: agent?.name ?? run.assistant_id, agentId: run.assistant_id, objective, pointer, expected: expectedValue };
     const preview = [...cases, { ...value, id: "preview", createdAt: new Date().toISOString() }];
     if (utf8(evaluationDatasetJsonl(preview)) > 128 * 1024) { setCaseError("Download this dataset before adding more source material."); return; }
     addCase(value); setCaseError(""); setSaved(true);
@@ -265,7 +275,27 @@ function EvaluateWorkspace({ connectionKey, evidence, run, threadId, agent, obje
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = "rusty-studio-evaluations@v1.jsonl"; anchor.click(); URL.revokeObjectURL(url);
   }
-  return <section className={styles.evaluateWorkspace}><div className={styles.evaluationIntro}><span className="eyebrow">Evaluate</span><h2>Turn this run into a reusable test</h2><p>The case begins from the exact run and its final journal. Review the input before it enters your page-memory dataset.</p><dl><div><dt>Agent</dt><dd>{agent?.name ?? "Run identity only"}</dd></div><div><dt>Run</dt><dd>{short(run.run_id)}</dd></div><div><dt>Events</dt><dd>{evidence.events.length}</dd></div><div><dt>Outcome</dt><dd>{run.status}</dd></div></dl>{cases.length > 0 && <section className={styles.dataset}><header><div><span className="eyebrow">Dataset</span><h3>{cases.length} saved case{cases.length === 1 ? "" : "s"}</h3></div><button type="button" className="secondary-button" onClick={download}>Download JSONL</button></header><ol>{cases.slice(-5).map((item) => <li key={item.id}><b>{item.caseId}</b><span>{item.agentName}</span></li>)}</ol><DatasetPublisher cases={cases} /><ExperimentWorkbench /></section>}</div><form className={styles.evaluationForm} onSubmit={save}><label>Case name<input value={caseId} onChange={(event) => { setCaseId(event.target.value); setSaved(false); setCaseError(""); }} /></label><label>Frozen input<textarea rows={5} value={objective || "Input is available in the run evidence."} readOnly /></label><label>Expected answer<textarea rows={5} value={expected} onChange={(event) => { setExpected(event.target.value); setSaved(false); setCaseError(""); }} placeholder="Write the exact answer value that should appear at /answer." /></label><label className={styles.ack}><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />I reviewed the frozen input and it is safe to include in this dataset.</label>{caseError && <p className={styles.error} role="alert">{caseError}</p>}<button className="primary-button" type="submit" disabled={!caseReady}>{saved ? "Case saved" : "Add evaluation case"}</button><p>Page-memory dataset. Download before reloading or changing connections.</p></form></section>;
+  return <section className={styles.evaluationShell}>
+    <div className={styles.evaluateWorkspace}>
+      <div className={styles.evaluationIntro}>
+        <span className="eyebrow">Evaluate</span><h2>Turn this run into a reusable test</h2>
+        <p>The case begins from the exact run and its final journal. Review the input before it enters your page-memory dataset.</p>
+        <dl><div><dt>Agent</dt><dd>{agent?.name ?? "Run identity only"}</dd></div><div><dt>Run</dt><dd>{short(run.run_id)}</dd></div><div><dt>Events</dt><dd>{evidence.events.length}</dd></div><div><dt>Outcome</dt><dd>{run.status}</dd></div></dl>
+        {cases.length > 0 && <section className={styles.dataset}><header><div><span className="eyebrow">Working set</span><h3>{cases.length} reviewed case{cases.length === 1 ? "" : "s"}</h3></div><button type="button" className="secondary-button" onClick={download}>Download JSONL</button></header><ol>{cases.slice(-5).map((item) => <li key={item.id}><b>{item.caseId}</b><span>{item.agentName}</span></li>)}</ol></section>}
+      </div>
+      <form className={styles.evaluationForm} onSubmit={save}>
+        <label>Case name<input value={caseId} onChange={(event) => { setCaseId(event.target.value); setSaved(false); setCaseError(""); }} /></label>
+        <label>Frozen input<textarea rows={5} value={objective || "Input is available in the run evidence."} readOnly /></label>
+        <label>Final-state path<select value={pointer} onChange={(event) => { const next = outputOptions.find((item) => item.pointer === event.target.value); setPointer(event.target.value); if (next) setExpected(evaluationValueText(next.value)); setSaved(false); setCaseError(""); }}>{outputOptions.length ? outputOptions.map((item) => <option key={item.pointer} value={item.pointer}>{item.pointer}</option>) : <option value="">No final output is available</option>}</select></label>
+        <label>Expected value <span className="field-hint">JSON</span><textarea rows={5} value={expected} onChange={(event) => { setExpected(event.target.value); setSaved(false); setCaseError(""); }} placeholder='For example: "approved", true, or {"status":"ready"}' /></label>
+        <label className={styles.ack}><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />I reviewed the frozen input, state path, and expected value, and they are safe to publish.</label>
+        {caseError && <p className={styles.error} role="alert">{caseError}</p>}
+        <button className="primary-button" type="submit" disabled={!caseReady}>{saved ? "Case saved" : "Add evaluation case"}</button>
+        <p>Cases stay in this tab until you publish or download them.</p>
+      </form>
+    </div>
+    {cases.length > 0 && <EvaluationLane cases={cases} />}
+  </section>;
 }
 
 function Metric({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "danger" }) { return <span className={tone === "danger" ? styles.metricDanger : styles.metric}><small>{label}</small><b>{value}</b></span>; }
@@ -276,3 +306,20 @@ function eventCategory(event: RunEvent) { if (event.status === "error") return "
 function eventTitle(event: RunEvent) { return event.node_id ? `${event.node_id} · ${event.kind.replaceAll("_", " ")}` : event.kind.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function kindIcon(kind: string) { if (kind === "model_call") return "M"; if (kind.includes("tool") || kind.includes("call")) return "T"; if (kind.includes("checkpoint")) return "C"; if (kind.includes("interrupt")) return "!"; return "•"; }
 function utf8(value: string) { return new TextEncoder().encode(value).byteLength; }
+function evaluationValueText(value: unknown) { return stringifyLossless(value, null, 2) ?? "null"; }
+function evaluationOutputOptions(output: unknown) {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return [];
+  return Object.entries(output as Record<string, unknown>).slice(0, 100).map(([key, value]) => ({
+    pointer: `/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`,
+    value,
+  }));
+}
+function validJsonPointer(value: string) { return value === "" || (value.startsWith("/") && value.split("/").slice(1).every((segment) => !/~(?:[^01]|$)/.test(segment))); }
+function runStudioObjective(run: RunSnapshot | null) {
+  const metadata = run?.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "";
+  const studio = (metadata as Record<string, unknown>).studio;
+  if (!studio || typeof studio !== "object" || Array.isArray(studio)) return "";
+  const objective = (studio as Record<string, unknown>).objective;
+  return typeof objective === "string" ? objective : "";
+}

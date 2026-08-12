@@ -228,15 +228,18 @@ and never ranked as better than complete evidence.
 
 ### Evaluation
 
-Evaluation currently creates a bounded portable JSONL case from an exact final run and compares captured runs.
-The remaining server-backed evaluation target is:
+Evaluation is a connected lane inside Work: reviewed run evidence becomes an immutable, tenant-scoped dataset;
+one catalog candidate is run against a serving baseline; Rust produces paired aggregate and per-case comparison;
+and a release gate can be saved only after the complete policy is disclosed and acknowledged. Every published
+case retains its exact source run, thread, agent, and capture time so regressions link back to evidence rather
+than to an inferred context.
 
-- Add the exact input/output to a dataset case with deliberate redaction review.
-- Select evaluators and a baseline.
-- Run an experiment and track progress.
-- Compare aggregate metrics and paired cases.
-- Drill from a regression directly back to the contributing trace.
-- Save a gate only after its complete policy and evidence are reviewable.
+Experiment execution is capability-bound. The server must be configured with an application evaluator that can
+apply the selected candidate to the runnable graph. The supplied standard adapter supports memory-set candidates;
+other candidate kinds fail explicitly unless the application provides the corresponding adapter. Current durable
+progress distinguishes queued, active, complete, failed, cancelled, and expired-ownership work. A renewed
+durable lease prevents another server replica from classifying live evaluation work as abandoned. Intermediate
+per-run progress and evaluation-execution journals remain evaluator extensions; Studio does not fabricate them.
 
 ## Operations model
 

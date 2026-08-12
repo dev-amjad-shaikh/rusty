@@ -273,7 +273,7 @@ pub(crate) fn build_router(
         mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
-        evaluation_state: crate::evaluations::init_evaluation_state(&config.store_path),
+        evaluation_state: crate::evaluations::init_evaluation_state(),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // Warm the capsule authorization plane (R0.9 wave 2): register any
@@ -486,6 +486,10 @@ pub(crate) fn build_router(
             post(create_experiment).get(list_experiments),
         )
         .route("/experiments/{experiment_id}", get(get_experiment))
+        .route(
+            "/experiments/{experiment_id}/cancel",
+            post(cancel_experiment),
+        )
         .route(
             "/experiments/{experiment_id}/report",
             get(get_experiment_report),
@@ -1558,6 +1562,8 @@ async fn get_run(
         "run_id": run_id,
         "thread_id": info.wire_thread_id,
         "graph": info.graph,
+        "assistant_id": info.assistant_id,
+        "metadata": info.metadata,
         "attempt": info.attempt,
         "status": info.status.as_str(),
     });
@@ -8946,7 +8952,7 @@ async fn get_coordination_trace(
 struct CreateDatasetPayload {
     name: String,
     version: String,
-    cases: Vec<rusty_eval::EvalCase>,
+    cases: Vec<evaluations::PublishedEvalCase>,
 }
 
 #[derive(Debug, Serialize)]
@@ -8961,11 +8967,45 @@ struct CreateDatasetResponse {
 async fn create_dataset(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<crate::auth::TenantContext>,
-    Json(payload): Json<CreateDatasetPayload>,
+    Json(mut payload): Json<CreateDatasetPayload>,
 ) -> Result<(StatusCode, Json<CreateDatasetResponse>), ApiError> {
-    let record = evaluations::persist_dataset(
+    for case in &mut payload.cases {
+        let source = &mut case.source;
+        let info = state
+            .run_deps
+            .manager
+            .info(&source.run_id)
+            .await
+            .ok_or_else(|| {
+                ApiError::not_found(format!("source run `{}` not found", source.run_id))
+            })?;
+        if !tenant.owns(&info.thread_id) {
+            return Err(ApiError::not_found(format!(
+                "source run `{}` not found",
+                source.run_id
+            )));
+        }
+        if info.wire_thread_id != source.thread_id
+            || info.assistant_id.as_deref() != Some(source.agent_id.as_str())
+            || info.input.as_ref() != Some(&case.case.input)
+        {
+            return Err(ApiError::bad_request(format!(
+                "case `{}` source does not match the run's exact thread, assistant, and input",
+                case.case.id
+            )));
+        }
+        if !info.status.is_terminal() {
+            return Err(ApiError::conflict(format!(
+                "case `{}` source run is not complete",
+                case.case.id
+            )));
+        }
+        // Capture time is server evidence, never a client assertion.
+        source.captured_at = info.created_at;
+    }
+    let (record, created) = evaluations::persist_dataset(
         &state.evaluation_state,
-        &state.config.store_path,
+        &state.server_store,
         tenant.tenant(),
         &payload.name,
         &payload.version,
@@ -8973,11 +9013,15 @@ async fn create_dataset(
     )
     .await?;
     Ok((
-        StatusCode::CREATED,
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
         Json(CreateDatasetResponse {
             name: record.name,
             version: record.version,
-            created: true,
+            created,
             case_count: record.case_count,
             digest: record.digest,
         }),
@@ -8988,8 +9032,10 @@ async fn list_datasets(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<crate::auth::TenantContext>,
 ) -> Result<Json<Value>, ApiError> {
-    let datasets = evaluations::list_datasets(&state.evaluation_state, tenant.tenant()).await;
-    Ok(Json(json!({ "datasets": datasets })))
+    let catalog = evaluations::list_datasets(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "datasets": catalog.datasets, "truncated": catalog.truncated }),
+    ))
 }
 
 async fn get_dataset(
@@ -8997,7 +9043,8 @@ async fn get_dataset(
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Path(name): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let versions = evaluations::get_dataset_versions(&state.evaluation_state, tenant.tenant(), &name).await;
+    let versions =
+        evaluations::get_dataset_versions(&state.server_store, tenant.tenant(), &name).await?;
     if versions.is_empty() {
         return Err(ApiError::not_found(format!("dataset `{name}` not found")));
     }
@@ -9009,13 +9056,8 @@ async fn get_dataset_version(
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Path((name, version)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let dataset = evaluations::load_dataset(
-        &state.config.store_path,
-        tenant.tenant(),
-        &name,
-        &version,
-    )
-    .await?;
+    let dataset =
+        evaluations::load_dataset(&state.server_store, tenant.tenant(), &name, &version).await?;
     Ok(Json(json!({
         "name": dataset.name(),
         "version": dataset.version(),
@@ -9028,25 +9070,9 @@ async fn list_dataset_cases(
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Path((name, version)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let dataset = evaluations::load_dataset(
-        &state.config.store_path,
-        tenant.tenant(),
-        &name,
-        &version,
-    )
-    .await?;
-    let cases: Vec<Value> = dataset
-        .cases()
-        .iter()
-        .map(|case| {
-            json!({
-                "id": case.id,
-                "input": case.input,
-                "expect": case.expect,
-                "tags": case.tags,
-            })
-        })
-        .collect();
+    let cases =
+        evaluations::load_dataset_cases(&state.server_store, tenant.tenant(), &name, &version)
+            .await?;
     Ok(Json(json!({ "cases": cases })))
 }
 
@@ -9062,46 +9088,302 @@ struct CreateExperimentPayload {
     candidate_id: String,
     dataset_name: String,
     dataset_version: String,
+    #[serde(default = "default_runs_per_case")]
+    runs_per_case: usize,
+    #[serde(default = "default_experiment_concurrency")]
+    max_concurrency: usize,
     target_metric: String,
-    thresholds: Value,
-    #[serde(default)]
-    _baseline_experiment_id: Option<String>,
+    thresholds: rusty_eval::CompareThresholds,
+}
+
+fn default_runs_per_case() -> usize {
+    1
+}
+fn default_experiment_concurrency() -> usize {
+    1
+}
+
+fn bounded_experiment_failure(reason: String) -> String {
+    const MAX_BYTES: usize = 4 * 1024;
+    if reason.len() <= MAX_BYTES {
+        return reason;
+    }
+    let mut end = MAX_BYTES;
+    while !reason.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}… (failure detail truncated)", &reason[..end])
 }
 
 async fn create_experiment(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Json(payload): Json<CreateExperimentPayload>,
-) -> Result<(StatusCode, Json<evaluations::ExperimentRecord>), ApiError> {
-    let id = payload.experiment_id.unwrap_or_else(|| format!("exp-{}", uuid::Uuid::new_v4()));
+) -> Result<(StatusCode, Json<evaluations::ExperimentSummary>), ApiError> {
+    let id = payload
+        .experiment_id
+        .unwrap_or_else(|| format!("exp-{}", uuid::Uuid::new_v4()));
     validate_client_id("experiment_id", &id)?;
+    if !(1..=20).contains(&payload.runs_per_case) {
+        return Err(ApiError::bad_request(
+            "runs_per_case must be between 1 and 20".to_owned(),
+        ));
+    }
+    if !(1..=16).contains(&payload.max_concurrency) {
+        return Err(ApiError::bad_request(
+            "max_concurrency must be between 1 and 16".to_owned(),
+        ));
+    }
+    if payload.target_metric.trim().is_empty() || payload.target_metric.len() > 256 {
+        return Err(ApiError::bad_request(
+            "target_metric must be between 1 and 256 bytes".to_owned(),
+        ));
+    }
+    if !payload.thresholds.max_pass_rate_drop.is_finite()
+        || !(0.0..=1.0).contains(&payload.thresholds.max_pass_rate_drop)
+        || !payload.thresholds.max_latency_p95_ratio.is_finite()
+        || payload.thresholds.max_latency_p95_ratio < 0.0
+    {
+        return Err(ApiError::bad_request(
+            "experiment thresholds must be finite and non-negative; pass-rate drop cannot exceed 1"
+                .to_owned(),
+        ));
+    }
+    let dataset = evaluations::load_dataset(
+        &state.server_store,
+        tenant.tenant(),
+        &payload.dataset_name,
+        &payload.dataset_version,
+    )
+    .await?;
+    let candidate = state
+        .server_store
+        .get_candidate(tenant.tenant(), &payload.candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("candidate `{}` not found", payload.candidate_id))
+        })?
+        .candidate;
+    let evaluator = state.config.studio_experiment_evaluator.clone().ok_or_else(|| {
+        ApiError::conflict(
+            "this server has no Studio experiment evaluator configured; datasets remain available, but experiments cannot run".to_owned(),
+        )
+    })?;
+    let now = Utc::now();
+    let config = evaluations::ExperimentConfig {
+        runs_per_case: payload.runs_per_case,
+        max_concurrency: payload.max_concurrency,
+        target_metric: payload.target_metric,
+        thresholds: payload.thresholds,
+    };
     let record = evaluations::ExperimentRecord {
-        experiment_id: id,
+        experiment_id: id.clone(),
         dataset_name: payload.dataset_name,
         dataset_version: payload.dataset_version,
         candidate_id: payload.candidate_id,
-        target_metric: payload.target_metric,
-        thresholds: payload.thresholds,
+        config: config.clone(),
         status: evaluations::ExperimentStatus::Queued,
-        created_at: Utc::now(),
-        evaluation: None,
+        created_at: now,
+        updated_at: now,
+        baseline_report: None,
+        candidate_report: None,
+        comparison: None,
+        execution: Some(evaluations::execution_lease(&state.evaluation_state)),
     };
-    evaluations::persist_experiment(
+    let created = evaluations::put_experiment(
         &state.evaluation_state,
-        &state.config.store_path,
+        &state.server_store,
         tenant.tenant(),
         &record,
+        true,
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(record)))
+    if created {
+        let state_for_run = Arc::clone(&state);
+        let tenant_id = tenant.tenant().to_owned();
+        let cancellation =
+            evaluations::register_cancellation(&state.evaluation_state, tenant.tenant(), &id).await;
+        let mut running = record.clone();
+        let id_for_run = id.clone();
+        tokio::spawn(async move {
+            running.status = evaluations::ExperimentStatus::Running {
+                completed_runs: 0,
+                total_runs: dataset.cases().len().saturating_mul(config.runs_per_case),
+            };
+            running.updated_at = Utc::now();
+            evaluations::renew_execution_lease(&state_for_run.evaluation_state, &mut running);
+            if let Err(error) = evaluations::put_experiment(
+                &state_for_run.evaluation_state,
+                &state_for_run.server_store,
+                &tenant_id,
+                &running,
+                false,
+            )
+            .await
+            {
+                tracing::error!(experiment_id = %id_for_run, %error, "failed to mark experiment running");
+                evaluations::clear_cancellation(
+                    &state_for_run.evaluation_state,
+                    &tenant_id,
+                    &id_for_run,
+                )
+                .await;
+                return;
+            }
+            let evaluation = evaluator.evaluate(&candidate, &dataset, &config);
+            tokio::pin!(evaluation);
+            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+            heartbeat.tick().await;
+            let result = loop {
+                tokio::select! {
+                    () = cancellation.cancelled() => break None,
+                    outcome = &mut evaluation => break Some(outcome),
+                    _ = heartbeat.tick() => {
+                        if running.execution.as_ref().is_none_or(|lease| lease.expires_at <= Utc::now()) {
+                            break Some(Err("Rusty lost experiment ownership before evaluation settled; start a new experiment with a new identity".to_owned()));
+                        }
+                        evaluations::renew_execution_lease(&state_for_run.evaluation_state, &mut running);
+                        if let Err(error) = evaluations::put_experiment(
+                            &state_for_run.evaluation_state,
+                            &state_for_run.server_store,
+                            &tenant_id,
+                            &running,
+                            false,
+                        ).await {
+                            tracing::error!(experiment_id = %id_for_run, %error, "failed to renew experiment lease");
+                            break Some(Err("Rusty could not preserve experiment ownership; refresh before retrying".to_owned()));
+                        }
+                    }
+                }
+            };
+            let mut settled = running;
+            settled.updated_at = Utc::now();
+            settled.execution = None;
+            match result {
+                None => settled.status = evaluations::ExperimentStatus::Cancelled,
+                Some(Err(reason)) => {
+                    settled.status = evaluations::ExperimentStatus::Failed {
+                        reason: bounded_experiment_failure(reason),
+                    }
+                }
+                Some(Ok(outcome)) => {
+                    let expected_cases: std::collections::BTreeSet<String> =
+                        dataset.cases().iter().map(|case| case.id.clone()).collect();
+                    let expected_tags: std::collections::BTreeMap<String, Vec<String>> = dataset
+                        .cases()
+                        .iter()
+                        .map(|case| (case.id.clone(), case.tags.clone()))
+                        .collect();
+                    let report_cases = |report: &rusty_eval::ExperimentReport| {
+                        report
+                            .cases
+                            .iter()
+                            .map(|case| case.case_id.clone())
+                            .collect::<std::collections::BTreeSet<String>>()
+                    };
+                    let report_tags = |report: &rusty_eval::ExperimentReport| {
+                        report
+                            .cases
+                            .iter()
+                            .map(|case| (case.case_id.clone(), case.tags.clone()))
+                            .collect::<std::collections::BTreeMap<String, Vec<String>>>()
+                    };
+                    let exact = rusty_eval::experiment::validate_report(&outcome.baseline_report)
+                        .is_ok()
+                        && rusty_eval::experiment::validate_report(&outcome.candidate_report)
+                            .is_ok()
+                        && outcome.baseline_report.dataset_name == settled.dataset_name
+                        && outcome.baseline_report.dataset_version == settled.dataset_version
+                        && outcome.candidate_report.dataset_name == settled.dataset_name
+                        && outcome.candidate_report.dataset_version == settled.dataset_version
+                        && outcome.baseline_report.runs_per_case == config.runs_per_case
+                        && outcome.candidate_report.runs_per_case == config.runs_per_case
+                        && outcome.baseline_report.max_concurrency == config.max_concurrency
+                        && outcome.candidate_report.max_concurrency == config.max_concurrency
+                        && report_cases(&outcome.baseline_report) == expected_cases
+                        && report_cases(&outcome.candidate_report) == expected_cases
+                        && report_tags(&outcome.baseline_report) == expected_tags
+                        && report_tags(&outcome.candidate_report) == expected_tags;
+                    if exact {
+                        settled.comparison = Some(rusty_eval::compare(
+                            &outcome.baseline_report,
+                            &outcome.candidate_report,
+                            &config.thresholds,
+                        ));
+                        settled.baseline_report = Some(outcome.baseline_report);
+                        settled.candidate_report = Some(outcome.candidate_report);
+                        settled.status = evaluations::ExperimentStatus::Complete;
+                        if let Err(reason) = evaluations::ensure_experiment_storage_bound(&settled)
+                        {
+                            settled.baseline_report = None;
+                            settled.candidate_report = None;
+                            settled.comparison = None;
+                            settled.status = evaluations::ExperimentStatus::Failed {
+                                reason: bounded_experiment_failure(reason),
+                            };
+                        }
+                    } else {
+                        settled.status = evaluations::ExperimentStatus::Failed {
+                            reason: "the evaluator returned reports for a different dataset or repetition plan".to_owned(),
+                        };
+                    }
+                }
+            }
+            if let Err(error) = evaluations::put_experiment(
+                &state_for_run.evaluation_state,
+                &state_for_run.server_store,
+                &tenant_id,
+                &settled,
+                false,
+            )
+            .await
+            {
+                tracing::error!(experiment_id = %id_for_run, %error, "failed to persist experiment outcome");
+            }
+            evaluations::clear_cancellation(
+                &state_for_run.evaluation_state,
+                &tenant_id,
+                &id_for_run,
+            )
+            .await;
+        });
+    }
+    let receipt = if created {
+        record
+    } else {
+        evaluations::get_experiment(
+            &state.evaluation_state,
+            &state.server_store,
+            tenant.tenant(),
+            &id,
+        )
+        .await?
+        .ok_or_else(|| ApiError::internal(format!("converged experiment `{id}` disappeared")))?
+    };
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(evaluations::ExperimentSummary::from(&receipt)),
+    ))
 }
 
 async fn list_experiments(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<crate::auth::TenantContext>,
 ) -> Result<Json<Value>, ApiError> {
-    let experiments = evaluations::list_experiments(&state.evaluation_state, tenant.tenant()).await;
-    Ok(Json(json!({ "experiments": experiments })))
+    let catalog = evaluations::list_experiments(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+    )
+    .await?;
+    Ok(Json(
+        json!({ "experiments": catalog.experiments, "truncated": catalog.truncated }),
+    ))
 }
 
 async fn get_experiment(
@@ -9109,10 +9391,16 @@ async fn get_experiment(
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Path(experiment_id): Path<String>,
 ) -> Result<Json<evaluations::ExperimentRecord>, ApiError> {
-    evaluations::get_experiment(&state.evaluation_state, tenant.tenant(), &experiment_id)
-        .await
-        .map(Json)
-        .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))
+    evaluations::get_experiment(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &experiment_id,
+    )
+    .await?
+    .map(evaluations::public_experiment)
+    .map(Json)
+    .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))
 }
 
 async fn get_experiment_report(
@@ -9120,24 +9408,105 @@ async fn get_experiment_report(
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Path(experiment_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let record = evaluations::get_experiment(&state.evaluation_state, tenant.tenant(), &experiment_id)
-        .await
-        .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))?;
-    match &record.evaluation {
-        Some(evaluation) => Ok(Json(json!({ "report": evaluation }))),
-        None => Err(ApiError::not_found(format!(
+    let record = evaluations::get_experiment(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &experiment_id,
+    )
+    .await?
+    .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))?;
+    match (
+        &record.baseline_report,
+        &record.candidate_report,
+        &record.comparison,
+    ) {
+        (Some(baseline), Some(candidate), Some(comparison)) => Ok(Json(json!({
+            "baseline_report": baseline,
+            "candidate_report": candidate,
+            "comparison": comparison,
+        }))),
+        _ => Err(ApiError::not_found(format!(
             "experiment `{experiment_id}` has no report yet"
         ))),
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct CompareExperimentsQuery {
+    baseline: String,
+    candidate: String,
+    #[serde(default = "default_max_pass_rate_drop")]
+    max_pass_rate_drop: f64,
+    #[serde(default = "default_max_latency_ratio")]
+    max_latency_p95_ratio: f64,
+}
+
+fn default_max_pass_rate_drop() -> f64 {
+    0.05
+}
+fn default_max_latency_ratio() -> f64 {
+    1.25
+}
+
 async fn compare_experiments(
-    Extension(_tenant): Extension<crate::auth::TenantContext>,
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Query(query): Query<CompareExperimentsQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    Err(ApiError::new(
-        axum::http::StatusCode::NOT_IMPLEMENTED,
-        "not_implemented",
-        "experiment comparison is not yet exposed through the Studio workbench".to_string(),
+    if !query.max_pass_rate_drop.is_finite()
+        || !(0.0..=1.0).contains(&query.max_pass_rate_drop)
+        || !query.max_latency_p95_ratio.is_finite()
+        || query.max_latency_p95_ratio < 0.0
+    {
+        return Err(ApiError::bad_request(
+            "comparison thresholds must be finite and non-negative; pass-rate drop cannot exceed 1"
+                .to_owned(),
+        ));
+    }
+    let report = evaluations::compare_records(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &query.baseline,
+        &query.candidate,
+        rusty_eval::CompareThresholds {
+            max_pass_rate_drop: query.max_pass_rate_drop,
+            max_latency_p95_ratio: query.max_latency_p95_ratio,
+        },
+    )
+    .await?;
+    Ok(Json(json!({ "comparison": report })))
+}
+
+async fn cancel_experiment(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(experiment_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = evaluations::get_experiment(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &experiment_id,
+    )
+    .await?
+    .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))?;
+    if !matches!(
+        record.status,
+        evaluations::ExperimentStatus::Queued | evaluations::ExperimentStatus::Running { .. }
+    ) {
+        return Err(ApiError::conflict(format!(
+            "experiment `{experiment_id}` is already settled"
+        )));
+    }
+    if !evaluations::cancel(&state.evaluation_state, tenant.tenant(), &experiment_id).await {
+        return Err(ApiError::conflict(
+            "experiment execution is not active on this server; refresh its durable status before retrying".to_owned(),
+        ));
+    }
+    Ok(Json(
+        json!({ "experiment_id": experiment_id, "cancellation_requested": true }),
     ))
 }
 
@@ -9145,19 +9514,9 @@ async fn compare_experiments(
 struct CreateGatePayload {
     name: String,
     blocked_target: String,
-    metric: String,
-    threshold: f64,
-    #[serde(default = "default_min_evidence")]
-    min_evidence: usize,
-    #[serde(default)]
-    require_approval: bool,
-    dataset_version: String,
-    #[serde(default)]
-    baseline_experiment_id: Option<String>,
-}
-
-fn default_min_evidence() -> usize {
-    1
+    experiment_id: String,
+    policy: Value,
+    acknowledged: bool,
 }
 
 async fn create_gate(
@@ -9165,33 +9524,56 @@ async fn create_gate(
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Json(payload): Json<CreateGatePayload>,
 ) -> Result<(StatusCode, Json<evaluations::GateRecord>), ApiError> {
-    let record = evaluations::GateRecord {
-        name: payload.name,
-        blocked_target: payload.blocked_target,
-        metric: payload.metric,
-        threshold: payload.threshold,
-        min_evidence: payload.min_evidence,
-        require_approval: payload.require_approval,
-        dataset_version: payload.dataset_version,
-        baseline_experiment_id: payload.baseline_experiment_id,
-        created_at: Utc::now(),
-    };
-    evaluations::persist_gate(
+    if !payload.acknowledged {
+        return Err(ApiError::bad_request(
+            "acknowledged must be true after reviewing the complete policy and experiment evidence"
+                .to_owned(),
+        ));
+    }
+    let policy = rusty_eval::GatePolicy::from_json(
+        &serde_json::to_string(&payload.policy).map_err(internal_err)?,
+    )
+    .map_err(|error| ApiError::bad_request(format!("invalid gate policy: {error}")))?;
+    if policy.name() != payload.name {
+        return Err(ApiError::bad_request(
+            "gate policy name must match the requested gate name".to_owned(),
+        ));
+    }
+    let record = evaluations::build_gate(
         &state.evaluation_state,
-        &state.config.store_path,
+        &state.server_store,
+        tenant.tenant(),
+        payload.name,
+        payload.blocked_target,
+        payload.experiment_id,
+        policy,
+    )
+    .await?;
+    let (receipt, created) = evaluations::persist_gate(
+        &state.evaluation_state,
+        &state.server_store,
         tenant.tenant(),
         &record,
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(record)))
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(receipt),
+    ))
 }
 
 async fn list_gates(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<crate::auth::TenantContext>,
 ) -> Result<Json<Value>, ApiError> {
-    let gates = evaluations::list_gates(&state.evaluation_state, tenant.tenant()).await;
-    Ok(Json(json!({ "gates": gates })))
+    let catalog = evaluations::list_gates(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "gates": catalog.gates, "truncated": catalog.truncated }),
+    ))
 }
 
 async fn get_gate(
@@ -9199,8 +9581,8 @@ async fn get_gate(
     Extension(tenant): Extension<crate::auth::TenantContext>,
     Path(gate_name): Path<String>,
 ) -> Result<Json<evaluations::GateRecord>, ApiError> {
-    evaluations::get_gate(&state.evaluation_state, tenant.tenant(), &gate_name)
-        .await
+    evaluations::get_gate(&state.server_store, tenant.tenant(), &gate_name)
+        .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found(format!("gate `{gate_name}` not found")))
 }

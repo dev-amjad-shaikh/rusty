@@ -6,6 +6,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 8px; font-size: clamp(30px, 4vw, 50px); line-height: 1; letter-spacing: -.055em; }
 .route-error { padding: 32px; color: var(--danger); }
+.route-loading { padding: 32px; color: var(--text-muted); }
 .page { max-width: 1320px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 28px; }
 .page-header p { max-width: 680px; margin-bottom: 0; color: var(--text-muted); line-height: 1.55; }

@@ -1,145 +1,109 @@
 # Studio Phase 3 — Evaluation and Experiment Workbench
 
-## Customer outcome
+## Product outcome
 
-A person can turn a reviewed run into a durable evaluation case, publish an immutable dataset version, run a controlled experiment against an immutable agent version, monitor progress, compare it with a baseline, investigate regressions with exact trace links, and save a fully reviewed gate.
+Evaluation is one continuous lane inside **Work**. A person can turn exact run evidence into reviewed cases,
+publish those cases as an immutable dataset version, challenge one exact candidate, compare paired outcomes,
+open the source trace for a regression, and save a release gate only after reviewing the policy it binds.
 
-Evaluation remains the third Work stage. There is no new primary Evaluations or Datasets destination.
+The primary experience is not a collection of dataset, experiment, and gate admin forms. Those are durable
+objects behind one user task: **prove that the next version is better**.
 
-## Current backend state
+## Experience
 
-The runtime (`rusty-eval`) already implements canonical datasets, reports, comparisons, statistics, clustering, and gate semantics. The server has candidate evaluation at `POST /learn/candidates/{candidate_id}/evaluate`, which reads a dataset version from a server-local directory source configured at startup.
+The Evaluate stage presents four connected steps:
 
-What is missing for the Studio product journey:
+1. **Dataset** — publish the reviewed cases currently held in the Work session.
+2. **Run** — choose an immutable dataset and a real candidate from Rusty's catalog, then set repetitions and
+   concurrency.
+3. **Compare** — follow execution status and review baseline-to-candidate metrics plus a paired row for every
+   case. Each row links back to the exact source run from which the case was created.
+4. **Gate** — name the protected release target, disclose the complete policy, require a fresh acknowledgement,
+   and persist Rust's allow/block decision.
 
-- A tenant-scoped dataset store with named dataset versions created from Studio cases.
-- A durable experiment record (configuration, baseline/candidate bindings, progress, report reference).
-- REST endpoints to create/list/get datasets and versions.
-- REST endpoints to create/list/get experiments, read progress, and retrieve reports.
-- A comparison endpoint (or report-driven comparison) for baseline/candidate pairing.
-- A gate store and endpoints to save/list gates with full policy review.
+The lane is embedded in Work so trace review, case authoring, experimentation, and release evidence stay in
+one context. Empty, running, failed, cancelled, complete, and unavailable states are distinct. Mobile layouts
+preserve the same order and evidence without introducing a second workflow.
 
-Without these endpoints the UI cannot meet Phase 3 acceptance. Phase 3 therefore begins with a small, coherent server surface and then wires it into the existing Work Evaluate stage.
+## Durable contract
 
-## Proposed server surface (smallest coherent set)
+All evaluation records use the shared `ServerStore`, so JSON-file and PostgreSQL deployments have the same
+tenant isolation and restart behavior.
 
 ### Datasets
 
-- `POST /datasets` — create or append to a dataset from a list of exact run-provenance cases.
-  Body: `{ name, cases[], base_version? }` where each case carries `run_id`, `thread_id`, `agent_name`, `objective`, `pointer`, `expected`, optional `tags`, optional `redactions`.
-  Response: `{ name, version, created, case_count, digest }`.
-  Validation rejects invalid UTF-8, duplicate typed JSON fields, lone surrogates, excessive depth/nodes, invalid typed integers, and Rust-incompatible canonicalization by delegating to `rusty-eval` `Dataset` serialization.
-
-- `GET /datasets` — list dataset names.
-- `GET /datasets/{name}` — list versions newest first.
-- `GET /datasets/{name}/versions/{version}` — fetch one immutable version.
-- `GET /datasets/{name}/versions/{version}/cases` — fetch cases (optional pagination by cursor).
+- `POST /datasets` publishes `{name, version, cases}`.
+- Every case is validated by `rusty-eval::Dataset`; the server also proves that its run belongs to the
+  current tenant, matches the exact thread, agent, frozen input, and terminal state, then replaces the
+  client timestamp with the run's stable acceptance time. Provenance includes:
+  `run_id`, `thread_id`, `agent_id`, and `captured_at`.
+- A dataset version is immutable. Repeating the same exact publish converges; reusing the identity for different
+  cases conflicts.
+- Admission is bounded to 100 cases and 512 KiB of complete provenance plus evaluation content. With the
+  20-repetition ceiling, one experiment can schedule at most 2,000 runs per arm.
+- `GET /datasets` exposes the 200 most recent durable summaries. Exact version and `/cases` reads remain
+  addressable by name/version, so older evidence is not lost merely because it leaves the browsing window.
 
 ### Experiments
 
-- `POST /experiments` — create an experiment bound to exact agent/deployment version, dataset version, evaluator config, runs per case, concurrency, deterministic controls, baseline candidate id, and thresholds.
-  Response: `{ experiment_id, status: queued, queued_cases }`.
-- `GET /experiments/{experiment_id}` — status, progress matrix, latest report reference.
-- `GET /experiments/{experiment_id}/report` — canonical report.
-- `POST /experiments/{experiment_id}/cancel` — cancellation where supported.
+- `POST /experiments` binds a stable experiment ID to an exact dataset version, exact candidate ID, repetition
+  count, concurrency, metric, and comparison thresholds.
+- The server refuses to claim execution unless the application configured a `StudioExperimentEvaluator`.
+- The evaluator returns canonical baseline and candidate `rusty-eval::ExperimentReport` values. The server
+  recomputes their summaries, repetition indices, case sets, dataset identity, and requested concurrency,
+  computes the paired `ComparisonReport` with `rusty-eval`, and
+  persists the complete result.
+- `GET /experiments` returns at most 200 recent summaries; `GET /experiments/{id}` loads one selected report.
+  Complete evidence is capped at 6 MiB so a large history cannot make the catalog unreadable.
+- `GET /experiments/{id}/report` exposes the paired reports and comparison only after completion.
+- `GET /experiments/compare?baseline=…&candidate=…` compares two complete experiment candidates through
+  Rust's comparison semantics when their dataset versions match.
+- `POST /experiments/{id}/cancel` requests cancellation from the server instance that owns the execution.
+- A queued/running record carries a durable, renewed ownership lease. Another server respects a live owner;
+  an expired owner is projected as failed and cannot silently invite reuse of the same experiment identity.
 
-### Comparisons
-
-- `GET /experiments/compare?baseline={id}&candidate={id}` — Rust-authoritative paired comparison with shared dataset coverage, pass rates, win/loss/unchanged, latency/token/cost only where observed, and exact trace links.
+`EvalStudioExperimentEvaluator` is the supplied adapter for memory-set candidates. Prompt, tool, model, and
+other candidate kinds require an application evaluator that can apply that candidate to the actual runnable
+graph. The server fails explicitly when that capability is absent; it never compares two identical executions
+and calls one a candidate.
 
 ### Gates
 
-- `POST /gates` — save a gate only after complete policy review.
-  Body: `{ name, blocked_target, metric, threshold, min_evidence, unavailable_evaluator_behavior, require_approval, dataset_version, baseline_experiment_id? }`.
-- `GET /gates` — list gates.
-- `GET /gates/{name}` — read gate policy and latest decision.
+- `POST /gates` accepts a complete `rusty-eval::GatePolicy`, the exact completed experiment, protected target,
+  and `acknowledged: true`.
+- Rust evaluates the gate; Studio does not manufacture a decision in the browser.
+- Gate identities are immutable. An exact repeated save converges to the original timestamp and decision;
+  changing policy or evidence under the same name conflicts.
+- `GET /gates` exposes the 200 most recent durable decisions; `GET /gates/{name}` remains the exact lookup.
 
-## UI journey
+## Safety and ownership
 
-### Evaluate stage (existing)
+- Dataset, experiment, candidate, and gate reads are tenant-scoped.
+- Mutation receipts bind HTTP status and the complete reviewed dataset, experiment plan, or gate policy.
+  Ambiguous responses reconcile that same immutable operation against authoritative detail before offering
+  another attempt.
+- Late responses from an old connection cannot update the current tenant's UI.
+- Exact cases remain in page memory until deliberately published; changing connection clears draft selections.
+- Source links prove where a case came from. They do not claim that the evaluation runner created a server Run
+  journal unless the configured evaluator actually persists one.
+- Cost, latency, or result fields are shown only when present in the canonical report. Unavailable is not zero.
 
-Keep the current Work Evaluate stage but replace the page-memory dataset with durable dataset publishing:
+## Validation
 
-1. Review frozen input from the exact run and complete journal.
-2. Show selected artifact, tool trajectory, source event.
-3. Write expected answer and acknowledge.
-4. Add to an existing dataset or create a new one.
-5. Publish immutable version.
+Release validation covers:
 
-### Dataset workbench
+- immutable/convergent dataset publishing and exact provenance;
+- tenant isolation and restart durability;
+- real asynchronous evaluation through an application evaluator;
+- paired Rust comparison, explicit cancellation state, bounded catalogs, and leased ownership recovery;
+- acknowledgement-gated, Rust-evaluated, convergent gate persistence;
+- connection ownership and ambiguous-mutation reconciliation in the typed UI;
+- desktop and mobile layout, keyboard operation, accessible progress/status, and exact trace links;
+- strict TypeScript, component tests, Rust tests/clippy, production build parity, and legacy Studio regressions.
 
-Contextual route: `/work/evaluations/datasets/{datasetId}/versions/{versionId}`
+## Remaining platform extension
 
-- List cases with run/evidence links.
-- Show conflict review before sealing a new version.
-- Export portable JSONL as advanced action.
-
-### Experiment workbench
-
-Contextual routes:
-- `/work/evaluations/experiments/{experimentId}`
-- `/work/evaluations/compare?baseline=:id&candidate=:id`
-
-- Configure experiment: pick dataset version, candidate/baseline, runs per case, concurrency, thresholds.
-- Show estimated run count and unknown cost honestly.
-- Progress matrix: queued, running, passed, failed, evaluator error, cancelled, unavailable.
-- Comparison: paired lane per case, output/tool diffs, trace links.
-
-### Gate designer
-
-Contextual route: `/work/evaluations/gates/{gateName}`
-
-- Review complete policy before saving.
-- Show latest decision if any.
-- Fail-closed when evaluator is unavailable.
-
-## Files planned
-
-- `rusty-server/src/evaluations.rs` (new) — dataset/experiment/gate store and routes.
-- `rusty-server/src/server_store.rs` — persistence helpers.
-- `rusty-server/src/routes.rs` — route registration.
-- `rusty-server/tests/evaluations.rs` (new) — server tests.
-- `studio/ui/src/lib/api/evaluations.ts` (new) — typed client.
-- `studio/ui/src/features/work/evaluate/**` (new) — Evaluate stage refactor and workbench components.
-- `studio/ui/src/router.tsx` — new contextual routes.
-- `docs/studio-evaluation-experiment-workbench-design.md` (this file).
-
-## Implementation status
-
-The server surface and a first UI slice have been committed on the
-`feat/studio-evaluation-experiment-workbench` branch.
-
-### What landed
-
-- Datasets: exactly the endpoints above are implemented in
-  `rusty-server/src/evaluations.rs`, persisted as canonical JSONL under
-  `{store_path}/evaluations/datasets/{tenant}/{name}/{version}.jsonl`.
-- Experiments: durable experiment records with `POST /experiments`,
-  `GET /experiments`, `GET /experiments/{id}`, and
-  `GET /experiments/{id}/report`. The actual evaluation currently reuses
-  the existing candidate evaluator path; the Studio workbench stores the
-  configuration and can hold a captured report for later reference.
-- Gates: durable gate policy storage with `POST /gates`, `GET /gates`,
-  and `GET /gates/{name}`.
-- Rust integration tests in `rusty-server/tests/evaluations.rs` cover
-  dataset creation/listing/case retrieval, duplicate-version rejection,
-  tenant isolation, and experiment/gate record round-trips.
-- Studio UI: the Evaluate stage now hosts `DatasetPublisher` and
-  `ExperimentWorkbench` components for publishing dataset versions,
-  selecting them, saving experiment configurations, and saving gate
-  policies. Dedicated contextual routes for the dataset/experiment/gate
-  workbench remain for a follow-up refinement.
-- Typed client in `studio/ui/src/lib/api/evaluations.ts`.
-
-### Deferred / follow-up
-
-- `GET /experiments/compare` returns `501 Not Implemented` until a
-  dedicated comparison surface is needed.
-- Running an experiment directly from the workbench requires wiring the
-  candidate evaluator into the server surface; the current path keeps
-  evaluation execution in the existing learning plane while the
-  workbench owns the durable configuration and report references.
-
-## Acceptance blocked on
-
-The server surface above must exist before the UI can satisfy Phase 3 acceptance. This stream will implement the server surface first, then the UI, then tests, build, merge.
+Intermediate per-run progress depends on evaluator callbacks that the current `rusty-eval::ExperimentRunner`
+does not expose. Until that contract exists, Studio says that it is preparing the exact paired run set, then
+shows the complete matrix when every run settles. Evaluation-execution trace links likewise require an
+application evaluator that persists its journals; source-run links remain available for every published case.

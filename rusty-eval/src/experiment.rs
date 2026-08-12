@@ -583,6 +583,12 @@ impl ExperimentReport {
     }
 }
 
+/// Validate that a report is internally coherent before it is compared,
+/// persisted, or presented as evidence.
+pub fn validate_report(report: &ExperimentReport) -> Result<()> {
+    crate::gate::validate_report(report)
+}
+
 /// Nearest-rank percentile over a sorted slice. Empty input yields 0 — an
 /// experiment with no runs has no distribution, and zero is the honest
 /// placeholder rather than a panic.

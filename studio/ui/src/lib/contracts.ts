@@ -59,6 +59,8 @@ export const runSnapshotSchema = z.object({
   run_id: id,
   thread_id: id,
   graph: id,
+  assistant_id: id.nullable().optional(),
+  metadata: jsonValue.nullable().optional(),
   attempt: z.number().int().nonnegative(),
   status: runStatusSchema,
   output: jsonValue.optional(),

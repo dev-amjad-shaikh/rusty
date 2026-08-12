@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { stringify as stringifyLossless } from "lossless-json";
 import type { Assistant, RunEvidence, RunReceipt, RunSnapshot, Thread } from "../lib/contracts";
 
 export interface EvaluationCase {
@@ -8,9 +9,10 @@ export interface EvaluationCase {
   runId: string;
   threadId: string;
   agentName: string;
+  agentId: string;
   objective: string;
   pointer: string;
-  expected: string;
+  expected: unknown;
   createdAt: string;
 }
 
@@ -64,11 +66,11 @@ export const useWorkStore = create<WorkState>((set) => ({
     delete next[connectionKey];
     return { uncertainByConnection: next };
   }),
-  clear: () => set({ assistant: null, objective: "", thread: null, receipt: null }),
+  clear: () => set({ connectionKey: null, assistant: null, objective: "", thread: null, receipt: null, cases: [], comparisons: [] }),
 }));
 
 export function evaluationDatasetJsonl(cases: EvaluationCase[]) {
-  const header = JSON.stringify({ kind: "header", format_version: 1, name: "rusty-studio-evaluations", version: "v1" });
-  const lines = cases.map((item) => JSON.stringify({ kind: "case", id: item.caseId, input: { objective: item.objective }, expect: { state: [{ pointer: item.pointer, expected: item.expected }] }, tags: ["studio"] }));
+  const header = stringifyLossless({ kind: "header", format_version: 1, name: "rusty-studio-evaluations", version: "v1" });
+  const lines = cases.map((item) => stringifyLossless({ kind: "case", id: item.caseId, input: { objective: item.objective }, expect: { state: [{ pointer: item.pointer, expected: item.expected }] }, tags: ["studio", item.agentName] }));
   return `${[header, ...lines].join("\n")}\n`;
 }

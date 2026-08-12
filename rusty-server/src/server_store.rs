@@ -173,6 +173,22 @@ pub(crate) trait ServerStore: Send + Sync {
         key: &str,
         value: Value,
     ) -> StoreResult<(StoreItem, bool)>;
+    /// Insert only when absent. The existence check and write are atomic
+    /// across processes/replicas sharing this store.
+    async fn kv_create(
+        &self,
+        namespace: &str,
+        key: &str,
+        value: Value,
+    ) -> StoreResult<Option<StoreItem>>;
+    /// Replace only when the stored revision still matches.
+    async fn kv_compare_and_swap(
+        &self,
+        namespace: &str,
+        key: &str,
+        expected_updated_at: chrono::DateTime<chrono::Utc>,
+        value: Value,
+    ) -> StoreResult<Option<StoreItem>>;
     /// Fetch one KV item (`None` when absent).
     async fn kv_get(&self, namespace: &str, key: &str) -> StoreResult<Option<StoreItem>>;
     /// Delete one KV item; `true` when it existed.
@@ -1741,6 +1757,29 @@ impl ServerStore for JsonFileStore {
         store::put(&self.root, namespace, key, value)
             .await
             .map_err(io_err("put store item"))
+    }
+
+    async fn kv_create(
+        &self,
+        namespace: &str,
+        key: &str,
+        value: Value,
+    ) -> StoreResult<Option<StoreItem>> {
+        store::create(&self.root, namespace, key, value)
+            .await
+            .map_err(io_err("create store item"))
+    }
+
+    async fn kv_compare_and_swap(
+        &self,
+        namespace: &str,
+        key: &str,
+        expected_updated_at: chrono::DateTime<chrono::Utc>,
+        value: Value,
+    ) -> StoreResult<Option<StoreItem>> {
+        store::compare_and_swap(&self.root, namespace, key, expected_updated_at, value)
+            .await
+            .map_err(io_err("compare and swap store item"))
     }
 
     async fn kv_get(&self, namespace: &str, key: &str) -> StoreResult<Option<StoreItem>> {
@@ -4469,6 +4508,17 @@ mod postgres {
         SELECT "key", value, created_at, updated_at
         FROM server_kv WHERE namespace = $1 ORDER BY "key""#;
 
+    pub(crate) const INSERT_KV_IF_ABSENT_SQL: &str = r#"
+        INSERT INTO server_kv (namespace, "key", value, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $4)
+        ON CONFLICT (namespace, "key") DO NOTHING
+        RETURNING created_at, updated_at"#;
+
+    pub(crate) const CAS_KV_SQL: &str = r#"
+        UPDATE server_kv SET value = $4, updated_at = $5
+        WHERE namespace = $1 AND "key" = $2 AND updated_at = $3
+        RETURNING created_at, updated_at"#;
+
     /// Journal upsert: the snapshot is rewritten at every checkpoint
     /// boundary, so `updated_at` moves while `created_at` is preserved.
     pub(crate) const UPSERT_JOURNAL_SQL: &str = "
@@ -6154,6 +6204,60 @@ mod postgres {
                 kv_row_to_item(namespace, key, value, created_at, updated_at),
                 created,
             ))
+        }
+
+        async fn kv_create(
+            &self,
+            namespace: &str,
+            key: &str,
+            value: Value,
+        ) -> StoreResult<Option<StoreItem>> {
+            let now = Utc::now();
+            let row = sqlx::query(INSERT_KV_IF_ABSENT_SQL)
+                .bind(namespace)
+                .bind(key)
+                .bind(&value)
+                .bind(now)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("create store item"))?;
+            Ok(row.map(|row| {
+                kv_row_to_item(
+                    namespace,
+                    key,
+                    value,
+                    row.get("created_at"),
+                    row.get("updated_at"),
+                )
+            }))
+        }
+
+        async fn kv_compare_and_swap(
+            &self,
+            namespace: &str,
+            key: &str,
+            expected_updated_at: DateTime<Utc>,
+            value: Value,
+        ) -> StoreResult<Option<StoreItem>> {
+            let now = Utc::now();
+            let row = sqlx::query(CAS_KV_SQL)
+                .bind(namespace)
+                .bind(key)
+                .bind(expected_updated_at)
+                .bind(&value)
+                .bind(now)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("compare and swap store item"))?;
+            Ok(row.map(|row| {
+                kv_row_to_item(
+                    namespace,
+                    key,
+                    value,
+                    row.get("created_at"),
+                    row.get("updated_at"),
+                )
+            }))
         }
 
         async fn kv_get(&self, namespace: &str, key: &str) -> StoreResult<Option<StoreItem>> {
