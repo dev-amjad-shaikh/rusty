@@ -16,6 +16,7 @@ function renderPage() {
 }
 
 function response(value: unknown) { return new Response(JSON.stringify(value), { status: 200 }); }
+const emptyArtifactJournal = { run_id: "artifact-journal", events: [], complete: false };
 
 beforeEach(() => {
   useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" }, info: null, dialogOpen: false });
@@ -34,6 +35,7 @@ describe("exception-led Operations", () => {
       if (url.pathname === "/tasks") return Promise.resolve(response([]));
       if (url.pathname === "/crons") return Promise.resolve(response([{ cron_id: "daily" }]));
       if (url.pathname === "/triggers") return Promise.resolve(response([{ trigger_id: "hook", enabled: true }]));
+      if (url.pathname === "/artifacts/journal") return Promise.resolve(response(emptyArtifactJournal));
       throw new Error(`unexpected ${url}`);
     }));
     renderPage();
@@ -50,6 +52,7 @@ describe("exception-led Operations", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       const url = new URL(input);
       if (url.pathname === "/tasks") return Promise.reject(new Error("offline"));
+      if (url.pathname === "/artifacts/journal") return Promise.resolve(response(emptyArtifactJournal));
       return Promise.resolve(response([]));
     }));
     renderPage();
@@ -62,6 +65,7 @@ describe("exception-led Operations", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       const url = new URL(input);
       if (url.pathname === "/tasks" && url.search === "?status=dead") return Promise.resolve(response([{ task_id: "task-a", kind: "publish", pool: "default", status: "dead", last_error: "tenant A", next_attempt_at: null, run_id: null, thread_id: null, updated_at: "2026-08-11T00:00:00Z" }]));
+      if (url.pathname === "/artifacts/journal") return Promise.resolve(response(emptyArtifactJournal));
       return Promise.resolve(response([]));
     }));
     renderPage();
@@ -76,6 +80,7 @@ describe("exception-led Operations", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       const url = new URL(input);
       if (url.pathname === "/tasks" && url.search === "?status=dead" && !recovered) return Promise.resolve(response([{ task_id: "task-a", kind: "publish", pool: "default", status: "dead", last_error: "tenant A", next_attempt_at: null, run_id: null, thread_id: null, updated_at: "2026-08-11T00:00:00Z" }]));
+      if (url.pathname === "/artifacts/journal") return Promise.resolve(response(emptyArtifactJournal));
       return Promise.resolve(response([]));
     }));
     renderPage();

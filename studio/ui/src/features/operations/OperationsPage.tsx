@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { getOperationsSnapshot, type OperationAttentionItem } from "../../lib/api/client";
 import { useConnectionStore } from "../../state/connection";
 import { evidencePreview } from "../../lib/text";
+import { ArtifactInspector } from "../work/artifacts/ArtifactInspector";
+import { getRunArtifact } from "../../lib/api/artifacts";
 import styles from "./OperationsPage.module.css";
 
 const systems = [
@@ -18,6 +20,28 @@ function observedTime(value: string) {
 }
 
 function EvidencePanel({ item, close }: { item: OperationAttentionItem; close: () => void }) {
+  const { connection } = useConnectionStore();
+  const artifact = useQuery({
+    queryKey: connection && item.source === "artifact" && item.artifactId ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact", item.artifactId] : ["artifact", "idle"],
+    queryFn: () => getRunArtifact(connection!, item.artifactId!),
+    enabled: Boolean(connection && item.source === "artifact" && item.artifactId),
+  });
+  if (item.source === "artifact") {
+    return <>
+      <aside className={styles.evidence} aria-labelledby="operation-evidence-heading">
+        <div className={styles.evidenceHead}>
+          <div><span className="eyebrow">Artifact exception</span><h2 id="operation-evidence-heading">{item.title}</h2></div>
+          <button className="secondary-button" type="button" onClick={close}>Close</button>
+        </div>
+        <p>{item.detail}</p>
+        <dl>
+          <div><dt>Observed</dt><dd>{observedTime(item.observedAt)}</dd></div>
+          {item.artifactId && <div><dt>Artifact</dt><dd><code>{evidencePreview(item.artifactId, 64)}</code></dd></div>}
+        </dl>
+      </aside>
+      {artifact.data && <ArtifactInspector artifact={artifact.data} onClose={close} />}
+    </>;
+  }
   return <aside className={styles.evidence} aria-labelledby="operation-evidence-heading">
     <div className={styles.evidenceHead}>
       <div><span className="eyebrow">Task evidence</span><h2 id="operation-evidence-heading">{item.title}</h2></div>
