@@ -994,3 +994,35 @@ actions, features, propensities, version).
 > floor byte-for-byte. The bar for the next candidate does not move: twin
 > evidence, envelope admission, margin net of telemetry, completion
 > parity, byte-exact reversion.**
+
+
+## Capacity envelope (R1.0)
+
+The R1.0 gate measures the server's capacity envelope: how much load one
+rusty-agent-server process absorbs over loopback HTTP, driven exactly as a
+client would drive it. The harness (`rusty-server/examples/load_envelope.rs`)
+boots a real server in-process on an ephemeral port and measures four
+surfaces — concurrent blocking runs on a four-node no-op probe graph,
+concurrent SSE streams read to their `end` frame, an enqueue → claim →
+complete loop on the durable task queue, and the checkpoint writes the runs
+imply. It is a dev tool, not a CI gate: nothing references it from test
+paths, it cleans up after itself, and no numbers are published here until a
+maintainer runs it. Reproduce with (file backend; `WITH_POSTGRES=1`
+additionally runs the concurrent-runs and task-queue scenarios against a
+throwaway `postgres:17-alpine` container):
+
+```bash
+./scripts/load-envelope.sh --json target/load-envelope.json
+WITH_POSTGRES=1 ./scripts/load-envelope.sh --json target/load-envelope-pg.json
+```
+
+| Scenario | Backend | Concurrency | Throughput | p50 | p95 | p99 | Errors |
+|---|---|---|---|---|---|---|---|
+| Concurrent runs (4-node graph) | file | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
+| Concurrent runs (4-node graph) | postgres | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
+| SSE fanout (`runs/stream`) | file | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
+| Task queue (enqueue) | file | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
+| Task queue (claim + complete) | file | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
+| Task queue (enqueue) | postgres | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
+| Task queue (claim + complete) | postgres | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
+| Checkpoint writes (derived) | file | 32 | — pending measurement | — pending measurement | — pending measurement | — pending measurement | — pending measurement |
