@@ -199,3 +199,66 @@ or Gemini) before the gate is called closed.
 > `completion_tokens_details.reasoning_tokens` into the new `Usage`
 > fields — the type has the home, the mapping lands with the genai
 > adapter's usage translation.
+
+> **Wave 2 status: implemented.** The genai adapter landed as designed,
+> with one judgment call on the TLS backend. genai is pinned to the
+> stable `0.6` line (resolved 0.6.5) — the 0.7 train was still
+> beta-only at implementation time, answering open question 1 against
+> the changelog as instructed. The TLS choice needed a detour the
+> design did not foresee: genai 0.6's `rustls-tls` feature selects
+> reqwest 0.13's `rustls`, which in that line means the aws-lc-rs
+> backend — the C/assembly build the design says to keep out — and
+> genai offers no ring-selecting feature. The adapter therefore takes
+> genai with `default-features = false` (genai documents the
+> no-TLS-feature configuration as its supported bring-your-own-TLS
+> path), turns on reqwest 0.13's `rustls-no-provider` through a
+> renamed edge of our own, and installs rustls's ring provider as the
+> process default before any genai client is built: pure-Rust TLS,
+> the same provider the default reqwest 0.12 path already rides, no
+> `aws-lc-sys` in the tree (verified via `cargo tree`). The boundary
+> behaves as specified: system messages hoist into genai's
+> request-level `system` field, `role: tool` messages map to
+> tool-result content with `id` ↔ `call_id` pairing preserved, tool
+> schemas pass through in order with the `parameters` value unmodified
+> (determinism proven by a serialize-twice test — the replay request
+> hash is computed upstream in our serde form and cannot be disturbed
+> here), usage maps the detail fields including `cached_tokens` /
+> `reasoning_tokens`, and errors classify onto `LlmErrorClass` from
+> both of genai's HTTP error surfaces. Streaming drives genai's event
+> stream internally: text deltas fire the callback, genai's
+> pre-assembled tool-call events accumulate silently, terminal usage
+> comes from the `End` event (requested via `capture_usage`), and
+> exactly one `finish: true` chunk closes the stream. Two fidelity
+> limits are documented in the module docs rather than papered over:
+> the OpenAI participant `name` and genai's reasoning/thought-signature
+> parts have no home in our `ChatMessage` vocabulary and are dropped at
+> the boundary. All translation is pure functions, tested without
+> network in `rusty-core/tests/provider_genai.rs` (19 tests);
+> `rusty-core/examples/genai_live.rs` (gated by `required-features`)
+> is the manual live check — run it against OpenAI and one non-OpenAI
+> provider before the gate is called closed.
+>
+> **MSRV blocker found at verification time, unresolved.** The whole
+> genai 0.6 line (0.6.0 through 0.6.5, checked per-release) uses let
+> chains, stabilized in rustc 1.88: the feature build fails on the
+> workspace MSRV toolchain (1.86) with 59 `E0658` errors inside genai
+> itself. genai declares no `rust-version`, so this only surfaces at
+> compile time. The default (feature-off) build remains clean on 1.86,
+> and a committed `serde_with >=3, <3.18` edge caps the one transitive
+> dependency whose own declared MSRV (1.88) exceeded ours. Per the
+> implementation contract the MSRV was NOT bumped. The decision —
+> raise the workspace MSRV to 1.88, wait for genai 0.7 to stabilize
+> and reassess, or target genai 0.5 — is open and blocks the R1.0
+> gate for this wave; everything short of that gate is done and
+> green on the current stable toolchain.
+>
+> **Resolution (2026-08-12): the feature-raised floor, per the capsules
+> precedent.** The workspace MSRV stays at 1.86; the `genai` feature
+> raises the effective floor to rustc 1.88 for feature-enabled builds
+> only — the same posture `docs/capsules-design.md` took when
+> cedar-policy required 1.89 for `capsules`. Default builds are
+> untouched, and the CI MSRV job checks the default feature set, so
+> enforcement is unchanged. Bumping the whole workspace to satisfy one
+> optional dependency would punish every default-build user for a
+> feature they never turned on; waiting for genai 0.7 would stall the
+> R1.0 gate on someone else's release train.

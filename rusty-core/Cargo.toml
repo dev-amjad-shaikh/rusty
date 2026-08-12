@@ -45,16 +45,44 @@ rand_chacha = { version = "0.3", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json", "chrono"], optional = true }
 wasmtime = { version = "47", optional = true }
+# Provider layer, wave 2 (docs/provider-layer-design.md): multi-provider
+# model access through the genai crate, behind the `genai` feature. genai is
+# taken WITHOUT its default `rustls-tls` feature: in genai's reqwest 0.13
+# line that feature selects the aws-lc-rs backend (a C/assembly build via
+# aws-lc-sys), while the rest of this crate's HTTP stack rides reqwest
+# 0.12's ring-based rustls. The `reqwest-tls` edge below turns on reqwest
+# 0.13's `rustls-no-provider` instead (genai documents the no-TLS-feature
+# configuration as its supported bring-your-own-TLS path), and the `rustls`
+# edge supplies the ring crypto provider, which `GenaiChatModel` installs as
+# the process default before a client is built. No C toolchain required.
+genai = { version = "0.6", default-features = false, optional = true }
+reqwest-tls = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls-no-provider"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+# MSRV guard, not a code dependency: serde_with 3.18+ declares rustc 1.88,
+# above the workspace MSRV (1.86). This edge caps what genai's
+# `serde_with = "3"` requirement resolves to (3.17.x, rustc 1.82), so the
+# `genai` feature builds on the workspace toolchain — and so downstream
+# crates on 1.86 inherit the cap through feature unification rather than
+# discovering the break in their own builds.
+serde_with = { version = ">=3, <3.18", optional = true }
 
 [features]
 postgres = ["dep:sqlx"]
 wasm = ["dep:wasmtime"]
+genai = ["dep:genai", "dep:reqwest-tls", "dep:rustls", "dep:serde_with"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 # Benchmarks only: default features off (no plotters/rayon) to keep bench
 # builds lean; results still go to target/criterion as JSON estimates.
 criterion = { version = "0.5", default-features = false }
+
+[[example]]
+# Manual live validation for the genai adapter (provider layer, wave 2):
+# requires provider API keys and network access — never run in CI. The
+# `required-features` gate keeps it out of default builds entirely.
+name = "genai_live"
+required-features = ["genai"]
 
 [[bench]]
 name = "graph_compile"

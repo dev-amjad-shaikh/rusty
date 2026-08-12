@@ -206,6 +206,8 @@ pub mod mcp;
 pub mod memory;
 pub mod middleware;
 pub mod node;
+#[cfg(feature = "genai")]
+pub mod provider_genai;
 pub mod react;
 pub mod receipt;
 pub mod record;
@@ -321,6 +323,8 @@ pub mod prelude {
         ToolInvocation,
     };
     pub use crate::node::{Command, Node, NodeConfig, NodeContext, NodeOutput};
+    #[cfg(feature = "genai")]
+    pub use crate::provider_genai::GenaiChatModel;
     pub use crate::react::{
         create_react_agent, create_react_agent_replaying, create_react_agent_streaming,
         create_react_agent_with_recording,

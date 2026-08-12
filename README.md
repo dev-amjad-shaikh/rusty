@@ -37,7 +37,7 @@ async-trait = "0.1"
 serde_json = "1"
 ```
 
-or `cargo add rusty-agent-runtime`. The server is `cargo add rusty-agent-server`. Optional crate features: `postgres` (Postgres checkpointer) and `wasm` (sandboxed WASM nodes). MSRV is **Rust 1.86**, declared at the workspace root and checked in CI.
+or `cargo add rusty-agent-runtime`. The server is `cargo add rusty-agent-server`. Optional crate features: `postgres` (Postgres checkpointer), `wasm` (sandboxed WASM nodes), and `genai` (multi-provider model access — OpenAI, Anthropic, Gemini, Ollama and more through one client; see [docs/provider-layer-design.md](docs/provider-layer-design.md)). MSRV is **Rust 1.86**, declared at the workspace root and checked in CI; the `genai` feature raises the floor for feature-enabled builds to 1.88 (genai's own requirement) — default builds are unaffected.
 
 The clients install from npm and PyPI:
 
