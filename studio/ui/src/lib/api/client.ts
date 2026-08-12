@@ -46,7 +46,7 @@ export class StudioApiError extends Error {
   }
 }
 
-function endpoint(connection: ConnectionIdentity, path: string) {
+export function endpoint(connection: ConnectionIdentity, path: string) {
   const normalized = connection.origin.replace(/\/$/, "");
   if (import.meta.env.DEV && normalized === "http://127.0.0.1:8100") return `/api${path}`;
   return `${normalized}${path}`;
@@ -86,7 +86,7 @@ function errorMessage(text: string, status: number) {
   return `Rusty returned HTTP ${status}.`;
 }
 
-async function requestText(
+export async function requestText(
   connection: ConnectionIdentity,
   path: string,
   init: RequestInit = {},
@@ -111,7 +111,7 @@ async function requestText(
   return { status: response.status, text };
 }
 
-function parseJson<T>(text: string, schema: z.ZodType<T>, context: string): T {
+export function parseJson<T>(text: string, schema: z.ZodType<T>, context: string): T {
   try {
     return schema.parse(JSON.parse(text));
   } catch (error) {
@@ -120,7 +120,7 @@ function parseJson<T>(text: string, schema: z.ZodType<T>, context: string): T {
   }
 }
 
-function parseMutationJson<T>(text: string, schema: z.ZodType<T>, context: string, status: number): T {
+export function parseMutationJson<T>(text: string, schema: z.ZodType<T>, context: string, status: number): T {
   try { return parseJson(text, schema, context); }
   catch (caught) {
     throw new StudioApiError(caught instanceof Error ? caught.message : `${context} was not trustworthy.`, status, true);
@@ -288,13 +288,14 @@ const triggerSummarySchema = z.array(z.object({ trigger_id: z.string().min(1), e
 
 export interface OperationAttentionItem {
   id: string;
-  source: "task";
+  source: "task" | "artifact";
   title: string;
   detail: string;
   observedAt: string;
   runId: string | null;
   threadId: string | null;
   retryScheduled: boolean;
+  artifactId?: string;
 }
 
 export interface OperationsSnapshot {
@@ -312,19 +313,44 @@ async function projected<T>(connection: ConnectionIdentity, path: string, schema
   return parseJson(text, schema, context);
 }
 
+const artifactUnavailableOutputSchema = z.object({
+  artifact_id: z.string(),
+  surface: z.string(),
+}).passthrough();
+
 export async function getOperationsSnapshot(connection: ConnectionIdentity): Promise<OperationsSnapshot> {
-  const [deadResult, failedResult, schedulesResult, triggersResult] = await Promise.allSettled([
+  const [deadResult, failedResult, schedulesResult, triggersResult, artifactsJournalResult] = await Promise.allSettled([
     projected(connection, "/tasks?status=dead", operationTasksSchema, "Dead-letter tasks"),
     projected(connection, "/tasks?status=failed", operationTasksSchema, "Failed tasks"),
     projected(connection, "/crons", cronSummarySchema, "Schedule catalog"),
     projected(connection, "/triggers", triggerSummarySchema, "Automation catalog"),
+    projected(connection, "/artifacts/journal", runEvidenceSchema, "Artifact evidence chain"),
   ]);
   const unavailable: string[] = [];
   if (deadResult.status === "rejected" || failedResult.status === "rejected") unavailable.push("task queue");
   if (schedulesResult.status === "rejected") unavailable.push("schedules");
   if (triggersResult.status === "rejected") unavailable.push("automations");
+  if (artifactsJournalResult.status === "rejected") unavailable.push("artifact evidence");
   const dead = deadResult.status === "fulfilled" ? deadResult.value : [];
   const failed = failedResult.status === "fulfilled" ? failedResult.value : [];
+  const artifactEvents = artifactsJournalResult.status === "fulfilled" ? artifactsJournalResult.value.events : [];
+  const artifactItems = artifactEvents
+    .filter((event) => event.kind === "artifact_unavailable")
+    .map((event): OperationAttentionItem => {
+      const payload = (event.output && typeof event.output === "object" && "artifact_id" in event.output ? event.output : {}) as { artifact_id?: unknown };
+      const artifactId = typeof payload.artifact_id === "string" ? payload.artifact_id : undefined;
+      return {
+        id: `${event.id}-unavailable`,
+        source: "artifact",
+        title: "Stored bytes unavailable",
+        detail: `Artifact identity ${artifactId ? evidencePreview(artifactId, 128) : event.id} was referenced by a run, but the bytes are no longer in the store.`,
+        observedAt: event.recorded_at,
+        runId: null,
+        threadId: null,
+        retryScheduled: false,
+        artifactId,
+      };
+    });
   const items = [...dead, ...failed.filter((task) => !task.next_attempt_at)]
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .slice(0, 100)
@@ -339,7 +365,7 @@ export async function getOperationsSnapshot(connection: ConnectionIdentity): Pro
       retryScheduled: Boolean(task.next_attempt_at),
     }));
   return {
-    attention: items,
+    attention: [...items, ...artifactItems],
     systems: {
       tasks: deadResult.status === "fulfilled" && failedResult.status === "fulfilled" ? dead.length + failed.length : null,
       automations: triggersResult.status === "fulfilled" ? triggersResult.value.length : null,

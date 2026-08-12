@@ -85,6 +85,7 @@ describe("Studio API boundary", () => {
       if (url.pathname === "/tasks" && url.search === "?status=failed") return Promise.resolve(response([]));
       if (url.pathname === "/crons") return Promise.resolve(response([{ cron_id: "daily" }]));
       if (url.pathname === "/triggers") return Promise.resolve(response([{ trigger_id: "hook", enabled: true }]));
+      if (url.pathname === "/artifacts/journal") return Promise.resolve(response({ run_id: "artifact-journal", events: [], complete: false }));
       throw new Error(`unexpected ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -98,6 +99,7 @@ describe("Studio API boundary", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       const url = new URL(input);
       if (url.pathname === "/tasks") return Promise.reject(new Error("offline"));
+      if (url.pathname === "/artifacts/journal") return Promise.resolve(response({ run_id: "artifact-journal", events: [], complete: false }));
       return Promise.resolve(response([]));
     }));
     const snapshot = await getOperationsSnapshot(connection);

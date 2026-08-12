@@ -7,6 +7,7 @@ import { useConnectionStore } from "../../state/connection";
 import { type EvaluationCase, useWorkStore } from "../../state/work";
 import { durableConnectionScope, readRecentWork, rememberRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
 import { bytePreview } from "../../lib/text";
+import { ArtifactTray } from "./artifacts/ArtifactTray";
 import styles from "./WorkPage.module.css";
 
 const stages = ["run", "trace", "evaluate"] as const;
@@ -151,6 +152,7 @@ export function WorkPage() {
           {routedRun && !run.isError && !evidence.isError && !envelopeMismatch && (!exactRun || !exactEvidence) && <div className={styles.loading} aria-live="polite">Loading exact run evidence…</div>}
           {stage === "trace" && exactRun && exactEvidence && !run.isError && !evidence.isError && !envelopeMismatch && <TraceWorkspace evidence={exactEvidence} run={exactRun} openEvaluate={() => openStage("evaluate")} />}
           {stage === "evaluate" && exactEvidence && exactRun && params.threadId && !run.isError && !evidence.isError && !envelopeMismatch && <EvaluateWorkspace connectionKey={scope} evidence={exactEvidence} run={exactRun} threadId={params.threadId} agent={activeAgent} objective={routeObjective} />}
+          {routedRun && stage !== "evaluate" && exactRun && exactEvidence && !run.isError && !evidence.isError && !envelopeMismatch && params.runId && <ArtifactTray runId={params.runId} />}
         </div>
       )}
     </section>
