@@ -27,7 +27,7 @@
 //! | Endpoint | Purpose |
 //! |---|---|
 //! | `GET /ok` | liveness |
-//! | `GET /info` | service version + registered graphs and their channels |
+//! | `GET /info` | crate version + [`API_PROTOCOL_VERSION`] + registered graphs and their channels (the SDK compatibility handshake) |
 //! | `POST /threads` | create a thread bound to a registered graph |
 //! | `POST /threads/{id}/fork` | time travel: copy the thread's checkpoint history (full or up to `checkpoint_id`) into a new thread |
 //! | `GET /threads/{id}/state` | latest checkpoint as `{values, next, checkpoint}` (the checkpoint ref carries its pinned `policy_version`, R0.8 wave 4) |
@@ -229,6 +229,22 @@ pub use runs::RunStatus;
 /// correctness net; the grace bound only decides how *fast* the common
 /// case is. Override with [`ServerConfig::with_shutdown_grace`].
 pub const DEFAULT_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// The HTTP/SSE API protocol version spoken by this server, reported by
+/// `GET /info` as `api_protocol_version`.
+///
+/// Within API v1, evolution is additive-only: new routes, new optional
+/// request fields, new response fields, and new SSE event families may
+/// appear in minor releases. A removal, rename, or meaning change requires
+/// bumping to 2 — a new major line of the server. Clients must ignore
+/// unknown fields and unknown SSE events (the standing contract in
+/// `docs/stability.md`), which is what makes additive evolution safe.
+///
+/// This constant is the server side of the SDK compatibility handshake: an
+/// SDK is compatible with any server whose `/info` reports an
+/// `api_protocol_version` it supports, and refuses or warns on anything
+/// else. SDK-side enforcement lands when the SDKs adopt the handshake.
+pub const API_PROTOCOL_VERSION: u32 = 1;
 
 /// Names the JSON-file layout already owns at the store root
 /// (`agent_leases/`, `agents/`, `artifacts/`, `assistants/`, `capsules/`,

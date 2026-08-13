@@ -199,11 +199,11 @@ v1. The SSE families `metadata`, `values`, `updates`, `error`, and `end`
 become frozen names; their payload fields are additive-only. The
 long-standing client rule stands, and becomes mandatory in the other
 direction: clients must ignore unknown events and unknown fields, and
-the server must never remove what an older client might read. One gate
-remains before this freeze takes effect — the server needs an explicit
-API version, reported by `/info` and carried as a constant, which
-replaces the same-cycle pairing rule in
-[versioning.md](versioning.md).
+the server must never remove what an older client might read. The gate
+that stood in the way of this freeze — an explicit API version, reported
+by `/info` and carried as a constant — has landed as
+`API_PROTOCOL_VERSION` (`rusty-server/src/lib.rs`), which replaces the
+same-cycle pairing rule in [versioning.md](versioning.md).
 
 **F. SDK surfaces.** Frozen at 1.0 for the groups both SDKs cover today:
 threads, runs (including SSE streaming, fixtures, replay, and diff),
@@ -246,7 +246,7 @@ when every gate below closes:
 
 | Gate | Owner | Evidence |
 |---|---|---|
-| HTTP API version constant + `/info` reporting | maintainers | code; the same-cycle pairing row in [versioning.md](versioning.md) is rewritten |
+| HTTP API version constant + `/info` reporting | maintainers | landed 2026-08-12: `API_PROTOCOL_VERSION` = 1 in `rusty-server/src/lib.rs`, reported by `GET /info` as `api_protocol_version`; the same-cycle pairing row in [versioning.md](versioning.md) is rewritten |
 | Durable pending-run queue | maintainers | code; restart-survival test in the server suite |
 | Capacity envelope | maintainers | load-test harness plus published numbers in [benchmarks.md](benchmarks.md) |
 | Provider-layer integration | maintainers | one integrated provider layer instead of hand-built adapters |

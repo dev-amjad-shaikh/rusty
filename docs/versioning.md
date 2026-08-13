@@ -32,18 +32,25 @@ do not support, and responses are accepted regardless of their version
 field so newer workers can serve older clients. A non-additive change
 requires bumping `PROTOCOL_VERSION` to 2.
 
-**Server↔SDK compatibility is not yet versioned by a constant.** The
-Python and TypeScript SDKs speak to `rusty-agent-server`'s HTTP/SSE API (an
-Agent-Protocol subset; see `rusty-server/src/routes.rs`). That surface has
-no numeric protocol version today — there is no `protocol_version` field
-on HTTP requests and the `/info` endpoint does not report a server
-version. Until one exists, the compatibility rule is:
+**Server↔SDK compatibility is versioned by `API_PROTOCOL_VERSION`.**
+`rusty-agent-server` carries `pub const API_PROTOCOL_VERSION: u32 = 1`
+(`rusty-server/src/lib.rs`) and reports it from `GET /info` as
+`api_protocol_version`, alongside the crate `version`. The Python and
+TypeScript SDKs speak to that HTTP/SSE API (an Agent-Protocol subset; see
+`rusty-server/src/routes.rs`). Within API v1, evolution is additive-only:
+new routes, new optional request fields, new response fields, and new SSE
+event families may appear in minor releases; a removal, rename, or meaning
+change requires bumping to 2 — a new major line of the server. Clients
+must ignore unknown fields and unknown SSE events (the standing contract
+in [stability.md](stability.md)). The compatibility rule is:
 
-- An SDK at version `0.x.y` is tested against the `rusty-agent-server` release
-  from the same cycle (see the matrix below). That pairing is the
-  supported configuration.
-- Newer SDK minor versions against older servers (and vice versa) may
-  work where the API overlap is additive, but are not validated. Rusty
+- An SDK is compatible with any server whose `/info` reports an
+  `api_protocol_version` it supports (currently 1); the SDK refuses or
+  warns on anything else.
+- SDK-side enforcement lands when the SDKs adopt the handshake — neither
+  SDK gates on `api_protocol_version` yet. Until they do, the same-cycle
+  pairing (SDK 0.5.x ↔ server 0.12.x) remains the tested configuration,
+  and cross-cycle use remains unvalidated rather than refused. Rusty
   Studio carries client-side fallback notes for older servers where a
   feature needs a newer endpoint.
 
@@ -76,7 +83,7 @@ Which package pairs must agree, and on what:
 | Producer | Consumer | Governing version | Rule |
 |---|---|---|---|
 | `rusty-agent-runtime` (RemoteNode) | `rusty-worker` | `PROTOCOL_VERSION` = 1 | Worker rejects tasks with an unsupported `protocol_version`. Both sides currently speak v1. Keep worker and runtime on compatible protocol majors. |
-| `rusty-agent-server` | `@rusty-runtime/client`, `rusty_client` (PyPI) | same-cycle pairing (no constant yet) | SDK 0.5.x ↔ server 0.12.x is the tested pairing. Cross-cycle use is unvalidated. |
+| `rusty-agent-server` | `@rusty-runtime/client`, `rusty_client` (PyPI) | `API_PROTOCOL_VERSION` = 1 | Additive-only within API v1: an SDK is compatible with any server whose `/info` reports an `api_protocol_version` it supports, and refuses or warns on anything else. The SDKs do not enforce the handshake yet — SDK 0.5.x ↔ server 0.12.x remains the tested pairing. |
 | `rusty-agent-runtime` | `rusty-agent-server`, `rusty-worker`, `rusty-otel` | crate versions | All three are path-dependents built in lockstep from this monorepo; a published crate pair must satisfy SemVer on the Rust API, which is unstable at 0.x (see [stability.md](stability.md)). |
 | `rusty-agent-server` | Rusty Studio (`studio/ui`) | same-cycle pairing | Studio's typed wire schemas and committed production bundle are distributed in-repo; CI validates them against the same-cycle server contract. The legacy console remains a temporary advanced compatibility surface. |
 | checkpoint writers (`JsonFileCheckpointer`, `PostgresCheckpointer`) | checkpoint readers | `rusty-agent-runtime` minor version | Checkpoints written by one `0.x.*` line are guaranteed readable by that same minor line only. See [stability.md](stability.md). |

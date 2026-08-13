@@ -8,7 +8,7 @@ use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use rusty_agent_runtime::prelude::*;
-use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig, API_PROTOCOL_VERSION};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -144,6 +144,10 @@ async fn ok_and_info_list_graphs() {
     let (status, v) = call(&app, "GET", "/info", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["service"], json!("rusty-server"));
+    // The SDK compatibility handshake: the crate version and the API
+    // protocol version an SDK gates on.
+    assert_eq!(v["version"], json!(env!("CARGO_PKG_VERSION")));
+    assert_eq!(v["api_protocol_version"], json!(API_PROTOCOL_VERSION));
     let names: Vec<&str> = v["graphs"]
         .as_array()
         .unwrap()

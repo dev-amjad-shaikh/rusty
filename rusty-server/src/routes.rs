@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -841,16 +842,39 @@ async fn ok() -> Json<Value> {
     Json(json!({ "ok": true }))
 }
 
-async fn info(AxumState(state): AxumState<Arc<AppState>>) -> Json<Value> {
-    let graphs: Vec<Value> = state
+/// One registered graph as reported by `GET /info`.
+#[derive(Debug, Serialize)]
+struct InfoGraph {
+    name: String,
+    channels: Vec<String>,
+}
+
+/// The `GET /info` response — the SDK compatibility handshake.
+///
+/// `version` carries the server crate version and `api_protocol_version`
+/// carries [`crate::API_PROTOCOL_VERSION`]; an SDK gates on the pair before
+/// trusting the rest of the surface. Within an API protocol version this
+/// shape is additive-only: new fields may appear in minor releases,
+/// existing fields never move, get renamed, or change meaning.
+#[derive(Debug, Serialize)]
+struct InfoResponse {
+    service: &'static str,
+    version: &'static str,
+    api_protocol_version: u32,
+    checkpointer: &'static str,
+    server_store: &'static str,
+    store_path: PathBuf,
+    graphs: Vec<InfoGraph>,
+}
+
+async fn info(AxumState(state): AxumState<Arc<AppState>>) -> Json<InfoResponse> {
+    let graphs = state
         .registry
         .names()
         .into_iter()
-        .map(|name| {
-            json!({
-                "name": name,
-                "channels": state.registry.channel_names(&name),
-            })
+        .map(|name| InfoGraph {
+            channels: state.registry.channel_names(&name),
+            name,
         })
         .collect();
     let persistence = if state.config.database_url.is_some() {
@@ -858,14 +882,15 @@ async fn info(AxumState(state): AxumState<Arc<AppState>>) -> Json<Value> {
     } else {
         "json_file"
     };
-    Json(json!({
-        "service": "rusty-server",
-        "version": env!("CARGO_PKG_VERSION"),
-        "checkpointer": persistence,
-        "server_store": persistence,
-        "store_path": state.config.store_path,
-        "graphs": graphs,
-    }))
+    Json(InfoResponse {
+        service: "rusty-server",
+        version: env!("CARGO_PKG_VERSION"),
+        api_protocol_version: crate::API_PROTOCOL_VERSION,
+        checkpointer: persistence,
+        server_store: persistence,
+        store_path: state.config.store_path.clone(),
+        graphs,
+    })
 }
 
 // --------------------------------------------------------------------- //
