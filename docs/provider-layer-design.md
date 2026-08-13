@@ -262,3 +262,15 @@ or Gemini) before the gate is called closed.
 > optional dependency would punish every default-build user for a
 > feature they never turned on; waiting for genai 0.7 would stall the
 > R1.0 gate on someone else's release train.
+>
+> **Live validation (2026-08-12): Fireworks passed.** The gated example
+> ran a real ReAct agent over `GenaiChatModel` against Fireworks
+> (`fireworks::accounts/fireworks/models/gpt-oss-20b`): live token
+> deltas streamed through the event tap, the accumulated final response
+> assembled correctly, and state merged through the normal graph
+> machinery — no errors. genai drives Fireworks over its
+> OpenAI-compatible protocol, so this proves the adapter end-to-end
+> against a live provider but not the native-protocol translations
+> (Anthropic's top-level `system`, Gemini's `functionCall` parts); one
+> run against a native-protocol provider remains the last check before
+> the gate is called fully closed.
