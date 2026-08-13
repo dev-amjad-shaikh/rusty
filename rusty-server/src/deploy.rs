@@ -944,7 +944,7 @@ fn rollback_target(
 /// one `deployment_resolved` event journaled ahead of the run's own
 /// events. Absent is the pre-R0.12 behavior, byte-identically: no
 /// resolution, no new event.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct DeploymentRunBinding {
     /// The environment the run targets; must be declared and serving.
     pub environment: EnvironmentTag,

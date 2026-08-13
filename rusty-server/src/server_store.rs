@@ -10,10 +10,13 @@
 //!   KV items are pure file-backed reads/writes under `{store_path}/store/`;
 //!   Flight Recorder journals are one file per run under
 //!   `{store_path}/journals/`; durable tasks are an in-memory index persisted
-//!   as one file per task under `{store_path}/tasks/` (R0.6).
+//!   as one file per task under `{store_path}/tasks/` (R0.6); pending
+//!   (queued) runs are one file per run under `{store_path}/pending_runs/`
+//!   (the R1.0 durable-queue gate — see [`crate::pending_runs`]).
 //! - [`PostgresStore`] (feature `postgres`) — tables `server_assistants`,
 //!   `server_crons`, `server_threads`, `server_kv`, `server_journals`,
-//!   `server_tasks` (the R0.6 durable task queue, column-mapped for
+//!   `server_pending_runs` (the durable run queue), `server_tasks` (the R0.6
+//!   durable task queue, column-mapped for
 //!   `FOR UPDATE SKIP LOCKED` claiming), `server_outbox` (the R0.6
 //!   wave-2b transactional outbox), and `server_triggers` /
 //!   `server_trigger_events` (event-driven triggers), auto-migrated on
@@ -67,6 +70,7 @@ use crate::journals;
 use crate::learn;
 use crate::memory;
 use crate::outbox::{self, OutboxRecord};
+use crate::pending_runs::{self, PendingRunRecord};
 use crate::policy::{self, PolicyActivation, PolicyBinding, PolicyRecord, PolicyWrite};
 use crate::receipts::ReceiptKeyRecord;
 use crate::registry;
@@ -211,6 +215,24 @@ pub(crate) trait ServerStore: Send + Sync {
     /// and one corrupt record must not blind them to the rest; the corrupt
     /// record's own read path still surfaces its error.
     async fn list_journals(&self) -> StoreResult<Vec<JournalSnapshot>>;
+
+    // -- Durable pending-run queue (R1.0 gate) ------------------------- //
+
+    /// Persist a queued (pending) run's restore record, written when the
+    /// run lands in the per-thread FIFO (see [`crate::pending_runs`]).
+    /// A rewrite of the same run id replaces — enqueue is not idempotent
+    /// by design (run ids are server-minted per submission).
+    async fn put_pending_run(&self, record: &PendingRunRecord) -> StoreResult<()>;
+    /// Delete a queued run's restore record when the run leaves the queue
+    /// (promoted to active, cancelled while queued, or rejected); `true`
+    /// when a record existed.
+    async fn delete_pending_run(&self, run_id: &str) -> StoreResult<bool>;
+    /// Every persisted pending-run record, in per-thread FIFO order
+    /// (`thread_id`, then `seq`) — boot's restore replays this listing.
+    /// A record that fails to deserialize is skipped with a warning
+    /// rather than failing the listing (the journal listing's rule): one
+    /// corrupt record must not strand the rest of the queue.
+    async fn list_pending_runs(&self) -> StoreResult<Vec<PendingRunRecord>>;
 
     // -- Durable task queue (R0.6) -------------------------------------- //
 
@@ -1817,6 +1839,24 @@ impl ServerStore for JsonFileStore {
         journals::list(&self.root)
             .await
             .map_err(io_err("list journals"))
+    }
+
+    async fn put_pending_run(&self, record: &PendingRunRecord) -> StoreResult<()> {
+        pending_runs::persist(&self.root, record)
+            .await
+            .map_err(io_err("persist pending run"))
+    }
+
+    async fn delete_pending_run(&self, run_id: &str) -> StoreResult<bool> {
+        pending_runs::remove(&self.root, run_id)
+            .await
+            .map_err(io_err("delete pending run"))
+    }
+
+    async fn list_pending_runs(&self) -> StoreResult<Vec<PendingRunRecord>> {
+        pending_runs::list(&self.root)
+            .await
+            .map_err(io_err("list pending runs"))
     }
 
     async fn enqueue_task(&self, record: &TaskRecord) -> StoreResult<(TaskRecord, bool)> {
@@ -4321,6 +4361,17 @@ mod postgres {
         CREATE INDEX IF NOT EXISTS server_env_secrets_listing
             ON server_env_secrets (tenant, environment)";
 
+    /// `server_pending_runs` (the R1.0 durable-queue gate): one row per
+    /// queued (pending) run, the restore record as JSONB — the run id is
+    /// the only access path (delete on queue-exit, whole-table replay on
+    /// boot), so no column mapping.
+    pub(crate) const CREATE_PENDING_RUNS_SQL: &str = "
+        CREATE TABLE IF NOT EXISTS server_pending_runs (
+            run_id     TEXT PRIMARY KEY,
+            payload    JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )";
+
     /// All idempotent migration statements, executed in order on connect.
     pub(crate) const MIGRATION_SQL: &[&str] = &[
         CREATE_ASSISTANTS_SQL,
@@ -4378,6 +4429,7 @@ mod postgres {
         CREATE_DEPLOYMENTS_INDEX_SQL,
         CREATE_ENV_SECRETS_SQL,
         CREATE_ENV_SECRETS_INDEX_SQL,
+        CREATE_PENDING_RUNS_SQL,
     ];
 
     /// Transaction-scoped advisory lock key serializing concurrent
@@ -4534,6 +4586,22 @@ mod postgres {
     /// listing order, so both backends answer identically).
     pub(crate) const SELECT_JOURNALS_SQL: &str =
         "SELECT payload FROM server_journals ORDER BY run_id";
+
+    // -- Pending-run queue statements (R1.0 gate) ----------------------- //
+
+    /// Upsert on enqueue: run ids are server-minted per submission, so a
+    /// conflict is at most a restore-then-requeue of the same record.
+    pub(crate) const UPSERT_PENDING_RUN_SQL: &str = "
+        INSERT INTO server_pending_runs (run_id, payload)
+        VALUES ($1, $2)
+        ON CONFLICT (run_id) DO UPDATE SET payload = EXCLUDED.payload";
+
+    pub(crate) const DELETE_PENDING_RUN_SQL: &str =
+        "DELETE FROM server_pending_runs WHERE run_id = $1";
+
+    /// Boot's whole-table replay; per-thread FIFO order is applied in
+    /// Rust (`pending_runs::sort`) so both backends answer identically.
+    pub(crate) const SELECT_PENDING_RUNS_SQL: &str = "SELECT payload FROM server_pending_runs";
 
     // -- Task queue statements (R0.6) ------------------------------------ //
 
@@ -6349,6 +6417,53 @@ mod postgres {
                 }
             }
             Ok(snapshots)
+        }
+
+        async fn put_pending_run(
+            &self,
+            record: &crate::pending_runs::PendingRunRecord,
+        ) -> StoreResult<()> {
+            let payload = record_to_payload(record)?;
+            sqlx::query(UPSERT_PENDING_RUN_SQL)
+                .bind(&record.run_id)
+                .bind(payload)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("upsert pending run"))?;
+            Ok(())
+        }
+
+        async fn delete_pending_run(&self, run_id: &str) -> StoreResult<bool> {
+            let result = sqlx::query(DELETE_PENDING_RUN_SQL)
+                .bind(run_id)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("delete pending run"))?;
+            Ok(result.rows_affected() > 0)
+        }
+
+        async fn list_pending_runs(
+            &self,
+        ) -> StoreResult<Vec<crate::pending_runs::PendingRunRecord>> {
+            let rows = sqlx::query(SELECT_PENDING_RUNS_SQL)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list pending runs"))?;
+            let mut records = Vec::with_capacity(rows.len());
+            for row in rows {
+                match record_from_payload::<crate::pending_runs::PendingRunRecord>(
+                    "pending run",
+                    row.get::<Value, _>("payload"),
+                ) {
+                    Ok(record) => records.push(record),
+                    // A corrupt row must not strand the rest of the queue
+                    // (the trait contract); its own read path still
+                    // surfaces the error.
+                    Err(e) => tracing::warn!("skipping corrupt pending-run row: {e}"),
+                }
+            }
+            crate::pending_runs::sort(&mut records);
+            Ok(records)
         }
 
         async fn enqueue_task(&self, record: &TaskRecord) -> StoreResult<(TaskRecord, bool)> {
@@ -8987,7 +9102,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 55);
+            assert_eq!(MIGRATION_SQL.len(), 56);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),
@@ -9143,6 +9258,12 @@ mod postgres {
             assert!(CREATE_ENV_SECRETS_SQL.contains("payload     JSONB"));
             assert!(!CREATE_ENV_SECRETS_SQL.contains("BYTEA"));
             assert!(CREATE_ENV_SECRETS_INDEX_SQL.contains("(tenant, environment)"));
+            // The durable pending-run queue (R1.0 gate): one JSONB row per
+            // queued run, run-id keyed — the only access paths are the
+            // queue-exit delete and boot's whole-table replay.
+            assert!(CREATE_PENDING_RUNS_SQL.contains("server_pending_runs"));
+            assert!(CREATE_PENDING_RUNS_SQL.contains("run_id     TEXT PRIMARY KEY"));
+            assert!(CREATE_PENDING_RUNS_SQL.contains("payload    JSONB"));
         }
 
         #[test]

@@ -151,8 +151,9 @@ pub(crate) fn load_artifacts(root: &Path) -> HashMap<String, ArtifactRecord> {
 /// One artifact a run declares it uses: `{family, name}` — the same
 /// address the registry routes speak. Deserialized inside
 /// [`RegistryRunBinding`], so an unknown family fails the request's JSON
-/// parse (a malformed binding, not a resolution miss).
-#[derive(Debug, Clone, Deserialize)]
+/// parse (a malformed binding, not a resolution miss). `Serialize` is for
+/// the durable pending-run record, which persists the payload verbatim.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RegistryArtifactRef {
     /// The registry family (the candidate kind the artifact indexes).
     pub family: CandidateKind,
@@ -167,7 +168,7 @@ pub struct RegistryArtifactRef {
 /// pins — so a version promoted *after* the run's admission never
 /// reaches it (the conservatism every release since R0.7 has kept), and
 /// a version promoted *without redeploying* binds the next run.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RegistryRunBinding {
     /// The environment tag the run targets. Absent resolves the
     /// deployment's declared default tag

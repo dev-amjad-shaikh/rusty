@@ -118,7 +118,7 @@ Sources: LangChain's checkpointing and time-travel documentation; third-party La
 Rusty is explicit about what v0.x is not:
 
 - **Single-node executor.** One process runs the super-step loop. Remote nodes distribute node *work*, but the executor itself is not clustered and has no failover.
-- **No durable queue.** Queued runs live in an in-memory per-thread FIFO; a server restart drops pending (not-yet-started) runs. Durable queues and autoscaling are open R1.0 items.
+- **Durable queue.** Queued (pending) runs persist on enqueue and resume draining after a restart, on both store backends; in-flight runs were already checkpoint-covered. Autoscaling remains an open R1.0 item.
 - **Persistence is single-node.** The core executor checkpoints only when you attach a `Checkpointer`; `InMemoryCheckpointer` is for dev/test and loses state on restart. On the server, checkpoints and the assistants / crons / KV store default to JSON files on local disk (`server_store: json_file` in `/info`) — Postgres requires the `postgres` feature, and there is no replication either way.
 - **Idempotency contract.** Checkpoints happen at step boundaries, never mid-node: resume re-executes a node from its start, so node logic must be idempotent.
 - **Open by default in dev.** With no API keys configured the server runs unauthenticated, and its CORS layer is permissive — restrict both before exposing it to a network.

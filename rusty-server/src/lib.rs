@@ -179,6 +179,7 @@ mod learn;
 mod mcp_bridge;
 mod memory;
 mod outbox;
+mod pending_runs;
 mod policy;
 mod receipts;
 mod registry;
@@ -276,6 +277,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "memory",
     "memory_artifacts",
     "outbox",
+    "pending_runs",
     "policy",
     "receipts",
     "registry",

@@ -46,7 +46,7 @@ use tokio::sync::{broadcast, watch};
 
 use crate::auth::TenantContext;
 use crate::routes::AppState;
-use crate::runs::{self, MultitaskStrategy, RunManager, RunPayload, SseFrame};
+use crate::runs::{self, MultitaskStrategy, RunDeps, RunPayload, SseFrame};
 use crate::threads::ThreadRecord;
 
 /// The MCP revision this bridge speaks. Pinned, not negotiated: Streamable
@@ -153,7 +153,7 @@ pub(crate) async fn handle(
                     // A terminal or unknown run is a no-op inside
                     // `cancel_run` — cancellation is control flow,
                     // idempotent by no-op.
-                    state.run_deps.manager.cancel_run(&run_id).await;
+                    runs::cancel_run(&state.run_deps, &run_id).await;
                 }
             }
             StatusCode::ACCEPTED.into_response()
@@ -315,7 +315,7 @@ async fn call_tool(
     if wants_sse(headers) {
         let stream = call_stream(
             state.mcp_bridge.clone(),
-            state.run_deps.manager.clone(),
+            state.run_deps.clone(),
             scheduled,
             id,
             progress_token,
@@ -396,7 +396,7 @@ fn tool_result(terminal: &Value) -> Value {
 /// a finished call's request id must not name a stale run.
 struct DisconnectGuard {
     bridge: McpBridgeState,
-    manager: RunManager,
+    deps: RunDeps,
     run_id: String,
     request_key: String,
     armed: bool,
@@ -406,10 +406,10 @@ impl Drop for DisconnectGuard {
     fn drop(&mut self) {
         self.bridge.remove(&self.request_key);
         if self.armed {
-            let manager = self.manager.clone();
+            let deps = self.deps.clone();
             let run_id = std::mem::take(&mut self.run_id);
             tokio::spawn(async move {
-                manager.cancel_run(&run_id).await;
+                runs::cancel_run(&deps, &run_id).await;
             });
         }
     }
@@ -484,7 +484,7 @@ impl CallStream {
 /// for each run frame, then the final JSON-RPC response as the last event.
 fn call_stream(
     bridge: McpBridgeState,
-    manager: RunManager,
+    deps: RunDeps,
     scheduled: runs::Scheduled,
     id: Value,
     progress_token: Option<Value>,
@@ -500,7 +500,7 @@ fn call_stream(
         phase: CallPhase::Frames,
         guard: DisconnectGuard {
             bridge,
-            manager,
+            deps,
             run_id: scheduled.run_id,
             request_key,
             armed: true,

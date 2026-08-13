@@ -7,14 +7,20 @@
 //!
 //! Multitask: there is always at most one **active** run per thread. The
 //! `reject` strategy returns 409 when the thread is busy; `enqueue` appends
-//! to an in-memory per-thread FIFO queue (depth-capped by
+//! to a per-thread FIFO queue (depth-capped by
 //! `ServerConfig::max_concurrent_runs_per_thread`) that drains automatically
-//! as runs finish.
+//! as runs finish. The FIFO is store-backed: a queued run has no checkpoint
+//! coverage (it never executed, so there is nothing to resume *from*), so
+//! its queue entry is persisted on enqueue ([`crate::pending_runs`]),
+//! deleted when the run leaves the queue, and replayed into the scheduler
+//! on boot ([`restore_pending_runs`]) — a restart no longer strands
+//! accepted-but-never-started runs.
 //!
 //! Retention: terminal runs are kept for `GET /runs/{id}` polling up to
 //! [`MAX_RETAINED_RUNS`] per process; the oldest terminal runs are evicted
 //! beyond that (active and queued runs are never evicted). Run history is
-//! in-memory by design — durability lives in the checkpoint log.
+//! in-memory by design — durability of executed runs lives in the
+//! checkpoint log, durability of queued runs in the pending-run records.
 //!
 //! Drain (R0.6 wave 2c): the server's shutdown token is threaded into every
 //! run's executor ([`RunConfig::with_cancellation`]). When it fires, each
@@ -42,11 +48,12 @@ use rusty_agent_runtime::executor::{ExecutionOutcome, Executor, GraphEvent, RunC
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
 use rusty_agent_runtime::record::{Effect, RunEventKind};
 use rusty_agent_runtime::state::State;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, watch, Mutex};
 
 use crate::error::ApiError;
+use crate::pending_runs::PendingRunRecord;
 use crate::server_store::ServerStore;
 use crate::GraphRegistry;
 
@@ -56,7 +63,7 @@ use crate::GraphRegistry;
 
 /// The `command` field of a run payload: `{ "resume": <value> }` continues
 /// an interrupted thread via [`RunConfig::with_resume`].
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct CommandPayload {
     /// Resume value delivered to the interrupted node.
     #[serde(default)]
@@ -64,7 +71,7 @@ pub struct CommandPayload {
 }
 
 /// The `config` field of a run payload.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RunConfigPayload {
     /// Maps to [`RunConfig::with_max_steps`] (LangGraph `recursion_limit`).
     #[serde(default)]
@@ -74,14 +81,14 @@ pub struct RunConfigPayload {
 /// The `checkpoint` field of a run payload: `{ "checkpoint_id": "…" }`
 /// replays the thread from that checkpoint (time travel) instead of the
 /// latest, via [`RunConfig::with_checkpoint_id`].
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct CheckpointPayload {
     /// Id of a checkpoint of this thread (see `POST /threads/{id}/history`).
     pub checkpoint_id: String,
 }
 
 /// The payload accepted by `POST /threads/{id}/runs{,/wait,/stream}`.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RunPayload {
     /// Initial state (must be a JSON object). Ignored when resuming: the
     /// checkpointed state takes precedence.
@@ -398,8 +405,9 @@ impl RunHandle {
 pub(crate) enum ScheduleDecision {
     /// The thread slot was free; the run must be spawned now.
     Started,
-    /// The run was queued behind the active run.
-    Queued,
+    /// The run was queued behind the active run; carries the run's FIFO
+    /// sequence, the persisted record's `seq` (durable queue).
+    Queued(u64),
 }
 
 /// What [`RunManager::cancel_run`] did (R0.7 wave 2).
@@ -445,6 +453,12 @@ struct RunManagerInner {
     active_by_thread: HashMap<String, String>,
     queues: HashMap<String, VecDeque<String>>,
     attempts: HashMap<String, usize>,
+    /// Process-wide monotonic FIFO sequence, stamped on every insert.
+    /// Compared only within one thread (the persisted record's `seq`);
+    /// a single counter avoids a per-thread watermark a restart would
+    /// reset. Not itself durable — restored runs take fresh stamps in
+    /// restore order, which the persisted sequence already fixed.
+    queue_seq: u64,
     /// Insertion order of run ids, feeding terminal-run eviction.
     order: VecDeque<String>,
 }
@@ -484,6 +498,8 @@ impl RunManager {
             *counter
         };
         handle.attempt = attempt;
+        inner.queue_seq += 1;
+        let seq = inner.queue_seq;
         inner.order.push_back(handle.run_id.clone());
 
         match strategy {
@@ -501,7 +517,7 @@ impl RunManager {
                 }
                 queue.push_back(handle.run_id.clone());
                 inner.runs.insert(handle.run_id.clone(), handle);
-                Ok(ScheduleDecision::Queued)
+                Ok(ScheduleDecision::Queued(seq))
             }
             _ => {
                 inner
@@ -581,6 +597,10 @@ impl RunManager {
     /// exactly like the server drain. A queued (pending) run never started,
     /// so it is dequeued and finished terminal-`cancelled` immediately —
     /// leaving it queued would let a dead run promote and execute.
+    ///
+    /// Manager-only primitive: callers must route through
+    /// [`crate::runs::cancel_run`] so a dequeued run's durable queue record
+    /// clears with the transition.
     pub(crate) async fn cancel_run(&self, run_id: &str) -> RunCancel {
         let mut inner = self.inner.lock().await;
         let Some(handle) = inner.runs.get_mut(run_id) else {
@@ -622,6 +642,10 @@ impl RunManager {
     /// signalled, every queued run is dequeued-cancelled — the whole
     /// per-thread run state, so cancelling an agent's thread leaves no
     /// pending run that would re-drive it.
+    ///
+    /// Manager-only primitive: callers must route through
+    /// [`crate::runs::cancel_thread_runs`] so each dequeued run's durable
+    /// queue record clears with the transition.
     pub(crate) async fn cancel_thread_runs(&self, thread_id: &str) -> ThreadCancellation {
         let (active, queued) = {
             let inner = self.inner.lock().await;
@@ -646,6 +670,28 @@ impl RunManager {
             }
         }
         outcome
+    }
+
+    /// Drop a queued run without a terminal transition: the rollback for
+    /// an enqueue whose durable record could not be written — the
+    /// submission failed, so no run may exist. `false` when the run is
+    /// unknown or already left the queue (a promotion that outran the
+    /// failed persist keeps its run; it was legitimately admitted).
+    pub(crate) async fn remove_queued(&self, run_id: &str) -> bool {
+        let mut inner = self.inner.lock().await;
+        let Some(handle) = inner.runs.get(run_id) else {
+            return false;
+        };
+        if handle.status != RunStatus::Pending {
+            return false;
+        }
+        let thread_id = handle.thread_id.clone();
+        if let Some(queue) = inner.queues.get_mut(&thread_id) {
+            queue.retain(|queued| queued != run_id);
+        }
+        inner.runs.remove(run_id);
+        inner.order.retain(|id| id != run_id);
+        true
     }
 
     /// Record the terminal status + JSON, wake waiters, release the thread
@@ -774,55 +820,8 @@ pub(crate) async fn schedule(
         )));
     }
     let run_id = uuid::Uuid::new_v4().to_string();
-    // Registry admission (R0.11 wave 2): the binding resolves now, at
-    // admission — a promotion landing afterwards never reaches this run
-    // (the conservatism checkpoint pinning has kept since R0.7), and a
-    // queued run binds at admission, not at dequeue. The tenant comes
-    // from the internal thread id, so every entry point (HTTP, cron,
-    // trigger, bridge) resolves in the submitter's namespace without
-    // threading the request context through. A resolution failure is an
-    // admission failure: the run never enters the manager.
-    let admission = match &payload.registry {
-        Some(binding) => Some(
-            crate::registry::resolve_admission(
-                &deps.server_store,
-                crate::auth::tenant_of_internal(thread_id),
-                deps.default_environment_tag.as_ref(),
-                &run_id,
-                binding,
-            )
-            .await?,
-        ),
-        None => None,
-    };
-    // Deployment admission (R0.12 wave 3): the environment's pointer
-    // binds a revision now, at admission — a promotion landing afterwards
-    // never reaches this run (the registry admission's conservatism,
-    // lifted to deployments). The revision's identity checks against the
-    // registered graph (name and current topology hash), so a build the
-    // revision no longer describes is refused, never run. A resolution
-    // failure is an admission failure: the run never enters the manager.
-    let deployment = match &payload.deployment {
-        Some(binding) => {
-            let (graph_obj, _spec) = deps.registry.get(graph).ok_or_else(|| {
-                ApiError::internal(format!(
-                    "graph `{graph}` left the registry between route validation and admission"
-                ))
-            })?;
-            Some(
-                crate::deploy::resolve_admission(
-                    &deps.server_store,
-                    crate::auth::tenant_of_internal(thread_id),
-                    &run_id,
-                    binding,
-                    graph,
-                    &graph_obj.topology_hash(),
-                )
-                .await?,
-            )
-        }
-        None => None,
-    };
+    let (admission, deployment) =
+        resolve_admissions(deps, &run_id, thread_id, graph, &payload).await?;
     let (bcast_tx, _bcast_rx) = broadcast::channel(256);
     let (terminal_tx, terminal_rx) = watch::channel(None);
     let handle = RunHandle {
@@ -846,6 +845,12 @@ pub(crate) async fn schedule(
     // Subscribe/snapshot before any execution can emit frames.
     let replay = handle.log_snapshot();
     let broadcast = handle.subscribe();
+    // The durable queue record is staged only under the enqueue strategy —
+    // the one path that can park the run — and persisted only when the run
+    // actually lands in the FIFO: the active run's durability is the
+    // checkpoint log's job, not this record's.
+    let staged = matches!(strategy, MultitaskStrategy::Enqueue)
+        .then(|| (handle.payload.clone(), handle.created_at));
 
     let decision = deps
         .manager
@@ -856,7 +861,39 @@ pub(crate) async fn schedule(
             spawn_execute(deps.clone(), run_id.clone());
             RunStatus::Running
         }
-        ScheduleDecision::Queued => RunStatus::Pending,
+        ScheduleDecision::Queued(seq) => {
+            let (payload, enqueued_at) = staged.expect("enqueue strategy staged the record");
+            let record = PendingRunRecord {
+                run_id: run_id.clone(),
+                thread_id: thread_id.to_string(),
+                wire_thread_id: wire_thread_id.to_string(),
+                tenant: crate::auth::tenant_of_internal(thread_id).to_string(),
+                graph: graph.to_string(),
+                payload,
+                seq,
+                enqueued_at,
+            };
+            // A run the server cannot persist must not be accepted — the
+            // accepted-but-forgotten window is exactly the gap the durable
+            // queue closes — so a persist failure fails the submission and
+            // the in-memory insert rolls back with it.
+            if let Err(error) = deps.server_store.put_pending_run(&record).await {
+                deps.manager.remove_queued(&run_id).await;
+                return Err(ApiError::internal(format!(
+                    "failed to persist queued run `{run_id}`: {error}"
+                )));
+            }
+            // A promotion can outrun the persist (the active run finished
+            // while the record was landing): the promotion path's delete
+            // then found nothing to delete, so clear the straggler here —
+            // an active run must not leave a queue record behind for the
+            // next boot to restore.
+            if !matches!(deps.manager.info(&run_id).await, Some(info) if info.status == RunStatus::Pending)
+            {
+                clear_pending_record(&deps.server_store, &run_id).await;
+            }
+            RunStatus::Pending
+        }
     };
 
     Ok(Scheduled {
@@ -866,6 +903,246 @@ pub(crate) async fn schedule(
         broadcast,
         replay,
     })
+}
+
+/// The registry (R0.11 wave 2) and deployment (R0.12 wave 3) admission
+/// resolutions every scheduling path performs — fresh submissions and
+/// boot restores alike, so a restored run binds exactly as if just
+/// enqueued.
+///
+/// Registry admission: the binding resolves now, at admission — a
+/// promotion landing afterwards never reaches this run (the conservatism
+/// checkpoint pinning has kept since R0.7), and a queued run binds at
+/// admission, not at dequeue. The tenant comes from the internal thread
+/// id, so every entry point (HTTP, cron, trigger, bridge, restore)
+/// resolves in the submitter's namespace without threading the request
+/// context through. A resolution failure is an admission failure: the
+/// run never enters the manager.
+///
+/// Deployment admission: the environment's pointer binds a revision now,
+/// at admission — the registry admission's conservatism, lifted to
+/// deployments. The revision's identity checks against the registered
+/// graph (name and current topology hash), so a build the revision no
+/// longer describes is refused, never run.
+async fn resolve_admissions(
+    deps: &RunDeps,
+    run_id: &str,
+    thread_id: &str,
+    graph: &str,
+    payload: &RunPayload,
+) -> Result<
+    (
+        Option<crate::registry::RegistryAdmission>,
+        Option<crate::deploy::DeploymentAdmission>,
+    ),
+    ApiError,
+> {
+    let admission = match &payload.registry {
+        Some(binding) => Some(
+            crate::registry::resolve_admission(
+                &deps.server_store,
+                crate::auth::tenant_of_internal(thread_id),
+                deps.default_environment_tag.as_ref(),
+                run_id,
+                binding,
+            )
+            .await?,
+        ),
+        None => None,
+    };
+    let deployment = match &payload.deployment {
+        Some(binding) => {
+            let (graph_obj, _spec) = deps.registry.get(graph).ok_or_else(|| {
+                ApiError::internal(format!(
+                    "graph `{graph}` left the registry between route validation and admission"
+                ))
+            })?;
+            Some(
+                crate::deploy::resolve_admission(
+                    &deps.server_store,
+                    crate::auth::tenant_of_internal(thread_id),
+                    run_id,
+                    binding,
+                    graph,
+                    &graph_obj.topology_hash(),
+                )
+                .await?,
+            )
+        }
+        None => None,
+    };
+    Ok((admission, deployment))
+}
+
+/// Cancel one run (the store-backed form of [`RunManager::cancel_run`]):
+/// a queued run that never starts must also lose its durable queue
+/// record, or the next boot would restore a run the caller cancelled.
+pub(crate) async fn cancel_run(deps: &RunDeps, run_id: &str) -> RunCancel {
+    let outcome = deps.manager.cancel_run(run_id).await;
+    if outcome == RunCancel::CancelledQueued {
+        clear_pending_record(&deps.server_store, run_id).await;
+    }
+    outcome
+}
+
+/// Cancel every run of one thread (the store-backed form of
+/// [`RunManager::cancel_thread_runs`]): every dequeued run's durable
+/// queue record clears with it.
+pub(crate) async fn cancel_thread_runs(deps: &RunDeps, thread_id: &str) -> ThreadCancellation {
+    let outcome = deps.manager.cancel_thread_runs(thread_id).await;
+    for run_id in &outcome.cancelled {
+        clear_pending_record(&deps.server_store, run_id).await;
+    }
+    outcome
+}
+
+/// Best-effort delete of a queued run's durable record. A failure is
+/// logged, not raised: the record is reconcile-on-read — boot's restore
+/// dedupes against the journal and clears stragglers itself.
+async fn clear_pending_record(server_store: &Arc<dyn ServerStore>, run_id: &str) {
+    if let Err(error) = server_store.delete_pending_run(run_id).await {
+        tracing::warn!(%run_id, %error, "pending-run record delete failed");
+    }
+}
+
+/// Replay the store's pending-run records into the scheduler — the boot
+/// half of the durable queue, spawned once per process. Records restore
+/// in per-thread FIFO order (`seq`), each scheduling exactly as if just
+/// enqueued: a free thread slot starts the run immediately, in
+/// **background** — its SSE client died with the last process, so frames
+/// flow to the journal and frame log and clients reattach via
+/// `GET /runs/{id}/stream` — and a busy one queues behind the active run.
+pub(crate) async fn restore_pending_runs(deps: RunDeps) {
+    // A draining server restores nothing: the records stay for a process
+    // that is still serving (the same rule schedule()'s 503 enforces).
+    if deps.shutdown.is_cancelled() {
+        return;
+    }
+    let mut records = match deps.server_store.list_pending_runs().await {
+        Ok(records) => records,
+        Err(error) => {
+            // The queue's accept state has no other copy — a boot that
+            // cannot read it must say so loudly, not start empty.
+            tracing::warn!(%error, "pending-run restore skipped: store listing failed");
+            return;
+        }
+    };
+    if records.is_empty() {
+        return;
+    }
+    crate::pending_runs::sort(&mut records);
+    // The depth cap guards live submissions. The runs being restored were
+    // admitted legally under the cap of their own process; a restart with
+    // a shrunken cap must not strand them, so each thread's restore cap
+    // floors at its surviving queue depth.
+    let mut depth_by_thread: HashMap<String, usize> = HashMap::new();
+    for record in &records {
+        *depth_by_thread.entry(record.thread_id.clone()).or_insert(0) += 1;
+    }
+    let mut restored = 0usize;
+    for record in records {
+        let cap = deps
+            .queue_cap
+            .max(depth_by_thread[record.thread_id.as_str()]);
+        if restore_one(&deps, record, cap).await {
+            restored += 1;
+        }
+    }
+    tracing::info!(restored, "pending runs restored from the store");
+}
+
+/// Restore one record: dedupe defensively, re-resolve admissions, insert,
+/// and start immediately when the thread slot is free. `false` means the
+/// record stays for the next boot (a deferral, never a silent drop).
+async fn restore_one(deps: &RunDeps, record: PendingRunRecord, queue_cap: usize) -> bool {
+    let run_id = record.run_id.clone();
+    // Dedupe before anything else: a record can outlive its run — a crash
+    // mid-promotion (the promotion path's delete lost the race) or a
+    // best-effort delete that failed. Any run that executed at all has a
+    // journal (flushed at the first checkpoint boundary and again at
+    // completion), so a journal under this run id means the queue entry
+    // is a zombie: clear it, never double-schedule.
+    match deps.server_store.get_journal(&run_id).await {
+        Ok(Some(_)) => {
+            tracing::info!(%run_id, "skipping pending-run restore: the run already has a journal");
+            clear_pending_record(&deps.server_store, &run_id).await;
+            return false;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            // Indeterminate: defer to the next boot rather than risk
+            // double-scheduling.
+            tracing::warn!(%run_id, %error, "pending-run restore deferred: journal read failed");
+            return false;
+        }
+    }
+    if deps.manager.info(&run_id).await.is_some() {
+        // Two routers over one store in a single process (an embedding,
+        // not the shipped server) restore the same records; the first
+        // wins.
+        tracing::info!(%run_id, "skipping pending-run restore: the run is already scheduled");
+        return false;
+    }
+    let (admission, deployment) = match resolve_admissions(
+        deps,
+        &run_id,
+        &record.thread_id,
+        &record.graph,
+        &record.payload,
+    )
+    .await
+    {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            // Defer, keeping the record: the binding may resolve under a
+            // later deployment, and dropping it here would strand
+            // accepted work.
+            tracing::warn!(%run_id, %error, "pending-run restore deferred: admission failed");
+            return false;
+        }
+    };
+    let (bcast_tx, _bcast_rx) = broadcast::channel(256);
+    let (terminal_tx, _terminal_rx) = watch::channel(None);
+    let handle = RunHandle {
+        run_id: run_id.clone(),
+        thread_id: record.thread_id,
+        wire_thread_id: record.wire_thread_id,
+        graph: record.graph,
+        attempt: 0, // assigned by RunManager::insert
+        status: RunStatus::Pending,
+        payload: record.payload,
+        created_at: record.enqueued_at,
+        admission,
+        deployment,
+        sink: FrameSink::new(deps.log_capacity, bcast_tx),
+        terminal: terminal_tx,
+        checkpoint_ids: Arc::new(StdMutex::new(Vec::new())),
+        // A child of the server drain token, exactly as at schedule time:
+        // a drain starting mid-restore stops the restored run at its
+        // first boundary like any other.
+        cancel: deps.shutdown.child_token(),
+    };
+    match deps
+        .manager
+        .insert(handle, MultitaskStrategy::Enqueue, queue_cap)
+        .await
+    {
+        Ok(ScheduleDecision::Started) => {
+            // The thread freed between restarts: the run starts now. Its
+            // record leaves the store with the promotion, same as the
+            // live promotion path.
+            clear_pending_record(&deps.server_store, &run_id).await;
+            spawn_execute(deps.clone(), run_id);
+            true
+        }
+        // Still queued — its record stays, mirroring the live enqueue
+        // path's persist.
+        Ok(ScheduleDecision::Queued(_)) => true,
+        Err(error) => {
+            tracing::warn!(%run_id, %error, "pending-run restore deferred: the queue refused the run");
+            false
+        }
+    }
 }
 
 /// Drive one run to its terminal state and chain the next queued run.
@@ -1230,7 +1507,8 @@ fn spawn_execute(deps: RunDeps, run_id: String) {
 
 /// Record the terminal state and spawn the next queued run, if any. While
 /// the server drains, the queue does not advance (see
-/// [`RunManager::finish`]'s `draining` flag).
+/// [`RunManager::finish`]'s `draining` flag) — and queued runs keep their
+/// durable records, so the next process restores them.
 async fn terminate(deps: &RunDeps, run_id: &str, status: RunStatus, terminal: Value) {
     let draining = deps.shutdown.is_cancelled();
     if let Some(next) = deps
@@ -1238,6 +1516,10 @@ async fn terminate(deps: &RunDeps, run_id: &str, status: RunStatus, terminal: Va
         .finish(run_id, status, terminal, draining)
         .await
     {
+        // The promoted run left the queue: its durable record goes with
+        // the transition. From here the run's durability is the
+        // checkpoint log's job, like any active run's.
+        clear_pending_record(&deps.server_store, &next).await;
         spawn_execute(deps.clone(), next);
     }
 }
@@ -1260,5 +1542,216 @@ fn error_kind(error: &RustyError) -> &'static str {
         // Drain cancellation is control flow and takes its own terminal
         // path in `execute`; this arm exists for exhaustiveness only.
         RustyError::Cancelled(_) => "cancelled",
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Tests
+// --------------------------------------------------------------------- //
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server_store::JsonFileStore;
+    use rusty_agent_runtime::journal::{Clock, Journal};
+    use rusty_agent_runtime::prelude::{
+        Graph, GraphBuilder, JsonFileCheckpointer, NodeContext, NodeOutput, Reducer, StateSpec,
+    };
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    /// Unique temp store root, removed on drop.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("rusty-runs-test-{}", uuid::Uuid::new_v4())))
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A gated graph: `wait` parks the run for a minute (the occupying
+    /// run in queue tests — long enough that it never finishes inside a
+    /// test); without it the run completes immediately.
+    fn gated_graph() -> (Graph, StateSpec) {
+        let spec = StateSpec::new()
+            .channel("wait", Reducer::Overwrite)
+            .channel("done", Reducer::Overwrite);
+        let mut builder = GraphBuilder::new();
+        builder.add_node("work", |ctx: NodeContext| async move {
+            if ctx
+                .state()
+                .get("wait")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+            Ok(NodeOutput::update("done", json!(true)))
+        });
+        builder.set_entry_point("work");
+        (builder.compile().unwrap(), spec)
+    }
+
+    /// Run deps over a fresh JSON-file store: the same wiring the router
+    /// builds, minus HTTP.
+    fn test_deps(root: &Path) -> RunDeps {
+        let mut registry = GraphRegistry::new();
+        let (graph, spec) = gated_graph();
+        registry.register("gated", graph, spec);
+        RunDeps {
+            registry,
+            checkpointer: Arc::new(JsonFileCheckpointer::new(root.to_path_buf())),
+            manager: RunManager::new(),
+            server_store: Arc::new(JsonFileStore::load(root)),
+            queue_cap: 8,
+            log_capacity: 64,
+            shutdown: tokio_util::sync::CancellationToken::new(),
+            default_environment_tag: None,
+        }
+    }
+
+    fn payload(input: Value) -> RunPayload {
+        RunPayload {
+            input: Some(input),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_while_queued_clears_the_durable_record() {
+        let tmp = TestDir::new();
+        let deps = test_deps(&tmp.0);
+        // Occupy the thread so the next submission lands in the FIFO.
+        let occupier = schedule(
+            &deps,
+            "thread-1",
+            "thread-1",
+            "gated",
+            payload(json!({"wait": true})),
+            MultitaskStrategy::Enqueue,
+        )
+        .await
+        .unwrap();
+        assert_eq!(occupier.status, RunStatus::Running);
+        let queued = schedule(
+            &deps,
+            "thread-1",
+            "thread-1",
+            "gated",
+            payload(json!({})),
+            MultitaskStrategy::Enqueue,
+        )
+        .await
+        .unwrap();
+        assert_eq!(queued.status, RunStatus::Pending);
+        // The enqueue persisted a restore record.
+        assert_eq!(
+            deps.server_store.list_pending_runs().await.unwrap().len(),
+            1
+        );
+
+        let outcome = cancel_run(&deps, &queued.run_id).await;
+        assert_eq!(outcome, RunCancel::CancelledQueued);
+        // The record left the store with the transition...
+        assert!(deps
+            .server_store
+            .list_pending_runs()
+            .await
+            .unwrap()
+            .is_empty());
+        // ...so a fresh boot over the same store restores nothing (no
+        // zombie run re-appears).
+        let reboot = test_deps(&tmp.0);
+        restore_pending_runs(reboot.clone()).await;
+        assert!(reboot.manager.info(&queued.run_id).await.is_none());
+        assert!(!reboot.manager.thread_busy("thread-1").await);
+    }
+
+    #[tokio::test]
+    async fn restore_dedupes_a_run_that_already_has_a_journal() {
+        let tmp = TestDir::new();
+        let deps = test_deps(&tmp.0);
+        // A leftover record whose run already executed — a crash
+        // mid-promotion lost the record delete. The journal (flushed at
+        // the first checkpoint boundary and at completion) is the ground
+        // truth that the run ran.
+        let record = PendingRunRecord {
+            run_id: "run-stale".to_string(),
+            thread_id: "thread-1".to_string(),
+            wire_thread_id: "thread-1".to_string(),
+            tenant: "default".to_string(),
+            graph: "gated".to_string(),
+            payload: RunPayload::default(),
+            seq: 1,
+            enqueued_at: chrono::Utc::now(),
+        };
+        deps.server_store.put_pending_run(&record).await.unwrap();
+        let journal = Journal::new(
+            "run-stale".to_string(),
+            "thread-1".to_string(),
+            Clock::System,
+        );
+        deps.server_store
+            .put_journal(&journal.snapshot())
+            .await
+            .unwrap();
+
+        restore_pending_runs(deps.clone()).await;
+
+        // Not double-scheduled, and the zombie record is cleared.
+        assert!(deps.manager.info("run-stale").await.is_none());
+        assert!(!deps.manager.thread_busy("thread-1").await);
+        assert!(deps
+            .server_store
+            .list_pending_runs()
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn restore_schedules_a_free_threads_run_in_background() {
+        let tmp = TestDir::new();
+        let deps = test_deps(&tmp.0);
+        let record = PendingRunRecord {
+            run_id: "run-restored".to_string(),
+            thread_id: "thread-1".to_string(),
+            wire_thread_id: "thread-1".to_string(),
+            tenant: "default".to_string(),
+            graph: "gated".to_string(),
+            payload: RunPayload::default(),
+            seq: 1,
+            enqueued_at: chrono::Utc::now(),
+        };
+        deps.server_store.put_pending_run(&record).await.unwrap();
+
+        restore_pending_runs(deps.clone()).await;
+
+        // The slot was free, so the run started immediately — in
+        // background, no SSE client — and ran to completion; its queue
+        // record left the store with the promotion.
+        let mut status = None;
+        for _ in 0..100 {
+            if let Some(info) = deps.manager.info("run-restored").await {
+                status = Some(info.status);
+                if info.status.is_terminal() {
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(status, Some(RunStatus::Success));
+        assert!(deps
+            .server_store
+            .list_pending_runs()
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

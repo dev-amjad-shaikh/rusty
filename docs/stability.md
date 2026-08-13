@@ -247,7 +247,7 @@ when every gate below closes:
 | Gate | Owner | Evidence |
 |---|---|---|
 | HTTP API version constant + `/info` reporting | maintainers | landed 2026-08-12: `API_PROTOCOL_VERSION` = 1 in `rusty-server/src/lib.rs`, reported by `GET /info` as `api_protocol_version`; the same-cycle pairing row in [versioning.md](versioning.md) is rewritten |
-| Durable pending-run queue | maintainers | code; restart-survival test in the server suite |
+| Durable pending-run queue | maintainers | landed 2026-08-12: queued runs persist on enqueue as `server_pending_runs` records (JSON-file and Postgres backends), the record deletes on every queue-exit transition, and boot replays survivors into the per-thread FIFO in original order; restart-survival tests in `rusty-server/tests/durable_pending_runs.rs` and `rusty-server/tests/postgres_pending_runs.rs` |
 | Capacity envelope | maintainers | load-test harness plus published numbers in [benchmarks.md](benchmarks.md) |
 | Provider-layer integration | maintainers | one integrated provider layer instead of hand-built adapters |
 | Independent security review | external | published report or summary |

@@ -277,6 +277,10 @@ pub(crate) fn build_router(
         evaluation_state: crate::evaluations::init_evaluation_state(),
     });
     crons::spawn_scheduler(Arc::clone(&state));
+    // The durable pending-run queue's boot half: replay persisted queue
+    // entries back into the scheduler (R1.0 gate). Restored runs schedule
+    // in background, exactly as if just enqueued.
+    tokio::spawn(runs::restore_pending_runs(state.run_deps.clone()));
     // Warm the capsule authorization plane (R0.9 wave 2): register any
     // operator config-file policies (default tenant; registered, never
     // activated), then preload every tenant's active engine into the
@@ -8302,13 +8306,13 @@ async fn cancel_one_agent(
     // The agent's thread convention, internally scoped — the manager keys
     // runs by internal thread id.
     let thread = tenant.scope(&AgentId::new(agent_external).thread_id());
-    let runs = state.run_deps.manager.cancel_thread_runs(&thread).await;
+    let run_outcome = runs::cancel_thread_runs(&state.run_deps, &thread).await;
     let ids =
         |tasks: Vec<TaskRecord>| -> Vec<String> { tasks.into_iter().map(|t| t.task_id).collect() };
     let cancelled = ids(outcome.cancelled);
     let signalled = ids(outcome.signalled);
     let mut exit_event = Value::Null;
-    if !cancelled.is_empty() || !signalled.is_empty() || !runs.is_empty() {
+    if !cancelled.is_empty() || !signalled.is_empty() || !run_outcome.is_empty() {
         exit_event = json!(supervision::journal_agent_exit(
             &state.server_store,
             tenant,
@@ -8317,8 +8321,8 @@ async fn cancel_one_agent(
             json!({
                 "cancelled_messages": cancelled,
                 "signalled_messages": signalled,
-                "signalled_runs": runs.signalled,
-                "cancelled_runs": runs.cancelled,
+                "signalled_runs": run_outcome.signalled,
+                "cancelled_runs": run_outcome.cancelled,
             }),
         )
         .await
@@ -8329,8 +8333,8 @@ async fn cancel_one_agent(
         "cancelled": cancelled,
         "signalled": signalled,
         "runs": {
-            "signalled": runs.signalled,
-            "cancelled": runs.cancelled,
+            "signalled": run_outcome.signalled,
+            "cancelled": run_outcome.cancelled,
         },
         "exit_event": exit_event,
     }))
