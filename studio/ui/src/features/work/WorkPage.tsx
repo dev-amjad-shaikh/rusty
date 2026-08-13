@@ -34,6 +34,12 @@ export function WorkPage() {
   const uncertainty = work.uncertainByConnection[durableMutationScope] ?? "";
   const draftScope = useRef(scope);
   const drafts = useRef(new Map<string, { selectedAgentId: string; objective: string }>());
+  const launchOwner = useRef({ mounted: true, operationId: "" });
+
+  useEffect(() => {
+    launchOwner.current.mounted = true;
+    return () => { launchOwner.current.mounted = false; };
+  }, []);
 
   useEffect(() => {
     if (draftScope.current === scope) return;
@@ -74,14 +80,17 @@ export function WorkPage() {
     })) : [],
   });
   const launch = useMutation({
-    mutationFn: async (input: { connection: NonNullable<typeof connection>; scope: string; mutationScope: string; durableScope: string; agent: Assistant; objective: string }) => {
+    mutationFn: async (input: { connection: NonNullable<typeof connection>; scope: string; mutationScope: string; durableScope: string; operationId: string; agent: Assistant; objective: string }) => {
       let threadCreated = false;
       try {
         const thread = await createThread(input.connection, input.agent.graph, input.agent.assistant_id);
         threadCreated = true;
-        const receipt = await startRun(input.connection, thread, input.agent.assistant_id, input.objective);
+        const receipt = await startRun(input.connection, thread, input.agent.assistant_id, input.agent.active_version_id, input.objective);
         return { ...input, thread, receipt };
       } catch (caught) {
+        if (caught instanceof StudioApiError && caught.status === 409 && !caught.mayHaveCommitted) {
+          throw new StudioApiError("This agent changed after you opened it. Review the current active version, then choose the agent again.", 409);
+        }
         if (threadCreated || (caught instanceof StudioApiError && caught.mayHaveCommitted)) {
           work.markUncertain(input.mutationScope, "Rusty may have accepted part or all of this launch. Check server work before allowing another run.");
           throw new StudioApiError("The launch result is uncertain. Studio locked retry to avoid duplicate work.", caught instanceof StudioApiError ? caught.status : 0, true);
@@ -89,18 +98,28 @@ export function WorkPage() {
         throw caught;
       }
     },
-    onSuccess: ({ agent, thread, receipt, objective: exactObjective, scope: initiatingScope, durableScope: initiatingDurableScope }) => {
+    onSuccess: ({ agent, thread, receipt, objective: exactObjective, scope: initiatingScope, durableScope: initiatingDurableScope, operationId }) => {
       const current = useConnectionStore.getState().connection;
       if (!current || connectionScope(current) !== initiatingScope) return;
+      const recent = rememberRecentWork(initiatingDurableScope, { threadId: thread.thread_id, runId: receipt.run_id });
+      if (!launchOwner.current.mounted || launchOwner.current.operationId !== operationId) return;
       work.clearUncertain(mutationScope(current));
       work.begin(initiatingScope, agent, exactObjective, thread, receipt);
-      setRecentIds(rememberRecentWork(initiatingDurableScope, { threadId: thread.thread_id, runId: receipt.run_id }));
+      setRecentIds(recent);
       setError("");
       navigate({ to: "/work/$threadId/runs/$runId", params: { threadId: thread.thread_id, runId: receipt.run_id } });
     },
-    onError: (caught) => {
+    onError: (caught, input) => {
       const current = useConnectionStore.getState().connection;
       if (!current || connectionScope(current) !== scope) return;
+      if (caught instanceof StudioApiError && caught.status === 409 && !caught.mayHaveCommitted) {
+        work.expirePrepared(input.scope, input.agent.assistant_id, input.agent.active_version_id);
+      }
+      if (!launchOwner.current.mounted || launchOwner.current.operationId !== input.operationId) return;
+      if (caught instanceof StudioApiError && caught.status === 409 && !caught.mayHaveCommitted) {
+        setSelectedAgentId("");
+        void assistants.refetch();
+      }
       setError(caught instanceof Error ? caught.message : "The run could not be started.");
     },
   });
@@ -108,12 +127,15 @@ export function WorkPage() {
   function submitLaunch() {
     if (!connection) { setError("Connect Rusty before starting work."); return; }
     if (uncertainty) return;
-    const agent = assistants.data?.find((item) => item.assistant_id === selectedAgentId && !item.archived_at);
+    const prepared = ownsRoute && work.assistant?.assistant_id === selectedAgentId ? work.assistant : null;
+    const agent = prepared ?? assistants.data?.find((item) => item.assistant_id === selectedAgentId && !item.archived_at);
     if (!agent) { setError("Choose an available agent."); return; }
     const exactObjective = objective.trim();
     if (!exactObjective) { setError("Describe the outcome you need."); return; }
     setError("");
-    launch.mutate({ connection, scope, mutationScope: durableMutationScope, durableScope, agent, objective: exactObjective });
+    const operationId = crypto.randomUUID();
+    launchOwner.current.operationId = operationId;
+    launch.mutate({ connection, scope, mutationScope: durableMutationScope, durableScope, operationId, agent, objective: exactObjective });
   }
 
   const exactRun = run.data && run.data.run_id === params.runId && run.data.thread_id === params.threadId ? run.data : null;

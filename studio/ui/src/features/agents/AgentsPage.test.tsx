@@ -5,15 +5,17 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "../../state/connection";
 import { useAgentMutationStore } from "../../state/agents";
-import { AgentsPage, modelRequirement, outputSchemaRequirement, toolContracts } from "./AgentsPage";
+import { AgentsPage } from "./AgentsPage";
+import { editableAgent, modelRequirement, outputSchemaRequirement, toolContracts } from "./AgentIntentEditor";
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const root = createRootRoute({ component: Outlet });
   const agents = createRoute({ getParentRoute: () => root, path: "/agents", component: AgentsPage });
+  const workspace = createRoute({ getParentRoute: () => root, path: "/agents/$assistantId", component: () => <h1>Agent workspace</h1> });
   const prompts = createRoute({ getParentRoute: () => root, path: "/agents/prompts", component: () => <p>Prompts</p> });
-  const router = createRouter({ routeTree: root.addChildren([agents, prompts]), history: createMemoryHistory({ initialEntries: ["/agents"] }) });
-  return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+  const router = createRouter({ routeTree: root.addChildren([agents, workspace, prompts]), history: createMemoryHistory({ initialEntries: ["/agents"] }) });
+  return { router, ...render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>) };
 }
 
 function json(value: unknown, status = 200) { return Promise.resolve(new Response(JSON.stringify(value), { status })); }
@@ -22,6 +24,18 @@ beforeEach(() => { useConnectionStore.setState({ connection: null, info: null, d
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Agents", () => {
+  it("keeps non-round-trippable stored definitions view-only", () => {
+    const intent = {
+      format: "rusty.agent-intent/v3", model: "model-v1", tools: [],
+      memory: { access: "none", scopes: [] }, approval: "runtime_policy",
+      output: { mode: "text", schema: "" }, budget: {}, binding: {},
+    };
+    const definition = { name: "Analyst", graph: "research", config: { studio_intent: intent, recursion_limit: 12 }, metadata: { description: "Review evidence" } };
+    expect(editableAgent(definition)).toBe(true);
+    expect(editableAgent({ ...definition, config: { studio_intent: { ...intent, extension: true } } })).toBe(false);
+    expect(editableAgent({ ...definition, config: { ...definition.config, recursion_limit: 1.5 } })).toBe(false);
+    expect(editableAgent({ ...definition, metadata: { description: 42 } })).toBe(false);
+  });
   it("keeps model credentials, hidden identities, and duplicate tools out of portable intent", () => {
     expect(() => modelRequirement("sk-abcdefghijklmnopqrstuvwxyz")).toThrow("secret token");
     expect(() => modelRequirement("https://user:secret@models.example/model")).toThrow("model identifier");
@@ -60,15 +74,14 @@ describe("Agents", () => {
     await userEvent.type(screen.getByLabelText("Name"), "Research analyst");
     await userEvent.selectOptions(screen.getByLabelText("Behavior"), "research");
     await userEvent.type(screen.getByLabelText("Responsibility"), "Investigate claims");
-    await userEvent.click(screen.getByRole("button", { name: /Model/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /Model/ }));
     await userEvent.type(screen.getByLabelText("Model requirement"), "model-v1");
-    for (const capability of ["Knowledge", "Tools", "Output", "Guardrails"]) await userEvent.click(screen.getByRole("button", { name: new RegExp(capability) }));
+    for (const capability of ["Knowledge", "Tools", "Output", "Guardrails"]) await userEvent.click(screen.getByRole("tab", { name: new RegExp(capability) }));
     expect(screen.getByText(/Enforcement depends on the selected behavior and deployment policies/)).toBeVisible();
     fireEvent.submit(screen.getByRole("button", { name: "Create agent" }).closest("form")!);
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Research analyst" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Agent workspace" })).toBeVisible());
     const request = fetchMock.mock.calls.find((call) => call[1]?.method === "POST");
     const body = JSON.parse(String(request?.[1]?.body));
-    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute("href", `/advanced/legacy?studio=agents&agent=${body.assistant_id}`);
     expect(body).toMatchObject({ config: { studio_intent: { format: "rusty.agent-intent/v3" } } });
   });
 
@@ -81,12 +94,51 @@ describe("Agents", () => {
     await userEvent.type(screen.getByLabelText("Name"), "Analyst");
     await userEvent.selectOptions(screen.getByLabelText("Behavior"), "research");
     await userEvent.type(screen.getByLabelText("Responsibility"), "Investigate claims");
-    await userEvent.click(screen.getByRole("button", { name: /Model/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /Model/ }));
     await userEvent.type(screen.getByLabelText("Model requirement"), "model-v1");
-    for (const capability of ["Knowledge", "Tools", "Output", "Guardrails"]) await userEvent.click(screen.getByRole("button", { name: new RegExp(capability) }));
+    for (const capability of ["Knowledge", "Tools", "Output", "Guardrails"]) await userEvent.click(screen.getByRole("tab", { name: new RegExp(capability) }));
     await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
     expect(await screen.findByRole("button", { name: "Create locked" })).toBeDisabled();
     useConnectionStore.setState({ connection: { epoch: 2, ...identity } });
     expect(await screen.findByRole("button", { name: "Create locked" })).toBeDisabled();
+  });
+
+  it("protects a new-agent draft when leaving the builder", async () => {
+    useConnectionStore.setState({
+      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+      info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
+    const { router } = renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Create agent" }));
+    await userEvent.type(screen.getByLabelText("Name"), "Research analyst");
+
+    void router.navigate({ to: "/agents/prompts" });
+    expect(await screen.findByRole("dialog", { name: "Discard your changes?" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Keep editing" })).toHaveFocus());
+    await userEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(router.state.location.pathname).toBe("/agents");
+    expect(screen.getByLabelText("Name")).toHaveValue("Research analyst");
+
+    const secondNavigation = router.navigate({ to: "/agents/prompts" });
+    await userEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+    await secondNavigation;
+    expect(await screen.findByText("Prompts")).toBeVisible();
+  });
+
+  it("keeps each capability tab associated with the live panel at every viewport", async () => {
+    renderPage();
+    useConnectionStore.setState({
+      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+      info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
+    await userEvent.click(await screen.findByRole("button", { name: "Create agent" }));
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveAttribute("id", "agent-capability-panel");
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab).toHaveAttribute("aria-controls", panel.id);
+      expect(tab).not.toHaveAttribute("aria-orientation");
+    }
   });
 });

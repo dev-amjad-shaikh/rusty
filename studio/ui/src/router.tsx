@@ -9,6 +9,7 @@ import {
 import { AppShell } from "./app/AppShell";
 
 const AgentsPage = lazy(() => import("./features/agents/AgentsPage").then((module) => ({ default: module.AgentsPage })));
+const AgentWorkspace = lazy(() => import("./features/agents/AgentWorkspace").then((module) => ({ default: module.AgentWorkspace })));
 const PromptStudio = lazy(() => import("./features/prompts/PromptStudio").then((module) => ({ default: module.PromptStudio })));
 const WorkPage = lazy(() => import("./features/work/WorkPage").then((module) => ({ default: module.WorkPage })));
 const RunComparePage = lazy(() => import("./features/work/RunComparePage").then((module) => ({ default: module.RunComparePage })));
@@ -30,6 +31,7 @@ const indexRoute = createRoute({
 });
 
 const agentsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents", component: AgentsPage });
+const agentRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents/$assistantId", component: AgentWorkspace });
 const promptsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents/prompts", component: PromptStudio });
 const workRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work", component: WorkPage });
 const workCompareRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/compare", component: RunComparePage });
@@ -38,7 +40,7 @@ const workTraceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/wo
 const workEvaluateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId/evaluate", component: WorkPage });
 const operationsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations", component: OperationsPage });
 
-const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, promptsRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, operationsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, agentRoute, promptsRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, operationsRoute]);
 
 export const router = createRouter({
   routeTree,

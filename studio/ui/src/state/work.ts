@@ -34,6 +34,8 @@ interface WorkState {
   cases: EvaluationCase[];
   comparisons: ComparisonRun[];
   uncertainByConnection: Record<string, string>;
+  prepare: (connectionKey: string, assistant: Assistant) => void;
+  expirePrepared: (connectionKey: string, assistantId: string, versionId: string) => void;
   begin: (connectionKey: string, assistant: Assistant, objective: string, thread: Thread, receipt: RunReceipt) => void;
   addCase: (value: Omit<EvaluationCase, "id" | "createdAt">) => void;
   rememberRun: (value: Omit<ComparisonRun, "capturedAt">) => void;
@@ -51,6 +53,10 @@ export const useWorkStore = create<WorkState>((set) => ({
   cases: [],
   comparisons: [],
   uncertainByConnection: {},
+  prepare: (connectionKey, assistant) => set({ connectionKey, assistant, objective: "", thread: null, receipt: null }),
+  expirePrepared: (connectionKey, assistantId, versionId) => set((state) => state.connectionKey === connectionKey
+    && state.assistant?.assistant_id === assistantId && state.assistant.active_version_id === versionId
+    && !state.receipt ? { assistant: null, thread: null } : {}),
   begin: (connectionKey, assistant, objective, thread, receipt) => set({ connectionKey, assistant, objective, thread, receipt }),
   addCase: (value) => set((state) => ({
     cases: [...state.cases, { ...value, id: crypto.randomUUID(), createdAt: new Date().toISOString() }],

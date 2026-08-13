@@ -12,7 +12,7 @@ This gives Rusty typed navigation, route-owned loading and error boundaries, con
 state, schema validation at the API boundary, component isolation, and a production build.
 
 This document is the target 1.0 product contract. The typed application currently delivers the three-destination
-shell, capability-based agent creation, continuous run/trace/evaluation-case flow, prompt versioning, paired run
+shell, capability-based agent creation and immutable version workspace, continuous run/trace/evaluation-case flow, prompt versioning, paired run
 comparison, and a task-failure-led Operations entry point. Routes and behaviors named below but not in that list
 remain migration work; the document does not claim they are already shipped.
 
@@ -192,6 +192,14 @@ remain available in an Advanced section. They do not interrupt the primary flow.
 
 The review step renders the resulting capability map and a plain-language execution summary before any
 mutation. Exact manifest evidence is available in a disclosure beside it.
+
+The selected-agent route owns the complete definition lifecycle. It presents the active capability map and
+immutable version spine, hands the active version directly to Work, stages edits without changing serving
+behavior, and requires an exact version review before activation or rollback. Archive and restore are confirmed
+in the same workspace. Work submits the reviewed active-version identity as an admission guard, so a concurrent
+activation or rollback fails closed instead of silently running a different definition. Legacy and
+non-round-trippable configurations remain visible and runnable when their graph is available, but Studio does not
+rewrite them through the visual editor.
 
 ## Work workspace
 

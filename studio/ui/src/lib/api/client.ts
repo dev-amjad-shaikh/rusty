@@ -106,7 +106,15 @@ export async function requestText(
   } catch {
     throw new StudioApiError("Rusty could not be reached.", 0, init.method !== undefined && init.method !== "GET");
   }
-  const text = await readBounded(response, maxBytes);
+  let text: string;
+  try { text = await readBounded(response, maxBytes); }
+  catch (caught) {
+    const mutation = init.method !== undefined && init.method !== "GET";
+    if (caught instanceof StudioApiError && mutation) {
+      throw new StudioApiError(caught.message, caught.status, true);
+    }
+    throw caught;
+  }
   if (!response.ok) throw new StudioApiError(errorMessage(text, response.status), response.status, response.status >= 500 || response.status === 408);
   return { status: response.status, text };
 }
@@ -186,6 +194,7 @@ export async function startRun(
   connection: ConnectionIdentity,
   thread: Thread,
   assistantId: string,
+  expectedActiveVersionId: string,
   objective: string,
 ): Promise<RunReceipt> {
   const { status, text } = await requestText(connection, `/threads/${encodeURIComponent(thread.thread_id)}/runs`, {
@@ -193,6 +202,7 @@ export async function startRun(
     body: JSON.stringify({
       input: { objective },
       assistant_id: assistantId,
+      expected_active_version_id: expectedActiveVersionId,
       multitask_strategy: "reject",
       metadata: { studio: { objective } },
     }),

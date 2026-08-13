@@ -1254,6 +1254,11 @@ async fn schedule_for_thread(
             ));
         }
     }
+    if payload.expected_active_version_id.is_some() && payload.assistant_id.is_none() {
+        return Err(ApiError::bad_request(
+            "`expected_active_version_id` requires `assistant_id`".to_string(),
+        ));
+    }
     if let Some(assistant_id) = &payload.assistant_id {
         // The id arrives in a JSON body, not a path segment, so it must be
         // validated here like every other client-chosen id: the default
@@ -1269,6 +1274,24 @@ async fn schedule_for_thread(
             .await
             .map_err(internal_err)?
             .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+        if let Some(expected) = &payload.expected_active_version_id {
+            if !valid_version_id(expected) {
+                return Err(ApiError::bad_request(
+                    "`expected_active_version_id` must be an exact assistant version id"
+                        .to_string(),
+                ));
+            }
+            let active = assistant.active_version_id();
+            if active != *expected {
+                return Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "assistant_version_changed",
+                    format!(
+                        "assistant `{assistant_id}` now serves version `{active}`; review the active version before starting work"
+                    ),
+                ));
+            }
+        }
         if assistant.archived_at.is_some() {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,

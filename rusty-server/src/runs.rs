@@ -131,6 +131,13 @@ pub struct RunPayload {
     #[serde(default)]
     pub assistant_id: Option<String>,
 
+    /// Optional optimistic guard for a named assistant. When present, run
+    /// admission fails unless the assistant still serves this exact immutable
+    /// version. This keeps a reviewed UI handoff exact across concurrent
+    /// activation or rollback.
+    #[serde(default)]
+    pub expected_active_version_id: Option<String>,
+
     /// The run's registry declaration (R0.11 Extension Plane, wave 2):
     /// the named configuration artifacts the run uses and the
     /// environment it targets. At admission each artifact resolves

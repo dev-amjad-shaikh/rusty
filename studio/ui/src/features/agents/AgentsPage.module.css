@@ -1,6 +1,7 @@
 .headerActions { display: flex; align-items: center; gap: 8px; }
 .headerActions a { display: inline-grid; place-items: center; text-decoration: none; }
-.builder { display: grid; grid-template-columns: minmax(190px, .55fr) minmax(420px, 1.4fr) minmax(240px, .7fr); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--surface-1); box-shadow: var(--shadow); }
+.builder { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .32fr); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--surface-1); box-shadow: var(--shadow); }
+.intentEditor { display: grid; grid-template-columns: minmax(190px, .55fr) minmax(420px, 1.4fr); min-width: 0; }
 .capabilityMap { display: grid; align-content: start; gap: 6px; padding: 14px; border-right: 1px solid var(--line); background: var(--surface-0); }
 .capabilityMap button { display: grid; grid-template-columns: 26px 1fr; gap: 2px 8px; min-width: 0; padding: 11px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; }
 .capabilityMap button:hover { background: var(--surface-2); color: var(--text); }
@@ -8,10 +9,6 @@
 .capabilityMap button b { font-size: 12px; }
 .capabilityMap button small { overflow: hidden; color: var(--text-faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .capabilityMap .activeCapability { border-color: var(--accent-border); background: var(--accent-soft); color: var(--text); }
-.agentCore { display: grid; gap: 3px; margin-bottom: 4px; padding: 16px 12px; border: 1px solid var(--accent-border); border-radius: 10px; background: linear-gradient(145deg, var(--accent-soft), var(--surface-1)); }
-.agentCore span { color: var(--accent); font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
-.agentCore strong { font-size: 16px; }
-.agentCore small { color: var(--text-muted); font-size: 10px; }
 .editor { min-width: 0; padding: clamp(24px, 4vw, 48px); }
 .editor h2, .review h2 { margin-bottom: 24px; font-size: 24px; letter-spacing: -.04em; }
 .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
@@ -23,6 +20,16 @@
 .checks legend { padding: 0 5px; color: var(--text-muted); font-size: 10px; }
 .checks label { display: flex; grid-auto-flow: column; align-items: center; gap: 6px; font-size: 10px; }
 .checks input { width: 15px; min-height: 15px; accent-color: var(--accent); }
+.toolEditor { grid-column: 1 / -1; display: grid; gap: 12px; }
+.toolHeading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.toolHeading b { font-size: 12px; }
+.toolHeading p, .emptyTools { margin: 3px 0 0; color: var(--text-faint); font-size: 10px; }
+.toolHeading button, .toolRow > button { min-height: 34px; border: 1px solid var(--line-strong); border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.toolHeading button { padding: 0 12px; }
+.toolRows { display: grid; gap: 8px; }
+.toolRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .72fr); align-items: end; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-0); }
+.toolRow > button { grid-column: 1 / -1; justify-self: end; min-width: 92px; padding: 0 10px; }
+.emptyTools { padding: 22px; border: 1px dashed var(--line-strong); border-radius: 10px; text-align: center; }
 .placeholder { max-width: 560px; padding: 24px; border: 1px dashed var(--line-strong); border-radius: 12px; }
 .placeholder p { color: var(--text-muted); line-height: 1.55; }
 .review { padding: 24px 20px; border-left: 1px solid var(--line); background: var(--blue-soft); }
@@ -49,8 +56,8 @@
 .live, .archived { padding: 4px 7px; border-radius: 99px; background: var(--moss-soft); color: var(--moss); font: 700 8px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .archived { background: var(--surface-2); color: var(--text-faint); }
 
-@media (max-width: 1040px) { .builder { grid-template-columns: 190px minmax(0, 1fr); } .review { grid-column: 1 / -1; border-top: 1px solid var(--line); border-left: 0; } }
+@media (max-width: 1040px) { .builder { grid-template-columns: 1fr; } .intentEditor { grid-template-columns: 190px minmax(0, 1fr); } .review { border-top: 1px solid var(--line); border-left: 0; } }
 @media (max-width: 980px) { .library { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 680px) { .headerActions { align-items: stretch; flex-direction: column; width: 100%; } .builder { display: block; } .capabilityMap { grid-template-columns: repeat(3, minmax(0, 1fr)); border-right: 0; border-bottom: 1px solid var(--line); } .agentCore { grid-column: 1 / -1; } .capabilityMap button { display: block; padding: 10px 8px; text-align: center; } .capabilityMap button span, .capabilityMap button small { display: none; } .editor { padding: 24px 16px; } .fields { grid-template-columns: 1fr; } .wide { grid-column: auto; } }
+@media (max-width: 680px) { .headerActions { align-items: stretch; flex-direction: column; width: 100%; } .builder, .intentEditor { display: block; } .capabilityMap { grid-template-columns: repeat(3, minmax(0, 1fr)); border-right: 0; border-bottom: 1px solid var(--line); } .capabilityMap button { display: block; padding: 10px 8px; text-align: center; } .capabilityMap button span, .capabilityMap button small { display: none; } .editor { padding: 24px 16px; } .fields { grid-template-columns: 1fr; } .wide { grid-column: auto; } .toolRow { grid-template-columns: 1fr; } .toolRow > button { width: 100%; } }
 @media (max-width: 620px) { .library { grid-template-columns: 1fr; } }
 @media (max-width: 390px) { .capabilityMap { grid-template-columns: repeat(2, minmax(0, 1fr)); } .checks { align-items: flex-start; flex-direction: column; } }

@@ -192,7 +192,20 @@ async fn immutable_versions_stage_activate_and_roll_back_without_rewriting_histo
         &server,
         "POST",
         &format!("/threads/{pipeline_thread}/runs/wait"),
-        Some(json!({"assistant_id": "scout"})),
+        Some(json!({"assistant_id": "scout", "expected_active_version_id": v2})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "stale guard was accepted: {staged_run}"
+    );
+
+    let (status, staged_run) = call(
+        &server,
+        "POST",
+        &format!("/threads/{pipeline_thread}/runs/wait"),
+        Some(json!({"assistant_id": "scout", "expected_active_version_id": v1})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "staged run failed: {staged_run}");
