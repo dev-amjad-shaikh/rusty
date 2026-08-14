@@ -85,8 +85,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             conn.request(self.command, upstream, body=body, headers=headers)
             resp = conn.getresponse()
-        except OSError as exc:
-            self.send_error(502, f"proxy cannot reach {self.target_host}:{self.target_port} — {exc}")
+        except OSError:
+            # HTTP reason phrases are latin-1. Keep this message deliberately
+            # plain so an unavailable local workspace still returns a valid 502.
+            self.send_error(502, "upstream workspace is unavailable")
             return
 
         self.send_response(resp.status)

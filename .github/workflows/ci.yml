@@ -154,6 +154,10 @@ jobs:
 
       - name: Check with MSRV toolchain
         # No committed Cargo.lock (library policy), so --locked cannot be used.
+        # Resolve the newest dependency set that still supports the crate's
+        # declared Rust version instead of letting a transitive release raise it.
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
         run: cargo check -p ${{ matrix.pkg }}
 
   # Advisory scan of the workspace Cargo.lock against the RustSec advisory DB.
