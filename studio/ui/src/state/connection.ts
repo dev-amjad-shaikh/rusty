@@ -5,9 +5,16 @@ import type { ConnectionIdentity } from "../lib/api/client";
 interface ConnectionState {
   connection: ConnectionIdentity | null;
   info: ServerInfo | null;
+  workspaceStatus: "discovering" | "ready" | "unavailable";
+  discoveryAttempt: number;
+  discoveryError: string;
+  suggestedOrigin: string;
   dialogOpen: boolean;
   openDialog: () => void;
   closeDialog: () => void;
+  retryDiscovery: () => void;
+  acceptDiscovery: (attempt: number, origin: string, info: ServerInfo) => Promise<void>;
+  failDiscovery: (attempt: number, error: string, suggestedOrigin: string) => void;
   connect: (origin: string, apiKey: string, info: ServerInfo) => Promise<void>;
   disconnect: () => void;
 }
@@ -26,9 +33,52 @@ async function fingerprint(apiKey: string) {
 export const useConnectionStore = create<ConnectionState>((set) => ({
   connection: null,
   info: null,
+  workspaceStatus: "discovering",
+  discoveryAttempt: 0,
+  discoveryError: "",
+  suggestedOrigin: "",
   dialogOpen: false,
-  openDialog: () => set({ dialogOpen: true }),
+  openDialog: () => set((state) => ({
+    dialogOpen: true,
+    workspaceStatus: state.connection ? "ready" : "unavailable",
+  })),
   closeDialog: () => set({ dialogOpen: false }),
+  retryDiscovery: () => set((state) => ({
+    connection: null,
+    info: null,
+    dialogOpen: false,
+    workspaceStatus: "discovering",
+    discoveryAttempt: state.discoveryAttempt + 1,
+    discoveryError: "",
+  })),
+  acceptDiscovery: async (attempt, origin, info) => {
+    const tenantFingerprint = await fingerprint("");
+    set((state) => {
+      if (state.discoveryAttempt !== attempt || state.workspaceStatus !== "discovering"
+        || state.dialogOpen || state.connection) return {};
+      return {
+        connection: {
+          epoch: ++epoch,
+          origin: origin.replace(/\/$/, ""),
+          apiKey: "",
+          tenantFingerprint,
+        },
+        info,
+        workspaceStatus: "ready" as const,
+        discoveryError: "",
+        suggestedOrigin: origin,
+      };
+    });
+  },
+  failDiscovery: (attempt, error, suggestedOrigin) => set((state) => {
+    if (state.discoveryAttempt !== attempt || state.workspaceStatus !== "discovering"
+      || state.dialogOpen || state.connection) return {};
+    return {
+      workspaceStatus: "unavailable" as const,
+      discoveryError: error,
+      suggestedOrigin,
+    };
+  }),
   connect: async (origin, apiKey, info) => {
     const tenantFingerprint = await fingerprint(apiKey);
     set({
@@ -39,8 +89,17 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
         tenantFingerprint,
       },
       info,
+      workspaceStatus: "ready",
+      discoveryError: "",
+      suggestedOrigin: origin.replace(/\/$/, ""),
       dialogOpen: false,
     });
   },
-  disconnect: () => set({ connection: null, info: null, dialogOpen: false }),
+  disconnect: () => set({
+    connection: null,
+    info: null,
+    workspaceStatus: "unavailable",
+    discoveryError: "Choose a workspace to continue.",
+    dialogOpen: false,
+  }),
 }));

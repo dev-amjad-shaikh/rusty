@@ -9,8 +9,8 @@ available at ``/advanced/legacy`` while its workflows migrate.
 Usage:
     python3 studio/serve.py [--port 8000] [--target http://127.0.0.1:8100]
 
-Then open http://127.0.0.1:8000/. The default connection points directly to
-http://127.0.0.1:8100; the proxy remains available at /api/*.
+Then open http://127.0.0.1:8000/. Studio discovers the proxied local workspace
+at /api automatically; server addresses and access keys remain recovery-only.
 """
 
 import argparse

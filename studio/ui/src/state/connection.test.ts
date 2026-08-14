@@ -3,7 +3,7 @@ import { useConnectionStore } from "./connection";
 
 const info = { service: "rusty-server" as const, version: "1", checkpointer: "json_file" as const, server_store: "json_file" as const, store_path: "/tmp", graphs: [] };
 
-beforeEach(() => useConnectionStore.setState({ connection: null, info: null, dialogOpen: false }));
+beforeEach(() => useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "discovering", discoveryAttempt: 0, discoveryError: "", suggestedOrigin: "", dialogOpen: false }));
 
 describe("connection identity", () => {
   it("derives a strong opaque tenant scope without exposing the access key", async () => {
@@ -21,5 +21,14 @@ describe("connection identity", () => {
     const second = useConnectionStore.getState().connection!;
     expect(second.tenantFingerprint).not.toBe(first.tenantFingerprint);
     expect(second.epoch).toBeGreaterThan(first.epoch);
+  });
+
+  it("ignores discovery evidence from an abandoned attempt", async () => {
+    useConnectionStore.getState().retryDiscovery();
+    const activeAttempt = useConnectionStore.getState().discoveryAttempt;
+    await useConnectionStore.getState().acceptDiscovery(activeAttempt - 1, "https://stale.example/api", info);
+    expect(useConnectionStore.getState().connection).toBeNull();
+    useConnectionStore.getState().failDiscovery(activeAttempt - 1, "stale", "https://stale.example/api");
+    expect(useConnectionStore.getState().workspaceStatus).toBe("discovering");
   });
 });

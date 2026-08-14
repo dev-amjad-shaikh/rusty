@@ -98,7 +98,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
 
   const publish = useMutation({
     mutationFn: async (operation: PublishOperation) => {
-      if (!connection) throw new Error("Connect Rusty first.");
+      if (!connection) throw new Error("Open a workspace first.");
       return createDataset(connection, { name: operation.name, version: operation.version, cases: operation.cases });
     },
     onSuccess: async (record, operation) => {
@@ -133,7 +133,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
 
   const start = useMutation({
     mutationFn: async (operation: ExperimentOperation) => {
-      if (!connection) throw new Error("Connect Rusty first.");
+      if (!connection) throw new Error("Open a workspace first.");
       return createExperiment(connection, operation.payload);
     },
     onSuccess: async (record, operation) => {
@@ -163,7 +163,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
 
   const gate = useMutation({
     mutationFn: async (operation: GateOperation) => {
-      if (!connection) throw new Error("Connect Rusty first.");
+      if (!connection) throw new Error("Open a workspace first.");
       return createGate(connection, operation.payload);
     },
     onSuccess: async (record, operation) => {

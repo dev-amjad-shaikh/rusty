@@ -125,7 +125,7 @@ export function WorkPage() {
   });
 
   function submitLaunch() {
-    if (!connection) { setError("Connect Rusty before starting work."); return; }
+    if (!connection) { openDialog(); return; }
     if (uncertainty) return;
     const prepared = ownsRoute && work.assistant?.assistant_id === selectedAgentId ? work.assistant : null;
     const agent = prepared ?? assistants.data?.find((item) => item.assistant_id === selectedAgentId && !item.archived_at);
@@ -169,7 +169,7 @@ export function WorkPage() {
   return (
     <section className="page" aria-labelledby="work-heading">
       <header className="page-header"><div><span className="eyebrow">Work</span><h1 id="work-heading">Give an agent a goal</h1><p>Run the work, understand every step, and evaluate the result without losing the thread.</p></div>{currentComparisons.length >= 2 && <Link className="secondary-button" to="/work/compare">Compare runs</Link>}</header>
-      {!connection ? <div className="empty-state"><span className="eyebrow">One continuous workspace</span><h2>Connect Rusty to begin</h2><p>Choose an agent, start one real run, then move through its trace and evaluation in the same workspace.</p><button className="primary-button" type="button" onClick={openDialog}>Connect Rusty</button></div> : (
+      {!connection ? <div className="empty-state"><span className="eyebrow">One continuous workspace</span><h2>Open a workspace to start work</h2><p>Your agents, runs, and evidence live together in a Rusty workspace.</p><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div> : (
         <div className={styles.workspace}>
           <header className={styles.contextBar}><div><span>Agent</span><b>{activeAgent?.name ?? exactRun?.graph ?? "New work"}</b></div><div><span>Status</span><b className={styles.status}>{exactRun?.status ?? (launch.isPending ? "starting" : "not started")}</b></div><div className={styles.identity}><span>Thread / run</span><code>{params.threadId ? `${short(params.threadId)} / ${short(params.runId ?? "")}` : "Created when you start"}</code></div></header>
           <nav className={styles.stages} aria-label="Work stages">{stages.map((item, index) => <button type="button" key={item} aria-current={stage === item ? "step" : undefined} onClick={() => openStage(item)} disabled={(item === "trace" && !traceReady) || (item === "evaluate" && !evaluationReady) || (!params.runId && item !== "run")}><span>{index + 1}</span>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>

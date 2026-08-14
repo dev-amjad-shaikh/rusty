@@ -80,11 +80,11 @@ export function OperationsPage() {
   return <section className="page" aria-labelledby="operations-heading">
     <header className="page-header">
       <div><span className="eyebrow">Operations</span><h1 id="operations-heading">Intervene only when needed</h1><p>Terminal task failures appear first. Schedule and automation catalogs stay quiet until you open them.</p></div>
-      {!connection && <button className="primary-button" type="button" onClick={openDialog}>Connect Rusty</button>}
+      {!connection && <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>}
       {connection && <button className="secondary-button" type="button" onClick={() => snapshot.refetch()} disabled={snapshot.isFetching}>{snapshot.isFetching ? "Refreshing…" : "Refresh"}</button>}
     </header>
 
-    {!connection ? <div className="empty-state"><span className="eyebrow">Attention queue</span><h2>Connect to load operations</h2><p>Failures and routine systems will remain clearly separated.</p></div>
+    {!connection ? <div className="empty-state"><span className="eyebrow">Attention queue</span><h2>Open a workspace to review operations</h2><p>Failures and routine systems will remain clearly separated.</p></div>
       : snapshot.isLoading ? <div className={styles.loading}>Loading operational evidence…</div>
       : snapshot.isError ? <div className={styles.attention}><div><span className="eyebrow">Evidence unavailable</span><h2>Operations could not be loaded</h2><p>{snapshot.error instanceof Error ? snapshot.error.message : "Try again."}</p></div></div>
       : <>

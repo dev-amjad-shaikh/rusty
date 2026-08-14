@@ -24,6 +24,19 @@ remain available at the exact decision where they matter; they do not dominate t
 
 ## Primary experience
 
+### Workspace entry
+
+The normal local path has no connection task. Studio probes its same-origin `/api` gateway and then a
+direct same-origin API, validates the exact server-information contract, and opens the product workspace.
+The application shell remains visible while that bounded discovery is in flight. Server addresses and
+access keys appear only when local discovery fails or a person deliberately switches deployments.
+
+Opening workspace settings abandons the automatic attempt, so a late local response cannot replace a
+manual choice. Switching workspaces clears connection-owned queries and page-memory run/evaluation state;
+late results remain ineligible through the connection epoch. Access keys stay in page memory and never
+enter routes. A person may shape an unsaved agent draft before choosing a workspace; the first successful
+workspace opening preserves that draft, while a later workspace change clears it.
+
 ### Agents
 
 Agents is the place to define reusable workers.
@@ -85,7 +98,7 @@ before resolving tenant data.
 ```text
 App shell
 ├── route tree and navigation
-├── connection boundary
+├── automatic workspace discovery and authentication boundary
 ├── command palette and global search
 └── notifications and error boundaries
 

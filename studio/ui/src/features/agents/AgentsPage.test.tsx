@@ -20,7 +20,7 @@ function renderPage() {
 
 function json(value: unknown, status = 200) { return Promise.resolve(new Response(JSON.stringify(value), { status })); }
 
-beforeEach(() => { useConnectionStore.setState({ connection: null, info: null, dialogOpen: false }); useAgentMutationStore.setState({ uncertainByConnection: {} }); });
+beforeEach(() => { useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", discoveryAttempt: 0, discoveryError: "", suggestedOrigin: "", dialogOpen: false }); useAgentMutationStore.setState({ uncertainByConnection: {} }); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Agents", () => {
@@ -50,11 +50,31 @@ describe("Agents", () => {
     expect(outputSchemaRequirement("report.v1", "json_schema")).toBe("report.v1");
     expect(modelRequirement("api-speech-preview")).toBe("api-speech-preview");
   });
-  it("offers one clear connection action when disconnected", async () => {
+  it("preserves an offline agent draft when its first workspace opens", async () => {
     renderPage();
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Connect Rusty to load agents" })).toBeVisible());
-    await userEvent.click(screen.getByRole("button", { name: "Connect Rusty" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Design your first agent now" })).toBeVisible());
+    await userEvent.click(screen.getByRole("button", { name: "Start a draft" }));
+    await userEvent.type(screen.getByLabelText("Name"), "Research analyst");
+    await userEvent.type(screen.getByLabelText("Responsibility"), "Investigate claims");
+    expect(screen.getByLabelText("Behavior")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Choose workspace" }));
     expect(useConnectionStore.getState().dialogOpen).toBe(true);
+    await useConnectionStore.getState().connect("https://rusty.example", "key", { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] });
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Research analyst"));
+    expect(screen.getByLabelText("Responsibility")).toHaveValue("Investigate claims");
+    expect(screen.getByLabelText("Behavior")).toBeEnabled();
+  });
+
+  it("clears a draft before showing it in a different workspace", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Start a draft" }));
+    await userEvent.type(screen.getByLabelText("Name"), "Private analyst");
+    await useConnectionStore.getState().connect("https://first.example", "first-key", { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] });
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Private analyst"));
+    await useConnectionStore.getState().connect("https://second.example", "second-key", { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Create your first worker" })).toBeVisible());
+    expect(screen.queryByDisplayValue("Private analyst")).not.toBeInTheDocument();
   });
 
   it("creates an agent from the complete capability draft and admits the exact receipt", async () => {

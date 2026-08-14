@@ -10,7 +10,7 @@ import { useConnectionStore } from "../state/connection";
 import { AppShell } from "./AppShell";
 
 async function scan(path: "/agents" | "/work" | "/operations") {
-  useConnectionStore.setState({ connection: null, info: null, dialogOpen: false });
+  useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", discoveryAttempt: 0, discoveryError: "", suggestedOrigin: "", dialogOpen: false });
   const root = createRootRoute({ component: AppShell });
   const routes = [
     createRoute({ getParentRoute: () => root, path: "/agents", component: AgentsPage }),

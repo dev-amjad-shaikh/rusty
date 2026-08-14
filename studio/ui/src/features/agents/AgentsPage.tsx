@@ -29,6 +29,7 @@ export function AgentsPage() {
   const [error, setError] = useState("");
   const [assistantId, setAssistantId] = useState(() => crypto.randomUUID());
   const allowNavigation = useRef(false);
+  const previousWorkspace = useRef("disconnected");
   const mutationState = useAgentMutationStore();
   const scope = connection ? connectionScope(connection) : "disconnected";
   const durableMutationScope = connection ? mutationScope(connection) : "disconnected";
@@ -40,6 +41,9 @@ export function AgentsPage() {
     withResolver: true,
   });
   useEffect(() => {
+    const previous = previousWorkspace.current;
+    previousWorkspace.current = durableMutationScope;
+    if (previous === durableMutationScope || (previous === "disconnected" && durableMutationScope !== "disconnected")) return;
     setCreating(false); setVisited(new Set(["purpose"])); setDraft(emptyAgentDraft());
     setAssistantId(crypto.randomUUID()); setError("");
   }, [durableMutationScope]);
@@ -48,7 +52,7 @@ export function AgentsPage() {
   const catalog = useQuery({ queryKey, queryFn: () => listAssistants(connection!), enabled: Boolean(connection) });
   const create = useMutation({
     mutationFn: async () => {
-      if (!connection) throw new Error("Connect Rusty before creating an agent.");
+      if (!connection) throw new Error("Open a workspace before creating an agent.");
       const fields = agentVersionFields(draft);
       const input = {
         assistant_id: assistantId,
@@ -103,19 +107,23 @@ export function AgentsPage() {
   const intentReady = hasPortableIntent(draft);
 
   function update<K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) { setDraft((current) => ({ ...current, [key]: value })); setError(""); }
-  function submit(event: FormEvent) { event.preventDefault(); if (uncertainty) return; setError(""); create.mutate(); }
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!connection) { openDialog(); return; }
+    if (uncertainty) return;
+    setError("");
+    create.mutate();
+  }
 
   return (
     <section className="page" aria-labelledby="agents-heading">
       <header className="page-header">
         <div><span className="eyebrow">Agents</span><h1 id="agents-heading">Build a worker you can trust</h1><p>Give it a clear job, connect only the capabilities it needs, and test it before it joins real work.</p></div>
-        {connection && <div className={styles.headerActions}><Link className="secondary-button" to="/agents/prompts">Prompt library</Link>{(creating || Boolean(catalog.data?.length)) && <button className="primary-button" type="button" onClick={() => setCreating((value) => !value)} aria-expanded={creating} aria-controls="agent-builder">{creating ? "Close builder" : "Create agent"}</button>}</div>}
+        <div className={styles.headerActions}>{connection ? <Link className="secondary-button" to="/agents/prompts">Prompt library</Link> : <button className="secondary-button" type="button" onClick={openDialog}>Choose workspace</button>}{(creating || Boolean(catalog.data?.length)) && <button className="primary-button" type="button" onClick={() => setCreating((value) => !value)} aria-expanded={creating} aria-controls="agent-builder">{creating ? "Close builder" : "Create agent"}</button>}</div>
       </header>
       {routeBlocker.status === "blocked" && <UnsavedChangesDialog onKeep={routeBlocker.reset} onDiscard={() => { setDraft(emptyAgentDraft()); setVisited(new Set(["purpose"])); setError(""); routeBlocker.proceed(); }} />}
 
-      {!connection ? (
-        <div className="empty-state"><span className="eyebrow">Your agent library</span><h2>Connect Rusty to load agents</h2><p>Your deployment stays the source of truth. Studio will show each agent’s purpose and active definition.</p><button className="primary-button" type="button" onClick={openDialog}>Connect Rusty</button></div>
-      ) : creating ? (
+      {creating ? (
         <form className={styles.builder} id="agent-builder" onSubmit={submit}>
           <AgentIntentEditor draft={draft} onChange={update} graphs={info?.graphs.map((graph) => graph.name) ?? []} onCapabilityVisit={(capability) => setVisited((current) => new Set(current).add(capability))} />
           <aside className={styles.review}>
@@ -123,10 +131,12 @@ export function AgentsPage() {
             <dl>{capabilities.map((item) => <div key={item.key}><dt>{item.label}</dt><dd>{progress[item.key] ? capabilitySummary(item.key, draft) : "Not set"}</dd></div>)}</dl>
             {error && <p className={styles.error} role="alert">{error}</p>}
             {uncertainty && <div className={styles.error} role="alert"><p>{uncertainty}</p><button type="button" onClick={() => { mutationState.clearUncertain(durableMutationScope); setError(""); }}>I checked the server — allow retry</button></div>}
-            <button className="primary-button" type="submit" disabled={create.isPending || Boolean(uncertainty) || completed < capabilities.length || !intentReady}>{create.isPending ? "Creating…" : uncertainty ? "Create locked" : completed < capabilities.length ? `Review ${capabilities.length - completed} more` : !intentReady ? "Add one capability" : "Create agent"}</button>
-            <p className={styles.boundary}>These are portable requirements stored with the agent. Enforcement depends on the selected behavior and deployment policies, so test the agent before relying on them. Nothing begins running yet.</p>
+            <button className="primary-button" type="submit" disabled={create.isPending || Boolean(uncertainty) || completed < capabilities.length || !intentReady}>{create.isPending ? "Creating…" : uncertainty ? "Create locked" : completed < capabilities.length ? `Review ${capabilities.length - completed} more` : !intentReady ? "Add one capability" : !connection ? "Choose workspace to save" : "Create agent"}</button>
+            <p className={styles.boundary}>{connection ? "These are portable requirements stored with the agent. Enforcement depends on the selected behavior and deployment policies, so test the agent before relying on them. Nothing begins running yet." : "This draft stays on this page. Open a workspace to choose an available behavior, save the definition, and test it."}</p>
           </aside>
         </form>
+      ) : !connection ? (
+        <div className="empty-state"><span className="eyebrow">Start here</span><h2>Design your first agent now</h2><p>Shape an unsaved draft without setup. Choose a workspace when you are ready to save, run, and share it.</p><button className="primary-button" type="button" onClick={() => setCreating(true)}>Start a draft</button></div>
       ) : catalog.isLoading ? (
         <div className={styles.loading} aria-live="polite">Loading agents…</div>
       ) : catalog.isError ? (
