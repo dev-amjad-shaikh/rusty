@@ -24,6 +24,12 @@ beforeEach(() => { useConnectionStore.setState({ connection: null, info: null, w
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Agents", () => {
+  it("opens with the Forge thesis and an accessible capability system", async () => {
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Build an agent that earns trust." })).toBeVisible();
+    expect(screen.getByRole("img", { name: /Agent capability system/ })).toBeVisible();
+  });
+
   it("keeps non-round-trippable stored definitions view-only", () => {
     const intent = {
       format: "rusty.agent-intent/v3", model: "model-v1", tools: [],

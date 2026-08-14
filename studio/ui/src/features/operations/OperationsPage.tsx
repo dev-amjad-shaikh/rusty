@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { getOperationsSnapshot, type OperationAttentionItem } from "../../lib/api/client";
 import { useConnectionStore } from "../../state/connection";
 import { evidencePreview } from "../../lib/text";
@@ -9,9 +9,9 @@ import { getRunArtifact } from "../../lib/api/artifacts";
 import styles from "./OperationsPage.module.css";
 
 const systems = [
-  { key: "tasks", label: "Task queue", detail: "Work that needs action", href: "/advanced/legacy?studio=tasks" },
-  { key: "automations", label: "Automations", detail: "Event-driven entry points", href: "/advanced/legacy?studio=automations" },
-  { key: "schedules", label: "Schedules", detail: "Recurring execution", href: "/advanced/legacy?studio=schedules" },
+  { key: "tasks", label: "Task queue", detail: "Work that needs action" },
+  { key: "automations", label: "Automations", detail: "Event-driven entry points" },
+  { key: "schedules", label: "Schedules", detail: "Recurring execution" },
 ] as const;
 
 function observedTime(value: string) {
@@ -19,7 +19,7 @@ function observedTime(value: string) {
   return Number.isNaN(date.valueOf()) ? "Observation time unavailable" : date.toLocaleString();
 }
 
-function EvidencePanel({ item, close }: { item: OperationAttentionItem; close: () => void }) {
+function EvidencePanel({ item, close, headingRef }: { item: OperationAttentionItem; close: () => void; headingRef: RefObject<HTMLHeadingElement | null> }) {
   const { connection } = useConnectionStore();
   const artifact = useQuery({
     queryKey: connection && item.source === "artifact" && item.artifactId ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact", item.artifactId] : ["artifact", "idle"],
@@ -28,9 +28,9 @@ function EvidencePanel({ item, close }: { item: OperationAttentionItem; close: (
   });
   if (item.source === "artifact") {
     return <>
-      <aside className={styles.evidence} aria-labelledby="operation-evidence-heading">
+      <aside id="operation-evidence" className={styles.evidence} aria-labelledby="operation-evidence-heading">
         <div className={styles.evidenceHead}>
-          <div><span className="eyebrow">Artifact exception</span><h2 id="operation-evidence-heading">{item.title}</h2></div>
+          <div><span className="eyebrow">Artifact exception</span><h2 ref={headingRef} tabIndex={-1} id="operation-evidence-heading">{item.title}</h2></div>
           <button className="secondary-button" type="button" onClick={close}>Close</button>
         </div>
         <p>{item.detail}</p>
@@ -42,9 +42,9 @@ function EvidencePanel({ item, close }: { item: OperationAttentionItem; close: (
       {artifact.data && <ArtifactInspector artifact={artifact.data} onClose={close} />}
     </>;
   }
-  return <aside className={styles.evidence} aria-labelledby="operation-evidence-heading">
+  return <aside id="operation-evidence" className={styles.evidence} aria-labelledby="operation-evidence-heading">
     <div className={styles.evidenceHead}>
-      <div><span className="eyebrow">Task evidence</span><h2 id="operation-evidence-heading">{item.title}</h2></div>
+      <div><span className="eyebrow">Task evidence</span><h2 ref={headingRef} tabIndex={-1} id="operation-evidence-heading">{item.title}</h2></div>
       <button className="secondary-button" type="button" onClick={close}>Close</button>
     </div>
     <p>{item.detail}</p>
@@ -63,7 +63,37 @@ function EvidencePanel({ item, close }: { item: OperationAttentionItem; close: (
 export function OperationsPage() {
   const { connection, openDialog } = useConnectionStore();
   const [selected, setSelected] = useState<OperationAttentionItem | null>(null);
-  useEffect(() => { setSelected(null); }, [connection?.epoch, connection?.origin, connection?.tenantFingerprint]);
+  const evidenceHeadingRef = useRef<HTMLHeadingElement>(null);
+  const reviewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pageHeadingRef = useRef<HTMLHeadingElement>(null);
+  const attentionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const restoreStableFocusRef = useRef(false);
+  const evidenceOwnedFocusRef = useRef(false);
+  useEffect(() => {
+    const rememberFocusOwner = (event: FocusEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      evidenceOwnedFocusRef.current = Boolean(document.getElementById("operation-evidence")?.contains(event.target as Node) || target?.closest("[data-artifact-inspector]"));
+    };
+    document.addEventListener("focusin", rememberFocusOwner);
+    return () => document.removeEventListener("focusin", rememberFocusOwner);
+  }, []);
+  useEffect(() => { clearEvidenceToStableHeading(); }, [connection?.epoch, connection?.origin, connection?.tenantFingerprint]);
+  useEffect(() => {
+    if (selected) evidenceHeadingRef.current?.focus();
+    else if (restoreStableFocusRef.current) {
+      restoreStableFocusRef.current = false;
+      (attentionHeadingRef.current ?? pageHeadingRef.current)?.focus();
+    }
+  }, [selected?.id]);
+  function closeEvidence() {
+    setSelected(null);
+    requestAnimationFrame(() => reviewTriggerRef.current?.focus());
+  }
+  function clearEvidenceToStableHeading() {
+    restoreStableFocusRef.current = evidenceOwnedFocusRef.current;
+    evidenceOwnedFocusRef.current = false;
+    setSelected(null);
+  }
   const snapshot = useQuery({
     queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "operations"] : ["operations", "disconnected"],
     queryFn: () => getOperationsSnapshot(connection!),
@@ -71,15 +101,18 @@ export function OperationsPage() {
     refetchInterval: 15_000,
   });
   const data = snapshot.data;
+  const taskStatusUnavailable = Boolean(data?.unavailable.includes("task queue"));
   useEffect(() => {
     if (!selected || !data) return;
     const current = data.attention.find((item) => item.id === selected.id) ?? null;
-    if (current !== selected) setSelected(current);
+    if (current === selected) return;
+    if (current) setSelected(current);
+    else clearEvidenceToStableHeading();
   }, [data, selected]);
 
-  return <section className="page" aria-labelledby="operations-heading">
-    <header className="page-header">
-      <div><span className="eyebrow">Operations</span><h1 id="operations-heading">Intervene only when needed</h1><p>Terminal task failures appear first. Schedule and automation catalogs stay quiet until you open them.</p></div>
+  return <section className={`page ${styles.operationsPage}`} aria-labelledby="operations-heading">
+    <header className={`page-header ${styles.operationsHeader}`}>
+      <div><span className="eyebrow">Operations · human runtime</span><h1 ref={pageHeadingRef} tabIndex={-1} id="operations-heading">Only exceptions<br /><span>break the surface.</span></h1><p>Failed work appears first with its evidence. Schedules and automations stay quiet until you need them.</p></div>
       {!connection && <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>}
       {connection && <button className="secondary-button" type="button" onClick={() => snapshot.refetch()} disabled={snapshot.isFetching}>{snapshot.isFetching ? "Refreshing…" : "Refresh"}</button>}
     </header>
@@ -90,21 +123,21 @@ export function OperationsPage() {
       : <>
         <section className={styles.attention} aria-labelledby="attention-heading">
           <header>
-            <div><span className="eyebrow">Needs attention</span><h2 id="attention-heading">{data?.attention.length ? `${data.attention.length} item${data.attention.length === 1 ? "" : "s"}` : "No task failures need action"}</h2></div>
-            {data?.unavailable.length ? <span className={styles.unknown}>Not observed: {data.unavailable.join(", ")}</span> : <span className={styles.observed}>Task failure queues and catalogs observed</span>}
+            <div><span className="eyebrow">Needs attention</span><h2 ref={attentionHeadingRef} tabIndex={-1} id="attention-heading">{data?.attention.length ? `${data.attention.length} item${data.attention.length === 1 ? "" : "s"}` : taskStatusUnavailable ? "Task status could not be verified" : "No task failures need action"}</h2></div>
+            {data?.unavailable.length ? <span className={styles.unknown}>Unavailable: {data.unavailable.join(", ")}</span> : <span className={styles.observed}>All sources checked</span>}
           </header>
           {data?.attention.length ? <ol className={styles.attentionList}>{data.attention.map((item) => <li key={item.id}>
             <span className={styles.severity} aria-hidden="true">!</span>
             <div><b>{item.title}</b><p>{item.detail}</p><small>{observedTime(item.observedAt)}</small></div>
-            <button type="button" aria-expanded={selected?.id === item.id} onClick={() => setSelected(item)}>Review</button>
-          </li>)}</ol> : <p className={styles.clearCopy}>No dead or terminally failed tasks are present in the evidence that loaded.</p>}
+            <button type="button" aria-controls="operation-evidence" aria-expanded={selected?.id === item.id} onClick={(event) => { reviewTriggerRef.current = event.currentTarget; setSelected(item); }}>Review</button>
+          </li>)}</ol> : <p className={styles.clearCopy}>{taskStatusUnavailable ? "Refresh to check for work that may need attention." : "There are no dead or terminally failed tasks."}</p>}
         </section>
-        {selected && <EvidencePanel item={selected} close={() => setSelected(null)} />}
+        {selected && <EvidencePanel item={selected} close={closeEvidence} headingRef={evidenceHeadingRef} />}
         <section className={styles.systems} aria-labelledby="systems-heading">
-          <div className={styles.systemsHead}><h2 id="systems-heading">Routine systems</h2><span>Observed without becoming a dashboard</span></div>
+          <div className={styles.systemsHead}><h2 id="systems-heading">Routine systems</h2><span>Current inventory</span></div>
           <div className={styles.systemGrid}>{systems.map((system) => {
             const count = data?.systems[system.key];
-            return <a className={styles.systemCard} href={system.href} key={system.label}><b>{system.label}</b><span>{system.detail}</span><i>{count === null || count === undefined ? "Unknown" : count}</i></a>;
+            return <article className={styles.systemCard} key={system.label}><b>{system.label}</b><span>{system.detail}</span><i>{count === null || count === undefined ? "Unknown" : count}</i></article>;
           })}</div>
         </section>
       </>}

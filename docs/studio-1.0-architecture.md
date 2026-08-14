@@ -191,6 +191,28 @@ EvidenceDisclosure, ExactId, JsonViewer, DiffViewer
 Components expose focus behavior, loading semantics, accessible names, and responsive rules through
 their public contract. Feature code does not create new button, alert, dialog, or table primitives.
 
+## Visual operating system
+
+Studio presents one product, not a collection of operator panels. Its primary rooms share a dark spatial
+canvas, a compact top-level route bar, and a restrained signal palette: mint for ready and intentional
+action, sky for observed execution, violet for governed state, and magenta for exceptions. Exact evidence
+keeps its monospace treatment, but implementation and protocol commentary stays behind deliberate evidence
+disclosures rather than competing with the user's task.
+
+Each primary room has one job and one visual thesis:
+
+- **Forge** makes an agent's behavior, memory, tools, and safeguards visible as one capability system. The
+  orbital agent core is the product's signature illustration and appears only where it clarifies creation.
+- **Work** is a continuous execution console. Objective, live activity, trace, and evaluation remain within
+  one stable run surface instead of becoming separate dashboards.
+- **Operations** is an exception room. Failed or blocked work owns attention; healthy catalogs recede into
+  a quiet routine-systems layer.
+
+At narrow widths the primary routes become a compact second header row, while page content remains in
+document order with no horizontal overflow. Motion is ornamental only and is removed for reduced-motion
+preferences. The visual system must never imply readiness, health, enforcement, or proof beyond the same
+validated domain evidence used by the underlying workflow.
+
 ## Agent builder
 
 The builder is a guided canvas backed by one typed draft.

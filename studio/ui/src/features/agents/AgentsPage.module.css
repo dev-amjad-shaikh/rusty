@@ -1,6 +1,29 @@
+.forgeHeader { min-height: 500px; display: grid; grid-template-columns: minmax(420px, .95fr) minmax(440px, 1.05fr); align-items: center; gap: clamp(30px, 6vw, 100px); padding: clamp(20px, 3vw, 46px) 0 clamp(46px, 7vw, 90px); }
+.forgeCopy { position: relative; z-index: 2; max-width: 700px; }
+.forgeCopy h1 { max-width: 700px; margin-bottom: 24px; font-size: clamp(48px, 6.3vw, 92px); }
+.forgeCopy h1 span { background: linear-gradient(100deg, var(--mint), var(--sky) 42%, var(--violet) 72%, var(--pink)); background-clip: text; color: transparent; }
+.forgeCopy > p { max-width: 650px; margin-bottom: 28px; color: var(--text-muted); font-size: clamp(15px, 1.45vw, 19px); line-height: 1.65; }
+.compactHeader { align-items: flex-start; }
+.compactHeader .forgeCopy h1 { font-size: clamp(38px, 4vw, 58px); }
 .headerActions { display: flex; align-items: center; gap: 8px; }
 .headerActions a { display: inline-grid; place-items: center; text-decoration: none; }
-.builder { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .32fr); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--surface-1); box-shadow: var(--shadow); }
+.orbit { position: relative; width: min(100%, 590px); aspect-ratio: 1.1; justify-self: end; filter: drop-shadow(0 24px 70px rgb(0 0 0 / .38)); }
+.orbit::before { position: absolute; z-index: -1; inset: 23%; border-radius: 50%; background: radial-gradient(circle, rgb(123 255 189 / .15), rgb(123 255 189 / .04) 42%, transparent 70%); filter: blur(10px); content: ""; }
+.orbitRingOne, .orbitRingTwo, .orbitRingThree { position: absolute; top: 50%; left: 50%; border: 1px solid rgb(123 255 189 / .22); border-radius: 50%; transform: translate(-50%, -50%); }
+.orbitRingOne { width: 38%; aspect-ratio: 1; box-shadow: inset 0 0 38px rgb(123 255 189 / .04); }
+.orbitRingTwo { width: 62%; aspect-ratio: 1; border-color: rgb(110 215 255 / .18); border-style: dashed; }
+.orbitRingThree { width: 84%; aspect-ratio: 1; border-color: rgb(155 140 255 / .16); }
+.orbitCore { position: absolute; top: 50%; left: 50%; width: 132px; aspect-ratio: 1; display: grid; place-content: center; border: 1px solid var(--mint); border-radius: 50%; background: radial-gradient(circle at 38% 30%, rgb(123 255 189 / .16), rgb(7 10 9 / .96) 60%); box-shadow: 0 0 0 10px rgb(123 255 189 / .025), 0 0 48px rgb(123 255 189 / .2); text-align: center; transform: translate(-50%, -50%); }
+.orbitCore b { color: var(--text); font: 760 44px/1 var(--display); text-shadow: 0 0 24px rgb(123 255 189 / .55); }
+.orbitCore small { margin-top: 7px; color: var(--mint); font: 650 8px var(--mono); text-transform: uppercase; letter-spacing: .16em; }
+.signalBehavior, .signalMemory, .signalTools, .signalGuardrails { position: absolute; display: flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; background: rgb(7 10 9 / .88); color: var(--text-muted); font: 650 8px var(--mono); text-transform: uppercase; letter-spacing: .09em; white-space: nowrap; box-shadow: 0 10px 30px rgb(0 0 0 / .3); }
+.signalBehavior i, .signalMemory i, .signalTools i, .signalGuardrails i { width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+.signalBehavior { top: 8%; left: 50%; color: var(--violet); transform: translateX(-50%); }
+.signalMemory { top: 47%; left: 1%; color: var(--sky); }
+.signalTools { top: 47%; right: 1%; color: var(--pink); }
+.signalGuardrails { bottom: 7%; left: 50%; color: var(--mint); transform: translateX(-50%); }
+.signalBehavior i, .signalMemory i, .signalTools i, .signalGuardrails i { background: currentColor; }
+.builder { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .32fr); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: rgb(16 21 18 / .92); box-shadow: var(--shadow), 0 0 0 1px rgb(123 255 189 / .025); }
 .intentEditor { display: grid; grid-template-columns: minmax(190px, .55fr) minmax(420px, 1.4fr); min-width: 0; }
 .capabilityMap { display: grid; align-content: start; gap: 6px; padding: 14px; border-right: 1px solid var(--line); background: var(--surface-0); }
 .capabilityMap button { display: grid; grid-template-columns: 26px 1fr; gap: 2px 8px; min-width: 0; padding: 11px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; }
@@ -32,7 +55,7 @@
 .emptyTools { padding: 22px; border: 1px dashed var(--line-strong); border-radius: 10px; text-align: center; }
 .placeholder { max-width: 560px; padding: 24px; border: 1px dashed var(--line-strong); border-radius: 12px; }
 .placeholder p { color: var(--text-muted); line-height: 1.55; }
-.review { padding: 24px 20px; border-left: 1px solid var(--line); background: var(--blue-soft); }
+.review { padding: 24px 20px; border-left: 1px solid var(--line); background: linear-gradient(155deg, var(--violet-soft), var(--surface-1) 72%); }
 .review dl { display: grid; margin: 0 0 24px; }
 .review dl div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--blue) 18%, transparent); }
 .review dt { color: var(--text-muted); font-size: 11px; }
@@ -40,9 +63,17 @@
 .review button { width: 100%; }
 .boundary { margin: 10px 0 0; color: var(--text-faint); font-size: 9px; line-height: 1.45; }
 .error { padding: 10px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: 8px; background: var(--danger-soft); color: #f4b7aa; font-size: 11px; line-height: 1.45; }
+@media (forced-colors: active) { .forgeCopy h1 span { background: none; color: CanvasText; } }
 .loading { min-height: 200px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 14px; color: var(--text-muted); }
+.librarySection { position: relative; padding-top: 26px; border-top: 1px solid var(--line); }
+.librarySection::before { position: absolute; top: -1px; left: 0; width: 96px; height: 1px; background: linear-gradient(90deg, var(--mint), transparent); box-shadow: 0 0 12px rgb(123 255 189 / .5); content: ""; }
+.librarySection > header { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.librarySection > header h2 { margin: 0; font-size: clamp(25px, 3vw, 38px); letter-spacing: -.05em; }
+.librarySection > header > span { color: var(--text-faint); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
 .library { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.agentCard { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-1); box-shadow: 0 12px 35px rgb(0 0 0 / .14); }
+.agentCard { position: relative; min-width: 0; padding: 20px; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(145deg, rgb(18 25 21 / .94), rgb(10 14 12 / .96)); box-shadow: 0 18px 42px rgb(0 0 0 / .2); transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease; }
+.agentCard::before { position: absolute; top: 0; left: 20px; width: 50px; height: 1px; background: var(--mint); box-shadow: 0 0 14px rgb(123 255 189 / .55); content: ""; }
+.agentCard:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: 0 24px 54px rgb(0 0 0 / .3); }
 .agentCard header, .agentCard footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .agentCard header code { overflow: hidden; color: var(--text-faint); font: 9px var(--mono); text-overflow: ellipsis; }
 .agentCard h2 { margin: 24px 0 8px; font-size: 18px; letter-spacing: -.035em; }
@@ -56,8 +87,11 @@
 .live, .archived { padding: 4px 7px; border-radius: 99px; background: var(--moss-soft); color: var(--moss); font: 700 8px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .archived { background: var(--surface-2); color: var(--text-faint); }
 
-@media (max-width: 1040px) { .builder { grid-template-columns: 1fr; } .intentEditor { grid-template-columns: 190px minmax(0, 1fr); } .review { border-top: 1px solid var(--line); border-left: 0; } }
+@media (max-width: 1080px) { .forgeHeader { min-height: 430px; grid-template-columns: minmax(360px, 1fr) minmax(350px, .82fr); } .orbit { max-width: 470px; } .builder { grid-template-columns: 1fr; } .intentEditor { grid-template-columns: 190px minmax(0, 1fr); } .review { border-top: 1px solid var(--line); border-left: 0; } }
 @media (max-width: 980px) { .library { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .forgeHeader { min-height: 0; grid-template-columns: 1fr; padding-top: 12px; } .forgeCopy h1 { max-width: 620px; font-size: clamp(48px, 12vw, 72px); } .orbit { width: min(100%, 540px); justify-self: center; } }
 @media (max-width: 680px) { .headerActions { align-items: stretch; flex-direction: column; width: 100%; } .builder, .intentEditor { display: block; } .capabilityMap { grid-template-columns: repeat(3, minmax(0, 1fr)); border-right: 0; border-bottom: 1px solid var(--line); } .capabilityMap button { display: block; padding: 10px 8px; text-align: center; } .capabilityMap button span, .capabilityMap button small { display: none; } .editor { padding: 24px 16px; } .fields { grid-template-columns: 1fr; } .wide { grid-column: auto; } .toolRow { grid-template-columns: 1fr; } .toolRow > button { width: 100%; } }
 @media (max-width: 620px) { .library { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .orbit { margin-block: 8px 20px; } .orbitCore { width: 96px; } .orbitCore b { font-size: 32px; } .signalBehavior, .signalMemory, .signalTools, .signalGuardrails { padding: 6px 8px; font-size: 7px; } .librarySection > header { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 390px) { .capabilityMap { grid-template-columns: repeat(2, minmax(0, 1fr)); } .checks { align-items: flex-start; flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { .agentCard { transition: none; } }

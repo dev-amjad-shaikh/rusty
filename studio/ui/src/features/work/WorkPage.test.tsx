@@ -30,7 +30,7 @@ const assistant = { assistant_id: "agent-1", name: "Research analyst", graph: "r
 const events = [
   { id: "run-1:0", run_id: "run-1", thread_id: "thread-1", node_id: "research", seq: 0, kind: "node_input", effect: "pure", input: { inline: { objective: "Verify" } }, output: null, latency_ms: null, tokens: null, cost_usd: null, status: "ok", parent: null, recorded_at: "2026-08-11T00:00:00Z" },
   { id: "run-1:1", run_id: "run-1", thread_id: "thread-1", node_id: "research", seq: 1, kind: "model_call", effect: "non_idempotent", input: null, output: { inline: { text: "done" } }, latency_ms: 12, tokens: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 }, cost_usd: 0.001, status: "ok", parent: "run-1:0", recorded_at: "2026-08-11T00:00:01Z" },
-  { id: "run-1:2", run_id: "run-1", thread_id: "thread-1", node_id: "research", seq: 2, kind: "node_output", effect: "pure", input: null, output: { inline: { answer: "done" } }, latency_ms: 3, tokens: null, cost_usd: null, status: "ok", parent: "run-1:1", recorded_at: "2026-08-11T00:00:02Z" },
+  { id: "run-1:2", run_id: "run-1", thread_id: "thread-1", node_id: null, seq: 2, kind: "node_output", effect: "pure", input: null, output: { inline: { answer: "done" } }, latency_ms: 3, tokens: null, cost_usd: null, status: "ok", parent: "run-1:1", recorded_at: "2026-08-11T00:00:02Z" },
 ];
 
 beforeEach(() => {
@@ -66,9 +66,10 @@ describe("continuous Work journey", () => {
       input: { objective: "Verify the release claim" },
     });
     await waitFor(() => expect(screen.getByRole("button", { name: /Inspect trace|Follow trace/ })).toBeVisible());
+    expect(screen.getByText("Sequence 2")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: /Inspect trace|Follow trace/ }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Work completed" })).toBeVisible());
-    expect(screen.getByRole("list", { name: "Causal execution graph" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "research · model call, sequence 1, status ok" })).toBeVisible();
     expect(container.querySelectorAll("svg path")).toHaveLength(2);
     expect(HTMLElement.prototype.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ left: expect.any(Number), top: expect.any(Number) }));
     await userEvent.click(screen.getByRole("button", { name: "Evaluate this run" }));
@@ -263,7 +264,7 @@ describe("continuous Work journey", () => {
     }));
     renderPage("/work/thread-1/runs/run-1");
     expect(await screen.findByRole("heading", { name: "This workspace could not prove the requested run" })).toBeVisible();
-    expect(screen.queryByRole("list", { name: "Causal execution graph" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /research · model call/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start run" })).not.toBeInTheDocument();
     expect(screen.queryByText("Loading exact run evidence…")).not.toBeInTheDocument();
   });
@@ -292,7 +293,7 @@ describe("continuous Work journey", () => {
       throw new Error(`unexpected ${path}`);
     }));
     renderPage("/work/thread-1/runs/run-1");
-    expect(await screen.findByRole("heading", { name: "Work is underway" })).toBeVisible();
+    expect(await screen.findAllByRole("heading", { name: "Work completed" })).toHaveLength(2);
     expect(screen.queryByRole("heading", { name: "Check Rusty before starting again" })).not.toBeInTheDocument();
   });
 
@@ -306,10 +307,10 @@ describe("continuous Work journey", () => {
       throw new Error(`unexpected ${path}`);
     }));
     const { client } = renderPage("/work/thread-1/runs/run-1/trace");
-    expect(await screen.findByRole("list", { name: "Causal execution graph" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /research · model call/i })).toBeVisible();
     failRun = true;
     await client.refetchQueries({ queryKey: [1, "https://rusty.example", "a", "run", "run-1"], exact: true });
     expect(await screen.findByRole("heading", { name: "This workspace could not prove the requested run" })).toBeVisible();
-    expect(screen.queryByRole("list", { name: "Causal execution graph" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /research · model call/i })).not.toBeInTheDocument();
   });
 });

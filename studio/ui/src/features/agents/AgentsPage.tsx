@@ -117,9 +117,14 @@ export function AgentsPage() {
 
   return (
     <section className="page" aria-labelledby="agents-heading">
-      <header className="page-header">
-        <div><span className="eyebrow">Agents</span><h1 id="agents-heading">Build a worker you can trust</h1><p>Give it a clear job, connect only the capabilities it needs, and test it before it joins real work.</p></div>
-        <div className={styles.headerActions}>{connection ? <Link className="secondary-button" to="/agents/prompts">Prompt library</Link> : <button className="secondary-button" type="button" onClick={openDialog}>Choose workspace</button>}{(creating || Boolean(catalog.data?.length)) && <button className="primary-button" type="button" onClick={() => setCreating((value) => !value)} aria-expanded={creating} aria-controls="agent-builder">{creating ? "Close builder" : "Create agent"}</button>}</div>
+      <header className={creating ? `page-header ${styles.compactHeader}` : styles.forgeHeader}>
+        <div className={styles.forgeCopy}>
+          <span className="eyebrow">The Forge</span>
+          <h1 id="agents-heading">Build an agent that <span>earns trust.</span></h1>
+          <p>Give it one clear responsibility. Shape its capabilities, test the real behavior, then activate a version you can account for.</p>
+          <div className={styles.headerActions}>{connection ? <Link className="secondary-button" to="/agents/prompts">Prompt library</Link> : <button className="secondary-button" type="button" onClick={openDialog}>Choose workspace</button>}{(creating || Boolean(catalog.data?.length)) && <button className="primary-button" type="button" onClick={() => setCreating((value) => !value)} aria-expanded={creating} aria-controls="agent-builder">{creating ? "Close builder" : "Create agent"}</button>}</div>
+        </div>
+        {!creating && <AgentOrbit />}
       </header>
       {routeBlocker.status === "blocked" && <UnsavedChangesDialog onKeep={routeBlocker.reset} onDiscard={() => { setDraft(emptyAgentDraft()); setVisited(new Set(["purpose"])); setError(""); routeBlocker.proceed(); }} />}
 
@@ -142,10 +147,26 @@ export function AgentsPage() {
       ) : catalog.isError ? (
         <div className="empty-state"><span className="eyebrow">Agents unavailable</span><h2>The agent library could not be loaded</h2><p>{catalog.error instanceof Error ? catalog.error.message : "Try the request again."}</p><button className="primary-button" type="button" onClick={() => catalog.refetch()}>Retry</button></div>
       ) : catalog.data?.length ? (
-        <div className={styles.library}>{catalog.data.map((agent) => { const available = Boolean(info?.graphs.some((graph) => graph.name === agent.graph)); return <article key={agent.assistant_id} className={styles.agentCard}><header><span className={agent.archived_at || !available ? styles.archived : styles.live}>{agent.archived_at ? "Archived" : available ? "Active" : "Unavailable"}</span><code>{agent.active_version_id.slice(0, 12)}</code></header><h2>{evidencePreview(agent.name, 256)}</h2><p>{typeof agent.metadata === "object" && agent.metadata && "description" in agent.metadata ? evidencePreview(String(agent.metadata.description), 500) : "No purpose has been added."}</p><footer><span title={agent.graph}>{humanizeIdentifier(evidencePreview(agent.graph, 256))}</span><div><b>{agent.version_count} version{agent.version_count === 1 ? "" : "s"}</b><Link to="/agents/$assistantId" params={{ assistantId: agent.assistant_id }}>Open agent</Link></div></footer></article>; })}</div>
+        <section className={styles.librarySection} aria-labelledby="agent-library-heading">
+          <header><div><span className="eyebrow">Serving definitions</span><h2 id="agent-library-heading">Your agents</h2></div><span>{catalog.data.length} definition{catalog.data.length === 1 ? "" : "s"}</span></header>
+          <div className={styles.library}>{catalog.data.map((agent) => { const available = Boolean(info?.graphs.some((graph) => graph.name === agent.graph)); return <article key={agent.assistant_id} className={styles.agentCard}><header><span className={agent.archived_at || !available ? styles.archived : styles.live}>{agent.archived_at ? "Archived" : available ? "Active" : "Unavailable"}</span><code>{agent.active_version_id.slice(0, 12)}</code></header><h2>{evidencePreview(agent.name, 256)}</h2><p>{typeof agent.metadata === "object" && agent.metadata && "description" in agent.metadata ? evidencePreview(String(agent.metadata.description), 500) : "No purpose has been added."}</p><footer><span title={agent.graph}>{humanizeIdentifier(evidencePreview(agent.graph, 256))}</span><div><b>{agent.version_count} version{agent.version_count === 1 ? "" : "s"}</b><Link to="/agents/$assistantId" params={{ assistantId: agent.assistant_id }}>Open agent</Link></div></footer></article>; })}</div>
+        </section>
       ) : (
         <div className="empty-state"><span className="eyebrow">Your agent library</span><h2>Create your first worker</h2><p>Start with one clear responsibility. Model, knowledge, tools, output, and guardrails stay in one reviewable capability map.</p><button className="primary-button" type="button" onClick={() => setCreating(true)}>Create agent</button></div>
       )}
     </section>
   );
+}
+
+function AgentOrbit() {
+  return <div className={styles.orbit} role="img" aria-label="Agent capability system: behavior, models, memory, tools, and safeguards orbit the agent definition.">
+    <span className={styles.orbitRingOne} aria-hidden="true" />
+    <span className={styles.orbitRingTwo} aria-hidden="true" />
+    <span className={styles.orbitRingThree} aria-hidden="true" />
+    <span className={styles.orbitCore} aria-hidden="true"><b>R</b><small>agent</small></span>
+    <span className={styles.signalBehavior} aria-hidden="true"><i />behavior</span>
+    <span className={styles.signalMemory} aria-hidden="true"><i />memory</span>
+    <span className={styles.signalTools} aria-hidden="true"><i />tools</span>
+    <span className={styles.signalGuardrails} aria-hidden="true"><i />guardrails</span>
+  </div>;
 }

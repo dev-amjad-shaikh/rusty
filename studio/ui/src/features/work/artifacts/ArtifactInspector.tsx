@@ -1,5 +1,5 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArtifactImage } from "./ArtifactImage";
 import { getRunArtifactBytes, getRunArtifactNamed, getRunArtifactPreview, listRunArtifactVersions, releaseRunArtifact, type ArtifactPreview, type RunArtifact } from "../../../lib/api/artifacts";
 import { useConnectionStore } from "../../../state/connection";
@@ -116,7 +116,16 @@ function VersionsPanel({ name }: { name: string }) {
   );
 }
 
-function ReleasePanel({ artifact, onReleased }: { artifact: RunArtifact; onReleased: () => void }) {
+type ReleaseResult = Awaited<ReturnType<typeof releaseRunArtifact>>;
+
+export function releaseOutcomeCopy(result: Pick<ReleaseResult, "converged" | "pruned">) {
+  if (result.converged && result.pruned) return "Release was already recorded. This retry removed the stored bytes.";
+  if (result.converged) return "Release was already recorded. This retry did not remove additional stored bytes.";
+  if (result.pruned) return "Release recorded and stored bytes were removed.";
+  return "Release recorded. This call did not prove that stored bytes were removed; retention cleanup will retry if needed.";
+}
+
+function ReleasePanel({ artifact, onReleased }: { artifact: RunArtifact; onReleased: (result: ReleaseResult) => Promise<void> | void }) {
   const { connection } = useConnectionStore();
   const [author, setAuthor] = useState("");
   const [reason, setReason] = useState("");
@@ -125,7 +134,7 @@ function ReleasePanel({ artifact, onReleased }: { artifact: RunArtifact; onRelea
       if (!connection) throw new Error("Not connected.");
       return releaseRunArtifact(connection, artifact.artifact_id, { released_by: author, reason: reason || undefined });
     },
-    onSuccess: () => { setAuthor(""); setReason(""); onReleased(); },
+    onSuccess: async (result) => { setAuthor(""); setReason(""); await onReleased(result); },
   });
   return (
     <div className={styles.preview}>
@@ -141,12 +150,29 @@ function ReleasePanel({ artifact, onReleased }: { artifact: RunArtifact; onRelea
 
 export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact; onClose: () => void }) {
   const { connection } = useConnectionStore();
+  const queryClient = useQueryClient();
   const [view, setView] = useState<"preview" | "versions" | "release">("preview");
+  const [releaseSummary, setReleaseSummary] = useState("");
+  const [releaseAnnouncement, setReleaseAnnouncement] = useState("");
+  const [previewAvailability, setPreviewAvailability] = useState<"available" | "checking" | "removed" | "unknown">("available");
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previewButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const previewKey = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-preview", artifact.artifact_id] : ["artifact-preview", "idle"];
   const preview = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-preview", artifact.artifact_id] : ["artifact-preview", "idle"],
+    queryKey: previewKey,
     queryFn: () => getRunArtifactPreview(connection!, artifact.artifact_id),
-    enabled: Boolean(connection),
+    enabled: Boolean(connection) && previewAvailability !== "removed",
   });
+  useEffect(() => {
+    if (previewAvailability === "removed") queryClient.removeQueries({ queryKey: previewKey, exact: true });
+  }, [previewAvailability, queryClient, connection?.epoch, connection?.origin, connection?.tenantFingerprint, artifact.artifact_id]);
   const named = useQuery({
     queryKey: connection && artifact.name ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-named", artifact.name] : ["artifact-named", "idle"],
     queryFn: () => getRunArtifactNamed(connection!, artifact.name!),
@@ -163,16 +189,62 @@ export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact
   });
 
   const current = named.data ?? artifact;
+  function closeAndRestoreFocus() {
+    onClose();
+    requestAnimationFrame(() => {
+      if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+    });
+  }
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeAndRestoreFocus();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'));
+    if (!focusable.length) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0], last = focusable.at(-1)!;
+    if (event.shiftKey && (document.activeElement === first || !dialogRef.current.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+  function selectView(next: "preview" | "versions" | "release") {
+    setView(next);
+  }
+  async function finishRelease(result: ReleaseResult) {
+    const summary = releaseOutcomeCopy(result);
+    setView("preview");
+    setReleaseSummary(summary);
+    setReleaseAnnouncement(summary);
+    requestAnimationFrame(() => previewButtonRef.current?.focus());
+    const bytesKnownRemoved = result.pruned || previewAvailability === "removed";
+    if (bytesKnownRemoved) {
+      setPreviewAvailability("removed");
+    } else {
+      setPreviewAvailability("checking");
+      const refreshed = await preview.refetch();
+      setPreviewAvailability(refreshed.isSuccess ? "available" : "unknown");
+    }
+    if (artifact.name) await named.refetch();
+  }
 
   return (
-    <div className={styles.inspectorBackdrop} role="dialog" aria-modal="true" aria-labelledby="artifact-title" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div ref={dialogRef} data-artifact-inspector className={styles.inspectorBackdrop} role="dialog" aria-modal="true" aria-labelledby="artifact-title" onKeyDown={handleDialogKeyDown} onClick={(event) => { if (event.target === event.currentTarget) closeAndRestoreFocus(); }}>
       <div className={styles.inspector}>
         <header>
           <div>
             <span className="eyebrow">Artifact</span>
             <h2 id="artifact-title">{artifact.name ?? bytePreview(artifact.artifact_id, 24).text}</h2>
           </div>
-          <button type="button" onClick={onClose}>Close</button>
+          <button ref={closeButtonRef} type="button" onClick={closeAndRestoreFocus}>Close</button>
         </header>
         <div className={styles.body}>
           <dl>
@@ -180,7 +252,8 @@ export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact
             <div><dt>Media kind</dt><dd>{current.media_kind}</dd></div>
             <div><dt>Declared type</dt><dd>{current.media_type ?? "Not declared"}</dd></div>
             <div><dt>Size</dt><dd>{formatBytes(Number(current.versions[0]?.bytes ?? 0))}</dd></div>
-            <div><dt>Retention</dt><dd>{retentionLabel(current.retention)}</dd></div>
+            <div><dt>{releaseSummary ? "Original policy" : "Retention"}</dt><dd>{retentionLabel(current.retention)}</dd></div>
+            {releaseSummary && <div><dt>Release</dt><dd>{releaseSummary}</dd></div>}
             <div><dt>Committed</dt><dd>{new Date(current.created_at).toLocaleString()}</dd></div>
           </dl>
           <div className={styles.lineage}>
@@ -191,17 +264,18 @@ export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact
               <li>Event <code>{bytePreview(current.lineage.event_id, 24).text}</code></li>
             </ol>
           </div>
-          <div className={styles.viewTabs} role="tablist" aria-label="Artifact views">
-            <button type="button" role="tab" aria-selected={view === "preview"} onClick={() => setView("preview")}>Preview</button>
-            {artifact.name && <button type="button" role="tab" aria-selected={view === "versions"} onClick={() => setView("versions")}>Versions</button>}
-            <button type="button" role="tab" aria-selected={view === "release"} onClick={() => setView("release")}>Release</button>
+          <div className={styles.viewTabs} role="group" aria-label="Artifact views">
+            <button ref={previewButtonRef} type="button" aria-pressed={view === "preview"} onClick={() => selectView("preview")}>Preview</button>
+            {artifact.name && <button type="button" aria-pressed={view === "versions"} onClick={() => selectView("versions")}>Versions</button>}
+            <button type="button" aria-pressed={view === "release"} onClick={() => selectView("release")}>Release</button>
           </div>
-          {view === "preview" && (preview.isLoading ? <p className={styles.emptyPreview}>Loading preview…</p> : preview.isError ? <p className={styles.emptyPreview}>Preview could not be loaded.</p> : preview.data ? <PreviewView preview={preview.data.preview} /> : null)}
+          {releaseAnnouncement && <p className={styles.emptyPreview} role="status">{releaseAnnouncement}</p>}
+          {view === "preview" && (previewAvailability === "removed" ? <p className={styles.emptyPreview}>Stored bytes are no longer available to preview.</p> : previewAvailability === "checking" ? <p className={styles.emptyPreview}>Checking current preview availability…</p> : previewAvailability === "unknown" ? <p className={styles.emptyPreview}>Current preview availability could not be verified.</p> : preview.isLoading ? <p className={styles.emptyPreview}>Loading preview…</p> : preview.isError ? <p className={styles.emptyPreview}>Preview could not be loaded.</p> : preview.data ? <PreviewView preview={preview.data.preview} /> : null)}
           {view === "versions" && artifact.name && <VersionsPanel name={artifact.name} />}
-          {view === "release" && <ReleasePanel artifact={current} onReleased={() => setView("preview")} />}
+          {view === "release" && <ReleasePanel artifact={current} onReleased={finishRelease} />}
         </div>
         <div className={styles.actions}>
-          <button type="button" className="secondary-button" onClick={() => download.mutate()} disabled={download.isPending}>{download.isPending ? "Downloading…" : "Download exact bytes"}</button>
+          <button type="button" className="secondary-button" onClick={() => download.mutate()} disabled={download.isPending || previewAvailability !== "available"}>{download.isPending ? "Downloading…" : previewAvailability === "removed" ? "Stored bytes removed" : "Download exact bytes"}</button>
           {download.isError && <p className={styles.emptyPreview} role="alert">{download.error instanceof Error ? download.error.message : "Download failed."}</p>}
         </div>
       </div>
