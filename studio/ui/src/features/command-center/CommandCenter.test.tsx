@@ -25,8 +25,8 @@ function renderCenter() {
 }
 
 function response(value: unknown) { return Promise.resolve(new Response(JSON.stringify(value), { status: 200 })); }
-function run(runId: string, threadId: string, status: "pending" | "running" | "success" | "interrupted" | "error" | "cancelled") {
-  return { run_id: runId, thread_id: threadId, graph: "react_agent", assistant_id: "agent-1", metadata: { studio: { objective: `${status} customer request` } }, attempt: 0, status, message: status === "interrupted" ? "Approval required before continuing." : undefined, error: status === "error" ? "Provider timed out after retry." : undefined };
+function run(runId: string, threadId: string, status: "pending" | "running" | "success" | "interrupted" | "error" | "cancelled", attempt = 1) {
+  return { run_id: runId, thread_id: threadId, graph: "react_agent", assistant_id: "agent-1", metadata: { studio: { objective: `${status} customer request` } }, attempt, status, message: status === "interrupted" ? "Approval required before continuing." : undefined, error: status === "error" ? "Provider timed out after retry." : undefined };
 }
 const emptyJournal = { run_id: "artifact-journal", events: [], complete: false };
 
@@ -66,6 +66,7 @@ describe("v4 Command Center", () => {
     expect(within(screen.getByRole("region", { name: "Stuck" })).getByText("Provider timed out after retry.")).toBeVisible();
     expect(await within(screen.getByRole("region", { name: "Done" })).findByRole("link", { name: /success customer request/ })).toBeVisible();
     expect(await within(screen.getByRole("region", { name: "Done" })).findByRole("link", { name: /cancelled customer request/ })).toBeVisible();
+    expect(screen.queryByText(/Retry 1/)).not.toBeInTheDocument();
     expect(screen.getByText("Session runs and current operational exceptions.")).toBeVisible();
     expect(screen.getByRole("link", { name: /running customer request/ }).closest('[data-rusty-card="forged"]')).toHaveAttribute("data-tone", "working");
     await user.click(screen.getByRole("button", { name: "Active" }));

@@ -14,7 +14,6 @@ import {
   capabilitySummary,
   capabilityValue,
   emptyAgentDraft,
-  hasPortableIntent,
   humanizeIdentifier,
   type AgentDraft,
   type Capability,
@@ -170,8 +169,7 @@ export function AgentBuilderPage() {
     output: visited.has("output") && (draft.outputMode !== "json_schema" || Boolean(draft.outputSchema.trim())),
     guardrails: visited.has("guardrails"),
   }), [draft, visited]);
-  const completed = Object.values(progress).filter(Boolean).length;
-  const intentReady = hasPortableIntent(draft);
+  const requiredPurposeReady = Boolean(draft.name.trim() && draft.responsibility.trim() && draft.graph);
   const parkedDraftCount = [...builderSessions.entries()].filter(([scope, session]) => scope !== durableMutationScope && !jsonEquivalent(session.draft, emptyAgentDraft())).length;
 
   function update<K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) {
@@ -247,7 +245,7 @@ export function AgentBuilderPage() {
         <dl>{capabilities.map((item) => <div key={item.key}><dt>{item.label}</dt><dd>{progress[item.key] ? capabilitySummary(item.key, draft) : "Not set"}</dd></div>)}</dl></div>
         {uncertainty && <div className={styles.error} role="alert"><p>{uncertainty}</p><button type="button" onClick={() => { mutationState.clearUncertain(durableMutationScope); builderErrors.delete(durableMutationScope); setError(""); }}>I checked the server — allow retry</button></div>}
         {error && !validationRequest && !uncertainty && <p className={styles.error} role="alert">{error}</p>}
-        <button ref={reviewAgentButton} className="primary-button" type="button" onClick={openCreationReview} disabled={create.isPending || Boolean(uncertainty) || completed < capabilities.length || !intentReady}>{uncertainty ? "Create locked" : completed < capabilities.length ? `Review ${capabilities.length - completed} more` : !intentReady ? "Add one capability" : !connection ? "Choose workspace to save" : "Review agent"}</button>
+        <button ref={reviewAgentButton} className="primary-button" type="button" onClick={openCreationReview} disabled={create.isPending || Boolean(uncertainty) || !requiredPurposeReady}>{uncertainty ? "Create locked" : !requiredPurposeReady ? "Add name, behavior, and responsibility" : !connection ? "Choose workspace to save" : "Review agent"}</button>
         <p className={styles.boundary}>{connection ? "Nothing runs until you create version 1." : "This draft stays here until you choose a workspace."}</p>
         {connection && <details className={styles.runtimeBoundary}><summary>Runtime boundary</summary><p>Requirements apply only where the selected behavior and deployment support them.</p></details>}
       </aside>

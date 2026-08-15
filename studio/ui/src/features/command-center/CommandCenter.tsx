@@ -151,7 +151,7 @@ function RunCard({ item, agent, lane }: { item: ExactRecentRun; agent?: Assistan
     <span className={styles.agentRow}><span>{initials(agentName)}</span><b>{agentName}</b></span>
     <p className={styles.cardStatus}>{runState(item.run)}</p>
     {lane === "working" && <span className={styles.activityBar} aria-hidden="true"><i /></span>}
-    <small><span>{openedContext(item.identity.savedAt)}</span>{item.run.attempt > 0 && <span>Retry {item.run.attempt}</span>}</small>
+    <small><span>{openedContext(item.identity.savedAt)}</span>{item.run.attempt > 1 && <span>Retry {item.run.attempt - 1}</span>}</small>
   </Link></RustyCardFrame>;
 }
 

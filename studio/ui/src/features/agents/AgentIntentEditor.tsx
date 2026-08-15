@@ -173,15 +173,9 @@ export function outputSchemaRequirement(value: string, mode: AgentDraft["outputM
   return value;
 }
 
-export function hasPortableIntent(draft: AgentDraft) {
-  return Boolean(draft.model || draft.tools.trim() || draft.memoryAccess !== "none"
-    || draft.approval !== "runtime_policy" || draft.outputMode !== "runtime_default" || draft.outputSchema);
-}
-
 export function validateAgentDraft(draft: AgentDraft) {
   if (!draft.name.trim() || !draft.responsibility.trim() || !draft.graph) throw new Error("Name, responsibility, and behavior are required.");
   if (draft.memoryAccess !== "none" && !draft.scopes.length) throw new Error("Choose what memory this agent may use.");
-  if (!hasPortableIntent(draft)) throw new Error("Add at least one model, memory, tool, output, or approval requirement.");
   const recursion = draft.recursionLimit.trim() ? Number(draft.recursionLimit) : null;
   if (recursion !== null && (!Number.isSafeInteger(recursion) || recursion < 1 || recursion > 100_000)) {
     throw new Error("The step limit must be between 1 and 100,000.");

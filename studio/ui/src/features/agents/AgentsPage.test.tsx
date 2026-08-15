@@ -198,7 +198,7 @@ describe("Agents", () => {
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Private analyst"));
   });
 
-  it("creates an agent from the complete capability draft and admits the exact receipt", async () => {
+  it("creates a basic agent with deployment defaults and admits the exact receipt", async () => {
     useConnectionStore.setState({
       connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
@@ -214,9 +214,7 @@ describe("Agents", () => {
     await userEvent.type(screen.getByLabelText("Name"), "Research analyst");
     await userEvent.selectOptions(screen.getByLabelText("Behavior"), "research");
     await userEvent.type(screen.getByLabelText("Responsibility"), "Investigate claims");
-    await userEvent.click(screen.getByRole("tab", { name: /Model/ }));
-    await userEvent.type(screen.getByLabelText("Model requirement"), "model-v1");
-    for (const capability of ["Goals", "Knowledge", "Tools", "Output", "Guardrails"]) await userEvent.click(screen.getByRole("tab", { name: new RegExp(capability) }));
+    expect(screen.getByRole("button", { name: "Review agent" })).toBeEnabled();
     expect(screen.getByText("Nothing runs until you create version 1.")).toBeVisible();
     expect(screen.getByText(/Requirements apply only where the selected behavior and deployment support them/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review agent" }));
@@ -233,7 +231,14 @@ describe("Agents", () => {
     expect((await axe.run(document.body, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] } })).violations.map((violation) => violation.id)).toEqual([]);
     const request = fetchMock.mock.calls.find((call) => call[1]?.method === "POST");
     const body = JSON.parse(String(request?.[1]?.body));
-    expect(body).toMatchObject({ config: { studio_intent: { format: "rusty.agent-intent/v3" } } });
+    expect(body).toMatchObject({ config: { studio_intent: {
+      format: "rusty.agent-intent/v3",
+      model: "",
+      tools: [],
+      memory: { access: "none", scopes: [] },
+      approval: "runtime_policy",
+      output: { mode: "runtime_default", schema: "" },
+    } } });
     await userEvent.click(screen.getByRole("button", { name: "Start first task" }));
     expect(await screen.findByRole("heading", { name: "Run workspace" })).toBeVisible();
     expect(useWorkStore.getState().assistant?.assistant_id).toBe(body.assistant_id);
@@ -267,7 +272,7 @@ describe("Agents", () => {
     expect(await screen.findByRole("heading", { name: "Review version 1" })).toBeVisible();
     useConnectionStore.setState({ connection: { epoch: 2, origin: "https://b.example", apiKey: "b", tenantFingerprint: "b" }, info });
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Review version 1" })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Review 7 more" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled();
   });
 
   it("requires a fresh review after the same workspace reconnects", async () => {
@@ -297,7 +302,7 @@ describe("Agents", () => {
     finishPost(new Response(JSON.stringify({ error: "Agent definition was rejected" }), { status: 400 }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/rejected|400/i);
     useConnectionStore.setState({ connection: { epoch: 3, origin: "https://b.example", apiKey: "b", tenantFingerprint: "b" }, info });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Review 7 more" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled());
     useConnectionStore.setState({ connection: { epoch: 4, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
     expect(await screen.findByRole("alert")).toHaveTextContent(/rejected|400/i);
     void router.navigate({ to: "/agents/prompts" });
@@ -445,7 +450,7 @@ describe("Agents", () => {
     rejectPost(new TypeError("connection lost"));
     await waitFor(() => expect(Object.values(useAgentMutationStore.getState().uncertainByConnection).some(Boolean)).toBe(true));
     expect(screen.queryByText(/create result is uncertain/i)).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Review 7 more" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled());
   });
 
   it("records a late exact create in its originating workspace without restoring a committed draft", async () => {
@@ -466,7 +471,7 @@ describe("Agents", () => {
     await reviewAndCreate();
     await useConnectionStore.getState().connect("https://b.example", "b", info);
     finishPost(new Response(JSON.stringify({ ...submitted, created_at: "2026-08-11T00:00:00Z", active_version_id: "av-1", version_count: 1 }), { status: 201 }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Review 7 more" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled());
     useConnectionStore.setState({ connection: { epoch: 3, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
     expect(await screen.findByRole("heading", { name: "Research analyst is ready for its first task" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Review agent" }));
