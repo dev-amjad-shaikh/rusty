@@ -1,11 +1,12 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import type { Assistant, RunSnapshot } from "../../lib/contracts";
-import { getOperationsSnapshot, getRun, listAssistants, type OperationAttentionItem } from "../../lib/api/client";
+import { connectionScope, getOperationsSnapshot, getRun, listAssistants, type OperationAttentionItem } from "../../lib/api/client";
 import { evidencePreview } from "../../lib/text";
 import { durableConnectionScope, readRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
 import { useConnectionStore } from "../../state/connection";
+import { useWorkStore } from "../../state/work";
 import { PageHeader } from "../../components/PageHeader";
 import { RustyCardFrame, type RustyCardTone } from "../../components/RustyCardFrame";
 import styles from "./CommandCenter.module.css";
@@ -27,7 +28,9 @@ const lanes: Array<{ key: RunLane; label: string }> = [
 ];
 
 export function CommandCenter() {
-  const { connection, openDialog } = useConnectionStore();
+  const navigate = useNavigate();
+  const work = useWorkStore();
+  const { connection, info, openDialog } = useConnectionStore();
   const [boardFilter, setBoardFilter] = useState<BoardFilter>("all");
   const allWorkFilterRef = useRef<HTMLButtonElement>(null);
   const scope = connection ? durableConnectionScope(connection) : "disconnected";
@@ -57,6 +60,9 @@ export function CommandCenter() {
   });
   const mismatchedRuns = recentQueries.filter((query, index) => Boolean(query.data) && (query.data!.run_id !== recentIdentities[index]?.runId || query.data!.thread_id !== recentIdentities[index]?.threadId)).length;
   const agentById = new Map((assistants.data ?? []).map((agent) => [agent.assistant_id, agent]));
+  const availableGraphs = new Set(info?.graphs.map((graph) => graph.name) ?? []);
+  const availableAgents = (assistants.data ?? []).filter((agent) => !agent.archived_at && availableGraphs.has(agent.graph));
+  const starterAgent = availableAgents.length === 1 ? availableAgents[0] : null;
   const grouped = groupRuns(exactRuns);
   const attention = operations.data?.attention ?? [];
   const visibleRuns = filterRuns(grouped, boardFilter);
@@ -76,6 +82,12 @@ export function CommandCenter() {
   const maxLaneCount = Math.max(1, ...lanes.map(({ key }) => key === "needs" ? visibleRuns.needs.length + visibleAttention.length : visibleRuns[key].length));
   const visibleBoardEmpty = Object.values(visibleRuns).every((items) => items.length === 0) && visibleAttention.length === 0;
   const verifiedFilterEmpty = boardFilter !== "all" && visibleBoardEmpty && !loadingRuns && !operations.isLoading && !evidencePartial;
+
+  function beginFirstWork() {
+    if (!connection || !starterAgent) return;
+    work.prepare(connectionScope(connection), starterAgent);
+    navigate({ to: "/work" });
+  }
 
   if (!connection) return <section className={`page ${styles.command}`} aria-labelledby="command-heading">
     <PageHeader headingId="command-heading" eyebrow="Command center" title="Work board" description="Open a Rusty workspace to see work in motion and the exceptions that need you." actions={<button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>} />
@@ -103,8 +115,8 @@ export function CommandCenter() {
 
     <section className={styles.board} aria-label="Current work">
       {verifiedEmpty && <div className={styles.emptyBoard}>
-        <div><h2>No session work yet</h2><p>Start a run when you are ready. It will move across this board as Rusty works.</p></div>
-        <Link to="/work">Start a run</Link>
+        <div><h2>{starterAgent ? "Ready for the first task" : availableAgents.length > 1 ? "Choose the next agent" : assistants.isLoading ? "Checking available agents" : assistants.isError ? "Agent availability is unknown" : (assistants.data?.length ?? 0) > 0 ? "Agents need attention" : "Build your first agent"}</h2><p>{starterAgent ? `${evidencePreview(starterAgent.name, 120)} is available. Start one real objective and follow it across this board.` : availableAgents.length > 1 ? `${availableAgents.length} agents are available. Choose the right one for the objective before work starts.` : assistants.isLoading ? "Rusty is checking which active definition can start work." : assistants.isError ? "Open the portfolio to refresh agent availability before starting work." : (assistants.data?.length ?? 0) > 0 ? "Open the portfolio to restore an archived agent or choose an available behavior." : "Shape its responsibility and capabilities, then bring its first task back here."}</p></div>
+        {starterAgent ? <button type="button" onClick={beginFirstWork}>Start with {evidencePreview(starterAgent.name, 80)}</button> : availableAgents.length > 1 ? <Link to="/work">Choose an agent</Link> : assistants.isLoading ? null : assistants.isError || (assistants.data?.length ?? 0) > 0 ? <Link to="/agents">Review agents</Link> : <Link to="/agents/new">Create first agent</Link>}
       </div>}
       {verifiedFilterEmpty && <div className={styles.emptyBoard}>
         <div><h2>{boardFilter === "active" ? "No active work" : "Nothing needs attention"}</h2><p>Other work is still available on the full board.</p></div>

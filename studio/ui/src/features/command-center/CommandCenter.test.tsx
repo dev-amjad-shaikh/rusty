@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "../../state/connection";
 import { durableConnectionScope, rememberRecentWork } from "../../state/recentWork";
+import { useWorkStore } from "../../state/work";
 import { CommandCenter } from "./CommandCenter";
 
 const connection = { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "tenant" };
@@ -16,8 +17,9 @@ function renderCenter() {
   const run = createRoute({ getParentRoute: () => root, path: "/work/$threadId/runs/$runId", component: () => <p>Run</p> });
   const trace = createRoute({ getParentRoute: () => root, path: "/work/$threadId/runs/$runId/trace", component: () => <p>Trace</p> });
   const agents = createRoute({ getParentRoute: () => root, path: "/agents", component: () => <p>Agents</p> });
+  const newAgent = createRoute({ getParentRoute: () => root, path: "/agents/new", component: () => <p>New agent</p> });
   const operations = createRoute({ getParentRoute: () => root, path: "/operations", component: () => <p>Operations</p> });
-  const router = createRouter({ routeTree: root.addChildren([command, work, run, trace, agents, operations]), history: createMemoryHistory({ initialEntries: ["/"] }) });
+  const router = createRouter({ routeTree: root.addChildren([command, work, run, trace, agents, newAgent, operations]), history: createMemoryHistory({ initialEntries: ["/"] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
 }
@@ -31,6 +33,7 @@ const emptyJournal = { run_id: "artifact-journal", events: [], complete: false }
 beforeEach(() => {
   sessionStorage.clear();
   useConnectionStore.setState({ connection, info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "react_agent", channels: [] }] }, workspaceStatus: "ready", dialogOpen: false });
+  useWorkStore.getState().clear();
 });
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 
@@ -138,10 +141,27 @@ describe("v4 Command Center", () => {
       throw new Error(`unexpected ${url}`);
     }));
     renderCenter();
-    expect(await screen.findByRole("heading", { name: "No session work yet" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Start a run" })).toHaveAttribute("href", "/work");
+    expect(await screen.findByRole("heading", { name: "Build your first agent" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Create first agent" })).toHaveAttribute("href", "/agents/new");
     expect(screen.queryByRole("heading", { name: "Queued" })).not.toBeInTheDocument();
     expect(screen.queryByText("No recent work is waiting.")).not.toBeInTheDocument();
+  });
+
+  it("hands a verified available agent from the empty board into its first task", async () => {
+    const user = userEvent.setup();
+    const agent = { assistant_id: "agent-1", name: "Research agent", graph: "react_agent", config: {}, metadata: {}, created_at: "2026-08-11T00:00:00Z", active_version_id: "version-1", version_count: 1 };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      const url = new URL(input);
+      if (url.pathname === "/assistants") return response([agent]);
+      if (url.pathname === "/tasks" || url.pathname === "/crons" || url.pathname === "/triggers") return response([]);
+      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderCenter();
+    expect(await screen.findByRole("heading", { name: "Ready for the first task" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Start with Research agent" }));
+    expect(await screen.findByText("Work")).toBeVisible();
+    expect(useWorkStore.getState().assistant).toMatchObject({ assistant_id: "agent-1", active_version_id: "version-1" });
   });
 
   it("explains an empty filtered projection and returns to all work", async () => {
