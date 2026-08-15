@@ -365,10 +365,10 @@ function changedCapabilities(active: AgentDraft, target: AgentDraft, activeSourc
   const add = (key: (typeof capabilities)[number]["key"], changed: boolean, before = capabilityValue(key, active), after = capabilityValue(key, target)) => {
     if (changed) changes.push({ label: capabilities.find((item) => item.key === key)!.label, before, after });
   };
-  add("purpose", active.name !== target.name || active.responsibility !== target.responsibility
-    || active.audience !== target.audience || active.graph !== target.graph,
+  add("purpose", active.name !== target.name || active.responsibility !== target.responsibility || active.graph !== target.graph,
   `${active.name} · ${capabilityValue("purpose", active)} · ${humanizeIdentifier(active.graph)}`,
   `${target.name} · ${capabilityValue("purpose", target)} · ${humanizeIdentifier(target.graph)}`);
+  add("goals", active.goals !== target.goals || active.audience !== target.audience);
   add("model", active.model !== target.model);
   add("knowledge", active.memoryAccess !== target.memoryAccess || !jsonEquivalent(active.scopes, target.scopes));
   add("tools", active.tools !== target.tools);
@@ -391,6 +391,7 @@ function advancedDefinition(source: Pick<Assistant, "config" | "metadata">) {
   delete config.recursion_limit;
   delete metadata.description;
   delete metadata.audience;
+  delete metadata.goals;
   return { intent: advancedIntent, config, metadata };
 }
 

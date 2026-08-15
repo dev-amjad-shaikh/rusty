@@ -159,7 +159,7 @@ describe("Agent Workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: "Activate version" }));
 
     expect(await screen.findByText("The reviewed version is now active.")).toBeVisible();
-    expect(screen.getByText("Investigate claims and explain the evidence")).toBeVisible();
+    expect(screen.getAllByText("Investigate claims and explain the evidence")[0]).toBeVisible();
     const activationRequest = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith(`/versions/${v2}/activate`) && init?.method === "POST");
     expect(JSON.parse(String(activationRequest?.[1]?.body))).toEqual({ expected_active_version_id: v1 });
   });
@@ -253,6 +253,20 @@ describe("Agent Workspace", () => {
     expect(screen.queryByText("No visible capability changes")).not.toBeInTheDocument();
   });
 
+  it("presents goals as one visual change rather than duplicated advanced evidence", async () => {
+    const goalsMetadata = { ...baseMetadata, goals: "Every claim is supported by a cited source" };
+    const goalsVersionId = await assistantVersionContentAddress({ parent_version_id: v1, name: "Research analyst", graph: "research", config: baseConfig, metadata: goalsMetadata });
+    const goalsVersion = { version_id: goalsVersionId, parent_version_id: v1, name: "Research analyst", graph: "research", config: baseConfig, metadata: goalsMetadata, created_at: "2026-08-11T01:00:00Z", active: false };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => new URL(url).pathname.endsWith(`/versions/${goalsVersionId}`)
+      ? json({ assistant_id: "analyst", active_version_id: v1, version: goalsVersion })
+      : json({ ...history(), assistant: assistant({ version_count: 2 }), versions: [{ version_id: goalsVersionId, parent_version_id: v1, graph: "research", created_at: goalsVersion.created_at, active: false }, ...history().versions] })));
+    renderWorkspace();
+
+    await userEvent.click(await screen.findByRole("button", { name: `Review version ${goalsVersionId.slice(0, 10)}…${goalsVersionId.slice(-6)}` }));
+    expect(await screen.findByRole("heading", { name: "Goals" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Advanced settings" })).not.toBeInTheDocument();
+  });
+
   it("does not let a late version receipt cross into a new connection", async () => {
     let finishPost!: (response: Response) => void;
     const pendingPost = new Promise<Response>((resolve) => { finishPost = resolve; });
@@ -271,7 +285,7 @@ describe("Agent Workspace", () => {
     finishPost(new Response(JSON.stringify({ assistant_id: "analyst", created: true, active_version_id: v1, version: exactVersion() }), { status: 201 }));
 
     await waitFor(() => expect(screen.queryByText("Draft version saved. The active version is unchanged.")).not.toBeInTheDocument());
-    expect(screen.getByText("Verify claims and cite evidence")).toBeVisible();
+    expect(screen.getAllByText("Verify claims and cite evidence")[0]).toBeVisible();
   });
 
   it("does not let a late version receipt take over another agent", async () => {
@@ -298,6 +312,6 @@ describe("Agent Workspace", () => {
 
     finishPost(new Response(JSON.stringify({ assistant_id: "analyst", created: true, active_version_id: v1, version: exactVersion() }), { status: 201 }));
     await waitFor(() => expect(screen.queryByText("Draft version saved. The active version is unchanged.")).not.toBeInTheDocument());
-    expect(screen.getByText("Review policy exceptions")).toBeVisible();
+    expect(screen.getAllByText("Review policy exceptions")[0]).toBeVisible();
   });
 });

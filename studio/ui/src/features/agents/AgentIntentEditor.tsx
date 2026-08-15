@@ -1,10 +1,11 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Assistant } from "../../lib/contracts";
 import { isUnicodeScalarString } from "../../lib/text";
 import styles from "./AgentsPage.module.css";
 
 export const capabilities = [
   { key: "purpose", label: "Purpose", detail: "The job and who it serves" },
+  { key: "goals", label: "Goals", detail: "What good looks like" },
   { key: "model", label: "Model", detail: "How the agent reasons" },
   { key: "knowledge", label: "Knowledge", detail: "Memory and context" },
   { key: "tools", label: "Tools", detail: "Actions it can take" },
@@ -18,6 +19,7 @@ export interface AgentDraft {
   name: string;
   responsibility: string;
   audience: string;
+  goals: string;
   graph: string;
   model: string;
   memoryAccess: "none" | "read_only" | "read_write";
@@ -33,7 +35,7 @@ export type AgentDefinition = Pick<Assistant, "name" | "graph" | "config" | "met
 
 export function emptyAgentDraft(): AgentDraft {
   return {
-    name: "", responsibility: "", audience: "", graph: "", model: "",
+    name: "", responsibility: "", audience: "", goals: "", graph: "", model: "",
     memoryAccess: "none", scopes: [], tools: "", outputMode: "runtime_default",
     outputSchema: "", approval: "runtime_policy", recursionLimit: "",
   };
@@ -64,7 +66,8 @@ export function editableAgent(agent: AgentDefinition) {
   const intent = agent.config.studio_intent;
   if (intent !== undefined && !roundTripsStudioIntent(intent)) return false;
   if (("description" in agent.metadata && typeof agent.metadata.description !== "string")
-    || ("audience" in agent.metadata && typeof agent.metadata.audience !== "string")) return false;
+    || ("audience" in agent.metadata && typeof agent.metadata.audience !== "string")
+    || ("goals" in agent.metadata && typeof agent.metadata.goals !== "string")) return false;
   const recursion = agent.config.recursion_limit;
   return recursion === undefined || (typeof recursion === "number" && Number.isSafeInteger(recursion) && recursion >= 1 && recursion <= 100_000);
 }
@@ -120,6 +123,7 @@ export function draftFromAgent(agent: AgentDefinition): AgentDraft {
     name: agent.name,
     responsibility: stringValue(metadata.description),
     audience: stringValue(metadata.audience),
+    goals: stringValue(metadata.goals),
     graph: agent.graph,
     model: stringValue(intent.model),
     memoryAccess,
@@ -185,6 +189,7 @@ export function validateAgentDraft(draft: AgentDraft) {
   modelRequirement(draft.model);
   toolContracts(draft.tools);
   outputSchemaRequirement(draft.outputSchema, draft.outputMode);
+  validateGoalNotes(draft.goals);
   return recursion;
 }
 
@@ -199,7 +204,7 @@ export function agentVersionFields(draft: AgentDraft, source?: AgentDefinition) 
       format: "rusty.agent-intent/v3",
       model: modelRequirement(draft.model),
       tools: toolContracts(draft.tools),
-      memory: { access: draft.memoryAccess, scopes: draft.memoryAccess === "none" ? [] : draft.scopes },
+      memory: { access: draft.memoryAccess, scopes: draft.memoryAccess === "none" ? [] : memoryScopes.filter((scope) => draft.scopes.includes(scope)) },
       approval: draft.approval,
       output: { mode: draft.outputMode, schema: outputSchemaRequirement(draft.outputSchema, draft.outputMode) },
       budget: plainObject(previousIntent.budget) ? previousIntent.budget : { max_tokens: "", max_cost_usd: "", max_latency_ms: "" },
@@ -208,16 +213,19 @@ export function agentVersionFields(draft: AgentDraft, source?: AgentDefinition) 
   };
   if (recursion === null) delete config.recursion_limit;
   else config.recursion_limit = recursion;
+  const metadata: Record<string, unknown> = { ...sourceMetadata, description: draft.responsibility.trim(), audience: draft.audience.trim() };
+  if (draft.goals.trim() || "goals" in sourceMetadata) metadata.goals = draft.goals.trim();
   return {
     name: draft.name.trim(),
     graph: draft.graph,
     config,
-    metadata: { ...sourceMetadata, description: draft.responsibility.trim(), audience: draft.audience.trim() },
+    metadata,
   };
 }
 
 export function capabilitySummary(capability: Capability, draft: AgentDraft) {
   if (capability === "purpose") return draft.name || "Not set";
+  if (capability === "goals") return draft.goals || draft.audience || "Not set";
   if (capability === "model") return draft.model || "Deployment default";
   if (capability === "knowledge") return draft.memoryAccess === "none" ? "No memory" : `${draft.memoryAccess.replace("_", " ")} · ${draft.scopes.length}`;
   if (capability === "tools") return `${draft.tools.trim().split("\n").filter(Boolean).length} selected`;
@@ -227,8 +235,9 @@ export function capabilitySummary(capability: Capability, draft: AgentDraft) {
 
 export function capabilityValue(capability: Capability, draft: AgentDraft) {
   if (capability === "purpose") {
-    return [draft.responsibility || "No responsibility", draft.audience ? `Audience: ${draft.audience}` : ""].filter(Boolean).join(" · ");
+    return draft.responsibility || "No responsibility";
   }
+  if (capability === "goals") return [draft.goals || "No success criteria", draft.audience ? `Audience: ${draft.audience}` : ""].filter(Boolean).join(" · ");
   if (capability === "model") return draft.model || "Use the deployment model";
   if (capability === "knowledge") {
     if (draft.memoryAccess === "none") return "No memory access";
@@ -249,14 +258,17 @@ export function humanizeIdentifier(value: string) {
 }
 
 function capabilityHeading(capability: Capability) {
-  return ({ purpose: "What should this agent own?", model: "How should it reason?", knowledge: "What may it remember?", tools: "What actions may it take?", output: "What must it deliver?", guardrails: "Where should it stop and ask?" } as const)[capability];
+  return ({ purpose: "What should this agent own?", goals: "What does good look like?", model: "How should it reason?", knowledge: "What may it know and remember?", tools: "What actions may it take?", output: "What must it deliver?", guardrails: "Where should it stop and ask?" } as const)[capability];
 }
 
-export function AgentIntentEditor({ draft, onChange, graphs, initialCapability = "purpose", onCapabilityVisit }: {
+export function AgentIntentEditor({ draft, onChange, graphs, initialCapability = "purpose", progress, validationRequest, validationMessage, onCapabilityVisit }: {
   draft: AgentDraft;
   onChange: <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => void;
   graphs: string[];
   initialCapability?: Capability;
+  progress?: Record<Capability, boolean>;
+  validationRequest?: { capability: Capability; nonce: number } | null;
+  validationMessage?: string;
   onCapabilityVisit?: (capability: Capability) => void;
 }) {
   const [active, setActive] = useState<Capability>(initialCapability);
@@ -266,6 +278,11 @@ export function AgentIntentEditor({ draft, onChange, graphs, initialCapability =
     onCapabilityVisit?.(capability);
     if (focus) requestAnimationFrame(() => tabs.current[capabilities.findIndex((item) => item.key === capability)]?.focus());
   }
+  useEffect(() => {
+    if (validationRequest) selectCapability(validationRequest.capability, true);
+    // Each nonce represents a deliberate request to revisit the invalid control group.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validationRequest]);
   function onTabKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     let next = index;
     if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % capabilities.length;
@@ -276,27 +293,77 @@ export function AgentIntentEditor({ draft, onChange, graphs, initialCapability =
     event.preventDefault();
     selectCapability(capabilities[next].key, true);
   }
+  const activeIndex = capabilities.findIndex((item) => item.key === active);
+  const next = capabilities[activeIndex + 1];
   return <div className={styles.intentEditor}>
     <div className={styles.capabilityMap} role="tablist" aria-label="Agent capabilities">
       {capabilities.map((capability, index) => <button key={capability.key} ref={(node) => { tabs.current[index] = node; }} type="button" role="tab" id={`agent-tab-${capability.key}`} aria-controls="agent-capability-panel" aria-selected={active === capability.key} tabIndex={active === capability.key ? 0 : -1} className={active === capability.key ? styles.activeCapability : ""} onClick={() => selectCapability(capability.key)} onKeyDown={(event) => onTabKey(event, index)}>
-        <span>{String(index + 1).padStart(2, "0")}</span><b>{capability.label}</b><small>{capability.detail}</small>
+        <span>{progress?.[capability.key] ? "✓" : String(index + 1).padStart(2, "0")}</span><b>{capability.label}</b><small>{capability.detail}</small>
       </button>)}
     </div>
     <section className={styles.editor} role="tabpanel" id="agent-capability-panel" aria-labelledby={`agent-tab-${active}`} tabIndex={0}>
-      <span className="eyebrow">{capabilities.find((item) => item.key === active)?.label}</span>
       <h2>{capabilityHeading(active)}</h2>
+      <p className={styles.editorLead}>{capabilities[activeIndex].detail}.</p>
+      {validationRequest && validationRequest.capability === active && validationMessage && <p className={styles.editorError} role="alert">{validationMessage}</p>}
       <CapabilityFields capability={active} draft={draft} update={onChange} graphs={graphs} />
+      <div className={styles.editorNext}>{activeIndex > 0 ? <button type="button" onClick={() => selectCapability(capabilities[activeIndex - 1].key, true)}><span aria-hidden="true">←</span> Back</button> : <span />}{next && <button type="button" onClick={() => selectCapability(next.key, true)}>Next: {next.label} <span aria-hidden="true">→</span></button>}</div>
     </section>
   </div>;
 }
 
 function CapabilityFields({ capability, draft, update, graphs }: { capability: Capability; draft: AgentDraft; update: <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => void; graphs: string[] }) {
-  if (capability === "purpose") return <div className={styles.fields}><label>Name<input value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="Research analyst" /></label><label>Behavior<select value={draft.graph} onChange={(event) => update("graph", event.target.value)} disabled={!graphs.length}><option value="">{graphs.length ? "Choose a behavior" : "Available when workspace opens"}</option>{graphs.map((graph) => <option key={graph} value={graph}>{humanizeIdentifier(graph)}</option>)}</select></label><label className={styles.wide}>Responsibility<textarea rows={5} value={draft.responsibility} onChange={(event) => update("responsibility", event.target.value)} placeholder="Investigate a question, verify the sources, and return a concise answer." /></label><label>Audience<input value={draft.audience} onChange={(event) => update("audience", event.target.value)} placeholder="Product team" /></label></div>;
-  if (capability === "model") return <div className={styles.fields}><label className={styles.wide}>Model requirement<input value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="Leave blank to use the deployment default" /></label><p className={styles.helper}>Choose a model identifier. Provider credentials remain in the deployment.</p></div>;
-  if (capability === "knowledge") return <div className={styles.fields}><label>Memory access<select value={draft.memoryAccess} onChange={(event) => { const access = event.target.value as AgentDraft["memoryAccess"]; update("memoryAccess", access); if (access === "none") update("scopes", []); }}><option value="none">No memory</option><option value="read_only">Read only</option><option value="read_write">Read and write</option></select></label><fieldset className={styles.checks} disabled={draft.memoryAccess === "none"}><legend>Allowed scope</legend>{["run", "agent", "user", "team", "tenant"].map((scope) => <label key={scope}><input type="checkbox" checked={draft.scopes.includes(scope)} onChange={(event) => update("scopes", event.target.checked ? [...draft.scopes, scope] : draft.scopes.filter((item) => item !== scope))} />{scope}</label>)}</fieldset></div>;
+  if (capability === "purpose") return <div className={styles.fields}><label>Name<input value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="Receipt Chaser" /></label><label>Behavior<select value={draft.graph} onChange={(event) => update("graph", event.target.value)} disabled={!graphs.length}><option value="">{graphs.length ? "Choose a behavior" : "Available when workspace opens"}</option>{graphs.map((graph) => <option key={graph} value={graph}>{humanizeIdentifier(graph)}</option>)}</select></label><label className={styles.wide}>Responsibility<textarea rows={2} value={draft.responsibility} onChange={(event) => update("responsibility", event.target.value)} placeholder="Chase missing receipts and give each owner a clear deadline." /></label><label className={styles.wide}>Audience<input value={draft.audience} onChange={(event) => update("audience", event.target.value)} placeholder="Finance operations, accounting" /><small>Who this agent serves. Use the names your team already knows.</small></label></div>;
+  if (capability === "goals") return <GoalFields value={draft.goals} onChange={(value) => update("goals", value)} />;
+  if (capability === "model") return <div className={styles.choiceStack}><button aria-pressed={!draft.model} className={!draft.model ? styles.selectedChoice : ""} type="button" onClick={() => update("model", "")}><i /><span><b>Deployment default</b><small>Follow the model chosen when this agent runs</small></span></button><button aria-pressed={Boolean(draft.model)} className={draft.model ? styles.selectedChoice : ""} type="button" onClick={() => document.getElementById("agent-model-requirement")?.focus()}><i /><span><b>Require a model</b><small>Ask the deployment to resolve this exact identifier</small></span></button><label className={styles.inlineRequirement}>Model requirement<input id="agent-model-requirement" value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="provider/model" /></label><p className={styles.choiceNote}>This records a deployment requirement, not a verified catalog choice. Credentials never belong here.</p></div>;
+  if (capability === "knowledge") return <div className={styles.knowledgeStack}><div className={styles.choiceStack}>{([ ["none", "No memory", "Work only from this run"], ["read_only", "Read memory", "Use approved context without changing it"], ["read_write", "Read and write", "Use context and add to its own history"] ] as const).map(([access, label, detail]) => <button key={access} aria-pressed={draft.memoryAccess === access} className={draft.memoryAccess === access ? styles.selectedChoice : ""} type="button" onClick={() => { update("memoryAccess", access); if (access === "none") update("scopes", []); }}><i /><span><b>{label}</b><small>{detail}</small></span></button>)}</div>{draft.memoryAccess !== "none" && <fieldset className={styles.scopeLayers}><legend>Allowed scope</legend>{memoryScopes.map((scope, index) => <label key={scope} style={{ marginLeft: `${index * 7}px` }}><input type="checkbox" checked={draft.scopes.includes(scope)} onChange={(event) => update("scopes", memoryScopes.filter((item) => event.target.checked ? item === scope || draft.scopes.includes(item) : item !== scope && draft.scopes.includes(item)))} /><span>{humanizeIdentifier(scope)}</span><small>{index < 2 ? "local context" : "wider inherited context"}</small></label>)}</fieldset>}</div>;
   if (capability === "tools") return <ToolFields value={draft.tools} onChange={(value) => update("tools", value)} />;
-  if (capability === "output") return <div className={styles.fields}><label>Required output<select value={draft.outputMode} onChange={(event) => { const mode = event.target.value as AgentDraft["outputMode"]; update("outputMode", mode); if (mode !== "json_schema") update("outputSchema", ""); }}><option value="runtime_default">Deployment default</option><option value="text">Text</option><option value="json_object">JSON object</option><option value="json_schema">Named JSON schema</option></select></label>{draft.outputMode === "json_schema" && <label>Schema binding<input value={draft.outputSchema} onChange={(event) => update("outputSchema", event.target.value)} placeholder="report.v1" /></label>}</div>;
-  return <div className={styles.fields}><label>Approval boundary<select value={draft.approval} onChange={(event) => update("approval", event.target.value as AgentDraft["approval"])}><option value="runtime_policy">Deployment policy</option><option value="irreversible">Before irreversible actions</option><option value="external_effect">Before every external action</option></select></label><label>Maximum steps<input value={draft.recursionLimit} onChange={(event) => update("recursionLimit", event.target.value)} inputMode="numeric" placeholder="Deployment default" /></label></div>;
+  if (capability === "output") return <div className={styles.choiceStack}>{([ ["runtime_default", "Deployment default", "Use the workspace output policy"], ["text", "Text", "Return a human-readable response"], ["json_object", "JSON object", "Return structured JSON"], ["json_schema", "Named JSON schema", "Require a schema identifier at deployment"] ] as const).map(([mode, label, detail]) => <button key={mode} aria-pressed={draft.outputMode === mode} className={draft.outputMode === mode ? styles.selectedChoice : ""} type="button" onClick={() => { update("outputMode", mode); if (mode !== "json_schema") update("outputSchema", ""); }}><i /><span><b>{label}</b><small>{detail}</small></span></button>)}{draft.outputMode === "json_schema" && <><label className={styles.inlineRequirement}>Required schema identifier<input value={draft.outputSchema} onChange={(event) => update("outputSchema", event.target.value)} placeholder="report.v1" /></label><p className={styles.choiceNote}>Studio records the requirement here; the deployment must resolve it before use.</p></>}</div>;
+  return <div className={styles.fields}><label>Approval boundary<select value={draft.approval} onChange={(event) => update("approval", event.target.value as AgentDraft["approval"])}><option value="runtime_policy">Deployment policy</option><option value="irreversible">Before irreversible actions</option><option value="external_effect">Before every external action</option></select></label><label>Maximum steps<input value={draft.recursionLimit} onChange={(event) => update("recursionLimit", event.target.value)} inputMode="numeric" placeholder="Deployment default" /></label><p className={styles.helper}>A hard stop keeps the agent bounded. Leave the step limit blank to use the deployment default.</p></div>;
+}
+
+const goalPresets = [
+  { name: "Task success rate", hint: "runs that achieve the intended outcome", direction: "≥", target: "90", unit: "%" },
+  { name: "Median latency", hint: "time from start to terminal result", direction: "≤", target: "5", unit: "s" },
+  { name: "Cost per successful run", hint: "average model and tool cost", direction: "≤", target: "0.10", unit: "USD" },
+] as const;
+
+const memoryScopes = ["run", "agent", "user", "team", "tenant"] as const;
+
+function presetGoalTarget(line: string, preset: typeof goalPresets[number]) {
+  const prefix = `${preset.name} ${preset.direction} `;
+  const suffix = ` ${preset.unit}`;
+  if (!line.startsWith(prefix) || !line.endsWith(suffix)) return null;
+  const target = line.slice(prefix.length, -suffix.length);
+  return !/\s/.test(target) ? target : null;
+}
+
+function validateGoalNotes(value: string) {
+  for (const line of value.split("\n").map((item) => item.trim()).filter(Boolean)) {
+    for (const preset of goalPresets) {
+      const prefix = `${preset.name} ${preset.direction} `;
+      const suffix = ` ${preset.unit}`;
+      if (!line.startsWith(prefix) || !line.endsWith(suffix)) continue;
+      const target = line.slice(prefix.length, -suffix.length);
+      const number = Number(target);
+      if (!target || !Number.isFinite(number) || number < 0 || (preset.unit === "%" && number > 100)) {
+        throw new Error(`${preset.name} needs a valid numeric target${preset.unit === "%" ? " from 0 to 100" : ""}.`);
+      }
+    }
+  }
+}
+
+function GoalFields({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const lines = value.split("\n").map((line) => line.trim()).filter(Boolean);
+  const custom = lines.filter((line) => !goalPresets.some((preset) => presetGoalTarget(line, preset) !== null));
+  const commit = (preset: typeof goalPresets[number], enabled: boolean, target: string = preset.target) => {
+    const remaining = lines.filter((line) => presetGoalTarget(line, preset) === null);
+    onChange([...remaining, ...(enabled ? [`${preset.name} ${preset.direction} ${target} ${preset.unit}`] : [])].join("\n"));
+  };
+  return <div className={styles.goalRows}><p className={styles.goalBoundary}>Success notes travel with this version. Bind executable evaluators in Run &amp; Evaluate.</p>{goalPresets.map((preset) => {
+    const current = lines.find((line) => presetGoalTarget(line, preset) !== null);
+    const target = current ? presetGoalTarget(current, preset) ?? preset.target : preset.target;
+    return <div key={preset.name} className={current ? styles.goalActive : styles.goalRow}><span><b>{preset.name}</b><small>{preset.hint}</small></span><label><span>{preset.direction}</span><input type="number" min="0" max={preset.unit === "%" ? "100" : undefined} step="any" value={target} disabled={!current} onChange={(event) => commit(preset, true, event.target.value)} aria-label={`${preset.name} target`} /></label><code>{preset.unit}</code><button type="button" aria-pressed={Boolean(current)} aria-label={`${current ? "Remove" : "Add"} ${preset.name}`} onClick={() => commit(preset, !current)}>{current ? "✓" : "+"}</button></div>;
+  })}{custom.map((line) => <div className={styles.goalActive} key={line}><span><b>{line}</b><small>Goal retained from this definition</small></span><button type="button" aria-label={`Remove ${line}`} onClick={() => onChange(lines.filter((item) => item !== line).join("\n"))}>×</button></div>)}<label className={styles.customGoal}>Custom goal<input placeholder="Describe another measurable outcome" onKeyDown={(event) => { if (event.key === "Enter" && event.currentTarget.value.trim()) { event.preventDefault(); onChange([...lines, event.currentTarget.value.trim()].join("\n")); event.currentTarget.value = ""; } }} /><small>Press Enter to add it to this version.</small></label></div>;
 }
 
 const toolEffects = ["pure", "read_only", "idempotent", "compensatable", "non_idempotent"] as const;
@@ -308,7 +375,7 @@ function ToolFields({ value, onChange }: { value: string; onChange: (value: stri
   }) : [];
   const commit = (next: Array<{ name: string; effect: string }>) => onChange(next.map((row) => `${row.name} | ${row.effect}`).join("\n"));
   return <div className={styles.toolEditor}>
-    <div className={styles.toolHeading}><div><b>Allowed tools</b><p>Choose only the actions this agent needs.</p></div><button type="button" onClick={() => commit([...rows, { name: "", effect: "read_only" }])} disabled={rows.length >= 16}>Add tool</button></div>
+    <div className={styles.toolHeading}><div><b>Required tool contracts</b><p>Enter deployment requirements; availability is resolved when the agent runs.</p></div><button type="button" onClick={() => commit([...rows, { name: "", effect: "read_only" }])} disabled={rows.length >= 16}>Add tool</button></div>
     {rows.length === 0 ? <p className={styles.emptyTools}>No tools selected.</p> : <div className={styles.toolRows}>{rows.map((row, index) => <div className={styles.toolRow} key={index}>
       <label>Tool name<input value={row.name} onChange={(event) => commit(rows.map((item, rowIndex) => rowIndex === index ? { ...item, name: event.target.value } : item))} placeholder="search" /></label>
       <label>Effect<select value={row.effect} onChange={(event) => commit(rows.map((item, rowIndex) => rowIndex === index ? { ...item, effect: event.target.value } : item))}>{toolEffects.map((effect) => <option key={effect} value={effect}>{humanizeIdentifier(effect)}</option>)}</select></label>
