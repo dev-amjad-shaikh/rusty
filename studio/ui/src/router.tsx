@@ -1,11 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { lazy } from "react";
-import {
-  createRootRouteWithContext,
-  createRoute,
-  createRouter,
-  redirect,
-} from "@tanstack/react-router";
+import { createRootRouteWithContext, createRoute, createRouter } from "@tanstack/react-router";
 import { AppShell } from "./app/AppShell";
 
 const AgentsPage = lazy(() => import("./features/agents/AgentsPage").then((module) => ({ default: module.AgentsPage })));
@@ -14,6 +9,7 @@ const PromptStudio = lazy(() => import("./features/prompts/PromptStudio").then((
 const WorkPage = lazy(() => import("./features/work/WorkPage").then((module) => ({ default: module.WorkPage })));
 const RunComparePage = lazy(() => import("./features/work/RunComparePage").then((module) => ({ default: module.RunComparePage })));
 const OperationsPage = lazy(() => import("./features/operations/OperationsPage").then((module) => ({ default: module.OperationsPage })));
+const CommandCenter = lazy(() => import("./features/command-center/CommandCenter").then((module) => ({ default: module.CommandCenter })));
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -27,7 +23,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  beforeLoad: () => { throw redirect({ to: "/work" }); },
+  component: CommandCenter,
 });
 
 const agentsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents", component: AgentsPage });
