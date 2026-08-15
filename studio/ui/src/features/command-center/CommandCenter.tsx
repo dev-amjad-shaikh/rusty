@@ -1,29 +1,35 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { useRef, useState } from "react";
 import type { Assistant, RunSnapshot } from "../../lib/contracts";
 import { getOperationsSnapshot, getRun, listAssistants, type OperationAttentionItem } from "../../lib/api/client";
 import { evidencePreview } from "../../lib/text";
 import { durableConnectionScope, readRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
 import { useConnectionStore } from "../../state/connection";
 import { PageHeader } from "../../components/PageHeader";
+import { RustyCardFrame, type RustyCardTone } from "../../components/RustyCardFrame";
 import styles from "./CommandCenter.module.css";
 
-type RunLane = "queued" | "working" | "attention" | "done";
+type RunLane = "queued" | "working" | "needs" | "stuck" | "done";
+type BoardFilter = "all" | "active" | "attention";
 
 interface ExactRecentRun {
   identity: RecentWorkIdentity;
   run: RunSnapshot;
 }
 
-const lanes: Array<{ key: RunLane; label: string; hint: string }> = [
-  { key: "queued", label: "Queued", hint: "Accepted and waiting" },
-  { key: "working", label: "Working", hint: "Executing now" },
-  { key: "attention", label: "Needs attention", hint: "Stopped or needs review" },
-  { key: "done", label: "Done", hint: "Recently completed" },
+const lanes: Array<{ key: RunLane; label: string }> = [
+  { key: "queued", label: "Queued" },
+  { key: "working", label: "Working" },
+  { key: "needs", label: "Needs you" },
+  { key: "stuck", label: "Stuck" },
+  { key: "done", label: "Done" },
 ];
 
 export function CommandCenter() {
-  const { connection, info, openDialog } = useConnectionStore();
+  const { connection, openDialog } = useConnectionStore();
+  const [boardFilter, setBoardFilter] = useState<BoardFilter>("all");
+  const allWorkFilterRef = useRef<HTMLButtonElement>(null);
   const scope = connection ? durableConnectionScope(connection) : "disconnected";
   const recentIdentities = connection ? readRecentWork(scope) : [];
   const assistants = useQuery({
@@ -53,11 +59,23 @@ export function CommandCenter() {
   const agentById = new Map((assistants.data ?? []).map((agent) => [agent.assistant_id, agent]));
   const grouped = groupRuns(exactRuns);
   const attention = operations.data?.attention ?? [];
-  const availableGraphs = new Set(info?.graphs.map((graph) => graph.name) ?? []);
-  const activeAgents = assistants.data?.filter((agent) => !agent.archived_at && availableGraphs.has(agent.graph)).length ?? 0;
+  const visibleRuns = filterRuns(grouped, boardFilter);
+  const visibleAttention = boardFilter === "active" ? [] : attention;
   const evidenceUnavailable = operations.data?.unavailable ?? [];
   const loadingRuns = recentQueries.some((query) => query.isLoading);
   const unavailableRuns = recentQueries.filter((query) => query.isError).length;
+  const runEvidencePartial = unavailableRuns > 0 || mismatchedRuns > 0;
+  const attentionEvidencePartial = operations.isError || evidenceUnavailable.length > 0;
+  const evidencePartial = runEvidencePartial || attentionEvidencePartial;
+  const runningCount = grouped.working.length;
+  const needsCount = grouped.needs.length + attention.length;
+  const stuckCount = grouped.stuck.length;
+  const blockedCount = needsCount + stuckCount;
+  const boardEmpty = Object.values(grouped).every((items) => items.length === 0) && attention.length === 0;
+  const verifiedEmpty = boardEmpty && !loadingRuns && !operations.isLoading && !evidencePartial;
+  const maxLaneCount = Math.max(1, ...lanes.map(({ key }) => key === "needs" ? visibleRuns.needs.length + visibleAttention.length : visibleRuns[key].length));
+  const visibleBoardEmpty = Object.values(visibleRuns).every((items) => items.length === 0) && visibleAttention.length === 0;
+  const verifiedFilterEmpty = boardFilter !== "all" && visibleBoardEmpty && !loadingRuns && !operations.isLoading && !evidencePartial;
 
   if (!connection) return <section className={`page ${styles.command}`} aria-labelledby="command-heading">
     <PageHeader headingId="command-heading" eyebrow="Command center" title="Work board" description="Open a Rusty workspace to see work in motion and the exceptions that need you." actions={<button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>} />
@@ -69,75 +87,99 @@ export function CommandCenter() {
   </section>;
 
   return <section className={`page ${styles.command}`} aria-labelledby="command-heading">
-    <PageHeader headingId="command-heading" eyebrow="Command center" title="Work board" description="Runs opened in this Studio session, plus current operational exceptions." actions={<div className={styles.heroActions}><Link className="secondary-button" to="/agents">Open agents</Link><Link className="primary-button" to="/work">Start work</Link></div>} />
-
-    <section className={styles.signalStrip} aria-label="Workspace summary">
-      <SummarySignal label="Active agents" value={assistants.isError ? "Unknown" : assistants.isLoading ? "…" : String(activeAgents)} tone="live" />
-      <SummarySignal label="Session runs" value={loadingRuns ? "…" : String(exactRuns.length)} />
-      <SummarySignal label="Needs attention" value={operations.isError ? "Unknown" : operations.isLoading ? "…" : String(grouped.attention.length + attention.length)} tone={(grouped.attention.length + attention.length) > 0 ? "warn" : "quiet"} />
-      <SummarySignal label="Completed" value={loadingRuns ? "…" : String(grouped.done.length)} tone="done" />
-    </section>
+    <PageHeader
+      headingId="command-heading"
+      eyebrow="Command center"
+      title="Work board"
+      variant="board"
+      detail={<><span className={styles.liveSummary}><i aria-hidden="true" />{loadingRuns || operations.isLoading ? "Checking work…" : runEvidencePartial ? "Work status incomplete" : attentionEvidencePartial ? `${runningCount} running · attention status incomplete` : `${runningCount} running · ${needsCount} need you · ${stuckCount} stuck`}</span>{!evidencePartial && blockedCount > 0 && <span className={styles.nowBadge}>Now: {blockedCount} blocked</span>}</>}
+      description="Session runs and current operational exceptions."
+      actions={<div className={styles.boardFilters} role="group" aria-label="Filter work board">{([ ["all", "All work"], ["active", "Active"], ["attention", "Needs attention"] ] as Array<[BoardFilter, string]>).map(([key, label]) => <button ref={key === "all" ? allWorkFilterRef : undefined} key={key} type="button" aria-pressed={boardFilter === key} onClick={() => setBoardFilter(key)}>{label}</button>)}</div>}
+    />
 
     {(evidenceUnavailable.length > 0 || operations.isError || unavailableRuns > 0 || mismatchedRuns > 0) && <div className={styles.evidenceWarning} role="status">
       <span aria-hidden="true">!</span><p><b>Some evidence is unavailable.</b> {[...evidenceUnavailable, ...(operations.isError ? ["operations"] : []), ...(unavailableRuns ? [`${unavailableRuns} recent run${unavailableRuns === 1 ? "" : "s"}`] : []), ...(mismatchedRuns ? [`${mismatchedRuns} crossed run ${mismatchedRuns === 1 ? "identity" : "identities"}`] : [])].join(", ")} could not be verified.</p>
     </div>}
 
     <section className={styles.board} aria-label="Current work">
-      <div className={styles.lanes}>
-        {lanes.map((lane) => <section className={styles.lane} key={lane.key} aria-labelledby={`lane-${lane.key}`}>
-          <header><span className={styles.laneSignal} data-tone={lane.key} aria-hidden="true" /><div><h2 id={`lane-${lane.key}`}>{lane.label}</h2><p>{lane.hint}</p></div><b>{lane.key === "attention" ? grouped.attention.length + attention.length : grouped[lane.key].length}</b></header>
+      {verifiedEmpty && <div className={styles.emptyBoard}>
+        <div><h2>No session work yet</h2><p>Start a run when you are ready. It will move across this board as Rusty works.</p></div>
+        <Link to="/work">Start a run</Link>
+      </div>}
+      {verifiedFilterEmpty && <div className={styles.emptyBoard}>
+        <div><h2>{boardFilter === "active" ? "No active work" : "Nothing needs attention"}</h2><p>Other work is still available on the full board.</p></div>
+        <button type="button" onClick={() => { setBoardFilter("all"); requestAnimationFrame(() => allWorkFilterRef.current?.focus()); }}>Show all work</button>
+      </div>}
+      {!verifiedEmpty && !verifiedFilterEmpty && <div className={styles.lanes}>
+        {lanes.map((lane) => {
+          const laneCount = lane.key === "needs" ? visibleRuns.needs.length + visibleAttention.length : visibleRuns[lane.key].length;
+          return <section className={styles.lane} data-lane={lane.key} key={lane.key} aria-labelledby={`lane-${lane.key}`}>
+          <div className={styles.laneMeter} aria-hidden="true"><span style={{ width: laneCount === 0 ? "0%" : `${Math.max(8, Math.round(laneCount / maxLaneCount * 100))}%` }} /></div>
+          <header><span className={styles.laneSignal} data-tone={lane.key} aria-hidden="true" /><h2 id={`lane-${lane.key}`}>{lane.label}</h2><b>{laneCount}</b></header>
           <div className={styles.cards}>
-            {grouped[lane.key].map((item) => <RunCard key={item.run.run_id} item={item} agent={item.run.assistant_id ? agentById.get(item.run.assistant_id) : undefined} />)}
-            {lane.key === "attention" && attention.slice(0, 6).map((item) => <ExceptionCard key={`${item.source}-${item.id}`} item={item} />)}
-            {grouped[lane.key].length === 0 && (lane.key !== "attention" || attention.length === 0) && <p className={styles.emptyLane}>{loadingRuns || operations.isLoading ? "Checking evidence…" : emptyLaneCopy(lane.key)}</p>}
+            {visibleRuns[lane.key].map((item) => <RunCard key={item.run.run_id} item={item} lane={lane.key} agent={item.run.assistant_id ? agentById.get(item.run.assistant_id) : undefined} />)}
+            {lane.key === "needs" && visibleAttention.slice(0, 6).map((item) => <ExceptionCard key={`${item.source}-${item.id}`} item={item} />)}
+            {lane.key === "needs" && visibleAttention.length > 6 && <Link className={styles.moreAttention} to="/operations">Review {visibleAttention.length - 6} more in Operations</Link>}
+            {laneCount === 0 && <p className={styles.emptyLane}>{loadingRuns || operations.isLoading ? "Checking evidence…" : emptyLaneCopy(lane.key)}</p>}
           </div>
-        </section>)}
-      </div>
+        </section>;})}
+      </div>}
     </section>
 
   </section>;
 }
 
-function SummarySignal({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "live" | "warn" | "quiet" | "done" }) {
-  return <article data-tone={tone}><span>{label}</span><b>{value}</b></article>;
-}
-
-function RunCard({ item, agent }: { item: ExactRecentRun; agent?: Assistant }) {
+function RunCard({ item, agent, lane }: { item: ExactRecentRun; agent?: Assistant; lane: RunLane }) {
   const objective = runObjective(item.run);
   const label = objective || agent?.name || item.run.graph;
-  return <Link className={styles.workCard} to="/work/$threadId/runs/$runId" params={{ threadId: item.identity.threadId, runId: item.identity.runId }} aria-label={`Open ${evidencePreview(label, 180)}, status ${item.run.status}`}>
-    <span className={styles.cardType}>{agent ? evidencePreview(agent.name, 100) : evidencePreview(item.run.graph, 100)}</span>
+  const agentName = agent ? evidencePreview(agent.name, 100) : evidencePreview(item.run.graph, 100);
+  return <RustyCardFrame tone={lane}><Link className={styles.workCard} to="/work/$threadId/runs/$runId" params={{ threadId: item.identity.threadId, runId: item.identity.runId }} aria-label={`Open ${evidencePreview(label, 180)}, status ${item.run.status}`}>
+    {(lane === "working" || lane === "needs" || lane === "stuck") && <span className={styles.riskSignal} aria-hidden="true" />}
     <h3>{evidencePreview(label, 220)}</h3>
-    <p><span>{statusLabel(item.run.status)}</span><span>Attempt {item.run.attempt}</span></p>
-    <small>{compactIdentity(item.run.run_id)}</small>
-  </Link>;
+    <span className={styles.agentRow}><span>{initials(agentName)}</span><b>{agentName}</b></span>
+    <p className={styles.cardStatus}>{runState(item.run)}</p>
+    {lane === "working" && <span className={styles.activityBar} aria-hidden="true"><i /></span>}
+    <small><span>{openedContext(item.identity.savedAt)}</span>{item.run.attempt > 0 && <span>Retry {item.run.attempt}</span>}</small>
+  </Link></RustyCardFrame>;
 }
 
 function ExceptionCard({ item }: { item: OperationAttentionItem }) {
   const destination = item.runId && item.threadId
     ? { to: "/work/$threadId/runs/$runId/trace" as const, params: { threadId: item.threadId, runId: item.runId } }
     : null;
-  const content = <><span className={styles.cardType}>{item.source === "artifact" ? "Artifact" : "Operation"}</span><h3>{item.title}</h3><p>{evidencePreview(item.detail, 220)}</p><small>{observedTime(item.observedAt)}</small></>;
+  const content = <><span className={styles.riskSignal} aria-hidden="true" /><h3>{item.title}</h3><span className={styles.agentRow}><span>{item.source === "artifact" ? "AR" : "OP"}</span><b>{item.source === "artifact" ? "Artifact" : "Operation"}</b></span><p className={styles.cardStatus}>{evidencePreview(item.detail, 220)}</p><small><span>{observedTime(item.observedAt)}</span><span>Review</span></small></>;
   return destination
-    ? <Link className={`${styles.workCard} ${styles.exceptionCard}`} to={destination.to} params={destination.params} aria-label={`Inspect ${item.title}`}>{content}</Link>
-    : <Link className={`${styles.workCard} ${styles.exceptionCard}`} to="/operations" aria-label={`Review ${item.title} in Operations`}>{content}</Link>;
+    ? <RustyCardFrame tone="needs"><Link className={styles.workCard} to={destination.to} params={destination.params} aria-label={`Inspect ${item.title}`}>{content}</Link></RustyCardFrame>
+    : <RustyCardFrame tone="needs"><Link className={styles.workCard} to="/operations" aria-label={`Review ${item.title} in Operations`}>{content}</Link></RustyCardFrame>;
 }
 
 function groupRuns(items: ExactRecentRun[]): Record<RunLane, ExactRecentRun[]> {
-  const grouped: Record<RunLane, ExactRecentRun[]> = { queued: [], working: [], attention: [], done: [] };
+  const grouped: Record<RunLane, ExactRecentRun[]> = { queued: [], working: [], needs: [], stuck: [], done: [] };
   for (const item of items) grouped[runLane(item.run.status)].push(item);
   return grouped;
+}
+
+function filterRuns(grouped: Record<RunLane, ExactRecentRun[]>, filter: BoardFilter): Record<RunLane, ExactRecentRun[]> {
+  if (filter === "all") return grouped;
+  if (filter === "active") return { queued: grouped.queued, working: grouped.working, needs: [], stuck: [], done: [] };
+  return { queued: [], working: [], needs: grouped.needs, stuck: grouped.stuck, done: [] };
 }
 
 function runLane(status: RunSnapshot["status"]): RunLane {
   if (status === "pending") return "queued";
   if (status === "running") return "working";
-  if (status === "success") return "done";
-  return "attention";
+  if (status === "interrupted") return "needs";
+  if (status === "success" || status === "cancelled") return "done";
+  return "stuck";
 }
 
 function statusLabel(status: RunSnapshot["status"]) {
-  return ({ pending: "Queued", running: "Running", success: "Completed", interrupted: "Interrupted", error: "Failed", cancelled: "Cancelled" } as const)[status];
+  return ({ pending: "Queued", running: "Running", success: "Completed", interrupted: "Waiting for your input", error: "Failed", cancelled: "Stopped safely" } as const)[status];
+}
+
+function runState(run: RunSnapshot) {
+  const detail = [run.message, run.error].find((value) => typeof value === "string" && value.trim());
+  return detail ? evidencePreview(detail, 220) : statusLabel(run.status);
 }
 
 function runObjective(run: RunSnapshot) {
@@ -151,9 +193,11 @@ function runObjective(run: RunSnapshot) {
 function emptyLaneCopy(lane: RunLane) {
   if (lane === "queued") return "No recent work is waiting.";
   if (lane === "working") return "No recent work is running.";
-  if (lane === "attention") return "No verified exception is in this view.";
+  if (lane === "needs") return "Nothing is waiting on you.";
+  if (lane === "stuck") return "Nothing is stuck.";
   return "Completed runs you open will appear here.";
 }
 
-function compactIdentity(value: string) { return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value; }
+function initials(value: string) { return value.split(/\s+/u).filter(Boolean).slice(0, 2).map((part) => Array.from(part)[0]?.toUpperCase() ?? "").join("") || "AG"; }
 function observedTime(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Time unavailable" : date.toLocaleString(); }
+function openedContext(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Opened this session" : `Opened ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`; }

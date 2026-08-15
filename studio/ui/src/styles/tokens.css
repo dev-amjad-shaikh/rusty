@@ -43,5 +43,6 @@
   --glass-fill: linear-gradient(158deg, rgb(255 236 214 / .08), rgb(255 222 192 / .035));
   --glass-fill-hi: linear-gradient(158deg, rgb(255 238 218 / .12), rgb(255 224 196 / .055));
   --glass-lift: inset 0 1px rgb(255 238 222 / .09), 0 18px 40px -26px rgb(0 0 0 / .7), 0 0 22px -8px rgb(232 116 42 / .2);
+  --rust-edge-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='r'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.045 .1' numOctaves='5' seed='18'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 .46 0 0 0 0 .2 0 0 0 0 .07 0 0 0 1.9 -.62'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23r)'/%3E%3C/svg%3E");
   --shadow: 0 22px 68px rgba(0, 0, 0, .34);
 }

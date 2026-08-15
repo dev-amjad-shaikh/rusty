@@ -37,7 +37,16 @@ Desktop uses a persistent left rail and content header. Mobile uses a compact he
 - Mechanical fasteners and plates straddle the rail/content seam. They do not float inside the workspace or compete with task content.
 - Every modern route uses the shared page header: lifecycle context, one task name, one concise orientation line, and route actions. Pages do not introduce independent campaign heroes.
 - Standard headers share the same baseline, divider, and action column. Compact headers are reserved for nested builder and detail workspaces.
+- The Work board is the one dense overview surface. Its shared header uses the compact board composition from the v4 reference: task title, live state summary, blocked-work signal, and filters on one visual axis.
 - The Command Center owns current work and exceptions only. Agent portfolio management stays in its dedicated route and is not repeated below the board.
+
+### Material language
+
+- Work cards use the v4 forged-edge treatment: a two-pixel irregular oxidized-copper perimeter, dark translucent plate, warm top-edge reflection, and restrained lift on hover. A plain one-pixel application card is not an acceptable substitute.
+- The forged edge is a shared primitive. Lane status changes the edge temperature and signal light without changing card geometry.
+- Lanes are open work surfaces, not bordered dashboard panels. A thin load rail, status lamp, mono label, and exact count establish each column.
+- Empty lanes use quiet text rather than placeholder cards. The forged object only appears when there is real work to open.
+- Card hierarchy is task → agent identity → current state → compact evidence. Internal implementation labels do not lead the card.
 
 ## Command Center evidence contract
 
@@ -47,24 +56,21 @@ The board loads at most the connection-scoped run identities retained by `recent
 
 - Queued: `pending`
 - Working: `running`
-- Needs attention: `error`, `interrupted`, or `cancelled`
-- Done: `success`
+- Needs you: `interrupted`, alongside current operational exceptions
+- Stuck: `error`
+- Done: `success` or safely `cancelled` among the session identities available to Studio
 
 This is explicitly recent work opened in the current Studio session. It is not called the tenant's complete run catalog.
 
 ### Exceptions
 
-Current task and artifact exceptions come from the existing Operations projection. Exceptions join the Needs attention column and hand off to Operations or an exact trace when both run and thread identities exist.
+Current task and artifact exceptions come from the existing Operations projection. Exceptions join the Needs you column and hand off to Operations or an exact trace when both run and thread identities exist.
 
 If an Operations source is unavailable, the Command Center names that source as unavailable. It never presents missing evidence as healthy.
 
-### Agent portfolio
+### Board filters
 
-Agent counts and next actions come from the exact assistant catalog. Archived agents are not called ready. If the catalog is unavailable, the agent state is unavailable rather than zero.
-
-### Routine systems
-
-Schedule and automation counts are projections from Operations. They are counts only; the Command Center does not claim delivery health from catalog presence.
+All work is the default. Active shows queued and running session work. Needs attention shows current Operations exceptions and terminal session runs that are stuck. Filters change only the visible projection; they never change or synthesize durable state.
 
 ## Interaction invariants
 
@@ -80,8 +86,8 @@ Schedule and automation counts are projections from Operations. They are counts 
 
 ## Responsive contract
 
-- Wide screens: 264px lifecycle rail, content header, four-column board when space allows.
-- Medium screens: rail remains compact and board becomes two columns.
+- Wide screens: 252px lifecycle rail, content header, five-column board when space allows.
+- Medium screens: the board steps through three and two columns without shrinking card content below its readable bound.
 - Small screens (320px and above): rail becomes an expandable navigator, board becomes one column, controls stay within the viewport, and no content is clipped horizontally.
 
 ## Deliberate non-goals for this slice

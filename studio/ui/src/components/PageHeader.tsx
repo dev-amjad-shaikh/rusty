@@ -18,7 +18,7 @@ export function PageHeader({
   actions?: ReactNode;
   detail?: ReactNode;
   headingRef?: RefObject<HTMLHeadingElement | null>;
-  variant?: "standard" | "compact";
+  variant?: "standard" | "compact" | "board";
 }) {
   return <header className={styles.header} data-variant={variant}>
     <div className={styles.copy}>

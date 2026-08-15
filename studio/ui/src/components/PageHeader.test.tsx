@@ -30,4 +30,12 @@ describe("PageHeader", () => {
     rerender(<PageHeader headingId="static-heading" eyebrow="Oversee" title="Work board" />);
     expect(screen.getByRole("heading", { name: "Work board" })).not.toHaveAttribute("tabindex");
   });
+
+  it("keeps the board composition inside the shared header contract", () => {
+    render(<PageHeader headingId="board-heading" eyebrow="Oversee" title="Work board" variant="board" detail={<span>2 running</span>} actions={<button type="button">All work</button>} />);
+    const header = screen.getByRole("heading", { name: "Work board" }).closest("header");
+    expect(header).toHaveAttribute("data-variant", "board");
+    expect(header).toContainElement(screen.getByText("2 running"));
+    expect(header).toContainElement(screen.getByRole("button", { name: "All work" }));
+  });
 });
