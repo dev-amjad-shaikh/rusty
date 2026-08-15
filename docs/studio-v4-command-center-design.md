@@ -18,16 +18,26 @@ The primary lifecycle rail contains only available destinations:
 
 - Oversee
   - Command Center (`/`)
-- Build
   - Agent portfolio (`/agents` and agent workspaces)
+- Build
+  - Agent builder (`/agents/new`)
   - Prompt library (`/agents/prompts`)
-- Operate
+- Prove
   - Run workspace (`/work` and run/trace/evaluate routes)
+- Operate
   - Operations (`/operations`)
 
 Prove, Learn, and Govern remain product lifecycle concepts but do not become empty global destinations. Evaluation stays attached to an exact run until a durable standalone evaluation workspace exists. Unsupported v4 mock destinations are not rendered.
 
 Desktop uses a persistent left rail and content header. Mobile uses a compact header and an in-flow expandable lifecycle navigator; it does not preserve the mock's clipped fixed rail.
+
+## Shared spatial contract
+
+- The desktop lifecycle rail begins directly below the product mark. Navigation is top-aligned; the runtime boundary alone is anchored to the bottom.
+- Mechanical fasteners and plates straddle the rail/content seam. They do not float inside the workspace or compete with task content.
+- Every modern route uses the shared page header: lifecycle context, one task name, one concise orientation line, and route actions. Pages do not introduce independent campaign heroes.
+- Standard headers share the same baseline, divider, and action column. Compact headers are reserved for nested builder and detail workspaces.
+- The Command Center owns current work and exceptions only. Agent portfolio management stays in its dedicated route and is not repeated below the board.
 
 ## Command Center evidence contract
 

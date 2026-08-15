@@ -4,6 +4,7 @@ import { connectionScope } from "../../lib/api/client";
 import type { RunEvent } from "../../lib/contracts";
 import { useConnectionStore } from "../../state/connection";
 import { type ComparisonRun, useWorkStore } from "../../state/work";
+import { PageHeader } from "../../components/PageHeader";
 import styles from "./RunComparePage.module.css";
 
 function short(value: string) { return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-5)}` : value; }
@@ -37,7 +38,7 @@ export function RunComparePage() {
   const candidateTotals = useMemo(() => candidate ? totals(candidate) : null, [candidate]);
 
   return <section className="page" aria-labelledby="compare-heading">
-    <header className="page-header"><div><span className="eyebrow">Work · Compare</span><h1 id="compare-heading">See what changed between runs</h1><p>Compare outcomes, evidence coverage, and step trajectories before deciding that one run is better.</p></div><Link className="secondary-button" to="/work">Back to Work</Link></header>
+    <PageHeader headingId="compare-heading" eyebrow="Work / Compare" title="Compare runs" description="Compare outcomes, evidence coverage, and step trajectories before deciding which run is better." actions={<Link className="secondary-button" to="/work">Back to Work</Link>} />
     {runs.length < 2 ? <div className="empty-state"><span className="eyebrow">Run comparison</span><h2>Complete two runs to compare them</h2><p>Completed runs you open here are available to compare until this session ends.</p><Link className="primary-button" to="/work">Start work</Link></div>
       : baseline && candidate && baselineTotals && candidateTotals ? <div className={styles.workspace}>
         <header className={styles.selectors}><label>Baseline<select value={baselineId} onChange={(event) => setBaselineId(event.target.value)}>{runs.map((item) => <option key={item.run.run_id} value={item.run.run_id}>{item.agentName} · {short(item.run.run_id)}</option>)}</select></label><span aria-hidden="true">→</span><label>Candidate<select value={candidateId} onChange={(event) => setCandidateId(event.target.value)}>{runs.map((item) => <option key={item.run.run_id} value={item.run.run_id}>{item.agentName} · {short(item.run.run_id)}</option>)}</select></label></header>

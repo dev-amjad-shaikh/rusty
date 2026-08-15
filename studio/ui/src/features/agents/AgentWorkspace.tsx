@@ -16,6 +16,7 @@ import type { Assistant } from "../../lib/contracts";
 import { evidencePreview } from "../../lib/text";
 import { useConnectionStore } from "../../state/connection";
 import { useWorkStore } from "../../state/work";
+import { PageHeader } from "../../components/PageHeader";
 import {
   AgentIntentEditor,
   agentVersionFields,
@@ -268,9 +269,10 @@ export function AgentWorkspace() {
     }
   }
 
-  if (!connection) return <section className="page" aria-labelledby="agent-heading"><header className="page-header"><div><span className="eyebrow">Agents</span><h1 id="agent-heading">Open an agent</h1></div></header><div className="empty-state"><h2>Open its workspace to continue</h2><p>The active definition and immutable history stay in your Rusty workspace.</p><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div></section>;
-  if (history.isLoading) return <section className="page" aria-labelledby="agent-heading"><h1 id="agent-heading" className={styles.srHeading}>Agent workspace</h1><div className={styles.loading} role="status">Loading agent…</div></section>;
-  if (history.isError || !history.data || !assistant) return <section className="page" aria-labelledby="agent-heading"><header className="page-header"><div><span className="eyebrow">Agents</span><h1 id="agent-heading">Agent unavailable</h1><p>{history.error instanceof Error ? history.error.message : "Rusty did not return this agent."}</p></div><Link className="secondary-button" to="/agents">Back to agents</Link></header><div className="empty-state"><h2>Reload the active definition</h2><button className="primary-button" type="button" onClick={() => history.refetch()}>Retry</button></div></section>;
+  const workspaceEyebrow = <><Link to="/agents" activeOptions={{ exact: true }}>Agents</Link><span aria-hidden="true"> / </span><span>Workspace</span></>;
+  if (!connection) return <section className="page" aria-labelledby="agent-heading"><PageHeader headingId="agent-heading" eyebrow={workspaceEyebrow} title="Open an agent" variant="compact" /><div className="empty-state"><h2>Open its workspace to continue</h2><p>The active definition and immutable history stay in your Rusty workspace.</p><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div></section>;
+  if (history.isLoading) return <section className="page" aria-labelledby="agent-heading"><PageHeader headingId="agent-heading" eyebrow={workspaceEyebrow} title="Opening agent" variant="compact" /><div className={styles.loading} role="status">Loading agent…</div></section>;
+  if (history.isError || !history.data || !assistant) return <section className="page" aria-labelledby="agent-heading"><PageHeader headingId="agent-heading" eyebrow={workspaceEyebrow} title="Agent unavailable" description={history.error instanceof Error ? history.error.message : "Rusty did not return this agent."} actions={<Link className="secondary-button" to="/agents">Back to agents</Link>} variant="compact" /><div className="empty-state"><h2>Reload the active definition</h2><button className="primary-button" type="button" onClick={() => history.refetch()}>Retry</button></div></section>;
 
   const historyData = history.data;
   const archived = Boolean(assistant.archived_at);
@@ -285,10 +287,14 @@ export function AgentWorkspace() {
     || right.version_id.localeCompare(left.version_id));
 
   return <section className="page" aria-labelledby="agent-heading">
-    <header className={styles.pageHeader}>
-      <div className={styles.titleBlock}><Link to="/agents">Agents</Link><div className={styles.titleLine}><span className={archived ? styles.archived : styles.active}>{archived ? "Archived" : "Active"}</span><code>{shortId(assistant.active_version_id)}</code></div><h1 id="agent-heading">{evidencePreview(assistant.name, 512)}</h1><p>{agentDescription(assistant)}</p></div>
-      <div className={styles.primaryActions}><div><button className="primary-button" type="button" onClick={runActive} disabled={archived || !graphAvailable || editing}>Run active version</button><button ref={createVersionRef} className="secondary-button" type="button" onClick={beginEdit} disabled={editBlocked || editing}>Create version</button><button className="secondary-button" type="button" onClick={requestLifecycle} disabled={lifecycle.isPending}>{archived ? "Restore" : "Archive"}</button></div>{availabilityNote && <p>{availabilityNote}</p>}</div>
-    </header>
+    <PageHeader
+      headingId="agent-heading"
+      eyebrow={workspaceEyebrow}
+      title={evidencePreview(assistant.name, 512)}
+      description={agentDescription(assistant)}
+      detail={<div className={styles.titleLine}><span className={archived ? styles.archived : styles.active}>{archived ? "Archived" : "Active"}</span><code>{shortId(assistant.active_version_id)}</code></div>}
+      actions={<div className={styles.primaryActions}><div><button className="primary-button" type="button" onClick={runActive} disabled={archived || !graphAvailable || editing}>Run active version</button><button ref={createVersionRef} className="secondary-button" type="button" onClick={beginEdit} disabled={editBlocked || editing}>Create version</button><button className="secondary-button" type="button" onClick={requestLifecycle} disabled={lifecycle.isPending}>{archived ? "Restore" : "Archive"}</button></div>{availabilityNote && <p>{availabilityNote}</p>}</div>}
+    />
 
     <p ref={noticeRef} className={notice ? styles.notice : styles.srHeading} role="status" tabIndex={notice ? -1 : undefined}>{notice}</p>
     {error && <p className={styles.error} role="alert">{error}</p>}

@@ -11,8 +11,6 @@ h1 { margin-bottom: 8px; font: 300 clamp(34px, 5vw, 64px)/.96 var(--display); le
 .route-error { padding: 32px; color: var(--danger); }
 .route-loading { padding: 32px; color: var(--text-muted); }
 .page { max-width: 1440px; margin: 0 auto; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 28px; }
-.page-header p { max-width: 680px; margin-bottom: 0; color: var(--text-muted); line-height: 1.55; }
 .eyebrow { display: block; margin-bottom: 10px; color: var(--mint); font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: .18em; }
 .primary-button { min-height: 42px; padding: 0 17px; border: 1px solid var(--accent); border-radius: 6px; background: linear-gradient(180deg, #fb9a3f, #e8742a); color: #2a1000; font-weight: 400; box-shadow: 0 8px 26px -10px rgb(232 116 38 / .9); cursor: pointer; }
 .primary-button:hover { box-shadow: 0 0 28px rgb(243 111 56 / .25); }
@@ -26,6 +24,4 @@ h1 { margin-bottom: 8px; font: 300 clamp(34px, 5vw, 64px)/.96 var(--display); le
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 
 @media (max-width: 640px) {
-  .page-header { align-items: stretch; flex-direction: column; }
-  .page-header .primary-button { width: 100%; }
 }

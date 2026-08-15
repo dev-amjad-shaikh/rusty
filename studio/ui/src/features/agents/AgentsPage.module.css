@@ -1,7 +1,4 @@
 .portfolio, .builderPage { max-width: 1220px; }
-.portfolioHeader, .builderHeader { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
-.portfolioHeader h1, .builderHeader h1 { margin: 0; color: #f7ece4; font-size: 28px; font-weight: 200; line-height: 1.1; letter-spacing: -.024em; }
-.portfolioHeader p { margin: 5px 0 0; color: var(--text-faint); font-size: 12.5px; }
 .portfolioActions { display: flex; align-items: center; gap: 8px; }
 .portfolioActions a, .portfolioEmpty a { display: inline-grid; place-items: center; text-decoration: none; }
 
@@ -30,12 +27,10 @@
 .portfolioEmpty > div:last-child { display: flex; gap: 8px; }
 .loading { min-height: 220px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; background: var(--glass-fill); color: var(--text-muted); font-size: 13px; }
 
-.builderHeader { min-height: 40px; }
-.builderTitle { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.builderTitle > a, .draftState a, .draftState button { color: var(--text-muted); font-size: 13px; font-weight: 300; text-decoration: none; }
+.draftState a, .draftState button { color: var(--text-muted); font-size: 13px; font-weight: 300; text-decoration: none; }
 .draftState button { padding: 0; border: 0; background: transparent; cursor: pointer; }
-.builderTitle > a:hover, .draftState a:hover, .draftState button:hover { color: var(--text); }
-.builderTitle > span { padding: 3px 10px; border-radius: 5px; background: var(--rust-soft); color: var(--rust); font: 400 11px var(--mono); }
+.draftState a:hover, .draftState button:hover { color: var(--text); }
+.builderBadge { padding: 3px 10px; border-radius: 5px; background: var(--rust-soft); color: var(--rust); font: 400 11px var(--mono); }
 .draftState { display: flex; align-items: center; gap: 18px; color: var(--text-faint); font: 400 11px var(--mono); }
 .draftState > span { white-space: nowrap; }
 .builder { margin-top: 4px; }
@@ -138,7 +133,6 @@
   .review dl { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; }
 }
 @media (max-width: 900px) {
-  .builderHeader { align-items: stretch; flex-direction: column; }
   .draftState { width: 100%; }
   .tableHead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .agentTable { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 10px; border-color: var(--line); background: transparent; box-shadow: none; }
@@ -150,12 +144,9 @@
   .agentTable > footer { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
-  .portfolioHeader, .builderHeader { align-items: stretch; flex-direction: column; }
   .portfolioActions, .draftState { width: 100%; }
   .portfolioActions a { flex: 1; }
   .agentTable { grid-template-columns: 1fr; }
-  .builderTitle { flex-wrap: wrap; }
-  .builderTitle h1 { order: 3; width: 100%; }
   .builderGrid { grid-template-columns: 1fr; }
   .capabilityMap { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .capabilityMap button { display: block; padding: 10px 7px; text-align: center; }
@@ -167,7 +158,6 @@
   .portfolioEmpty > :last-child { grid-column: 1 / -1; }
 }
 @media (max-width: 520px) {
-  .portfolioHeader h1, .builderHeader h1 { font-size: 28px; }
   .portfolioActions { flex-direction: column-reverse; }
   .portfolioEmpty { grid-template-columns: 1fr; padding: 22px; }
   .portfolioEmpty > :last-child { grid-column: auto; }

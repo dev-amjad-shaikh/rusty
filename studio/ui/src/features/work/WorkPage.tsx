@@ -10,6 +10,7 @@ import { durableConnectionScope, readRecentWork, rememberRecentWork, type Recent
 import { bytePreview } from "../../lib/text";
 import { ArtifactTray } from "./artifacts/ArtifactTray";
 import { EvaluationLane } from "./evaluations/EvaluationLane";
+import { PageHeader } from "../../components/PageHeader";
 import styles from "./WorkPage.module.css";
 
 const stages = ["run", "trace", "evaluate"] as const;
@@ -168,7 +169,7 @@ export function WorkPage() {
 
   return (
     <section className={`page ${styles.workPage}`} aria-labelledby="work-heading">
-      <header className={`page-header ${styles.workHeader}`}><div><span className="eyebrow">Work · durable execution</span><h1 id="work-heading">Run the work.<br /><span>Keep the evidence.</span></h1><p>Give an agent an outcome, follow its execution, and turn the exact result into an evaluation without leaving the thread.</p></div>{currentComparisons.length >= 2 && <Link className="secondary-button" to="/work/compare">Compare runs</Link>}</header>
+      <PageHeader headingId="work-heading" eyebrow="Work" title="Run & evaluate" description="Start a task, follow its exact trace, and turn the result into an evaluation." actions={currentComparisons.length >= 2 ? <Link className="secondary-button" to="/work/compare">Compare runs</Link> : undefined} />
       {!connection ? <div className="empty-state"><span className="eyebrow">One continuous workspace</span><h2>Open a workspace to start work</h2><p>Your agents, runs, and evidence live together in a Rusty workspace.</p><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div> : (
         <div className={styles.workspace}>
           <header className={styles.contextBar}><div><span>Agent</span><b>{activeAgent?.name ?? exactRun?.graph ?? "New work"}</b></div><div><span>Status</span><b className={styles.status}>{exactRun?.status ?? (launch.isPending ? "starting" : "not started")}</b></div><div className={styles.identity}><span>Thread / run</span><code>{params.threadId ? `${short(params.threadId)} / ${short(params.runId ?? "")}` : "Created when you start"}</code></div></header>

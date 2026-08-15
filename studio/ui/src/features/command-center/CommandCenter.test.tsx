@@ -50,13 +50,16 @@ describe("v4 Command Center", () => {
     }));
     renderCenter();
     expect(await screen.findByRole("heading", { name: "Work board" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "Queued" })).toBeVisible();
     expect(await within(screen.getByRole("region", { name: "Queued" })).findByRole("link", { name: /pending customer request/ })).toBeVisible();
     expect(await within(screen.getByRole("region", { name: "Working" })).findByRole("link", { name: /running customer request/ })).toBeVisible();
     const attention = screen.getByRole("region", { name: "Needs attention" });
     expect(await within(attention).findByRole("link", { name: /error customer request/ })).toBeVisible();
     expect(await within(attention).findByRole("link", { name: /publish_report exhausted its retries/ })).toBeVisible();
     expect(await within(screen.getByRole("region", { name: "Done" })).findByRole("link", { name: /success customer request/ })).toBeVisible();
-    expect(screen.getByText("Recent runs opened in this Studio session, joined with current operational exceptions.")).toBeVisible();
+    expect(screen.getByText("Runs opened in this Studio session, plus current operational exceptions.")).toBeVisible();
+    expect(screen.getByText("Session runs")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Agent portfolio" })).not.toBeInTheDocument();
   });
 
   it("does not admit a crossed run identity and discloses the missing proof", async () => {
@@ -89,7 +92,7 @@ describe("v4 Command Center", () => {
   it("offers useful local work before a workspace is connected", async () => {
     useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
     renderCenter();
-    expect(await screen.findByRole("heading", { name: /Bring your agent system/ })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Work board" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Start a local draft" })).toHaveAttribute("href", "/agents");
     expect(screen.getByRole("button", { name: "Choose workspace" })).toBeVisible();
   });

@@ -4,6 +4,7 @@ import { listAssistants } from "../../lib/api/client";
 import type { Assistant } from "../../lib/contracts";
 import { evidencePreview } from "../../lib/text";
 import { useConnectionStore } from "../../state/connection";
+import { PageHeader } from "../../components/PageHeader";
 import { humanizeIdentifier } from "./AgentIntentEditor";
 import styles from "./AgentsPage.module.css";
 
@@ -24,16 +25,16 @@ export function AgentsPage() {
 
   return (
     <section className={`${styles.portfolio} page`} aria-labelledby="agents-heading">
-      <header className={styles.portfolioHeader}>
-        <div>
-          <h1 id="agents-heading">Agents</h1>
-          <p>{portfolioSummary}</p>
-        </div>
-        <div className={styles.portfolioActions}>
+      <PageHeader
+        headingId="agents-heading"
+        eyebrow="Agents"
+        title="Agent portfolio"
+        description={portfolioSummary}
+        actions={<div className={styles.portfolioActions}>
           <Link className="secondary-button" to="/agents/prompts">Prompt library</Link>
           <Link className="primary-button" to="/agents/new">New agent</Link>
-        </div>
-      </header>
+        </div>}
+      />
 
       {!connection ? (
         <div className={styles.portfolioEmpty}>

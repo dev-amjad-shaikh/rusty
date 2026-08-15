@@ -39,7 +39,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Agents", () => {
   it("opens with the v4 portfolio and hands off to the dedicated builder", async () => {
     renderPage();
-    expect(await screen.findByRole("heading", { name: "Agents" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Agent portfolio" })).toBeVisible();
     expect(screen.queryByText("Table")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("link", { name: "New agent" }));
     expect(await screen.findByRole("heading", { name: "New agent" })).toBeVisible();

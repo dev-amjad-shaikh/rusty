@@ -95,7 +95,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 22px 14px 16px;
   border-right: 1px solid var(--line);
   background:
@@ -104,7 +104,7 @@
   backdrop-filter: blur(28px) saturate(125%);
   box-shadow: inset -1px 0 rgb(255 255 255 / .018);
 }
-.sidebar nav { min-height: 0; display: grid; align-content: start; gap: 14px; margin-top: 20px; overflow-y: auto; scrollbar-width: thin; }
+.sidebar nav { min-height: 0; display: grid; align-content: start; gap: 14px; margin-top: 22px; overflow-y: auto; scrollbar-width: thin; }
 .sidebar section { display: grid; gap: 1px; }
 .sidebar h2 { margin: 0 0 4px 8px; color: var(--copper); font: 400 9.5px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; }
 .sidebar nav a { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 9px; color: var(--text-muted); text-decoration: none; }
@@ -117,17 +117,17 @@
 .sidebar a > span:last-child { min-width: 0; display: grid; gap: 0; }
 .sidebar b { overflow: hidden; color: inherit; font-size: 13.5px; font-weight: 300; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar small { display: none; }
-.shellBoundary { display: flex; align-items: center; gap: 8px; margin: 0 6px 0 13px; color: var(--text-faint); font: 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.shellBoundary { display: flex; align-items: center; gap: 8px; margin: auto 6px 0 13px; padding-top: 20px; color: var(--text-faint); font: 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .shellBoundary span { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px rgb(143 199 158 / .45); }
-.mechanicalRail { position: absolute; z-index: 4; top: 0; right: -56px; bottom: 0; width: 64px; pointer-events: none; }
+.mechanicalRail { position: absolute; z-index: 4; top: 0; right: -16px; bottom: 0; width: 32px; pointer-events: none; }
 .mechanicalRail::before, .mechanicalRail::after, .mechanicalRail i { position: absolute; border-radius: 2px; background: linear-gradient(100deg, rgb(66 37 21 / .96), rgb(28 15 9 / .99) 54%, rgb(56 31 18 / .96)); box-shadow: inset 0 1px rgb(255 198 148 / .22), inset 0 -1px rgb(0 0 0 / .78), 0 5px 13px -4px rgb(0 0 0 / .86), 0 0 17px -6px rgb(232 116 42 / .42); content: ""; }
-.mechanicalRail::before { left: 1px; top: 7.5%; width: 54px; height: 15px; transform: rotate(-1.6deg); }
-.mechanicalRail::after { left: -2px; top: 56%; width: 60px; height: 13px; transform: rotate(2.4deg); }
+.mechanicalRail::before { left: -12px; top: 7.5%; width: 56px; height: 15px; transform: rotate(-1.6deg); }
+.mechanicalRail::after { left: -14px; top: 56%; width: 60px; height: 13px; transform: rotate(2.4deg); }
 .mechanicalRail i::before, .mechanicalRail i::after { position: absolute; border-radius: 50%; background: radial-gradient(circle at 34% 30%, rgb(255 222 190 / .92) 0 1.4px, rgb(138 80 45 / .96) 1.4px 2.7px, rgb(22 11 6 / .93) 2.7px); box-shadow: 0 0 7px rgb(232 116 42 / .38); content: ""; }
-.mechanicalRail i:nth-child(1) { left: 18px; top: 19%; width: 18px; height: 32px; transform: rotate(1.1deg); }.mechanicalRail i:nth-child(1)::before { left: 4px; top: 5px; width: 8px; height: 8px; }.mechanicalRail i:nth-child(1)::after { left: 7px; top: 20px; width: 6px; height: 6px; }
-.mechanicalRail i:nth-child(2) { left: 17px; top: 41%; width: 16px; height: 27px; transform: rotate(-2.3deg); }.mechanicalRail i:nth-child(2)::before { left: 4px; top: 4px; width: 7px; height: 7px; }.mechanicalRail i:nth-child(2)::after { left: 5px; top: 16px; width: 6px; height: 6px; }
-.mechanicalRail i:nth-child(3) { left: 20px; top: 69%; width: 15px; height: 16px; transform: rotate(-3.1deg); }.mechanicalRail i:nth-child(3)::before { left: 4px; top: 4px; width: 7px; height: 7px; }
-.mechanicalRail i:nth-child(4) { left: 17px; top: 82%; width: 18px; height: 38px; transform: rotate(.7deg); }.mechanicalRail i:nth-child(4)::before { left: 5px; top: 4px; width: 7px; height: 7px; }.mechanicalRail i:nth-child(4)::after { left: 6px; top: 27px; width: 7px; height: 7px; }
+.mechanicalRail i:nth-child(1) { left: 7px; top: 19%; width: 18px; height: 32px; transform: rotate(1.1deg); }.mechanicalRail i:nth-child(1)::before { left: 4px; top: 5px; width: 8px; height: 8px; }.mechanicalRail i:nth-child(1)::after { left: 7px; top: 20px; width: 6px; height: 6px; }
+.mechanicalRail i:nth-child(2) { left: 8px; top: 41%; width: 16px; height: 27px; transform: rotate(-2.3deg); }.mechanicalRail i:nth-child(2)::before { left: 4px; top: 4px; width: 7px; height: 7px; }.mechanicalRail i:nth-child(2)::after { left: 5px; top: 16px; width: 6px; height: 6px; }
+.mechanicalRail i:nth-child(3) { left: 8px; top: 69%; width: 15px; height: 16px; transform: rotate(-3.1deg); }.mechanicalRail i:nth-child(3)::before { left: 4px; top: 4px; width: 7px; height: 7px; }
+.mechanicalRail i:nth-child(4) { left: 7px; top: 82%; width: 18px; height: 38px; transform: rotate(.7deg); }.mechanicalRail i:nth-child(4)::before { left: 5px; top: 4px; width: 7px; height: 7px; }.mechanicalRail i:nth-child(4)::after { left: 6px; top: 27px; width: 7px; height: 7px; }
 .main { position: relative; z-index: 1; grid-column: 2; grid-row: 2; min-width: 0; padding: 22px 32px 54px; }
 .main:focus { outline: none; }
 .commandDialog { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 14px; background: #17110f; color: var(--text); box-shadow: 0 30px 90px rgb(0 0 0 / .72), 0 0 34px -10px rgb(232 116 42 / .4); }

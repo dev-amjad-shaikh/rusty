@@ -6,6 +6,7 @@ import { useConnectionStore } from "../../state/connection";
 import { useWorkStore } from "../../state/work";
 import { isUnicodeScalarString } from "../../lib/text";
 import { usePromptMutationStore } from "../../state/prompts";
+import { PageHeader } from "../../components/PageHeader";
 import styles from "./PromptStudio.module.css";
 
 function promptName(surface: string) { return surface.startsWith("prompt:") ? surface.slice(7) : surface; }
@@ -111,7 +112,7 @@ export function PromptStudio() {
   function selectArtifact(artifact: PromptArtifact) { setCreating(false); setSelectedName(promptName(artifact.surface)); setSelectedVersion(artifact.commits.at(-1)?.candidate_id ?? ""); setError(""); setSaved(""); }
 
   return <section className="page" aria-labelledby="prompts-heading">
-    <header className="page-header"><div><span className="eyebrow">Agents · Prompts</span><h1 id="prompts-heading">Shape the instructions behind the work</h1><p>Edit with version history beside you. Every saved version names its author and the run that informed it.</p></div><div className={styles.headerActions}><Link className="secondary-button" to="/agents">Back to agents</Link>{connection && <button className="primary-button" type="button" onClick={newPrompt}>New prompt</button>}</div></header>
+    <PageHeader headingId="prompts-heading" eyebrow="Agents / Prompts" title="Prompt library" description="Edit instructions with their immutable history and exact source run beside you." actions={<div className={styles.headerActions}><Link className="secondary-button" to="/agents">Back to agents</Link>{connection && <button className="primary-button" type="button" onClick={newPrompt}>New prompt</button>}</div>} />
       {!connection ? <div className="empty-state"><span className="eyebrow">Prompt library</span><h2>Open a workspace to load prompts</h2><p>Prompts stay in your Rusty workspace; Studio does not host a separate copy.</p><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div>
       : catalog.isLoading ? <div className={styles.loading}>Loading prompts…</div>
       : catalog.isError ? <div className="empty-state"><h2>Prompt history is unavailable</h2><p>{catalog.error instanceof Error ? catalog.error.message : "Try again."}</p><button className="primary-button" type="button" onClick={() => catalog.refetch()}>Retry</button></div>

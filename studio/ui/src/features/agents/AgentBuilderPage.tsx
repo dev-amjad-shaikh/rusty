@@ -4,6 +4,7 @@ import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { connectionScope, createAssistant, jsonEquivalent, listAssistants, mutationScope, StudioApiError } from "../../lib/api/client";
 import { useAgentMutationStore } from "../../state/agents";
 import { useConnectionStore } from "../../state/connection";
+import { PageHeader } from "../../components/PageHeader";
 import {
   agentVersionFields,
   capabilities,
@@ -191,10 +192,15 @@ export function AgentBuilderPage() {
 
   return <section className={`${styles.builderPage} page`} aria-labelledby="agent-builder-heading">
     {routeBlocker.status === "blocked" && <UnsavedChangesDialog pending={create.isPending} title={parkedDraftCount ? `Discard ${parkedDraftCount + (builderChanged ? 1 : 0)} workspace drafts?` : undefined} message={parkedDraftCount ? "Drafts are parked in more than one workspace. Continuing will discard every parked definition from this page." : undefined} discardLabel={parkedDraftCount ? "Discard all drafts" : undefined} returnFocusRef={builderHeading} onKeep={routeBlocker.reset} onDiscard={() => { builderSessions.clear(); builderErrors.clear(); setDraft(emptyAgentDraft()); setVisited(new Set(["purpose"])); setError(""); setValidationRequest(null); routeBlocker.proceed(); }} />}
-    <header className={styles.builderHeader}>
-      <div className={styles.builderTitle}><Link to="/agents" activeOptions={{ exact: true }}>← Agents</Link><h1 id="agent-builder-heading" ref={builderHeading} tabIndex={-1}>New agent</h1><span>Guided draft</span></div>
-      <div className={styles.draftState}>{connection ? <Link to="/agents/prompts">Prompt library</Link> : <button type="button" onClick={openDialog}>Choose workspace</button>}<span>{completedCreate ? "version 1 created" : "draft · page memory only"}</span></div>
-    </header>
+    <PageHeader
+      headingId="agent-builder-heading"
+      headingRef={builderHeading}
+      eyebrow={<><Link to="/agents" activeOptions={{ exact: true }}>Agents</Link><span aria-hidden="true"> / </span><span>Builder</span></>}
+      title="New agent"
+      detail={<span className={styles.builderBadge}>Guided draft</span>}
+      actions={<div className={styles.draftState}>{connection ? <Link to="/agents/prompts">Prompt library</Link> : <button type="button" onClick={openDialog}>Choose workspace</button>}<span>{completedCreate ? "version 1 created" : "draft · page memory only"}</span></div>}
+      variant="compact"
+    />
     <form className={styles.builder} id="agent-builder" onSubmit={submit} aria-busy={create.isPending}>
       <fieldset className={styles.builderGrid} disabled={create.isPending}>
       <AgentIntentEditor draft={draft} onChange={update} graphs={info?.graphs.map((graph) => graph.name) ?? []} progress={progress} validationRequest={validationRequest} validationMessage={error} onCapabilityVisit={(capability) => setVisited((current) => new Set(current).add(capability))} />

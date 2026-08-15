@@ -1,9 +1,4 @@
 .workPage { position: relative; }
-.workHeader { min-height: 178px; align-items: center; margin-bottom: 20px; }
-.workHeader h1 { font-size: clamp(42px, 5vw, 68px); }
-.workHeader h1 span { background: linear-gradient(100deg, var(--mint), var(--sky) 48%, var(--violet)); background-clip: text; color: transparent; }
-@media (forced-colors: active) { .workHeader h1 span { background: none; color: CanvasText; } }
-.workHeader p { font-size: clamp(14px, 1.35vw, 18px); }
 .workspace { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: rgb(13 18 15 / .94); box-shadow: var(--shadow), 0 0 70px rgb(110 215 255 / .035); }
 .workspace::before { position: absolute; z-index: 3; top: -1px; left: 7%; width: 170px; height: 1px; background: linear-gradient(90deg, transparent, var(--sky), transparent); box-shadow: 0 0 16px rgb(110 215 255 / .45); pointer-events: none; content: ""; }
 .contextBar { display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(200px, 1fr); align-items: center; gap: 20px; padding: 14px 18px; border-bottom: 1px solid var(--line); background: rgb(9 13 11 / .88); }

@@ -6,6 +6,7 @@ import { useConnectionStore } from "../../state/connection";
 import { evidencePreview } from "../../lib/text";
 import { ArtifactInspector } from "../work/artifacts/ArtifactInspector";
 import { getRunArtifact } from "../../lib/api/artifacts";
+import { PageHeader } from "../../components/PageHeader";
 import styles from "./OperationsPage.module.css";
 
 const systems = [
@@ -111,11 +112,7 @@ export function OperationsPage() {
   }, [data, selected]);
 
   return <section className={`page ${styles.operationsPage}`} aria-labelledby="operations-heading">
-    <header className={`page-header ${styles.operationsHeader}`}>
-      <div><span className="eyebrow">Operations · human runtime</span><h1 ref={pageHeadingRef} tabIndex={-1} id="operations-heading">Only exceptions<br /><span>break the surface.</span></h1><p>Failed work appears first with its evidence. Schedules and automations stay quiet until you need them.</p></div>
-      {!connection && <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>}
-      {connection && <button className="secondary-button" type="button" onClick={() => snapshot.refetch()} disabled={snapshot.isFetching}>{snapshot.isFetching ? "Refreshing…" : "Refresh"}</button>}
-    </header>
+    <PageHeader headingId="operations-heading" headingRef={pageHeadingRef} eyebrow="Operate" title="Operations" description="Review failed work first. Schedules and automations stay quiet until they need attention." actions={!connection ? <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button> : <button className="secondary-button" type="button" onClick={() => snapshot.refetch()} disabled={snapshot.isFetching}>{snapshot.isFetching ? "Refreshing…" : "Refresh"}</button>} />
 
     {!connection ? <div className="empty-state"><span className="eyebrow">Attention queue</span><h2>Open a workspace to review operations</h2><p>Failures and routine systems will remain clearly separated.</p></div>
       : snapshot.isLoading ? <div className={styles.loading}>Loading operational evidence…</div>

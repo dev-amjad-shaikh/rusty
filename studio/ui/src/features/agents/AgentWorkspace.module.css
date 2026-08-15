@@ -4,14 +4,8 @@
 .versionError h2, .versionError p { margin: 0; }
 .versionError p { max-width: 560px; color: var(--text-muted); font-size: 11px; line-height: 1.55; }
 .versionError > div { display: flex; gap: 8px; margin-top: 4px; }
-.pageHeader { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 28px; }
-.titleBlock > a { display: inline-block; margin-bottom: 16px; color: var(--text-muted); font-size: 11px; text-decoration: none; }
-.titleBlock > a::before { content: "← "; }
-.titleBlock > a:hover { color: var(--text); }
-.titleLine { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.titleLine { display: flex; align-items: center; gap: 9px; }
 .titleLine code { color: var(--text-faint); font: 9px var(--mono); }
-.titleBlock h1 { max-width: 720px; margin: 0 0 8px; font-size: clamp(32px, 5vw, 52px); letter-spacing: -.055em; line-height: .98; }
-.titleBlock > p { max-width: 680px; margin: 0; color: var(--text-muted); line-height: 1.55; }
 .active, .archived { padding: 5px 8px; border-radius: 99px; background: var(--moss-soft); color: var(--moss); font: 800 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .archived { background: var(--surface-2); color: var(--text-faint); }
 .primaryActions { display: grid; justify-items: end; gap: 8px; }
@@ -101,5 +95,5 @@
 .reviewActions { display: flex; justify-content: flex-end; gap: 8px; padding: 18px 26px; border-top: 1px solid var(--line); }
 
 @media (max-width: 1000px) { .workspace { grid-template-columns: 1fr; } .history { border-top: 1px solid var(--line); border-left: 0; } }
-@media (max-width: 720px) { .pageHeader { align-items: stretch; flex-direction: column; } .primaryActions { justify-items: stretch; } .primaryActions > div { justify-content: flex-start; } .primaryActions > p { text-align: left; } .primaryActions button { flex: 1 1 150px; } .lifecycleReview { align-items: stretch; flex-direction: column; } .lifecycleReview > div:last-child { justify-content: flex-end; } .capabilitySpine { grid-template-columns: 1fr; } .reviewIdentity, .rawComparison { grid-template-columns: 1fr; } .changeRows article { grid-template-columns: 1fr; } .sectionHeader, .saveBar { align-items: stretch; flex-direction: column; } .definitionIdentity { text-align: left; } }
+@media (max-width: 720px) { .primaryActions { justify-items: stretch; } .primaryActions > div { justify-content: flex-start; } .primaryActions > p { text-align: left; } .primaryActions button { flex: 1 1 150px; } .lifecycleReview { align-items: stretch; flex-direction: column; } .lifecycleReview > div:last-child { justify-content: flex-end; } .capabilitySpine { grid-template-columns: 1fr; } .reviewIdentity, .rawComparison { grid-template-columns: 1fr; } .changeRows article { grid-template-columns: 1fr; } .sectionHeader, .saveBar { align-items: stretch; flex-direction: column; } .definitionIdentity { text-align: left; } }
 @media (max-width: 520px) { .lifecycleReview > div:last-child, .reviewActions, .discardDialog > div { flex-direction: column-reverse; } .lifecycleReview button, .reviewActions button, .saveBar button, .discardDialog button { width: 100%; } .capabilitySpine article { min-height: 120px; padding: 20px 16px; } .sectionHeader { padding: 20px 16px; } .evidence, .acknowledgement { margin-right: 16px; margin-left: 16px; } }

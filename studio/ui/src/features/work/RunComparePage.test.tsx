@@ -30,7 +30,7 @@ beforeEach(() => {
 describe("run comparison", () => {
   it("shows paired outcomes, coverage-aware metrics, aligned steps, and trace handoffs", async () => {
     renderPage();
-    expect(await screen.findByRole("heading", { name: "See what changed between runs" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Compare runs" })).toBeVisible();
     expect(screen.getByText("120 ms · 1/2")).toBeVisible();
     expect(screen.getByText("90 ms · 1/3")).toBeVisible();
     expect(screen.getByRole("table", { name: "Aligned run steps" })).toBeVisible();

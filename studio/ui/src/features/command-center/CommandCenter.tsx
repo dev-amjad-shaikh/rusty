@@ -5,6 +5,7 @@ import { getOperationsSnapshot, getRun, listAssistants, type OperationAttentionI
 import { evidencePreview } from "../../lib/text";
 import { durableConnectionScope, readRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
 import { useConnectionStore } from "../../state/connection";
+import { PageHeader } from "../../components/PageHeader";
 import styles from "./CommandCenter.module.css";
 
 type RunLane = "queued" | "working" | "attention" | "done";
@@ -54,16 +55,12 @@ export function CommandCenter() {
   const attention = operations.data?.attention ?? [];
   const availableGraphs = new Set(info?.graphs.map((graph) => graph.name) ?? []);
   const activeAgents = assistants.data?.filter((agent) => !agent.archived_at && availableGraphs.has(agent.graph)).length ?? 0;
-  const unavailableAgents = assistants.data?.filter((agent) => Boolean(agent.archived_at) || !availableGraphs.has(agent.graph)).length ?? 0;
   const evidenceUnavailable = operations.data?.unavailable ?? [];
   const loadingRuns = recentQueries.some((query) => query.isLoading);
   const unavailableRuns = recentQueries.filter((query) => query.isError).length;
 
   if (!connection) return <section className={`page ${styles.command}`} aria-labelledby="command-heading">
-    <header className={styles.hero}>
-      <div><span className="eyebrow">Rusty command center</span><h1 id="command-heading">Bring your agent system<br /><span>into view.</span></h1><p>Open a local or remote Rusty workspace. Your agents, recent runs, and exceptions will meet here without leaving your infrastructure.</p></div>
-      <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>
-    </header>
+    <PageHeader headingId="command-heading" eyebrow="Command center" title="Work board" description="Open a Rusty workspace to see work in motion and the exceptions that need you." actions={<button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>} />
     <div className={styles.offlineGrid}>
       <article><span>01</span><h2>Build</h2><p>Shape a versioned agent with models, memory, tools, output, and guardrails.</p><Link to="/agents">Start a local draft</Link></article>
       <article><span>02</span><h2>Run</h2><p>Give the agent an objective and follow its exact run evidence in one workspace.</p><button type="button" onClick={openDialog}>Open a workspace</button></article>
@@ -72,14 +69,11 @@ export function CommandCenter() {
   </section>;
 
   return <section className={`page ${styles.command}`} aria-labelledby="command-heading">
-    <header className={styles.hero}>
-      <div><span className="eyebrow">Command center · live workspace</span><h1 id="command-heading">The work board</h1><p>Recent runs opened in this Studio session, joined with current operational exceptions.</p></div>
-      <div className={styles.heroActions}><Link className="secondary-button" to="/agents">Open agents</Link><Link className="primary-button" to="/work">Start work</Link></div>
-    </header>
+    <PageHeader headingId="command-heading" eyebrow="Command center" title="Work board" description="Runs opened in this Studio session, plus current operational exceptions." actions={<div className={styles.heroActions}><Link className="secondary-button" to="/agents">Open agents</Link><Link className="primary-button" to="/work">Start work</Link></div>} />
 
     <section className={styles.signalStrip} aria-label="Workspace summary">
       <SummarySignal label="Active agents" value={assistants.isError ? "Unknown" : assistants.isLoading ? "…" : String(activeAgents)} tone="live" />
-      <SummarySignal label="Recent runs" value={loadingRuns ? "…" : String(exactRuns.length)} />
+      <SummarySignal label="Session runs" value={loadingRuns ? "…" : String(exactRuns.length)} />
       <SummarySignal label="Needs attention" value={operations.isError ? "Unknown" : operations.isLoading ? "…" : String(grouped.attention.length + attention.length)} tone={(grouped.attention.length + attention.length) > 0 ? "warn" : "quiet"} />
       <SummarySignal label="Completed" value={loadingRuns ? "…" : String(grouped.done.length)} tone="done" />
     </section>
@@ -88,11 +82,10 @@ export function CommandCenter() {
       <span aria-hidden="true">!</span><p><b>Some evidence is unavailable.</b> {[...evidenceUnavailable, ...(operations.isError ? ["operations"] : []), ...(unavailableRuns ? [`${unavailableRuns} recent run${unavailableRuns === 1 ? "" : "s"}`] : []), ...(mismatchedRuns ? [`${mismatchedRuns} crossed run ${mismatchedRuns === 1 ? "identity" : "identities"}`] : [])].join(", ")} could not be verified.</p>
     </div>}
 
-    <section className={styles.board} aria-labelledby="board-heading">
-      <header className={styles.sectionHead}><div><span className="eyebrow">Current movement</span><h2 id="board-heading">Work board</h2></div><Link to="/work">Open run workspace <span aria-hidden="true">→</span></Link></header>
+    <section className={styles.board} aria-label="Current work">
       <div className={styles.lanes}>
         {lanes.map((lane) => <section className={styles.lane} key={lane.key} aria-labelledby={`lane-${lane.key}`}>
-          <header><span className={styles.laneSignal} data-tone={lane.key} aria-hidden="true" /><div><h3 id={`lane-${lane.key}`}>{lane.label}</h3><p>{lane.hint}</p></div><b>{lane.key === "attention" ? grouped.attention.length + attention.length : grouped[lane.key].length}</b></header>
+          <header><span className={styles.laneSignal} data-tone={lane.key} aria-hidden="true" /><div><h2 id={`lane-${lane.key}`}>{lane.label}</h2><p>{lane.hint}</p></div><b>{lane.key === "attention" ? grouped.attention.length + attention.length : grouped[lane.key].length}</b></header>
           <div className={styles.cards}>
             {grouped[lane.key].map((item) => <RunCard key={item.run.run_id} item={item} agent={item.run.assistant_id ? agentById.get(item.run.assistant_id) : undefined} />)}
             {lane.key === "attention" && attention.slice(0, 6).map((item) => <ExceptionCard key={`${item.source}-${item.id}`} item={item} />)}
@@ -102,16 +95,6 @@ export function CommandCenter() {
       </div>
     </section>
 
-    <section className={styles.portfolio} aria-labelledby="portfolio-heading">
-      <div><span className="eyebrow">Capability inventory</span><h2 id="portfolio-heading">Agent portfolio</h2><p>Versioned workers currently visible in this workspace.</p></div>
-      <div className={styles.portfolioStats}>
-        <article><span>Active</span><b>{assistants.isError ? "—" : activeAgents}</b><small>{assistants.isError ? "Catalog unavailable" : "Available definitions"}</small></article>
-        <article><span>Unavailable</span><b>{assistants.isError ? "—" : unavailableAgents}</b><small>Archived or missing behavior</small></article>
-        <article><span>Automations</span><b>{operations.data?.systems.automations ?? "—"}</b><small>{operations.data?.systems.automations === null ? "Inventory unavailable" : "Configured entry points"}</small></article>
-        <article><span>Schedules</span><b>{operations.data?.systems.schedules ?? "—"}</b><small>{operations.data?.systems.schedules === null ? "Inventory unavailable" : "Configured cadences"}</small></article>
-      </div>
-      <Link className="secondary-button" to="/agents">Manage agents</Link>
-    </section>
   </section>;
 }
 
@@ -124,7 +107,7 @@ function RunCard({ item, agent }: { item: ExactRecentRun; agent?: Assistant }) {
   const label = objective || agent?.name || item.run.graph;
   return <Link className={styles.workCard} to="/work/$threadId/runs/$runId" params={{ threadId: item.identity.threadId, runId: item.identity.runId }} aria-label={`Open ${evidencePreview(label, 180)}, status ${item.run.status}`}>
     <span className={styles.cardType}>{agent ? evidencePreview(agent.name, 100) : evidencePreview(item.run.graph, 100)}</span>
-    <h4>{evidencePreview(label, 220)}</h4>
+    <h3>{evidencePreview(label, 220)}</h3>
     <p><span>{statusLabel(item.run.status)}</span><span>Attempt {item.run.attempt}</span></p>
     <small>{compactIdentity(item.run.run_id)}</small>
   </Link>;
@@ -134,7 +117,7 @@ function ExceptionCard({ item }: { item: OperationAttentionItem }) {
   const destination = item.runId && item.threadId
     ? { to: "/work/$threadId/runs/$runId/trace" as const, params: { threadId: item.threadId, runId: item.runId } }
     : null;
-  const content = <><span className={styles.cardType}>{item.source === "artifact" ? "Artifact" : "Operation"}</span><h4>{item.title}</h4><p>{evidencePreview(item.detail, 220)}</p><small>{observedTime(item.observedAt)}</small></>;
+  const content = <><span className={styles.cardType}>{item.source === "artifact" ? "Artifact" : "Operation"}</span><h3>{item.title}</h3><p>{evidencePreview(item.detail, 220)}</p><small>{observedTime(item.observedAt)}</small></>;
   return destination
     ? <Link className={`${styles.workCard} ${styles.exceptionCard}`} to={destination.to} params={destination.params} aria-label={`Inspect ${item.title}`}>{content}</Link>
     : <Link className={`${styles.workCard} ${styles.exceptionCard}`} to="/operations" aria-label={`Review ${item.title} in Operations`}>{content}</Link>;
