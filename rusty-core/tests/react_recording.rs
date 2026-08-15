@@ -8,8 +8,9 @@
 //!   outbound calls), journal and final state included.
 //! - **Divergence** — a replayed run that issues a different request fails
 //!   loudly instead of improvising.
-//! - **Default unchanged** — plain `create_react_agent` records no model or
-//!   tool events even with a journal attached: recording is strictly opt-in.
+//! - **Run-owned recording** — plain `create_react_agent` records model and
+//!   tool events when the run explicitly attaches a journal. A graph that is
+//!   executed without a caller-owned journal keeps the lightweight default.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -366,13 +367,14 @@ async fn replay_diverging_from_the_recording_fails_loudly() {
     assert!(message.contains("divergence"), "got: {message}");
 }
 
-// ---------- the default is unchanged ----------
+// ---------- run-owned recording ----------
 
-/// Plain `create_react_agent` records no model/tool events even with a
-/// journal attached: the Flight Recorder wiring is strictly opt-in, and the
-/// default run's transcript is identical to the recording run's.
+/// A server-style run owns its journal at admission time, after the reusable
+/// graph has already been built. Plain ReAct agents therefore inherit that
+/// journal at the model/tool boundaries and emit the same canonical effects
+/// as an explicitly recording graph.
 #[tokio::test]
-async fn default_react_agent_records_no_model_or_tool_events() {
+async fn plain_react_agent_records_effects_into_an_attached_run_journal() {
     let checkpointer = Arc::new(InMemoryCheckpointer::new());
     let executor = Executor::with_checkpointer(checkpointer.clone());
     let journal = Journal::new(RUN_ID, THREAD_ID, logical_clock());
@@ -392,8 +394,14 @@ async fn default_react_agent_records_no_model_or_tool_events() {
         .unwrap();
 
     let snapshot = journal.snapshot();
-    assert!(events_of_kind(&snapshot, RunEventKind::ModelCall).is_empty());
-    assert!(events_of_kind(&snapshot, RunEventKind::ToolCall).is_empty());
+    let model_calls = events_of_kind(&snapshot, RunEventKind::ModelCall);
+    let tool_calls = events_of_kind(&snapshot, RunEventKind::ToolCall);
+    assert_eq!(model_calls.len(), 2);
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(
+        tool_calls[0].parent.as_deref(),
+        Some(node_input_id(&snapshot, TOOLS_NODE, 0).as_str())
+    );
 
     // Same conversation as the recording run produces.
     match outcome {

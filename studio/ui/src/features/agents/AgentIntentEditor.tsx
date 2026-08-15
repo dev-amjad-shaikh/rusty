@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { Assistant } from "../../lib/contracts";
+import type { Assistant, InfoGraph, ToolCapability } from "../../lib/contracts";
 import { isUnicodeScalarString } from "../../lib/text";
 import styles from "./AgentsPage.module.css";
 
@@ -258,7 +258,7 @@ function capabilityHeading(capability: Capability) {
 export function AgentIntentEditor({ draft, onChange, graphs, initialCapability = "purpose", progress, validationRequest, validationMessage, onCapabilityVisit }: {
   draft: AgentDraft;
   onChange: <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => void;
-  graphs: string[];
+  graphs: InfoGraph[];
   initialCapability?: Capability;
   progress?: Record<Capability, boolean>;
   validationRequest?: { capability: Capability; nonce: number } | null;
@@ -305,12 +305,17 @@ export function AgentIntentEditor({ draft, onChange, graphs, initialCapability =
   </div>;
 }
 
-function CapabilityFields({ capability, draft, update, graphs }: { capability: Capability; draft: AgentDraft; update: <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => void; graphs: string[] }) {
-  if (capability === "purpose") return <div className={styles.fields}><label>Name<input value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="Receipt Chaser" /></label><label>Behavior<select value={draft.graph} onChange={(event) => update("graph", event.target.value)} disabled={!graphs.length}><option value="">{graphs.length ? "Choose a behavior" : "Available when workspace opens"}</option>{graphs.map((graph) => <option key={graph} value={graph}>{humanizeIdentifier(graph)}</option>)}</select></label><label className={styles.wide}>Responsibility<textarea rows={2} value={draft.responsibility} onChange={(event) => update("responsibility", event.target.value)} placeholder="Chase missing receipts and give each owner a clear deadline." /></label><label className={styles.wide}>Audience<input value={draft.audience} onChange={(event) => update("audience", event.target.value)} placeholder="Finance operations, accounting" /><small>Who this agent serves. Use the names your team already knows.</small></label></div>;
+function CapabilityFields({ capability, draft, update, graphs }: { capability: Capability; draft: AgentDraft; update: <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => void; graphs: InfoGraph[] }) {
+  const graph = graphs.find((item) => item.name === draft.graph);
+  if (capability === "purpose") return <div className={styles.fields}><label>Name<input value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="Receipt Chaser" /></label><label>Behavior<select value={draft.graph} onChange={(event) => {
+    const selected = graphs.find((item) => item.name === event.target.value);
+    update("graph", event.target.value);
+    update("tools", selected?.tools ? toolContractText(selected.tools) : "");
+  }} disabled={!graphs.length}><option value="">{graphs.length ? "Choose a behavior" : "Available when workspace opens"}</option>{graphs.map((item) => <option key={item.name} value={item.name}>{humanizeIdentifier(item.name)}</option>)}</select></label><label className={styles.wide}>Responsibility<textarea rows={2} value={draft.responsibility} onChange={(event) => update("responsibility", event.target.value)} placeholder="Chase missing receipts and give each owner a clear deadline." /></label><label className={styles.wide}>Audience<input value={draft.audience} onChange={(event) => update("audience", event.target.value)} placeholder="Finance operations, accounting" /><small>Who this agent serves. Use the names your team already knows.</small></label></div>;
   if (capability === "goals") return <GoalFields value={draft.goals} onChange={(value) => update("goals", value)} />;
   if (capability === "model") return <div className={styles.choiceStack}><button aria-pressed={!draft.model} className={!draft.model ? styles.selectedChoice : ""} type="button" onClick={() => update("model", "")}><i /><span><b>Deployment default</b><small>Follow the model chosen when this agent runs</small></span></button><button aria-pressed={Boolean(draft.model)} className={draft.model ? styles.selectedChoice : ""} type="button" onClick={() => document.getElementById("agent-model-requirement")?.focus()}><i /><span><b>Require a model</b><small>Ask the deployment to resolve this exact identifier</small></span></button><label className={styles.inlineRequirement}>Model requirement<input id="agent-model-requirement" value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="provider/model" /></label><p className={styles.choiceNote}>This records a deployment requirement, not a verified catalog choice. Credentials never belong here.</p></div>;
   if (capability === "knowledge") return <div className={styles.knowledgeStack}><div className={styles.choiceStack}>{([ ["none", "No memory", "Work only from this run"], ["read_only", "Read memory", "Use approved context without changing it"], ["read_write", "Read and write", "Use context and add to its own history"] ] as const).map(([access, label, detail]) => <button key={access} aria-pressed={draft.memoryAccess === access} className={draft.memoryAccess === access ? styles.selectedChoice : ""} type="button" onClick={() => { update("memoryAccess", access); if (access === "none") update("scopes", []); }}><i /><span><b>{label}</b><small>{detail}</small></span></button>)}</div>{draft.memoryAccess !== "none" && <fieldset className={styles.scopeLayers}><legend>Allowed scope</legend>{memoryScopes.map((scope, index) => <label key={scope} style={{ marginLeft: `${index * 7}px` }}><input type="checkbox" checked={draft.scopes.includes(scope)} onChange={(event) => update("scopes", memoryScopes.filter((item) => event.target.checked ? item === scope || draft.scopes.includes(item) : item !== scope && draft.scopes.includes(item)))} /><span>{humanizeIdentifier(scope)}</span><small>{index < 2 ? "local context" : "wider inherited context"}</small></label>)}</fieldset>}</div>;
-  if (capability === "tools") return <ToolFields value={draft.tools} onChange={(value) => update("tools", value)} />;
+  if (capability === "tools") return <ToolFields value={draft.tools} graph={graph} />;
   if (capability === "output") return <div className={styles.choiceStack}>{([ ["runtime_default", "Deployment default", "Use the workspace output policy"], ["text", "Text", "Return a human-readable response"], ["json_object", "JSON object", "Return structured JSON"], ["json_schema", "Named JSON schema", "Require a schema identifier at deployment"] ] as const).map(([mode, label, detail]) => <button key={mode} aria-pressed={draft.outputMode === mode} className={draft.outputMode === mode ? styles.selectedChoice : ""} type="button" onClick={() => { update("outputMode", mode); if (mode !== "json_schema") update("outputSchema", ""); }}><i /><span><b>{label}</b><small>{detail}</small></span></button>)}{draft.outputMode === "json_schema" && <><label className={styles.inlineRequirement}>Required schema identifier<input value={draft.outputSchema} onChange={(event) => update("outputSchema", event.target.value)} placeholder="report.v1" /></label><p className={styles.choiceNote}>Studio records the requirement here; the deployment must resolve it before use.</p></>}</div>;
   return <div className={styles.fields}><label>Approval boundary<select value={draft.approval} onChange={(event) => update("approval", event.target.value as AgentDraft["approval"])}><option value="runtime_policy">Deployment policy</option><option value="irreversible">Before irreversible actions</option><option value="external_effect">Before every external action</option></select></label><label>Maximum steps<input value={draft.recursionLimit} onChange={(event) => update("recursionLimit", event.target.value)} inputMode="numeric" placeholder="Deployment default" /></label><p className={styles.helper}>A hard stop keeps the agent bounded. Leave the step limit blank to use the deployment default.</p></div>;
 }
@@ -360,20 +365,29 @@ function GoalFields({ value, onChange }: { value: string; onChange: (value: stri
   })}{custom.map((line) => <div className={styles.goalActive} key={line}><span><b>{line}</b><small>Goal retained from this definition</small></span><button type="button" aria-label={`Remove ${line}`} onClick={() => onChange(lines.filter((item) => item !== line).join("\n"))}>×</button></div>)}<label className={styles.customGoal}>Custom goal<input placeholder="Describe another measurable outcome" onKeyDown={(event) => { if (event.key === "Enter" && event.currentTarget.value.trim()) { event.preventDefault(); onChange([...lines, event.currentTarget.value.trim()].join("\n")); event.currentTarget.value = ""; } }} /><small>Press Enter to add it to this version.</small></label></div>;
 }
 
-const toolEffects = ["pure", "read_only", "idempotent", "compensatable", "non_idempotent"] as const;
+function toolContractText(tools: ToolCapability[]) {
+  return tools.map((tool) => `${tool.name} | ${tool.effect}`).join("\n");
+}
 
-function ToolFields({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const rows = value.trim() ? value.split("\n").map((line) => {
-    const [name = "", effect = "read_only"] = line.split("|").map((part) => part.trim());
-    return { name, effect: toolEffects.includes(effect as typeof toolEffects[number]) ? effect : "read_only" };
-  }) : [];
-  const commit = (next: Array<{ name: string; effect: string }>) => onChange(next.map((row) => `${row.name} | ${row.effect}`).join("\n"));
+function ToolFields({ value, graph }: { value: string; graph?: InfoGraph }) {
+  const advertised = graph?.tools;
+  const configured = (() => { try { return toolContracts(value); } catch { return []; } })();
+  const catalogMatches = advertised !== undefined && toolContractText(advertised) === value;
   return <div className={styles.toolEditor}>
-    <div className={styles.toolHeading}><div><b>Required tool contracts</b><p>Enter deployment requirements; availability is resolved when the agent runs.</p></div><button type="button" onClick={() => commit([...rows, { name: "", effect: "read_only" }])} disabled={rows.length >= 16}>Add tool</button></div>
-    {rows.length === 0 ? <p className={styles.emptyTools}>No tools selected.</p> : <div className={styles.toolRows}>{rows.map((row, index) => <div className={styles.toolRow} key={index}>
-      <label>Tool name<input value={row.name} onChange={(event) => commit(rows.map((item, rowIndex) => rowIndex === index ? { ...item, name: event.target.value } : item))} placeholder="search" /></label>
-      <label>Effect<select value={row.effect} onChange={(event) => commit(rows.map((item, rowIndex) => rowIndex === index ? { ...item, effect: event.target.value } : item))}>{toolEffects.map((effect) => <option key={effect} value={effect}>{humanizeIdentifier(effect)}</option>)}</select></label>
-      <button type="button" aria-label={`Remove ${row.name || `tool ${index + 1}`}`} onClick={() => commit(rows.filter((_, rowIndex) => rowIndex !== index))}>Remove</button>
-    </div>)}</div>}
+    <div className={styles.toolHeading}><div><b>Executable tools</b><p>{graph ? "Included by this behavior and enforced by its runtime graph." : "Choose a behavior to see what it can execute."}</p></div>{advertised && <span>{advertised.length} available</span>}</div>
+    {!graph ? <p className={styles.emptyTools}>Choose a behavior first.</p>
+      : advertised === undefined ? <div className={styles.emptyTools}><b>Tool catalog unavailable</b><p>This server does not advertise executable tools for this behavior.</p>{configured.length > 0 && <small>{configured.length} stored requirement{configured.length === 1 ? "" : "s"} remain unchanged.</small>}</div>
+      : advertised.length === 0 ? <div className={styles.emptyTools}><b>Tool-free behavior</b><p>This graph answers without callable tools.</p></div>
+      : <div className={styles.toolRows}>{advertised.map((tool) => <article className={styles.toolCapability} key={tool.name}>
+        <div><b>{humanizeIdentifier(tool.name)}</b><code>{tool.name}</code></div><p>{tool.description}</p><dl><div><dt>Effect</dt><dd>{humanizeIdentifier(tool.effect)}</dd></div><div><dt>Inputs</dt><dd>{toolInputSummary(tool)}</dd></div></dl>
+      </article>)}</div>}
+    {advertised && !catalogMatches && configured.length > 0 && <p className={styles.toolMismatch} role="status">This saved draft names a different tool set. Choose the behavior again to adopt its current executable catalog.</p>}
   </div>;
+}
+
+function toolInputSummary(tool: ToolCapability) {
+  const properties = tool.parameters_schema.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return "Structured input";
+  const names = Object.keys(properties);
+  return names.length ? names.map(humanizeIdentifier).join(", ") : "No input";
 }

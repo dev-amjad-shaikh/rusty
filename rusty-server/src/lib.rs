@@ -295,6 +295,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
 struct GraphEntry {
     graph: Graph,
     spec: StateSpec,
+    tools: Vec<rusty_agent_runtime::tool::ToolCapability>,
 }
 
 /// The set of graphs this server hosts — the Rust analog of the `graphs` map
@@ -320,8 +321,34 @@ impl GraphRegistry {
         graph: Graph,
         spec: StateSpec,
     ) -> &mut Self {
-        self.entries.insert(name.into(), GraphEntry { graph, spec });
+        self.entries.insert(
+            name.into(),
+            GraphEntry {
+                graph,
+                spec,
+                tools: Vec::new(),
+            },
+        );
         self
+    }
+
+    /// Register a graph together with the exact executable tool catalog used
+    /// to construct it.
+    ///
+    /// The catalog is derived from `tools`; callers do not author a second
+    /// metadata copy. Invalid names, descriptions, or schemas fail before the
+    /// graph is advertised by `GET /info`.
+    pub fn register_with_tools(
+        &mut self,
+        name: impl Into<String>,
+        graph: Graph,
+        spec: StateSpec,
+        tools: &rusty_agent_runtime::tool::ToolRegistry,
+    ) -> rusty_agent_runtime::error::Result<&mut Self> {
+        let tools = tools.capabilities()?;
+        self.entries
+            .insert(name.into(), GraphEntry { graph, spec, tools });
+        Ok(self)
     }
 
     /// `true` if a graph is registered under `name`.
@@ -345,6 +372,14 @@ impl GraphRegistry {
             .unwrap_or_default();
         channels.sort_unstable();
         channels
+    }
+
+    /// The graph's exact executable tools, sorted by stable tool name.
+    pub fn tool_capabilities(&self, name: &str) -> Vec<rusty_agent_runtime::tool::ToolCapability> {
+        self.entries
+            .get(name)
+            .map(|entry| entry.tools.clone())
+            .unwrap_or_default()
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<(Graph, StateSpec)> {

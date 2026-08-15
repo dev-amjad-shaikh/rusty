@@ -1,5 +1,5 @@
-//! Demo server: a two-node pipeline graph plus a ReAct agent (scripted
-//! `ChatModel` — no network), served on `127.0.0.1:8100`.
+//! Demo server: a two-node pipeline graph plus a ReAct agent (deterministic
+//! local `ChatModel` — no network), served on `127.0.0.1:8100`.
 //!
 //! Every run is journaled by the Flight Recorder: the server attaches a
 //! journal to the executor at run start and persists its snapshot at every
@@ -15,32 +15,57 @@
 //! this binary as a real process it can SIGKILL mid-effect and restart from
 //! the same store.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use rusty_agent_runtime::prelude::*;
+use rusty_agent_runtime::tool::builtins::{
+    CalculatorTool, KnowledgeDocument, KnowledgeSearchTool, SandboxedDocumentReaderTool,
+    TextInspectorTool,
+};
 use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
 
-/// A scripted model: pops one canned response per call; once the script is
-/// exhausted it always answers "done" (so repeated runs keep working).
-struct ScriptedModel {
-    script: Mutex<VecDeque<ChatMessage>>,
-}
+/// A deterministic local model that exercises the complete tool pipeline on
+/// every new thread. It keeps the demo credential-free while producing real
+/// model-call and tool-call evidence for Studio.
+struct HarnessDemoModel;
 
 #[async_trait]
-impl ChatModel for ScriptedModel {
-    async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
-        let message = self
-            .script
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(|| ChatMessage::assistant("done"));
+impl ChatModel for HarnessDemoModel {
+    async fn chat(&self, messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
+        let message = if messages.iter().any(|message| message.role == Role::Tool) {
+            ChatMessage::assistant(
+                "The local capability pack completed its calculation, text inspection, knowledge search, document read, and echo calls.",
+            )
+        } else {
+            ChatMessage::assistant_tool_calls(vec![
+                ToolCall::new("call_echo", "echo", json!({"text": "pong"})),
+                ToolCall::new(
+                    "call_calculator",
+                    "calculator",
+                    json!({"operation": "multiply", "left": 7, "right": 6}),
+                ),
+                ToolCall::new(
+                    "call_inspect",
+                    "inspect_text",
+                    json!({"text": "Rusty records exact tool evidence."}),
+                ),
+                ToolCall::new(
+                    "call_search",
+                    "search_knowledge",
+                    json!({"query": "Rusty tool evidence", "limit": 2}),
+                ),
+                ToolCall::new(
+                    "call_document",
+                    "read_document",
+                    json!({"path": "capability-pack.md"}),
+                ),
+            ])
+        };
         Ok(ChatResponse {
             message,
-            model: Some("scripted".to_string()),
+            model: Some("rusty-harness-demo".to_string()),
             usage: None,
         })
     }
@@ -59,6 +84,9 @@ impl Tool for Echo {
     }
     fn parameters_schema(&self) -> Value {
         json!({"type": "object", "properties": {"text": {"type": "string"}}})
+    }
+    fn effect(&self) -> Effect {
+        Effect::Pure
     }
     async fn call(&self, args: Value) -> Result<Value> {
         Ok(args.get("text").cloned().unwrap_or(Value::Null))
@@ -80,23 +108,31 @@ fn build_pipeline_graph() -> Result<(Graph, StateSpec)> {
     Ok((builder.compile()?, spec))
 }
 
-/// ReAct agent over a scripted model: one tool call, then a final answer.
-fn build_react_graph() -> Result<(Graph, StateSpec)> {
+/// ReAct agent over a deterministic local model and a safe capability pack.
+fn build_react_graph() -> Result<(Graph, StateSpec, ToolRegistry)> {
     let mut tools = ToolRegistry::new();
     tools.register(Echo);
-    let model: Arc<dyn ChatModel> = Arc::new(ScriptedModel {
-        script: Mutex::new(VecDeque::from(vec![
-            ChatMessage::assistant_tool_calls(vec![ToolCall::new(
-                "call_1",
-                "echo",
-                json!({"text": "pong"}),
-            )]),
-            ChatMessage::assistant("The echo tool said: pong."),
-        ])),
-    });
-    let graph = create_react_agent(model, tools)?;
+    tools.register(CalculatorTool);
+    tools.register(TextInspectorTool);
+    tools.register(SandboxedDocumentReaderTool::new(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/demo_documents"),
+    )?);
+    tools.register(KnowledgeSearchTool::new(vec![
+        KnowledgeDocument {
+            id: "runtime".into(),
+            title: "Rusty runtime".into(),
+            text: "Rusty executes typed tools through an effect-aware registry and records every call in the Flight Recorder.".into(),
+        },
+        KnowledgeDocument {
+            id: "studio".into(),
+            title: "Rusty Studio".into(),
+            text: "Studio creates versioned agents, starts work, and hands exact run evidence to Trace and Evaluate.".into(),
+        },
+    ])?);
+    let model: Arc<dyn ChatModel> = Arc::new(HarnessDemoModel);
+    let graph = create_react_agent(model, tools.clone())?;
     let spec = StateSpec::new().channel("messages", Reducer::AddMessages);
-    Ok((graph, spec))
+    Ok((graph, spec, tools))
 }
 
 #[tokio::main]
@@ -104,11 +140,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let (pipeline, pipeline_spec) = build_pipeline_graph()?;
-    let (react, react_spec) = build_react_graph()?;
+    let (react, react_spec, react_tools) = build_react_graph()?;
 
     let mut registry = GraphRegistry::new();
     registry.register("pipeline", pipeline, pipeline_spec);
-    registry.register("react_agent", react, react_spec);
+    registry.register_with_tools("react_agent", react, react_spec, &react_tools)?;
 
     let config = ServerConfig::new(
         std::env::var("RUSTY_DEMO_ADDR")
@@ -151,7 +187,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("  curl -s -X POST {base}/runs/replay \\");
     println!("    -H 'content-type: application/json' -d '{{\"run_id\": \"'$RUN_ID'\"}}' | jq");
     println!("  curl -s '{base}/runs/diff?base='$RUN_ID'&branch='$FORK_RUN_ID'' | jq\n");
-    println!("  # ReAct agent (scripted model; no network)");
+    println!("  # ReAct agent (deterministic local model; no network)");
     println!("  REACT=$(curl -s -X POST {base}/threads \\");
     println!("    -H 'content-type: application/json' \\");
     println!("    -d '{{\"graph\": \"react_agent\"}}' | jq -r .thread_id)");

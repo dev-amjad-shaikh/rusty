@@ -2,12 +2,15 @@
 //! via `tower::ServiceExt::oneshot` (no sockets).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use rusty_agent_runtime::prelude::*;
+use rusty_agent_runtime::tool::builtins::CalculatorTool;
 use rusty_agent_server::{router, GraphRegistry, ServerConfig, API_PROTOCOL_VERSION};
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -57,6 +60,27 @@ fn slow_graph() -> (Graph, StateSpec) {
     (builder.compile().unwrap(), spec)
 }
 
+struct DirectModel;
+
+#[async_trait]
+impl ChatModel for DirectModel {
+    async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
+        Ok(ChatResponse {
+            message: ChatMessage::assistant("done"),
+            model: Some("direct-test".into()),
+            usage: None,
+        })
+    }
+}
+
+fn capable_graph() -> (Graph, StateSpec, ToolRegistry) {
+    let mut tools = ToolRegistry::new();
+    tools.register(CalculatorTool);
+    let graph = create_react_agent(Arc::new(DirectModel), tools.clone()).unwrap();
+    let spec = StateSpec::new().channel("messages", Reducer::AddMessages);
+    (graph, spec, tools)
+}
+
 // --------------------------------------------------------------------- //
 // App + request helpers
 // --------------------------------------------------------------------- //
@@ -71,8 +95,12 @@ fn test_app(api_key: Option<&str>) -> (Router, PathBuf) {
     let (pipeline, pipeline_spec) = pipeline_graph();
     let (gate, gate_spec) = interrupt_graph();
     let (slow, slow_spec) = slow_graph();
+    let (capable, capable_spec, capable_tools) = capable_graph();
 
     let mut registry = GraphRegistry::new();
+    registry
+        .register_with_tools("capable", capable, capable_spec, &capable_tools)
+        .unwrap();
     registry.register("pipeline", pipeline, pipeline_spec);
     registry.register("interrupt_gate", gate, gate_spec);
     registry.register("slow", slow, slow_spec);
@@ -154,9 +182,18 @@ async fn ok_and_info_list_graphs() {
         .iter()
         .map(|g| g["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["interrupt_gate", "pipeline", "slow"]);
-    let pipeline = &v["graphs"][1];
+    assert_eq!(names, ["capable", "interrupt_gate", "pipeline", "slow"]);
+    let capable = &v["graphs"][0];
+    assert_eq!(capable["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(capable["tools"][0]["name"], json!("calculator"));
+    assert_eq!(capable["tools"][0]["effect"], json!("pure"));
+    assert_eq!(
+        capable["tools"][0]["parameters_schema"]["type"],
+        json!("object")
+    );
+    let pipeline = &v["graphs"][2];
     assert_eq!(pipeline["channels"], json!(["log"]));
+    assert_eq!(pipeline["tools"], json!([]));
 
     let _ = std::fs::remove_dir_all(store);
 }

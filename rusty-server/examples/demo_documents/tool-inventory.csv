@@ -1,0 +1,5 @@
+tool,effect,purpose
+calculator,pure,bounded arithmetic
+inspect_text,pure,text statistics
+search_knowledge,read_only,cited local retrieval
+read_document,read_only,workspace-scoped document access

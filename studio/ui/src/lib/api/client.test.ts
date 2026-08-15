@@ -21,11 +21,14 @@ describe("Studio API boundary", () => {
   });
   it("validates the exact server information envelope", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({
-      service: "rusty-server", version: "1.0.0", checkpointer: "json_file",
-      server_store: "json_file", store_path: "/tmp/rusty", graphs: [{ name: "agent", channels: ["messages"] }],
+      service: "rusty-server", version: "1.0.0", api_protocol_version: 1, checkpointer: "json_file",
+      server_store: "json_file", store_path: "/tmp/rusty", graphs: [{ name: "agent", channels: ["messages"], tools: [{
+        name: "search_knowledge", description: "Search local references.", effect: "read_only",
+        parameters_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      }] }],
     }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(getServerInfo(connection)).resolves.toMatchObject({ service: "rusty-server", graphs: [{ name: "agent" }] });
+    await expect(getServerInfo(connection)).resolves.toMatchObject({ service: "rusty-server", api_protocol_version: 1, graphs: [{ name: "agent", tools: [{ name: "search_knowledge", effect: "read_only" }] }] });
     expect(fetchMock).toHaveBeenCalledWith("https://rusty.example/info", expect.objectContaining({ headers: expect.objectContaining({ "X-Api-Key": "tenant-a" }) }));
   });
 

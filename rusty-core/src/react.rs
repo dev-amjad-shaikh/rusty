@@ -275,7 +275,17 @@ fn build_react_agent(
                 // wrappers carry the invocation's causal parent, which only
                 // exists once the executor has journaled the node input.
                 let model: Arc<dyn ChatModel> = match &evidence {
-                    EvidenceMode::None => model,
+                    EvidenceMode::None => match ctx.effect_journal() {
+                        Some(journal) => Arc::new(
+                            RecordingChatModel::new(
+                                model,
+                                journal.clone(),
+                                invocation_parent(&ctx, AGENT_NODE)?,
+                            )
+                            .node(AGENT_NODE),
+                        ),
+                        None => model,
+                    },
                     EvidenceMode::Record(journal) => Arc::new(
                         RecordingChatModel::new(
                             model,
@@ -352,7 +362,23 @@ fn build_react_agent(
             // (parallel, order-preserving, panic-containing).
             let mut tool_executor =
                 match &evidence {
-                    EvidenceMode::None => tool_executor,
+                    EvidenceMode::None => match ctx.effect_journal() {
+                        Some(journal) => {
+                            let parent = invocation_parent(&ctx, TOOLS_NODE)?;
+                            let mut wrapped = ToolRegistry::new();
+                            for name in tool_executor.registry().names() {
+                                let tool = tool_executor.registry().get(name).expect(
+                                    "tool names iterated from a registry resolve in that registry",
+                                );
+                                wrapped.register_shared(Arc::new(
+                                    RecordingTool::new(tool, journal.clone(), parent.clone())
+                                        .node(TOOLS_NODE),
+                                ));
+                            }
+                            ToolExecutor::new(wrapped)
+                        }
+                        None => tool_executor,
+                    },
                     EvidenceMode::Record(journal) => {
                         let parent = invocation_parent(&ctx, TOOLS_NODE)?;
                         let mut wrapped = ToolRegistry::new();

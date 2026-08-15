@@ -3,15 +3,25 @@ import { z } from "zod";
 const id = z.string().min(1).max(256);
 const instant = z.string().datetime({ offset: true });
 const jsonValue: z.ZodType<unknown> = z.unknown();
+export const toolEffectSchema = z.enum(["pure", "read_only", "idempotent", "compensatable", "non_idempotent"]);
+
+export const toolCapabilitySchema = z.object({
+  name: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/),
+  description: z.string().min(1).max(4_096),
+  parameters_schema: z.record(z.string(), jsonValue),
+  effect: toolEffectSchema,
+}).strict();
 
 export const graphSchema = z.object({
   name: id,
   channels: z.array(id).max(2_000),
+  tools: z.array(toolCapabilitySchema).max(256).optional(),
 }).strict();
 
 export const serverInfoSchema = z.object({
   service: z.literal("rusty-server"),
   version: z.string().min(1).max(64),
+  api_protocol_version: z.number().int().positive().optional(),
   checkpointer: z.enum(["postgres", "json_file"]),
   server_store: z.enum(["postgres", "json_file"]),
   store_path: z.string().max(4_096),
@@ -113,6 +123,8 @@ export const runEvidenceSchema = z.object({
 }).strict();
 
 export type ServerInfo = z.infer<typeof serverInfoSchema>;
+export type InfoGraph = z.infer<typeof graphSchema>;
+export type ToolCapability = z.infer<typeof toolCapabilitySchema>;
 export type Assistant = z.infer<typeof assistantSchema>;
 export type Thread = z.infer<typeof threadSchema>;
 export type RunReceipt = z.infer<typeof runReceiptSchema>;

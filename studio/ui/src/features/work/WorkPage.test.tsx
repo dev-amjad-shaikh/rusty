@@ -9,7 +9,7 @@ import { evaluationDatasetJsonl, useWorkStore } from "../../state/work";
 import { durableConnectionScope, readRecentWork, rememberRecentWork } from "../../state/recentWork";
 import { mutationScope } from "../../lib/api/client";
 import type { RunEvent } from "../../lib/contracts";
-import { traceGraphLayout, traceWindow, WorkPage } from "./WorkPage";
+import { traceEventTitle, traceGraphLayout, traceWindow, WorkPage } from "./WorkPage";
 
 function testRouter(initialEntry = "/work") {
   const root = createRootRoute({ component: Outlet });
@@ -42,6 +42,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("continuous Work journey", () => {
+  it("names tool trace nodes from their exact journaled call", () => {
+    const event = {
+      ...events[0],
+      id: "run-1:3",
+      seq: "3",
+      kind: "tool_call",
+      node_id: "tools",
+      input: { kind: "inline", value: { tool: "search_knowledge", arguments: { query: "Rusty" } } },
+      rawJson: "{}",
+    } as unknown as RunEvent;
+    expect(traceEventTitle(event)).toBe("Search Knowledge · tool call");
+  });
+
   it("keeps create, run, visual trace, and evaluation in one owned workspace", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
       const path = new URL(input).pathname;

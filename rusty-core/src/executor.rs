@@ -943,6 +943,11 @@ impl Executor {
         //    never collide in the shared state.
         let snapshot = state.clone();
         let effect_admission = effect_admission.cloned();
+        // Only an explicitly attached run journal enables automatic
+        // model/tool effect recording inside prebuilt agent nodes. The
+        // executor's internal journal still records graph transitions for
+        // every run, preserving the plain in-process behavior.
+        let effect_journal = config.journal.as_ref().map(|_| recorder.journal.clone());
         let mut join_set: JoinSet<(usize, String, Result<NodeOutput>, u64)> = JoinSet::new();
         // Per-invocation journal metadata, aligned with `active`: the input
         // event id (causal parent of the matching output) and the node's
@@ -1013,6 +1018,7 @@ impl Executor {
             let clock = recorder.clock.clone();
             let chain = self.middleware.clone();
             let effect_admission = effect_admission.clone();
+            let effect_journal = effect_journal.clone();
             join_set.spawn(
                 async move {
                     let node_started = clock.now();
@@ -1024,6 +1030,7 @@ impl Executor {
                     let result = if chain.is_empty() {
                         node.run(
                             NodeContext::new(node_state, node_config)
+                                .with_optional_effect_journal(effect_journal)
                                 .with_optional_effect_admission(effect_admission),
                         )
                         .await
@@ -1038,6 +1045,7 @@ impl Executor {
                             .run_node(&mut call, |call| {
                                 let ctx = NodeContext::new(call.state().clone(), node_config)
                                     .with_middleware(chain.clone())
+                                    .with_optional_effect_journal(effect_journal)
                                     .with_optional_effect_admission(effect_admission);
                                 let node = Arc::clone(&node);
                                 async move { node.run(ctx).await }

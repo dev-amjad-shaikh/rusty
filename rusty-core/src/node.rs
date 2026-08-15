@@ -25,6 +25,7 @@ use serde_json::Value;
 
 use crate::effects::EffectAdmissionContext;
 use crate::error::{Result, RustyError};
+use crate::journal::Journal;
 use crate::middleware::MiddlewareChain;
 use crate::state::State;
 
@@ -71,6 +72,7 @@ pub struct NodeContext {
     config: NodeConfig,
     middleware: MiddlewareChain,
     effect_admission: Option<EffectAdmissionContext>,
+    effect_journal: Option<Journal>,
 }
 
 impl NodeContext {
@@ -83,6 +85,7 @@ impl NodeContext {
             config,
             middleware: MiddlewareChain::new(),
             effect_admission: None,
+            effect_journal: None,
         }
     }
 
@@ -121,6 +124,17 @@ impl NodeContext {
         self.effect_admission.as_ref()
     }
 
+    /// The caller-supplied run journal available to outbound effect
+    /// boundaries, when the run explicitly attached one.
+    ///
+    /// The executor always records graph transitions. This handle is exposed
+    /// only when `RunConfig::with_journal` was used, so a prebuilt agent can
+    /// record model and tool effects into the same run journal without
+    /// changing the historical behavior of ordinary in-process graphs.
+    pub fn effect_journal(&self) -> Option<&Journal> {
+        self.effect_journal.as_ref()
+    }
+
     /// Builder-style: attach a run-scoped effect admission boundary.
     pub fn with_effect_admission(mut self, context: EffectAdmissionContext) -> Self {
         self.effect_admission = Some(context);
@@ -132,6 +146,11 @@ impl NodeContext {
         context: Option<EffectAdmissionContext>,
     ) -> Self {
         self.effect_admission = context;
+        self
+    }
+
+    pub(crate) fn with_optional_effect_journal(mut self, journal: Option<Journal>) -> Self {
+        self.effect_journal = journal;
         self
     }
 

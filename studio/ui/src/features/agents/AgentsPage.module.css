@@ -69,12 +69,23 @@
 .toolHeading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .toolHeading b { font-size: 13px; font-weight: 400; }
 .toolHeading p, .emptyTools { margin: 3px 0 0; color: var(--text-faint); font-size: 12.5px; }
-.toolHeading button, .toolRow > button { min-height: 34px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
-.toolHeading button { padding: 0 12px; }
+.toolHeading > span { flex: none; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--rust-bright); font: 500 9.5px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .toolRows { display: grid; gap: 8px; }
-.toolRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .72fr); align-items: end; gap: 8px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: rgb(255 236 214 / .04); }
-.toolRow > button { grid-column: 1 / -1; justify-self: end; min-width: 92px; padding: 0 10px; }
+.toolCapability { position: relative; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(180px, .8fr); gap: 8px 18px; padding: 14px 16px; border: 1px solid var(--line); background: linear-gradient(135deg, rgb(232 116 38 / .075), rgb(255 236 214 / .025)); clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px)); }
+.toolCapability::before { position: absolute; width: 4px; height: 4px; top: 7px; right: 7px; border-radius: 50%; background: var(--rust); box-shadow: 0 0 8px rgb(232 116 38 / .55); content: ""; }
+.toolCapability > div:first-child { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
+.toolCapability b { color: var(--text); font-size: 13px; font-weight: 400; }
+.toolCapability code { overflow: hidden; color: var(--text-faint); font: 400 9.5px var(--mono); text-overflow: ellipsis; }
+.toolCapability > p { grid-column: 1; margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.toolCapability dl { grid-column: 2; grid-row: 1 / span 2; display: grid; align-content: center; gap: 6px; margin: 0; }
+.toolCapability dl div { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+.toolCapability dt { color: var(--text-faint); font: 400 9px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.toolCapability dd { min-width: 0; margin: 0; color: var(--text-muted); font: 400 10px var(--mono); text-align: right; overflow-wrap: anywhere; }
 .emptyTools { padding: 22px; border: 1px dashed var(--line-strong); border-radius: 6px; text-align: center; }
+.emptyTools b { display: block; margin-bottom: 5px; color: var(--text); font-size: 13px; font-weight: 400; }
+.emptyTools p { margin: 0; }
+.emptyTools small { display: block; margin-top: 7px; font: 400 10px var(--mono); }
+.toolMismatch { margin: 0; padding: 9px 11px; border-left: 2px solid var(--warning); color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
 .choiceStack { width: min(100%, 560px); display: flex; flex-direction: column; gap: 8px; }
 .choiceStack > button { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 9px 13px; border: 1px solid var(--line-strong); border-radius: 6px; background: rgb(255 236 214 / .07); color: var(--text); text-align: left; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
 .choiceStack > button > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--line-strong); }
@@ -206,8 +217,8 @@
   .fields { grid-template-columns: 1fr; }
   .wide, .helper { grid-column: auto; }
   .checks { align-items: flex-start; flex-direction: column; }
-  .toolRow { grid-template-columns: 1fr; }
-  .toolRow > button { width: 100%; }
+  .toolCapability { grid-template-columns: 1fr; }
+  .toolCapability > p, .toolCapability dl { grid-column: 1; grid-row: auto; }
   .goalRow, .goalActive { grid-template-columns: minmax(0, 1fr) 26px; gap: 7px 9px; }
   .goalRow > span, .goalActive > span { grid-column: 1; }
   .goalRow b, .goalActive b, .goalRow small, .goalActive small { overflow: visible; text-overflow: clip; white-space: normal; }

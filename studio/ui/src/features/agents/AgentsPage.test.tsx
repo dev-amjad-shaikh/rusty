@@ -369,22 +369,31 @@ describe("Agents", () => {
     expect(screen.getByRole("button", { name: "Discard all drafts" })).toBeVisible();
   });
 
-  it("shows and focuses the capability that contains an invalid value", async () => {
+  it("derives executable tools from the selected behavior instead of accepting invented names", async () => {
     useConnectionStore.setState({
       connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
-      info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
+      info: {
+        service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp",
+        graphs: [{ name: "research", channels: [], tools: [
+          { name: "calculator", description: "Perform bounded arithmetic.", effect: "pure", parameters_schema: { type: "object", properties: { operation: { type: "string" }, left: { type: "number" }, right: { type: "number" } } } },
+          { name: "search_knowledge", description: "Search approved local references.", effect: "read_only", parameters_schema: { type: "object", properties: { query: { type: "string" } } } },
+        ] }],
+      },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
     renderPage();
     await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await completeBuilder();
+    await userEvent.type(screen.getByLabelText("Name"), "Research analyst");
+    await userEvent.selectOptions(screen.getByLabelText("Behavior"), "research");
+    await userEvent.type(screen.getByLabelText("Responsibility"), "Investigate claims");
     await userEvent.click(screen.getByRole("tab", { name: /Tools/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Add tool" }));
-    await userEvent.click(screen.getByRole("tab", { name: /Guardrails/ }));
+    expect(screen.getByText("2 available")).toBeVisible();
+    expect(screen.getByText("Calculator")).toBeVisible();
+    expect(screen.getByText("Search Knowledge")).toBeVisible();
+    expect(screen.getByText("Search approved local references.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review agent" }));
-
-    expect(await screen.findByText("Use one `tool_name | effect` contract per line.")).toBeVisible();
-    await waitFor(() => expect(screen.getByRole("tab", { name: /Tools/ })).toHaveFocus());
+    expect(await screen.findByText(/Calculator \(Pure\), Search Knowledge \(Read Only\)/)).toBeVisible();
   });
 
   it("keeps invalid metric targets editable and routes their error to Goals", async () => {

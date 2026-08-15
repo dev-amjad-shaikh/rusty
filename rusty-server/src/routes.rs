@@ -851,6 +851,7 @@ async fn ok() -> Json<Value> {
 struct InfoGraph {
     name: String,
     channels: Vec<String>,
+    tools: Vec<rusty_agent_runtime::tool::ToolCapability>,
 }
 
 /// The `GET /info` response — the SDK compatibility handshake.
@@ -878,6 +879,7 @@ async fn info(AxumState(state): AxumState<Arc<AppState>>) -> Json<InfoResponse> 
         .into_iter()
         .map(|name| InfoGraph {
             channels: state.registry.channel_names(&name),
+            tools: state.registry.tool_capabilities(&name),
             name,
         })
         .collect();

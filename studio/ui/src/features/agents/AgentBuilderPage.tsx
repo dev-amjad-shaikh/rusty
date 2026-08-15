@@ -239,7 +239,7 @@ export function AgentBuilderPage() {
       {completedCreate ? <CreationCompletePanel completed={completedCreate} headingRef={completeHeading} onStart={startCompletedCreate} onReview={openCompletedCreate} />
         : creationReview ? <CreationReviewPanel review={creationReview} headingRef={reviewHeading} pending={create.isPending} onBack={returnToEditing} /> : <>
       <fieldset className={styles.builderGrid} disabled={create.isPending}>
-      <AgentIntentEditor draft={draft} onChange={update} graphs={info?.graphs.map((graph) => graph.name) ?? []} progress={progress} validationRequest={validationRequest} validationMessage={error} onCapabilityVisit={(capability) => setVisited((current) => new Set(current).add(capability))} />
+      <AgentIntentEditor draft={draft} onChange={update} graphs={info?.graphs ?? []} progress={progress} validationRequest={validationRequest} validationMessage={error} onCapabilityVisit={(capability) => setVisited((current) => new Set(current).add(capability))} />
       <aside className={styles.review} aria-labelledby="agent-shape-heading">
         <div className={styles.shapeCard}><span className="eyebrow">Agent shape</span><h2 id="agent-shape-heading" className="sr-only">Agent shape</h2>
         <dl>{capabilities.map((item) => <div key={item.key}><dt>{item.label}</dt><dd>{progress[item.key] ? capabilitySummary(item.key, draft) : "Not set"}</dd></div>)}</dl></div>

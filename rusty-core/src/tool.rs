@@ -12,12 +12,90 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::FutureExt;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::effects::{EffectAdmissionContext, EffectRequest};
 use crate::error::{Result, RustyError};
 use crate::llm::{ChatMessage, ToolCall};
 use crate::middleware::{MiddlewareChain, ToolInvocation};
+
+pub mod builtins;
+
+/// Maximum serialized size of one advertised tool argument schema.
+///
+/// Tool schemas are copied into model requests and the server capability
+/// handshake. Keeping the boundary here prevents one implementation from
+/// turning either surface into an unbounded payload.
+pub const MAX_TOOL_SCHEMA_BYTES: usize = 64 * 1024;
+
+/// Maximum size of the model-facing description advertised for one tool.
+pub const MAX_TOOL_DESCRIPTION_BYTES: usize = 4 * 1024;
+
+/// The executable contract Studio and other clients may safely present.
+///
+/// This is derived from a real [`Tool`] rather than separately authored
+/// metadata. The graph registry therefore advertises the same name, schema,
+/// and effect class that the runtime executor will use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCapability {
+    /// Stable tool name emitted by the model in a tool call.
+    pub name: String,
+    /// Human/model-facing explanation of the action.
+    pub description: String,
+    /// JSON Schema object accepted by the tool.
+    pub parameters_schema: Value,
+    /// Runtime effect class enforced and journaled for calls.
+    pub effect: crate::record::Effect,
+}
+
+impl ToolCapability {
+    fn from_tool(tool: &dyn Tool) -> Result<Self> {
+        let name = tool.name();
+        if name.is_empty()
+            || name.len() > 128
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+        {
+            return Err(RustyError::Tool(format!(
+                "tool name `{name}` must use 1..=128 ASCII letters, digits, `.`, `_`, `:`, or `-`"
+            )));
+        }
+        let description = tool.description();
+        if description.is_empty()
+            || description != description.trim()
+            || description.len() > MAX_TOOL_DESCRIPTION_BYTES
+            || description.chars().any(char::is_control)
+        {
+            return Err(RustyError::Tool(format!(
+                "tool `{name}` description must be non-empty, trimmed, control-free, and at most {MAX_TOOL_DESCRIPTION_BYTES} bytes"
+            )));
+        }
+        let parameters_schema = tool.parameters_schema();
+        if !parameters_schema.is_object() {
+            return Err(RustyError::Tool(format!(
+                "tool `{name}` parameters schema must be a JSON object"
+            )));
+        }
+        let schema_bytes = serde_json::to_vec(&parameters_schema).map_err(|error| {
+            RustyError::Tool(format!(
+                "tool `{name}` parameters schema did not serialize: {error}"
+            ))
+        })?;
+        if schema_bytes.len() > MAX_TOOL_SCHEMA_BYTES {
+            return Err(RustyError::Tool(format!(
+                "tool `{name}` parameters schema exceeds {MAX_TOOL_SCHEMA_BYTES} bytes"
+            )));
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            description: description.to_owned(),
+            parameters_schema,
+            effect: tool.effect(),
+        })
+    }
+}
 
 /// An invocable tool.
 ///
@@ -160,6 +238,22 @@ impl ToolRegistry {
                 })
             })
             .collect()
+    }
+
+    /// Derive the user-facing capability catalog from the executable tools.
+    ///
+    /// The result is sorted by stable tool name so `/info`, Studio reviews,
+    /// and content-addressed configuration do not depend on `HashMap`
+    /// iteration order. Invalid contracts fail closed before a graph can
+    /// advertise them.
+    pub fn capabilities(&self) -> Result<Vec<ToolCapability>> {
+        let mut capabilities = self
+            .tools
+            .values()
+            .map(|tool| ToolCapability::from_tool(tool.as_ref()))
+            .collect::<Result<Vec<_>>>()?;
+        capabilities.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(capabilities)
     }
 }
 
