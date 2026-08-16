@@ -30,6 +30,10 @@
 //!   (`<connector>/<operation>`) with an explicit effect classification.
 //!   This is the foundation service packs are declared against.
 //!
+//! The built-in service packs (ServiceNow, Gmail, Slack, Linear, Notion,
+//! Google Calendar) live in [`packs`]: curated `http-api` manifests, one
+//! constructor per service.
+//!
 //! All timestamps are logical: every state transition takes `now_ms` from
 //! the caller instead of reading a wall clock, so health sweeps and
 //! lifecycle history stay deterministic under replay and test.
@@ -44,6 +48,7 @@ pub mod credential;
 pub mod http_api;
 pub mod instance;
 pub mod manifest;
+pub mod packs;
 pub mod provider;
 pub mod registry;
 

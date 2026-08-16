@@ -1205,17 +1205,23 @@ fn route_param<'a>(
     Ok(())
 }
 
-/// Operation parameter names: `[a-z][a-z0-9_]*`, bounded — the same
-/// charset as credential slot names, so a schema, a path template, and a
-/// query/body routing all spell a parameter identically.
+/// Operation parameter names: `[a-zA-Z][a-zA-Z0-9_]*`, bounded. The
+/// charset's job is identifier safety across path templates, query
+/// strings, JSON bodies, and GraphQL placeholders — not casing policy:
+/// real APIs spell camelCase (`maxResults`, `timeMin`, `addLabelIds`) and
+/// a manifest must declare the wire's spelling exactly. (Credential slot
+/// names stay `[a-z][a-z0-9_]*` — those are the host's keys, not the
+/// wire's.)
 fn validate_param_name(name: &str) -> Result<()> {
     let valid = !name.is_empty()
         && name.len() <= MAX_SLOT_NAME_LEN
-        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        && name.as_bytes()[0].is_ascii_lowercase();
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphabetic() || b.is_ascii_digit() || b == b'_')
+        && name.as_bytes()[0].is_ascii_alphabetic();
     if !valid {
         return Err(conn_err(format!(
-            "parameter name `{name}` must match `[a-z][a-z0-9_]*` and be at most {MAX_SLOT_NAME_LEN} bytes"
+            "parameter name `{name}` must match `[a-zA-Z][a-zA-Z0-9_]*` and be at most {MAX_SLOT_NAME_LEN} bytes"
         )));
     }
     Ok(())

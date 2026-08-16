@@ -555,20 +555,18 @@ fn http_api_rejects_bad_operation_shapes() {
 #[test]
 fn http_api_rejects_bad_paths_and_templates() {
     let cases: Vec<&str> = vec![
-        "v1/issues",          // must start with `/`
-        "/v1/issues?x=1",     // no query material in the path
-        "/v1/issues/{issue",  // unclosed placeholder
-        "/v1/issues}/x",      // stray closing brace
-        "/v1/issues/{Issue}", // invalid parameter name
-        "/v1/is sues",        // whitespace
+        "v1/issues",           // must start with `/`
+        "/v1/issues?x=1",      // no query material in the path
+        "/v1/issues/{issue",   // unclosed placeholder
+        "/v1/issues}/x",       // stray closing brace
+        "/v1/issues/{}",       // empty placeholder name
+        "/v1/issues/{1issue}", // leading digit
+        "/v1/issues/{issue-id}", // hyphen
+        "/v1/is sues",         // whitespace
     ];
     for path in cases {
         let mut op = get_issue();
         op.path = path.to_owned();
-        // Keep the schema consistent so the failure is the path itself.
-        if path == "/v1/issues/{Issue}" {
-            op.params_schema = json!({"type": "object"});
-        }
         let error = manifest_error(http_api_manifest(
             "tickets",
             Some(bearer_auth()),
@@ -582,6 +580,45 @@ fn http_api_rejects_bad_paths_and_templates() {
             "{path}: {error}"
         );
     }
+}
+
+#[tokio::test]
+async fn http_api_accepts_camel_case_parameter_names() {
+    // The charset is identifier safety, not casing policy: real APIs spell
+    // camelCase (`maxResults`), and the manifest declares the wire's
+    // spelling exactly.
+    let mut op = list_issues();
+    op.params_schema = json!({
+        "type": "object",
+        "properties": {"maxResults": {"type": "integer"}},
+    });
+    op.query_params = vec!["maxResults".to_owned()];
+    let manifest = http_api_manifest(
+        "tickets",
+        Some(bearer_auth()),
+        vec![],
+        None,
+        vec![op],
+        vec!["api_token"],
+    )
+    .expect("camelCase parameter names are legal");
+    let provider = HttpApiProvider::from_manifest(&manifest).expect("provider");
+    let transport = FakeApiTransport::default();
+    transport.push_json(200, json!({"issues": []}));
+    provider
+        .execute(
+            &transport,
+            &bearer_credentials(),
+            "inst-000001",
+            "list-issues",
+            &json!({"maxResults": 10}),
+        )
+        .await
+        .expect("execute");
+    assert_eq!(
+        transport.captured()[0].url,
+        "https://api.example.com/v1/issues?maxResults=10"
+    );
 }
 
 #[test]
