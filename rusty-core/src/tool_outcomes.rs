@@ -19,7 +19,15 @@
 //!   journals with [`EventStatus::Ok`] and the
 //!   `ERROR: {"kind":"argument_validation","violations":[…]}` string as its
 //!   output. The roll-up recognizes it with the shipped
-//!   [`parse_argument_validation_refusal`] — the one structured contract.
+//!   [`parse_argument_validation_refusal`].
+//! - **Gate refusals** — [`crate::skills::SkillGateTool`]'s active-skill
+//!   narrowing refusal (`ERROR: {"kind":"skill_tool_gate",…}`, the second
+//!   structured kind, recognized with
+//!   [`crate::skills::parse_skill_tool_gate_refusal`]). A policy refusal is
+//!   not tool-quality evidence — the tool never ran — so gate refusals are
+//!   excluded from every tally: no call count, no failure, no latency
+//!   sample. What they evidence (which skill gated which tool, how often)
+//!   is answerable from the journals directly.
 //! - **Opaque failures** — every other failure: a tool error journaled
 //!   with [`EventStatus::Error`] (output `{"error": …}`), or an
 //!   `ERROR: …`-prefixed string that is not the structured kind (the
@@ -77,6 +85,7 @@ use crate::journal::JournalSnapshot;
 use crate::learn::{Candidate, CandidateContent, EvidenceSpan};
 use crate::memory::ProvenanceAuthor;
 use crate::record::{sha256_hex, EventStatus, PayloadRef, RunEvent};
+use crate::skills::parse_skill_tool_gate_refusal;
 use crate::tool_select::{
     parse_argument_validation_refusal, ArgumentViolation, ToolOutcomeStats, ToolSelectionOverlay,
     ERROR_PREFIX,
@@ -249,6 +258,9 @@ pub struct ViolationCluster {
 enum CallOutcome {
     Success,
     ValidationFailure(Vec<ArgumentViolation>),
+    /// An active-skill gate refusal: policy enforcement, not tool-quality
+    /// evidence. The roll-up excludes it from every tally.
+    GateRefusal,
     OpaqueFailure,
 }
 
@@ -276,6 +288,13 @@ pub fn build_outcome_index(runs: &[&JournalSnapshot], stamp: DateTime<Utc>) -> R
             let (tool, arguments) = tool_call_parts(snapshot, event)?;
             let output = resolve_payload(snapshot, event.output.as_ref(), event.seq, "output")?;
             let outcome = classify(event.status, &output);
+            if matches!(outcome, CallOutcome::GateRefusal) {
+                // The gate refused the call before dispatch: nothing about
+                // the tool's quality was observed, so the event enters no
+                // tally — not even `calls`, which would depress the success
+                // rate a selection feature reads.
+                continue;
+            }
 
             let rollup = tools.entry(tool).or_default();
             rollup.stats.calls += 1;
@@ -285,6 +304,9 @@ pub fn build_outcome_index(runs: &[&JournalSnapshot], stamp: DateTime<Utc>) -> R
                 .or_default();
             pattern.calls += 1;
             match outcome {
+                CallOutcome::GateRefusal => {
+                    unreachable!("gate refusals are excluded above, before any tally")
+                }
                 CallOutcome::Success => {
                     rollup.stats.successes += 1;
                     pattern.successes += 1;
@@ -325,14 +347,19 @@ pub fn build_outcome_index(runs: &[&JournalSnapshot], stamp: DateTime<Utc>) -> R
     Ok(ToolOutcomeIndex { stamp, tools })
 }
 
-/// Classify one journaled call: the structured refusal contract is
+/// Classify one journaled call: the structured refusal contracts are
 /// recognized by **payload parsing** — refusals journal with
-/// [`EventStatus::Ok`], so status alone cannot see them. Every other
-/// failure is an opaque error string or an `Error` status.
+/// [`EventStatus::Ok`], so status alone cannot see them. Gate refusals are
+/// the second parsed kind, tried after validation and before the opaque
+/// tier; every other failure is an opaque error string or an `Error`
+/// status.
 fn classify(status: EventStatus, output: &Value) -> CallOutcome {
     if let Some(text) = output.as_str() {
         if let Some(violations) = parse_argument_validation_refusal(text) {
             return CallOutcome::ValidationFailure(violations);
+        }
+        if parse_skill_tool_gate_refusal(text).is_some() {
+            return CallOutcome::GateRefusal;
         }
         if text.starts_with(ERROR_PREFIX) {
             return CallOutcome::OpaqueFailure;
@@ -542,6 +569,22 @@ mod tests {
         assert!(matches!(
             classify(EventStatus::Ok, &Value::String("ERROR: boom".into())),
             CallOutcome::OpaqueFailure
+        ));
+        // The second structured kind: a gate refusal parses as GateRefusal,
+        // never as an opaque failure — policy enforcement is not
+        // tool-quality evidence.
+        let gate = crate::skills::skill_tool_gate_refusal(
+            "email.send",
+            &crate::skills::ActiveSkillSet::new(vec![crate::skills::ActiveSkill {
+                name: "web-research".into(),
+                revision: 2,
+                content_hash: "a".repeat(64),
+                tools: vec!["web.search".into()],
+            }]),
+        );
+        assert!(matches!(
+            classify(EventStatus::Ok, &Value::String(gate)),
+            CallOutcome::GateRefusal
         ));
         assert!(matches!(
             classify(EventStatus::Error, &json!({"error": "timeout"})),

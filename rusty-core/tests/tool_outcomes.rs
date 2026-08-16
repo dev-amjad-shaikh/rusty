@@ -48,6 +48,7 @@ use rusty_agent_runtime::learn::{
 use rusty_agent_runtime::memory::ProvenanceAuthor;
 use rusty_agent_runtime::record::{Effect, EventStatus, RunEventKind};
 use rusty_agent_runtime::replay::{tool_call_request, RecordingTool};
+use rusty_agent_runtime::skills::{skill_tool_gate_refusal, ActiveSkill, ActiveSkillSet};
 use rusty_agent_runtime::tool::{Tool, ToolRegistry};
 use rusty_agent_runtime::tool_outcomes::{
     build_outcome_index, distill_argument_guidance, selection_candidate, ToolOutcomeIndex,
@@ -320,6 +321,57 @@ fn refusals_are_counted_by_parsing_payloads_never_status() {
         1,
         "the unparseable ERROR string is the opaque tier"
     );
+}
+
+#[test]
+fn gate_refusals_never_enter_the_tool_quality_tallies() {
+    // The roll-up loop's second parsed kind: a journaled `skill_tool_gate`
+    // refusal is policy enforcement — the tool never ran — so it enters no
+    // tally. Two gate refusals beside one genuine success must leave the
+    // gated tool's stats exactly as if only the success had journaled.
+    let journal = Journal::new("run-gate", "thread-1", Clock::logical(CLOCK_START_MS, 1));
+    let active = ActiveSkillSet::new(vec![ActiveSkill {
+        name: "web-research".into(),
+        revision: 2,
+        content_hash: "a".repeat(64),
+        tools: vec!["web.search".into()],
+    }]);
+    for latency in [1, 2] {
+        journal_call(
+            &journal,
+            "email.send",
+            json!({"to": "a@b.c"}),
+            Value::String(skill_tool_gate_refusal("email.send", &active)),
+            EventStatus::Ok,
+            latency,
+        );
+    }
+    journal_call(
+        &journal,
+        "email.send",
+        json!({"to": "a@b.c"}),
+        json!({"sent": true}),
+        EventStatus::Ok,
+        40,
+    );
+
+    let index = build_outcome_index(&[&journal.snapshot()], ts(STAMP_MS)).unwrap();
+    let rollup = index.rollup_for("email.send").unwrap();
+    assert_eq!(rollup.stats.calls, 1, "gate refusals do not count as calls");
+    assert_eq!(rollup.stats.successes, 1);
+    assert_eq!(rollup.stats.validation_failures, 0);
+    assert_eq!(rollup.opaque_failures, 0, "a gate refusal is not a failure");
+    assert_eq!(
+        rollup.stats.success_bps(),
+        Some(10_000),
+        "the selection feature is unpolluted"
+    );
+    assert_eq!(
+        rollup.latencies_ms,
+        [40],
+        "wrapper latency is not tool latency"
+    );
+    assert_eq!(rollup.patterns.len(), 1, "only the dispatched call's shape");
 }
 
 #[test]
