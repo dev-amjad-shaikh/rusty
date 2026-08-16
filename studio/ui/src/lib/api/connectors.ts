@@ -1,0 +1,283 @@
+import { z } from "zod";
+import { toolCapabilitySchema } from "../contracts";
+import { parseJson, parseMutationJson, requestText, StudioApiError } from "./client";
+import type { ConnectionIdentity } from "./client";
+
+const sha256hex = z.string().regex(/^[0-9a-f]{64}$/);
+const dateTime = z.string().datetime({ offset: true });
+
+// ------------------------------------------------------------------ //
+// Manifests
+// ------------------------------------------------------------------ //
+
+export const credentialSlotSchema = z.object({
+  name: z.string().min(1).max(64),
+  description: z.string().max(256),
+}).strict();
+
+const searchAuthSchema = z.object({
+  header: z.string().min(1).max(128),
+  credential_slot: z.string().min(1).max(64),
+}).strict();
+
+export const providerKindSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("mcp_stdio"),
+    command: z.string().min(1).max(512),
+    args: z.array(z.string().max(1024)).max(64),
+    env_allowlist: z.array(z.string().min(1).max(128)).max(32),
+  }).strict(),
+  z.object({
+    kind: z.literal("http_search"),
+    base_url: z.string().min(1).max(2048),
+    auth: searchAuthSchema.nullable(),
+  }).strict(),
+]);
+
+export const connectorManifestSchema = z.object({
+  id: z.string().min(1).max(64),
+  version: z.string().min(1).max(32),
+  display_name: z.string().min(1).max(128),
+  description: z.string().min(1).max(4 * 1024),
+  provider: providerKindSchema,
+  capabilities: z.array(z.string().max(256)).max(64),
+  credential_slots: z.array(credentialSlotSchema).max(16),
+  hash: sha256hex,
+}).strict();
+
+/// The `POST /connectors/manifests` payload: the manifest content. `hash`
+/// is optional — the server recomputes it and a disagreement is a 422.
+export const manifestPayloadSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  version: z.string().min(1, "version is required"),
+  display_name: z.string().min(1, "display_name is required"),
+  description: z.string().min(1, "description is required"),
+  provider: providerKindSchema,
+  capabilities: z.array(z.string()).optional(),
+  credential_slots: z.array(credentialSlotSchema).optional(),
+  hash: z.string().optional(),
+}).strict();
+
+export type CredentialSlot = z.infer<typeof credentialSlotSchema>;
+export type ProviderKind = z.infer<typeof providerKindSchema>;
+export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
+export type ManifestPayload = z.infer<typeof manifestPayloadSchema>;
+
+const manifestListSchema = z.object({ manifests: z.array(connectorManifestSchema) }).strict();
+
+const manifestReceiptSchema = z.object({
+  receipt: z.object({
+    id: z.string().min(1),
+    version: z.string().min(1),
+    manifest_hash: sha256hex,
+    already_registered: z.boolean(),
+  }).strict(),
+}).strict();
+
+export type ManifestReceipt = z.infer<typeof manifestReceiptSchema>["receipt"];
+
+export async function listConnectorManifests(connection: ConnectionIdentity): Promise<ConnectorManifest[]> {
+  const { text } = await requestText(connection, "/connectors/manifests");
+  return parseJson(text, manifestListSchema, "Connector manifests").manifests;
+}
+
+export async function registerConnectorManifest(connection: ConnectionIdentity, payload: ManifestPayload): Promise<ManifestReceipt> {
+  const { status, text } = await requestText(connection, "/connectors/manifests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (status !== 201) throw new StudioApiError("Manifest registration returned an unproven receipt.", status, true);
+  const { receipt } = parseMutationJson(text, manifestReceiptSchema, "Manifest receipt", status);
+  if (receipt.id !== payload.id || receipt.version !== payload.version) {
+    throw new StudioApiError("Manifest receipt named a different connector.", status, true);
+  }
+  return receipt;
+}
+
+// ------------------------------------------------------------------ //
+// Instances
+// ------------------------------------------------------------------ //
+
+export const lifecycleStates = ["pending", "connecting", "healthy", "degraded", "failed", "disabled"] as const;
+export const lifecycleStateSchema = z.enum(lifecycleStates);
+export type LifecycleState = z.infer<typeof lifecycleStateSchema>;
+
+export const connectorInstanceSchema = z.object({
+  instance_id: z.string().min(1),
+  connector_id: z.string().min(1),
+  manifest_hash: sha256hex,
+  credential_slots: z.array(z.string()),
+  state: lifecycleStateSchema,
+  state_reason: z.string().nullable(),
+  consecutive_failures: z.number().int().nonnegative(),
+  last_health_check_ms: z.number().int().nonnegative().nullable(),
+  catalog_generation: z.number().int().positive().nullable(),
+  catalog_hash: sha256hex.nullable(),
+  created_at: dateTime,
+  updated_at: dateTime,
+}).strict();
+
+export type ConnectorInstance = z.infer<typeof connectorInstanceSchema>;
+
+const instanceListSchema = z.object({ instances: z.array(connectorInstanceSchema) }).strict();
+const instanceResponseSchema = z.object({ instance: connectorInstanceSchema }).strict();
+
+const lifecycleViewSchema = z.object({
+  state: lifecycleStateSchema,
+  reason: z.string().nullable(),
+}).strict();
+
+export const sweepOutcomeSchema = z.object({
+  instance_id: z.string().min(1),
+  previous_state: lifecycleViewSchema,
+  current_state: lifecycleViewSchema,
+  catalog_bumped: z.boolean(),
+}).strict();
+
+export type SweepOutcome = z.infer<typeof sweepOutcomeSchema>;
+
+const healthResponseSchema = z.object({
+  outcome: sweepOutcomeSchema,
+  instance: connectorInstanceSchema,
+}).strict();
+
+const sweepResponseSchema = z.object({ outcomes: z.array(sweepOutcomeSchema) }).strict();
+
+export async function listConnectorInstances(connection: ConnectionIdentity): Promise<ConnectorInstance[]> {
+  const { text } = await requestText(connection, "/connectors/instances");
+  return parseJson(text, instanceListSchema, "Connector instances").instances;
+}
+
+export interface CreateInstanceInput {
+  manifest_hash: string;
+  credentials: Record<string, string>;
+}
+
+export async function createConnectorInstance(connection: ConnectionIdentity, input: CreateInstanceInput): Promise<ConnectorInstance> {
+  const { status, text } = await requestText(connection, "/connectors/instances", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  if (status !== 201) throw new StudioApiError("Connector instantiation returned an unproven receipt.", status, true);
+  const { instance } = parseMutationJson(text, instanceResponseSchema, "Connector instance receipt", status);
+  if (instance.manifest_hash !== input.manifest_hash) {
+    throw new StudioApiError("Connector instance receipt pinned a different manifest.", status, true);
+  }
+  return instance;
+}
+
+async function instanceAction(connection: ConnectionIdentity, instanceId: string, action: string): Promise<ConnectorInstance> {
+  const { status, text } = await requestText(
+    connection,
+    `/connectors/instances/${encodeURIComponent(instanceId)}/${action}`,
+    { method: "POST", body: "{}" },
+  );
+  const { instance } = parseMutationJson(text, instanceResponseSchema, `Connector ${action} receipt`, status);
+  if (instance.instance_id !== instanceId) {
+    throw new StudioApiError(`Connector ${action} receipt named a different instance.`, status, true);
+  }
+  return instance;
+}
+
+export function connectConnectorInstance(connection: ConnectionIdentity, instanceId: string) {
+  return instanceAction(connection, instanceId, "connect");
+}
+
+export function disableConnectorInstance(connection: ConnectionIdentity, instanceId: string) {
+  return instanceAction(connection, instanceId, "disable");
+}
+
+export function enableConnectorInstance(connection: ConnectionIdentity, instanceId: string) {
+  return instanceAction(connection, instanceId, "enable");
+}
+
+export async function checkConnectorInstanceHealth(connection: ConnectionIdentity, instanceId: string) {
+  const { status, text } = await requestText(
+    connection,
+    `/connectors/instances/${encodeURIComponent(instanceId)}/health`,
+    { method: "POST", body: "{}" },
+  );
+  const result = parseMutationJson(text, healthResponseSchema, "Connector health receipt", status);
+  if (result.instance.instance_id !== instanceId || result.outcome.instance_id !== instanceId) {
+    throw new StudioApiError("Connector health receipt named a different instance.", status, true);
+  }
+  return result;
+}
+
+export async function sweepConnectors(connection: ConnectionIdentity): Promise<SweepOutcome[]> {
+  const { status, text } = await requestText(connection, "/connectors/sweep", { method: "POST", body: "{}" });
+  return parseMutationJson(text, sweepResponseSchema, "Connector sweep receipt", status).outcomes;
+}
+
+// ------------------------------------------------------------------ //
+// Served catalogs
+// ------------------------------------------------------------------ //
+
+const catalogSchema = z.object({
+  catalog: z.object({
+    instance_id: z.string().min(1),
+    generation: z.number().int().positive(),
+    hash: sha256hex,
+    tools: z.array(toolCapabilitySchema),
+  }).strict(),
+}).strict();
+
+export type InstanceCatalog = z.infer<typeof catalogSchema>["catalog"];
+
+export async function getInstanceCatalog(connection: ConnectionIdentity, instanceId: string, generation?: number): Promise<InstanceCatalog> {
+  const params = generation === undefined ? "" : `?generation=${encodeURIComponent(generation)}`;
+  const { text } = await requestText(connection, `/connectors/instances/${encodeURIComponent(instanceId)}/catalog${params}`);
+  const { catalog } = parseJson(text, catalogSchema, "Connector catalog");
+  if (catalog.instance_id !== instanceId) {
+    throw new StudioApiError("Connector catalog named a different instance.", 0);
+  }
+  if (generation !== undefined && catalog.generation !== generation) {
+    throw new StudioApiError("Connector catalog answered a different generation than the pin.", 0);
+  }
+  return catalog;
+}
+
+// ------------------------------------------------------------------ //
+// Vault connections (slot bindings resolve through these)
+// ------------------------------------------------------------------ //
+
+export const vaultConnectionSchema = z.object({
+  connection_id: z.string().min(1),
+  provider: z.enum(["oauth2_authorization_code", "oauth2_client_credentials", "api_key", "basic"]),
+  subject: z.string().optional(),
+  scopes: z.array(z.string()),
+  status: z.enum(["active", "needs_reauth", "revoked"]),
+  created_at: dateTime,
+  updated_at: dateTime,
+}).strict();
+
+export type VaultConnection = z.infer<typeof vaultConnectionSchema>;
+
+const vaultConnectionListSchema = z.object({ connections: z.array(vaultConnectionSchema) }).strict();
+
+export async function listVaultConnections(connection: ConnectionIdentity): Promise<VaultConnection[]> {
+  const { text } = await requestText(connection, "/connections");
+  return parseJson(text, vaultConnectionListSchema, "Vault connections").connections;
+}
+
+// ------------------------------------------------------------------ //
+// Server error reading
+// ------------------------------------------------------------------ //
+
+/// The instantiate 422 names the unbound or refused credential slot
+/// (`credential slot \`api_key\` …`). Extract it so the form can pin the
+/// message to the exact row.
+export function slotNamedInError(message: string): string | null {
+  const match = /credential slot `([^`]+)`/.exec(message);
+  return match ? match[1] : null;
+}
+
+/// The catalog pin-mismatch 409 names the live generation
+/// (`… does not match the live generation N`). Extract it for the
+/// reload affordance.
+export function liveGenerationInError(message: string): number | null {
+  const match = /live generation (\d+)/.exec(message);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
