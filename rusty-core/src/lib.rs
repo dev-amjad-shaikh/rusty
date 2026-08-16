@@ -234,6 +234,7 @@ pub mod effects;
 pub mod error;
 pub mod executor;
 pub mod graph;
+pub mod inbox;
 pub mod journal;
 pub mod knowledge;
 pub mod learn;
@@ -336,6 +337,11 @@ pub mod prelude {
     pub use crate::error::{LlmErrorClass, Result, RustyError};
     pub use crate::executor::{ExecutionOutcome, Executor, GraphEvent, RunConfig};
     pub use crate::graph::{ConditionalRouter, Edge, Graph, GraphBuilder, Route, Send};
+    pub use crate::inbox::{
+        CancelCause, ConsumptionPoint, DroppedMessages, Inbox, InboxBounds, InboxConsumption,
+        InboxKind, InboxMessage, InboxSnapshot, InboxTarget, RunCancellation, DEFAULT_SENDER,
+        INBOX_DELIVERY_KEY,
+    };
     pub use crate::journal::{
         Clock, EventDraft, Journal, JournalSnapshot, RngSource, PARENT_EVENT_KEY,
     };

@@ -259,6 +259,21 @@ pub struct RunConfig {
     /// node carries a guard journal (the prebuilt ReAct tools node does in
     /// every evidence mode). Empty by default: no guards, no new behavior.
     pub tool_guards: Vec<Arc<dyn crate::tool::ToolGuard>>,
+
+    /// The run's durable inbox (R0.13 parity wave): steering, follow-ups,
+    /// staged injections, and typed cancellation. When set, the executor
+    /// settles pending sends into journaled intake events at every
+    /// super-step boundary, drains steering (and, on a wake, staged
+    /// injections) into the step's node invocations via
+    /// [`crate::inbox::INBOX_DELIVERY_KEY`], extends a would-be-finished
+    /// turn when follow-ups are queued, and observes latched
+    /// cancellations with their typed [`crate::inbox::CancelCause`]. Every
+    /// observation is journaled and the queue state is stamped into every
+    /// checkpoint header, so replay reconstructs the exact message timing
+    /// and resume restores the exact queues. `None` (the default) — or an
+    /// attached inbox that never accepted a send — is byte-identical to
+    /// prior behavior.
+    pub inbox: Option<crate::inbox::Inbox>,
 }
 
 impl Default for RunConfig {
@@ -291,6 +306,7 @@ impl RunConfig {
             effect_admission: None,
             tool_allowlist: None,
             tool_guards: Vec::new(),
+            inbox: None,
         }
     }
 
@@ -414,6 +430,16 @@ impl RunConfig {
     /// for the monotonicity contract).
     pub fn with_tool_guards(mut self, guards: Vec<Arc<dyn crate::tool::ToolGuard>>) -> Self {
         self.tool_guards = guards;
+        self
+    }
+
+    /// Builder-style: attach the run's durable inbox (see the
+    /// [`RunConfig::inbox`] field docs and [`crate::inbox`]). Pass the same
+    /// handle to the resume that follows a suspension or a `keep_inbox`
+    /// cancellation; pass a fresh inbox to seed the queues from the
+    /// checkpoint's stamped snapshot instead.
+    pub fn with_inbox(mut self, inbox: crate::inbox::Inbox) -> Self {
+        self.inbox = Some(inbox);
         self
     }
 
@@ -784,6 +810,12 @@ impl Executor {
         // Causal parent for the first super-step: the resume event on a
         // resumed run, nothing on a fresh one.
         let mut step_parent: Option<String> = None;
+        // Durable inbox (R0.13 parity wave): the delivery batch a follow-up
+        // turn extension (or a restored checkpoint) handed to the upcoming
+        // super-step, and whether that step begins a turn — fresh run,
+        // resume, and extension all count as wakes for staged injections.
+        let mut carried_delivery: Vec<crate::inbox::InboxMessage> = Vec::new();
+        let mut turn_start = true;
 
         if config.checkpoint_id.is_some() || config.resume.is_some() {
             let checkpointer = self.checkpointer.as_ref().ok_or_else(|| {
@@ -828,6 +860,12 @@ impl Executor {
                     "resume": config.resume.clone().unwrap_or(Value::Null),
                 })),
             ));
+            // Durable inbox: adopt the queue state the checkpoint stamped.
+            // A live inbox (the same handle carried across an in-process
+            // suspension) keeps its own state — see Inbox::seed; a fresh one
+            // restores queues and intake sequence, and the executor picks up
+            // the pending delivery the checkpoint preserved.
+            let inbox_snapshot = checkpoint.header.inbox.clone();
             state = checkpoint.state;
             step = checkpoint.step;
             active = checkpoint
@@ -836,6 +874,12 @@ impl Executor {
                 .map(|name| ActiveTask { name, scoped: None })
                 .collect();
             pending_resume = config.resume.clone();
+            if let (Some(inbox), Some(snapshot)) = (&config.inbox, inbox_snapshot) {
+                if inbox.is_fresh() {
+                    carried_delivery = snapshot.pending_delivery.clone();
+                }
+                inbox.seed(snapshot);
+            }
             if active.is_empty() {
                 tracing::info!(
                     steps = 0,
@@ -911,6 +955,130 @@ impl Executor {
                     config.max_steps
                 )));
             }
+            // Durable inbox (R0.13 parity wave): settle arrivals into the
+            // journal, observe a latched typed cancellation, then assemble
+            // the delivery batch this super-step's nodes will see. Gated
+            // wholly on an attached inbox: without one nothing here
+            // journals, delivers, or stamps, and the run is byte-identical
+            // to prior behavior.
+            let mut delivery: Vec<crate::inbox::InboxMessage> = Vec::new();
+            if let Some(inbox) = &config.inbox {
+                let mut parent = inbox
+                    .settle(&recorder.journal, step_parent.clone())
+                    .or_else(|| step_parent.clone());
+                if let Some((cause, keep_inbox)) = inbox.take_cancel(recorder.journal.len() as u64)
+                {
+                    let dropped = if keep_inbox {
+                        crate::inbox::DroppedMessages::default()
+                    } else {
+                        inbox.clear()
+                    };
+                    let cancel_event = recorder.record({
+                        let mut draft = EventDraft::new(RunEventKind::RunCancelled, Effect::Pure)
+                            .output(
+                                serde_json::to_value(crate::inbox::RunCancellation {
+                                    cause,
+                                    keep_inbox,
+                                    dropped,
+                                })
+                                .expect("a RunCancellation always serializes"),
+                            );
+                        if let Some(parent) = parent.clone() {
+                            draft = draft.parent(parent);
+                        }
+                        draft
+                    });
+                    // A cancellation is only as durable as the resume point
+                    // it leaves behind. The boundary checkpoint of the last
+                    // step predates both the just-settled intakes and the
+                    // clear, so rewrite it: with keep_inbox the replacement
+                    // carries the queues (and any undelivered batch) for the
+                    // resume that follows; without it the replacement
+                    // records the drop.
+                    if let Some(checkpointer) = &self.checkpointer {
+                        let stamp = inbox.snapshot().map(|mut snapshot| {
+                            if keep_inbox {
+                                snapshot.pending_delivery = carried_delivery.clone();
+                            }
+                            snapshot
+                        });
+                        let checkpoint = recorder.mint_checkpoint(
+                            config.thread_id.clone(),
+                            step,
+                            state.clone(),
+                            active.iter().map(|t| t.name.clone()).collect(),
+                            stamp,
+                        );
+                        let checkpoint_id = checkpoint.id.clone();
+                        checkpointer.put(checkpoint).await?;
+                        recorder.record(
+                            EventDraft::new(RunEventKind::CheckpointWritten, Effect::Idempotent)
+                                .output(serde_json::json!({
+                                    "checkpoint_id": checkpoint_id,
+                                    "step": step,
+                                    "suspension": false,
+                                    "cancellation": true,
+                                }))
+                                .parent(cancel_event),
+                        );
+                        Self::emit(
+                            &config,
+                            GraphEvent::CheckpointSaved {
+                                checkpoint_id,
+                                step,
+                            },
+                        );
+                    }
+                    tracing::warn!(
+                        steps_run,
+                        cause = %cause,
+                        keep_inbox,
+                        "run cancelled through its inbox at a super-step boundary"
+                    );
+                    return Err(RustyError::Cancelled(format!(
+                        "cancelled ({cause}) after {steps_run} super-step(s); the boundary \
+                         checkpoint of thread `{}` is intact, so re-running the thread \
+                         resumes from there",
+                        config.thread_id
+                    )));
+                }
+                // The batch the step's nodes observe: an extension's (or a
+                // restored checkpoint's) carried batch first, then this
+                // boundary's steering, with staged injections riding any
+                // wake — a turn start, a carried batch, or a steering batch.
+                delivery = std::mem::take(&mut carried_delivery);
+                let begins_turn = turn_start || !delivery.is_empty();
+                let mut boundary = inbox.drain_steering();
+                let woke = begins_turn || !boundary.is_empty();
+                if woke {
+                    boundary.extend(inbox.drain_staged());
+                }
+                turn_start = false;
+                if !boundary.is_empty() {
+                    let consumption = crate::inbox::InboxConsumption {
+                        point: if begins_turn {
+                            crate::inbox::ConsumptionPoint::TurnStart
+                        } else {
+                            crate::inbox::ConsumptionPoint::StepBoundary
+                        },
+                        step,
+                        messages: boundary.clone(),
+                    };
+                    parent = Some(recorder.record({
+                        let mut draft = EventDraft::new(RunEventKind::InboxConsumed, Effect::Pure)
+                            .output(
+                                serde_json::to_value(&consumption)
+                                    .expect("an InboxConsumption always serializes"),
+                            );
+                        if let Some(parent) = parent {
+                            draft = draft.parent(parent);
+                        }
+                        draft
+                    }));
+                    delivery.extend(boundary);
+                }
+            }
+
             // Cooperative cancellation (drain): observed only here, at a
             // super-step boundary. The last step's barrier merged cleanly
             // and its boundary checkpoint is already persisted, so
@@ -950,16 +1118,23 @@ impl Executor {
                     step,
                     &mut pending_resume,
                     step_parent.clone(),
+                    &delivery,
                 )
                 .instrument(step_span)
                 .await?;
 
             match transition {
-                StepTransition::Next(next, route_event) => {
+                StepTransition::Next(next, route_event, extension) => {
                     active = next;
                     step += 1;
                     steps_run += 1;
                     step_parent = Some(route_event);
+                    // A follow-up turn extension hands its batch to the
+                    // upcoming super-step, which begins the new turn.
+                    if !extension.is_empty() {
+                        carried_delivery = extension;
+                        turn_start = true;
+                    }
                 }
                 StepTransition::Finish(outcome) => {
                     if !outcome.is_interrupted() {
@@ -980,6 +1155,12 @@ impl Executor {
     /// [`StepTransition::Finish`] with the terminal outcome when the run ends
     /// (`Done`) or suspends (`Interrupted`).
     ///
+    /// `delivery` is the durable-inbox batch the run loop drained at this
+    /// step's boundary: handed to every invocation of the step under
+    /// [`crate::inbox::INBOX_DELIVERY_KEY`], and restored into the
+    /// suspension checkpoint when the step interrupts so the re-executed
+    /// step sees exactly what the discarded attempt saw.
+    ///
     /// Flight Recorder: every phase transition is journaled through
     /// `recorder` — super-step start/end, one node input/output pair per
     /// invocation (in deterministic active-set order, not finish order), the
@@ -998,6 +1179,7 @@ impl Executor {
         step: usize,
         pending_resume: &mut Option<Value>,
         step_parent: Option<String>,
+        delivery: &[crate::inbox::InboxMessage],
     ) -> Result<StepTransition> {
         // -- plan.
         let active_names: Vec<String> = active.iter().map(|t| t.name.clone()).collect();
@@ -1076,6 +1258,16 @@ impl Executor {
                     crate::tool::TOOL_ALLOWLIST_KEY.to_owned(),
                     serde_json::to_value(tool_allowlist)
                         .expect("tool allowlist serialization is infallible"),
+                );
+            }
+            // Durable inbox: the boundary-drained batch rides into every
+            // invocation of the step; inbox-aware nodes (the prebuilt ReAct
+            // agent) parse it, every other node ignores the key.
+            if !delivery.is_empty() {
+                extra.insert(
+                    crate::inbox::INBOX_DELIVERY_KEY.to_owned(),
+                    serde_json::to_value(delivery)
+                        .expect("an inbox delivery batch always serializes"),
                 );
             }
             let node_config = NodeConfig {
@@ -1255,8 +1447,24 @@ impl Executor {
                 "node interrupted; run suspended (resumable via RunConfig::resume)"
             );
             let pending: Vec<String> = active.iter().map(|t| t.name.clone()).collect();
-            let checkpoint =
-                recorder.mint_checkpoint(config.thread_id.clone(), step, state.clone(), pending);
+            // Durable inbox: the step is discarded, so its delivery batch
+            // must survive as undelivered — the suspension checkpoint
+            // carries it as the pending delivery the resume re-serves,
+            // making the re-executed step see exactly what this attempt
+            // saw.
+            let stamp = config.inbox.as_ref().and_then(|inbox| {
+                inbox.snapshot().map(|mut snapshot| {
+                    snapshot.pending_delivery = delivery.to_vec();
+                    snapshot
+                })
+            });
+            let checkpoint = recorder.mint_checkpoint(
+                config.thread_id.clone(),
+                step,
+                state.clone(),
+                pending,
+                stamp,
+            );
             let checkpoint_id = checkpoint.id.clone();
             if let Some(checkpointer) = &self.checkpointer {
                 checkpointer.put(checkpoint).await?;
@@ -1431,6 +1639,46 @@ impl Executor {
             }
         }
 
+        // -- durable inbox: a would-be-finished turn continues when
+        //    follow-ups are queued. Settle arrivals first so the decision
+        //    observes everything sent up to this point; then the drained
+        //    follow-ups (plus any staged injections riding the wake) are
+        //    journaled as consumed and carried into the extension turn's
+        //    first super-step, which re-activates the graph's entry point.
+        //    The routing decision and boundary checkpoint below therefore
+        //    record the *extended* run — a resume continues the turn rather
+        //    than finishing.
+        let mut extension: Vec<crate::inbox::InboxMessage> = Vec::new();
+        let mut route_parent = step_end_event.clone();
+        if next.is_empty() {
+            if let Some(inbox) = &config.inbox {
+                if let Some(last) = inbox.settle(&recorder.journal, Some(step_end_event.clone())) {
+                    route_parent = last;
+                }
+                extension = inbox.drain_followups();
+                if !extension.is_empty() {
+                    extension.extend(inbox.drain_staged());
+                    let consumption = crate::inbox::InboxConsumption {
+                        point: crate::inbox::ConsumptionPoint::TurnExtension,
+                        step,
+                        messages: extension.clone(),
+                    };
+                    route_parent = recorder.record(
+                        EventDraft::new(RunEventKind::InboxConsumed, Effect::Pure)
+                            .output(
+                                serde_json::to_value(&consumption)
+                                    .expect("an InboxConsumption always serializes"),
+                            )
+                            .parent(route_parent),
+                    );
+                    next.push(ActiveTask {
+                        name: graph.entry_point().to_owned(),
+                        scoped: None,
+                    });
+                }
+            }
+        }
+
         let route_event = recorder.record(
             EventDraft::new(RunEventKind::RoutingDecision, Effect::Pure)
                 .output(serde_json::json!({
@@ -1446,14 +1694,28 @@ impl Executor {
                         .flat_map(|command| command.goto.iter().cloned())
                         .collect::<Vec<String>>(),
                 }))
-                .parent(step_end_event.clone()),
+                .parent(route_parent),
         );
 
         // -- checkpoint at the super-step boundary.
         if let Some(checkpointer) = &self.checkpointer {
             let next_names: Vec<String> = next.iter().map(|t| t.name.clone()).collect();
-            let checkpoint =
-                recorder.mint_checkpoint(config.thread_id.clone(), step, state.clone(), next_names);
+            // Durable inbox: stamp the queue state; an extension's batch is
+            // already consumed, so it crosses the checkpoint as the pending
+            // delivery the next super-step (or a resume from here) serves.
+            let stamp = config.inbox.as_ref().and_then(|inbox| {
+                inbox.snapshot().map(|mut snapshot| {
+                    snapshot.pending_delivery = extension.clone();
+                    snapshot
+                })
+            });
+            let checkpoint = recorder.mint_checkpoint(
+                config.thread_id.clone(),
+                step,
+                state.clone(),
+                next_names,
+                stamp,
+            );
             let checkpoint_id = checkpoint.id.clone();
             checkpointer.put(checkpoint).await?;
             recorder.record(
@@ -1480,7 +1742,7 @@ impl Executor {
                 state.clone(),
             )));
         }
-        Ok(StepTransition::Next(next, route_event))
+        Ok(StepTransition::Next(next, route_event, extension))
     }
 
     /// Best-effort event emission: a full or closed channel never aborts a run.
@@ -1513,7 +1775,9 @@ impl Recorder {
 
     /// Mint a boundary checkpoint through the determinism seams: id from the
     /// run's RNG, timestamp from the run's clock, the frozen provenance
-    /// header, and a journal reference pinning the evidence head as it stood
+    /// header, the durable inbox's stamped queue state (`None` for
+    /// inbox-free runs, keeping their checkpoint bytes exactly as before),
+    /// and a journal reference pinning the evidence head as it stood
     /// *before* this checkpoint's own `checkpoint_written` event is
     /// recorded.
     fn mint_checkpoint(
@@ -1522,6 +1786,7 @@ impl Recorder {
         step: usize,
         state: State,
         next_nodes: Vec<String>,
+        inbox: Option<crate::inbox::InboxSnapshot>,
     ) -> Checkpoint {
         Checkpoint {
             id: self.rng.uuid_string(),
@@ -1537,6 +1802,7 @@ impl Recorder {
                 policy_version: self.policy_version.clone(),
                 logical_clock: self.clock.now_ms(),
                 manifest: self.manifest.clone(),
+                inbox,
             },
             journal_ref: Some(self.journal.head_ref()),
             // The executor always mints full snapshots; delta encoding is
@@ -1557,9 +1823,11 @@ struct ActiveTask {
 /// The control-flow result of a single super-step: either the next active
 /// set (the loop continues) or the terminal run outcome (the loop breaks).
 enum StepTransition {
-    /// The next active set plus the routing-decision journal event that
-    /// produced it (the causal parent of the next super-step's start event).
-    Next(Vec<ActiveTask>, String),
+    /// The next active set, the routing-decision journal event that
+    /// produced it (the causal parent of the next super-step's start
+    /// event), and the durable-inbox turn-extension batch the next
+    /// super-step must deliver (empty when the routing was ordinary).
+    Next(Vec<ActiveTask>, String, Vec<crate::inbox::InboxMessage>),
     Finish(ExecutionOutcome),
 }
 

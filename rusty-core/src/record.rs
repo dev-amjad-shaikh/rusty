@@ -907,6 +907,40 @@ pub enum RunEventKind {
     /// refuses journals whose gate evidence is not so nested — see
     /// [`crate::replay`].
     ApprovalDecided,
+
+    /// A message was settled into the run's durable inbox (R0.13 parity
+    /// wave): a send the executor observed at a settlement point — a
+    /// super-step boundary, the turn-end check, the cancellation check —
+    /// entered its queue. An [`Effect::Pure`] record: the intake is
+    /// run-control evidence, not an external effect. Output carries the
+    /// journaled [`crate::inbox::InboxMessage`] — the inbox's monotonic
+    /// intake sequence, the queue kind, the sender provenance, and the
+    /// content. Journaled at settlement rather than at send time so the
+    /// journal — not wall-clock arrival — fixes each message's position in
+    /// the run's evidence, which is what makes exact replay of inbox-driven
+    /// runs possible ([`crate::inbox::Inbox::replaying`]).
+    InboxIntake,
+
+    /// A batch of messages left the run's durable inbox into the execution
+    /// (R0.13 parity wave): steering drained at a super-step boundary,
+    /// staged injections riding a wake, or follow-ups consumed at the
+    /// turn-end check to extend the run into another turn. An
+    /// [`Effect::Pure`] record. Output carries the journaled
+    /// [`crate::inbox::InboxConsumption`] — the
+    /// [`crate::inbox::ConsumptionPoint`], the super-step, and the exact
+    /// batch in intake order.
+    InboxConsumed,
+
+    /// The run was cancelled through its durable inbox with a typed cause
+    /// (R0.13 parity wave): [`crate::inbox::Inbox::cancel`] latched the
+    /// request and the executor observed it at a super-step boundary — the
+    /// same transactional granularity as the cooperative-cancellation token,
+    /// extended with the *who*. An [`Effect::Pure`] record: cancellation is
+    /// control flow, never a failure. Output carries the journaled
+    /// [`crate::inbox::RunCancellation`] — the closed
+    /// [`crate::inbox::CancelCause`], the `keep_inbox` disposition, and what
+    /// a dropping cancellation discarded.
+    RunCancelled,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.
@@ -1953,6 +1987,19 @@ pub struct CheckpointHeader {
     /// their exact R0.5 shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest: Option<RunManifest>,
+
+    /// The durable inbox's queue state at this checkpoint (R0.13 parity
+    /// wave): the steering / follow-up / staged queues and the next intake
+    /// sequence, so a resumed run's inbox continues exactly where the
+    /// checkpoint was taken. Stamped from [`crate::executor::RunConfig`]'s
+    /// inbox at checkpoint time; resume seeds a fresh
+    /// [`crate::inbox::Inbox`] from it.
+    ///
+    /// Additive: `None` (the default) is absent from the wire, so headers of
+    /// runs without an inbox — and of inbox runs that never accepted a send
+    /// — keep their exact prior shape (the [`RunManifest`] discipline).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox: Option<crate::inbox::InboxSnapshot>,
 }
 
 impl Default for CheckpointHeader {
@@ -1968,6 +2015,7 @@ impl Default for CheckpointHeader {
             policy_version: PolicyVersion::default(),
             logical_clock: 0,
             manifest: None,
+            inbox: None,
         }
     }
 }

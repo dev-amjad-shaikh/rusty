@@ -163,6 +163,9 @@ fn golden_checkpoint_header_shape() {
             // R0.7: no manifest pinned — the serialized shape must stay
             // byte-identical to the R0.5 golden (additive evolution).
             manifest: None,
+            // R0.13: no inbox attached — absent from the wire for the same
+            // additive discipline.
+            inbox: None,
         },
     );
 }
@@ -216,6 +219,7 @@ fn golden_checkpoint_header_with_manifest_shape() {
             policy_version: PolicyVersion::new("static-v0"),
             logical_clock: 1_750_000_000_000,
             manifest: Some(sample_run_manifest()),
+            inbox: None,
         },
     );
 }

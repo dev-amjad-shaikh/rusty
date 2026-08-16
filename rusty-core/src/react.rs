@@ -279,7 +279,35 @@ fn build_react_agent(
             let agent_tools = agent_tools.clone();
             let token_tx = token_tx.clone();
             async move {
-                let messages = read_messages(ctx.state())?;
+                let mut messages = read_messages(ctx.state())?;
+                // Durable inbox (R0.13 parity wave): the executor hands the
+                // step's drained batch — steering at a step boundary,
+                // follow-ups and staged injections at a turn's wake — to
+                // every invocation under INBOX_DELIVERY_KEY. The model sees
+                // the batch as user-role input before its next call, and the
+                // messages join the channel so the conversation history the
+                // run persists carries them. Absent key: the pre-inbox
+                // behavior, byte-identical.
+                let delivered: Vec<crate::inbox::InboxMessage> =
+                    match ctx.config().extra.get(crate::inbox::INBOX_DELIVERY_KEY) {
+                        Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+                            RustyError::Node(format!(
+                                "node `{AGENT_NODE}` received a malformed inbox delivery: {error}"
+                            ))
+                        })?,
+                        None => Vec::new(),
+                    };
+                let inbox_messages: Vec<ChatMessage> = delivered
+                    .iter()
+                    .map(|message| {
+                        ChatMessage::user(match &message.content {
+                            Value::String(text) => text.clone(),
+                            other => serde_json::to_string(other)
+                                .expect("a JSON value always serializes"),
+                        })
+                    })
+                    .collect();
+                messages.extend(inbox_messages.iter().cloned());
                 let tool_schemas = sorted_tool_schemas(&invocation_tools(&agent_tools, &ctx)?);
                 // Evidence wiring is per invocation: the recording/replaying
                 // wrappers carry the invocation's causal parent, which only
@@ -332,9 +360,21 @@ fn build_react_agent(
                     }
                     None => model.chat(&messages, &tool_schemas).await?,
                 };
-                let appended = serde_json::to_value(&response.message)?;
                 // A single message object is fine: AddMessages accepts one
-                // message or an array and upserts/appends accordingly.
+                // message or an array and upserts/appends accordingly. The
+                // inbox batch (when any) precedes the assistant message so
+                // the persisted conversation carries the user-role input the
+                // model actually saw.
+                let appended = if inbox_messages.is_empty() {
+                    serde_json::to_value(&response.message)?
+                } else {
+                    let mut batch: Vec<Value> = inbox_messages
+                        .iter()
+                        .map(serde_json::to_value)
+                        .collect::<std::result::Result<_, _>>()?;
+                    batch.push(serde_json::to_value(&response.message)?);
+                    Value::Array(batch)
+                };
                 Ok(NodeOutput::update(MESSAGES_CHANNEL, appended))
             }
         }

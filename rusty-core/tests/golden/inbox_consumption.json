@@ -1,0 +1,20 @@
+{
+  "point": "turn_extension",
+  "step": 4,
+  "messages": [
+    {
+      "seq": 3,
+      "kind": "follow_up",
+      "sender": "user",
+      "content": "and one more thing"
+    },
+    {
+      "seq": 1,
+      "kind": "injected",
+      "sender": "hook:locale",
+      "content": {
+        "timezone": "Europe/Lisbon"
+      }
+    }
+  ]
+}

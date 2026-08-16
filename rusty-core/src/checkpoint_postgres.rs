@@ -953,6 +953,7 @@ mod tests {
             policy_version: Default::default(),
             logical_clock: 1_700_000_000_042,
             manifest: None,
+            inbox: None,
         };
         checkpoint.journal_ref = Some(JournalRef {
             events: 17,
