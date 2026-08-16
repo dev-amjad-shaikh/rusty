@@ -1669,6 +1669,7 @@ fn error_kind(error: &RustyError) -> &'static str {
         RustyError::Serialization(_) => "serialization_error",
         RustyError::InvalidUpdate(_) => "invalid_update",
         RustyError::Replay(_) => "replay_error",
+        RustyError::Plugin(_) => "plugin_error",
         // Drain cancellation is control flow and takes its own terminal
         // path in `execute`; this arm exists for exhaustiveness only.
         RustyError::Cancelled(_) => "cancelled",

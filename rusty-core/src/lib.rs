@@ -117,6 +117,16 @@
 //!   [`effects::ApprovalToken`] scoped to the draft's derived effect id,
 //!   and only for drafts that passed validation and scan in the session's
 //!   draft store.
+//! - **The self-improvement plane** ([`self_improve`]): the harness
+//!   introspecting itself — a declarative capability catalog whose probes
+//!   report `Present` only on real evidence in a host-assembled
+//!   [`self_improve::CapabilityInspection`] snapshot, a pure
+//!   [`self_improve::assess`] gap report over it, and a persisted,
+//!   append-only [`self_improve::BacklogStore`] (content-derived ids, a
+//!   validated status machine, `operator:*` / `harness:self-improve`
+//!   provenance). For approved, skill-shaped gaps the self-build path
+//!   drafts through the unchanged composer and stages the publish behind
+//!   its approval gate — the harness proposes, the approval disposes.
 //! - **The configuration registry** ([`registry`], R0.11): the
 //!   prompt/configuration registry — named, owned [`registry::ArtifactRecord`]s
 //!   indexing the candidate pipeline (a commit *is* a candidate, never a fork
@@ -242,6 +252,7 @@ pub mod record;
 pub mod registry;
 pub mod remote;
 pub mod replay;
+pub mod self_improve;
 pub mod session_query;
 pub mod skill;
 pub mod state;
@@ -398,6 +409,20 @@ pub mod prelude {
         LogicalClockParams, RecordingChatModel, RecordingTool, ReplayFixture, ReplayOutcome,
         ReplayParams, ReplaySource, ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
         FIXTURE_FORMAT_VERSION,
+    };
+    pub use crate::self_improve::{
+        assess, capability_catalog, catalog_entry, draft_skill_for_entry, publish_staged_skill,
+        BacklogEntry, BacklogProvenance, BacklogStatus, BacklogStore, BuildGapSkillTool,
+        BuildShape, Capability, CapabilityAssessment, CapabilityInspection, CapabilityStatus,
+        GapReport, InspectCapabilitiesTool, Plane, ProposeBacklogTool, SkillProposal, StagedSkill,
+        BACKLOG_ENTRY_ID_PREFIX, BACKLOG_FORMAT_VERSION, FEATURE_CAPABILITY_SETS,
+        FEATURE_CODE_MODE, FEATURE_DURABLE_STEER_INBOX, FEATURE_GOALS_SUBSYSTEM,
+        FEATURE_HOOKS_COMPATIBILITY, FEATURE_OS_SANDBOX, FEATURE_PERMISSION_PRESETS,
+        FEATURE_PLUGIN_KERNEL, FEATURE_RENDER_INTENTS, FEATURE_STREAMING_CHUNK_CAPTURE,
+        FEATURE_SURFACE_COMPACTION, FEATURE_TELEMETRY_LEDGER, FEATURE_TOKEN_METER,
+        HARNESS_PROVENANCE, MAX_BACKLOG_EVIDENCE_BYTES, MAX_BACKLOG_GAPS,
+        MAX_BACKLOG_RATIONALE_BYTES, MAX_BACKLOG_TITLE_BYTES, MAX_PROPOSE_ENTRIES,
+        RUNBOOK_SKILL_PREFIX,
     };
     pub use crate::session_query::{
         EventTrace, FileJournalQuery, InMemoryJournalQuery, JournalQuery, SearchField, SearchHit,

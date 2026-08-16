@@ -1,12 +1,12 @@
 //! Harness flows — the harness demo's end-to-end proof, automated.
 //!
-//! `rusty-server/examples/harness_demo.rs` serves three scripted ReAct
-//! agents (calendar manager, ServiceNow operator, composer studio) over
-//! stateful in-process fixtures. This suite spawns that example as a real
-//! process (the crash-recovery pattern: own port, own store, SIGKILL guard)
-//! and drives eight journeys over plain HTTP, asserting on the real
-//! responses and on `GET /runs/{id}/events` — the Flight Recorder journal
-//! is the evidence, not the model's say-so:
+//! `rusty-server/examples/harness_demo.rs` serves four scripted ReAct
+//! agents (calendar manager, ServiceNow operator, composer studio,
+//! self-improver) over stateful in-process fixtures. This suite spawns
+//! that example as a real process (the crash-recovery pattern: own port,
+//! own store, SIGKILL guard) and drives nine journeys over plain HTTP,
+//! asserting on the real responses and on `GET /runs/{id}/events` — the
+//! Flight Recorder journal is the evidence, not the model's say-so:
 //!
 //! 1. calendar: list the fixture day, book the first verified free slot
 //!    (09:30–10:00), then a follow-up summary that observes the booking;
@@ -23,7 +23,10 @@
 //! 7. evals: a dataset case sourced from journey 1's run evidence, a
 //!    candidate, and an experiment that completes without regression;
 //! 8. composer: compose → approval-gated publish → read-only `run_cli`,
-//!    then a disallowed command refused by the policy.
+//!    then a disallowed command refused by the policy;
+//! 9. self-improver: introspect the demo's own registries → record backlog
+//!    entries for the top gaps → draft the approved runbook entry's skill
+//!    through the composer and stage its publish (the gate stays shut).
 //!
 //! One sequential test, one server: journeys 1 and 3 share the calendar
 //! fixture by design, and the dataset case must match journey 1's run
@@ -768,6 +771,130 @@ async fn harness_flows_end_to_end() {
     assert_eq!(
         calls[0].status, "error",
         "the refusal is journaled as an errored call"
+    );
+
+    // -- Journey 9: the self-improver introspects the demo's own
+    //    registries, records backlog entries for the top gaps, then drafts
+    //    the pre-approved runbook entry's skill through the composer and
+    //    stages its publish — without crossing the approval gate.
+    let (_loop_thread, loop_run) = run_on(
+        &client,
+        &base,
+        "self_improver",
+        json!({"input": {"messages": [{"role": "user", "content": "Inspect your capabilities, record the top gaps, and stage the runbook skill."}]}}),
+    )
+    .await;
+    let loop_run_id = loop_run["run_id"].as_str().unwrap().to_owned();
+    let calls = tool_calls(&client, &base, &loop_run_id).await;
+    assert_eq!(
+        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
+        ["inspect_capabilities", "propose_backlog_entries", "build_gap_skill"],
+        "journey 9 journal: introspect → backlog → draft-and-stage"
+    );
+    assert_eq!(calls[0].effect, "read_only");
+    assert_eq!(calls[1].effect, "idempotent");
+    assert_eq!(calls[2].effect, "pure");
+    assert!(
+        calls.iter().all(|call| call.status == "ok"),
+        "all three loop steps succeed: {calls:?}"
+    );
+
+    let (status, journal) = get(&client, &format!("{base}/runs/{loop_run_id}/events")).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    let events = journal["events"].as_array().unwrap();
+    let tool_event = |name: &str| {
+        events
+            .iter()
+            .find(|event| event.pointer("/input/value/tool") == Some(&json!(name)))
+            .unwrap_or_else(|| panic!("the journal holds a {name} call"))
+            .clone()
+    };
+
+    // The inspection is honest about the demo's own wiring: the real
+    // planes are present, run_cli-without-confinement is exactly partial,
+    // and every dsh-parity gap stays absent until its stream lands. The
+    // full report exceeds the journal's inline-payload ceiling, so the
+    // journaled event carries it as a content-addressed artifact
+    // reference — evidence by hash — while the run's tool message holds
+    // the inline JSON to assert against.
+    let inspect = tool_event("inspect_capabilities");
+    assert_eq!(inspect["output"]["kind"], json!("artifact"));
+    let reference = &inspect["output"]["value"];
+    assert_eq!(reference["sha256"].as_str().unwrap().len(), 64);
+    assert!(
+        reference["bytes"].as_u64().unwrap() > 4096,
+        "the report spills above the inline ceiling: {reference}"
+    );
+    let report_text = tool_message_contents(&loop_run)[0].to_owned();
+    let report: Value = serde_json::from_str(&report_text).unwrap();
+    let present = report["present"].as_u64().unwrap();
+    let partial = report["partial"].as_u64().unwrap();
+    let absent = report["absent"].as_u64().unwrap();
+    assert_eq!(
+        present + partial + absent,
+        report["assessments"].as_array().unwrap().len() as u64,
+        "the counts are derived, not claimed: {report}"
+    );
+    assert!(present >= 8, "the demo's real planes are present: {report}");
+    let status_of = |id: &str| {
+        report["assessments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == json!(id))
+            .unwrap_or_else(|| panic!("the report assesses {id}"))
+            .pointer("/status/status")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(status_of("skill-plane"), "present");
+    assert_eq!(status_of("approval-gated-publish"), "present");
+    assert_eq!(status_of("os-sandbox-confinement"), "partial");
+    assert_eq!(status_of("telemetry-ledger"), "absent");
+    // A staged-but-unpublished runbook honestly changes nothing.
+    assert_eq!(status_of("operator-runbooks"), "absent");
+
+    // The proposals land as harness-proposed, operator-unapproved work.
+    let propose = tool_event("propose_backlog_entries");
+    let recorded = propose["output"]["value"]["recorded"].as_array().unwrap();
+    assert_eq!(recorded.len(), 3, "one entry per top gap: {propose}");
+    let proposed_gaps: Vec<&str> = recorded
+        .iter()
+        .map(|entry| entry["gap_ids"][0].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        proposed_gaps,
+        ["surface-compaction", "telemetry-ledger", "agent-session-query"]
+    );
+    for entry in recorded {
+        assert_eq!(entry["provenance"], json!("harness:self-improve"));
+        assert_eq!(entry["status"], json!("proposed"));
+        assert_eq!(entry["inserted"], json!(true));
+        assert!(entry["id"].as_str().unwrap().starts_with("bl-"));
+    }
+
+    // The draft is staged behind the gate: an approved entry, a content
+    // hash, the publish effect id — and no publish call anywhere in the
+    // journal.
+    let build = tool_event("build_gap_skill");
+    let staged = &build["output"]["value"];
+    assert_eq!(staged["entry_status"], json!("approved"));
+    assert_eq!(staged["content_hash"].as_str().unwrap().len(), 64);
+    assert!(
+        staged["publish_effect_id"].as_str().unwrap().len() >= 64,
+        "the staged publish names its scoped effect id: {staged}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event.pointer("/input/value/tool") != Some(&json!("publish_composed_skill"))),
+        "the loop never publishes: the gate stays with the operator"
+    );
+    let closing = final_assistant_text(&loop_run);
+    assert!(
+        closing.contains("runbook-incident-review") && closing.contains("awaits an operator approval"),
+        "the closing message reports the staged gate honestly: {closing}"
     );
 
     server.sigkill().await;
