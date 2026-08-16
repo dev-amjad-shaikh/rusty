@@ -59,11 +59,11 @@ use std::time::Duration;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use rusty_agent_runtime::broker::{
-    BrokerDenial, ClassifiedFailure, ConnectionConsent, ConnectionProvider,
-    ConnectionReauthRequired, ConnectionRecord, ConnectionRefresh, ConnectionRevocation,
-    ConnectionStatus, CredentialHandle, CredentialUse, HandleClaims, HandleIssuance, OAuthProvider,
-    SEALED_FORMAT_VERSION, SealedCredential, StoredConnection, TokenMaterial, hex_decode,
-    hex_encode, new_connection_id, new_handle_id, scopes_missing,
+    hex_decode, hex_encode, new_connection_id, new_handle_id, scopes_missing, BrokerDenial,
+    ClassifiedFailure, ConnectionConsent, ConnectionProvider, ConnectionReauthRequired,
+    ConnectionRecord, ConnectionRefresh, ConnectionRevocation, ConnectionStatus, CredentialHandle,
+    CredentialUse, HandleClaims, HandleIssuance, OAuthProvider, SealedCredential, StoredConnection,
+    TokenMaterial, SEALED_FORMAT_VERSION,
 };
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
 use rusty_agent_runtime::record::{Effect, RunEventKind};
@@ -71,8 +71,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
-use chacha20poly1305::XChaCha20Poly1305;
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
+use chacha20poly1305::XChaCha20Poly1305;
 
 use crate::server_store::{ConnectionUpdate, ServerStore, StoreResult};
 
@@ -2109,11 +2109,9 @@ mod tests {
         let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
         assert_eq!(resolved.material.access_token, "sk-live-DUE");
         assert_eq!(provider.call_counts(), (0, 0));
-        assert!(
-            !journal_kinds(&store)
-                .await
-                .contains(&RunEventKind::ConnectionRefreshed)
-        );
+        assert!(!journal_kinds(&store)
+            .await
+            .contains(&RunEventKind::ConnectionRefreshed));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2480,11 +2478,9 @@ mod tests {
         );
         let after = b.get("acme", &due.connection_id).await.unwrap().unwrap();
         assert!(after.health.last_refresh_at.is_some());
-        assert!(
-            journal_kinds(&store)
-                .await
-                .contains(&RunEventKind::ConnectionRefreshed)
-        );
+        assert!(journal_kinds(&store)
+            .await
+            .contains(&RunEventKind::ConnectionRefreshed));
 
         // A second due connection whose refresh the provider refuses
         // terminally: the pass flips it (journaled) and counts it.

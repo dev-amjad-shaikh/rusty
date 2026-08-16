@@ -17,12 +17,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::broker::{ScriptedOAuthProvider, TokenGrant};
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 /// The plaintext credential every registration here seals. Distinctive,
@@ -122,12 +122,10 @@ async fn register(app: &Router, auth: Option<(&str, &str)>) -> Value {
     let (status, v) = call_as(app, auth, "POST", "/connections", Some(register_payload())).await;
     assert_eq!(status, StatusCode::CREATED, "register failed: {v}");
     let record = &v["connection"];
-    assert!(
-        record["connection_id"]
-            .as_str()
-            .unwrap()
-            .starts_with("conn-")
-    );
+    assert!(record["connection_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("conn-"));
     assert_eq!(record["status"], "active");
     record.clone()
 }

@@ -39,15 +39,15 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use rusty_agent_runtime::broker::{
-    BrokerDenial, BrokerDenialReason, CONNECTION_ID_PREFIX, ClassifiedFailure, ConnectionConsent,
+    scopes_missing, BrokerDenial, BrokerDenialReason, ClassifiedFailure, ConnectionConsent,
     ConnectionHealth, ConnectionProvider, ConnectionReauthRequired, ConnectionRecord,
     ConnectionRefresh, ConnectionRevocation, ConnectionStatus, CredentialBroker, CredentialHandle,
-    CredentialMediator, CredentialRequirement, CredentialTool, CredentialUse, HANDLE_ID_PREFIX,
-    HandleClaims, HandleIssuance, IssueRequest, ResolvedCredential, SEALED_FORMAT_VERSION,
-    SealedCredential, StoredConnection, TokenMaterial, scopes_missing,
+    CredentialMediator, CredentialRequirement, CredentialTool, CredentialUse, HandleClaims,
+    HandleIssuance, IssueRequest, ResolvedCredential, SealedCredential, StoredConnection,
+    TokenMaterial, CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, SEALED_FORMAT_VERSION,
 };
 use rusty_agent_runtime::durable::ErrorClass;
 use rusty_agent_runtime::error::Result as RuntimeResult;
@@ -724,7 +724,7 @@ mod capsule_mediation {
     };
     use rusty_agent_runtime::capsule_host::{CapsuleHost, CapsuleInvocation};
     use rusty_agent_runtime::journal::{Clock, Journal};
-    use rusty_agent_runtime::record::{RunEventKind, sha256_hex};
+    use rusty_agent_runtime::record::{sha256_hex, RunEventKind};
 
     const REALLOC: &str = r#"
     (global $heap (mut i32) (i32.const 1024))

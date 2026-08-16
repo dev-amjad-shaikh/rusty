@@ -23,8 +23,8 @@ use rusty_agent_runtime::tool::builtins::{
     CalculatorTool, KnowledgeDocument, KnowledgeSearchTool, SandboxedDocumentReaderTool,
     TextInspectorTool,
 };
-use rusty_agent_server::{GraphRegistry, ServerConfig, serve};
-use serde_json::{Value, json};
+use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 
 /// A deterministic local model that exercises the complete tool pipeline on
 /// every new thread. It keeps the demo credential-free while producing real
