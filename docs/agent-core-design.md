@@ -887,7 +887,14 @@ Flagged before Wave 1 lands:
   derived-index storage on both backends (Waves 2–3), and the `skill:*` /
   `context:*` pointer store (the learn pointer machinery's server half,
   Wave 4). The affected server file scopes will need register entries when
-  those waves start; none is claimed this wave.
+  those waves start; none is claimed this wave. One compile-forced
+  exception already landed: Wave 2's additive `rank` / `maintenance`
+  members on `CandidateContent::MemoryConfiguration` required
+  struct-literal updates in `rusty-server/tests/registry_admission.rs`
+  (a Rust struct literal must name every field), so that test file carries
+  R0.13 edits despite no server scope being claimed — concurrent server
+  streams touching it should expect a merge collision and rebase through
+  it.
 - **`tool/**` owner:** consumed read-only. `restricted_to`, `ToolCapability`,
   `ToolExecutor` batch semantics, and the middleware hooks are sufficient —
   if they stop being sufficient, that is a request to your stream, not a

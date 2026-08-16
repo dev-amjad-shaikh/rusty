@@ -69,6 +69,11 @@
 //! never stored on the record — and rebuildable from journals
 //! byte-identically.
 //!
+//! One acknowledged bias: utility accrues only to records that were packed,
+//! so the signal leans toward the already-selected — cold-start lock-in.
+//! The neutral prior ([`NEUTRAL_SUCCESS_BPS`]) is what keeps a record the
+//! index has never seen eligible for selection at all.
+//!
 //! Consumption is the two-stage discipline the design fixes
 //! ([`TieredMemoryDriver`]):
 //!
@@ -107,6 +112,15 @@
 //! The floor is always legal: [`RankPolicy::default()`] is utility weight
 //! zero and no over-fetch, under which the driver's within-tier order *is*
 //! the shipped rank — the `static-v0` of retrieval, one pointer move away.
+//! At that floor the packed ids and order equal the shipped read exactly.
+//! One field diverges by construction and is documented rather than
+//! aligned: `truncated` is reported by the driver's final re-pack over the
+//! over-fetched pool, not by [`assemble`] over the raw filtered set, so on
+//! the same universe and budget the driver can read `truncated: false`
+//! where the shipped [`assemble`] reads `true` — the re-pack walks only
+//! the stage-one pool, which by construction fits the budget, and never
+//! observes the records the shipped read dropped. Selection semantics are
+//! unchanged; only the flag's frame of reference differs.
 //!
 //! Golden-file tests under `tests/golden/` pin every wire shape this module
 //! adds; any accidental drift fails CI.
@@ -120,7 +134,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, RustyError};
 use crate::journal::{EventDraft, Journal, JournalSnapshot};
 use crate::memory::{
-    apply_query, assemble, estimated_tokens, memory_read_request, ContextBudget, JournaledMemory,
+    assemble, estimated_tokens, memory_read_request, ContextBudget, JournaledMemory,
     MemoryAssembly, MemoryKind, MemoryQuery, MemoryRecord, MemoryReplaySource, MemoryScope,
     MemoryStore, TokenAccounting, TOKEN_BYTES_PER_ESTIMATE,
 };
@@ -357,10 +371,20 @@ impl WriteGate {
     /// converge onto its id. The convergence *is* journaled: the gate
     /// issues the journaled write of the record it converged onto, so the
     /// run's evidence names what its write resolved to under the converged
-    /// effect key. Only live records dedup — an expired or superseded
-    /// same-content record does not block a fresh assertion. Same key with
-    /// different content is never dedup: supersession (attributed) or
-    /// conflict detection (inferred), unchanged.
+    /// effect key. Journaling the *existing* record rather than the
+    /// submitter's is deliberate — convergence means this claim already
+    /// stands as written, so the submitter's provenance is dropped from
+    /// the evidence by intent. Only live records dedup — an expired or
+    /// superseded same-content record does not block a fresh assertion.
+    /// Same key with different content is never dedup: supersession
+    /// (attributed) or conflict detection (inferred), unchanged.
+    ///
+    /// The gate assumes a single writer per scope. The dedup scan and the
+    /// journaled write are not atomic, so two concurrent writers of the
+    /// same claim in one scope can both store; that is accepted because
+    /// content addressing keeps both records and the shipped conflict
+    /// detection flags the same-key divergence — the gate is a convergence
+    /// aid, not a mutual-exclusion primitive.
     ///
     /// `now` is the run-clock instant expiry is evaluated against — the
     /// caller stamps it, exactly as the shipped read stamps `as_of`.
@@ -380,15 +404,19 @@ impl WriteGate {
             }
         }
         if record.key.is_some() {
-            let live = apply_query(
-                &store.all().await?,
-                &MemoryQuery {
-                    scope: Some(record.scope.clone()),
-                    key: record.key.clone(),
-                    ..MemoryQuery::default()
-                },
-                now,
-            );
+            // `MemoryStore::query` over the store's own scan, not an
+            // in-memory filter over `all()`: the default implementation is
+            // exactly that filter, and column-mapped backends pre-filter.
+            let live = store
+                .query(
+                    &MemoryQuery {
+                        scope: Some(record.scope.clone()),
+                        key: record.key.clone(),
+                        ..MemoryQuery::default()
+                    },
+                    now,
+                )
+                .await?;
             let content_hash = record.content.content_hash()?;
             for existing in &live {
                 if existing.memory_id != record.memory_id
@@ -765,10 +793,12 @@ pub fn build_utility_index(
 /// — resolved through the snapshot's artifact map, parsed as the shipped
 /// [`MemoryAssembly`] (a tiered read's `section_manifest` extension member
 /// is ignored, the additive-extension rule). A read with no resolvable
-/// output is an inconsistent journal and fails loud.
+/// output is an inconsistent journal and fails loud — [`RustyError::Replay`],
+/// the class the shipped replay path uses for journal inconsistencies
+/// (`memory.rs`'s replay serving precedent), not the invalid-update class.
 fn assembly_ids(snapshot: &JournalSnapshot, event: &RunEvent) -> Result<Vec<String>> {
     let payload = event.output.as_ref().ok_or_else(|| {
-        invalid(format!(
+        replay_error(format!(
             "journaled memory read at seq {} carries no output payload — the journal is \
              inconsistent",
             event.seq
@@ -781,7 +811,7 @@ fn assembly_ids(snapshot: &JournalSnapshot, event: &RunEvent) -> Result<Vec<Stri
             .get(&reference.sha256)
             .cloned()
             .ok_or_else(|| {
-                invalid(format!(
+                replay_error(format!(
                     "journaled memory read at seq {} references artifact {}, which the snapshot \
                      does not hold — the journal is inconsistent",
                     event.seq, reference.sha256
@@ -789,7 +819,7 @@ fn assembly_ids(snapshot: &JournalSnapshot, event: &RunEvent) -> Result<Vec<Stri
             })?,
     };
     let assembly: MemoryAssembly = serde_json::from_value(value).map_err(|e| {
-        invalid(format!(
+        replay_error(format!(
             "journaled memory read at seq {} does not parse as a memory assembly: {e}",
             event.seq
         ))
@@ -1182,11 +1212,12 @@ pub fn rederive_section(
     budget: &ContextBudget,
     manifest: &TierSectionManifest,
 ) -> Result<TieredMemorySection> {
-    if manifest.rank != driver.rank {
+    if manifest.rank != driver.rank || manifest.utility_stamp != driver.utility.stamp {
         return Err(invalid(format!(
-            "the journaled manifest pins rank {:?} but the driver runs {:?} — re-derivation \
-             under different pins is divergence, not verification",
-            manifest.rank, driver.rank
+            "the journaled manifest pins rank {:?} with utility stamp {} but the driver runs \
+             rank {:?} with stamp {} — re-derivation under different pins is divergence, not \
+             verification",
+            manifest.rank, manifest.utility_stamp, driver.rank, driver.utility.stamp
         )));
     }
     let (assembly, derived) = driver.rerank(pool, budget)?;
