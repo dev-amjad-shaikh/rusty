@@ -104,6 +104,19 @@
 //!   active-version pointer with byte-exact rollback. Every transition
 //!   journals through the `CandidateCreated` / `CandidateEvaluated` /
 //!   `CandidatePromoted` / `CandidateRolledBack` event kinds.
+//! - **The composer plane** ([`composer`]): governed self-extension — the
+//!   tools through which an agent drafts new skills and tool definitions by
+//!   itself. Drafting ([`composer::ComposeSkillTool`],
+//!   [`composer::ComposeToolDefinitionTool`], [`record::Effect::Pure`]) runs
+//!   the assembled package or definition through the skill plane's and tool
+//!   plane's own validators and returns a machine-readable
+//!   [`composer::DraftReceipt`]; publishing
+//!   ([`composer::PublishComposedSkillTool`],
+//!   [`record::Effect::NonIdempotent`]) crosses the trust boundary into the
+//!   shared [`skill::SkillRegistry`] only behind an
+//!   [`effects::ApprovalToken`] scoped to the draft's derived effect id,
+//!   and only for drafts that passed validation and scan in the session's
+//!   draft store.
 //! - **The configuration registry** ([`registry`], R0.11): the
 //!   prompt/configuration registry — named, owned [`registry::ArtifactRecord`]s
 //!   indexing the candidate pipeline (a commit *is* a candidate, never a fork
@@ -194,6 +207,7 @@ pub mod capsule_host;
 pub mod checkpoint;
 #[cfg(feature = "postgres")]
 pub mod checkpoint_postgres;
+pub mod composer;
 pub mod connector;
 pub mod deploy;
 pub mod durable;
@@ -264,6 +278,12 @@ pub mod prelude {
     };
     #[cfg(feature = "postgres")]
     pub use crate::checkpoint_postgres::PostgresCheckpointer;
+    pub use crate::composer::{
+        publish_effect_id, ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession,
+        DraftFinding, DraftReceipt, PublishComposedSkillTool, PublishReceipt, PublishSkillEffect,
+        COMPOSER_SOURCE_NAME, MAX_COMPOSED_REFERENCES, MAX_RECIPE_TEMPLATE_BYTES,
+        MAX_SESSION_DRAFTS, PUBLISH_SKILL_EFFECT_KIND, RECIPE_HTTP_METHODS,
+    };
     pub use crate::deploy::{
         deployment_admission, deployment_surface, derive_revision_id, pin_set_digest,
         revision_promotion_effect_id, scoped_secret_name, validate_secret_name, CanaryClearance,

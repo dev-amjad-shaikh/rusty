@@ -57,50 +57,62 @@ pub struct ToolCapability {
 
 impl ToolCapability {
     fn from_tool(tool: &dyn Tool) -> Result<Self> {
-        let name = tool.name();
-        if name.is_empty()
-            || name.len() > 128
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
-        {
-            return Err(RustyError::Tool(format!(
-                "tool name `{name}` must use 1..=128 ASCII letters, digits, `.`, `_`, `:`, or `-`"
-            )));
-        }
-        let description = tool.description();
-        if description.is_empty()
-            || description != description.trim()
-            || description.len() > MAX_TOOL_DESCRIPTION_BYTES
-            || description.chars().any(char::is_control)
-        {
-            return Err(RustyError::Tool(format!(
-                "tool `{name}` description must be non-empty, trimmed, control-free, and at most {MAX_TOOL_DESCRIPTION_BYTES} bytes"
-            )));
-        }
-        let parameters_schema = tool.parameters_schema();
-        if !parameters_schema.is_object() {
-            return Err(RustyError::Tool(format!(
-                "tool `{name}` parameters schema must be a JSON object"
-            )));
-        }
-        let schema_bytes = serde_json::to_vec(&parameters_schema).map_err(|error| {
-            RustyError::Tool(format!(
-                "tool `{name}` parameters schema did not serialize: {error}"
-            ))
-        })?;
-        if schema_bytes.len() > MAX_TOOL_SCHEMA_BYTES {
-            return Err(RustyError::Tool(format!(
-                "tool `{name}` parameters schema exceeds {MAX_TOOL_SCHEMA_BYTES} bytes"
-            )));
-        }
+        validate_tool_contract(tool.name(), tool.description(), &tool.parameters_schema())?;
         Ok(Self {
-            name: name.to_owned(),
-            description: description.to_owned(),
-            parameters_schema,
+            name: tool.name().to_owned(),
+            description: tool.description().to_owned(),
+            parameters_schema: tool.parameters_schema(),
             effect: tool.effect(),
         })
     }
+}
+
+/// The executable-contract rules every advertised tool surface must meet:
+/// a bounded, wire-safe name; a non-empty, trimmed, control-free,
+/// bounded description; and a JSON-object parameter schema within
+/// [`MAX_TOOL_SCHEMA_BYTES`]. `pub(crate)` so the composer plane validates
+/// drafted tool definitions against exactly these rules instead of
+/// restating them.
+pub(crate) fn validate_tool_contract(
+    name: &str,
+    description: &str,
+    parameters_schema: &Value,
+) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+    {
+        return Err(RustyError::Tool(format!(
+            "tool name `{name}` must use 1..=128 ASCII letters, digits, `.`, `_`, `:`, or `-`"
+        )));
+    }
+    if description.is_empty()
+        || description != description.trim()
+        || description.len() > MAX_TOOL_DESCRIPTION_BYTES
+        || description.chars().any(char::is_control)
+    {
+        return Err(RustyError::Tool(format!(
+            "tool `{name}` description must be non-empty, trimmed, control-free, and at most {MAX_TOOL_DESCRIPTION_BYTES} bytes"
+        )));
+    }
+    if !parameters_schema.is_object() {
+        return Err(RustyError::Tool(format!(
+            "tool `{name}` parameters schema must be a JSON object"
+        )));
+    }
+    let schema_bytes = serde_json::to_vec(parameters_schema).map_err(|error| {
+        RustyError::Tool(format!(
+            "tool `{name}` parameters schema did not serialize: {error}"
+        ))
+    })?;
+    if schema_bytes.len() > MAX_TOOL_SCHEMA_BYTES {
+        return Err(RustyError::Tool(format!(
+            "tool `{name}` parameters schema exceeds {MAX_TOOL_SCHEMA_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 /// An invocable tool.

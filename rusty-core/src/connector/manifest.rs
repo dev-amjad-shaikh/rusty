@@ -1102,7 +1102,9 @@ fn validate_slot_name(name: &str) -> Result<()> {
 
 /// Shared rule for human-facing text: trimmed, control-free, bounded.
 /// `allow_empty` distinguishes notes (may be empty) from primary fields.
-fn validate_text_field(
+/// `pub(crate)` so the composer plane validates drafted tool definitions
+/// against exactly this rule instead of restating it.
+pub(crate) fn validate_text_field(
     field: &str,
     value: &str,
     max_bytes: usize,
