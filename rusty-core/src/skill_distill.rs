@@ -171,9 +171,10 @@ pub struct DistillRequest {
     pub corrections: Vec<Correction>,
 
     /// The run-facing binding declaration, when the distiller declares one
-    /// — carried opaquely into [`CandidateContent::Skill`]'s `binding`
-    /// member while the binding schema is the skills plane's.
-    pub binding: Option<Value>,
+    /// — typed as the skills plane's [`crate::skills::SkillBinding`] and
+    /// validated fail-closed at distillation (`SkillBinding::validate`), so
+    /// a malformed binding never becomes a candidate.
+    pub binding: Option<crate::skills::SkillBinding>,
 
     /// The distiller's identity (mandatory — journaled with creation).
     pub distilled_by: ProvenanceAuthor,
@@ -320,6 +321,11 @@ pub fn distill_skill(request: &DistillRequest) -> Result<DistilledSkill, SkillDi
         return Err(SkillDistillError::EmptyEvidence);
     }
     check_correction_targets(request)?;
+    if let Some(binding) = &request.binding {
+        binding
+            .validate()
+            .map_err(|error| SkillDistillError::Candidate(error.to_string()))?;
+    }
 
     let package = SkillPackage::from_markdown(&render_skill_md(request))?;
     let scan = scan_package(&package);

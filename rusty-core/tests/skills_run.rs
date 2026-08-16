@@ -31,6 +31,7 @@ use rusty_agent_runtime::context::{
     ContextInputs, ContextPipeline, ContextPolicy, SectionKind, SectionPolicy,
     CONTEXT_POLICY_SCHEMA_VERSION,
 };
+use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::journal::{Clock, Journal};
 use rusty_agent_runtime::learn::{
     CandidateId, PromotionAuthority, PromotionDecision, PromotionReceipt, RollbackReceipt,
@@ -48,7 +49,6 @@ use rusty_agent_runtime::skills::{
     SKILL_TOOL_GATE_KIND,
 };
 use rusty_agent_runtime::tool::{Tool, ToolRegistry};
-use rusty_agent_runtime::error::Result;
 
 // ---------- golden-file machinery (the tests/learn.rs discipline) ----------
 
@@ -87,9 +87,8 @@ fn skill_md(name: &str, description: &str, body: &str) -> String {
 }
 
 fn register(registry: &mut SkillRegistry, name: &str, body: &str) -> SkillMetadata {
-    let package =
-        SkillPackage::from_markdown(&skill_md(name, &format!("The {name} skill."), body))
-            .expect("valid package");
+    let package = SkillPackage::from_markdown(&skill_md(name, &format!("The {name} skill."), body))
+        .expect("valid package");
     registry
         .register(
             package,
@@ -172,7 +171,11 @@ fn skill_registry() -> (SkillRegistry, SkillMetadata, SkillMetadata, SkillMetada
         "web-research",
         "Search, then summarize with citations.",
     );
-    let drafting = register(&mut registry, "email-drafting", "Draft a reply, then confirm.");
+    let drafting = register(
+        &mut registry,
+        "email-drafting",
+        "Draft a reply, then confirm.",
+    );
     (registry, research_v1, research_v2, drafting)
 }
 
@@ -180,12 +183,13 @@ fn catalog(research_v2: &SkillMetadata, drafting: &SkillMetadata) -> Vec<SkillCa
     vec![
         catalog_entry(
             research_v2.clone(),
-            binding(&["web", "research"], &["web.search"], Some("open-ended lookup tasks")),
+            binding(
+                &["web", "research"],
+                &["web.search"],
+                Some("open-ended lookup tasks"),
+            ),
         ),
-        catalog_entry(
-            drafting.clone(),
-            binding(&["email"], &["email.send"], None),
-        ),
+        catalog_entry(drafting.clone(), binding(&["email"], &["email.send"], None)),
     ]
 }
 
@@ -195,7 +199,11 @@ fn catalog(research_v2: &SkillMetadata, drafting: &SkillMetadata) -> Vec<SkillCa
 fn golden_skill_binding_shape() {
     assert_golden(
         "skill_binding.json",
-        &binding(&["web", "research"], &["web.search"], Some("open-ended lookup tasks")),
+        &binding(
+            &["web", "research"],
+            &["web.search"],
+            Some("open-ended lookup tasks"),
+        ),
     );
 }
 
@@ -421,7 +429,11 @@ async fn gate_refusal_journals_as_an_ordinary_tool_call() {
 
 // ---------- version-pointer authority: promote / rollback, byte-exact ----------
 
-fn promotion(candidate: &CandidateId, surface: &SurfaceKey, previous: Option<CandidateId>) -> PromotionReceipt {
+fn promotion(
+    candidate: &CandidateId,
+    surface: &SurfaceKey,
+    previous: Option<CandidateId>,
+) -> PromotionReceipt {
     PromotionReceipt {
         candidate_id: candidate.clone(),
         surface: surface.clone(),
@@ -524,8 +536,11 @@ async fn promotion_and_rollback_change_the_bound_revision_byte_exactly() {
 
     // Promote v1: the pipeline binds revision 1.
     let pointer = pointer.promoted(&promotion(&cand_v1, &surface, None));
-    let assembly_v1 =
-        assemble_with_pointer(&registry, &pointer, &v2 /* catalog latest */, &drafting, &pin).await;
+    let assembly_v1 = assemble_with_pointer(
+        &registry, &pointer, &v2, /* catalog latest */
+        &drafting, &pin,
+    )
+    .await;
     let bytes_v1 = serde_json::to_string(&assembly_v1).unwrap();
     let skills_report = assembly_v1
         .manifest
@@ -588,8 +603,8 @@ async fn pipeline_composition_assembles_and_pins_the_skills_section() {
 
     // Admission: the pointer binds v2; the shortlist ranks the catalog;
     // the section entries carry tier-1 for both and tier-2 for the active.
-    let pointer = VersionPointer::new(surface.clone())
-        .promoted(&promotion(&cand_v2, &surface, None));
+    let pointer =
+        VersionPointer::new(surface.clone()).promoted(&promotion(&cand_v2, &surface, None));
     let active_skill = resolve_active_skill(&registry, &pointer, "run-w4a", &pin)
         .unwrap()
         .expect("promoted skill binds");

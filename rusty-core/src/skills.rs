@@ -251,9 +251,8 @@ impl SkillBinding {
 /// package content address (the skill plane's own digest — candidate
 /// identity and package identity are one hash), and the binding.
 ///
-/// This is the seam between this module and the parallel stream's
-/// `learn.rs` delta: when `CandidateContent::Skill { name, content_hash,
-/// binding }` lands, the caller's pin function is one match arm.
+/// [`skill_pin`] is the extraction: one match arm over
+/// `CandidateContent::Skill { name, content_hash, binding }`.
 pub struct SkillPin {
     /// The skill name (the registry key).
     pub name: String,
@@ -261,6 +260,25 @@ pub struct SkillPin {
     pub content_hash: String,
     /// The run-facing binding.
     pub binding: SkillBinding,
+}
+
+/// The typed extraction [`SkillPin`]'s docs promise: one match arm over a
+/// candidate's content, `None` for every non-skill candidate. A skill
+/// candidate without a declared binding pins the default (empty) binding —
+/// no trigger tags, no declared tools, nothing narrowed.
+pub fn skill_pin(candidate: &crate::learn::Candidate) -> Option<SkillPin> {
+    match &candidate.content {
+        crate::learn::CandidateContent::Skill {
+            name,
+            content_hash,
+            binding,
+        } => Some(SkillPin {
+            name: name.clone(),
+            content_hash: content_hash.clone(),
+            binding: binding.clone().unwrap_or_default(),
+        }),
+        _ => None,
+    }
 }
 
 // --------------------------------------------------------------------- //
@@ -382,8 +400,8 @@ impl std::fmt::Debug for ActiveSkills {
 /// latest pointer is authorship history, never an activation fallback.
 ///
 /// `pin` maps a candidate id to its skill pin — the caller's half of the
-/// contract with the candidate store (one match arm over
-/// `CandidateContent::Skill` once the wave's `learn.rs` delta lands).
+/// contract with the candidate store: [`skill_pin`] applied to the store's
+/// candidate lookup.
 pub fn resolve_active_skill(
     registry: &SkillRegistry,
     pointer: &VersionPointer,
@@ -407,7 +425,10 @@ pub fn resolve_active_skill(
         });
     }
     let version = registry
-        .get_version(&pin.name, SkillVersionSelector::ContentHash(pin.content_hash.clone()))
+        .get_version(
+            &pin.name,
+            SkillVersionSelector::ContentHash(pin.content_hash.clone()),
+        )
         .ok_or_else(|| SkillsError::VersionNotRegistered {
             name: pin.name.clone(),
             content_hash: pin.content_hash.clone(),
@@ -657,7 +678,10 @@ pub fn skill_section_entries(
 ) -> std::result::Result<Vec<SkillSectionEntry>, SkillsError> {
     let body_of = |name: &str, content_hash: &str| {
         registry
-            .get_version(name, SkillVersionSelector::ContentHash(content_hash.to_owned()))
+            .get_version(
+                name,
+                SkillVersionSelector::ContentHash(content_hash.to_owned()),
+            )
             .map(|version| version.body().to_owned())
             .ok_or_else(|| SkillsError::Undisclosable {
                 name: name.to_owned(),
@@ -678,7 +702,11 @@ pub fn skill_section_entries(
                 active_skill.content_hash.clone(),
                 Some(body_of(&active_skill.name, &active_skill.content_hash)?),
             ),
-            None => (ranked.revision.to_string(), ranked.content_hash.clone(), None),
+            None => (
+                ranked.revision.to_string(),
+                ranked.content_hash.clone(),
+                None,
+            ),
         };
         entries.push(SkillSectionEntry {
             name: ranked.name.clone(),
@@ -815,7 +843,10 @@ impl SkillGateTool {
     /// [`crate::tool_select::ValidatingTool::wrap_registry`]; compose the
     /// two wrappers for validation AND skill narrowing over the narrowed
     /// registry.
-    pub fn wrap_registry(registry: &crate::tool::ToolRegistry, active: ActiveSkills) -> crate::tool::ToolRegistry {
+    pub fn wrap_registry(
+        registry: &crate::tool::ToolRegistry,
+        active: ActiveSkills,
+    ) -> crate::tool::ToolRegistry {
         let mut names: Vec<&str> = registry.names().collect();
         names.sort_unstable();
         let mut wrapped = crate::tool::ToolRegistry::new();
@@ -879,8 +910,9 @@ mod tests {
     }
 
     fn register(registry: &mut SkillRegistry, name: &str, body: &str) -> SkillMetadata {
-        let package = SkillPackage::from_markdown(&skill_md(name, &format!("The {name} skill."), body))
-            .expect("valid package");
+        let package =
+            SkillPackage::from_markdown(&skill_md(name, &format!("The {name} skill."), body))
+                .expect("valid package");
         registry
             .register(
                 package,
@@ -984,7 +1016,11 @@ mod tests {
         assert_eq!(outcome.selected.len(), 2);
         assert_eq!(outcome.ranking.len(), 6);
         // Below the cutoff, selection is identity.
-        let identity = select_skills(&features, &catalog[..3], &SkillSelectionPolicy { cutoff: 3, k: 2 });
+        let identity = select_skills(
+            &features,
+            &catalog[..3],
+            &SkillSelectionPolicy { cutoff: 3, k: 2 },
+        );
         assert_eq!(identity.selected.len(), 3);
     }
 
@@ -992,7 +1028,11 @@ mod tests {
     fn unavailable_tools_exclude_before_scoring() {
         let mut registry = SkillRegistry::new();
         let metadata = register(&mut registry, "deployer", "Deploys.");
-        let catalog = vec![catalog_entry(metadata, &["deploy"], &["cloud.deploy", "cloud.logs"])];
+        let catalog = vec![catalog_entry(
+            metadata,
+            &["deploy"],
+            &["cloud.deploy", "cloud.logs"],
+        )];
         let features = SkillSelectionFeatures {
             task_tags: vec!["deploy".into()],
             available_tools: Some(BTreeSet::from(["cloud.deploy".to_string()])),
@@ -1069,7 +1109,10 @@ mod tests {
         }]);
         let entries = skill_section_entries(&registry, &selection, &active).unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(entries[0].body.is_none(), "alpha is shortlisted, not active");
+        assert!(
+            entries[0].body.is_none(),
+            "alpha is shortlisted, not active"
+        );
         assert_eq!(entries[1].body.as_deref(), Some("Beta instructions.\n"));
         assert_eq!(entries[1].revision, "1");
     }
@@ -1088,7 +1131,11 @@ mod tests {
             task_tags: vec!["web".into()],
             available_tools: None,
         };
-        let selection = select_skills(&features, &catalog, &SkillSelectionPolicy { cutoff: 1, k: 1 });
+        let selection = select_skills(
+            &features,
+            &catalog,
+            &SkillSelectionPolicy { cutoff: 1, k: 1 },
+        );
         assert_eq!(selection.selected.len(), 1);
         let active = ActiveSkillSet::new(vec![ActiveSkill {
             name: "beta".into(),
@@ -1186,6 +1233,9 @@ mod tests {
         wrong.active = Some(candidate.clone());
         let err = resolve_active_skill(&registry, &wrong, "run-1", &pin_fn).unwrap_err();
         assert!(matches!(err, SkillsError::SurfaceMismatch { .. }));
+        // The promote/rollback divergence case (two revisions, byte-exact
+        // rebinding) lives in tests/skills_run.rs's
+        // `promotion_and_rollback_change_the_bound_revision_byte_exactly`.
         let _ = v1;
     }
 }

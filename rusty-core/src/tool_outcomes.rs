@@ -122,9 +122,7 @@ fn argument_shape(value: &Value) -> Value {
                 .map(|(key, item)| (key.clone(), argument_shape(item)))
                 .collect(),
         ),
-        Value::Array(items) => {
-            Value::Array(items.iter().map(argument_shape).collect())
-        }
+        Value::Array(items) => Value::Array(items.iter().map(argument_shape).collect()),
         Value::Null => Value::String("null".to_owned()),
         Value::Bool(_) => Value::String("boolean".to_owned()),
         Value::Number(number) if number.is_i64() || number.is_u64() => {
@@ -274,7 +272,10 @@ enum CallOutcome {
 /// [`crate::replay::tool_call_request`] shape is an inconsistent journal
 /// and fails loud — the [`build_utility_index`](crate::memory_tiers::build_utility_index)
 /// rule.
-pub fn build_outcome_index(runs: &[&JournalSnapshot], stamp: DateTime<Utc>) -> Result<ToolOutcomeIndex> {
+pub fn build_outcome_index(
+    runs: &[&JournalSnapshot],
+    stamp: DateTime<Utc>,
+) -> Result<ToolOutcomeIndex> {
     let mut tools: BTreeMap<String, ToolRollup> = BTreeMap::new();
     for snapshot in runs {
         for event in &snapshot.events {
@@ -342,7 +343,9 @@ pub fn build_outcome_index(runs: &[&JournalSnapshot], stamp: DateTime<Utc>) -> R
     }
     for rollup in tools.values_mut() {
         rollup.latencies_ms.sort_unstable();
-        rollup.violations.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.rule.cmp(&b.rule)));
+        rollup
+            .violations
+            .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.rule.cmp(&b.rule)));
     }
     Ok(ToolOutcomeIndex { stamp, tools })
 }

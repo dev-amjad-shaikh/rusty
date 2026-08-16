@@ -68,9 +68,13 @@ use rusty_agent_runtime::record::{Effect, EventStatus, PayloadRef, RunEvent, Run
 use rusty_agent_runtime::replay::{
     ExactReplay, RecordingChatModel, RecordingTool, ReplayingChatModel, ReplayingTool,
 };
-use rusty_agent_runtime::skill::{SkillRegistry, SkillSource, SkillVersion, SkillVersionSelector};
+use rusty_agent_runtime::skill::{SkillRegistry, SkillSource, SkillVersion};
 use rusty_agent_runtime::skill_distill::{
     distill_skill, trajectory_steps, DistillRequest, DistilledSkill, SkillDistillError,
+};
+use rusty_agent_runtime::skills::{
+    resolve_active_skill, select_skills, skill_pin, skill_section_entries, ActiveSkillSet,
+    SkillBinding, SkillCatalogEntry, SkillSelectionFeatures, SkillSelectionPolicy,
 };
 use rusty_agent_runtime::tool::Tool;
 
@@ -355,19 +359,30 @@ fn a_scan_denial_never_becomes_a_candidate() {
 }
 
 #[test]
-fn binding_declaration_rides_the_candidate_opaque_and_optional() {
+fn binding_declaration_rides_the_candidate_typed_and_optional() {
     let mut request = fixture_request();
-    request.binding = Some(json!({
-        "trigger_tags": ["refund", "support"],
-        "tools": ["issue_refund"],
-    }));
+    request.binding = Some(SkillBinding {
+        trigger_tags: vec!["refund".into(), "support".into()],
+        tools: vec!["issue_refund".into()],
+        ..Default::default()
+    });
     let with_binding = distill_skill(&request).unwrap();
     match &with_binding.candidate.content {
         CandidateContent::Skill { binding, .. } => {
-            assert!(binding.is_some(), "a declared binding rides the candidate");
+            let binding = binding
+                .as_ref()
+                .expect("a declared binding rides the candidate, typed");
+            assert_eq!(binding.trigger_tags, vec!["refund", "support"]);
+            assert_eq!(binding.tools, vec!["issue_refund"]);
         }
         other => panic!("expected a skill candidate, got {other:?}"),
     }
+    // The typed extraction is the consumption seam: the pin carries the
+    // declared binding verbatim.
+    let pin = skill_pin(&with_binding.candidate).expect("a skill candidate pins");
+    assert_eq!(pin.binding.tools, vec!["issue_refund"]);
+    assert_eq!(pin.name, "refund-with-reason");
+
     // The binding is inside the content address — a changed binding is a
     // changed candidate.
     assert_ne!(
@@ -375,6 +390,17 @@ fn binding_declaration_rides_the_candidate_opaque_and_optional() {
         fixture_distilled().candidate.candidate_id
     );
     with_binding.candidate.verify_address().unwrap();
+
+    // A malformed binding fails closed at distillation, never candidacy.
+    let mut bad = fixture_request();
+    bad.binding = Some(SkillBinding {
+        tools: vec!["not a tool".into()],
+        ..Default::default()
+    });
+    assert!(matches!(
+        distill_skill(&bad),
+        Err(SkillDistillError::Candidate(_))
+    ));
 }
 
 // ---------- the gate ----------
@@ -1002,10 +1028,14 @@ async fn release_proof_trajectory_to_promoted_skill_and_back() {
         replay_evidence: vec![defective.clone()],
     };
     let evaluation = evaluator.evaluate(&candidate, &request).await.unwrap();
+    // The replay half's load is carried inside `evaluate` by the sentinel
+    // counts and the event/head-hash equality; here assert the summary's
+    // substance, not its derived predicate.
     assert!(
-        evaluation.replay.is_clean(),
-        "the evidence reproduces itself"
+        evaluation.replay.divergences.is_empty(),
+        "no fixture diverged: the evidence reproduces itself"
     );
+    assert_eq!(evaluation.replay.matched, 1);
     assert_eq!(evaluation.verdict.baseline, Some(0.0));
     assert_eq!(evaluation.verdict.candidate, Some(1.0));
     assert_eq!(evaluation.verdict.delta, Some(1.0));
@@ -1073,26 +1103,50 @@ async fn release_proof_trajectory_to_promoted_skill_and_back() {
     );
 
     // ---------------------------------------------------------------
-    // 6. The improved run: admission resolves the pointer (candidate id
-    //    → content hash → registry version) and assembles with the
-    //    promoted skill. The defect class disappears; the journaled
-    //    model call's manifest pins the promoted revision.
+    // 6. The improved run: admission resolves the pointer THROUGH THE
+    //    SKILLS PLANE'S REAL RESOLVER — `resolve_active_skill` over a
+    //    candidate-store lookup (`skill_pin` is the extraction), then
+    //    `skill_section_entries` assembles the section. The defect class
+    //    disappears; the journaled model call's manifest pins the
+    //    promoted revision.
     // ---------------------------------------------------------------
-    let active = pointer.active.clone().expect("the pointer moved");
-    assert_eq!(active, candidate.candidate_id);
-    let (skill_name, pinned_hash) = match &candidate.content {
-        CandidateContent::Skill {
-            name, content_hash, ..
-        } => (name.clone(), content_hash.clone()),
-        other => panic!("expected a skill candidate, got {other:?}"),
-    };
-    let version = registry
-        .get_version(
-            &skill_name,
-            SkillVersionSelector::ContentHash(pinned_hash.clone()),
-        )
-        .expect("the promoted content hash resolves in the registry");
-    let improved = drive_recording("run-improved", vec![skill_entry(&version)]).await;
+    assert_eq!(
+        pointer.active,
+        Some(candidate.candidate_id.clone()),
+        "the pointer moved"
+    );
+    let candidates: std::collections::BTreeMap<_, _> =
+        [(candidate.candidate_id.clone(), candidate.clone())]
+            .into_iter()
+            .collect();
+    let pin = |id: &rusty_agent_runtime::learn::CandidateId| candidates.get(id).and_then(skill_pin);
+    let resolved = resolve_active_skill(&registry, &pointer, "run-improved", &pin)
+        .expect("the promoted candidate resolves")
+        .expect("the promoted pointer binds the skill");
+    let skill_name = resolved.name.clone();
+    let pinned_hash = resolved.content_hash.clone();
+    let active_set = ActiveSkillSet::new(vec![resolved]);
+    let catalog = vec![SkillCatalogEntry {
+        metadata: registry
+            .get(&skill_name)
+            .expect("the promoted skill is registered")
+            .metadata(),
+        binding: pin(&candidate.candidate_id)
+            .expect("the pin extracts")
+            .binding,
+    }];
+    let selection = select_skills(
+        &SkillSelectionFeatures::default(),
+        &catalog,
+        &SkillSelectionPolicy::default(),
+    );
+    let entries = skill_section_entries(&registry, &selection, &active_set).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(
+        entries[0].body.is_some(),
+        "the active skill's tier-2 body loads"
+    );
+    let improved = drive_recording("run-improved", entries).await;
     assert_eq!(
         defect_count(&improved),
         0,

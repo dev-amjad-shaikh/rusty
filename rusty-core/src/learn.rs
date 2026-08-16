@@ -371,14 +371,13 @@ pub enum CandidateContent {
         /// produces is unbindable at consumption.
         content_hash: String,
         /// The run-facing binding (trigger tags, the declared tool set),
-        /// when the distiller declares one. `Value`-bodied while the
-        /// binding schema lands with the skills plane — the
-        /// [`CandidateContent::ContextPolicy`] precedent (`policy: Value`);
-        /// absent from the wire while unset. The typed parse is the skills
-        /// plane's; the candidate pipeline carries the declaration
-        /// opaquely, the wave-3 discipline for `selection` applied here.
+        /// when the distiller declares one — typed as the skills plane's
+        /// [`crate::skills::SkillBinding`], validated fail-closed at
+        /// distillation, and absent from the wire while unset, so
+        /// binding-free candidates keep their content addresses
+        /// byte-for-byte. Extract it with [`crate::skills::skill_pin`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<Value>,
+        binding: Option<crate::skills::SkillBinding>,
     },
 }
 

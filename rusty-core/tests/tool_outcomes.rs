@@ -54,8 +54,8 @@ use rusty_agent_runtime::tool_outcomes::{
     build_outcome_index, distill_argument_guidance, selection_candidate, ToolOutcomeIndex,
 };
 use rusty_agent_runtime::tool_select::{
-    argument_validation_refusal, manifests_for_registry, parse_argument_validation_refusal,
-    select, ArgumentViolation, SelectionFeatures, ToolSelectionOverlay, ValidatingTool,
+    argument_validation_refusal, manifests_for_registry, parse_argument_validation_refusal, select,
+    ArgumentViolation, SelectionFeatures, ToolSelectionOverlay, ValidatingTool,
 };
 
 // ---------- golden-file machinery (the tests/learn.rs discipline) ----------
@@ -394,14 +394,20 @@ fn incomplete_journals_fail_loud_and_interrupted_calls_are_excluded() {
     // silent skip.
     let journal = Journal::new("run-bad", "thread-1", Clock::logical(CLOCK_START_MS, 1));
     journal.record(
-        EventDraft::new(RunEventKind::ToolCall, Effect::ReadOnly)
-            .input(tool_call_request("search.legacy", &json!({"query": "rust"}))),
+        EventDraft::new(RunEventKind::ToolCall, Effect::ReadOnly).input(tool_call_request(
+            "search.legacy",
+            &json!({"query": "rust"}),
+        )),
     );
     let snapshot = journal.snapshot();
     assert!(build_outcome_index(&[&snapshot], ts(STAMP_MS)).is_err());
 
     // A suspended run's in-flight call is not terminal evidence.
-    let journal = Journal::new("run-suspended", "thread-1", Clock::logical(CLOCK_START_MS, 1));
+    let journal = Journal::new(
+        "run-suspended",
+        "thread-1",
+        Clock::logical(CLOCK_START_MS, 1),
+    );
     journal_call(
         &journal,
         "search.legacy",
@@ -637,7 +643,9 @@ fn selection_overlay_promotes_through_the_gate_and_rolls_back_byte_exactly() {
     // Re-resolution by id returns the exact bytes that served before B.
     let redistilled = overlay_candidate(&["search"], 1_750_200_002_000);
     assert_eq!(redistilled.candidate_id, restored_id);
-    let restored_bytes = store.get(restored_id.as_str()).expect("the restored id resolves");
+    let restored_bytes = store
+        .get(restored_id.as_str())
+        .expect("the restored id resolves");
     assert_eq!(*restored_bytes, serde_json::to_vec(&redistilled).unwrap());
     let restored: Candidate = serde_json::from_slice(restored_bytes).unwrap();
     restored.verify_address().unwrap();
@@ -668,7 +676,9 @@ impl Tool for LegacySearch {
         Effect::ReadOnly
     }
     async fn call(&self, args: Value) -> Result<Value> {
-        Ok(json!({"results": ["legacy"], "query": args.get("query").cloned().unwrap_or(Value::Null)}))
+        Ok(
+            json!({"results": ["legacy"], "query": args.get("query").cloned().unwrap_or(Value::Null)}),
+        )
     }
 }
 
@@ -707,7 +717,10 @@ fn base_registry() -> ToolRegistry {
 /// a refusal the script retries once, unchanged — the defect does not
 /// self-repair — then completes with an answer either way. Returns the
 /// journal and whether the run completed.
-async fn scripted_run(run_id: &str, overlays: &BTreeMap<String, ToolSelectionOverlay>) -> (Journal, bool) {
+async fn scripted_run(
+    run_id: &str,
+    overlays: &BTreeMap<String, ToolSelectionOverlay>,
+) -> (Journal, bool) {
     let journal = Journal::new(run_id, "thread-1", Clock::logical(CLOCK_START_MS, 1));
     let registry = base_registry();
     let manifests = manifests_for_registry(&registry, overlays).unwrap();
@@ -719,7 +732,9 @@ async fn scripted_run(run_id: &str, overlays: &BTreeMap<String, ToolSelectionOve
     let shortlist = select(&features, &manifests, 10);
     let chosen = shortlist.selected[0].name.clone();
 
-    let narrowed = registry.restricted_to(std::slice::from_ref(&chosen)).unwrap();
+    let narrowed = registry
+        .restricted_to(std::slice::from_ref(&chosen))
+        .unwrap();
     let validated = ValidatingTool::wrap_registry(&narrowed);
     let tool = validated.get(&chosen).unwrap();
     let recording = RecordingTool::new(tool, journal.clone(), "parent-event").node("tools");
@@ -793,7 +808,9 @@ async fn a_promoted_overlay_reduces_invalid_calls_at_non_inferior_completion() {
     // 4. The promoted run resolves its overlays from the promoted
     //    candidate's content — the pointer's artifact, not a side channel.
     let CandidateContent::ToolContract {
-        tool, selection: Some(overlay), ..
+        tool,
+        selection: Some(overlay),
+        ..
     } = &candidate.content
     else {
         panic!("the candidate carries the overlay");
@@ -812,7 +829,10 @@ async fn a_promoted_overlay_reduces_invalid_calls_at_non_inferior_completion() {
     let v2 = promoted_index.rollup_for("search.v2").unwrap();
     assert_eq!(v2.stats.calls, 1);
     assert_eq!(v2.stats.success_bps(), Some(10_000));
-    assert_eq!(promoted_completed, baseline_completed, "non-inferior completion");
+    assert_eq!(
+        promoted_completed, baseline_completed,
+        "non-inferior completion"
+    );
 }
 
 // ---------- goldens ----------
@@ -850,7 +870,10 @@ fn pre_wave_tool_contract_wire_shape_is_byte_identical() {
     candidate.verify_address().unwrap();
     match &candidate.content {
         CandidateContent::ToolContract { selection, .. } => {
-            assert!(selection.is_none(), "the pre-wave shape carries no selection");
+            assert!(
+                selection.is_none(),
+                "the pre-wave shape carries no selection"
+            );
         }
         other => panic!("expected a tool_contract candidate, got {other:?}"),
     }
