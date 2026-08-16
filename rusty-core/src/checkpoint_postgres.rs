@@ -72,8 +72,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::checkpoint::{
-    encode_delta, fold_chain, materialize_all, Checkpoint, Checkpointer, DeltaEncoding, DeltaHead,
-    DeltaPolicy,
+    encode_delta, ensure_supported_format, fold_chain, materialize_all, Checkpoint, Checkpointer,
+    DeltaEncoding, DeltaHead, DeltaPolicy,
 };
 use crate::error::{Result, RustyError};
 use crate::journal::ArtifactStore;
@@ -283,6 +283,16 @@ impl CheckpointRow {
             .map(serde_json::from_value::<CheckpointHeader>)
             .transpose()?
             .unwrap_or_default();
+        // The stamped format version is enforced on the way out, exactly as
+        // the file backend enforces it on the way in: a row written by a
+        // newer format fails closed, naming found/supported/direction.
+        ensure_supported_format(
+            &header,
+            &format!(
+                "checkpoint `{}` (thread `{}` in `{TABLE_NAME}`)",
+                self.checkpoint_id, self.thread_id
+            ),
+        )?;
         let journal_ref = self
             .journal_ref
             .map(serde_json::from_value::<JournalRef>)
@@ -977,6 +987,34 @@ mod tests {
         let back = row.into_checkpoint().unwrap();
         assert_eq!(back.header, CheckpointHeader::default());
         assert_eq!(back.journal_ref, None);
+    }
+
+    /// A row whose stamped header names a format version newer than this
+    /// build supports is refused on decode — the found version, the
+    /// supported version, and the upgrade direction all named, matching the
+    /// file backend's refusal.
+    #[test]
+    fn row_with_a_newer_format_version_is_refused() {
+        let mut checkpoint = sample_checkpoint();
+        checkpoint.header.format_version = crate::record::CURRENT_FORMAT_VERSION + 1;
+        let row = CheckpointRow::from_checkpoint(&checkpoint).unwrap();
+
+        let err = row.into_checkpoint().unwrap_err().to_string();
+        assert!(
+            err.contains(&(crate::record::CURRENT_FORMAT_VERSION + 1).to_string()),
+            "names the found version: {err}"
+        );
+        assert!(
+            err.contains(&format!(
+                "version {}",
+                crate::record::CURRENT_FORMAT_VERSION
+            )),
+            "names the supported version: {err}"
+        );
+        assert!(
+            err.contains("upgrade the runtime"),
+            "names the upgrade direction: {err}"
+        );
     }
 
     /// The W4 delta-chain link round-trips through the row mapping; `NULL`

@@ -230,6 +230,7 @@ pub mod learn;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
+pub mod meter;
 pub mod middleware;
 pub mod node;
 pub mod plugin;
@@ -241,9 +242,11 @@ pub mod record;
 pub mod registry;
 pub mod remote;
 pub mod replay;
+pub mod session_query;
 pub mod skill;
 pub mod state;
 pub mod team_trace;
+pub mod telemetry;
 pub mod tool;
 pub mod twin;
 #[cfg(feature = "wasm")]
@@ -351,6 +354,10 @@ pub mod prelude {
         TokenAccounting, ValidityWindow, DEFAULT_TOKEN_MARGIN_PERCENT, MEMORY_SCHEMA_VERSION,
         TOKEN_BYTES_PER_ESTIMATE,
     };
+    pub use crate::meter::{
+        meter_journal, CostEstimate, ModelMeter, RunMeter, TokenTotals, ToolClassTotals,
+        UNREPORTED_MODEL,
+    };
     pub use crate::middleware::{
         instantiate_composition, Decision, InterceptPoint, Middleware, MiddlewareChain,
         MiddlewareChatModel, ModelCall, NodeCall, Rejection, RequestLogger, ToolCallBlocklist,
@@ -392,8 +399,19 @@ pub mod prelude {
         ReplayParams, ReplaySource, ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
         FIXTURE_FORMAT_VERSION,
     };
+    pub use crate::session_query::{
+        EventTrace, FileJournalQuery, InMemoryJournalQuery, JournalQuery, SearchField, SearchHit,
+        SessionSearch, SessionSearchTool, SessionTraceTool, MAX_EXCERPT_CHARS, MAX_QUERY_BYTES,
+        MAX_READ_EVENTS, MAX_SEARCH_RESULTS, MAX_TRACE_EVENTS,
+    };
     pub use crate::state::{Reducer, State, StateSpec};
     pub use crate::team_trace::{TeamTrace, TeamTraceNode};
+    pub use crate::telemetry::{
+        redactor_fn, severity_of, AppendOutcome, InMemoryLedger, JsonlLedger, LedgerRecord,
+        MirrorCursor, MirrorReport, PayloadDrop, PayloadHasher, RedactionAction, RedactionMark,
+        Redactor, RedactorFn, Severity, SeverityFloor, TelemetryLedger, TelemetryMirror,
+        TELEMETRY_FORMAT_VERSION,
+    };
     pub use crate::tool::{Tool, ToolExecutor, ToolRegistry};
     pub use crate::twin::{
         CounterfactualBranch, CounterfactualFork, DecisionContext, FaultAnchor, FaultInjection,

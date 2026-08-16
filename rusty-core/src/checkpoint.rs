@@ -31,6 +31,16 @@
 //! [`JsonFileCheckpointer`] and the Postgres backend opt in;
 //! [`InMemoryCheckpointer`] does not — its `put` is a sub-2 µs move, so a
 //! delta would buy nothing.
+//!
+//! # Format-versioned headers
+//!
+//! Every persisted checkpoint carries its [`CheckpointHeader`] with the
+//! stamped `format_version`. Load paths enforce it
+//! ([`ensure_supported_format`]): a checkpoint written by a newer format
+//! version is refused with a message naming the found version, the
+//! supported version, and the upgrade direction — never silently
+//! reinterpreted. Older versions load under the additive-evolution
+//! contract, so the refusal is one-directional by design.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -41,7 +51,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, RustyError};
-use crate::record::{CheckpointHeader, JournalRef};
+use crate::record::{CheckpointHeader, JournalRef, CURRENT_FORMAT_VERSION};
 use crate::state::State;
 
 /// A versioned snapshot of one thread's state at a super-step boundary.
@@ -417,6 +427,48 @@ pub(crate) fn materialize_all(raw: Vec<Checkpoint>) -> Vec<Checkpoint> {
     out
 }
 
+/// Refuse a checkpoint whose stamped format version this build cannot
+/// interpret.
+///
+/// The envelope evolves additively (serde defaults; see [`CheckpointHeader`]),
+/// so an *older* version is never a mismatch — it deserializes under the
+/// documented compatibility contract. The refusal case is a checkpoint
+/// written by a *newer* format: loading it would reinterpret bytes this
+/// build does not understand, so the load fails closed, naming the found
+/// version, the supported version, and the upgrade direction. `what`
+/// identifies the artifact in the message (a checkpoint id, a file, a row).
+pub fn ensure_supported_format(header: &CheckpointHeader, what: &str) -> Result<()> {
+    if header.format_version > CURRENT_FORMAT_VERSION {
+        return Err(RustyError::Checkpoint(format!(
+            "{what} was written in checkpoint format version {}, but this build supports \
+             version {CURRENT_FORMAT_VERSION} — upgrade the runtime to read it; newer \
+             checkpoint bytes are never silently reinterpreted",
+            header.format_version
+        )));
+    }
+    Ok(())
+}
+
+/// How a direct checkpoint-file read failed. Internal to the file backend:
+/// scans treat corruption forgivingly but propagate a format refusal —
+/// serving a thread's history while silently skipping a checkpoint this
+/// build cannot interpret would truncate evidence at a format boundary,
+/// which is exactly the failure the stamped header exists to prevent.
+enum ReadFailure {
+    /// IO or JSON corruption: forgiving scans skip the file with a warning.
+    Corrupt(RustyError),
+    /// A stamped format version newer than this build supports.
+    Unsupported(RustyError),
+}
+
+impl ReadFailure {
+    fn into_error(self) -> RustyError {
+        match self {
+            ReadFailure::Corrupt(e) | ReadFailure::Unsupported(e) => e,
+        }
+    }
+}
+
 /// The checkpointer interface (the LangGraph `BaseCheckpointSaver` analog).
 ///
 /// Implementations must be safe to share across tasks (`Send + Sync`) and
@@ -618,7 +670,11 @@ impl Checkpointer for InMemoryCheckpointer {
 /// empty list, a missing or corrupt `latest` pointer falls back to scanning
 /// the checkpoint files, and individual corrupt checkpoint files are skipped
 /// during scans. Genuine IO failures surface as
-/// [`RustyError::Checkpoint`].
+/// [`RustyError::Checkpoint`]. One deliberate exception: a checkpoint
+/// stamped with a newer format version than this build supports is
+/// **refused** ([`ensure_supported_format`]), never skipped — skipping it
+/// would serve an older checkpoint as "latest" while evidence this build
+/// cannot interpret sits in the same directory.
 ///
 /// # Delta checkpoints (R0.7 wave 4)
 ///
@@ -738,18 +794,28 @@ impl JsonFileCheckpointer {
         Ok(())
     }
 
-    /// Read and deserialize one checkpoint file, mapping IO and JSON errors
-    /// to [`RustyError::Checkpoint`].
-    async fn read_checkpoint(path: &PathBuf) -> Result<Checkpoint> {
+    /// Read and deserialize one checkpoint file, enforcing the stamped
+    /// format version ([`ensure_supported_format`]): corruption maps to
+    /// [`ReadFailure::Corrupt`], a newer format to [`ReadFailure::Unsupported`].
+    async fn read_checkpoint(path: &PathBuf) -> std::result::Result<Checkpoint, ReadFailure> {
         let bytes = tokio::fs::read(path).await.map_err(|e| {
-            RustyError::Checkpoint(format!(
+            ReadFailure::Corrupt(RustyError::Checkpoint(format!(
                 "failed to read checkpoint file `{}`: {e}",
                 path.display()
-            ))
+            )))
         })?;
-        serde_json::from_slice(&bytes).map_err(|e| {
-            RustyError::Checkpoint(format!("corrupt checkpoint file `{}`: {e}", path.display()))
-        })
+        let checkpoint: Checkpoint = serde_json::from_slice(&bytes).map_err(|e| {
+            ReadFailure::Corrupt(RustyError::Checkpoint(format!(
+                "corrupt checkpoint file `{}`: {e}",
+                path.display()
+            )))
+        })?;
+        ensure_supported_format(
+            &checkpoint.header,
+            &format!("checkpoint `{}` (file `{}`)", checkpoint.id, path.display()),
+        )
+        .map_err(ReadFailure::Unsupported)?;
+        Ok(checkpoint)
     }
 
     /// Load every parseable `*.json` checkpoint in a thread directory,
@@ -788,9 +854,13 @@ impl JsonFileCheckpointer {
             }
             match Self::read_checkpoint(&path).await {
                 Ok(cp) => checkpoints.push(cp),
+                // A format refusal is never skipped: listing the thread
+                // without the unreadable checkpoint would silently truncate
+                // its history at the format boundary.
+                Err(ReadFailure::Unsupported(e)) => return Err(e),
                 // Graceful degradation: one corrupt file must not poison the
                 // whole thread's history.
-                Err(e) => {
+                Err(ReadFailure::Corrupt(e)) => {
                     tracing::warn!(
                         thread_id = %thread_id,
                         path = %path.display(),
@@ -816,7 +886,12 @@ impl JsonFileCheckpointer {
                     let path = self.checkpoint_path(thread_id, id);
                     match Self::read_checkpoint(&path).await {
                         Ok(cp) => return Ok(Some(cp)),
-                        Err(e) => tracing::warn!(
+                        // A format refusal is terminal, not a fallback
+                        // trigger: scanning would either hit the same refusal
+                        // or, worse, settle on an older checkpoint as
+                        // "latest" while a newer-format one exists.
+                        Err(ReadFailure::Unsupported(e)) => return Err(e),
+                        Err(ReadFailure::Corrupt(e)) => tracing::warn!(
                             thread_id = %thread_id,
                             path = %path.display(),
                             error = %e,
@@ -863,7 +938,11 @@ impl JsonFileCheckpointer {
                 )));
             }
             let path = self.checkpoint_path(thread_id, &base_id);
-            chain.push(Self::read_checkpoint(&path).await?);
+            chain.push(
+                Self::read_checkpoint(&path)
+                    .await
+                    .map_err(ReadFailure::into_error)?,
+            );
         }
         chain.reverse();
         Ok(chain)
@@ -1819,5 +1898,84 @@ mod tests {
         assert_eq!(by_step[&0].state, evolving_state(0, "m"));
         assert_eq!(by_step[&1].state, evolving_state(1, "m"));
         assert!(materialized.iter().all(|c| c.base.is_none()));
+    }
+
+    #[tokio::test]
+    async fn json_file_refuses_a_newer_format_version() {
+        let tmp = TestDir::new();
+        let store = JsonFileCheckpointer::new(tmp.0.clone());
+
+        let good = cp("t1", 0);
+        store.put(good).await.unwrap();
+
+        // A checkpoint file stamped by a newer format, written by hand next
+        // to the good one (and pointed at by `latest`, as a newer binary's
+        // put would leave it).
+        let mut newer = cp("t1", 1);
+        newer.header.format_version = CURRENT_FORMAT_VERSION + 1;
+        let bytes = serde_json::to_vec_pretty(&newer).unwrap();
+        std::fs::write(
+            tmp.0.join("t1").join(format!("{}.json", newer.id)),
+            &bytes,
+        )
+        .unwrap();
+        std::fs::write(tmp.0.join("t1").join("latest"), &newer.id).unwrap();
+
+        for outcome in [
+            store.get_latest("t1").await.unwrap_err().to_string(),
+            store.list("t1").await.unwrap_err().to_string(),
+            store
+                .get_by_id("t1", &newer.id)
+                .await
+                .unwrap_err()
+                .to_string(),
+        ] {
+            assert!(
+                outcome.contains(&(CURRENT_FORMAT_VERSION + 1).to_string()),
+                "names the found version: {outcome}"
+            );
+            assert!(
+                outcome.contains(&format!("version {CURRENT_FORMAT_VERSION}")),
+                "names the supported version: {outcome}"
+            );
+            assert!(
+                outcome.contains("upgrade the runtime"),
+                "names the upgrade direction: {outcome}"
+            );
+        }
+        // The good checkpoint is not deleted or shadowed — the thread is
+        // simply unreadable until the runtime is upgraded.
+    }
+
+    #[tokio::test]
+    async fn json_file_loads_an_older_format_version_under_the_additive_contract() {
+        let tmp = TestDir::new();
+        let store = JsonFileCheckpointer::new(tmp.0.clone());
+
+        // A header stamped by an older writer: older versions deserialize
+        // under the additive-evolution contract, so the load succeeds.
+        let mut older = cp("t1", 0);
+        older.header.format_version = CURRENT_FORMAT_VERSION - 1;
+        let id = older.id.clone();
+        std::fs::create_dir_all(tmp.0.join("t1")).unwrap();
+        std::fs::write(
+            tmp.0.join("t1").join(format!("{id}.json")),
+            serde_json::to_vec_pretty(&older).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = store.get_by_id("t1", &id).await.unwrap().unwrap();
+        assert_eq!(loaded.header.format_version, CURRENT_FORMAT_VERSION - 1);
+    }
+
+    #[test]
+    fn ensure_supported_format_refuses_only_newer_versions() {
+        let mut header = CheckpointHeader::default();
+        assert!(ensure_supported_format(&header, "checkpoint `x`").is_ok());
+        header.format_version = 0;
+        assert!(ensure_supported_format(&header, "checkpoint `x`").is_ok());
+        header.format_version = CURRENT_FORMAT_VERSION + 1;
+        let err = ensure_supported_format(&header, "checkpoint `x`").unwrap_err();
+        assert!(err.to_string().contains("checkpoint `x`"));
     }
 }
