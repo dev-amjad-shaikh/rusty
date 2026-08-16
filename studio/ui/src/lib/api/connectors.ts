@@ -20,6 +20,65 @@ const searchAuthSchema = z.object({
   credential_slot: z.string().min(1).max(64),
 }).strict();
 
+// The `http_api` provider's wire shapes, mirroring `connector/manifest.rs`:
+// auth is internally tagged on `style`, the body on `type`, methods are
+// UPPERCASE, effects snake_case, and `default_headers` serializes as
+// name/value pairs.
+const httpApiAuthSchema = z.discriminatedUnion("style", [
+  z.object({
+    style: z.literal("bearer_token"),
+    credential_slot: z.string().min(1).max(64),
+  }).strict(),
+  z.object({
+    style: z.literal("basic"),
+    username_slot: z.string().min(1).max(64),
+    password_slot: z.string().min(1).max(64),
+  }).strict(),
+  z.object({
+    style: z.literal("header"),
+    header: z.string().min(1).max(128),
+    credential_slot: z.string().min(1).max(64),
+  }).strict(),
+  z.object({
+    style: z.literal("query_param"),
+    param: z.string().min(1).max(128),
+    credential_slot: z.string().min(1).max(64),
+  }).strict(),
+]);
+
+const httpMethodSchema = z.enum(["GET", "POST", "PATCH", "PUT", "DELETE"]);
+
+const operationBodySchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("none") }).strict(),
+  z.object({
+    type: z.literal("json"),
+    params: z.array(z.string().min(1).max(64)).max(64),
+  }).strict(),
+  z.object({
+    type: z.literal("graphql"),
+    query: z.string().min(1).max(8 * 1024),
+  }).strict(),
+]);
+
+const operationEffectSchema = z.enum(["read_only", "idempotent", "compensatable", "irreversible"]);
+
+const httpApiOperationSchema = z.object({
+  name: z.string().min(1).max(64),
+  description: z.string().min(1).max(1024),
+  method: httpMethodSchema,
+  path: z.string().min(1).max(512),
+  params_schema: z.record(z.string(), z.unknown()),
+  query_params: z.array(z.string().min(1).max(64)).max(64),
+  body: operationBodySchema,
+  effect: operationEffectSchema,
+  response: z.object({
+    projection: z.string().max(256).nullable(),
+    max_bytes: z.number().int().positive().nullable(),
+  }).strict(),
+  timeout_ms: z.number().int().positive().max(60_000).nullable(),
+  idempotency_key_header: z.string().min(1).max(128).nullable(),
+}).strict();
+
 export const providerKindSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("mcp_stdio"),
@@ -31,6 +90,14 @@ export const providerKindSchema = z.discriminatedUnion("kind", [
     kind: z.literal("http_search"),
     base_url: z.string().min(1).max(2048),
     auth: searchAuthSchema.nullable(),
+  }).strict(),
+  z.object({
+    kind: z.literal("http_api"),
+    base_url: z.string().min(1).max(2048),
+    auth: httpApiAuthSchema.nullable(),
+    default_headers: z.array(z.tuple([z.string().min(1), z.string()])).max(16),
+    health_check: z.string().min(1).max(64).nullable(),
+    operations: z.array(httpApiOperationSchema).min(1).max(64),
   }).strict(),
 ]);
 

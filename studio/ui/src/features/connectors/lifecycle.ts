@@ -53,6 +53,7 @@ export function effectLabel(effect: string) {
 export const providerKindLabels: Record<string, string> = {
   mcp_stdio: "mcp-stdio",
   http_search: "http-search",
+  http_api: "http-api",
 };
 
 export function providerKindLabel(kind: string) {
