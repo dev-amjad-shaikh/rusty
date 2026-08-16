@@ -82,6 +82,7 @@ use crate::memory::{
 };
 use crate::memory_tiers::{ConsolidationPolicy, RankPolicy};
 use crate::record::{sha256_hex, DecisionFamily, RunManifest};
+use crate::tool_select::ToolSelectionOverlay;
 
 fn invalid(message: impl Into<String>) -> RustyError {
     // Candidate construction and application are state updates to the
@@ -264,6 +265,18 @@ pub enum CandidateContent {
         tool: String,
         /// The parameters schema the tool declares.
         schema: Value,
+        /// The operator-governed selection overlay (R0.13 wave 3):
+        /// capability tags, the when-to-use note, cost class, batching
+        /// flags, prerequisites — the per-tool selection metadata
+        /// [`crate::tool_select::ToolManifest`] assembles. Additive and
+        /// optional — absent from the wire while unset, so pre-R0.13
+        /// `tool_contract` artifacts keep their shape (and their content
+        /// addresses) byte-for-byte. A `tool_contract` candidate may carry
+        /// the schema, the selection overlay, or both; validation is at
+        /// consumption ([`crate::tool_select::ToolManifest::with_overlay`]),
+        /// the wave-2 discipline for `rank`/`maintenance` applied here.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selection: Option<ToolSelectionOverlay>,
     },
     /// A model id plus its parameters (R0.11). The pair is what
     /// [`RunManifest::pin_model`] pins: the provider-precise model id

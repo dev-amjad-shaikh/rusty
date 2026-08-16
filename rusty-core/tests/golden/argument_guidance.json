@@ -1,0 +1,23 @@
+[
+  {
+    "tool": "http.get",
+    "path": "/url",
+    "rule": "type",
+    "occurrences": 2,
+    "guidance": "the value at `/url` has the wrong JSON type; supply the declared type — quoted numerics never coerce"
+  },
+  {
+    "tool": "search.legacy",
+    "path": "",
+    "rule": "required",
+    "occurrences": 1,
+    "guidance": "calls are missing a required property at the arguments root; include every property the schema's `required` list names"
+  },
+  {
+    "tool": "search.legacy",
+    "path": "/limit",
+    "rule": "type",
+    "occurrences": 1,
+    "guidance": "the value at `/limit` has the wrong JSON type; supply the declared type — quoted numerics never coerce"
+  }
+]
