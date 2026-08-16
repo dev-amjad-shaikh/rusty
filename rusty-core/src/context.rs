@@ -99,10 +99,14 @@
 //!
 //! [`AssemblingChatModel`] is the composition recipe: it runs the pipeline
 //! over each call's `messages`/`tools` and forwards the assembly to the inner
-//! model — the pattern [`crate::replay::RecordingChatModel`] establishes.
-//! `create_react_agent(model, tools)` receives the wrapper (or the recording
-//! / replaying wrapper around it, which is where the per-mode summarizer
-//! wiring sits); `react.rs` never knows.
+//! model. The journaled `ModelCall` input *is* the assembled request, so the
+//! evidence wrapper sits **inside** the assembler: recording mode builds
+//! `AssemblingChatModel { inner: RecordingChatModel(real_model, journal,
+//! parent) }`, replay mode `AssemblingChatModel { inner:
+//! ReplayingChatModel(sentinel, source.clone(), journal, parent) }`, and the
+//! summarizer slot is wrapped per mode the same way (parented to
+//! [`CONTEXT_PIPELINE_PARENT`]). `create_react_agent(model, tools)` receives
+//! the assembler; `react.rs` never knows.
 
 use std::sync::Arc;
 
@@ -813,7 +817,8 @@ impl ContextPipeline {
     /// system message — the documented per-item accounting, uniform across
     /// counters).
     fn count_item(&self, message: &ChatMessage) -> u32 {
-        self.counter.count(&[message.clone()], &self.model_id)
+        self.counter
+            .count(std::slice::from_ref(message), &self.model_id)
     }
 
     fn count_schema(&self, schema: &Value) -> u32 {
@@ -1129,7 +1134,12 @@ impl ContextPipeline {
                 section.budget_tokens,
                 section.resolved_overflow(SectionKind::Identity),
             )?;
-            packed.identity = Some((message, cost, truncated, section.budget_tokens));
+            packed.identity = Some(PackedSection::new(
+                message,
+                cost,
+                truncated,
+                section.budget_tokens,
+            ));
         }
 
         if let Some(section) = &policy.task {
@@ -1140,7 +1150,12 @@ impl ContextPipeline {
                 section.budget_tokens,
                 section.resolved_overflow(SectionKind::Task),
             )?;
-            packed.task = Some((message, cost, truncated, section.budget_tokens));
+            packed.task = Some(PackedSection::new(
+                message,
+                cost,
+                truncated,
+                section.budget_tokens,
+            ));
         }
 
         if let Some(section) = &policy.skills {
@@ -1157,7 +1172,10 @@ impl ContextPipeline {
                     .iter()
                     .map(|s| format!("{}@{}:{}", s.name, s.revision, s.content_hash))
                     .collect();
-                packed.skills = Some((message, cost, truncated, section.budget_tokens, ids));
+                packed.skills = Some(
+                    PackedSection::new(message, cost, truncated, section.budget_tokens)
+                        .with_ids(ids),
+                );
             }
         }
 
@@ -1191,7 +1209,9 @@ impl ContextPipeline {
             for schema in &kept {
                 ids.push(tool_name(schema)?);
             }
-            packed.tools = Some((kept, used, truncated, section.budget_tokens, ids));
+            packed.tools = Some(
+                PackedSection::new(kept, used, truncated, section.budget_tokens).with_ids(ids),
+            );
         }
 
         if let Some(section) = &policy.memory {
@@ -1228,7 +1248,10 @@ impl ContextPipeline {
                 }
                 let message = ChatMessage::system(memory_body(&kept));
                 let ids = kept.iter().map(|r| r.memory_id.clone()).collect();
-                packed.memory = Some((message, used, truncated, section.budget_tokens, ids));
+                packed.memory = Some(
+                    PackedSection::new(message, used, truncated, section.budget_tokens)
+                        .with_ids(ids),
+                );
             }
         }
 
@@ -1236,7 +1259,12 @@ impl ContextPipeline {
             if !history_items.is_empty() {
                 let (messages, used, truncated) =
                     self.pack_history(history_items, history_budget, compaction_report)?;
-                packed.history = Some((messages, used, truncated, section.budget_tokens));
+                packed.history = Some(PackedSection::new(
+                    messages,
+                    used,
+                    truncated,
+                    section.budget_tokens,
+                ));
             }
         }
 
@@ -1291,26 +1319,26 @@ impl ContextPipeline {
         inputs: &ContextInputs,
     ) -> ContextAssembly {
         let mut messages = Vec::new();
-        if let Some((message, _, _, _)) = &packed.identity {
-            messages.push(message.clone());
+        if let Some(section) = &packed.identity {
+            messages.push(section.content.clone());
         }
         messages.push(manifest_message);
-        if let Some((message, _, _, _)) = &packed.task {
-            messages.push(message.clone());
+        if let Some(section) = &packed.task {
+            messages.push(section.content.clone());
         }
-        if let Some((message, _, _, _, _)) = &packed.skills {
-            messages.push(message.clone());
+        if let Some(section) = &packed.skills {
+            messages.push(section.content.clone());
         }
-        if let Some((message, _, _, _, _)) = &packed.memory {
-            messages.push(message.clone());
+        if let Some(section) = &packed.memory {
+            messages.push(section.content.clone());
         }
-        if let Some((history, _, _, _)) = &packed.history {
-            messages.extend(history.clone());
+        if let Some(section) = &packed.history {
+            messages.extend(section.content.clone());
         }
         let tools = packed
             .tools
             .as_ref()
-            .map(|(kept, _, _, _, _)| kept.clone())
+            .map(|section| section.content.clone())
             .unwrap_or_else(|| inputs.tools.clone());
         ContextAssembly {
             messages,
@@ -1320,81 +1348,78 @@ impl ContextPipeline {
     }
 }
 
+/// One packed section's outcome: the content, the accounting the assembly
+/// applied, the declared budget (before total absorption), and the packed
+/// content's identifiers for the manifest.
+struct PackedSection<T> {
+    content: T,
+    used: u32,
+    truncated: bool,
+    budget: u32,
+    ids: Vec<String>,
+}
+
+impl<T> PackedSection<T> {
+    fn new(content: T, used: u32, truncated: bool, budget: u32) -> Self {
+        Self {
+            content,
+            used,
+            truncated,
+            budget,
+            ids: Vec::new(),
+        }
+    }
+
+    fn with_ids(mut self, ids: Vec<String>) -> Self {
+        self.ids = ids;
+        self
+    }
+
+    fn report(&self, kind: SectionKind, compaction: Option<CompactionReport>) -> SectionReport {
+        SectionReport {
+            kind,
+            budget_tokens: self.budget,
+            used_tokens: self.used,
+            truncated: self.truncated,
+            ids: self.ids.clone(),
+            compaction,
+        }
+    }
+}
+
 /// One packing pass's intermediate state: per-section packed content plus
 /// cost, before the manifest message exists.
 #[derive(Default)]
 struct PackedSections {
-    identity: Option<(ChatMessage, u32, bool, u32)>,
-    task: Option<(ChatMessage, u32, bool, u32)>,
-    skills: Option<(ChatMessage, u32, bool, u32, Vec<String>)>,
-    tools: Option<(Vec<Value>, u32, bool, u32, Vec<String>)>,
-    memory: Option<(ChatMessage, u32, bool, u32, Vec<String>)>,
-    history: Option<(Vec<ChatMessage>, u32, bool, u32)>,
+    identity: Option<PackedSection<ChatMessage>>,
+    task: Option<PackedSection<ChatMessage>>,
+    skills: Option<PackedSection<ChatMessage>>,
+    tools: Option<PackedSection<Vec<Value>>>,
+    memory: Option<PackedSection<ChatMessage>>,
+    history: Option<PackedSection<Vec<ChatMessage>>>,
 }
 
 impl PackedSections {
     /// The manifest's per-section reports, in canonical order ([`SECTION_ORDER`]).
     fn section_reports(&self, compaction: &Option<CompactionReport>) -> Vec<SectionReport> {
         let mut reports = Vec::new();
-        if let Some((_, used, truncated, budget)) = &self.identity {
-            reports.push(SectionReport {
-                kind: SectionKind::Identity,
-                budget_tokens: *budget,
-                used_tokens: *used,
-                truncated: *truncated,
-                ids: Vec::new(),
-                compaction: None,
-            });
+        if let Some(section) = &self.identity {
+            reports.push(section.report(SectionKind::Identity, None));
         }
-        if let Some((_, used, truncated, budget)) = &self.task {
-            reports.push(SectionReport {
-                kind: SectionKind::Task,
-                budget_tokens: *budget,
-                used_tokens: *used,
-                truncated: *truncated,
-                ids: Vec::new(),
-                compaction: None,
-            });
+        if let Some(section) = &self.task {
+            reports.push(section.report(SectionKind::Task, None));
         }
-        if let Some((_, used, truncated, budget, ids)) = &self.skills {
-            reports.push(SectionReport {
-                kind: SectionKind::Skills,
-                budget_tokens: *budget,
-                used_tokens: *used,
-                truncated: *truncated,
-                ids: ids.clone(),
-                compaction: None,
-            });
+        if let Some(section) = &self.skills {
+            reports.push(section.report(SectionKind::Skills, None));
         }
-        if let Some((_, used, truncated, budget, ids)) = &self.tools {
-            reports.push(SectionReport {
-                kind: SectionKind::Tools,
-                budget_tokens: *budget,
-                used_tokens: *used,
-                truncated: *truncated,
-                ids: ids.clone(),
-                compaction: None,
-            });
+        if let Some(section) = &self.tools {
+            reports.push(section.report(SectionKind::Tools, None));
         }
-        if let Some((_, used, truncated, budget, ids)) = &self.memory {
-            reports.push(SectionReport {
-                kind: SectionKind::Memory,
-                budget_tokens: *budget,
-                used_tokens: *used,
-                truncated: *truncated,
-                ids: ids.clone(),
-                compaction: None,
-            });
+        if let Some(section) = &self.memory {
+            reports.push(section.report(SectionKind::Memory, None));
         }
-        if let Some((_, used, truncated, budget)) = &self.history {
-            reports.push(SectionReport {
-                kind: SectionKind::History,
-                budget_tokens: *budget,
-                used_tokens: *used,
-                truncated: *truncated,
-                ids: Vec::new(),
-                compaction: compaction.clone(),
-            });
+        if let Some(section) = &self.history {
+            reports.push(section.report(SectionKind::History, compaction.clone()));
         }
         reports
     }
