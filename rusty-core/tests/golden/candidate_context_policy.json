@@ -1,0 +1,52 @@
+{
+  "candidate_id": "158facc2b5c233d307453c2ddc4d2f30e5570375b54cc50a770c63c2e8280a28",
+  "content": {
+    "kind": "context_policy",
+    "name": "default",
+    "policy": {
+      "budget": {
+        "max_tokens": 4096,
+        "overflow": "truncate"
+      },
+      "compaction": {
+        "keep_recent_messages": 2,
+        "prompt": "Summarize the conversation prefix, preserving decisions.",
+        "summary_max_tokens": 128,
+        "trigger_tokens": 400
+      },
+      "history": {
+        "budget_tokens": 1024
+      },
+      "identity": {
+        "budget_tokens": 256
+      },
+      "memory": {
+        "budget_tokens": 512,
+        "query": {
+          "scope": {
+            "id": "user-7",
+            "scope": "user"
+          }
+        }
+      },
+      "schema_version": "context-policy-v1",
+      "skills": {
+        "budget_tokens": 512
+      },
+      "task": {
+        "budget_tokens": 256
+      },
+      "tokenizer": {
+        "counter": "estimated"
+      },
+      "tools": {
+        "budget_tokens": 512
+      }
+    }
+  },
+  "distilled_by": {
+    "type": "distiller",
+    "name": "context-distiller"
+  },
+  "created_at": "2025-06-15T15:06:50Z"
+}
