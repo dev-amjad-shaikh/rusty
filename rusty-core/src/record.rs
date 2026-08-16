@@ -1583,6 +1583,17 @@ pub struct RunManifest {
     /// byte-stable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub middleware: Option<String>,
+
+    /// The content address ([`crate::capability::CapabilitySet::id`]) of
+    /// the capability set the run resolved at admission. Unlike the digest
+    /// pins above, the address itself is the join: the set's canonical
+    /// member list hashes to exactly this value, so re-resolution either
+    /// reproduces the id or fails — see
+    /// [`crate::capability::CapabilitySet::replay_guard`]. Absent means the
+    /// run declared no capability set, never a default; old manifests are
+    /// byte-stable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_set: Option<String>,
 }
 
 impl RunManifest {
@@ -1634,6 +1645,15 @@ impl RunManifest {
     /// journaled resolution digest and this pin can never diverge.
     pub fn pin_middleware(mut self, composition: &Value) -> Self {
         self.middleware = Some(canonical_json_digest(composition));
+        self
+    }
+
+    /// Pin the capability set the run resolved at admission, by content
+    /// address. The set id already *is* the SHA-256 of the set's canonical
+    /// member list, so the pin records the id verbatim rather than hashing
+    /// a second time.
+    pub fn pin_capability_set(mut self, set: &crate::capability::CapabilitySet) -> Self {
+        self.capability_set = Some(set.id().to_owned());
         self
     }
 }

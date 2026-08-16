@@ -76,6 +76,62 @@ pub struct RunConfigPayload {
     /// Maps to [`RunConfig::with_max_steps`] (LangGraph `recursion_limit`).
     #[serde(default)]
     pub recursion_limit: Option<usize>,
+
+    /// Exact subset of the graph's tools available to this run
+    /// ([`RunConfig::tool_allowlist`]). Validated against the graph's
+    /// executable catalog at admission: unknown or duplicate names are a
+    /// structured 400. Absent preserves the graph's complete registry
+    /// (byte-identical prior behavior); `[]` is a deliberately tool-free
+    /// run. Mutually exclusive with `capability_set`.
+    #[serde(default)]
+    pub tool_allowlist: Option<Vec<String>>,
+
+    /// Inline capability-set declaration: the composition
+    /// [`rusty_agent_runtime::capability::CapabilitySet`] resolves at
+    /// admission, validated against the graph's catalog. Its tool members
+    /// become the run's allowlist and its content address pins into the
+    /// run's manifest. Mutually exclusive with `tool_allowlist`.
+    #[serde(default)]
+    pub capability_set: Option<CapabilitySetPayload>,
+}
+
+/// The inline `config.capability_set` member list.
+///
+/// Tool members are exact names validated against the graph's catalog.
+/// Skill/connector members are opaque references with kind tags, recorded
+/// into the set's content address today and validated by their own planes
+/// when those land.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct CapabilitySetPayload {
+    /// Exact tool names the set composes.
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// Opaque skill references (the skill plane interprets them).
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// Opaque connector references (the connector plane interprets them).
+    #[serde(default)]
+    pub connectors: Vec<String>,
+}
+
+impl CapabilitySetPayload {
+    /// The shape-checked skill/connector references, kind-tagged.
+    pub fn refs(
+        &self,
+    ) -> rusty_agent_runtime::error::Result<Vec<rusty_agent_runtime::capability::CapabilityRef>>
+    {
+        self.skills
+            .iter()
+            .map(|reference| rusty_agent_runtime::capability::CapabilityRef::skill(reference.clone()))
+            .chain(
+                self.connectors
+                    .iter()
+                    .map(|reference| {
+                        rusty_agent_runtime::capability::CapabilityRef::connector(reference.clone())
+                    }),
+            )
+            .collect()
+    }
 }
 
 /// The `checkpoint` field of a run payload: `{ "checkpoint_id": "…" }`
@@ -353,6 +409,12 @@ pub(crate) struct RunInfo {
     pub metadata: Option<Value>,
     /// Exact accepted input used to bind derived evaluation cases.
     pub input: Option<Value>,
+    /// The run's declared tool selection, captured at admission: the
+    /// effective allowlist (explicit, capability-set members, or the
+    /// assistant default) — `None` for an unrestricted run. The replay
+    /// endpoint re-validates it against the current catalog rather than
+    /// silently widening or narrowing a replayed run.
+    pub capability_tools: Option<Vec<String>>,
     /// Stable server acceptance time used to bind downstream evidence.
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub attempt: usize,
@@ -564,6 +626,13 @@ impl RunManager {
             assistant_id: h.payload.assistant_id.clone(),
             metadata: h.payload.metadata.clone(),
             input: h.payload.input.clone(),
+            capability_tools: h.payload.config.as_ref().and_then(|config| {
+                config
+                    .capability_set
+                    .as_ref()
+                    .map(|set| set.tools.clone())
+                    .or_else(|| config.tool_allowlist.clone())
+            }),
             created_at: h.created_at,
             attempt: h.attempt,
             status: h.status,
@@ -1273,6 +1342,60 @@ async fn execute(deps: RunDeps, run_id: String) {
     if let Some(run_cfg) = &snap.payload.config {
         if let Some(limit) = run_cfg.recursion_limit {
             config = config.with_max_steps(limit);
+        }
+        // Capability admission: the selection validated at schedule time
+        // becomes the run's exact tool allowlist, and the composed set's
+        // content address pins into the manifest alongside the registry
+        // and deployment resolutions above. A bare `tool_allowlist`
+        // composes an anonymous (reference-free) set so replay can
+        // re-validate the selection by the same rule.
+        let selection = match &run_cfg.capability_set {
+            Some(set) => Some((set.tools.clone(), set.refs())),
+            None => run_cfg
+                .tool_allowlist
+                .clone()
+                .map(|tools| (tools, Ok(Vec::new()))),
+        };
+        if let Some((tools, refs)) = selection {
+            let catalog = deps.registry.tool_capabilities(&snap.graph);
+            let composed = refs.and_then(|refs| {
+                rusty_agent_runtime::capability::CapabilitySet::compose(&tools, &refs, &catalog)
+            });
+            match composed {
+                Ok(set) => {
+                    config = config.with_tool_allowlist(set.resolve_allowlist());
+                    let manifest = config
+                        .manifest
+                        .clone()
+                        .unwrap_or_default()
+                        .pin_capability_set(&set);
+                    config = config.with_manifest(manifest);
+                }
+                Err(error) => {
+                    // Admission validated this selection and the registry
+                    // is immutable after boot; reaching this branch means
+                    // the graph's catalog changed mid-flight.
+                    let message = format!(
+                        "capability selection validated at admission no longer resolves: {error}"
+                    );
+                    tracing::error!(%run_id, %message);
+                    sink.push(
+                        "error",
+                        0,
+                        json!({"error": "capability_unresolved", "message": message}),
+                    );
+                    sink.push("end", 0, json!({"status": "error"}));
+                    let terminal = json!({
+                        "run_id": run_id,
+                        "thread_id": snap.wire_thread_id,
+                        "status": "error",
+                        "error": "capability_unresolved",
+                        "message": message,
+                    });
+                    terminate(&deps, &run_id, RunStatus::Error, terminal).await;
+                    return;
+                }
+            }
         }
     }
     let initial = snap

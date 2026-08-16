@@ -1241,6 +1241,51 @@ async fn history(
 // Runs
 // --------------------------------------------------------------------- //
 
+/// The tool names an assistant version declares in its reviewed Studio
+/// intent (`config.studio_intent.tools[*].name`).
+///
+/// Only the exact reviewed shape supplies a default: an intent without a
+/// `tools` array — legacy versions, opaque vendor formats — answers `None`
+/// and the run stays unrestricted, byte-identical to prior behavior. The
+/// names are validated against the graph's catalog at admission like any
+/// other allowlist.
+fn assistant_tool_default(config: &Value) -> Option<Vec<String>> {
+    let tools = config.get("studio_intent")?.get("tools")?.as_array()?;
+    let mut names = Vec::with_capacity(tools.len());
+    for tool in tools {
+        names.push(tool.get("name")?.as_str()?.to_string());
+    }
+    Some(names)
+}
+
+/// Fail-closed admission check for a tool allowlist against the graph's
+/// executable catalog: duplicates and unknown names are structured 400s,
+/// never a silently narrowed or broadened run.
+fn validate_tool_allowlist(
+    allowlist: &[String],
+    graph: &str,
+    catalog: &[rusty_agent_runtime::tool::ToolCapability],
+) -> Result<(), ApiError> {
+    let mut sorted = allowlist.to_vec();
+    sorted.sort_unstable();
+    for pair in sorted.windows(2) {
+        if pair[0] == pair[1] {
+            return Err(ApiError::bad_request(format!(
+                "`tool_allowlist` contains duplicate `{}`",
+                pair[0]
+            )));
+        }
+    }
+    for name in allowlist {
+        if !catalog.iter().any(|tool| &tool.name == name) {
+            return Err(ApiError::bad_request(format!(
+                "`tool_allowlist` names `{name}`, which graph `{graph}` does not register"
+            )));
+        }
+    }
+    Ok(())
+}
+
 async fn schedule_for_thread(
     state: &Arc<AppState>,
     tenant: &TenantContext,
@@ -1323,6 +1368,50 @@ async fn schedule_for_thread(
                     .get_or_insert_with(RunConfigPayload::default)
                     .recursion_limit = Some(limit as usize);
             }
+        }
+        // The assistant version's reviewed tool selection
+        // (`config.studio_intent.tools`) is the run's default allowlist; an
+        // explicit run-level `tool_allowlist` or `capability_set` wins.
+        // Legacy or opaque intent shapes supply no default, preserving
+        // their pre-existing unrestricted behavior.
+        let declared = payload.config.as_ref().is_some_and(|config| {
+            config.tool_allowlist.is_some() || config.capability_set.is_some()
+        });
+        if !declared {
+            if let Some(names) = assistant_tool_default(&assistant.config) {
+                payload
+                    .config
+                    .get_or_insert_with(RunConfigPayload::default)
+                    .tool_allowlist = Some(names);
+            }
+        }
+    }
+    // Capability admission, shared by every run endpoint: the selection is
+    // validated against the graph's executable catalog now, so an unknown
+    // or ambiguous selection never reaches a running executor. Absent is
+    // byte-identical prior behavior; `[]` is a deliberately tool-free run.
+    if let Some(config) = &payload.config {
+        if config.tool_allowlist.is_some() && config.capability_set.is_some() {
+            return Err(ApiError::bad_request(
+                "`config` declares both `tool_allowlist` and `capability_set`; name exactly one"
+                    .to_string(),
+            ));
+        }
+        let catalog = state.registry.tool_capabilities(&record.graph);
+        if let Some(allowlist) = &config.tool_allowlist {
+            validate_tool_allowlist(allowlist, &record.graph, &catalog)?;
+        }
+        if let Some(set) = &config.capability_set {
+            let refs = set
+                .refs()
+                .map_err(|error| ApiError::bad_request(format!("invalid `capability_set`: {error}")))?;
+            rusty_agent_runtime::capability::CapabilitySet::compose(&set.tools, &refs, &catalog)
+                .map_err(|error| {
+                    ApiError::bad_request(format!(
+                        "invalid `capability_set` for graph `{}`: {error}",
+                        record.graph
+                    ))
+                })?;
         }
     }
     if let Some(checkpoint) = &payload.checkpoint {
@@ -1697,6 +1786,10 @@ struct RunEvidence {
     /// termination or lost with a process restart; either way no live writer
     /// remains, so the persisted snapshot cannot grow.
     complete: bool,
+    /// The run's declared tool selection, when the manager still holds the
+    /// accepted payload (fast path only; the store fallback has no payload
+    /// to read). Replay re-validates it against the current catalog.
+    capability_tools: Option<Vec<String>>,
 }
 
 /// Re-verify a stored snapshot's chained head hash before it is served or
@@ -1745,6 +1838,7 @@ async fn run_evidence(
             journal,
             checkpoint_ids: runs::lock_recover(&info.checkpoint_ids).clone(),
             complete: info.status.is_terminal(),
+            capability_tools: info.capability_tools,
         });
     }
 
@@ -1780,6 +1874,9 @@ async fn run_evidence(
         journal: Some(journal),
         checkpoint_ids,
         complete: true,
+        // The store fallback has no accepted payload to read; the replay
+        // guard simply does not apply to evidence this old.
+        capability_tools: None,
     })
 }
 
@@ -2568,8 +2665,9 @@ struct ReplayRunPayload {
 /// a final journal; `422` when the run's graph is not registered in this
 /// process, when the journal carries recorded model/tool/remote/WASM calls
 /// (server-side replay cannot serve them — export the fixture and replay in
-/// CI), or when the run resumed from a checkpoint (core's [`ExactReplay`]
-/// rejects mid-run evidence).
+/// CI), when the run resumed from a checkpoint (core's [`ExactReplay`]
+/// rejects mid-run evidence), or when the run pinned a tool selection the
+/// current catalog no longer resolves (replay never widens or narrows it).
 async fn replay_run(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
@@ -2593,6 +2691,22 @@ async fn replay_run(
             evidence.graph
         ))
     })?;
+    // Capability replay binding: a run admitted with a tool selection must
+    // re-resolve the same members against the current catalog. A member the
+    // catalog no longer contains fails typed (422, matching the other
+    // replay refusals) — replay never silently widens or narrows the set.
+    // Evidence old enough to have no accepted payload (store fallback)
+    // carries no selection to guard.
+    if let Some(tools) = &evidence.capability_tools {
+        let set = rusty_agent_runtime::capability::CapabilitySet::from_members(tools, &[])
+            .map_err(|error| ApiError::internal(format!("stored tool selection is malformed: {error}")))?;
+        set.replay_guard_catalog(&state.registry.tool_capabilities(&evidence.graph))
+            .map_err(|error| {
+                ApiError::unprocessable(format!(
+                    "run `{run_id}` pinned a tool selection that no longer resolves: {error}"
+                ))
+            })?;
+    }
     if carries_servable_effects(&snapshot) {
         return Err(ApiError::unprocessable(format!(
             "run `{run_id}` journaled model/tool/remote/WASM calls; server-side replay \

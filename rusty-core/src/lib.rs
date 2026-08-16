@@ -187,6 +187,7 @@ pub mod a2a;
 pub mod agents;
 pub mod artifact;
 pub mod broker;
+pub mod capability;
 pub mod capsule;
 #[cfg(feature = "wasm")]
 pub mod capsule_host;

@@ -68,7 +68,7 @@ use crate::node::NodeOutput;
 use crate::replay::{
     RecordingChatModel, RecordingTool, ReplaySource, ReplayingChatModel, ReplayingTool,
 };
-use crate::tool::{ToolExecutor, ToolRegistry};
+use crate::tool::{ToolExecutor, ToolRegistry, TOOL_ALLOWLIST_KEY};
 
 /// The state channel the ReAct loop reads from and appends to. Declare it
 /// with `Reducer::AddMessages` in the run's [`crate::state::StateSpec`].
@@ -153,6 +153,15 @@ fn sorted_tool_schemas(tools: &ToolRegistry) -> Vec<Value> {
     let mut schemas = tools.schemas();
     schemas.sort_by(|a, b| tool_name(a).cmp(tool_name(b)));
     schemas
+}
+
+fn invocation_tools(tools: &ToolRegistry, ctx: &crate::node::NodeContext) -> Result<ToolRegistry> {
+    let Some(value) = ctx.config().extra.get(TOOL_ALLOWLIST_KEY) else {
+        return Ok(tools.clone());
+    };
+    let allowlist: Vec<String> = serde_json::from_value(value.clone())
+        .map_err(|error| RustyError::Node(format!("run tool allowlist is malformed: {error}")))?;
+    tools.restricted_to(&allowlist)
 }
 
 /// Build a prebuilt ReAct agent graph over `model` and `tools`.
@@ -258,7 +267,7 @@ fn build_react_agent(
     token_tx: Option<mpsc::Sender<GraphEvent>>,
     evidence: EvidenceMode,
 ) -> Result<Graph> {
-    let tool_schemas = sorted_tool_schemas(&tools);
+    let agent_tools = tools.clone();
     let tool_executor = ToolExecutor::new(tools);
 
     let agent_node = {
@@ -267,10 +276,11 @@ fn build_react_agent(
         move |ctx: crate::node::NodeContext| {
             let model = Arc::clone(&model);
             let evidence = evidence.clone();
-            let tool_schemas = tool_schemas.clone();
+            let agent_tools = agent_tools.clone();
             let token_tx = token_tx.clone();
             async move {
                 let messages = read_messages(ctx.state())?;
+                let tool_schemas = sorted_tool_schemas(&invocation_tools(&agent_tools, &ctx)?);
                 // Evidence wiring is per invocation: the recording/replaying
                 // wrappers carry the invocation's causal parent, which only
                 // exists once the executor has journaled the node input.
@@ -360,6 +370,8 @@ fn build_react_agent(
             // record/replay mode each tool is wrapped with the invocation's
             // causal parent, then dispatched through the same batch executor
             // (parallel, order-preserving, panic-containing).
+            let tool_executor =
+                ToolExecutor::new(invocation_tools(tool_executor.registry(), &ctx)?);
             let mut tool_executor =
                 match &evidence {
                     EvidenceMode::None => match ctx.effect_journal() {
@@ -911,5 +923,58 @@ mod tests {
                 .unwrap();
             assert_eq!(model.seen.lock().unwrap().as_slice(), ["echo", "zeta"]);
         }
+    }
+
+    #[tokio::test]
+    async fn run_allowlist_limits_model_schemas_and_tool_dispatch() {
+        let model = Arc::new(SchemaRecorder {
+            seen: Mutex::new(Vec::new()),
+        });
+        let mut tools = ToolRegistry::new();
+        tools.register(Echo);
+        tools.register(Zeta);
+        let graph = create_react_agent(model.clone(), tools).unwrap();
+        let allowed = serde_json::json!(["echo"]);
+
+        let state = State::from_value(json!({
+            MESSAGES_CHANNEL: [serde_json::to_value(ChatMessage::user("hi")).unwrap()]
+        }))
+        .unwrap();
+        let mut config = NodeConfig::default();
+        config
+            .extra
+            .insert(TOOL_ALLOWLIST_KEY.to_owned(), allowed.clone());
+        graph
+            .node(AGENT_NODE)
+            .unwrap()
+            .run(NodeContext::new(state, config))
+            .await
+            .unwrap();
+        assert_eq!(model.seen.lock().unwrap().as_slice(), ["echo"]);
+
+        let state = State::from_value(json!({
+            MESSAGES_CHANNEL: [serde_json::to_value(ChatMessage::assistant_tool_calls(vec![
+                ToolCall::new("blocked", "zeta", json!({})),
+            ]))
+            .unwrap()]
+        }))
+        .unwrap();
+        let mut config = NodeConfig::default();
+        config.extra.insert(TOOL_ALLOWLIST_KEY.to_owned(), allowed);
+        let out = graph
+            .node(TOOLS_NODE)
+            .unwrap()
+            .run(NodeContext::new(state, config))
+            .await
+            .unwrap();
+        let messages: Vec<ChatMessage> =
+            serde_json::from_value(out.updates[MESSAGES_CHANNEL].clone()).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].tool_call_id.as_deref(), Some("blocked"));
+        assert!(messages[0]
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .contains("unknown tool `zeta`"));
     }
 }

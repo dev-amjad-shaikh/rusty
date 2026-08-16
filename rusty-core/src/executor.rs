@@ -241,6 +241,12 @@ pub struct RunConfig {
     /// production one. `None` (the default) is byte-identical to prior
     /// behavior.
     pub effect_admission: Option<EffectAdmissionContext>,
+
+    /// Optional exact subset of a graph's tools available to this run.
+    /// `None` preserves the graph's complete registry; `Some([])` makes the
+    /// run deliberately tool-free. Prebuilt agents enforce the subset at
+    /// both model-schema and dispatch boundaries.
+    pub tool_allowlist: Option<Vec<String>>,
 }
 
 impl Default for RunConfig {
@@ -271,6 +277,7 @@ impl RunConfig {
             manifest: None,
             effect_approvals: Vec::new(),
             effect_admission: None,
+            tool_allowlist: None,
         }
     }
 
@@ -370,6 +377,22 @@ impl RunConfig {
     /// production one.
     pub fn with_effect_admission_context(mut self, context: EffectAdmissionContext) -> Self {
         self.effect_admission = Some(context);
+        self
+    }
+
+    /// Builder-style: restrict this run to the named tools.
+    ///
+    /// The caller's order is normalized because an allowlist is a set. The
+    /// graph validates that every name resolves before model or tool work is
+    /// performed.
+    pub fn with_tool_allowlist(
+        mut self,
+        tools: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let mut tools: Vec<String> = tools.into_iter().map(Into::into).collect();
+        tools.sort_unstable();
+        tools.dedup();
+        self.tool_allowlist = Some(tools);
         self
     }
 
@@ -987,6 +1010,17 @@ impl Executor {
             );
             invocation_effects.push(node.effect());
 
+            let mut extra = HashMap::from([(
+                crate::journal::PARENT_EVENT_KEY.to_owned(),
+                Value::String(input_event.clone()),
+            )]);
+            if let Some(tool_allowlist) = &config.tool_allowlist {
+                extra.insert(
+                    crate::tool::TOOL_ALLOWLIST_KEY.to_owned(),
+                    serde_json::to_value(tool_allowlist)
+                        .expect("tool allowlist serialization is infallible"),
+                );
+            }
             let node_config = NodeConfig {
                 thread_id: config.thread_id.clone(),
                 step,
@@ -994,10 +1028,7 @@ impl Executor {
                 // Hand the invocation its own journal event id so node
                 // code can parent the effects it records (model/tool
                 // calls) to this invocation.
-                extra: HashMap::from([(
-                    crate::journal::PARENT_EVENT_KEY.to_owned(),
-                    Value::String(input_event.clone()),
-                )]),
+                extra,
             };
             input_events.push(input_event);
             let name = task.name.clone();

@@ -7,7 +7,7 @@
 //! pattern of the prebuilt ReAct agent) and returns one `role: "tool"`
 //! message per call, preserving call order.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,6 +31,12 @@ pub const MAX_TOOL_SCHEMA_BYTES: usize = 64 * 1024;
 
 /// Maximum size of the model-facing description advertised for one tool.
 pub const MAX_TOOL_DESCRIPTION_BYTES: usize = 4 * 1024;
+
+/// Reserved node-config key carrying the exact run-scoped tool allowlist.
+///
+/// Only [`crate::executor::Executor`] writes this key. Prebuilt agents read
+/// it to narrow both model-visible schemas and executable dispatch.
+pub const TOOL_ALLOWLIST_KEY: &str = "__rusty_tool_allowlist";
 
 /// The executable contract Studio and other clients may safely present.
 ///
@@ -254,6 +260,30 @@ impl ToolRegistry {
             .collect::<Result<Vec<_>>>()?;
         capabilities.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(capabilities)
+    }
+
+    /// Clone the exact subset named by `allowlist`.
+    ///
+    /// An empty allowlist produces an empty registry. Unknown or duplicate
+    /// names fail closed so a configuration typo cannot silently broaden or
+    /// ambiguously describe the tools available to a run.
+    pub fn restricted_to(&self, allowlist: &[String]) -> Result<Self> {
+        let mut selected = Self::new();
+        let mut seen = HashSet::with_capacity(allowlist.len());
+        for name in allowlist {
+            if !seen.insert(name.as_str()) {
+                return Err(RustyError::Tool(format!(
+                    "tool allowlist contains duplicate `{name}`"
+                )));
+            }
+            let tool = self.get(name).ok_or_else(|| {
+                RustyError::Tool(format!(
+                    "tool allowlist names `{name}`, which is not registered"
+                ))
+            })?;
+            selected.register_shared(tool);
+        }
+        Ok(selected)
     }
 }
 
