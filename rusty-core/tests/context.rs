@@ -19,8 +19,8 @@ use serde_json::{json, Value};
 use rusty_agent_runtime::context::{
     AssemblingChatModel, CompactionPolicy, ContextInputs, ContextPipeline, ContextPolicy,
     EstimatedTokenCounter, MemorySectionPolicy, SectionKind, SectionManifest, SectionPolicy,
-    SkillSectionEntry, TokenCounter, CONTEXT_PIPELINE_PARENT, CONTEXT_POLICY_SCHEMA_VERSION,
-    MANIFEST_MESSAGE_NAME, SUMMARY_MARKER,
+    SkillSectionEntry, TokenCounter, ToolsSectionPolicy, CONTEXT_PIPELINE_PARENT,
+    CONTEXT_POLICY_SCHEMA_VERSION, MANIFEST_MESSAGE_NAME, SUMMARY_MARKER,
 };
 use rusty_agent_runtime::error::{Result as RustyResult, RustyError};
 use rusty_agent_runtime::journal::{Clock, Journal, JournalSnapshot};
@@ -34,9 +34,13 @@ use rusty_agent_runtime::memory::{
     MemoryQuery, MemoryRecord, MemoryReplaySource, MemoryScope, MemorySource, MemoryStore,
     ProvenanceAuthor, ScopeAddress, ValidityWindow, DEFAULT_TOKEN_MARGIN_PERCENT,
 };
-use rusty_agent_runtime::record::{PayloadRef, RunEvent, RunEventKind};
+use rusty_agent_runtime::record::{Effect, PayloadRef, RunEvent, RunEventKind};
 use rusty_agent_runtime::replay::{
     ExactReplay, RecordingChatModel, ReplayingChatModel,
+};
+use rusty_agent_runtime::tool::{Tool, ToolRegistry};
+use rusty_agent_runtime::tool_select::{
+    manifests_for_registry, ExclusionReason, ToolSelectionOverlay, ToolSelectionPolicy,
 };
 
 // ---------- golden-file machinery ----------
@@ -153,7 +157,7 @@ fn policy() -> ContextPolicy {
         identity: Some(SectionPolicy::new(256)),
         task: Some(SectionPolicy::new(256)),
         skills: Some(SectionPolicy::new(512)),
-        tools: Some(SectionPolicy::new(512)),
+        tools: Some(ToolsSectionPolicy::new(512)),
         memory: Some(MemorySectionPolicy {
             budget_tokens: 512,
             overflow: None,
@@ -183,6 +187,7 @@ fn golden_inputs() -> ContextInputs {
             ChatMessage::assistant("Let me check memory."),
             ChatMessage::user("go ahead"),
         ],
+        ..Default::default()
     }
 }
 
@@ -329,6 +334,158 @@ async fn the_manifest_message_is_budgeted_off_the_top() {
     assert_eq!(&parsed, manifest);
 }
 
+#[tokio::test]
+async fn fully_absorbed_sections_are_dropped_not_packed_bare() {
+    // A total budget only identity, task, skills, tools, and the manifest
+    // fit: absorption shrinks history and memory to zero, and both sections
+    // are dropped from the assembly rather than packed as a bare header or
+    // an empty message list.
+    let mut policy = policy();
+    policy.budget = rusty_agent_runtime::memory::ContextBudget::new(480);
+    let pipeline = ContextPipeline::new(policy).unwrap();
+    let assembly = assemble_with_store(&pipeline, &golden_inputs()).await;
+
+    let kinds: Vec<SectionKind> = assembly.manifest.sections.iter().map(|s| s.kind).collect();
+    assert!(
+        !kinds.contains(&SectionKind::History),
+        "absorbed-to-zero history must be dropped, not packed empty: {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&SectionKind::Memory),
+        "absorbed-to-zero memory must be dropped, not packed as a bare header: {kinds:?}"
+    );
+    assert!(assembly
+        .messages
+        .iter()
+        .all(|m| m.content.as_deref() != Some("# Memory")));
+}
+
+// ---------- governed tool selection ----------
+
+/// A toy tool for the shortlist exit criterion: distinct name, shared
+/// schema shape, pinned effect class.
+struct ToyTool {
+    name: String,
+    description: String,
+    effect: Effect,
+}
+
+#[async_trait::async_trait]
+impl Tool for ToyTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({"type": "object", "properties": {"q": {"type": "string"}}})
+    }
+
+    fn effect(&self) -> Effect {
+        self.effect
+    }
+
+    async fn call(&self, _args: Value) -> RustyResult<Value> {
+        Ok(json!(null))
+    }
+}
+
+#[tokio::test]
+async fn a_forty_tool_registry_shortlists_to_a_pinned_top_k() {
+    // Forty tools: three tag-matched, three above the run's effect ceiling,
+    // the rest score-zero eligible. The pinned expectation: the tag-matched
+    // three first (score 10000 each, ties broken by ascending name), then
+    // the five lowest-named score-zero eligible tools — eight total, the
+    // policy's k.
+    let mut registry = ToolRegistry::new();
+    for i in 1..=40u32 {
+        let effect = match i {
+            7 | 19 | 31 => Effect::NonIdempotent,
+            _ => Effect::Idempotent,
+        };
+        registry.register(ToyTool {
+            name: format!("tool_{i:02}"),
+            description: format!("Toy tool number {i}."),
+            effect,
+        });
+    }
+    let overlay = || ToolSelectionOverlay {
+        tags: vec!["search".to_owned()],
+        ..Default::default()
+    };
+    let overlays = std::collections::BTreeMap::from([
+        ("tool_05".to_owned(), overlay()),
+        ("tool_12".to_owned(), overlay()),
+        ("tool_23".to_owned(), overlay()),
+    ]);
+    let manifests = manifests_for_registry(&registry, &overlays).unwrap();
+    assert_eq!(manifests.len(), 40);
+
+    let mut policy = policy();
+    policy.tools = Some(
+        ToolsSectionPolicy::new(512).with_selection(ToolSelectionPolicy {
+            cutoff: 20,
+            k: 8,
+            ..Default::default()
+        }),
+    );
+    let pipeline = ContextPipeline::new(policy).unwrap();
+    let inputs = ContextInputs {
+        tool_manifests: manifests,
+        task_tags: vec!["search".to_owned()],
+        effect_ceiling: Some(Effect::Idempotent),
+        ..golden_inputs()
+    };
+    let assembly = assemble_with_store(&pipeline, &inputs).await;
+
+    let expected: Vec<String> = [
+        "tool_05", "tool_12", "tool_23", "tool_01", "tool_02", "tool_03", "tool_04", "tool_06",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(assembly.tools.len(), 8);
+    let tools_section = assembly
+        .manifest
+        .sections
+        .iter()
+        .find(|s| s.kind == SectionKind::Tools)
+        .expect("tools section report");
+    assert_eq!(tools_section.ids, expected);
+
+    // The section manifest carries the FULL selection outcome: every scored
+    // manifest in the ranking, every exclusion with its reason.
+    let shortlist = tools_section
+        .shortlist
+        .as_ref()
+        .expect("the governed shortlist is recorded");
+    let selected_names: Vec<&str> = shortlist
+        .selected
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(
+        selected_names,
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert_eq!(shortlist.ranking.len(), 37);
+    assert_eq!(shortlist.excluded.len(), 3);
+    assert!(shortlist
+        .excluded
+        .iter()
+        .all(|e| e.reason == ExclusionReason::EffectAboveCeiling));
+
+    // The assembled schemas are the canonical registry shape, so the model
+    // sees byte-identical schemas on either path.
+    assert_eq!(
+        assembly.tools[0],
+        json!({"type": "function", "function": {"name": "tool_05", "description": "Toy tool number 5.", "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}}})
+    );
+}
+
 // ---------- token accounting ----------
 
 #[test]
@@ -465,6 +622,31 @@ async fn compaction_trigger_without_a_summarizer_fails_loudly() {
     assert!(
         matches!(error, RustyError::InvalidUpdate(_)),
         "a fired trigger without a summarizer is a configuration error, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_unenforceable_summary_bound_is_a_configuration_error() {
+    // The generated-marker framing alone exceeds the bound: no truncation
+    // can satisfy it, so the pipeline fails loud rather than reporting a
+    // manifest whose summary_tokens silently violate the policy.
+    let mut policy = compacting_policy();
+    policy.compaction.as_mut().unwrap().summary_max_tokens = 1;
+    let summarizer: Arc<dyn ChatModel> =
+        Arc::new(ScriptedModel::new(vec!["earlier turns, summarized"]));
+    let pipeline = ContextPipeline::new(policy)
+        .unwrap()
+        .with_summarizer(summarizer);
+    let inputs = ContextInputs {
+        history: long_history(),
+        ..golden_inputs()
+    };
+    let journal = Journal::new("run-context-test", "t-context", logical_clock());
+    let memory = JournaledMemory::new(&journal, MemorySource::Store(store_with_records().await));
+    let error = pipeline.assemble(&inputs, Some(&memory)).await.unwrap_err();
+    assert!(
+        matches!(error, RustyError::InvalidUpdate(_)),
+        "an unenforceable summary bound is a configuration error, got {error:?}"
     );
 }
 

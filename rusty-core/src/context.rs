@@ -73,6 +73,11 @@
 //! The watermark — how many leading history messages the summary replaced —
 //! is recorded in the section manifest.
 //!
+//! Price the cost amplification before pinning a trigger: once compaction
+//! fires, every later assembly re-summarizes the (growing) prefix — one
+//! summarization call per assembly over a longer span. `trigger_tokens` and
+//! `keep_recent_messages` are cost policy, not just quality policy.
+//!
 //! The summarization call journals and replays like every other model call,
 //! through the per-mode wiring the design fixes (the `ChatModel` seam carries
 //! no parent, no replay source, no mode switch, so the wiring is
@@ -80,10 +85,10 @@
 //!
 //! - recording mode: `RecordingChatModel::new(summarizer, journal.clone(),
 //!   CONTEXT_PIPELINE_PARENT)`;
-//! - replay mode: `ReplayingChatModel::new(sentinel, source.clone(), journal)`
-//!   over the run's own shared `ReplaySource` (it is `Clone`; the compaction
-//!   call is one more journaled `ModelCall` in the run's stream, served in
-//!   order by sequence + canonical request hash);
+//! - replay mode: `ReplayingChatModel::new(sentinel, source.clone(), journal,
+//!   parent)` over the run's own shared `ReplaySource` (it is `Clone`; the
+//!   compaction call is one more journaled `ModelCall` in the run's stream,
+//!   served in order by sequence + canonical request hash);
 //! - unjournaled mode: the bare summarizer.
 //!
 //! Pipeline-internal effects cannot learn the invocation's node-input parent,
@@ -108,11 +113,12 @@
 //! [`CONTEXT_PIPELINE_PARENT`]). `create_react_agent(model, tools)` receives
 //! the assembler; `react.rs` never knows.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::error::{Result, RustyError};
 use crate::llm::{ChatMessage, ChatModel, ChatResponse, TokenChunk};
@@ -120,7 +126,10 @@ use crate::memory::{
     estimated_tokens, BudgetOverflow, ContextBudget, JournaledMemory, MemoryQuery, MemoryRecord,
     TOKEN_BYTES_PER_ESTIMATE,
 };
-use crate::record::PayloadRef;
+use crate::record::{Effect, PayloadRef};
+use crate::tool_select::{
+    SelectionFeatures, ToolManifest, ToolOutcomeStats, ToolSelectionPolicy, ToolShortlist,
+};
 
 fn invalid(message: impl Into<String>) -> RustyError {
     // Context assembly failures are configuration errors: the policy, the
@@ -322,6 +331,64 @@ impl SectionPolicy {
     }
 }
 
+/// Sparse-wire predicate for [`ToolsSectionPolicy::selection`]: the default
+/// selection policy serializes as absence, so a policy that never tuned
+/// selection keeps its pre-selection wire shape byte-for-byte.
+fn is_default_selection_policy(policy: &ToolSelectionPolicy) -> bool {
+    *policy == ToolSelectionPolicy::default()
+}
+
+/// The tools section's policy: the budget, the overflow rule, and the
+/// shortlist policy ([`ToolSelectionPolicy`]: cutoff, k, feature weights).
+/// Selection *policy* is assembly policy — it lives here, not per tool. When
+/// the assembly is handed manifests ([`ContextInputs::tool_manifests`]), the
+/// pipeline runs [`crate::tool_select::shortlist`] itself under this policy
+/// and records the full selection outcome in the section manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolsSectionPolicy {
+    /// The section's budget, in the pinned counter's tokens.
+    pub budget_tokens: u32,
+
+    /// The overflow rule; absent from the wire while unset, resolving to the
+    /// kind's default (truncate — the shortlist already made the cut).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overflow: Option<BudgetOverflow>,
+
+    /// The shortlist policy; absent from the wire while it equals
+    /// [`ToolSelectionPolicy::default`].
+    #[serde(default, skip_serializing_if = "is_default_selection_policy")]
+    pub selection: ToolSelectionPolicy,
+}
+
+impl ToolsSectionPolicy {
+    /// A section budget with the kind's default overflow rule and the default
+    /// selection policy.
+    pub fn new(budget_tokens: u32) -> Self {
+        Self {
+            budget_tokens,
+            overflow: None,
+            selection: ToolSelectionPolicy::default(),
+        }
+    }
+
+    /// Builder-style: declare the overflow rule explicitly.
+    pub fn with_overflow(mut self, overflow: BudgetOverflow) -> Self {
+        self.overflow = Some(overflow);
+        self
+    }
+
+    /// Builder-style: the shortlist policy (cutoff, k, feature weights).
+    pub fn with_selection(mut self, selection: ToolSelectionPolicy) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    fn resolved_overflow(&self) -> BudgetOverflow {
+        self.overflow
+            .unwrap_or_else(|| SectionKind::Tools.default_overflow())
+    }
+}
+
 /// Sparse-wire predicate for [`MemorySectionPolicy::query`]: an empty query
 /// (match-everything, modulo the two shipped defaults) serializes as absence.
 fn memory_query_is_empty(query: &MemoryQuery) -> bool {
@@ -422,9 +489,10 @@ pub struct ContextPolicy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skills: Option<SectionPolicy>,
 
-    /// The tools section.
+    /// The tools section (budget + the shortlist policy the pipeline runs
+    /// when handed manifests).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tools: Option<SectionPolicy>,
+    pub tools: Option<ToolsSectionPolicy>,
 
     /// The memory section (budget + base query).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -506,8 +574,35 @@ pub struct ContextInputs {
     pub skills: Vec<SkillSectionEntry>,
 
     /// The shortlisted tool schemas, exactly as passed to
-    /// [`ChatModel::chat`] (selection is the tool plane's).
+    /// [`ChatModel::chat`] (selection is the tool plane's). This is the
+    /// fallback path: when [`ContextInputs::tool_manifests`] is empty the
+    /// pipeline budget-packs these schemas as handed, and the section
+    /// manifest records only what the budget kept.
     pub tools: Vec<Value>,
+
+    /// The governed tools path: selection manifests for the registry's
+    /// tools ([`crate::tool_select::manifests_for_registry`]). When
+    /// non-empty the pipeline runs the shortlist itself under the tools
+    /// section's [`ToolSelectionPolicy`] — scoring against
+    /// [`ContextInputs::task_tags`], [`ContextInputs::tool_outcomes`], and
+    /// [`ContextInputs::effect_ceiling`] — packs the selected schemas
+    /// against the section budget, and records the full ranking and
+    /// exclusions in the section manifest. `tools` is then ignored for the
+    /// section (manifests are authoritative).
+    pub tool_manifests: Vec<ToolManifest>,
+
+    /// The task's capability tags, matched against manifest tags by the
+    /// shortlist. Meaningful only on the manifests path.
+    pub task_tags: Vec<String>,
+
+    /// The per-tool journaled outcome snapshot the shortlist scores against,
+    /// keyed by tool name. Meaningful only on the manifests path.
+    pub tool_outcomes: BTreeMap<String, ToolOutcomeStats>,
+
+    /// The run's effect ceiling: manifests above it are excluded before
+    /// scoring. `None` resolves to [`Effect::NonIdempotent`] (admits all).
+    /// Meaningful only on the manifests path.
+    pub effect_ceiling: Option<Effect>,
 
     /// The verbatim `messages` channel. Never mutated: compaction substitutes
     /// the summary in the assembled section only.
@@ -568,6 +663,13 @@ pub struct SectionReport {
     /// The section's declared budget (before total-budget absorption).
     pub budget_tokens: u32,
 
+    /// The budget the section actually packed against, when total-budget
+    /// absorption shrank it below the declared budget — absent while equal
+    /// to `budget_tokens`, so the audit closes: `used_tokens` is always
+    /// accounted against `effective_budget_tokens.unwrap_or(budget_tokens)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_budget_tokens: Option<u32>,
+
     /// The token cost the assembly actually applied (per-item accounting for
     /// multi-item sections — the module docs' rule).
     pub used_tokens: u32,
@@ -583,6 +685,13 @@ pub struct SectionReport {
     /// The compaction outcome, when the history section compacted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction: Option<CompactionReport>,
+
+    /// The full selection outcome, when the tools section ran the governed
+    /// shortlist: the selected top-k plus the complete ranking and the
+    /// exclusions — the audit trail for why the model saw exactly these
+    /// tools, recorded even when the section budget then cut the tail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortlist: Option<ToolShortlist>,
 }
 
 /// The section manifest: what the assembly carried, under which policy and
@@ -711,6 +820,21 @@ fn tool_name(schema: &Value) -> Result<String> {
                  it cannot name",
             )
         })
+}
+
+/// The canonical schema one manifest contributes to the `tools` argument —
+/// the same shape [`crate::tool::ToolRegistry::schemas`] renders, so the
+/// governed shortlist path and the registry path hand the model
+/// byte-identical schemas.
+fn manifest_schema(manifest: &ToolManifest) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": manifest.name.as_str(),
+            "description": manifest.description.as_str(),
+            "parameters": manifest.parameters_schema.clone(),
+        }
+    })
 }
 
 // --------------------------------------------------------------------- //
@@ -939,6 +1063,19 @@ impl ContextPipeline {
         }
         let message = summary_message(watermark, &summary);
         let summary_tokens = self.count_item(&message);
+        // Post-check, mirroring `fit_text_section`: the halving loop bounds
+        // iterations, so an unenforceable bound (the marker framing alone
+        // exceeds it) must fail loud rather than report a manifest whose
+        // summary_tokens silently violate the policy.
+        if summary_tokens > compaction.summary_max_tokens {
+            return Err(invalid(format!(
+                "the compaction summary bound of {} tokens is unenforceable: the \
+                 generated-marker framing alone costs an estimated {summary_tokens} — raise \
+                 `summary_max_tokens`; an unenforceable bound is a configuration error, not \
+                 a truncation",
+                compaction.summary_max_tokens
+            )));
+        }
         let mut items = vec![message];
         items.extend_from_slice(&history[watermark..]);
         Ok((
@@ -1180,38 +1317,104 @@ impl ContextPipeline {
         }
 
         if let Some(section) = &policy.tools {
-            let mut used: u32 = 0;
-            let mut kept: Vec<Value> = Vec::new();
-            let mut truncated = false;
-            for schema in &inputs.tools {
-                let cost = self.count_schema(schema);
-                if used.saturating_add(cost) > section.budget_tokens {
-                    match section.resolved_overflow(SectionKind::Tools) {
-                        BudgetOverflow::Truncate => {
-                            truncated = true;
-                            break;
-                        }
-                        BudgetOverflow::Fail => {
-                            let name = tool_name(schema).unwrap_or_else(|_| "<unnamed>".into());
-                            return Err(invalid(format!(
-                                "the tools section does not fit its budget: schema `{name}` \
-                                 costs an estimated {cost} tokens with {used} of {} already \
-                                 used — the shortlist is too wide for the declared budget",
-                                section.budget_tokens
-                            )));
+            if !inputs.tool_manifests.is_empty() {
+                // The governed path: the pipeline runs the shortlist itself
+                // under the section's selection policy, then budget-packs
+                // the selected schemas. The section manifest records the
+                // full selection outcome — the complete ranking and the
+                // exclusions, not just the cut the budget applied.
+                let features = SelectionFeatures {
+                    task_tags: inputs.task_tags.clone(),
+                    effect_ceiling: inputs.effect_ceiling.unwrap_or(Effect::NonIdempotent),
+                    outcomes: inputs.tool_outcomes.clone(),
+                };
+                let shortlist = crate::tool_select::shortlist(
+                    &features,
+                    &inputs.tool_manifests,
+                    &section.selection,
+                );
+                let by_name: BTreeMap<&str, &ToolManifest> = inputs
+                    .tool_manifests
+                    .iter()
+                    .map(|m| (m.name.as_str(), m))
+                    .collect();
+                let mut used: u32 = 0;
+                let mut kept: Vec<Value> = Vec::new();
+                let mut ids: Vec<String> = Vec::new();
+                let mut truncated = false;
+                for ranked in &shortlist.selected {
+                    let manifest = by_name.get(ranked.name.as_str()).ok_or_else(|| {
+                        invalid(format!(
+                            "the shortlist selected `{}`, which is not among the input \
+                             manifests — selection must draw from the handed set",
+                            ranked.name
+                        ))
+                    })?;
+                    let schema = manifest_schema(manifest);
+                    let cost = self.count_schema(&schema);
+                    if used.saturating_add(cost) > section.budget_tokens {
+                        match section.resolved_overflow() {
+                            BudgetOverflow::Truncate => {
+                                truncated = true;
+                                break;
+                            }
+                            BudgetOverflow::Fail => {
+                                return Err(invalid(format!(
+                                    "the tools section does not fit its budget: schema `{}` \
+                                     costs an estimated {cost} tokens with {used} of {} already \
+                                     used — the shortlist is too wide for the declared budget",
+                                    ranked.name, section.budget_tokens
+                                )));
+                            }
                         }
                     }
+                    used = used.saturating_add(cost);
+                    kept.push(schema);
+                    ids.push(ranked.name.clone());
                 }
-                used = used.saturating_add(cost);
-                kept.push(schema.clone());
+                packed.tools = Some(
+                    PackedSection::new(kept, used, truncated, section.budget_tokens)
+                        .with_ids(ids)
+                        .with_shortlist(shortlist),
+                );
+            } else {
+                // The fallback path: pre-shortlisted schemas, budget-packed
+                // as handed (selection was the tool plane's).
+                let mut used: u32 = 0;
+                let mut kept: Vec<Value> = Vec::new();
+                let mut truncated = false;
+                for schema in &inputs.tools {
+                    let cost = self.count_schema(schema);
+                    if used.saturating_add(cost) > section.budget_tokens {
+                        match section.resolved_overflow() {
+                            BudgetOverflow::Truncate => {
+                                truncated = true;
+                                break;
+                            }
+                            BudgetOverflow::Fail => {
+                                let name =
+                                    tool_name(schema).unwrap_or_else(|_| "<unnamed>".into());
+                                return Err(invalid(format!(
+                                    "the tools section does not fit its budget: schema `{name}` \
+                                     costs an estimated {cost} tokens with {used} of {} already \
+                                     used — the shortlist is too wide for the declared budget",
+                                    section.budget_tokens
+                                )));
+                            }
+                        }
+                    }
+                    used = used.saturating_add(cost);
+                    kept.push(schema.clone());
+                }
+                let mut ids = Vec::new();
+                for schema in &kept {
+                    ids.push(tool_name(schema)?);
+                }
+                packed.tools = Some(
+                    PackedSection::new(kept, used, truncated, section.budget_tokens)
+                        .with_ids(ids),
+                );
             }
-            let mut ids = Vec::new();
-            for schema in &kept {
-                ids.push(tool_name(schema)?);
-            }
-            packed.tools = Some(
-                PackedSection::new(kept, used, truncated, section.budget_tokens).with_ids(ids),
-            );
         }
 
         if let Some(section) = &policy.memory {
@@ -1246,12 +1449,21 @@ impl ContextPipeline {
                     used = used.saturating_add(line_cost);
                     kept.push(record.clone());
                 }
-                let message = ChatMessage::system(memory_body(&kept));
-                let ids = kept.iter().map(|r| r.memory_id.clone()).collect();
-                packed.memory = Some(
-                    PackedSection::new(message, used, truncated, section.budget_tokens)
-                        .with_ids(ids),
-                );
+                // When nothing fits — the absorbed budget cannot carry even
+                // one record — the section is dropped rather than packed as
+                // a bare "# Memory" header: a header-only section spends
+                // tokens on no content and guarantees the next absorption
+                // iteration errors. Mirrors `pack_history`'s behavior at
+                // budget 0.
+                if !kept.is_empty() {
+                    let message = ChatMessage::system(memory_body(&kept));
+                    let ids = kept.iter().map(|r| r.memory_id.clone()).collect();
+                    packed.memory = Some(
+                        PackedSection::new(message, used, truncated, section.budget_tokens)
+                            .with_effective_budget(memory_budget)
+                            .with_ids(ids),
+                    );
+                }
             }
         }
 
@@ -1259,12 +1471,14 @@ impl ContextPipeline {
             if !history_items.is_empty() {
                 let (messages, used, truncated) =
                     self.pack_history(history_items, history_budget, compaction_report)?;
-                packed.history = Some(PackedSection::new(
-                    messages,
-                    used,
-                    truncated,
-                    section.budget_tokens,
-                ));
+                // Budget 0 without a compaction summary packs nothing — the
+                // section is dropped rather than carried empty.
+                if !messages.is_empty() {
+                    packed.history = Some(
+                        PackedSection::new(messages, used, truncated, section.budget_tokens)
+                            .with_effective_budget(history_budget),
+                    );
+                }
             }
         }
 
@@ -1349,14 +1563,17 @@ impl ContextPipeline {
 }
 
 /// One packed section's outcome: the content, the accounting the assembly
-/// applied, the declared budget (before total absorption), and the packed
-/// content's identifiers for the manifest.
+/// applied, the declared budget (before total absorption), the effective
+/// budget the pack ran against, and the packed content's identifiers for
+/// the manifest.
 struct PackedSection<T> {
     content: T,
     used: u32,
     truncated: bool,
     budget: u32,
+    effective_budget: u32,
     ids: Vec<String>,
+    shortlist: Option<ToolShortlist>,
 }
 
 impl<T> PackedSection<T> {
@@ -1366,7 +1583,9 @@ impl<T> PackedSection<T> {
             used,
             truncated,
             budget,
+            effective_budget: budget,
             ids: Vec::new(),
+            shortlist: None,
         }
     }
 
@@ -1375,14 +1594,30 @@ impl<T> PackedSection<T> {
         self
     }
 
+    /// The budget the pack actually ran against (after total-budget
+    /// absorption); the manifest records it when it differs from declared.
+    fn with_effective_budget(mut self, effective_budget: u32) -> Self {
+        self.effective_budget = effective_budget;
+        self
+    }
+
+    /// The governed shortlist outcome the tools section records.
+    fn with_shortlist(mut self, shortlist: ToolShortlist) -> Self {
+        self.shortlist = Some(shortlist);
+        self
+    }
+
     fn report(&self, kind: SectionKind, compaction: Option<CompactionReport>) -> SectionReport {
         SectionReport {
             kind,
             budget_tokens: self.budget,
+            effective_budget_tokens: (self.effective_budget != self.budget)
+                .then_some(self.effective_budget),
             used_tokens: self.used,
             truncated: self.truncated,
             ids: self.ids.clone(),
             compaction,
+            shortlist: self.shortlist.clone(),
         }
     }
 }
@@ -1436,9 +1671,11 @@ impl PackedSections {
 /// receive the wrapper and `react.rs` never knows.
 ///
 /// Construction-time inputs are the pinned-at-admission half of the assembly:
-/// identity, task, shortlisted skills, and the journaled memory handle. The
-/// per-call half — the `messages` history and the shortlisted tool schemas —
-/// arrives through [`ChatModel::chat`]. The summarizer slot lives on the
+/// identity, task, shortlisted skills, the governed tool manifests (with the
+/// task's selection features), and the journaled memory handle. The per-call
+/// half — the `messages` history — arrives through [`ChatModel::chat`]; when
+/// manifests are set they supersede the per-call `tools` argument (selection
+/// is the pipeline's, under the policy). The summarizer slot lives on the
 /// pipeline ([`ContextPipeline::with_summarizer`]), wrapped per mode by the
 /// application (the module docs' wiring recipe).
 pub struct AssemblingChatModel {
@@ -1447,6 +1684,10 @@ pub struct AssemblingChatModel {
     identity: Option<String>,
     task: Option<String>,
     skills: Vec<SkillSectionEntry>,
+    tool_manifests: Vec<ToolManifest>,
+    task_tags: Vec<String>,
+    tool_outcomes: BTreeMap<String, ToolOutcomeStats>,
+    effect_ceiling: Option<Effect>,
     memory: Option<JournaledMemory>,
 }
 
@@ -1459,6 +1700,10 @@ impl AssemblingChatModel {
             identity: None,
             task: None,
             skills: Vec::new(),
+            tool_manifests: Vec::new(),
+            task_tags: Vec::new(),
+            tool_outcomes: BTreeMap::new(),
+            effect_ceiling: None,
             memory: None,
         }
     }
@@ -1481,6 +1726,37 @@ impl AssemblingChatModel {
         self
     }
 
+    /// Builder-style: the governed tool manifests
+    /// ([`crate::tool_select::manifests_for_registry`]). When set, the
+    /// pipeline runs the shortlist per call under the tools section's
+    /// [`ToolSelectionPolicy`] and these manifests supersede the per-call
+    /// `tools` argument.
+    pub fn with_tool_manifests(mut self, manifests: Vec<ToolManifest>) -> Self {
+        self.tool_manifests = manifests;
+        self
+    }
+
+    /// Builder-style: the task's capability tags the shortlist scores
+    /// against.
+    pub fn with_task_tags(mut self, tags: Vec<String>) -> Self {
+        self.task_tags = tags;
+        self
+    }
+
+    /// Builder-style: the per-tool journaled outcome snapshot the shortlist
+    /// scores against, keyed by tool name.
+    pub fn with_tool_outcomes(mut self, outcomes: BTreeMap<String, ToolOutcomeStats>) -> Self {
+        self.tool_outcomes = outcomes;
+        self
+    }
+
+    /// Builder-style: the run's effect ceiling (manifests above it are
+    /// excluded before scoring; default [`Effect::NonIdempotent`]).
+    pub fn with_effect_ceiling(mut self, ceiling: Effect) -> Self {
+        self.effect_ceiling = Some(ceiling);
+        self
+    }
+
     /// Builder-style: the journaled memory handle (per-mode wired by the
     /// application, like the summarizer slot).
     pub fn with_memory(mut self, memory: JournaledMemory) -> Self {
@@ -1498,11 +1774,23 @@ impl AssemblingChatModel {
         messages: &[ChatMessage],
         tools: &[Value],
     ) -> Result<ContextAssembly> {
+        // When manifests are set the pipeline shortlists itself; the
+        // per-call `tools` argument is superseded (documented on
+        // `with_tool_manifests`). Otherwise the per-call schemas are the
+        // fallback path.
         let inputs = ContextInputs {
             identity: self.identity.clone(),
             task: self.task.clone(),
             skills: self.skills.clone(),
-            tools: tools.to_vec(),
+            tools: if self.tool_manifests.is_empty() {
+                tools.to_vec()
+            } else {
+                Vec::new()
+            },
+            tool_manifests: self.tool_manifests.clone(),
+            task_tags: self.task_tags.clone(),
+            tool_outcomes: self.tool_outcomes.clone(),
+            effect_ceiling: self.effect_ceiling,
             history: messages.to_vec(),
         };
         self.pipeline.assemble(&inputs, self.memory.as_ref()).await

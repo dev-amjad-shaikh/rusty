@@ -368,7 +368,8 @@ machinery where the application can reach it — at construction:
   **summarizer slot**, wrapped per mode exactly as the run's own model is:
   recording mode gets `RecordingChatModel::new(summarizer, journal.clone(),
   CONTEXT_PIPELINE_PARENT)`; replay mode gets `ReplayingChatModel::new(
-  sentinel, source.clone(), journal)` over the **run's own `ReplaySource`**
+  sentinel, source.clone(), journal, parent)` over the **run's own
+  `ReplaySource`**
   (it is `Clone`, and the serving rule — sequence plus canonical request
   hash — is unchanged: the compaction call is simply one more journaled
   `ModelCall` in the run's stream, served in order); unjournaled mode gets

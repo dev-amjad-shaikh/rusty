@@ -335,7 +335,9 @@ pub struct SelectionFeatures {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectionWeights {
     /// Points per task-tag overlap, scaled by 10000: with the default
-    /// weights one matched tag outranks any outcome statistic.
+    /// weights one matched tag ties a perfect outcome statistic (10000
+    /// basis points at weight 1) — ties break by ascending name — and two
+    /// matched tags outrank any outcome statistic.
     pub tag_match: u32,
     /// Points per success basis point from the outcome snapshot.
     pub outcome_success: u32,
@@ -560,9 +562,15 @@ fn select_weighted(
                 }
             }
         }
-        // Prerequisites rank ahead of dependents inside the closure.
+        // Prerequisites rank ahead of dependents inside the closure, under
+        // the main ranking's order: score descending, name ascending.
         closure.sort_by(|left, right| {
-            rank_key(&ranked_by_name, right).cmp(&rank_key(&ranked_by_name, left))
+            let left_key = rank_key(&ranked_by_name, left);
+            let right_key = rank_key(&ranked_by_name, right);
+            right_key
+                .0
+                .cmp(&left_key.0)
+                .then_with(|| left_key.1.cmp(right_key.1))
         });
         let needed = closure.len() + 1;
         if selected.len() + needed > k {
@@ -624,8 +632,11 @@ pub struct ArgumentViolation {
 }
 
 /// Build the structured refusal payload: `ERROR: {"kind":"argument_validation","violations":[…]}`
-/// — compact JSON, key order pinned by construction. This string is THE
-/// contract the outcome roll-up parses; the golden pins it byte-for-byte.
+/// — compact JSON, key order pinned by construction. Byte-exactness rests on
+/// serde_json's default `BTreeMap`-backed object ordering; enabling the
+/// `preserve_order` feature would flip it — the golden fails loud if it ever
+/// does. This string is THE contract the outcome roll-up parses; the golden
+/// pins it byte-for-byte.
 pub fn argument_validation_refusal(violations: &[ArgumentViolation]) -> String {
     let body = json!({
         "kind": ARGUMENT_VALIDATION_KIND,
