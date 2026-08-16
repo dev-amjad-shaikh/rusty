@@ -176,6 +176,12 @@ pub(crate) struct AppState {
     /// the durable version files under `{store_path}/skills/` — file-backed
     /// on either store backend, the receipt-keyring precedent.
     pub skills: crate::skills::SkillPlane,
+    /// The knowledge plane (capability-harness slice #4): governed sources,
+    /// chunk indexes, content-addressed bytes, and purge tombstones under
+    /// `{store_path}/knowledge/`, rebuilt from disk at boot. File-backed on
+    /// every deployment in this slice; per-tenant views come through
+    /// [`crate::knowledge::ServerKnowledgeStore`].
+    pub knowledge: Arc<crate::server_store::KnowledgePlane>,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -293,6 +299,7 @@ pub(crate) fn build_router(
         journal_locks: Mutex::new(HashMap::new()),
         evaluation_state: crate::evaluations::init_evaluation_state(),
         skills: crate::skills::SkillPlane::load(&config.store_path),
+        knowledge: Arc::new(crate::server_store::KnowledgePlane::load(&config.store_path)),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // The durable pending-run queue's boot half: replay persisted queue
@@ -524,6 +531,37 @@ pub(crate) fn build_router(
         .route(
             "/skills/{name}/files/{*path}",
             get(crate::skills::get_skill_file),
+        )
+        // The knowledge plane (capability-harness slice #4): governed
+        // sources with deterministic ingestion, cited hybrid retrieval,
+        // corrections as superseding versions, and the retention sweep.
+        // Tenant-isolated at the storage layer — cross-tenant answers
+        // `404`, never `403`. The static segments (`query`, `retention`)
+        // win over `{source_id}`, the `/memory` routing rule.
+        .route(
+            "/knowledge/sources",
+            post(crate::knowledge::register_source).get(crate::knowledge::list_sources),
+        )
+        .route("/knowledge/query", post(crate::knowledge::query_knowledge))
+        .route(
+            "/knowledge/retention/plan",
+            post(crate::knowledge::retention_plan),
+        )
+        .route(
+            "/knowledge/retention/apply",
+            post(crate::knowledge::retention_apply),
+        )
+        .route(
+            "/knowledge/sources/{source_id}",
+            get(crate::knowledge::get_source),
+        )
+        .route(
+            "/knowledge/sources/{source_id}/correct",
+            post(crate::knowledge::correct_source),
+        )
+        .route(
+            "/knowledge/sources/{source_id}/chunks/{chunk_id}",
+            get(crate::knowledge::get_chunk),
         )
         // The learning-candidate lifecycle (R0.8 wave 3): creation plus
         // the three journaled transitions, and the version-pointer

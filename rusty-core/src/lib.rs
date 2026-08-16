@@ -202,6 +202,7 @@ pub mod error;
 pub mod executor;
 pub mod graph;
 pub mod journal;
+pub mod knowledge;
 pub mod learn;
 pub mod llm;
 pub mod mcp;

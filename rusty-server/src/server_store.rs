@@ -43,6 +43,7 @@ use rusty_agent_runtime::deploy::{
 };
 use rusty_agent_runtime::durable::resolve_timeout_bound_ms;
 use rusty_agent_runtime::journal::{ArtifactStore, FileArtifactStore, JournalSnapshot};
+use rusty_agent_runtime::knowledge::{ChunkRecord, KnowledgeSource, SourceTombstone};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
 use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
 use rusty_agent_runtime::receipt::RunReceipt;
@@ -69,6 +70,7 @@ use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::deploy;
 use crate::journals;
+use crate::knowledge;
 use crate::learn;
 use crate::memory;
 use crate::outbox::{self, OutboxRecord};
@@ -10441,6 +10443,252 @@ mod postgres {
 
 #[cfg(feature = "postgres")]
 pub(crate) use postgres::{LazyPostgresCheckpointer, PostgresStore};
+
+// --------------------------------------------------------------------- //
+// The knowledge plane (capability-harness slice #4)
+// --------------------------------------------------------------------- //
+
+/// The file-backed knowledge store: every tenant's governed sources, chunk
+/// indexes, content-addressed bytes, and purge tombstones under
+/// `{store_path}/knowledge/` (see [`crate::knowledge`] for the layout),
+/// served from in-memory indexes rebuilt from disk at boot — the
+/// `JsonFileStore` convention, as a standalone plane: the knowledge store
+/// is not part of the [`ServerStore`] trait in this slice (a
+/// column-mapped Postgres backend is a later concern behind core's
+/// `ContentAddressedStore` trait), so a Postgres-configured deployment
+/// still serves knowledge from these files.
+///
+/// Every key is tenant-scoped (`{tenant}/{id}` for named tenants, bare for
+/// the default tenant — [`crate::auth::scope_id`]), and the records
+/// themselves carry bare ids: tenancy rides the key prefix, the same
+/// discipline the memory index applies.
+pub(crate) struct KnowledgePlane {
+    root: PathBuf,
+    /// Source versions keyed by tenant-scoped content hash.
+    sources: Mutex<HashMap<String, KnowledgeSource>>,
+    /// Chunk lists keyed by tenant-scoped source-version hash.
+    chunks: Mutex<HashMap<String, Vec<ChunkRecord>>>,
+    /// Content-addressed bytes keyed by tenant-scoped address. Scoped per
+    /// tenant deliberately: a tenant's retention sweep must never collect
+    /// bytes another tenant still references, and key-level isolation
+    /// makes that structural rather than a cross-tenant refcount.
+    content: Mutex<HashMap<String, Vec<u8>>>,
+    /// Purge tombstones keyed by tenant-scoped source id.
+    tombstones: Mutex<HashMap<String, SourceTombstone>>,
+}
+
+impl KnowledgePlane {
+    /// Rebuild the indexes from the files under `root` (boot).
+    pub(crate) fn load(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            sources: Mutex::new(knowledge::load_sources(root).into_iter().collect()),
+            chunks: Mutex::new(knowledge::load_chunks(root).into_iter().collect()),
+            content: Mutex::new(knowledge::load_content(root).into_iter().collect()),
+            tombstones: Mutex::new(knowledge::load_tombstones(root).into_iter().collect()),
+        }
+    }
+
+    /// Store content-addressed bytes. Idempotent for identical bytes under
+    /// the same address; fails when the address does not match the bytes
+    /// (core's verification rule, enforced at the persistence layer too).
+    pub(crate) async fn put_content(
+        &self,
+        tenant: &str,
+        address: &str,
+        bytes: &[u8],
+    ) -> StoreResult<bool> {
+        if rusty_agent_runtime::record::sha256_hex(bytes) != address {
+            return Err(format!(
+                "knowledge content address mismatch: {address} was declared but the bytes do \
+                 not hash to it"
+            ));
+        }
+        let scoped = crate::auth::scope_id(tenant, address);
+        let mut map = self.content.lock().await;
+        if map.contains_key(&scoped) {
+            return Ok(false);
+        }
+        // Persist before the index insert, holding the lock across both
+        // (the assistants convention): a failed write leaves nothing
+        // half-visible.
+        knowledge::persist_content(&self.root, &scoped, bytes).await?;
+        map.insert(scoped, bytes.to_vec());
+        Ok(true)
+    }
+
+    pub(crate) async fn get_content(
+        &self,
+        tenant: &str,
+        address: &str,
+    ) -> StoreResult<Option<Vec<u8>>> {
+        let scoped = crate::auth::scope_id(tenant, address);
+        Ok(self.content.lock().await.get(&scoped).cloned())
+    }
+
+    /// Remove content bytes. File before index (the memory removal rule,
+    /// inverted from put): a crash between the two leaves an in-memory
+    /// entry the next reload clears, never a blob no index remembers.
+    pub(crate) async fn remove_content(&self, tenant: &str, address: &str) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, address);
+        knowledge::remove_content(&self.root, &scoped).await?;
+        Ok(self.content.lock().await.remove(&scoped).is_some())
+    }
+
+    /// Store one source version under its content hash. Write-once:
+    /// re-putting an identical record converges (`false`); a different
+    /// record under an occupied hash is an error — a version is immutable
+    /// and its hash is its identity.
+    pub(crate) async fn put_source(
+        &self,
+        tenant: &str,
+        source: &KnowledgeSource,
+    ) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, &source.content_hash);
+        let mut map = self.sources.lock().await;
+        match map.get(&scoped) {
+            Some(existing) if existing == source => return Ok(false),
+            Some(_) => {
+                return Err(format!(
+                    "a different source record already occupies content hash {} — a version is \
+                     immutable, and its hash is its identity",
+                    source.content_hash
+                ))
+            }
+            None => {}
+        }
+        knowledge::persist_source(&self.root, &scoped, source).await?;
+        map.insert(scoped, source.clone());
+        Ok(true)
+    }
+
+    pub(crate) async fn get_source(
+        &self,
+        tenant: &str,
+        content_hash: &str,
+    ) -> StoreResult<Option<KnowledgeSource>> {
+        let scoped = crate::auth::scope_id(tenant, content_hash);
+        Ok(self.sources.lock().await.get(&scoped).cloned())
+    }
+
+    /// The tenant's whole source-version universe (all versions, superseded
+    /// and expired included — filtering is core's query semantics, never
+    /// the scan's).
+    pub(crate) async fn all_sources(&self, tenant: &str) -> StoreResult<Vec<KnowledgeSource>> {
+        let map = self.sources.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, record)| record.clone())
+            .collect())
+    }
+
+    pub(crate) async fn remove_source(&self, tenant: &str, content_hash: &str) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, content_hash);
+        knowledge::remove_source(&self.root, &scoped).await?;
+        Ok(self.sources.lock().await.remove(&scoped).is_some())
+    }
+
+    /// Store one version's chunk list. Write-once under the version's
+    /// content hash (core's rule, enforced here).
+    pub(crate) async fn put_chunks(
+        &self,
+        tenant: &str,
+        chunks: &[ChunkRecord],
+    ) -> StoreResult<()> {
+        let Some(first) = chunks.first() else {
+            return Ok(());
+        };
+        let scoped = crate::auth::scope_id(tenant, &first.source_hash);
+        let mut map = self.chunks.lock().await;
+        if let Some(existing) = map.get(&scoped) {
+            if existing == chunks {
+                return Ok(());
+            }
+            return Err(format!(
+                "different chunks already occupy source version {} — a version's chunk list is \
+                 write-once",
+                first.source_hash
+            ));
+        }
+        knowledge::persist_chunks(&self.root, &scoped, chunks).await?;
+        map.insert(scoped, chunks.to_vec());
+        Ok(())
+    }
+
+    pub(crate) async fn chunks_of(
+        &self,
+        tenant: &str,
+        source_hash: &str,
+    ) -> StoreResult<Vec<ChunkRecord>> {
+        let scoped = crate::auth::scope_id(tenant, source_hash);
+        Ok(self
+            .chunks
+            .lock()
+            .await
+            .get(&scoped)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    pub(crate) async fn remove_chunks(&self, tenant: &str, source_hash: &str) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, source_hash);
+        knowledge::remove_chunks(&self.root, &scoped).await?;
+        Ok(self.chunks.lock().await.remove(&scoped).is_some())
+    }
+
+    /// The reverse index, computed by scan: which surviving source version
+    /// lists the chunk content address. Scan-backed deliberately — the
+    /// reverse lookup serves the evidence path, not the hot query path.
+    pub(crate) async fn source_of_chunk(
+        &self,
+        tenant: &str,
+        content_address: &str,
+    ) -> StoreResult<Option<String>> {
+        let map = self.chunks.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .find(|(_, list)| list.iter().any(|c| c.content_address == content_address))
+            .and_then(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).map(str::to_owned)))
+    }
+
+    /// Record a purge tombstone. Write-once per source id: a re-purge
+    /// converges on the first tombstone — the earliest receipt is the
+    /// evidence.
+    pub(crate) async fn put_tombstone(
+        &self,
+        tenant: &str,
+        tombstone: &SourceTombstone,
+    ) -> StoreResult<()> {
+        let scoped = crate::auth::scope_id(tenant, &tombstone.source_id);
+        let mut map = self.tombstones.lock().await;
+        if map.contains_key(&scoped) {
+            return Ok(());
+        }
+        knowledge::persist_tombstone(&self.root, &scoped, tombstone).await?;
+        map.insert(scoped, tombstone.clone());
+        Ok(())
+    }
+
+    pub(crate) async fn tombstone_for(
+        &self,
+        tenant: &str,
+        source_id: &str,
+    ) -> StoreResult<Option<SourceTombstone>> {
+        let scoped = crate::auth::scope_id(tenant, source_id);
+        Ok(self.tombstones.lock().await.get(&scoped).cloned())
+    }
+
+    pub(crate) async fn all_tombstones(&self, tenant: &str) -> StoreResult<Vec<SourceTombstone>> {
+        let map = self.tombstones.lock().await;
+        Ok(map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, tombstone)| tombstone.clone())
+            .collect())
+    }
+}
 
 // --------------------------------------------------------------------- //
 // Deployment store tests (R0.12 wave 3, file backend)

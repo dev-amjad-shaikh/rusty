@@ -147,6 +147,12 @@
 //! | `DELETE /deployments/secrets/{environment}/{name}` | R0.12 (wave 3): revoke by deletion `{author}` → `204` (`404` unknown/cross-tenant); the `env_secret_revoked` tombstone journals before the delete — the tombstone is the evidence the scope once held a value |
 //! | `POST /deployments/shadows` | R0.12 (wave 4): run a recorded run's twin under a candidate revision, behind the shadow admission boundary `{revision_id, source, input?, author}` — `source` is the journal snapshot, inline, so shadow evidence is self-contained → `201 {shadow_run_id, verdict}`; `404` unknown revision; `422` a revision failing its content-address check, a source snapshot failing integrity, or a failed run (the verdict journals either way — a failed shadow is evidence about the candidate). Pure and read-only effects execute; everything above is refused (typed, classified, journaled) and served from the recorded world when the source journal holds the outcome; the verdict names matched, unserved, and unrequested outcomes. The shadow journals under its own run id and holds no thread — a receipt request for it is a `404` by construction |
 //! | `GET /deployments/health` | R0.12 (wave 4): the health board — every environment's pointer, canary state with its bound-run tally, and the last gate decision the chain recorded for it, derived from journaled data alone (no new store) |
+//! | `POST /knowledge/sources` | Knowledge plane (capability-harness slice #4): register a governed source `{source_id, kind, title, author, body, confidence?, retention?, scope?}` → `201 {source_id, content_hash, version, chunk_count, created}` (`200` + `created: false` on an identical re-registration — content addressing converges; `400` contract violations, including a *different* body under a taken id — that is a correction). Scope defaults to the caller's tenant scope |
+//! | `GET /knowledge/sources` / `GET /knowledge/sources/{id}` | the tenant's sources (latest version per id, metadata only — bodies never cross a listing — sorted by id, plus the tenant's tombstones) / one source's latest metadata with its chunk inventory (`404` unknown/cross-tenant; a purged id answers `200 {"tombstone": …}` — old citations stay resolvable to metadata) |
+//! | `GET /knowledge/sources/{id}/chunks/{chunk_id}` | one chunk with its full citation (`chunk_id` accepts the bare index or the full `{id}#{index}`); `?version={content_hash}` pins a superseded version for evidence. `404` unknown source/version/chunk/cross-tenant |
+//! | `POST /knowledge/sources/{id}/correct` | mint the superseding version `{author, body}` → `201` (`404` unknown/purged; `400` contract violations — a byte-identical "correction" is not one). The old version stops serving retrieval immediately and stays addressable as evidence |
+//! | `POST /knowledge/query` | hybrid cited retrieval `{text, limits?, scope?}` → `200 {query, results}` — every result a `CitedChunk` (text *with* citation, never bare text) over the tenant's live sources; count/byte ceilings truncate (`400` invalid limits or a termless query) |
+//! | `POST /knowledge/retention/plan` / `POST /knowledge/retention/apply` | the retention sweep's dry-run report / its exact execution — chunks, bodies, and records removed (an address dies with its last reference), one metadata-only tombstone per purged source id. `{as_of?}` is the operator-declared sweep instant (default: now). No admin-role convention exists; the tenant key is the operator gate, as with `/memory/forget` |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -176,6 +182,7 @@ mod error;
 mod evaluations;
 mod gate;
 mod journals;
+mod knowledge;
 mod learn;
 mod mcp_bridge;
 mod memory;
@@ -218,6 +225,11 @@ pub use gate::{
     DirectoryGatePolicySource, EvalRevisionGateEvaluator, GatePolicySource, RevisionEvaluationAgent,
 };
 pub use learn::{DatasetSource, DirectoryDatasetSource, EvalCandidateEvaluator, EvaluationAgent};
+/// The knowledge plane's tool adapter is public: embedders (the demo
+/// server, downstream harnesses) register it into their `ToolRegistry` so
+/// a graph's `search_knowledge` upgrades to the governed backend without a
+/// catalog change.
+pub use knowledge::GovernedKnowledgeSearchTool;
 pub use runs::RunStatus;
 
 /// Default bound on graceful shutdown (25 s): how long
@@ -275,6 +287,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "env-secrets",
     "journals",
     "keys",
+    "knowledge",
     "learn",
     "memory",
     "memory_artifacts",
