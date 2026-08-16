@@ -24,6 +24,11 @@
 //!   tests drive a fake and real wiring is a server concern. Search is a
 //!   provider in its own right — never a hidden network call inside a
 //!   built-in tool.
+//! - [`HttpApiProvider`], the generic REST/GraphQL contract: a manifest
+//!   declares a base URL, a slot-referencing auth style, and an operations
+//!   list, and each valid operation derives one catalog tool
+//!   (`<connector>/<operation>`) with an explicit effect classification.
+//!   This is the foundation service packs are declared against.
 //!
 //! All timestamps are logical: every state transition takes `now_ms` from
 //! the caller instead of reading a wall clock, so health sweeps and
@@ -36,18 +41,26 @@
 use crate::error::RustyError;
 
 pub mod credential;
+pub mod http_api;
 pub mod instance;
 pub mod manifest;
 pub mod provider;
 pub mod registry;
 
 pub use credential::{CredentialBroker, CredentialHandle, InMemoryCredentialBroker};
+pub use http_api::{
+    derive_idempotency_key, HttpApiProvider, HttpApiRequest, HttpApiTool, HttpApiTransport,
+    DEFAULT_HTTP_API_TIMEOUT, IDEMPOTENCY_KEY_DOMAIN, MAX_HTTP_API_ERROR_BODY_BYTES,
+    MAX_HTTP_API_REQUEST_BYTES,
+};
 pub use instance::{
     CatalogGeneration, CatalogPin, ConnectorInstance, LifecycleState, DEFAULT_DEGRADE_AFTER_FAILURES,
     MAX_INSTANCE_ERROR_BYTES, MAX_TENANT_ID_LEN,
 };
 pub use manifest::{
-    ConnectorManifest, CredentialSlot, HttpSearchSpec, McpStdioSpec, ProviderKind, SearchAuth,
+    ConnectorManifest, CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiSpec, HttpMethod,
+    HttpSearchSpec, McpStdioSpec, OperationBody, OperationEffect, ProviderKind, ResponseExtraction,
+    SearchAuth,
 };
 pub use provider::{
     default_provider, ConnectorProvider, ConnectorSearchTool, HttpRequest, HttpResponse,

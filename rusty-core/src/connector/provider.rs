@@ -30,7 +30,7 @@ use crate::record::Effect;
 use crate::tool::{Tool, ToolCapability, MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_SCHEMA_BYTES};
 
 /// Maximum length of one derived catalog tool name (`<connector>/<tool>`).
-const MAX_DERIVED_TOOL_NAME_LEN: usize = 128;
+pub(crate) const MAX_DERIVED_TOOL_NAME_LEN: usize = 128;
 
 // ---------------------------------------------------------------------------
 // Provider contracts
@@ -76,11 +76,15 @@ pub trait ConnectorProvider: std::fmt::Debug + Send + Sync {
 
 /// The provider a manifest gets when the caller does not supply one:
 /// [`McpStdioProvider`] for `mcp-stdio`, a manifest-configured
-/// [`HttpSearchProvider`] for `http-search`.
+/// [`HttpSearchProvider`] for `http-search`, a manifest-configured
+/// [`super::http_api::HttpApiProvider`] for `http-api`.
 pub fn default_provider(manifest: &ConnectorManifest) -> Result<Arc<dyn ConnectorProvider>> {
     match &manifest.provider {
         ProviderKind::McpStdio(_) => Ok(Arc::new(McpStdioProvider)),
         ProviderKind::HttpSearch(_) => Ok(Arc::new(HttpSearchProvider::from_manifest(manifest)?)),
+        ProviderKind::HttpApi(_) => Ok(Arc::new(
+            super::http_api::HttpApiProvider::from_manifest(manifest)?,
+        )),
     }
 }
 
@@ -122,10 +126,11 @@ impl ConnectorProvider for McpStdioProvider {
     ) -> Result<Box<dyn ProviderSession>> {
         let spec = match &manifest.provider {
             ProviderKind::McpStdio(spec) => spec,
-            ProviderKind::HttpSearch(_) => {
+            ProviderKind::HttpSearch(_) | ProviderKind::HttpApi(_) => {
                 return Err(conn_err(format!(
-                    "manifest `{}` is http-search; McpStdioProvider cannot serve it",
-                    manifest.id
+                    "manifest `{}` is {}; McpStdioProvider cannot serve it",
+                    manifest.id,
+                    provider_kind_name(&manifest.provider)
                 )))
             }
         };
@@ -446,9 +451,10 @@ impl HttpSearchProvider {
             ProviderKind::HttpSearch(spec) => {
                 Self::new(spec.base_url.clone(), spec.auth.clone())
             }
-            ProviderKind::McpStdio(_) => Err(conn_err(format!(
-                "manifest `{}` is mcp-stdio; HttpSearchProvider cannot serve it",
-                manifest.id
+            ProviderKind::McpStdio(_) | ProviderKind::HttpApi(_) => Err(conn_err(format!(
+                "manifest `{}` is {}; HttpSearchProvider cannot serve it",
+                manifest.id,
+                provider_kind_name(&manifest.provider)
             ))),
         }
     }
@@ -590,11 +596,21 @@ impl ConnectorProvider for HttpSearchProvider {
                 connector_id: manifest.id.clone(),
                 provider: self.clone(),
             })),
-            ProviderKind::McpStdio(_) => Err(conn_err(format!(
-                "manifest `{}` is mcp-stdio; HttpSearchProvider cannot serve it",
-                manifest.id
+            ProviderKind::McpStdio(_) | ProviderKind::HttpApi(_) => Err(conn_err(format!(
+                "manifest `{}` is {}; HttpSearchProvider cannot serve it",
+                manifest.id,
+                provider_kind_name(&manifest.provider)
             ))),
         }
+    }
+}
+
+/// The serde tag a [`ProviderKind`] carries, for mismatch errors.
+pub(crate) fn provider_kind_name(kind: &ProviderKind) -> &'static str {
+    match kind {
+        ProviderKind::McpStdio(_) => "mcp-stdio",
+        ProviderKind::HttpSearch(_) => "http-search",
+        ProviderKind::HttpApi(_) => "http-api",
     }
 }
 
