@@ -11,6 +11,10 @@ const WorkPage = lazy(() => import("./features/work/WorkPage").then((module) => 
 const RunComparePage = lazy(() => import("./features/work/RunComparePage").then((module) => ({ default: module.RunComparePage })));
 const OperationsPage = lazy(() => import("./features/operations/OperationsPage").then((module) => ({ default: module.OperationsPage })));
 const CommandCenter = lazy(() => import("./features/command-center/CommandCenter").then((module) => ({ default: module.CommandCenter })));
+const SkillsPage = lazy(() => import("./features/skills-tools/SkillsPage").then((module) => ({ default: module.SkillsPage })));
+const KnowledgePage = lazy(() => import("./features/knowledge/KnowledgePage").then((module) => ({ default: module.KnowledgePage })));
+const MemoryPage = lazy(() => import("./features/memory/MemoryPage").then((module) => ({ default: module.MemoryPage })));
+const ConnectorsPage = lazy(() => import("./features/connectors/ConnectorsPage").then((module) => ({ default: module.ConnectorsPage })));
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -37,8 +41,12 @@ const workRunRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work
 const workTraceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId/trace", component: WorkPage });
 const workEvaluateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId/evaluate", component: WorkPage });
 const operationsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations", component: OperationsPage });
+const skillsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/skills", component: SkillsPage });
+const knowledgeRoute = createRoute({ getParentRoute: () => rootRoute, path: "/knowledge", component: KnowledgePage });
+const memoryRoute = createRoute({ getParentRoute: () => rootRoute, path: "/memory", component: MemoryPage });
+const connectorsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/connectors", component: ConnectorsPage });
 
-const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, agentBuilderRoute, agentRoute, promptsRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, operationsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, agentBuilderRoute, agentRoute, promptsRoute, skillsRoute, knowledgeRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, memoryRoute, connectorsRoute, operationsRoute]);
 
 export const router = createRouter({
   routeTree,
