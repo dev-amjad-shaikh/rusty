@@ -258,6 +258,7 @@ pub mod self_improve;
 pub mod session_query;
 pub mod skill;
 pub mod state;
+pub mod surface;
 pub mod team_trace;
 pub mod telemetry;
 pub mod tool;
@@ -437,6 +438,9 @@ pub mod prelude {
         MAX_READ_EVENTS, MAX_SEARCH_RESULTS, MAX_TRACE_EVENTS,
     };
     pub use crate::state::{Reducer, State, StateSpec};
+    pub use crate::surface::{
+        Provenance, Surface, SurfaceEntry, SurfaceEntryKind, SurfaceOp, SurfaceRevision,
+    };
     pub use crate::team_trace::{TeamTrace, TeamTraceNode};
     pub use crate::telemetry::{
         redactor_fn, severity_of, AppendOutcome, InMemoryLedger, JsonlLedger, LedgerRecord,
