@@ -196,12 +196,9 @@ impl ConnectorInstance {
     /// a previously reviewed tool set.
     pub fn verify_pin(&self, pin: &CatalogPin) -> bool {
         pin.instance_id == self.instance_id
-            && self
-                .catalog
-                .as_ref()
-                .is_some_and(|catalog| {
-                    catalog.generation == pin.generation && catalog.hash == pin.hash
-                })
+            && self.catalog.as_ref().is_some_and(|catalog| {
+                catalog.generation == pin.generation && catalog.hash == pin.hash
+            })
     }
 
     /// `pending | failed | degraded → connecting`.
@@ -383,8 +380,7 @@ impl ConnectorInstance {
     /// bytes leave the generation — including its production time —
     /// untouched.
     fn adopt_catalog(&mut self, tools: Vec<ToolCapability>, now_ms: u64) -> bool {
-        let value = serde_json::to_value(&tools)
-            .expect("a ToolCapability vec always serializes");
+        let value = serde_json::to_value(&tools).expect("a ToolCapability vec always serializes");
         let hash = super::canonical_json_hash(&value);
         match &mut self.catalog {
             None => {

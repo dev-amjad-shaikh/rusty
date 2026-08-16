@@ -1051,9 +1051,7 @@ pub(crate) trait ServerStore: Send + Sync {
     /// its tenant (order unspecified). Boot restore's scan: the plane
     /// re-registers the whole catalog before it serves, and per-tenant
     /// listing would need a tenant roster the plane does not keep.
-    async fn list_all_connector_manifests(
-        &self,
-    ) -> StoreResult<Vec<(String, ConnectorManifest)>>;
+    async fn list_all_connector_manifests(&self) -> StoreResult<Vec<(String, ConnectorManifest)>>;
 
     /// Insert or replace a connector instance record (the lifecycle
     /// mirror: `sync_record` rewrites state, failure counters, and the
@@ -3558,9 +3556,7 @@ impl ServerStore for JsonFileStore {
             .collect())
     }
 
-    async fn list_all_connector_manifests(
-        &self,
-    ) -> StoreResult<Vec<(String, ConnectorManifest)>> {
+    async fn list_all_connector_manifests(&self) -> StoreResult<Vec<(String, ConnectorManifest)>> {
         let map = self.connector_manifests.lock().await;
         Ok(map
             .iter()
@@ -10583,7 +10579,11 @@ impl KnowledgePlane {
             .collect())
     }
 
-    pub(crate) async fn remove_source(&self, tenant: &str, content_hash: &str) -> StoreResult<bool> {
+    pub(crate) async fn remove_source(
+        &self,
+        tenant: &str,
+        content_hash: &str,
+    ) -> StoreResult<bool> {
         let scoped = crate::auth::scope_id(tenant, content_hash);
         knowledge::remove_source(&self.root, &scoped).await?;
         Ok(self.sources.lock().await.remove(&scoped).is_some())
@@ -10591,11 +10591,7 @@ impl KnowledgePlane {
 
     /// Store one version's chunk list. Write-once under the version's
     /// content hash (core's rule, enforced here).
-    pub(crate) async fn put_chunks(
-        &self,
-        tenant: &str,
-        chunks: &[ChunkRecord],
-    ) -> StoreResult<()> {
+    pub(crate) async fn put_chunks(&self, tenant: &str, chunks: &[ChunkRecord]) -> StoreResult<()> {
         let Some(first) = chunks.first() else {
             return Ok(());
         };

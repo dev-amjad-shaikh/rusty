@@ -176,16 +176,14 @@ impl ConnectorRegistry {
         broker: &dyn CredentialBroker,
     ) -> Result<String> {
         let entry = self.manifests.get(manifest_hash).ok_or_else(|| {
-            conn_err(format!("no manifest registered under hash `{manifest_hash}`"))
+            conn_err(format!(
+                "no manifest registered under hash `{manifest_hash}`"
+            ))
         })?;
 
         let instance_id = format!("inst-{:06}", self.next_instance_seq);
-        let mut instance = ConnectorInstance::new(
-            &instance_id,
-            &entry.manifest.id,
-            manifest_hash,
-            tenant_id,
-        )?;
+        let mut instance =
+            ConnectorInstance::new(&instance_id, &entry.manifest.id, manifest_hash, tenant_id)?;
 
         let mut credentials = Vec::with_capacity(entry.manifest.credential_slots.len());
         let mut missing = Vec::new();
@@ -244,7 +242,8 @@ impl ConnectorRegistry {
     /// The current catalog generation of an instance, if it has ever been
     /// healthy.
     pub fn catalog(&self, instance_id: &str) -> Option<&CatalogGeneration> {
-        self.instance(instance_id).and_then(ConnectorInstance::catalog)
+        self.instance(instance_id)
+            .and_then(ConnectorInstance::catalog)
     }
 
     /// The pin a consumer should hold against the instance's current
@@ -262,15 +261,18 @@ impl ConnectorRegistry {
     /// violations (unknown id, disabled instance, already connecting) do
     /// error.
     pub async fn connect(&mut self, instance_id: &str, now_ms: u64) -> Result<()> {
-        let entry = self.instances.get_mut(instance_id).ok_or_else(|| {
-            conn_err(format!("no instance registered under id `{instance_id}`"))
-        })?;
+        let entry = self
+            .instances
+            .get_mut(instance_id)
+            .ok_or_else(|| conn_err(format!("no instance registered under id `{instance_id}`")))?;
         entry.instance.begin_connect()?;
         let manifest = &self
             .manifests
             .get(&entry.instance.manifest_hash)
             .ok_or_else(|| {
-                conn_err(format!("instance `{instance_id}` pins an unregistered manifest"))
+                conn_err(format!(
+                    "instance `{instance_id}` pins an unregistered manifest"
+                ))
             })?
             .manifest;
 
@@ -296,9 +298,10 @@ impl ConnectorRegistry {
     /// session.
     pub async fn check_health(&mut self, instance_id: &str, now_ms: u64) -> Result<SweepOutcome> {
         let degrade_after = self.degrade_after;
-        let entry = self.instances.get_mut(instance_id).ok_or_else(|| {
-            conn_err(format!("no instance registered under id `{instance_id}`"))
-        })?;
+        let entry = self
+            .instances
+            .get_mut(instance_id)
+            .ok_or_else(|| conn_err(format!("no instance registered under id `{instance_id}`")))?;
         let previous = entry.instance.state().clone();
         if !matches!(
             previous,
@@ -369,9 +372,10 @@ impl ConnectorRegistry {
 
     /// Disable an instance, shutting its session down first.
     pub async fn disable(&mut self, instance_id: &str) -> Result<()> {
-        let entry = self.instances.get_mut(instance_id).ok_or_else(|| {
-            conn_err(format!("no instance registered under id `{instance_id}`"))
-        })?;
+        let entry = self
+            .instances
+            .get_mut(instance_id)
+            .ok_or_else(|| conn_err(format!("no instance registered under id `{instance_id}`")))?;
         entry.instance.disable()?;
         if let Some(session) = entry.session.take() {
             session.shutdown().await?;
@@ -382,9 +386,10 @@ impl ConnectorRegistry {
     /// Re-enable a disabled instance; it returns to `pending` and must
     /// connect again before serving.
     pub fn enable(&mut self, instance_id: &str) -> Result<()> {
-        let entry = self.instances.get_mut(instance_id).ok_or_else(|| {
-            conn_err(format!("no instance registered under id `{instance_id}`"))
-        })?;
+        let entry = self
+            .instances
+            .get_mut(instance_id)
+            .ok_or_else(|| conn_err(format!("no instance registered under id `{instance_id}`")))?;
         entry.instance.enable()
     }
 }

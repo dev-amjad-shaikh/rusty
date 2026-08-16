@@ -312,9 +312,7 @@ fn feature_probe(feature: &'static str) -> fn(&CapabilityInspection) -> Capabili
     match feature {
         FEATURE_CAPABILITY_SETS => |i| flag(i.has_feature(FEATURE_CAPABILITY_SETS)),
         FEATURE_SURFACE_COMPACTION => |i| flag(i.has_feature(FEATURE_SURFACE_COMPACTION)),
-        FEATURE_STREAMING_CHUNK_CAPTURE => {
-            |i| flag(i.has_feature(FEATURE_STREAMING_CHUNK_CAPTURE))
-        }
+        FEATURE_STREAMING_CHUNK_CAPTURE => |i| flag(i.has_feature(FEATURE_STREAMING_CHUNK_CAPTURE)),
         FEATURE_TELEMETRY_LEDGER => |i| flag(i.has_feature(FEATURE_TELEMETRY_LEDGER)),
         FEATURE_TOKEN_METER => |i| flag(i.has_feature(FEATURE_TOKEN_METER)),
         FEATURE_PLUGIN_KERNEL => |i| flag(i.has_feature(FEATURE_PLUGIN_KERNEL)),
@@ -396,10 +394,12 @@ fn probe_hooks_compatibility(inspection: &CapabilityInspection) -> CapabilitySta
 /// runbook does not count, which is what keeps the approval gate visible
 /// in the report.
 fn probe_operator_runbooks(inspection: &CapabilityInspection) -> CapabilityStatus {
-    flag(inspection
-        .skill_names
-        .iter()
-        .any(|name| name.starts_with(RUNBOOK_SKILL_PREFIX)))
+    flag(
+        inspection
+            .skill_names
+            .iter()
+            .any(|name| name.starts_with(RUNBOOK_SKILL_PREFIX)),
+    )
 }
 
 /// The declarative capability catalog: rusty's real planes first, then the
@@ -449,7 +449,8 @@ pub fn capability_catalog() -> Vec<Capability> {
         Capability {
             id: "agent-fabric",
             plane: Plane::Agents,
-            description: "durable agents with stable identity, mailboxes, and coordination contracts",
+            description:
+                "durable agents with stable identity, mailboxes, and coordination contracts",
             build: BuildShape::CoreStream,
             probe: plane_probe(Plane::Agents),
         },
@@ -463,14 +464,16 @@ pub fn capability_catalog() -> Vec<Capability> {
         Capability {
             id: "approval-gated-publish",
             plane: Plane::Skills,
-            description: "composer drafts cross into the shared registry only behind a scoped approval token",
+            description:
+                "composer drafts cross into the shared registry only behind a scoped approval token",
             build: BuildShape::CoreStream,
             probe: probe_gated_publish,
         },
         Capability {
             id: "capability-sets",
             plane: Plane::Agents,
-            description: "content-addressed capability sets resolved to exact per-run tool allowlists",
+            description:
+                "content-addressed capability sets resolved to exact per-run tool allowlists",
             build: BuildShape::CoreStream,
             probe: feature_probe(FEATURE_CAPABILITY_SETS),
         },
@@ -764,7 +767,9 @@ impl<'de> Deserialize<'de> for BacklogEntry {
     /// backlog file whose ids do not match their contents fails closed, the
     /// same discipline content-addressed candidates and capability sets
     /// keep.
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let body = BacklogEntryBody::deserialize(deserializer)?;
         let derived = backlog_entry_id(&body.title, &body.gap_ids);
         if derived != body.id {
@@ -1034,9 +1039,9 @@ impl BacklogStore {
         };
         let bytes = serde_json::to_vec(&file)?;
         if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| backlog_io_error(format!("create backlog dir `{}`", parent.display()), e))?;
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                backlog_io_error(format!("create backlog dir `{}`", parent.display()), e)
+            })?;
         }
         crate::checkpoint::JsonFileCheckpointer::atomic_write(&self.path, &bytes).await
     }
@@ -1082,9 +1087,9 @@ impl BacklogStore {
     ) -> Result<BacklogEntry> {
         let (next, snapshot) = {
             let mut entries = self.lock();
-            let current = entries.get(id).ok_or_else(|| {
-                RustyError::Tool(format!("unknown backlog entry `{id}`"))
-            })?;
+            let current = entries
+                .get(id)
+                .ok_or_else(|| RustyError::Tool(format!("unknown backlog entry `{id}`")))?;
             let next = current.transition(to, evidence, now)?;
             entries.insert(id.to_owned(), next.clone());
             (next, entries.clone())
@@ -1174,9 +1179,9 @@ pub async fn draft_skill_for_entry(
     entry_id: &str,
     proposal: &SkillProposal,
 ) -> Result<StagedSkill> {
-    let entry = store.get(entry_id).ok_or_else(|| {
-        RustyError::Tool(format!("unknown backlog entry `{entry_id}`"))
-    })?;
+    let entry = store
+        .get(entry_id)
+        .ok_or_else(|| RustyError::Tool(format!("unknown backlog entry `{entry_id}`")))?;
     if entry.status != BacklogStatus::Approved {
         return Err(RustyError::Tool(format!(
             "backlog entry `{entry_id}` is {:?}, not approved — the harness proposes, the \
@@ -1524,9 +1529,7 @@ impl Tool for BuildGapSkillTool {
         let gap_id = string("gap_id")?;
         let catalog = capability_catalog();
         let capability = catalog_entry(&catalog, &gap_id).ok_or_else(|| {
-            RustyError::Tool(format!(
-                "gap `{gap_id}` is not in the capability catalog"
-            ))
+            RustyError::Tool(format!("gap `{gap_id}` is not in the capability catalog"))
         })?;
         if capability.build != BuildShape::Skill {
             return Err(RustyError::Tool(format!(
@@ -1539,7 +1542,8 @@ impl Tool for BuildGapSkillTool {
             .list()
             .into_iter()
             .filter(|entry| {
-                entry.status == BacklogStatus::Approved && entry.gap_ids.iter().any(|g| g == &gap_id)
+                entry.status == BacklogStatus::Approved
+                    && entry.gap_ids.iter().any(|g| g == &gap_id)
             })
             .collect();
         let entry = match approved.as_slice() {
@@ -1572,7 +1576,8 @@ impl Tool for BuildGapSkillTool {
             references,
             author: string("author")?,
         };
-        let staged = draft_skill_for_entry(&self.store, &self.session, &entry.id, &proposal).await?;
+        let staged =
+            draft_skill_for_entry(&self.store, &self.session, &entry.id, &proposal).await?;
         Ok(json!({
             "entry_id": staged.entry_id,
             "entry_status": "approved",

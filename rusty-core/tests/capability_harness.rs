@@ -218,10 +218,7 @@ fn compose_addresses_members_canonically() {
     )
     .unwrap();
     assert_ne!(set.id(), with_refs.id());
-    assert_eq!(
-        with_refs.refs()[0].kind.as_str(),
-        "skill"
-    );
+    assert_eq!(with_refs.refs()[0].kind.as_str(), "skill");
 }
 
 #[test]

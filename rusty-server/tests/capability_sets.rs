@@ -84,7 +84,10 @@ fn quiet_graph() -> (Graph, StateSpec, ToolRegistry) {
 }
 
 fn temp_store() -> PathBuf {
-    std::env::temp_dir().join(format!("rusty-capability-set-test-{}", uuid::Uuid::new_v4()))
+    std::env::temp_dir().join(format!(
+        "rusty-capability-set-test-{}",
+        uuid::Uuid::new_v4()
+    ))
 }
 
 fn test_app(attempted: Option<&str>) -> (Router, PathBuf) {
@@ -130,7 +133,11 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
 
 async fn create_thread(app: &Router, graph: &str) -> String {
     let (status, value) = call(app, "POST", "/threads", Some(json!({"graph": graph}))).await;
-    assert_eq!(status, StatusCode::CREATED, "thread creation failed: {value}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "thread creation failed: {value}"
+    );
     value["thread_id"].as_str().unwrap().to_string()
 }
 
@@ -391,7 +398,11 @@ async fn create_assistant(app: &Router, id: &str, config: Value) {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "assistant creation failed: {value}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "assistant creation failed: {value}"
+    );
 }
 
 #[tokio::test]
@@ -523,7 +534,13 @@ async fn replay_reresolves_the_pinned_selection_against_the_catalog() {
 
     // The selection still resolves against the unchanged catalog, so the
     // replay guard passes and the journal verifies.
-    let (status, value) = call(&app, "POST", "/runs/replay", Some(json!({"run_id": run_id}))).await;
+    let (status, value) = call(
+        &app,
+        "POST",
+        "/runs/replay",
+        Some(json!({"run_id": run_id})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "replay failed: {value}");
     assert_eq!(value["verified"], json!(true));
     let _ = std::fs::remove_dir_all(store);

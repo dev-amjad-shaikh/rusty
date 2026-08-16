@@ -70,7 +70,13 @@ fn op(
 
 /// A read: GET and `ReadOnly`, the only pairing the taxonomy allows.
 fn get(name: &str, description: &str, path: &str) -> HttpApiOperation {
-    op(name, description, HttpMethod::Get, path, OperationEffect::ReadOnly)
+    op(
+        name,
+        description,
+        HttpMethod::Get,
+        path,
+        OperationEffect::ReadOnly,
+    )
 }
 
 /// Declare the operation's params schema: a property for every routed
@@ -230,7 +236,12 @@ pub fn servicenow(instance: &str) -> Result<ConnectorManifest> {
     );
     query(
         &mut list,
-        &["sysparm_query", "sysparm_fields", "sysparm_limit", "sysparm_offset"],
+        &[
+            "sysparm_query",
+            "sysparm_fields",
+            "sysparm_limit",
+            "sysparm_offset",
+        ],
     );
     project(&mut list, "/result");
 
@@ -262,7 +273,11 @@ pub fn servicenow(instance: &str) -> Result<ConnectorManifest> {
         "/api/now/table/{table}",
         OperationEffect::Compensatable,
     );
-    schema(&mut create, &["table"], &write_properties(&[("table", string())]));
+    schema(
+        &mut create,
+        &["table"],
+        &write_properties(&[("table", string())]),
+    );
     body(&mut create, SN_WRITE_FIELDS);
     project(&mut create, "/result");
 
@@ -470,7 +485,10 @@ pub fn slack() -> Result<ConnectorManifest> {
             ("latest", string()),
         ],
     );
-    query(&mut history, &["channel", "limit", "cursor", "oldest", "latest"]);
+    query(
+        &mut history,
+        &["channel", "limit", "cursor", "oldest", "latest"],
+    );
 
     let mut list_users = get(
         "list-users",
@@ -560,7 +578,10 @@ pub fn linear() -> Result<ConnectorManifest> {
         "/graphql",
         OperationEffect::Compensatable,
     );
-    graphql(&mut teams, "query {{ teams {{ nodes {{ id name key }} }} }}");
+    graphql(
+        &mut teams,
+        "query {{ teams {{ nodes {{ id name key }} }} }}",
+    );
     project(&mut teams, "/data");
 
     // `first` is required even though Linear defaults it: the template
@@ -662,7 +683,10 @@ pub fn linear() -> Result<ConnectorManifest> {
         None,
         vec![teams, issues, issue, create, update],
         &["linear issue tracking"],
-        &[("api_key", "Linear OAuth access token, sent as a bearer token.")],
+        &[(
+            "api_key",
+            "Linear OAuth access token, sent as a bearer token.",
+        )],
     )
 }
 
@@ -695,7 +719,10 @@ pub fn notion() -> Result<ConnectorManifest> {
             ("start_cursor", string()),
         ],
     );
-    body(&mut search, &["query", "filter", "sort", "page_size", "start_cursor"]);
+    body(
+        &mut search,
+        &["query", "filter", "sort", "page_size", "start_cursor"],
+    );
 
     let mut get_page = get(
         "get-page",
@@ -903,7 +930,14 @@ pub fn google_calendar() -> Result<ConnectorManifest> {
     );
     body(
         &mut create,
-        &["summary", "description", "location", "start", "end", "attendees"],
+        &[
+            "summary",
+            "description",
+            "location",
+            "start",
+            "end",
+            "attendees",
+        ],
     );
 
     // Compensatable: the undo is writing back the prior field values.
@@ -921,7 +955,14 @@ pub fn google_calendar() -> Result<ConnectorManifest> {
     );
     body(
         &mut update,
-        &["summary", "description", "location", "start", "end", "attendees"],
+        &[
+            "summary",
+            "description",
+            "location",
+            "start",
+            "end",
+            "attendees",
+        ],
     );
 
     let mut delete = op(

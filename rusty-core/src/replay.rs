@@ -106,10 +106,8 @@ pub const SERVABLE_KINDS: [RunEventKind; 4] = [
 /// outside a journaled effect, or a run that stopped between the decision
 /// and the effect's own record — makes the journal not exactly replayable,
 /// and [`ExactReplay::new`] says so.
-const NESTED_EVIDENCE_KINDS: [RunEventKind; 2] = [
-    RunEventKind::ApprovalAsked,
-    RunEventKind::ApprovalDecided,
-];
+const NESTED_EVIDENCE_KINDS: [RunEventKind; 2] =
+    [RunEventKind::ApprovalAsked, RunEventKind::ApprovalDecided];
 
 fn is_servable(kind: RunEventKind) -> bool {
     SERVABLE_KINDS.contains(&kind)
@@ -278,8 +276,8 @@ impl ServedEffect {
     /// everything but the causal parent, which the two journaling paths
     /// supply differently.
     fn recorded_draft(&self) -> EventDraft {
-        let mut draft = EventDraft::new(self.event.kind, self.event.effect)
-            .status(self.event.status);
+        let mut draft =
+            EventDraft::new(self.event.kind, self.event.effect).status(self.event.status);
         if let Some(node) = &self.event.node_id {
             draft = draft.node(node.clone());
         }
@@ -617,7 +615,12 @@ impl ChatModel for RecordingChatModel {
         let latency_ms = (self.journal.clock().now() - started)
             .num_milliseconds()
             .max(0) as u64;
-        self.journal_outcome(latency_ms, model_call_request(messages, tools), None, result)
+        self.journal_outcome(
+            latency_ms,
+            model_call_request(messages, tools),
+            None,
+            result,
+        )
     }
 
     async fn chat_stream(

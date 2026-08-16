@@ -184,7 +184,11 @@ async fn register_source_validates_and_converges() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "cross-tenant scope is 404, never 403");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "cross-tenant scope is 404, never 403"
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }
@@ -197,7 +201,13 @@ async fn register_source_validates_and_converges() {
 async fn list_and_fetch_serve_metadata_and_cited_chunks() {
     let (app, store) = app();
     for (id, marker) in [("beta", "storage"), ("alpha", "retrieval")] {
-        let (status, _) = call(&app, "POST", "/knowledge/sources", Some(register_payload(id, marker))).await;
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/knowledge/sources",
+            Some(register_payload(id, marker)),
+        )
+        .await;
         assert_eq!(status, StatusCode::CREATED);
     }
 
@@ -207,7 +217,10 @@ async fn list_and_fetch_serve_metadata_and_cited_chunks() {
     assert_eq!(sources.len(), 2);
     assert_eq!(sources[0]["source_id"], "alpha", "sorted by source id");
     assert_eq!(sources[1]["source_id"], "beta");
-    assert!(sources[0].get("body").is_none(), "a listing is metadata only");
+    assert!(
+        sources[0].get("body").is_none(),
+        "a listing is metadata only"
+    );
     assert!(sources[0]["chunk_count"].as_u64().unwrap() > 1);
     assert_eq!(list["tombstones"].as_array().unwrap().len(), 0);
 
@@ -283,7 +296,9 @@ async fn query_returns_cited_chunks_within_ceilings() {
         assert_eq!(citation["source_id"], "manual");
         assert!(result["text"].as_str().unwrap().contains("governed"));
         assert!(result["score"].as_f64().unwrap() > 0.0);
-        assert!(citation["byte_end"].as_u64().unwrap() > citation["byte_start"].as_u64().unwrap_or(0));
+        assert!(
+            citation["byte_end"].as_u64().unwrap() > citation["byte_start"].as_u64().unwrap_or(0)
+        );
     }
 
     // Determinism: an identical query answers byte-identically.
@@ -301,7 +316,9 @@ async fn query_returns_cited_chunks_within_ceilings() {
         &app,
         "POST",
         "/knowledge/query",
-        Some(json!({"text": "governed retrieval", "limits": {"max_results": 2, "max_bytes": 65536}})),
+        Some(
+            json!({"text": "governed retrieval", "limits": {"max_results": 2, "max_bytes": 65536}}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -357,9 +374,21 @@ async fn correction_hides_the_old_version_but_keeps_it_addressable() {
     assert_eq!(corrected["supersedes"], json!(v1_hash));
 
     // The old version stops serving; the term unique to it finds nothing.
-    let (_, answer) = call(&app, "POST", "/knowledge/query", Some(json!({"text": "apple"}))).await;
+    let (_, answer) = call(
+        &app,
+        "POST",
+        "/knowledge/query",
+        Some(json!({"text": "apple"})),
+    )
+    .await;
     assert_eq!(answer["results"].as_array().unwrap().len(), 0);
-    let (_, answer) = call(&app, "POST", "/knowledge/query", Some(json!({"text": "banana"}))).await;
+    let (_, answer) = call(
+        &app,
+        "POST",
+        "/knowledge/query",
+        Some(json!({"text": "banana"})),
+    )
+    .await;
     assert_eq!(answer["results"].as_array().unwrap().len(), 1);
     assert_eq!(
         answer["results"][0]["citation"]["source_hash"],
@@ -461,7 +490,10 @@ async fn retention_plans_then_purges_with_tombstones() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{receipt_apply}");
-    assert_eq!(receipt_apply["plan"], plan, "apply executes the dry-run plan");
+    assert_eq!(
+        receipt_apply["plan"], plan,
+        "apply executes the dry-run plan"
+    );
     let tombstones = receipt_apply["tombstones"].as_array().unwrap();
     assert_eq!(tombstones.len(), 1);
     assert_eq!(tombstones[0]["source_id"], "ephemeral");
@@ -575,7 +607,14 @@ async fn tenants_are_isolated_404_never_403() {
     )
     .await;
     assert_eq!(answer["results"].as_array().unwrap().len(), 0);
-    let (_, list) = call_as(&app, Some("globex-secret"), "GET", "/knowledge/sources", None).await;
+    let (_, list) = call_as(
+        &app,
+        Some("globex-secret"),
+        "GET",
+        "/knowledge/sources",
+        None,
+    )
+    .await;
     assert_eq!(list["sources"].as_array().unwrap().len(), 0);
     for (method, uri, body) in [
         ("GET", "/knowledge/sources/acme-manual", None),

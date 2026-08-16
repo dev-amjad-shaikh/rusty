@@ -224,12 +224,12 @@ pub use evaluations::{
 pub use gate::{
     DirectoryGatePolicySource, EvalRevisionGateEvaluator, GatePolicySource, RevisionEvaluationAgent,
 };
-pub use learn::{DatasetSource, DirectoryDatasetSource, EvalCandidateEvaluator, EvaluationAgent};
 /// The knowledge plane's tool adapter is public: embedders (the demo
 /// server, downstream harnesses) register it into their `ToolRegistry` so
 /// a graph's `search_knowledge` upgrades to the governed backend without a
 /// catalog change.
 pub use knowledge::GovernedKnowledgeSearchTool;
+pub use learn::{DatasetSource, DirectoryDatasetSource, EvalCandidateEvaluator, EvaluationAgent};
 pub use runs::RunStatus;
 
 /// Default bound on graceful shutdown (25 s): how long

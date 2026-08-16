@@ -595,7 +595,10 @@ impl JsonlLedger {
         };
         let header: serde_json::Value = serde_json::from_str(header).map_err(|e| {
             ledger_io_error(
-                format!("ledger `{}` has an unreadable header line", self.path.display()),
+                format!(
+                    "ledger `{}` has an unreadable header line",
+                    self.path.display()
+                ),
                 std::io::Error::new(std::io::ErrorKind::InvalidData, e),
             )
         })?;
@@ -914,8 +917,7 @@ mod tests {
     #[tokio::test]
     async fn waterfall_hashes_payloads_and_attests() {
         let ledger = Arc::new(InMemoryLedger::new());
-        let mirror =
-            TelemetryMirror::new(ledger.clone()).with_redactor(Arc::new(PayloadHasher));
+        let mirror = TelemetryMirror::new(ledger.clone()).with_redactor(Arc::new(PayloadHasher));
         let report = mirror.mirror(&journaled_snapshot()).await.unwrap();
         assert_eq!(report.redacted, 2); // the model call (in+out) and the tool error
 
@@ -957,7 +959,8 @@ mod tests {
 
     #[tokio::test]
     async fn jsonl_ledger_round_trips_and_dedupes() {
-        let dir = std::env::temp_dir().join(format!("rusty-telemetry-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("rusty-telemetry-test-{}", uuid::Uuid::new_v4()));
         let path = dir.join("ledger.jsonl");
         let ledger = JsonlLedger::open(&path).await.unwrap();
         let mirror = TelemetryMirror::new(Arc::new(ledger.clone()));
@@ -979,7 +982,8 @@ mod tests {
 
     #[tokio::test]
     async fn jsonl_ledger_refuses_a_newer_format_version() {
-        let dir = std::env::temp_dir().join(format!("rusty-telemetry-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("rusty-telemetry-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("ledger.jsonl");
         std::fs::write(

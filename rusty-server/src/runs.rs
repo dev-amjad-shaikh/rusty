@@ -122,14 +122,12 @@ impl CapabilitySetPayload {
     {
         self.skills
             .iter()
-            .map(|reference| rusty_agent_runtime::capability::CapabilityRef::skill(reference.clone()))
-            .chain(
-                self.connectors
-                    .iter()
-                    .map(|reference| {
-                        rusty_agent_runtime::capability::CapabilityRef::connector(reference.clone())
-                    }),
-            )
+            .map(|reference| {
+                rusty_agent_runtime::capability::CapabilityRef::skill(reference.clone())
+            })
+            .chain(self.connectors.iter().map(|reference| {
+                rusty_agent_runtime::capability::CapabilityRef::connector(reference.clone())
+            }))
             .collect()
     }
 }

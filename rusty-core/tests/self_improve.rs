@@ -174,7 +174,9 @@ fn probes_flip_only_on_real_evidence() {
     // Drafting without the gated publish path is Partial; withdrawing both
     // is Absent; the pair together is Present.
     let mut snapshot = demo_snapshot();
-    snapshot.tool_names.retain(|name| name != "publish_composed_skill");
+    snapshot
+        .tool_names
+        .retain(|name| name != "publish_composed_skill");
     match assess(&catalog, &snapshot)
         .assessments
         .iter()
@@ -212,7 +214,9 @@ fn probes_flip_only_on_real_evidence() {
         CapabilityStatus::Partial { note } => assert!(note.contains("hooks.json")),
         other => panic!("middleware without the wire protocol must be Partial: {other:?}"),
     }
-    snapshot.features.push(FEATURE_HOOKS_COMPATIBILITY.to_owned());
+    snapshot
+        .features
+        .push(FEATURE_HOOKS_COMPATIBILITY.to_owned());
     assert_eq!(
         status_of(&assess(&catalog, &snapshot), "hooks-compatibility"),
         CapabilityStatus::Present
@@ -272,15 +276,24 @@ fn entry_ids_are_content_derived() {
     assert!(a.id.starts_with("bl-"));
     assert_eq!(a.id.len(), 3 + 64);
 
-    let c = BacklogEntry::new("Close another gap", "different title", &gaps,
-        BacklogProvenance::HarnessSelfImprove, t0())
+    let c = BacklogEntry::new(
+        "Close another gap",
+        "different title",
+        &gaps,
+        BacklogProvenance::HarnessSelfImprove,
+        t0(),
+    )
     .unwrap();
     assert_ne!(a.id, c.id);
 
     // Validation: empty titles, duplicate gaps, and gap-less entries fail.
-    assert!(BacklogEntry::new("", "r", &gaps, BacklogProvenance::HarnessSelfImprove, t0()).is_err());
+    assert!(
+        BacklogEntry::new("", "r", &gaps, BacklogProvenance::HarnessSelfImprove, t0()).is_err()
+    );
     let dup = vec!["g".to_owned(), "g".to_owned()];
-    assert!(BacklogEntry::new("t", "r", &dup, BacklogProvenance::HarnessSelfImprove, t0()).is_err());
+    assert!(
+        BacklogEntry::new("t", "r", &dup, BacklogProvenance::HarnessSelfImprove, t0()).is_err()
+    );
     assert!(BacklogEntry::new("t", "r", &[], BacklogProvenance::HarnessSelfImprove, t0()).is_err());
 }
 
@@ -288,7 +301,10 @@ fn entry_ids_are_content_derived() {
 fn provenance_labels_are_closed_and_checked() {
     let operator = BacklogProvenance::operator("harness-demo").unwrap();
     assert_eq!(operator.label(), "operator:harness-demo");
-    assert_eq!(BacklogProvenance::HarnessSelfImprove.label(), HARNESS_PROVENANCE);
+    assert_eq!(
+        BacklogProvenance::HarnessSelfImprove.label(),
+        HARNESS_PROVENANCE
+    );
     assert!(BacklogProvenance::operator("").is_err());
     assert!(BacklogProvenance::operator(" has-control\n").is_err());
 }
@@ -311,7 +327,9 @@ fn the_status_machine_allows_only_the_declared_edges() {
         .is_err());
     // proposed → approved → in_progress → done is the happy path, and done
     // carries its evidence.
-    let approved = entry.transition(BacklogStatus::Approved, None, t1()).unwrap();
+    let approved = entry
+        .transition(BacklogStatus::Approved, None, t1())
+        .unwrap();
     assert_eq!(approved.status, BacklogStatus::Approved);
     let in_progress = approved
         .transition(BacklogStatus::InProgress, None, t1())
@@ -329,10 +347,14 @@ fn the_status_machine_allows_only_the_declared_edges() {
     assert_eq!(done.status, BacklogStatus::Done);
     assert!(done.evidence.is_some());
     // done is terminal.
-    assert!(done.transition(BacklogStatus::Rejected, None, t1()).is_err());
+    assert!(done
+        .transition(BacklogStatus::Rejected, None, t1())
+        .is_err());
 
     // rejected is reachable from every open state and is terminal.
-    let rejected = entry.transition(BacklogStatus::Rejected, None, t1()).unwrap();
+    let rejected = entry
+        .transition(BacklogStatus::Rejected, None, t1())
+        .unwrap();
     assert!(rejected
         .transition(BacklogStatus::Approved, None, t1())
         .is_err());
@@ -404,11 +426,7 @@ async fn the_backlog_persists_and_fails_closed_on_corruption() {
 // --------------------------------------------------------------------- //
 
 async fn approved_runbook_store(tag: &str) -> (Arc<BacklogStore>, BacklogEntry) {
-    let store = Arc::new(
-        BacklogStore::open(temp_backlog_path(tag))
-            .await
-            .unwrap(),
-    );
+    let store = Arc::new(BacklogStore::open(temp_backlog_path(tag)).await.unwrap());
     let proposed = BacklogEntry::new(
         "Ship the incident-review runbook skill",
         "operator-runbooks is Absent; the incident-review workflow recurs and belongs in a \
@@ -496,13 +514,12 @@ async fn publishing_stays_behind_the_approval_gate() {
 
     // A token scoped to another draft: the composer's own fail-closed
     // admission refuses it.
-    let wrong = ApprovalToken::approve(
-        publish_effect_id("self-build", &"0".repeat(64)),
-        "ops:ada",
+    let wrong = ApprovalToken::approve(publish_effect_id("self-build", &"0".repeat(64)), "ops:ada");
+    assert!(
+        publish_staged_skill(&session, &registry, &staged, Some(&wrong))
+            .await
+            .is_err()
     );
-    assert!(publish_staged_skill(&session, &registry, &staged, Some(&wrong))
-        .await
-        .is_err());
     assert!(registry.lock().unwrap().is_empty());
 
     // The correctly scoped operator token publishes — the only way across.
@@ -605,7 +622,10 @@ async fn build_tool_drafts_only_for_the_approved_entry() {
     assert_eq!(staged["entry_id"], json!(approved.id));
     assert_eq!(staged["content_hash"].as_str().unwrap().len(), 64);
     assert!(staged["publish_effect_id"].is_string());
-    assert!(staged["publish_gate"].as_str().unwrap().contains("operator"));
+    assert!(staged["publish_gate"]
+        .as_str()
+        .unwrap()
+        .contains("operator"));
 
     // A core-stream gap is refused by shape…
     assert!(tool
@@ -639,7 +659,9 @@ fn catalog_build_shapes_make_the_self_build_scope_explicit() {
         BuildShape::Skill
     );
     assert_eq!(
-        catalog_entry(&catalog, "agent-session-query").unwrap().build,
+        catalog_entry(&catalog, "agent-session-query")
+            .unwrap()
+            .build,
         BuildShape::ToolDefinition
     );
     assert_eq!(
@@ -661,9 +683,14 @@ fn feature_flags_used_by_probes_are_the_declared_constants() {
     // The compaction probe reads the declared constant, so a snapshot
     // declaring it flips the status.
     let mut snapshot = demo_snapshot();
-    snapshot.features.push(FEATURE_SURFACE_COMPACTION.to_owned());
+    snapshot
+        .features
+        .push(FEATURE_SURFACE_COMPACTION.to_owned());
     assert_eq!(
-        status_of(&assess(&capability_catalog(), &snapshot), "surface-compaction"),
+        status_of(
+            &assess(&capability_catalog(), &snapshot),
+            "surface-compaction"
+        ),
         CapabilityStatus::Present
     );
 }

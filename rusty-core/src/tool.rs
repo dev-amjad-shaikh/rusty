@@ -135,7 +135,6 @@ pub(crate) struct GuardEvidence {
     pub(crate) parent: String,
 }
 
-
 /// The executable contract Studio and other clients may safely present.
 ///
 /// This is derived from a real [`Tool`] rather than separately authored
@@ -645,7 +644,10 @@ async fn dispatch_tool(
                     denials: denials.clone(),
                 };
                 let mut draft = EventDraft::new(RunEventKind::ToolCallDenied, Effect::Pure)
-                    .input(crate::replay::tool_call_request(&call.name, &call.arguments))
+                    .input(crate::replay::tool_call_request(
+                        &call.name,
+                        &call.arguments,
+                    ))
                     .output(serde_json::to_value(&record)?)
                     .parent(evidence.parent.clone());
                 if !node.is_empty() {

@@ -260,7 +260,12 @@ impl ContentAddressedStore for InMemoryContentAddressedStore {
     }
 
     async fn chunks_of(&self, source_hash: &str) -> Result<Vec<ChunkRecord>> {
-        Ok(self.lock().chunks.get(source_hash).cloned().unwrap_or_default())
+        Ok(self
+            .lock()
+            .chunks
+            .get(source_hash)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn remove_chunks(&self, source_hash: &str) -> Result<bool> {
@@ -283,7 +288,9 @@ impl ContentAddressedStore for InMemoryContentAddressedStore {
                 .map(|(hash, _)| hash.clone());
             match owner {
                 Some(hash) => {
-                    inner.chunk_reverse.insert(chunk.content_address.clone(), hash);
+                    inner
+                        .chunk_reverse
+                        .insert(chunk.content_address.clone(), hash);
                 }
                 None => {
                     inner.chunk_reverse.remove(&chunk.content_address);

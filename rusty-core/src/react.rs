@@ -372,27 +372,9 @@ fn build_react_agent(
             // (parallel, order-preserving, panic-containing).
             let tool_executor =
                 ToolExecutor::new(invocation_tools(tool_executor.registry(), &ctx)?);
-            let mut tool_executor =
-                match &evidence {
-                    EvidenceMode::None => match ctx.effect_journal() {
-                        Some(journal) => {
-                            let parent = invocation_parent(&ctx, TOOLS_NODE)?;
-                            let mut wrapped = ToolRegistry::new();
-                            for name in tool_executor.registry().names() {
-                                let tool = tool_executor.registry().get(name).expect(
-                                    "tool names iterated from a registry resolve in that registry",
-                                );
-                                wrapped.register_shared(Arc::new(
-                                    RecordingTool::new(tool, journal.clone(), parent.clone())
-                                        .node(TOOLS_NODE),
-                                ));
-                            }
-                            ToolExecutor::new(wrapped)
-                                .with_guard_journal(journal.clone(), parent.clone())
-                        }
-                        None => tool_executor,
-                    },
-                    EvidenceMode::Record(journal) => {
+            let mut tool_executor = match &evidence {
+                EvidenceMode::None => match ctx.effect_journal() {
+                    Some(journal) => {
                         let parent = invocation_parent(&ctx, TOOLS_NODE)?;
                         let mut wrapped = ToolRegistry::new();
                         for name in tool_executor.registry().names() {
@@ -407,24 +389,41 @@ fn build_react_agent(
                         ToolExecutor::new(wrapped)
                             .with_guard_journal(journal.clone(), parent.clone())
                     }
-                    EvidenceMode::Replay { source, journal } => {
-                        let parent = invocation_parent(&ctx, TOOLS_NODE)?;
-                        let mut wrapped = ToolRegistry::new();
-                        for name in tool_executor.registry().names() {
-                            let tool = tool_executor.registry().get(name).expect(
-                                "tool names iterated from a registry resolve in that registry",
-                            );
-                            wrapped.register_shared(Arc::new(ReplayingTool::new(
-                                tool,
-                                source.clone(),
-                                journal.clone(),
-                                parent.clone(),
-                            )));
-                        }
-                        ToolExecutor::new(wrapped)
-                            .with_guard_journal(journal.clone(), parent.clone())
+                    None => tool_executor,
+                },
+                EvidenceMode::Record(journal) => {
+                    let parent = invocation_parent(&ctx, TOOLS_NODE)?;
+                    let mut wrapped = ToolRegistry::new();
+                    for name in tool_executor.registry().names() {
+                        let tool = tool_executor
+                            .registry()
+                            .get(name)
+                            .expect("tool names iterated from a registry resolve in that registry");
+                        wrapped.register_shared(Arc::new(
+                            RecordingTool::new(tool, journal.clone(), parent.clone())
+                                .node(TOOLS_NODE),
+                        ));
                     }
-                };
+                    ToolExecutor::new(wrapped).with_guard_journal(journal.clone(), parent.clone())
+                }
+                EvidenceMode::Replay { source, journal } => {
+                    let parent = invocation_parent(&ctx, TOOLS_NODE)?;
+                    let mut wrapped = ToolRegistry::new();
+                    for name in tool_executor.registry().names() {
+                        let tool = tool_executor
+                            .registry()
+                            .get(name)
+                            .expect("tool names iterated from a registry resolve in that registry");
+                        wrapped.register_shared(Arc::new(ReplayingTool::new(
+                            tool,
+                            source.clone(),
+                            journal.clone(),
+                            parent.clone(),
+                        )));
+                    }
+                    ToolExecutor::new(wrapped).with_guard_journal(journal.clone(), parent.clone())
+                }
+            };
             // The executor attaches both cross-cutting boundaries to the
             // node context. Re-attach them after evidence wrapping so the
             // finalized, post-middleware call is admitted immediately before

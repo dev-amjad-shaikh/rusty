@@ -99,8 +99,7 @@ async fn persist_version(
             .await
             .map_err(|e| io(format!("create skills dir: {e}")))?;
     }
-    let bytes =
-        serde_json::to_vec_pretty(version).map_err(|e| io(format!("serialize: {e}")))?;
+    let bytes = serde_json::to_vec_pretty(version).map_err(|e| io(format!("serialize: {e}")))?;
     let tmp = path.with_extension("tmp");
     tokio::fs::write(&tmp, bytes)
         .await
@@ -117,12 +116,18 @@ async fn persist_version(
 /// is the integrity check: tampered bytes address differently.
 fn package_of(version: &SkillVersion) -> Result<SkillPackage, SkillError> {
     let metadata = version.metadata();
-    let mut frontmatter = format!("name: {}\ndescription: {}", metadata.name, metadata.description);
+    let mut frontmatter = format!(
+        "name: {}\ndescription: {}",
+        metadata.name, metadata.description
+    );
     if let Some(license) = &metadata.license {
         frontmatter.push_str(&format!("\nlicense: {license}"));
     }
     if !metadata.allowed_tools.is_empty() {
-        frontmatter.push_str(&format!("\nallowed-tools: {}", metadata.allowed_tools.join(", ")));
+        frontmatter.push_str(&format!(
+            "\nallowed-tools: {}",
+            metadata.allowed_tools.join(", ")
+        ));
     }
     if let Some(compatibility) = &metadata.compatibility {
         frontmatter.push_str(&format!("\ncompatibility: {compatibility}"));
@@ -251,9 +256,7 @@ impl SkillPlane {
         for entry in loaded {
             let registry = tenants.entry(entry.tenant.clone()).or_default();
             let version = entry.version;
-            if version.revision() as usize
-                != registry.history(version.name()).len() + 1
-            {
+            if version.revision() as usize != registry.history(version.name()).len() + 1 {
                 tracing::warn!(
                     tenant = %entry.tenant,
                     name = %version.name(),
@@ -304,7 +307,10 @@ impl SkillPlane {
     /// The tenant's tier-1 catalog (name-sorted latest metadata).
     pub(crate) async fn list(&self, tenant: &str) -> Vec<SkillMetadata> {
         let tenants = self.tenants.lock().await;
-        tenants.get(tenant).map(SkillRegistry::list).unwrap_or_default()
+        tenants
+            .get(tenant)
+            .map(SkillRegistry::list)
+            .unwrap_or_default()
     }
 
     /// The latest version of one skill in the caller's tenant.
@@ -575,9 +581,7 @@ pub(crate) async fn get_skill_file(
         .get(tenant.tenant(), &name)
         .await
         .ok_or_else(|| ApiError::not_found(format!("skill `{name}` not found")))?;
-    let not_found = || {
-        ApiError::not_found(format!("skill `{name}` has no member `{path}`"))
-    };
+    let not_found = || ApiError::not_found(format!("skill `{name}` has no member `{path}`"));
     if let Some(bytes) = version.reference(&path) {
         return Ok((
             [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
@@ -616,7 +620,9 @@ mod tests {
     async fn plane_round_trips_across_reload() {
         let root = store_root();
         let plane = SkillPlane::load(&root);
-        let package = SkillPackage::from_markdown(&skill_md("web-research", "Search, then summarize.")).unwrap();
+        let package =
+            SkillPackage::from_markdown(&skill_md("web-research", "Search, then summarize."))
+                .unwrap();
         let registration = plane
             .register("default", package, source(), "operator:ada".to_owned())
             .await
@@ -676,8 +682,14 @@ mod tests {
 
     #[test]
     fn hex_decoding_round_trips_and_rejects() {
-        assert_eq!(decode_hex("89504e47").unwrap(), vec![0x89, 0x50, 0x4e, 0x47]);
-        assert_eq!(decode_hex("89504E47").unwrap(), vec![0x89, 0x50, 0x4e, 0x47]);
+        assert_eq!(
+            decode_hex("89504e47").unwrap(),
+            vec![0x89, 0x50, 0x4e, 0x47]
+        );
+        assert_eq!(
+            decode_hex("89504E47").unwrap(),
+            vec![0x89, 0x50, 0x4e, 0x47]
+        );
         assert!(decode_hex("abc").is_err());
         assert!(decode_hex("zz").is_err());
     }

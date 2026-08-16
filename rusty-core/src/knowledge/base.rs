@@ -305,17 +305,17 @@ impl KnowledgeBase {
         let mut texts: Vec<String> = Vec::new();
         for source in &live {
             for chunk in self.store.chunks_of(&source.content_hash).await? {
-                let bytes =
-                    self.store
-                        .get_content(&chunk.content_address)
-                        .await?
-                        .ok_or_else(|| {
-                            invalid(format!(
-                                "chunk {} of source `{}` is indexed but its content is missing \
+                let bytes = self
+                    .store
+                    .get_content(&chunk.content_address)
+                    .await?
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "chunk {} of source `{}` is indexed but its content is missing \
                                  from the store — the index and the content store disagree",
-                                chunk.chunk_id, source.source_id
-                            ))
-                        })?;
+                            chunk.chunk_id, source.source_id
+                        ))
+                    })?;
                 let text = String::from_utf8(bytes).map_err(|_| {
                     invalid(format!(
                         "chunk {} of source `{}` is not valid UTF-8 — store corruption",
@@ -353,8 +353,8 @@ impl KnowledgeBase {
                         .unwrap_or(0.0),
                     _ => 0.0,
                 };
-                let score =
-                    self.weights.lexical * lexical_scores[index] + self.weights.vector * vector_score;
+                let score = self.weights.lexical * lexical_scores[index]
+                    + self.weights.vector * vector_score;
                 (score > 0.0).then_some((index, score))
             })
             .collect();
@@ -475,7 +475,10 @@ impl KnowledgeBase {
         // expired purges them together), metadata by construction.
         let mut by_source: BTreeMap<String, Vec<&PurgeEntry>> = BTreeMap::new();
         for entry in &plan.entries {
-            by_source.entry(entry.source_id.clone()).or_default().push(entry);
+            by_source
+                .entry(entry.source_id.clone())
+                .or_default()
+                .push(entry);
         }
         let mut tombstones = Vec::new();
         for (source_id, entries) in by_source {

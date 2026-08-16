@@ -33,13 +33,13 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
-use rusty_agent_runtime::connector::{
-    packs, CredentialHandle, HttpApiProvider, HttpApiRequest, HttpApiTool, HttpApiTransport,
-    HttpMethod, HttpResponse,
-};
 use rusty_agent_runtime::composer::{
     publish_effect_id, ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession,
     PublishComposedSkillTool,
+};
+use rusty_agent_runtime::connector::{
+    packs, CredentialHandle, HttpApiProvider, HttpApiRequest, HttpApiTool, HttpApiTransport,
+    HttpMethod, HttpResponse,
 };
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::learn::Candidate;
@@ -175,7 +175,9 @@ fn parse_body(
     match serde_json::from_slice::<Value>(body) {
         Ok(value) if value.is_object() => Ok(value),
         Ok(_) => Err(bad_request("the request body must be a JSON object")),
-        Err(error) => Err(bad_request(&format!("the request body is not JSON: {error}"))),
+        Err(error) => Err(bad_request(&format!(
+            "the request body is not JSON: {error}"
+        ))),
     }
 }
 
@@ -237,7 +239,12 @@ impl CalendarState {
     /// never collide.
     fn seeded() -> Self {
         let events = [
-            calendar_event("evt-0001", "Standup", "2026-02-09T09:00:00Z", "2026-02-09T09:30:00Z"),
+            calendar_event(
+                "evt-0001",
+                "Standup",
+                "2026-02-09T09:00:00Z",
+                "2026-02-09T09:30:00Z",
+            ),
             calendar_event(
                 "evt-0002",
                 "Quarterly planning review",
@@ -369,7 +376,10 @@ impl CalendarFixture {
 impl HttpApiTransport for CalendarFixture {
     async fn send(&self, request: HttpApiRequest) -> Result<HttpResponse> {
         let (path, query) = path_and_query(&request.url);
-        let segments: Vec<&str> = path.split('/').filter(|segment| !segment.is_empty()).collect();
+        let segments: Vec<&str> = path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(match (request.method, segments.as_slice()) {
             (HttpMethod::Get, ["calendar", "v3", "users", "me", "calendarList"]) => http_json(
@@ -397,9 +407,10 @@ impl HttpApiTransport for CalendarFixture {
             (HttpMethod::Patch, ["calendar", "v3", "calendars", _calendar, "events", event_id]) => {
                 state.update_event(event_id, &request.body)
             }
-            (HttpMethod::Delete, ["calendar", "v3", "calendars", _calendar, "events", event_id]) => {
-                state.delete_event(event_id)
-            }
+            (
+                HttpMethod::Delete,
+                ["calendar", "v3", "calendars", _calendar, "events", event_id],
+            ) => state.delete_event(event_id),
             _ => google_not_found("The requested calendar resource was not found."),
         })
     }
@@ -428,9 +439,9 @@ fn sysparm_terms(query: &str) -> std::result::Result<Vec<(String, String)>, Stri
             .split_once('=')
             .ok_or_else(|| format!("query term `{term}` is not `field=value`"))?;
         if field.is_empty()
-            || !field
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.'))
+            || !field.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.')
+            })
         {
             return Err(format!("query field `{field}` is not a plain field name"));
         }
@@ -463,27 +474,57 @@ impl ServiceNowState {
     /// `sys_id`s are the real 32-hex shape; allocation continues at 5.
     fn seeded() -> Self {
         let incidents = [
-            ("1", "INC0001001", "VPN gateway flapping in DXB office", "1", "1", "network"),
-            ("2", "INC0001002", "VPN tunnel drops every ten minutes", "1", "1", "network"),
-            ("3", "INC0001003", "Laptop battery swelling", "2", "3", "hardware"),
-            ("4", "INC0001004", "SSO login loop for Okta users", "1", "2", "identity"),
+            (
+                "1",
+                "INC0001001",
+                "VPN gateway flapping in DXB office",
+                "1",
+                "1",
+                "network",
+            ),
+            (
+                "2",
+                "INC0001002",
+                "VPN tunnel drops every ten minutes",
+                "1",
+                "1",
+                "network",
+            ),
+            (
+                "3",
+                "INC0001003",
+                "Laptop battery swelling",
+                "2",
+                "3",
+                "hardware",
+            ),
+            (
+                "4",
+                "INC0001004",
+                "SSO login loop for Okta users",
+                "1",
+                "2",
+                "identity",
+            ),
         ]
         .into_iter()
-        .map(|(sys_n, number, short_description, state, priority, category)| {
-            let sys_id = format!("{sys_n:0>32}");
-            let record = json!({
-                "sys_id": sys_id,
-                "number": number,
-                "short_description": short_description,
-                "state": state,
-                "priority": priority,
-                "category": category,
-                "opened_by": "harness.demo",
-                "sys_created_on": "2026-02-09 08:00:00",
-                "sys_updated_on": "2026-02-09 08:00:00",
-            });
-            (sys_id, record)
-        })
+        .map(
+            |(sys_n, number, short_description, state, priority, category)| {
+                let sys_id = format!("{sys_n:0>32}");
+                let record = json!({
+                    "sys_id": sys_id,
+                    "number": number,
+                    "short_description": short_description,
+                    "state": state,
+                    "priority": priority,
+                    "category": category,
+                    "opened_by": "harness.demo",
+                    "sys_created_on": "2026-02-09 08:00:00",
+                    "sys_updated_on": "2026-02-09 08:00:00",
+                });
+                (sys_id, record)
+            },
+        )
         .collect();
         let mut tables = BTreeMap::new();
         tables.insert("incident".to_owned(), incidents);
@@ -540,7 +581,11 @@ impl ServiceNowState {
             .map(|record| match &fields {
                 Some(fields) => fields
                     .iter()
-                    .filter_map(|field| record.get(field).map(|value| (field.clone(), value.clone())))
+                    .filter_map(|field| {
+                        record
+                            .get(field)
+                            .map(|value| (field.clone(), value.clone()))
+                    })
                     .collect(),
                 None => record.clone(),
             })
@@ -636,7 +681,10 @@ impl ServiceNowFixture {
 impl HttpApiTransport for ServiceNowFixture {
     async fn send(&self, request: HttpApiRequest) -> Result<HttpResponse> {
         let (path, query) = path_and_query(&request.url);
-        let segments: Vec<&str> = path.split('/').filter(|segment| !segment.is_empty()).collect();
+        let segments: Vec<&str> = path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(match (request.method, segments.as_slice()) {
             (HttpMethod::Get, ["api", "now", "table", table]) => state.list_records(table, &query),
@@ -665,7 +713,9 @@ impl HttpApiTransport for ServiceNowFixture {
 /// rounds are counted from the tail — the tool replies that follow the last
 /// user message — never from the head of the channel.
 fn turn_progress(messages: &[ChatMessage]) -> (String, Vec<String>) {
-    let last_user = messages.iter().rposition(|message| message.role == Role::User);
+    let last_user = messages
+        .iter()
+        .rposition(|message| message.role == Role::User);
     let user = last_user
         .and_then(|index| messages[index].content.clone())
         .unwrap_or_default();
@@ -707,8 +757,10 @@ fn first_free_slot(items: &[Value]) -> Option<(String, String)> {
     let mut busy: Vec<(DateTime<FixedOffset>, DateTime<FixedOffset>)> = items
         .iter()
         .filter_map(|event| {
-            let start = DateTime::parse_from_rfc3339(event.pointer("/start/dateTime")?.as_str()?).ok()?;
-            let end = DateTime::parse_from_rfc3339(event.pointer("/end/dateTime")?.as_str()?).ok()?;
+            let start =
+                DateTime::parse_from_rfc3339(event.pointer("/start/dateTime")?.as_str()?).ok()?;
+            let end =
+                DateTime::parse_from_rfc3339(event.pointer("/end/dateTime")?.as_str()?).ok()?;
             Some((start, end))
         })
         .collect();
@@ -755,8 +807,18 @@ fn day_summary(items: &[Value]) -> String {
     let mut conflicts = Vec::new();
     for (index, a) in items.iter().enumerate() {
         for b in &items[index + 1..] {
-            let (a_start, a_end) = (event_start(a), a.pointer("/end/dateTime").and_then(Value::as_str).unwrap_or(""));
-            let (b_start, b_end) = (event_start(b), b.pointer("/end/dateTime").and_then(Value::as_str).unwrap_or(""));
+            let (a_start, a_end) = (
+                event_start(a),
+                a.pointer("/end/dateTime")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            );
+            let (b_start, b_end) = (
+                event_start(b),
+                b.pointer("/end/dateTime")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            );
             if a_start < b_end && b_start < a_end {
                 conflicts.push(format!(
                     "\"{}\" overlaps \"{}\"",
@@ -851,8 +913,14 @@ impl ChatModel for CalendarModel {
                     ChatMessage::assistant(format!(
                         "Booked \"{}\" at {}–{} (event {}).",
                         event["summary"].as_str().unwrap_or(BOOKING_SUMMARY),
-                        event.pointer("/start/dateTime").and_then(Value::as_str).unwrap_or("?"),
-                        event.pointer("/end/dateTime").and_then(Value::as_str).unwrap_or("?"),
+                        event
+                            .pointer("/start/dateTime")
+                            .and_then(Value::as_str)
+                            .unwrap_or("?"),
+                        event
+                            .pointer("/end/dateTime")
+                            .and_then(Value::as_str)
+                            .unwrap_or("?"),
                         event["id"].as_str().unwrap_or("?")
                     ))
                 }
@@ -967,7 +1035,11 @@ impl ChatModel for ServiceNowModel {
                     )])
                 } else {
                     let records = Self::parse_records(listing);
-                    let what = if mentions_kb { "KB articles" } else { "incidents" };
+                    let what = if mentions_kb {
+                        "KB articles"
+                    } else {
+                        "incidents"
+                    };
                     let mut lines = vec![format!("{what} on file ({}):", records.len())];
                     for record in &records {
                         lines.push(format!(
@@ -1014,14 +1086,18 @@ struct ComposerModel {
 /// The skill the composer drafts. Fixed so the publish approval can be
 /// minted before any run starts.
 const COMPOSED_NAME: &str = "daily-standup-brief";
-const COMPOSED_DESCRIPTION: &str = "Turn a morning's calendar and inbox notes into a standup brief.";
-const COMPOSED_BODY: &str = "# Standup Brief\n\nList yesterday, today, and blockers, one line each.\n";
+const COMPOSED_DESCRIPTION: &str =
+    "Turn a morning's calendar and inbox notes into a standup brief.";
+const COMPOSED_BODY: &str =
+    "# Standup Brief\n\nList yesterday, today, and blockers, one line each.\n";
 
 /// The SKILL.md text `ComposeSkillTool` assembles for these exact args —
 /// the hash must match byte for byte, so the demo builds it with the same
 /// format string rather than approximating it.
 fn composed_skill_md() -> String {
-    format!("---\nname: {COMPOSED_NAME}\ndescription: {COMPOSED_DESCRIPTION}\n---\n\n{COMPOSED_BODY}\n")
+    format!(
+        "---\nname: {COMPOSED_NAME}\ndescription: {COMPOSED_DESCRIPTION}\n---\n\n{COMPOSED_BODY}\n"
+    )
 }
 
 /// Mint the publish approval the way an operator would: hash the exact
@@ -1029,8 +1105,9 @@ fn composed_skill_md() -> String {
 fn precompute_publish_approval() -> Result<Value> {
     let mut files = BTreeMap::new();
     files.insert("SKILL.md".to_owned(), composed_skill_md().into_bytes());
-    let package = SkillPackage::from_files(files)
-        .map_err(|error| RustyError::Tool(format!("the composed demo skill must parse: {error}")))?;
+    let package = SkillPackage::from_files(files).map_err(|error| {
+        RustyError::Tool(format!("the composed demo skill must parse: {error}"))
+    })?;
     let effect_id = publish_effect_id("composer-studio", &package.content_hash());
     let token = ApprovalToken::approve(effect_id, "ops:harness-demo");
     serde_json::to_value(token)
@@ -1197,7 +1274,8 @@ impl ChatModel for SelfImproverModel {
                     ))
                 } else {
                     let report = serde_json::from_str::<Value>(&replies[0]).unwrap_or(Value::Null);
-                    let recorded = serde_json::from_str::<Value>(&replies[1]).unwrap_or(Value::Null);
+                    let recorded =
+                        serde_json::from_str::<Value>(&replies[1]).unwrap_or(Value::Null);
                     let staged = serde_json::from_str::<Value>(staged).unwrap_or(Value::Null);
                     ChatMessage::assistant(format!(
                         "Inspection: {} present, {} partial, {} absent. Recorded {} backlog entries \
@@ -1230,7 +1308,11 @@ struct HarnessEvaluator;
 
 /// The exact `ExperimentReport` wire shape, built as JSON and deserialized
 /// so a schema drift fails here at startup instead of inside the lane.
-fn harness_report(dataset: &Dataset, config: &StudioExperimentConfig, name: &str) -> ExperimentReport {
+fn harness_report(
+    dataset: &Dataset,
+    config: &StudioExperimentConfig,
+    name: &str,
+) -> ExperimentReport {
     let cases: Vec<Value> = dataset
         .cases()
         .iter()
@@ -1508,12 +1590,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         packs::google_calendar()?.id,
         packs::servicenow("harness")?.id,
     ];
-    let (self_improver, self_improver_spec, self_improver_tools) = build_self_improver_graph(
-        backlog,
-        skills,
-        host_tool_names,
-        connector_manifest_ids,
-    )?;
+    let (self_improver, self_improver_spec, self_improver_tools) =
+        build_self_improver_graph(backlog, skills, host_tool_names, connector_manifest_ids)?;
 
     let mut registry = GraphRegistry::new();
     registry.register_with_tools("calendar_manager", calendar, calendar_spec, &calendar_tools)?;

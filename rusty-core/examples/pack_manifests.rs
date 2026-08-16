@@ -17,7 +17,9 @@
 use rusty_agent_runtime::connector::{manifest::ConnectorManifest, packs};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let instance = std::env::args().nth(1).unwrap_or_else(|| "example".to_owned());
+    let instance = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "example".to_owned());
     let manifests: Vec<ConnectorManifest> = vec![
         packs::servicenow(&instance)?,
         packs::gmail()?,

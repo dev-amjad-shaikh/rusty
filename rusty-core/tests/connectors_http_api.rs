@@ -44,7 +44,12 @@ fn bearer_auth() -> HttpApiAuth {
 
 /// A bare operation the fixtures customize: no params, no body, no
 /// overrides. Callers fill in the fields under test.
-fn bare_op(name: &str, method: HttpMethod, path: &str, effect: OperationEffect) -> HttpApiOperation {
+fn bare_op(
+    name: &str,
+    method: HttpMethod,
+    path: &str,
+    effect: OperationEffect,
+) -> HttpApiOperation {
     HttpApiOperation {
         name: name.to_owned(),
         description: format!("The {name} operation."),
@@ -65,7 +70,12 @@ fn bare_op(name: &str, method: HttpMethod, path: &str, effect: OperationEffect) 
 
 /// GET `/v1/issues?team=…&limit=…`.
 fn list_issues() -> HttpApiOperation {
-    let mut op = bare_op("list-issues", HttpMethod::Get, "/v1/issues", OperationEffect::ReadOnly);
+    let mut op = bare_op(
+        "list-issues",
+        HttpMethod::Get,
+        "/v1/issues",
+        OperationEffect::ReadOnly,
+    );
     op.params_schema = json!({
         "type": "object",
         "properties": {
@@ -158,7 +168,12 @@ fn delete_issue() -> HttpApiOperation {
 
 /// POST `/graphql` with an interpolated mutation template, Linear-style.
 fn graphql_create() -> HttpApiOperation {
-    let mut op = bare_op("graphql-create", HttpMethod::Post, "/graphql", OperationEffect::Compensatable);
+    let mut op = bare_op(
+        "graphql-create",
+        HttpMethod::Post,
+        "/graphql",
+        OperationEffect::Compensatable,
+    );
     op.params_schema = json!({
         "type": "object",
         "properties": {
@@ -176,7 +191,12 @@ fn graphql_create() -> HttpApiOperation {
 
 /// GET `/v1/ping` — a valid health check (parameterless read-only GET).
 fn ping() -> HttpApiOperation {
-    bare_op("ping", HttpMethod::Get, "/v1/ping", OperationEffect::ReadOnly)
+    bare_op(
+        "ping",
+        HttpMethod::Get,
+        "/v1/ping",
+        OperationEffect::ReadOnly,
+    )
 }
 
 /// The standard operation set.
@@ -272,10 +292,7 @@ impl HttpApiTransport for FakeApiTransport {
         if !latency.is_zero() {
             tokio::time::sleep(latency).await;
         }
-        self.captured
-            .lock()
-            .expect("captured lock")
-            .push(request);
+        self.captured.lock().expect("captured lock").push(request);
         self.replies
             .lock()
             .expect("replies lock")
@@ -555,14 +572,14 @@ fn http_api_rejects_bad_operation_shapes() {
 #[test]
 fn http_api_rejects_bad_paths_and_templates() {
     let cases: Vec<&str> = vec![
-        "v1/issues",           // must start with `/`
-        "/v1/issues?x=1",      // no query material in the path
-        "/v1/issues/{issue",   // unclosed placeholder
-        "/v1/issues}/x",       // stray closing brace
-        "/v1/issues/{}",       // empty placeholder name
-        "/v1/issues/{1issue}", // leading digit
+        "v1/issues",             // must start with `/`
+        "/v1/issues?x=1",        // no query material in the path
+        "/v1/issues/{issue",     // unclosed placeholder
+        "/v1/issues}/x",         // stray closing brace
+        "/v1/issues/{}",         // empty placeholder name
+        "/v1/issues/{1issue}",   // leading digit
         "/v1/issues/{issue-id}", // hyphen
-        "/v1/is sues",         // whitespace
+        "/v1/is sues",           // whitespace
     ];
     for path in cases {
         let mut op = get_issue();
@@ -576,7 +593,9 @@ fn http_api_rejects_bad_paths_and_templates() {
             vec!["api_token"],
         ));
         assert!(
-            error.contains("path") || error.contains("template") || error.contains("parameter name"),
+            error.contains("path")
+                || error.contains("template")
+                || error.contains("parameter name"),
             "{path}: {error}"
         );
     }
@@ -772,7 +791,10 @@ fn http_api_rejects_body_method_mismatches() {
     // Oversized GraphQL template.
     let mut op = graphql_create();
     op.body = OperationBody::Graphql {
-        query: format!("query {{{{ node(id: {{title}}) {{{{ id }}) }}}} {}", "x".repeat(9 * 1024)),
+        query: format!(
+            "query {{{{ node(id: {{title}}) {{{{ id }}) }}}} {}",
+            "x".repeat(9 * 1024)
+        ),
     };
     let error = manifest_error(http_api_manifest(
         "tickets",
@@ -852,7 +874,10 @@ fn http_api_enforces_effect_method_honesty() {
         vec![op.clone()],
         vec!["api_token"],
     ));
-    assert!(error.contains("must declare its idempotency-key header"), "{error}");
+    assert!(
+        error.contains("must declare its idempotency-key header"),
+        "{error}"
+    );
 
     // A key header without the idempotent effect is a lie in the other
     // direction.
@@ -1055,9 +1080,18 @@ async fn http_api_catalog_is_namespaced_sorted_and_effect_honest() {
     assert_eq!(by_name("tickets/list-issues").effect, Effect::ReadOnly);
     assert_eq!(by_name("tickets/get-issue").effect, Effect::ReadOnly);
     assert_eq!(by_name("tickets/create-issue").effect, Effect::Idempotent);
-    assert_eq!(by_name("tickets/comment-issue").effect, Effect::Compensatable);
-    assert_eq!(by_name("tickets/graphql-create").effect, Effect::Compensatable);
-    assert_eq!(by_name("tickets/delete-issue").effect, Effect::NonIdempotent);
+    assert_eq!(
+        by_name("tickets/comment-issue").effect,
+        Effect::Compensatable
+    );
+    assert_eq!(
+        by_name("tickets/graphql-create").effect,
+        Effect::Compensatable
+    );
+    assert_eq!(
+        by_name("tickets/delete-issue").effect,
+        Effect::NonIdempotent
+    );
 
     // The params schema passes through untouched.
     assert_eq!(
@@ -1105,9 +1139,15 @@ async fn http_api_bearer_auth_injects_header_and_never_leaks() {
     let request = &captured[0];
     assert_eq!(request.method, HttpMethod::Get);
     assert_eq!(request.url, "https://api.example.com/v1/issues?team=eng");
-    assert_eq!(header(request, "authorization"), Some("Bearer sekrit-token"));
+    assert_eq!(
+        header(request, "authorization"),
+        Some("Bearer sekrit-token")
+    );
     assert_eq!(header(request, "x-client"), Some("rusty-test"));
-    assert!(header(request, "content-type").is_none(), "no body, no content-type");
+    assert!(
+        header(request, "content-type").is_none(),
+        "no body, no content-type"
+    );
     assert!(request.body.is_empty());
 
     // The secret appears in the outbound header and nowhere else: not in
@@ -1117,10 +1157,7 @@ async fn http_api_bearer_auth_injects_header_and_never_leaks() {
 
     // An auth failure echoes no body at all (it may quote the credential's
     // neighborhood back).
-    transport.push_json(
-        401,
-        json!({"error": format!("token {SECRET} is invalid")}),
-    );
+    transport.push_json(401, json!({"error": format!("token {SECRET} is invalid")}));
     let error = provider
         .execute(
             transport.as_ref(),
@@ -1350,7 +1387,10 @@ async fn http_api_renders_paths_and_queries_fail_closed() {
         .await
         .expect_err("missing required must fail")
         .to_string();
-    assert!(error.contains("missing required argument `team`"), "{error}");
+    assert!(
+        error.contains("missing required argument `team`"),
+        "{error}"
+    );
     assert_eq!(transport.captured().len(), before, "no request went out");
 }
 
@@ -1438,11 +1478,21 @@ async fn http_api_idempotency_keys_are_deterministic_and_scoped() {
 
     // Every tuple component is load-bearing.
     let base = derive_idempotency_key("inst-000001", "create-issue", &args);
-    assert_ne!(base, derive_idempotency_key("inst-000002", "create-issue", &args));
-    assert_ne!(base, derive_idempotency_key("inst-000001", "comment-issue", &args));
     assert_ne!(
         base,
-        derive_idempotency_key("inst-000001", "create-issue", &json!({"team_id": "t1", "title": "Other"}))
+        derive_idempotency_key("inst-000002", "create-issue", &args)
+    );
+    assert_ne!(
+        base,
+        derive_idempotency_key("inst-000001", "comment-issue", &args)
+    );
+    assert_ne!(
+        base,
+        derive_idempotency_key(
+            "inst-000001",
+            "create-issue",
+            &json!({"team_id": "t1", "title": "Other"})
+        )
     );
 
     // Dispatch sends the derived key, and a retry of the same call sends
@@ -1462,8 +1512,12 @@ async fn http_api_idempotency_keys_are_deterministic_and_scoped() {
             .expect("execute");
     }
     let captured = transport.captured();
-    let first = header(&captured[0], "idempotency-key").expect("key header").to_owned();
-    let second = header(&captured[1], "idempotency-key").expect("key header").to_owned();
+    let first = header(&captured[0], "idempotency-key")
+        .expect("key header")
+        .to_owned();
+    let second = header(&captured[1], "idempotency-key")
+        .expect("key header")
+        .to_owned();
     assert_eq!(first, second, "retries present the same key");
     assert_eq!(first, base, "dispatch uses the documented derivation");
     assert_eq!(first.len(), 64, "keys are hex SHA-256 digests");
@@ -1491,7 +1545,10 @@ async fn http_api_idempotency_keys_are_deterministic_and_scoped() {
         "inst-000001",
     )
     .expect("tool");
-    assert_eq!(comment.idempotency_key(&json!({"issue_id": "i1", "text": "hi"})), None);
+    assert_eq!(
+        comment.idempotency_key(&json!({"issue_id": "i1", "text": "hi"})),
+        None
+    );
     assert_eq!(comment.effect(), Effect::Compensatable);
 }
 
@@ -1825,7 +1882,10 @@ async fn http_api_health_check_runs_at_connect() {
     let instance_id = registry
         .instantiate(&hash, "acme", &broker)
         .expect("instantiate");
-    registry.connect(&instance_id, 1_000).await.expect("connect");
+    registry
+        .connect(&instance_id, 1_000)
+        .await
+        .expect("connect");
 
     let instance = registry.instance(&instance_id).expect("instance");
     assert_eq!(instance.state(), &LifecycleState::Healthy);
@@ -1853,7 +1913,10 @@ async fn http_api_health_check_runs_at_connect() {
     let instance_id = registry
         .instantiate(&hash, "acme", &broker)
         .expect("instantiate");
-    registry.connect(&instance_id, 1_000).await.expect("connect");
+    registry
+        .connect(&instance_id, 1_000)
+        .await
+        .expect("connect");
     let instance = registry.instance(&instance_id).expect("instance");
     match instance.state() {
         LifecycleState::Failed { reason } => {
@@ -1894,14 +1957,20 @@ async fn http_api_integrates_with_registry_lifecycle_and_generations() {
     let instance_id = registry
         .instantiate(&hash, "acme", &broker)
         .expect("instantiate");
-    registry.connect(&instance_id, 1_000).await.expect("connect");
+    registry
+        .connect(&instance_id, 1_000)
+        .await
+        .expect("connect");
     let instance = registry.instance(&instance_id).expect("instance");
     assert_eq!(instance.state(), &LifecycleState::Healthy);
     let catalog = instance.catalog().expect("catalog");
     assert_eq!(catalog.generation, 1);
     assert_eq!(catalog.tools.len(), 7);
     assert!(
-        catalog.tools.iter().any(|t| t.name == "tickets/graphql-create"),
+        catalog
+            .tools
+            .iter()
+            .any(|t| t.name == "tickets/graphql-create"),
         "graphql operation advertised"
     );
     let pin = registry.catalog_pin(&instance_id).expect("pin");
@@ -1929,7 +1998,10 @@ async fn http_api_integrates_with_registry_lifecycle_and_generations() {
         registry.instance(&instance_id).expect("instance").state(),
         &LifecycleState::Pending
     );
-    registry.connect(&instance_id, 3_000).await.expect("reconnect");
+    registry
+        .connect(&instance_id, 3_000)
+        .await
+        .expect("reconnect");
     assert_eq!(
         registry.instance(&instance_id).expect("instance").state(),
         &LifecycleState::Healthy

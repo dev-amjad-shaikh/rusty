@@ -502,8 +502,8 @@ impl ConnectorManifest {
         };
         // Serializing this view is infallible: every field is a string, a
         // string vec, or an already-serializable spec struct.
-        let value = serde_json::to_value(&content)
-            .expect("the manifest content view always serializes");
+        let value =
+            serde_json::to_value(&content).expect("the manifest content view always serializes");
         super::canonical_json_hash(&value)
     }
 
@@ -518,7 +518,12 @@ impl ConnectorManifest {
     pub fn validate(&self) -> Result<()> {
         validate_connector_id(&self.id)?;
         validate_version(&self.version)?;
-        validate_text_field("display_name", &self.display_name, MAX_DISPLAY_NAME_LEN, false)?;
+        validate_text_field(
+            "display_name",
+            &self.display_name,
+            MAX_DISPLAY_NAME_LEN,
+            false,
+        )?;
         validate_text_field("description", &self.description, MAX_DESCRIPTION_LEN, false)?;
 
         if self.capabilities.len() > MAX_DECLARED_CAPABILITIES {
@@ -547,7 +552,10 @@ impl ConnectorManifest {
                 MAX_SLOT_DESCRIPTION_LEN,
                 true,
             )?;
-            if self.credential_slots[..index].iter().any(|s| s.name == slot.name) {
+            if self.credential_slots[..index]
+                .iter()
+                .any(|s| s.name == slot.name)
+            {
                 return Err(conn_err(format!(
                     "manifest `{}` declares credential slot `{}` twice",
                     self.id, slot.name
@@ -597,9 +605,7 @@ impl ConnectorManifest {
         for name in &spec.env_allowlist {
             let valid = !name.is_empty()
                 && name.len() <= MAX_ENV_NAME_LEN
-                && name
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
                 && !name.as_bytes()[0].is_ascii_digit();
             if !valid {
                 return Err(conn_err(format!(
@@ -618,7 +624,8 @@ impl ConnectorManifest {
                 self.id
             )));
         }
-        if spec.base_url.chars().any(char::is_control) || spec.base_url.contains(char::is_whitespace)
+        if spec.base_url.chars().any(char::is_control)
+            || spec.base_url.contains(char::is_whitespace)
         {
             return Err(conn_err(format!(
                 "manifest `{}` http-search base URL must not contain whitespace or control characters",
@@ -907,13 +914,26 @@ impl ConnectorManifest {
         // Route every parameter to exactly one location — path, query, or
         // body — and require the schema to declare each. A placeholder the
         // schema does not cover, or a property routed nowhere, both fail.
-        let mut routed: std::collections::BTreeMap<&str, &str> =
-            std::collections::BTreeMap::new();
+        let mut routed: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
         for name in &path_params {
-            route_param(&self.id, &operation.name, properties, &mut routed, name, "path")?;
+            route_param(
+                &self.id,
+                &operation.name,
+                properties,
+                &mut routed,
+                name,
+                "path",
+            )?;
         }
         for name in &operation.query_params {
-            route_param(&self.id, &operation.name, properties, &mut routed, name, "query")?;
+            route_param(
+                &self.id,
+                &operation.name,
+                properties,
+                &mut routed,
+                name,
+                "query",
+            )?;
         }
         let body_params: Vec<String> = match &operation.body {
             OperationBody::None => Vec::new(),
@@ -951,7 +971,14 @@ impl ConnectorManifest {
             }
         };
         for name in &body_params {
-            route_param(&self.id, &operation.name, properties, &mut routed, name, "body")?;
+            route_param(
+                &self.id,
+                &operation.name,
+                properties,
+                &mut routed,
+                name,
+                "body",
+            )?;
         }
         if let Some(props) = properties {
             for name in props.keys() {
@@ -1075,9 +1102,9 @@ fn validate_connector_id(id: &str) -> Result<()> {
 fn validate_version(version: &str) -> Result<()> {
     let valid = !version.is_empty()
         && version.len() <= MAX_VERSION_LEN
-        && version.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+' | b'_')
-        });
+        && version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+' | b'_'));
     if !valid {
         return Err(conn_err(format!(
             "version `{version}` must be 1..={MAX_VERSION_LEN} ASCII letters, digits, `.`, `-`, `+`, or `_`"
@@ -1090,7 +1117,9 @@ fn validate_version(version: &str) -> Result<()> {
 fn validate_slot_name(name: &str) -> Result<()> {
     let valid = !name.is_empty()
         && name.len() <= MAX_SLOT_NAME_LEN
-        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
         && name.as_bytes()[0].is_ascii_lowercase();
     if !valid {
         return Err(conn_err(format!(
@@ -1130,8 +1159,10 @@ pub(crate) fn validate_text_field(
 /// deduplicated view only when they survive it — exact duplicates of a
 /// query parameter are semantically one entry, and collapse.
 fn canonicalize_http_api(spec: &mut HttpApiSpec) {
-    spec.default_headers.sort_by(|left, right| left.0.cmp(&right.0));
-    spec.operations.sort_by(|left, right| left.name.cmp(&right.name));
+    spec.default_headers
+        .sort_by(|left, right| left.0.cmp(&right.0));
+    spec.operations
+        .sort_by(|left, right| left.name.cmp(&right.name));
     for operation in &mut spec.operations {
         operation.query_params.sort();
         operation.query_params.dedup();
@@ -1232,9 +1263,9 @@ fn validate_param_name(name: &str) -> Result<()> {
 fn validate_header_name(manifest_id: &str, name: &str) -> Result<()> {
     let valid = !name.is_empty()
         && name.len() <= MAX_AUTH_HEADER_LEN
-        && name.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
-        });
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
     if !valid {
         return Err(conn_err(format!(
             "manifest `{manifest_id}` header name `{name}` is not a valid HTTP token of at most {MAX_AUTH_HEADER_LEN} bytes"

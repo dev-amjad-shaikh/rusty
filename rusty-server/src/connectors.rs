@@ -113,7 +113,11 @@ pub(crate) struct ConnectorInstanceRecord {
 /// Fold a freshly derived catalog into the record's generation chain:
 /// equal bytes keep the generation, changed bytes advance it. This is the
 /// durable counterpart of the registry's in-memory `adopt_catalog`.
-fn fold_served_catalog(record: &mut ConnectorInstanceRecord, hash: &str, tools: Vec<ToolCapability>) {
+fn fold_served_catalog(
+    record: &mut ConnectorInstanceRecord,
+    hash: &str,
+    tools: Vec<ToolCapability>,
+) {
     match &mut record.catalog {
         None => {
             record.catalog = Some(ServedCatalog {
@@ -779,7 +783,11 @@ pub(crate) async fn create_connector_instance(
             ))
         })?;
     let credentials = plane
-        .resolve_slots_strict(tenant.tenant(), &manifest.credential_slots, &payload.credentials)
+        .resolve_slots_strict(
+            tenant.tenant(),
+            &manifest.credential_slots,
+            &payload.credentials,
+        )
         .await?;
 
     let instance_id = plane
@@ -1051,7 +1059,8 @@ mod tests {
 
     #[tokio::test]
     async fn file_layout_round_trips_scoped_records() {
-        let root = std::env::temp_dir().join(format!("rusty-connectors-test-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("rusty-connectors-test-{}", uuid::Uuid::new_v4()));
         let manifest = ConnectorManifest::new(
             "test-conn",
             "1.0.0",
@@ -1067,7 +1076,9 @@ mod tests {
             vec![],
         )
         .unwrap();
-        persist_manifest(&root, &manifest.hash, &manifest).await.unwrap();
+        persist_manifest(&root, &manifest.hash, &manifest)
+            .await
+            .unwrap();
         persist_manifest(&root, &format!("acme/{}", manifest.hash), &manifest)
             .await
             .unwrap();

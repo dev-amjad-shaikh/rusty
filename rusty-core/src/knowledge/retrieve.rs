@@ -78,10 +78,7 @@ impl LexicalConfig {
             )));
         }
         if !self.b.is_finite() || !(0.0..=1.0).contains(&self.b) {
-            return Err(invalid(format!(
-                "BM25 b must be in [0, 1], got {}",
-                self.b
-            )));
+            return Err(invalid(format!("BM25 b must be in [0, 1], got {}", self.b)));
         }
         Ok(())
     }
@@ -314,14 +311,12 @@ pub fn rank_lexical(
         .filter(|(_, score)| *score > 0.0)
         .collect();
     ranked.sort_by(|(a_idx, a_score), (b_idx, b_score)| {
-        b_score
-            .total_cmp(a_score)
-            .then_with(|| {
-                corpus[*a_idx]
-                    .chunk
-                    .content_address
-                    .cmp(&corpus[*b_idx].chunk.content_address)
-            })
+        b_score.total_cmp(a_score).then_with(|| {
+            corpus[*a_idx]
+                .chunk
+                .content_address
+                .cmp(&corpus[*b_idx].chunk.content_address)
+        })
     });
     Ok(ranked)
 }

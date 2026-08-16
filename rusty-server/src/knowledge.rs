@@ -41,19 +41,19 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::extract::{Path as AxumPath, Query, State as AxumState};
 use axum::http::StatusCode;
-use axum::Json;
 use axum::Extension;
+use axum::Json;
 use chrono::{DateTime, Utc};
 use rusty_agent_runtime::error::Result as RuntimeResult;
+use rusty_agent_runtime::error::RustyError;
 use rusty_agent_runtime::knowledge::{
-    Citation, ChunkRecord, ContentAddressedStore, KnowledgeBase, KnowledgeSource, QueryLimits,
+    ChunkRecord, Citation, ContentAddressedStore, KnowledgeBase, KnowledgeSource, QueryLimits,
     RetentionPolicy, SourceKind, SourceRegistration, SourceTombstone,
 };
 use rusty_agent_runtime::memory::{MemoryScope, ScopeAddress};
 use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::tool::builtins::{KnowledgeDocument, KnowledgeSearchTool};
 use rusty_agent_runtime::tool::Tool;
-use rusty_agent_runtime::error::RustyError;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -109,8 +109,8 @@ async fn persist_json(
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let bytes = serde_json::to_vec_pretty(record)
-        .map_err(|e| format!("serialize {scoped_id}: {e}"))?;
+    let bytes =
+        serde_json::to_vec_pretty(record).map_err(|e| format!("serialize {scoped_id}: {e}"))?;
     let path = dir.join(format!("{scoped_id}.json"));
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
@@ -121,7 +121,9 @@ async fn persist_json(
     tokio::fs::write(&tmp, bytes)
         .await
         .map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    tokio::fs::rename(&tmp, &path).await.map_err(|e| format!("rename {}: {e}", path.display()))
+    tokio::fs::rename(&tmp, &path)
+        .await
+        .map_err(|e| format!("rename {}: {e}", path.display()))
 }
 
 /// Remove one record file; `false` when already gone — a missing file is
@@ -205,11 +207,7 @@ pub(crate) async fn persist_tombstone(
 /// no extension — the record loaders above never mistake a blob for a
 /// record (the `memory_artifacts` sibling discipline, kept one level down:
 /// each has its own subdirectory here).
-pub(crate) async fn persist_content(
-    root: &Path,
-    scoped: &str,
-    bytes: &[u8],
-) -> Result<(), String> {
+pub(crate) async fn persist_content(root: &Path, scoped: &str, bytes: &[u8]) -> Result<(), String> {
     let dir = content_dir(root);
     tokio::fs::create_dir_all(&dir)
         .await
@@ -224,7 +222,9 @@ pub(crate) async fn persist_content(
     tokio::fs::write(&tmp, bytes)
         .await
         .map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    tokio::fs::rename(&tmp, &path).await.map_err(|e| format!("rename {}: {e}", path.display()))
+    tokio::fs::rename(&tmp, &path)
+        .await
+        .map_err(|e| format!("rename {}: {e}", path.display()))
 }
 
 pub(crate) async fn remove_content(root: &Path, scoped: &str) -> Result<bool, String> {
@@ -249,7 +249,9 @@ pub(crate) fn load_sources(root: &Path) -> Vec<(String, KnowledgeSource)> {
             .and_then(|raw| serde_json::from_str::<KnowledgeSource>(&raw).ok());
         match (scoped_key(&dir, &path, "json"), parsed) {
             (Some(key), Some(record)) => out.push((key, record)),
-            _ => tracing::warn!(path = %path.display(), "skipping unreadable knowledge source file"),
+            _ => {
+                tracing::warn!(path = %path.display(), "skipping unreadable knowledge source file")
+            }
         }
     }
     out
@@ -267,7 +269,9 @@ pub(crate) fn load_chunks(root: &Path) -> Vec<(String, Vec<ChunkRecord>)> {
             .and_then(|raw| serde_json::from_str::<Vec<ChunkRecord>>(&raw).ok());
         match (scoped_key(&dir, &path, "json"), parsed) {
             (Some(key), Some(chunks)) => out.push((key, chunks)),
-            _ => tracing::warn!(path = %path.display(), "skipping unreadable knowledge chunks file"),
+            _ => {
+                tracing::warn!(path = %path.display(), "skipping unreadable knowledge chunks file")
+            }
         }
     }
     out
@@ -312,7 +316,9 @@ pub(crate) fn load_content(root: &Path) -> Vec<(String, Vec<u8>)> {
         });
         match (key, std::fs::read(&path)) {
             (Some(key), Ok(bytes)) => out.push((key, bytes)),
-            _ => tracing::warn!(path = %path.display(), "skipping unreadable knowledge content blob"),
+            _ => {
+                tracing::warn!(path = %path.display(), "skipping unreadable knowledge content blob")
+            }
         }
     }
     out
@@ -443,7 +449,10 @@ impl ContentAddressedStore for ServerKnowledgeStore {
     }
 
     async fn all_tombstones(&self) -> RuntimeResult<Vec<SourceTombstone>> {
-        self.plane.all_tombstones(&self.tenant).await.map_err(invalid)
+        self.plane
+            .all_tombstones(&self.tenant)
+            .await
+            .map_err(invalid)
     }
 }
 
@@ -468,7 +477,10 @@ fn knowledge_base(state: &AppState, tenant: &TenantContext) -> KnowledgeBase {
 /// `404`, never `403` (cross-tenant is indistinguishable from absence by
 /// design); `agent` / `team` / `user` scopes ride tenant namespacing
 /// unchanged.
-fn check_knowledge_scope_gate(tenant: &TenantContext, scope: &ScopeAddress) -> Result<(), ApiError> {
+fn check_knowledge_scope_gate(
+    tenant: &TenantContext,
+    scope: &ScopeAddress,
+) -> Result<(), ApiError> {
     tasks::validate_label("scope.id", &scope.id, 256).map_err(ApiError::bad_request)?;
     match scope.scope {
         MemoryScope::Run => Err(ApiError::bad_request(
@@ -944,7 +956,11 @@ impl GovernedKnowledgeSearchTool {
     /// ([`GovernedKnowledgeSearchTool::in_memory`]); with a base set, the
     /// plane is the answer — an empty governed result is the truth of the
     /// tenant's knowledge, not a reason to consult the fallback.
-    pub fn governed(base: KnowledgeBase, scope: ScopeAddress, fallback: Vec<KnowledgeDocument>) -> rusty_agent_runtime::error::Result<Self> {
+    pub fn governed(
+        base: KnowledgeBase,
+        scope: ScopeAddress,
+        fallback: Vec<KnowledgeDocument>,
+    ) -> rusty_agent_runtime::error::Result<Self> {
         Ok(Self {
             base: Some(base),
             scope: Some(scope),
@@ -954,7 +970,9 @@ impl GovernedKnowledgeSearchTool {
 
     /// The in-memory configuration: exactly the built-in tool's behavior
     /// (the constructor an embedder uses before the plane is wired).
-    pub fn in_memory(documents: Vec<KnowledgeDocument>) -> rusty_agent_runtime::error::Result<Self> {
+    pub fn in_memory(
+        documents: Vec<KnowledgeDocument>,
+    ) -> rusty_agent_runtime::error::Result<Self> {
         Ok(Self {
             base: None,
             scope: None,
@@ -990,7 +1008,8 @@ impl Tool for GovernedKnowledgeSearchTool {
             .and_then(Value::as_str)
             .ok_or_else(|| RustyError::Tool("`query` must be a string".into()))?
             .trim();
-        if query.is_empty() || query.len() > rusty_agent_runtime::tool::builtins::MAX_SEARCH_QUERY_BYTES
+        if query.is_empty()
+            || query.len() > rusty_agent_runtime::tool::builtins::MAX_SEARCH_QUERY_BYTES
         {
             return Err(RustyError::Tool(format!(
                 "search query must contain 1..={} bytes",
@@ -1001,7 +1020,10 @@ impl Tool for GovernedKnowledgeSearchTool {
             .get("limit")
             .and_then(Value::as_u64)
             .unwrap_or(5)
-            .clamp(1, rusty_agent_runtime::tool::builtins::MAX_SEARCH_RESULTS as u64) as usize;
+            .clamp(
+                1,
+                rusty_agent_runtime::tool::builtins::MAX_SEARCH_RESULTS as u64,
+            ) as usize;
         let limits = QueryLimits {
             max_results: limit,
             ..QueryLimits::default()

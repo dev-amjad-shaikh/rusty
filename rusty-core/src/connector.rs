@@ -59,8 +59,8 @@ pub use http_api::{
     MAX_HTTP_API_REQUEST_BYTES,
 };
 pub use instance::{
-    CatalogGeneration, CatalogPin, ConnectorInstance, LifecycleState, DEFAULT_DEGRADE_AFTER_FAILURES,
-    MAX_INSTANCE_ERROR_BYTES, MAX_TENANT_ID_LEN,
+    CatalogGeneration, CatalogPin, ConnectorInstance, LifecycleState,
+    DEFAULT_DEGRADE_AFTER_FAILURES, MAX_INSTANCE_ERROR_BYTES, MAX_TENANT_ID_LEN,
 };
 pub use manifest::{
     ConnectorManifest, CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiSpec, HttpMethod,

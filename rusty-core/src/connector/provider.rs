@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 
+use super::conn_err;
 use super::credential::CredentialHandle;
 use super::manifest::{ConnectorManifest, ProviderKind, SearchAuth};
-use super::conn_err;
 use crate::error::Result;
 use crate::mcp::{McpClient, McpToolInfo};
 use crate::record::Effect;
@@ -82,9 +82,9 @@ pub fn default_provider(manifest: &ConnectorManifest) -> Result<Arc<dyn Connecto
     match &manifest.provider {
         ProviderKind::McpStdio(_) => Ok(Arc::new(McpStdioProvider)),
         ProviderKind::HttpSearch(_) => Ok(Arc::new(HttpSearchProvider::from_manifest(manifest)?)),
-        ProviderKind::HttpApi(_) => Ok(Arc::new(
-            super::http_api::HttpApiProvider::from_manifest(manifest)?,
-        )),
+        ProviderKind::HttpApi(_) => Ok(Arc::new(super::http_api::HttpApiProvider::from_manifest(
+            manifest,
+        )?)),
     }
 }
 
@@ -221,8 +221,12 @@ fn map_mcp_tools(connector_id: &str, infos: Vec<McpToolInfo>) -> Result<Vec<Tool
                 info.name
             )));
         }
-        let schema_bytes = serde_json::to_vec(&info.input_schema)
-            .map_err(|e| conn_err(format!("MCP tool `{}` schema did not serialize: {e}", info.name)))?;
+        let schema_bytes = serde_json::to_vec(&info.input_schema).map_err(|e| {
+            conn_err(format!(
+                "MCP tool `{}` schema did not serialize: {e}",
+                info.name
+            ))
+        })?;
         if schema_bytes.len() > MAX_TOOL_SCHEMA_BYTES {
             return Err(conn_err(format!(
                 "MCP tool `{}` schema exceeds {MAX_TOOL_SCHEMA_BYTES} bytes",
@@ -448,9 +452,7 @@ impl HttpSearchProvider {
     /// The provider for a validated `http-search` manifest.
     pub fn from_manifest(manifest: &ConnectorManifest) -> Result<Self> {
         match &manifest.provider {
-            ProviderKind::HttpSearch(spec) => {
-                Self::new(spec.base_url.clone(), spec.auth.clone())
-            }
+            ProviderKind::HttpSearch(spec) => Self::new(spec.base_url.clone(), spec.auth.clone()),
             ProviderKind::McpStdio(_) | ProviderKind::HttpApi(_) => Err(conn_err(format!(
                 "manifest `{}` is {}; HttpSearchProvider cannot serve it",
                 manifest.id,
@@ -527,7 +529,9 @@ impl HttpSearchProvider {
         });
         let reply = tokio::time::timeout(self.timeout, exchange)
             .await
-            .map_err(|_| conn_err(format!("search request timed out after {:?}", self.timeout)))??;
+            .map_err(|_| {
+                conn_err(format!("search request timed out after {:?}", self.timeout))
+            })??;
 
         if !(200..=299).contains(&reply.status) {
             // Status only: the body is provider-controlled text and may
@@ -535,7 +539,10 @@ impl HttpSearchProvider {
             // neighborhood — back at us.
             return Err(conn_err(match reply.status {
                 401 | 403 => {
-                    format!("search endpoint rejected the credential (status {})", reply.status)
+                    format!(
+                        "search endpoint rejected the credential (status {})",
+                        reply.status
+                    )
                 }
                 status => format!("search endpoint returned status {status}"),
             }));
@@ -754,17 +761,16 @@ impl Tool for ConnectorSearchTool {
         let mut request = SearchRequest::new(query)?;
         if let Some(max_results) = args.get("max_results") {
             let count = max_results.as_u64().ok_or_else(|| {
-                conn_err(format!("tool `{}` `max_results` must be a positive integer", self.name))
+                conn_err(format!(
+                    "tool `{}` `max_results` must be a positive integer",
+                    self.name
+                ))
             })?;
             request = request.with_max_results(count as usize)?;
         }
         let hits = self
             .provider
-            .search(
-                self.transport.as_ref(),
-                self.credential.as_ref(),
-                &request,
-            )
+            .search(self.transport.as_ref(), self.credential.as_ref(), &request)
             .await?;
         Ok(json!({ "results": hits }))
     }

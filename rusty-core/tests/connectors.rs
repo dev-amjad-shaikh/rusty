@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use rusty_agent_runtime::connector::{
     ConnectorInstance, ConnectorManifest, ConnectorProvider, ConnectorRegistry,
-    ConnectorSearchTool, CredentialHandle, CredentialSlot, HttpRequest,
-    HttpResponse, HttpSearchProvider, HttpSearchSpec, HttpTransport, InMemoryCredentialBroker,
-    LifecycleState, McpSession, McpStdioProvider, McpStdioSpec, ProviderKind, ProviderSession,
-    SearchAuth, SearchRequest, MAX_SEARCH_RESPONSE_BYTES,
+    ConnectorSearchTool, CredentialHandle, CredentialSlot, HttpRequest, HttpResponse,
+    HttpSearchProvider, HttpSearchSpec, HttpTransport, InMemoryCredentialBroker, LifecycleState,
+    McpSession, McpStdioProvider, McpStdioSpec, ProviderKind, ProviderSession, SearchAuth,
+    SearchRequest, MAX_SEARCH_RESPONSE_BYTES,
 };
 use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::mcp::McpClient;
@@ -198,10 +198,7 @@ impl FakeTransport {
 #[async_trait]
 impl HttpTransport for FakeTransport {
     async fn post(&self, request: HttpRequest) -> Result<HttpResponse> {
-        self.captured
-            .lock()
-            .expect("captured lock")
-            .push(request);
+        self.captured.lock().expect("captured lock").push(request);
         self.replies
             .lock()
             .expect("replies lock")
@@ -279,13 +276,12 @@ fn manifest_rejects_bad_versions_and_text_fields() {
     };
     // Empty and over-long versions.
     for bad in ["", &"1".repeat(33), "1.0 beta"] {
-        assert!(ConnectorManifest::new("ok-id", bad, "Name", "Desc.", spec(), vec![], vec![])
-            .is_err());
+        assert!(
+            ConnectorManifest::new("ok-id", bad, "Name", "Desc.", spec(), vec![], vec![]).is_err()
+        );
     }
     // Empty, untrimmed, and oversized display names / descriptions.
-    assert!(
-        ConnectorManifest::new("ok-id", "1.0.0", "", "Desc.", spec(), vec![], vec![]).is_err()
-    );
+    assert!(ConnectorManifest::new("ok-id", "1.0.0", "", "Desc.", spec(), vec![], vec![]).is_err());
     assert!(
         ConnectorManifest::new("ok-id", "1.0.0", " padded", "Desc.", spec(), vec![], vec![])
             .is_err()
@@ -591,7 +587,10 @@ fn registration_is_idempotent_by_hash_and_rejects_tampering() {
     let err = registry
         .register_manifest(tampered, provider())
         .expect_err("tampered manifest must be rejected");
-    assert!(err.to_string().contains("hash does not match"), "got: {err}");
+    assert!(
+        err.to_string().contains("hash does not match"),
+        "got: {err}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -608,7 +607,10 @@ fn credential_handle_never_leaks_secret_bytes() {
     assert!(debug.contains("[redacted]"));
 
     let serialized = serde_json::to_string(&handle).expect("serialize");
-    assert!(!serialized.contains(secret), "Serialize leaked: {serialized}");
+    assert!(
+        !serialized.contains(secret),
+        "Serialize leaked: {serialized}"
+    );
     assert!(serialized.contains("[redacted]"));
     assert!(serialized.contains("acme"));
     assert!(serialized.contains("api_key"));
@@ -664,7 +666,9 @@ fn missing_credential_lands_instance_in_failed_with_reason() {
     ));
 
     // Unknown manifest hashes error the call itself.
-    assert!(registry.instantiate("no-such-hash", "acme", &broker).is_err());
+    assert!(registry
+        .instantiate("no-such-hash", "acme", &broker)
+        .is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -717,7 +721,10 @@ async fn mcp_catalog_fails_closed_on_invalid_server_tools() {
     let err = McpStdioProvider::catalog_from_client("test-conn", &client)
         .await
         .expect_err("invalid name must fail derivation");
-    assert!(err.to_string().contains("invalid catalog name"), "got: {err}");
+    assert!(
+        err.to_string().contains("invalid catalog name"),
+        "got: {err}"
+    );
     client.shutdown().await.expect("shutdown");
 }
 
@@ -739,7 +746,9 @@ async fn registry_connects_mcp_instance_to_healthy_catalog() {
         )
         .expect("register");
     let broker = InMemoryCredentialBroker::new();
-    let id = registry.instantiate(&hash, "acme", &broker).expect("instantiate");
+    let id = registry
+        .instantiate(&hash, "acme", &broker)
+        .expect("instantiate");
     registry.connect(&id, 1_000).await.expect("connect");
 
     let instance = registry.instance(&id).expect("instance");
@@ -772,8 +781,13 @@ async fn mcp_spawn_failure_lands_instance_in_failed() {
         .register_manifest_with_default(manifest)
         .expect("register");
     let broker = InMemoryCredentialBroker::new();
-    let id = registry.instantiate(&hash, "acme", &broker).expect("instantiate");
-    registry.connect(&id, 1_000).await.expect("connect returns Ok");
+    let id = registry
+        .instantiate(&hash, "acme", &broker)
+        .expect("instantiate");
+    registry
+        .connect(&id, 1_000)
+        .await
+        .expect("connect returns Ok");
 
     match registry.instance(&id).expect("instance").state() {
         LifecycleState::Failed { reason } => {
@@ -909,7 +923,10 @@ async fn http_search_maps_failures_without_leaking() {
         )
         .await
         .expect_err("401 must fail");
-    assert!(err.to_string().contains("rejected the credential"), "got: {err}");
+    assert!(
+        err.to_string().contains("rejected the credential"),
+        "got: {err}"
+    );
     assert!(!err.to_string().contains("sekret-token"), "leaked: {err}");
 
     // Server failures carry the status.
@@ -1030,7 +1047,10 @@ fn lifecycle_transitions_and_guards() {
         .record_connect_success(1_000, vec![capability("test-conn/a")])
         .expect("success");
     assert!(matches!(instance.state(), LifecycleState::Healthy));
-    assert!(instance.begin_connect().is_err(), "healthy reconnects via sweep");
+    assert!(
+        instance.begin_connect().is_err(),
+        "healthy reconnects via sweep"
+    );
 
     // Health failures degrade at the threshold.
     assert!(!instance
@@ -1038,10 +1058,15 @@ fn lifecycle_transitions_and_guards() {
         .expect("failure"));
     assert!(matches!(instance.state(), LifecycleState::Healthy));
     assert_eq!(instance.consecutive_failures(), 1);
-    instance.record_health_failure("flaky", 2_100, 3).expect("failure");
-    assert!(instance
-        .record_health_failure("flaky", 2_200, 3)
-        .expect("failure"), "third failure degrades");
+    instance
+        .record_health_failure("flaky", 2_100, 3)
+        .expect("failure");
+    assert!(
+        instance
+            .record_health_failure("flaky", 2_200, 3)
+            .expect("failure"),
+        "third failure degrades"
+    );
     match instance.state() {
         LifecycleState::Degraded { reason } => assert_eq!(reason, "flaky"),
         other => panic!("expected degraded, got {other:?}"),
@@ -1058,7 +1083,9 @@ fn lifecycle_transitions_and_guards() {
     // disabled rejects connections; enable returns to pending.
     instance.disable().expect("disable");
     assert!(instance.disable().is_err(), "already disabled");
-    let err = instance.begin_connect().expect_err("disabled cannot connect");
+    let err = instance
+        .begin_connect()
+        .expect_err("disabled cannot connect");
     assert!(err.to_string().contains("disabled"), "got: {err}");
     assert!(instance.record_health_success(4_000, vec![]).is_err());
     instance.enable().expect("enable");
@@ -1101,7 +1128,10 @@ fn fail_pending_covers_pre_connect_failures_once() {
     instance
         .fail_pending("credential slot `api_key` unresolved for tenant `acme`")
         .expect("fail");
-    assert!(instance.fail_pending("again").is_err(), "not pending anymore");
+    assert!(
+        instance.fail_pending("again").is_err(),
+        "not pending anymore"
+    );
     assert!(matches!(instance.state(), LifecycleState::Failed { .. }));
 
     // Tenant ids are validated at construction.
@@ -1177,7 +1207,9 @@ async fn health_sweep_degrades_recovers_and_tracks_generations() {
         )
         .expect("register");
     let broker = InMemoryCredentialBroker::new();
-    let id = registry.instantiate(&hash, "acme", &broker).expect("instantiate");
+    let id = registry
+        .instantiate(&hash, "acme", &broker)
+        .expect("instantiate");
     registry.connect(&id, 1_000).await.expect("connect");
 
     // Unchanged catalog: no new generation.
@@ -1188,9 +1220,10 @@ async fn health_sweep_degrades_recovers_and_tracks_generations() {
     assert_eq!(registry.catalog(&id).expect("catalog").generation, 1);
 
     // Changed catalog: one new generation.
-    tools.lock().expect("tools lock").push(
-        json!({"name": "extra", "description": "Added.", "inputSchema": {"type": "object"}}),
-    );
+    tools
+        .lock()
+        .expect("tools lock")
+        .push(json!({"name": "extra", "description": "Added.", "inputSchema": {"type": "object"}}));
     let outcomes = registry.health_sweep(2_500).await;
     assert!(outcomes[0].catalog_bumped);
     let catalog = registry.catalog(&id).expect("catalog");
@@ -1206,10 +1239,16 @@ async fn health_sweep_degrades_recovers_and_tracks_generations() {
             assert!(matches!(instance.state(), LifecycleState::Healthy));
             assert_eq!(instance.consecutive_failures(), step as u32);
         } else {
-            assert!(matches!(outcomes[0].current, LifecycleState::Degraded { .. }));
+            assert!(matches!(
+                outcomes[0].current,
+                LifecycleState::Degraded { .. }
+            ));
             match instance.state() {
                 LifecycleState::Degraded { reason } => {
-                    assert!(reason.contains("tools backend unavailable"), "got: {reason}");
+                    assert!(
+                        reason.contains("tools backend unavailable"),
+                        "got: {reason}"
+                    );
                 }
                 other => panic!("expected degraded, got {other:?}"),
             }
@@ -1219,7 +1258,10 @@ async fn health_sweep_degrades_recovers_and_tracks_generations() {
     // Success recovers the instance and resets the counter.
     fail_list.store(false, Ordering::Relaxed);
     let outcomes = registry.health_sweep(4_000).await;
-    assert!(matches!(outcomes[0].previous, LifecycleState::Degraded { .. }));
+    assert!(matches!(
+        outcomes[0].previous,
+        LifecycleState::Degraded { .. }
+    ));
     assert!(matches!(outcomes[0].current, LifecycleState::Healthy));
     let instance = registry.instance(&id).expect("instance");
     assert_eq!(instance.consecutive_failures(), 0);
@@ -1244,7 +1286,9 @@ async fn registry_disable_shuts_down_and_enable_returns_to_pending() {
         )
         .expect("register");
     let broker = InMemoryCredentialBroker::new();
-    let id = registry.instantiate(&hash, "acme", &broker).expect("instantiate");
+    let id = registry
+        .instantiate(&hash, "acme", &broker)
+        .expect("instantiate");
     registry.connect(&id, 1_000).await.expect("connect");
 
     registry.disable(&id).await.expect("disable");
@@ -1289,9 +1333,15 @@ fn listings_are_deterministic() {
     assert!(registry.manifest("no-such-hash").is_none());
 
     let broker = InMemoryCredentialBroker::new();
-    let first = registry.instantiate(&alpha, "beta", &broker).expect("instantiate");
-    let second = registry.instantiate(&alpha, "acme", &broker).expect("instantiate");
-    let third = registry.instantiate(&alpha, "acme", &broker).expect("instantiate");
+    let first = registry
+        .instantiate(&alpha, "beta", &broker)
+        .expect("instantiate");
+    let second = registry
+        .instantiate(&alpha, "acme", &broker)
+        .expect("instantiate");
+    let third = registry
+        .instantiate(&alpha, "acme", &broker)
+        .expect("instantiate");
     assert_eq!(first, "inst-000001");
     assert_eq!(second, "inst-000002");
     assert_eq!(third, "inst-000003");

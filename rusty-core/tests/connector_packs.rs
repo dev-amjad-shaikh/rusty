@@ -134,15 +134,20 @@ fn all_packs_construct_and_verify() {
     let ids: Vec<&str> = manifests.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(
         ids,
-        vec!["servicenow", "gmail", "slack", "linear", "notion", "google-calendar"]
+        vec![
+            "servicenow",
+            "gmail",
+            "slack",
+            "linear",
+            "notion",
+            "google-calendar"
+        ]
     );
     for manifest in &manifests {
         assert_eq!(manifest.version, "1");
         assert!(manifest.verify_hash(), "{} hash must verify", manifest.id);
         // One derived tool per declared operation, namespaced by id.
-        let catalog = provider(manifest)
-            .catalog(&manifest.id)
-            .expect("catalog");
+        let catalog = provider(manifest).catalog(&manifest.id).expect("catalog");
         let operations = &http_api_spec(manifest).operations;
         assert_eq!(catalog.len(), operations.len(), "{}", manifest.id);
         for capability in &catalog {
@@ -171,12 +176,12 @@ fn servicenow_credentials() -> Vec<CredentialHandle> {
 fn servicenow_rejects_bad_instance_labels() {
     let long = "a".repeat(64);
     for bad in [
-        "",        // empty
-        "-acme",   // leading hyphen
-        "acme-",   // trailing hyphen
-        "ACME",    // uppercase
-        "ac_me",   // underscore is not a label character
-        "ac me",   // whitespace
+        "",                 // empty
+        "-acme",            // leading hyphen
+        "acme-",            // trailing hyphen
+        "ACME",             // uppercase
+        "ac_me",            // underscore is not a label character
+        "ac me",            // whitespace
         "acme.example.com", // dots: the constructor takes the label only
         long.as_str(),      // over 63 bytes
     ] {
@@ -227,7 +232,10 @@ async fn servicenow_wire_shapes() {
         request.url,
         "https://acme.service-now.com/api/now/table/incident?sysparm_limit=10&sysparm_query=active%3Dtrue"
     );
-    assert_eq!(header(&request, "authorization"), Some("Basic YWRhOnBAc3M="));
+    assert_eq!(
+        header(&request, "authorization"),
+        Some("Basic YWRhOnBAc3M=")
+    );
     assert!(request.body.is_empty());
     assert_eq!(
         result,
@@ -259,7 +267,10 @@ async fn servicenow_wire_shapes() {
     )
     .await;
     assert_eq!(request.method, HttpMethod::Post);
-    assert_eq!(request.url, "https://acme.service-now.com/api/now/table/incident");
+    assert_eq!(
+        request.url,
+        "https://acme.service-now.com/api/now/table/incident"
+    );
     assert_eq!(header(&request, "content-type"), Some("application/json"));
     assert_eq!(
         request_body(&request),
@@ -333,7 +344,10 @@ async fn servicenow_rejects_bad_arguments() {
         .await
         .expect_err("unexpected argument must fail")
         .to_string();
-    assert!(error.contains("unexpected argument `sysparm_qurey`"), "{error}");
+    assert!(
+        error.contains("unexpected argument `sysparm_qurey`"),
+        "{error}"
+    );
 
     let error = provider(&manifest)
         .execute(
@@ -346,7 +360,10 @@ async fn servicenow_rejects_bad_arguments() {
         .await
         .expect_err("missing required argument must fail")
         .to_string();
-    assert!(error.contains("missing required argument `sys_id`"), "{error}");
+    assert!(
+        error.contains("missing required argument `sys_id`"),
+        "{error}"
+    );
     assert!(transport.captured().is_empty(), "no request went out");
 }
 
@@ -397,7 +414,10 @@ async fn gmail_wire_shapes() {
     )
     .await;
     assert_eq!(request.method, HttpMethod::Get);
-    assert_eq!(request.url, "https://gmail.googleapis.com/gmail/v1/users/me/profile");
+    assert_eq!(
+        request.url,
+        "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+    );
     assert_eq!(
         header(&request, "authorization"),
         Some("Bearer ya29.test-token")
@@ -465,7 +485,10 @@ async fn gmail_wire_shapes() {
         request.url,
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
     );
-    assert_eq!(request_body(&request), json!({"raw": "RnJvbTogYWRhQGV4YW1wbGUuY29t"}));
+    assert_eq!(
+        request_body(&request),
+        json!({"raw": "RnJvbTogYWRhQGV4YW1wbGUuY29t"})
+    );
 }
 
 #[tokio::test]
@@ -498,7 +521,10 @@ async fn gmail_rejects_bad_arguments() {
         .await
         .expect_err("missing required argument must fail")
         .to_string();
-    assert!(error.contains("missing required argument `message_id`"), "{error}");
+    assert!(
+        error.contains("missing required argument `message_id`"),
+        "{error}"
+    );
     assert!(transport.captured().is_empty());
 }
 
@@ -637,7 +663,10 @@ async fn slack_rejects_bad_arguments() {
         .await
         .expect_err("missing required argument must fail")
         .to_string();
-    assert!(error.contains("missing required argument `channel`"), "{error}");
+    assert!(
+        error.contains("missing required argument `channel`"),
+        "{error}"
+    );
 
     let error = provider(&manifest)
         .execute(
@@ -705,7 +734,10 @@ async fn linear_graphql_wire_shapes() {
     .await;
     assert_eq!(request.method, HttpMethod::Post);
     assert_eq!(request.url, "https://api.linear.app/graphql");
-    assert_eq!(header(&request, "authorization"), Some("Bearer lin_api_test"));
+    assert_eq!(
+        header(&request, "authorization"),
+        Some("Bearer lin_api_test")
+    );
     assert_eq!(header(&request, "content-type"), Some("application/json"));
     assert_eq!(
         request_body(&request),
@@ -783,11 +815,20 @@ async fn linear_rejects_bad_arguments() {
     // `first` is required even though Linear would default it: the
     // template interpolates every declared parameter.
     let error = provider(&manifest)
-        .execute(&transport, &credentials, "inst-000001", "list-issues", &json!({}))
+        .execute(
+            &transport,
+            &credentials,
+            "inst-000001",
+            "list-issues",
+            &json!({}),
+        )
         .await
         .expect_err("missing required argument must fail")
         .to_string();
-    assert!(error.contains("missing required argument `first`"), "{error}");
+    assert!(
+        error.contains("missing required argument `first`"),
+        "{error}"
+    );
 
     let error = provider(&manifest)
         .execute(
@@ -871,7 +912,10 @@ async fn notion_wire_shapes() {
         header(&request, "authorization"),
         Some("Bearer ntn_test_token")
     );
-    assert_eq!(request_body(&request), json!({"query": "roadmap", "page_size": 10}));
+    assert_eq!(
+        request_body(&request),
+        json!({"query": "roadmap", "page_size": 10})
+    );
 
     // get-page and get-database: plain path-parameter GETs.
     let (_, request) = call(
@@ -972,7 +1016,10 @@ async fn notion_rejects_bad_arguments() {
         .await
         .expect_err("missing required argument must fail")
         .to_string();
-    assert!(error.contains("missing required argument `database_id`"), "{error}");
+    assert!(
+        error.contains("missing required argument `database_id`"),
+        "{error}"
+    );
 
     let error = provider(&manifest)
         .execute(
@@ -985,7 +1032,10 @@ async fn notion_rejects_bad_arguments() {
         .await
         .expect_err("unexpected argument must fail")
         .to_string();
-    assert!(error.contains("unexpected argument `filter_properties`"), "{error}");
+    assert!(
+        error.contains("unexpected argument `filter_properties`"),
+        "{error}"
+    );
     assert!(transport.captured().is_empty());
 }
 
@@ -1007,12 +1057,24 @@ fn google_calendar_catalog_and_health_check() {
     assert_eq!(
         catalog_effects(&manifest),
         vec![
-            ("google-calendar/create-event".to_owned(), Effect::Compensatable),
-            ("google-calendar/delete-event".to_owned(), Effect::NonIdempotent),
+            (
+                "google-calendar/create-event".to_owned(),
+                Effect::Compensatable
+            ),
+            (
+                "google-calendar/delete-event".to_owned(),
+                Effect::NonIdempotent
+            ),
             ("google-calendar/get-event".to_owned(), Effect::ReadOnly),
-            ("google-calendar/list-calendars".to_owned(), Effect::ReadOnly),
+            (
+                "google-calendar/list-calendars".to_owned(),
+                Effect::ReadOnly
+            ),
             ("google-calendar/list-events".to_owned(), Effect::ReadOnly),
-            ("google-calendar/update-event".to_owned(), Effect::Compensatable),
+            (
+                "google-calendar/update-event".to_owned(),
+                Effect::Compensatable
+            ),
         ]
     );
     assert_eq!(
@@ -1174,7 +1236,10 @@ async fn google_calendar_rejects_bad_arguments() {
         .await
         .expect_err("missing required argument must fail")
         .to_string();
-    assert!(error.contains("missing required argument `calendar_id`"), "{error}");
+    assert!(
+        error.contains("missing required argument `calendar_id`"),
+        "{error}"
+    );
 
     let error = provider(&manifest)
         .execute(

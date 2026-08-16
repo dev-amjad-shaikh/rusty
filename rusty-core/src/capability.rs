@@ -140,7 +140,10 @@ struct CapabilitySetBody {
 }
 
 impl Serialize for CapabilitySet {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
         CapabilitySetBody {
             tools: self.tools.clone(),
             refs: self.refs.clone(),
@@ -150,7 +153,9 @@ impl Serialize for CapabilitySet {
 }
 
 impl<'de> Deserialize<'de> for CapabilitySet {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let body = CapabilitySetBody::deserialize(deserializer)?;
         Self::from_members(&body.tools, &body.refs).map_err(serde::de::Error::custom)
     }
@@ -342,5 +347,8 @@ fn set_id(tools: &[String], refs: &[CapabilityRef]) -> String {
     });
     let canonical: Value = crate::record::canonicalize_value(&body);
     let bytes = serde_json::to_vec(&canonical).expect("a serde_json::Value always serializes");
-    format!("{CAPABILITY_SET_ID_PREFIX}{}", crate::record::sha256_hex(&bytes))
+    format!(
+        "{CAPABILITY_SET_ID_PREFIX}{}",
+        crate::record::sha256_hex(&bytes)
+    )
 }

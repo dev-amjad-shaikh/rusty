@@ -128,7 +128,10 @@ fn metadata_listing_never_loads_bodies() {
         version.reference_paths().collect::<Vec<_>>(),
         ["references/guide.md"]
     );
-    assert_eq!(version.asset_paths().collect::<Vec<_>>(), ["assets/logo.bin"]);
+    assert_eq!(
+        version.asset_paths().collect::<Vec<_>>(),
+        ["assets/logo.bin"]
+    );
     assert!(version.reference("references/missing.md").is_none());
 }
 
@@ -208,7 +211,11 @@ fn name_rules_are_enforced() {
 #[test]
 fn description_rules_are_enforced() {
     // Over the 1024-byte ceiling.
-    let text = skill_md("a-skill", &"x".repeat(MAX_SKILL_DESCRIPTION_BYTES + 1), "A body.");
+    let text = skill_md(
+        "a-skill",
+        &"x".repeat(MAX_SKILL_DESCRIPTION_BYTES + 1),
+        "A body.",
+    );
     assert!(matches!(
         SkillPackage::from_markdown(&text),
         Err(SkillError::InvalidDescription { .. })
@@ -220,7 +227,11 @@ fn description_rules_are_enforced() {
         Err(SkillError::InvalidDescription { .. })
     ));
     // Exactly at the ceiling parses.
-    let text = skill_md("a-skill", &"x".repeat(MAX_SKILL_DESCRIPTION_BYTES), "A body.");
+    let text = skill_md(
+        "a-skill",
+        &"x".repeat(MAX_SKILL_DESCRIPTION_BYTES),
+        "A body.",
+    );
     assert!(SkillPackage::from_markdown(&text).is_ok());
 }
 
@@ -257,7 +268,11 @@ fn path_traversal_is_rejected() {
 #[test]
 fn size_ceilings_are_enforced() {
     // Body over 256 KiB.
-    let text = skill_md("a-skill", "A description.", &"x".repeat(MAX_SKILL_BODY_BYTES));
+    let text = skill_md(
+        "a-skill",
+        "A description.",
+        &"x".repeat(MAX_SKILL_BODY_BYTES),
+    );
     assert!(matches!(
         SkillPackage::from_markdown(&text),
         Err(SkillError::BodyTooLarge { .. })
@@ -372,7 +387,8 @@ fn scan_denies_credentialed_urls_without_leaking_them() {
 fn scan_warns_on_base64_blobs_but_registers() {
     let blob = "QUJDREVGRw".repeat(BASE64_BLOB_MIN_CHARS / 10 + 1);
     let body = format!("Legitimate instructions.\n\n{blob}\n\nMore instructions.");
-    let package = SkillPackage::from_markdown(&skill_md("a-skill", "A description.", &body)).unwrap();
+    let package =
+        SkillPackage::from_markdown(&skill_md("a-skill", "A description.", &body)).unwrap();
     let report = scan_package(&package);
     assert!(!report.has_denials());
     let warnings: Vec<_> = report.warnings().collect();
@@ -396,10 +412,18 @@ fn scan_warns_on_base64_blobs_but_registers() {
 fn re_registration_is_idempotent() {
     let mut registry = SkillRegistry::new();
     let first = registry
-        .register(full_package("a-skill", "Version one."), local_source(), "operator:ada")
+        .register(
+            full_package("a-skill", "Version one."),
+            local_source(),
+            "operator:ada",
+        )
         .unwrap();
     let second = registry
-        .register(full_package("a-skill", "Version one."), local_source(), "operator:ada")
+        .register(
+            full_package("a-skill", "Version one."),
+            local_source(),
+            "operator:ada",
+        )
         .unwrap();
     assert!(!first.already_registered);
     assert!(second.already_registered);
@@ -412,7 +436,11 @@ fn re_registration_is_idempotent() {
 fn changed_content_appends_a_revision_and_moves_latest_forward() {
     let mut registry = SkillRegistry::new();
     let first = registry
-        .register(full_package("a-skill", "Version one."), local_source(), "operator:ada")
+        .register(
+            full_package("a-skill", "Version one."),
+            local_source(),
+            "operator:ada",
+        )
         .unwrap();
     let second = registry
         .register(
@@ -426,7 +454,10 @@ fn changed_content_appends_a_revision_and_moves_latest_forward() {
     assert_ne!(first.version.content_hash(), second.version.content_hash());
 
     // Latest points at revision 2; revision 1 stays reachable, unchanged.
-    assert!(Arc::ptr_eq(&registry.get("a-skill").unwrap(), &second.version));
+    assert!(Arc::ptr_eq(
+        &registry.get("a-skill").unwrap(),
+        &second.version
+    ));
     let pinned = registry
         .get_version("a-skill", SkillVersionSelector::Revision(1))
         .unwrap();
@@ -453,7 +484,11 @@ fn changed_content_appends_a_revision_and_moves_latest_forward() {
 
     // Re-registering an older revision does not drag the pointer back.
     let again = registry
-        .register(full_package("a-skill", "Version one."), local_source(), "operator:ada")
+        .register(
+            full_package("a-skill", "Version one."),
+            local_source(),
+            "operator:ada",
+        )
         .unwrap();
     assert!(again.already_registered);
     assert_eq!(again.version.revision(), 1);
@@ -470,7 +505,11 @@ fn listing_order_and_content_hashes_are_deterministic() {
     let mut registry = SkillRegistry::new();
     for name in names {
         registry
-            .register(full_package(name, "Instructions."), local_source(), "operator:ada")
+            .register(
+                full_package(name, "Instructions."),
+                local_source(),
+                "operator:ada",
+            )
             .unwrap();
     }
     let listed: Vec<_> = registry
@@ -488,7 +527,11 @@ fn listing_order_and_content_hashes_are_deterministic() {
     let mut reordered = SkillRegistry::new();
     for name in ["bravo-skill", "delta-skill", "alpha-skill", "charlie-skill"] {
         reordered
-            .register(full_package(name, "Instructions."), local_source(), "operator:ada")
+            .register(
+                full_package(name, "Instructions."),
+                local_source(),
+                "operator:ada",
+            )
             .unwrap();
     }
     assert_eq!(registry.list(), reordered.list());
@@ -523,7 +566,11 @@ fn directory_loader_round_trips() {
     std::fs::create_dir_all(root.join("assets")).unwrap();
     std::fs::write(
         root.join("SKILL.md"),
-        skill_md("web-research", "The web-research skill.", "Search, then summarize."),
+        skill_md(
+            "web-research",
+            "The web-research skill.",
+            "Search, then summarize.",
+        ),
     )
     .unwrap();
     std::fs::write(root.join("references/guide.md"), b"# Guide\n").unwrap();
@@ -536,7 +583,10 @@ fn directory_loader_round_trips() {
         package.references().keys().collect::<Vec<_>>(),
         ["references/guide.md", "references/nested/deep.md"]
     );
-    assert_eq!(package.assets().keys().collect::<Vec<_>>(), ["assets/logo.bin"]);
+    assert_eq!(
+        package.assets().keys().collect::<Vec<_>>(),
+        ["assets/logo.bin"]
+    );
 
     let mut registry = SkillRegistry::new();
     let registration = registry

@@ -232,7 +232,10 @@ fn search_snapshot(snapshot: &JournalSnapshot, terms: &[String]) -> Vec<SearchHi
             else {
                 continue;
             };
-            let score = terms.iter().filter(|term| text.contains(term.as_str())).count();
+            let score = terms
+                .iter()
+                .filter(|term| text.contains(term.as_str()))
+                .count();
             if score > 0 {
                 hits.push(SearchHit {
                     run_id: event.run_id.clone(),
@@ -276,7 +279,10 @@ fn trace_snapshot(snapshot: &JournalSnapshot, event_id: &str) -> Option<EventTra
         let Some(parent) = by_id.get(parent_id.as_str()) else {
             break; // parent outside the snapshot (a forked/tail fixture)
         };
-        if ancestors.iter().any(|event: &RunEvent| event.id == parent.id) {
+        if ancestors
+            .iter()
+            .any(|event: &RunEvent| event.id == parent.id)
+        {
             break; // cycle: stop at the repeated event
         }
         cursor = parent.parent.clone();
@@ -365,9 +371,8 @@ impl JournalQuery for InMemoryJournalQuery {
             .snapshots
             .get(run_id)
             .ok_or_else(|| not_found(format!("no journal for run `{run_id}`")))?;
-        trace_snapshot(snapshot, event_id).ok_or_else(|| {
-            not_found(format!("run `{run_id}` has no event `{event_id}`"))
-        })
+        trace_snapshot(snapshot, event_id)
+            .ok_or_else(|| not_found(format!("run `{run_id}` has no event `{event_id}`")))
     }
 
     async fn read_events(
@@ -432,9 +437,12 @@ impl FileJournalQuery {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(query_io_error(format!("read journal `{}`", run_id), e)),
         };
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|e| query_io_error(format!("parse journal `{run_id}`"), std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+        serde_json::from_slice(&bytes).map(Some).map_err(|e| {
+            query_io_error(
+                format!("parse journal `{run_id}`"),
+                std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            )
+        })
     }
 
     /// Every parseable snapshot in the directory, in run-id order.
@@ -729,7 +737,9 @@ mod tests {
             EventDraft::new(RunEventKind::ModelCall, Effect::NonIdempotent)
                 .node("agent")
                 .parent(input)
-                .input(json!({"messages": [{"role": "user", "content": "deploy the staging build"}]}))
+                .input(
+                    json!({"messages": [{"role": "user", "content": "deploy the staging build"}]}),
+                )
                 .output(json!({"message": {"content": "deploying now"}, "model": "mock"})),
         );
         journal.record(
@@ -762,7 +772,9 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().all(|hit| hit.run_id == "run-1"));
         assert!(hits.iter().any(|hit| hit.field == SearchField::Input));
-        assert!(hits.iter().all(|hit| hit.excerpt.len() <= MAX_EXCERPT_CHARS + 1));
+        assert!(hits
+            .iter()
+            .all(|hit| hit.excerpt.len() <= MAX_EXCERPT_CHARS + 1));
     }
 
     #[tokio::test]
@@ -848,12 +860,17 @@ mod tests {
         assert_eq!(rest.len(), 2);
         assert_eq!(rest[0].seq, 2);
         // A missing run reads as empty, never an error.
-        assert!(query.read_events("run-9", None, 10).await.unwrap().is_empty());
+        assert!(query
+            .read_events("run-9", None, 10)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
     async fn file_backend_reads_the_server_layout() {
-        let dir = std::env::temp_dir().join(format!("rusty-session-query-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("rusty-session-query-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let snapshot = fixture_snapshot();
         std::fs::write(

@@ -163,8 +163,13 @@ async fn publish_returns_the_version_receipt() {
 async fn re_publish_is_idempotent() {
     let (app, store) = app();
     let first = publish(&app, "a-skill", "Version one.").await;
-    let (status, second) =
-        call(&app, "POST", "/skills", Some(register_payload("a-skill", "Version one."))).await;
+    let (status, second) = call(
+        &app,
+        "POST",
+        "/skills",
+        Some(register_payload("a-skill", "Version one.")),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "idempotent re-register: {second}");
     assert_eq!(second["already_registered"], json!(true));
     assert_eq!(second["revision"], first["revision"]);
@@ -184,7 +189,12 @@ async fn re_publish_is_idempotent() {
 async fn metadata_listing_is_the_cheap_tier() {
     let (app, store) = app();
     for name in ["gamma-skill", "alpha-skill", "beta-skill"] {
-        publish(&app, name, &format!("Instructions for {name}: BODY-{name}.")).await;
+        publish(
+            &app,
+            name,
+            &format!("Instructions for {name}: BODY-{name}."),
+        )
+        .await;
     }
     let (status, v) = call(&app, "GET", "/skills", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -227,16 +237,34 @@ async fn detail_body_and_files_disclose_on_demand() {
     assert_eq!(v["revision"], json!(1));
 
     // Tier 3: member files by path.
-    let (status, content_type, bytes) =
-        call_raw(&app, None, "GET", "/skills/web-research/files/references/guide.md", None).await;
+    let (status, content_type, bytes) = call_raw(
+        &app,
+        None,
+        "GET",
+        "/skills/web-research/files/references/guide.md",
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(content_type.starts_with("text/markdown"), "got {content_type}");
+    assert!(
+        content_type.starts_with("text/markdown"),
+        "got {content_type}"
+    );
     assert_eq!(bytes.as_ref(), b"# Guide\n\nDetails on demand.\n");
 
-    let (status, content_type, bytes) =
-        call_raw(&app, None, "GET", "/skills/web-research/files/assets/logo.bin", None).await;
+    let (status, content_type, bytes) = call_raw(
+        &app,
+        None,
+        "GET",
+        "/skills/web-research/files/assets/logo.bin",
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(content_type.starts_with("application/octet-stream"), "got {content_type}");
+    assert!(
+        content_type.starts_with("application/octet-stream"),
+        "got {content_type}"
+    );
     assert_eq!(bytes.as_ref(), &[0x89, 0x50, 0x4e, 0x47]);
     let _ = std::fs::remove_dir_all(store);
 }
@@ -329,9 +357,14 @@ async fn registry_rebuilds_from_the_store_on_boot() {
     assert_eq!(pinned["content_hash"], first["content_hash"]);
     let (_, body) = call(&second_app, "GET", "/skills/web-research/body", None).await;
     assert_eq!(body["body"], json!("Version two.\n"));
-    let (status, _, bytes) =
-        call_raw(&second_app, None, "GET", "/skills/web-research/files/references/guide.md", None)
-            .await;
+    let (status, _, bytes) = call_raw(
+        &second_app,
+        None,
+        "GET",
+        "/skills/web-research/files/references/guide.md",
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(bytes.as_ref(), b"# Guide\n\nDetails on demand.\n");
 
@@ -370,7 +403,11 @@ async fn tenants_are_isolated_with_404_never_403() {
         "/skills/a-skill/files/references/guide.md",
     ] {
         let (status, _) = call_as(&app, globex, "GET", uri, None).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "cross-tenant `{uri}` must 404");
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "cross-tenant `{uri}` must 404"
+        );
     }
     let (_, listed) = call_as(&app, globex, "GET", "/skills", None).await;
     assert_eq!(listed["skills"].as_array().unwrap().len(), 0);

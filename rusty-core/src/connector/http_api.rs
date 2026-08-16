@@ -44,8 +44,7 @@ use super::manifest::{
     MAX_HTTP_API_RESPONSE_BYTES,
 };
 use super::provider::{
-    provider_kind_name, ConnectorProvider, HttpResponse, ProviderSession,
-    MAX_DERIVED_TOOL_NAME_LEN,
+    provider_kind_name, ConnectorProvider, HttpResponse, ProviderSession, MAX_DERIVED_TOOL_NAME_LEN,
 };
 use crate::error::Result;
 use crate::record::sha256_hex;
@@ -299,12 +298,12 @@ impl HttpApiProvider {
         args: &Value,
     ) -> Result<Value> {
         let op = self.operation(operation).ok_or_else(|| {
-            conn_err(format!(
-                "http-api connector has no operation `{operation}`"
-            ))
+            conn_err(format!("http-api connector has no operation `{operation}`"))
         })?;
         let object = args.as_object().ok_or_else(|| {
-            conn_err(format!("operation `{operation}` arguments must be a JSON object"))
+            conn_err(format!(
+                "operation `{operation}` arguments must be a JSON object"
+            ))
         })?;
         let properties = op
             .params_schema
@@ -370,7 +369,9 @@ impl HttpApiProvider {
                     }
                 }
                 let bytes = serde_json::to_vec(&Value::Object(map)).map_err(|e| {
-                    conn_err(format!("operation `{operation}` body did not serialize: {e}"))
+                    conn_err(format!(
+                        "operation `{operation}` body did not serialize: {e}"
+                    ))
                 })?;
                 if bytes.len() > MAX_HTTP_API_REQUEST_BYTES {
                     return Err(conn_err(format!(
@@ -428,7 +429,9 @@ impl HttpApiProvider {
                     "authorization".to_owned(),
                     format!(
                         "Basic {}",
-                        base64_encode(format!("{}:{}", username.secret(), password.secret()).as_bytes())
+                        base64_encode(
+                            format!("{}:{}", username.secret(), password.secret()).as_bytes()
+                        )
                     ),
                 ));
             }
@@ -459,7 +462,10 @@ impl HttpApiProvider {
             url.push_str(&pairs);
         }
 
-        let timeout = op.timeout_ms.map(Duration::from_millis).unwrap_or(self.timeout);
+        let timeout = op
+            .timeout_ms
+            .map(Duration::from_millis)
+            .unwrap_or(self.timeout);
         let exchange = transport.send(HttpApiRequest {
             method: op.method,
             url,
@@ -469,7 +475,11 @@ impl HttpApiProvider {
         });
         let reply = tokio::time::timeout(timeout, exchange)
             .await
-            .map_err(|_| conn_err(format!("operation `{operation}` timed out after {timeout:?}")))??;
+            .map_err(|_| {
+                conn_err(format!(
+                    "operation `{operation}` timed out after {timeout:?}"
+                ))
+            })??;
 
         if !(200..=299).contains(&reply.status) {
             return Err(conn_err(match reply.status {
@@ -710,7 +720,10 @@ impl Tool for HttpApiTool {
 
 /// The credential handle for `slot`, or a fail-closed error naming the
 /// slot — never the secret.
-fn resolve_slot<'a>(credentials: &'a [CredentialHandle], slot: &str) -> Result<&'a CredentialHandle> {
+fn resolve_slot<'a>(
+    credentials: &'a [CredentialHandle],
+    slot: &str,
+) -> Result<&'a CredentialHandle> {
     credentials
         .iter()
         .find(|handle| handle.slot() == slot)
@@ -747,7 +760,9 @@ fn render_template(
                     .expect("manifest validation rejects unclosed placeholders");
                 let name = &template[index + 1..close];
                 let value = args.get(name).ok_or_else(|| {
-                    conn_err(format!("operation `{operation}` requires argument `{name}`"))
+                    conn_err(format!(
+                        "operation `{operation}` requires argument `{name}`"
+                    ))
                 })?;
                 out.push_str(&substitute(name, value)?);
                 index = close + 1;

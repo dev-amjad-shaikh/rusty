@@ -27,8 +27,8 @@ use chrono::{DateTime, Duration, Utc};
 
 use rusty_agent_runtime::knowledge::{
     chunk_source, pack_results, rank_lexical, tokenize, ChunkRecord, CitedChunk,
-    ContentAddressedStore, IngestionConfig, InMemoryContentAddressedStore, KnowledgeBase,
-    KnowledgeSource, LexicalConfig, PurgeReason, QueryLimits, RetrievalWeights, RetentionPolicy,
+    ContentAddressedStore, InMemoryContentAddressedStore, IngestionConfig, KnowledgeBase,
+    KnowledgeSource, LexicalConfig, PurgeReason, QueryLimits, RetentionPolicy, RetrievalWeights,
     ScoredChunk, SourceKind, SourceRegistration, VectorScorer, MAX_SOURCE_BYTES,
 };
 use rusty_agent_runtime::memory::{MemoryScope, ScopeAddress};
@@ -123,9 +123,7 @@ async fn registration_fails_closed_on_invalid_inputs() {
 
     // A TTL already expired at registration time.
     let mut reg = registration("s1", scope_agent("a"));
-    reg.retention = RetentionPolicy::Ttl {
-        expires_at: at(-1),
-    };
+    reg.retention = RetentionPolicy::Ttl { expires_at: at(-1) };
     assert!(kb.register_source(reg, body, now).await.is_err());
 
     // And nothing was stored through any of it.
@@ -154,7 +152,10 @@ async fn registration_derives_content_address_and_is_idempotent() {
     let mut again = registration("doc", scope_agent("a"));
     again.title = "a different title, same body".to_owned();
     let stored = kb.register_source(again, body, now).await.unwrap();
-    assert_eq!(stored, source, "idempotent re-registration returns the stored record");
+    assert_eq!(
+        stored, source,
+        "idempotent re-registration returns the stored record"
+    );
 
     // A different body under the same id is a correction, not a registration.
     let err = kb
@@ -182,7 +183,10 @@ async fn chunking_is_deterministic_with_stable_ids_and_addresses() {
     let first = chunk_source(&source, &body, &config).unwrap();
     let second = chunk_source(&source, &body, &config).unwrap();
     assert_eq!(first, second, "same input chunks identically");
-    assert!(first.len() > 2, "the filler body must exercise multi-chunk ingestion");
+    assert!(
+        first.len() > 2,
+        "the filler body must exercise multi-chunk ingestion"
+    );
 
     for (index, chunk) in first.iter().enumerate() {
         assert_eq!(chunk.chunk_id, format!("filler#{index}"));
@@ -218,7 +222,8 @@ async fn chunking_never_splits_a_markdown_code_fence() {
     // A fence block larger than the 256-byte target, starting before the
     // first naive boundary: a fence-blind chunker would split inside it.
     let fence_body = "fn main() {\n".to_owned() + &"    let governed = true;\n".repeat(20) + "}\n";
-    let body = format!("# Guide\n\nintro paragraph text here\n\n```rust\n{fence_body}```\n\noutro\n");
+    let body =
+        format!("# Guide\n\nintro paragraph text here\n\n```rust\n{fence_body}```\n\noutro\n");
     let mut reg = registration("guide", scope_agent("a"));
     reg.kind = SourceKind::Markdown;
     let source = kb.register_source(reg, &body, at(0)).await.unwrap();
@@ -250,7 +255,10 @@ async fn chunking_never_splits_a_markdown_code_fence() {
         })
         .expect("the fence lives in some chunk");
     let slice = &body[fence_chunk.byte_start as usize..fence_chunk.byte_end as usize];
-    assert!(slice.contains("```\n"), "the same chunk carries the closing fence");
+    assert!(
+        slice.contains("```\n"),
+        "the same chunk carries the closing fence"
+    );
 }
 
 #[tokio::test]
@@ -268,7 +276,11 @@ async fn line_endings_normalize_to_identical_addresses() {
         .await
         .unwrap();
     let lf = kb
-        .register_source(registration("doc", scope_agent("a")), "alpha\nbeta\ngamma\n", at(1))
+        .register_source(
+            registration("doc", scope_agent("a")),
+            "alpha\nbeta\ngamma\n",
+            at(1),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -289,7 +301,10 @@ fn chunker_rejects_a_body_the_source_did_not_register() {
         target_chunk_bytes: 256,
         overlap_bytes: 256,
     };
-    assert!(bad_config.validate().is_err(), "overlap must stay below target");
+    assert!(
+        bad_config.validate().is_err(),
+        "overlap must stay below target"
+    );
 }
 
 // --------------------------------------------------------------------- //
@@ -303,9 +318,19 @@ async fn content_store_is_idempotent_and_verifies_addresses() {
     let address = sha256_hex(bytes);
 
     assert!(store.put_content(&address, bytes).await.unwrap());
-    assert!(!store.put_content(&address, bytes).await.unwrap(), "second put converges");
-    assert_eq!(store.get_content(&address).await.unwrap().as_deref(), Some(bytes.as_slice()));
-    assert!(store.get_content(&sha256_hex(b"absent")).await.unwrap().is_none());
+    assert!(
+        !store.put_content(&address, bytes).await.unwrap(),
+        "second put converges"
+    );
+    assert_eq!(
+        store.get_content(&address).await.unwrap().as_deref(),
+        Some(bytes.as_slice())
+    );
+    assert!(store
+        .get_content(&sha256_hex(b"absent"))
+        .await
+        .unwrap()
+        .is_none());
 
     // Bytes under a wrong address fail closed.
     let wrong = sha256_hex(b"other bytes");
@@ -319,7 +344,10 @@ async fn source_versions_and_chunk_lists_are_write_once() {
         .build("versioned body text", at(0))
         .unwrap();
     assert!(store.put_source(&source).await.unwrap());
-    assert!(!store.put_source(&source).await.unwrap(), "identical re-put converges");
+    assert!(
+        !store.put_source(&source).await.unwrap(),
+        "identical re-put converges"
+    );
 
     let mut impostor = source.clone();
     impostor.title = "same hash, different metadata".to_owned();
@@ -333,7 +361,10 @@ async fn source_versions_and_chunk_lists_are_write_once() {
     store.put_chunks(&chunks).await.unwrap();
     let mut drifted = chunks.clone();
     drifted[0].word_count += 1;
-    assert!(store.put_chunks(&drifted).await.is_err(), "chunk lists are write-once");
+    assert!(
+        store.put_chunks(&drifted).await.is_err(),
+        "chunk lists are write-once"
+    );
 
     assert_eq!(store.chunks_of(&source.content_hash).await.unwrap(), chunks);
     let reverse = store
@@ -382,8 +413,15 @@ fn lexical_ranking_is_sane_deterministic_and_tie_broken() {
     let lexical = LexicalConfig::default();
 
     let ranked = rank_lexical(&corpus, "rust", &lexical).unwrap();
-    assert_eq!(ranked.len(), 2, "the termless chunk scores zero and drops out");
-    assert_eq!(ranked[0].0, 0, "term frequency with length normalization ranks the rich chunk first");
+    assert_eq!(
+        ranked.len(),
+        2,
+        "the termless chunk scores zero and drops out"
+    );
+    assert_eq!(
+        ranked[0].0, 0,
+        "term frequency with length normalization ranks the rich chunk first"
+    );
     assert!(ranked[0].1 > ranked[1].1);
 
     // Determinism: repeated ranking of the same corpus is byte-identical.
@@ -417,7 +455,10 @@ fn lexical_ranking_is_sane_deterministic_and_tie_broken() {
         .iter()
         .map(|(index, _)| tie_chunks[*index].content_address.as_str())
         .collect();
-    assert!(addresses[0] < addresses[1], "ties break by content address ascending");
+    assert!(
+        addresses[0] < addresses[1],
+        "ties break by content address ascending"
+    );
 }
 
 #[tokio::test]
@@ -477,10 +518,18 @@ async fn query_ceilings_truncate_count_and_bytes() {
         .await
         .unwrap();
     let unlimited = kb
-        .query(&scope_agent("a"), "filler text", &QueryLimits::default(), at(1))
+        .query(
+            &scope_agent("a"),
+            "filler text",
+            &QueryLimits::default(),
+            at(1),
+        )
         .await
         .unwrap();
-    assert!(unlimited.len() > 3, "the corpus must exceed the test ceilings");
+    assert!(
+        unlimited.len() > 3,
+        "the corpus must exceed the test ceilings"
+    );
 
     let by_count = kb
         .query(
@@ -511,17 +560,33 @@ async fn query_ceilings_truncate_count_and_bytes() {
         .unwrap();
     let total: usize = by_bytes.iter().map(|r| r.text.len()).sum();
     assert!(total <= 300, "the byte ceiling holds");
-    assert_eq!(by_bytes.len(), 1, "one ~256-byte chunk fits 300 bytes, two do not");
+    assert_eq!(
+        by_bytes.len(),
+        1,
+        "one ~256-byte chunk fits 300 bytes, two do not"
+    );
 
     // Invalid ceilings fail closed.
     for limits in [
-        QueryLimits { max_results: 0, max_bytes: 1024 },
-        QueryLimits { max_results: 1, max_bytes: 0 },
+        QueryLimits {
+            max_results: 0,
+            max_bytes: 1024,
+        },
+        QueryLimits {
+            max_results: 1,
+            max_bytes: 0,
+        },
     ] {
-        assert!(kb.query(&scope_agent("a"), "governed", &limits, at(1)).await.is_err());
+        assert!(kb
+            .query(&scope_agent("a"), "governed", &limits, at(1))
+            .await
+            .is_err());
     }
     // A punctuation-only query cannot rank and fails closed.
-    assert!(kb.query(&scope_agent("a"), "… …", &QueryLimits::default(), at(1)).await.is_err());
+    assert!(kb
+        .query(&scope_agent("a"), "… …", &QueryLimits::default(), at(1))
+        .await
+        .is_err());
 }
 
 const DEFAULT_MAX_RESULT_BYTES_FOR_TEST: usize = 64 * 1024;
@@ -532,7 +597,11 @@ struct ZebraScorer;
 
 impl VectorScorer for ZebraScorer {
     fn score(&self, _query: &str, chunk_text: &str, _chunk: &ChunkRecord) -> Option<f64> {
-        Some(if chunk_text.contains("zebra") { 10.0 } else { 0.0 })
+        Some(if chunk_text.contains("zebra") {
+            10.0
+        } else {
+            0.0
+        })
     }
 }
 
@@ -557,7 +626,12 @@ async fn hybrid_vector_component_reorders_and_fails_closed_when_uninstalled() {
     let uninstalled = kb.clone().with_weights(hybrid_weights);
     assert!(
         uninstalled
-            .query(&scope_agent("a"), "query terms", &QueryLimits::default(), at(1))
+            .query(
+                &scope_agent("a"),
+                "query terms",
+                &QueryLimits::default(),
+                at(1)
+            )
             .await
             .is_err(),
         "hybrid weights without a scorer fail closed"
@@ -569,7 +643,12 @@ async fn hybrid_vector_component_reorders_and_fails_closed_when_uninstalled() {
         .with_weights(hybrid_weights)
         .with_vector_scorer(Arc::new(ZebraScorer));
     let results = hybrid
-        .query(&scope_agent("a"), "query terms", &QueryLimits::default(), at(1))
+        .query(
+            &scope_agent("a"),
+            "query terms",
+            &QueryLimits::default(),
+            at(1),
+        )
         .await
         .unwrap();
     assert_eq!(results.len(), 2);
@@ -606,7 +685,11 @@ fn pack_results_truncates_like_the_memory_assembly() {
             max_bytes: 9,
         },
     );
-    assert_eq!(packed.len(), 2, "packing stops at the first result that would spill");
+    assert_eq!(
+        packed.len(),
+        2,
+        "packing stops at the first result that would spill"
+    );
     assert!(tokenize("Hello, WORLD! hello") == vec!["hello", "world", "hello"]);
 }
 
@@ -619,7 +702,11 @@ async fn corrections_supersede_old_chunks_but_preserve_evidence() {
     let kb = knowledge_base();
     let scope = scope_agent("a");
     let v1 = kb
-        .register_source(registration("policy", scope.clone()), "the apple policy stands", at(0))
+        .register_source(
+            registration("policy", scope.clone()),
+            "the apple policy stands",
+            at(0),
+        )
         .await
         .unwrap();
     let v1_chunks = {
@@ -638,8 +725,14 @@ async fn corrections_supersede_old_chunks_but_preserve_evidence() {
         .unwrap();
     assert_eq!(v2.version, 2);
     assert_eq!(v2.supersedes.as_deref(), Some(v1.content_hash.as_str()));
-    assert_eq!(v2.author, "human:editor", "the correction carries the corrector");
-    assert_ne!(v2.content_hash, v1.content_hash, "a correction is a new version");
+    assert_eq!(
+        v2.author, "human:editor",
+        "the correction carries the corrector"
+    );
+    assert_ne!(
+        v2.content_hash, v1.content_hash,
+        "a correction is a new version"
+    );
 
     // Retrieval never returns superseded chunks: the term unique to the
     // old version finds nothing, and a term shared by both versions is
@@ -681,7 +774,9 @@ async fn corrections_supersede_old_chunks_but_preserve_evidence() {
 
     // Discipline failures fail closed.
     assert!(
-        kb.correct_source("unknown", "human:editor", "body", at(3)).await.is_err(),
+        kb.correct_source("unknown", "human:editor", "body", at(3))
+            .await
+            .is_err(),
         "correcting an unknown source fails"
     );
     assert!(
@@ -723,7 +818,12 @@ async fn scope_isolation_returns_empty_never_an_error_leak() {
         );
     }
     let own = kb
-        .query(&scope_agent("agent-1"), "otters", &QueryLimits::default(), at(1))
+        .query(
+            &scope_agent("agent-1"),
+            "otters",
+            &QueryLimits::default(),
+            at(1),
+        )
         .await
         .unwrap();
     assert_eq!(own.len(), 1);
@@ -792,15 +892,25 @@ async fn retention_dry_run_reports_then_apply_purges_with_tombstones() {
     assert!(entry.chunk_count > 0);
     assert_eq!(plan.total_chunk_bytes, entry.chunk_bytes);
     // Dry-run changes nothing.
-    assert!(kb.get_source(&expired_source.content_hash).await.unwrap().is_some());
+    assert!(kb
+        .get_source(&expired_source.content_hash)
+        .await
+        .unwrap()
+        .is_some());
 
     // Apply: the plan executes exactly; the pinned source is untouched.
     let receipt = kb.apply_sweep(at(150)).await.unwrap();
-    assert_eq!(receipt.plan, plan, "apply executes the dry-run plan byte-identically");
+    assert_eq!(
+        receipt.plan, plan,
+        "apply executes the dry-run plan byte-identically"
+    );
     assert_eq!(receipt.tombstones.len(), 1);
     let tombstone = &receipt.tombstones[0];
     assert_eq!(tombstone.source_id, "ephemeral");
-    assert_eq!(tombstone.purged_hashes, vec![expired_source.content_hash.clone()]);
+    assert_eq!(
+        tombstone.purged_hashes,
+        vec![expired_source.content_hash.clone()]
+    );
     assert_eq!(tombstone.reason, PurgeReason::Expired);
     assert_eq!(tombstone.purged_at, at(150));
     assert_eq!(tombstone.scope, scope);
@@ -808,13 +918,23 @@ async fn retention_dry_run_reports_then_apply_purges_with_tombstones() {
 
     // Content, chunks, and the source record are gone; the tombstone keeps
     // old citations resolvable to metadata.
-    assert!(kb.get_source(&expired_source.content_hash).await.unwrap().is_none());
+    assert!(kb
+        .get_source(&expired_source.content_hash)
+        .await
+        .unwrap()
+        .is_none());
     assert!(
-        kb.chunk_content(&expired_source.body_hash).await.unwrap().is_none(),
+        kb.chunk_content(&expired_source.body_hash)
+            .await
+            .unwrap()
+            .is_none(),
         "the purged body is gone"
     );
     assert!(
-        kb.chunk_content(&ephemeral_chunk_address).await.unwrap().is_none(),
+        kb.chunk_content(&ephemeral_chunk_address)
+            .await
+            .unwrap()
+            .is_none(),
         "the pre-sweep citation's content address no longer resolves to bytes"
     );
     assert_eq!(
@@ -849,7 +969,11 @@ async fn sweep_preserves_content_shared_with_surviving_versions() {
     };
     let exp = kb.register_source(expiring, &shared, at(0)).await.unwrap();
     let keep = kb
-        .register_source(registration("shared-keep", scope_agent("a")), &shared, at(0))
+        .register_source(
+            registration("shared-keep", scope_agent("a")),
+            &shared,
+            at(0),
+        )
         .await
         .unwrap();
 
@@ -863,11 +987,18 @@ async fn sweep_preserves_content_shared_with_surviving_versions() {
         "an address dies only with its last reference"
     );
     let results = kb
-        .query(&scope_agent("a"), "filler text", &QueryLimits::default(), at(150))
+        .query(
+            &scope_agent("a"),
+            "filler text",
+            &QueryLimits::default(),
+            at(150),
+        )
         .await
         .unwrap();
     assert!(
-        results.iter().all(|hit| hit.citation.source_id == "shared-keep"),
+        results
+            .iter()
+            .all(|hit| hit.citation.source_id == "shared-keep"),
         "only the surviving source serves"
     );
 }

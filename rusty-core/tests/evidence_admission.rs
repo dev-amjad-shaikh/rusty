@@ -301,8 +301,7 @@ impl ToolGuard for DenyEcho {
         "deny-echo"
     }
     fn check(&self, call: &GuardedCall<'_>) -> Option<GuardDenial> {
-        (call.tool == "echo")
-            .then(|| GuardDenial::new("deny-echo", "echo is blocked by policy"))
+        (call.tool == "echo").then(|| GuardDenial::new("deny-echo", "echo is blocked by policy"))
     }
 }
 
@@ -393,8 +392,9 @@ async fn record_run(
     let journal = Journal::new(RUN_ID, THREAD_ID, logical_clock());
     let echo_calls = Arc::new(AtomicUsize::new(0));
     let model: Arc<dyn ChatModel> = Arc::new(ScriptedModel::react_script());
-    let graph = create_react_agent_with_recording(model, tools(echo_calls.clone()), journal.clone())
-        .unwrap();
+    let graph =
+        create_react_agent_with_recording(model, tools(echo_calls.clone()), journal.clone())
+            .unwrap();
     let topology_hash = graph.topology_hash();
 
     let outcome = Executor::new()

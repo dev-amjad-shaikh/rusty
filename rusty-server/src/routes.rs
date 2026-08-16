@@ -299,7 +299,9 @@ pub(crate) fn build_router(
         journal_locks: Mutex::new(HashMap::new()),
         evaluation_state: crate::evaluations::init_evaluation_state(),
         skills: crate::skills::SkillPlane::load(&config.store_path),
-        knowledge: Arc::new(crate::server_store::KnowledgePlane::load(&config.store_path)),
+        knowledge: Arc::new(crate::server_store::KnowledgePlane::load(
+            &config.store_path,
+        )),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // The durable pending-run queue's boot half: replay persisted queue
@@ -1515,9 +1517,9 @@ async fn schedule_for_thread(
             validate_tool_allowlist(allowlist, &record.graph, &catalog)?;
         }
         if let Some(set) = &config.capability_set {
-            let refs = set
-                .refs()
-                .map_err(|error| ApiError::bad_request(format!("invalid `capability_set`: {error}")))?;
+            let refs = set.refs().map_err(|error| {
+                ApiError::bad_request(format!("invalid `capability_set`: {error}"))
+            })?;
             rusty_agent_runtime::capability::CapabilitySet::compose(&set.tools, &refs, &catalog)
                 .map_err(|error| {
                     ApiError::bad_request(format!(
@@ -2816,7 +2818,9 @@ async fn replay_run(
     // carries no selection to guard.
     if let Some(tools) = &evidence.capability_tools {
         let set = rusty_agent_runtime::capability::CapabilitySet::from_members(tools, &[])
-            .map_err(|error| ApiError::internal(format!("stored tool selection is malformed: {error}")))?;
+            .map_err(|error| {
+                ApiError::internal(format!("stored tool selection is malformed: {error}"))
+            })?;
         set.replay_guard_catalog(&state.registry.tool_capabilities(&evidence.graph))
             .map_err(|error| {
                 ApiError::unprocessable(format!(

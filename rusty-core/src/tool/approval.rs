@@ -88,10 +88,13 @@ impl ApprovalGate {
     /// journaled exactly as resolved — the gate does not second-guess its
     /// source — and returned unchanged; the caller enforces it (only
     /// [`ApprovalDecision::grants`] admits).
-    pub fn decide(&self, request: &ApprovalRequest, decision: ApprovalDecision) -> ApprovalDecision {
-        let mut asked = EventDraft::new(RunEventKind::ApprovalAsked, Effect::Pure).input(
-            serde_json::to_value(request).expect("an ApprovalRequest always serializes"),
-        );
+    pub fn decide(
+        &self,
+        request: &ApprovalRequest,
+        decision: ApprovalDecision,
+    ) -> ApprovalDecision {
+        let mut asked = EventDraft::new(RunEventKind::ApprovalAsked, Effect::Pure)
+            .input(serde_json::to_value(request).expect("an ApprovalRequest always serializes"));
         if let Some(parent) = &self.parent {
             asked = asked.parent(parent.clone());
         }

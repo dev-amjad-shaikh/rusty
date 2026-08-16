@@ -194,7 +194,10 @@ pub struct CostEstimate {
 /// resolve to themselves). Mirrors the journal's own receipt lookup: a
 /// missing artifact means a truncated snapshot, and the meter treats the
 /// model identity as unreported rather than failing the fold.
-fn resolve<'a>(snapshot: &'a JournalSnapshot, payload: &'a PayloadRef) -> Option<&'a serde_json::Value> {
+fn resolve<'a>(
+    snapshot: &'a JournalSnapshot,
+    payload: &'a PayloadRef,
+) -> Option<&'a serde_json::Value> {
     match payload {
         PayloadRef::Inline(value) => Some(value),
         PayloadRef::Artifact(reference) => snapshot.artifacts.get(&reference.sha256),
@@ -234,10 +237,13 @@ pub fn meter_journal(snapshot: &JournalSnapshot) -> RunMeter {
             RunEventKind::ModelCall => {
                 meter.tokens.requests += 1;
                 let model = model_of(snapshot, event);
-                let entry = meter.models.entry(model.clone()).or_insert_with(|| ModelMeter {
-                    model,
-                    ..ModelMeter::default()
-                });
+                let entry = meter
+                    .models
+                    .entry(model.clone())
+                    .or_insert_with(|| ModelMeter {
+                        model,
+                        ..ModelMeter::default()
+                    });
                 entry.tokens.requests += 1;
                 if let Some(usage) = &event.tokens {
                     meter.tokens.add(usage);
@@ -338,11 +344,17 @@ mod tests {
         let meter = meter_journal(&snapshot_with_calls());
         assert_eq!(
             meter.tool_calls_by_effect[&Effect::ReadOnly],
-            ToolClassTotals { calls: 2, errors: 0 }
+            ToolClassTotals {
+                calls: 2,
+                errors: 0
+            }
         );
         assert_eq!(
             meter.tool_calls_by_effect[&Effect::NonIdempotent],
-            ToolClassTotals { calls: 1, errors: 1 }
+            ToolClassTotals {
+                calls: 1,
+                errors: 1
+            }
         );
         assert!(!meter.tool_calls_by_effect.contains_key(&Effect::Pure));
     }

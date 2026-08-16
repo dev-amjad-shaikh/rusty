@@ -1914,11 +1914,7 @@ mod tests {
         let mut newer = cp("t1", 1);
         newer.header.format_version = CURRENT_FORMAT_VERSION + 1;
         let bytes = serde_json::to_vec_pretty(&newer).unwrap();
-        std::fs::write(
-            tmp.0.join("t1").join(format!("{}.json", newer.id)),
-            &bytes,
-        )
-        .unwrap();
+        std::fs::write(tmp.0.join("t1").join(format!("{}.json", newer.id)), &bytes).unwrap();
         std::fs::write(tmp.0.join("t1").join("latest"), &newer.id).unwrap();
 
         for outcome in [

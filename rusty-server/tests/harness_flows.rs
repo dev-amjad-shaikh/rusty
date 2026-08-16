@@ -287,8 +287,14 @@ async fn harness_flows_end_to_end() {
     let booking_run_id = booking_run["run_id"].as_str().unwrap().to_owned();
     let calls = tool_calls(&client, &base, &booking_run_id).await;
     assert_eq!(
-        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
-        ["google-calendar:list-events", "google-calendar:create-event"],
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "google-calendar:list-events",
+            "google-calendar:create-event"
+        ],
         "journey 1 journal"
     );
     assert_eq!(calls[0].effect, "read_only");
@@ -334,7 +340,10 @@ async fn harness_flows_end_to_end() {
     let kb_run_id = kb_run["run_id"].as_str().unwrap().to_owned();
     let calls = tool_calls(&client, &base, &kb_run_id).await;
     assert_eq!(
-        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
         ["servicenow:list-records", "servicenow:create-record"],
         "journey 2 journal"
     );
@@ -388,7 +397,10 @@ async fn harness_flows_end_to_end() {
     );
     let calls = tool_calls(&client, &base, &blocked_run_id).await;
     assert_eq!(
-        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
         ["google-calendar:list-events"],
         "a refused call never reaches a tool, so the journal holds the allowed listing only"
     );
@@ -432,8 +444,14 @@ async fn harness_flows_end_to_end() {
     let allowed_run_id = allowed_run["run_id"].as_str().unwrap().to_owned();
     let calls = tool_calls(&client, &base, &allowed_run_id).await;
     assert_eq!(
-        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
-        ["google-calendar:list-events", "google-calendar:create-event"]
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "google-calendar:list-events",
+            "google-calendar:create-event"
+        ]
     );
     assert_eq!(
         calls[1].arguments.pointer("/start/dateTime"),
@@ -449,13 +467,10 @@ async fn harness_flows_end_to_end() {
         // same contract.
         let package = SkillPackage::from_dir(&skills_dir.join(name))
             .unwrap_or_else(|e| panic!("{name} must parse as a skill package: {e}"));
-        assert!(
-            scan_package(&package).is_clean(),
-            "{name} must scan clean"
-        );
+        assert!(scan_package(&package).is_clean(), "{name} must scan clean");
 
-        let skill_md = std::fs::read_to_string(skills_dir.join(name).join("SKILL.md"))
-            .expect("read SKILL.md");
+        let skill_md =
+            std::fs::read_to_string(skills_dir.join(name).join("SKILL.md")).expect("read SKILL.md");
         let (status, receipt) = post(
             &client,
             &format!("{base}/skills"),
@@ -523,7 +538,11 @@ async fn harness_flows_end_to_end() {
         }),
     )
     .await;
-    assert_eq!(status, reqwest::StatusCode::CREATED, "memory write: {written}");
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "memory write: {written}"
+    );
     assert_eq!(written["created"], true);
     let memory_id = written["memory_id"].as_str().unwrap().to_owned();
     assert_eq!(memory_id.len(), 64, "memory ids are content addresses");
@@ -601,7 +620,10 @@ async fn harness_flows_end_to_end() {
     .await;
     assert_eq!(status, reqwest::StatusCode::OK, "knowledge query: {answer}");
     let results = answer["results"].as_array().expect("results");
-    assert!(!results.is_empty(), "retrieval must cite the source: {answer}");
+    assert!(
+        !results.is_empty(),
+        "retrieval must cite the source: {answer}"
+    );
     assert_eq!(results[0]["citation"]["source_id"], json!("harness-notes"));
     assert_eq!(
         results[0]["citation"]["content_address"]
@@ -691,8 +713,7 @@ async fn harness_flows_end_to_end() {
     let settled = loop {
         let (status, experiment) = get(&client, &format!("{base}/experiments/exp-calendar")).await;
         assert_eq!(status, reqwest::StatusCode::OK, "experiment: {experiment}");
-        if experiment["status"]["phase"] == "complete"
-            || experiment["status"]["phase"] == "failed"
+        if experiment["status"]["phase"] == "complete" || experiment["status"]["phase"] == "failed"
         {
             break experiment;
         }
@@ -718,7 +739,10 @@ async fn harness_flows_end_to_end() {
     let compose_run_id = compose_run["run_id"].as_str().unwrap().to_owned();
     let calls = tool_calls(&client, &base, &compose_run_id).await;
     assert_eq!(
-        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
         ["compose_skill", "publish_composed_skill", "run_cli"],
         "journey 8 journal"
     );
@@ -765,7 +789,10 @@ async fn harness_flows_end_to_end() {
     let refused_run_id = refused_run["run_id"].as_str().unwrap().to_owned();
     let calls = tool_calls(&client, &base, &refused_run_id).await;
     assert_eq!(
-        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
         ["run_cli"]
     );
     assert_eq!(
@@ -787,8 +814,15 @@ async fn harness_flows_end_to_end() {
     let loop_run_id = loop_run["run_id"].as_str().unwrap().to_owned();
     let calls = tool_calls(&client, &base, &loop_run_id).await;
     assert_eq!(
-        calls.iter().map(|call| call.name.as_str()).collect::<Vec<_>>(),
-        ["inspect_capabilities", "propose_backlog_entries", "build_gap_skill"],
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "inspect_capabilities",
+            "propose_backlog_entries",
+            "build_gap_skill"
+        ],
         "journey 9 journal: introspect → backlog → draft-and-stage"
     );
     assert_eq!(calls[0].effect, "read_only");
@@ -865,7 +899,11 @@ async fn harness_flows_end_to_end() {
         .collect();
     assert_eq!(
         proposed_gaps,
-        ["surface-compaction", "telemetry-ledger", "agent-session-query"]
+        [
+            "surface-compaction",
+            "telemetry-ledger",
+            "agent-session-query"
+        ]
     );
     for entry in recorded {
         assert_eq!(entry["provenance"], json!("harness:self-improve"));
@@ -888,12 +926,14 @@ async fn harness_flows_end_to_end() {
     assert!(
         events
             .iter()
-            .all(|event| event.pointer("/input/value/tool") != Some(&json!("publish_composed_skill"))),
+            .all(|event| event.pointer("/input/value/tool")
+                != Some(&json!("publish_composed_skill"))),
         "the loop never publishes: the gate stays with the operator"
     );
     let closing = final_assistant_text(&loop_run);
     assert!(
-        closing.contains("runbook-incident-review") && closing.contains("awaits an operator approval"),
+        closing.contains("runbook-incident-review")
+            && closing.contains("awaits an operator approval"),
         "the closing message reports the staged gate honestly: {closing}"
     );
 

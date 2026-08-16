@@ -17,7 +17,9 @@ use serde_json::{json, Value};
 
 /// A session, its compose tool, its publish tool, and the registry the
 /// publish tool writes into.
-fn harness(scope: &str) -> (
+fn harness(
+    scope: &str,
+) -> (
     Arc<ComposerSession>,
     ComposeSkillTool,
     PublishComposedSkillTool,
@@ -225,10 +227,7 @@ async fn publish_requires_an_approval_scoped_to_the_draft() {
         }))
         .await
         .expect_err("a mis-scoped token refuses");
-    assert!(
-        error_names(&wrong, "does not admit"),
-        "got: {wrong}"
-    );
+    assert!(error_names(&wrong, "does not admit"), "got: {wrong}");
 
     // A token minted in a different scope refuses the same way.
     let wrong_scope = publish
@@ -238,7 +237,10 @@ async fn publish_requires_an_approval_scoped_to_the_draft() {
         }))
         .await
         .expect_err("a token from another scope refuses");
-    assert!(error_names(&wrong_scope, "does not admit"), "got: {wrong_scope}");
+    assert!(
+        error_names(&wrong_scope, "does not admit"),
+        "got: {wrong_scope}"
+    );
 
     assert!(registry.lock().unwrap().is_empty());
 }
@@ -314,8 +316,7 @@ async fn tool_definition_validation_matrix_fails_closed() {
     let cases: Vec<(Value, &str)> = vec![
         // A name outside the wire-safe tool contract.
         (
-            definition_args(http.clone())
-                .with("name", json!("bad name!")),
+            definition_args(http.clone()).with("name", json!("bad name!")),
             "tool name",
         ),
         // An effect class the taxonomy does not declare.
@@ -335,7 +336,9 @@ async fn tool_definition_validation_matrix_fails_closed() {
         ),
         // A placeholder the schema never declared.
         (
-            definition_args(json!({"kind": "http", "method": "GET", "path_template": "/v1/{nope}"})),
+            definition_args(
+                json!({"kind": "http", "method": "GET", "path_template": "/v1/{nope}"}),
+            ),
             "placeholder `nope`",
         ),
         // A cli command outside the tool's allowlist.
@@ -361,7 +364,10 @@ async fn tool_definition_validation_matrix_fails_closed() {
             .map(|finding| finding["detail"].as_str().unwrap())
             .collect::<Vec<_>>()
             .join(" | ");
-        assert!(details.contains(expected), "expected `{expected}` in {details}");
+        assert!(
+            details.contains(expected),
+            "expected `{expected}` in {details}"
+        );
         assert!(!receipt["suggested_revision_notes"]
             .as_array()
             .unwrap()

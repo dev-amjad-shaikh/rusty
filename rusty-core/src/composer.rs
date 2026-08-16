@@ -54,7 +54,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::connector::canonical_json_hash;
-use crate::connector::manifest::{validate_text_field, MAX_ARG_LEN, MAX_ARGS, MAX_COMMAND_LEN};
+use crate::connector::manifest::{validate_text_field, MAX_ARGS, MAX_ARG_LEN, MAX_COMMAND_LEN};
 use crate::effects::{
     admit_irreversible, ApprovalToken, EffectId, EffectViolation, IrreversibleEffect, TypedEffect,
 };
@@ -691,9 +691,10 @@ impl Tool for ComposeToolDefinitionTool {
     async fn call(&self, args: Value) -> Result<Value> {
         let name = required_string(&args, "name")?;
         let description = required_string(&args, "description")?;
-        let schema = args.get("parameters_schema").cloned().ok_or_else(|| {
-            RustyError::Tool("`parameters_schema` must be a JSON object".into())
-        })?;
+        let schema = args
+            .get("parameters_schema")
+            .cloned()
+            .ok_or_else(|| RustyError::Tool("`parameters_schema` must be a JSON object".into()))?;
         let effect_name = required_string(&args, "effect")?;
         let recipe = args.get("recipe").cloned().ok_or_else(|| {
             RustyError::Tool("`recipe` must be a declarative recipe object".into())
@@ -701,7 +702,11 @@ impl Tool for ComposeToolDefinitionTool {
 
         let mut findings = Vec::new();
         if let Err(error) = validate_tool_contract(name, description, &schema) {
-            findings.push(tool_finding("tool_contract", "definition", error.to_string()));
+            findings.push(tool_finding(
+                "tool_contract",
+                "definition",
+                error.to_string(),
+            ));
         }
         let effect: Option<Effect> =
             match serde_json::from_value(Value::String(effect_name.to_owned())) {
@@ -774,9 +779,17 @@ fn validate_recipe(
                 .get("template")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "a template recipe must carry a `template` string".to_owned())?;
-            validate_text_field("recipe template", template, MAX_RECIPE_TEMPLATE_BYTES, false)
-                .map_err(|error| error.to_string())?;
-            if template.chars().any(|ch| ch.is_control() && ch != '\n' && ch != '\t') {
+            validate_text_field(
+                "recipe template",
+                template,
+                MAX_RECIPE_TEMPLATE_BYTES,
+                false,
+            )
+            .map_err(|error| error.to_string())?;
+            if template
+                .chars()
+                .any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
+            {
                 return Err(
                     "recipe template must not contain control characters other than newline and tab"
                         .to_owned(),
@@ -927,18 +940,24 @@ fn revision_notes_for_error(error: &SkillError) -> Vec<String> {
             "write a non-empty, trimmed, control-free description of at most 1024 bytes"
         }
         SkillError::InvalidField { field, .. } => {
-            return vec![format!("fix the frontmatter field `{field}`: it broke a declared rule")]
+            return vec![format!(
+                "fix the frontmatter field `{field}`: it broke a declared rule"
+            )]
         }
         SkillError::MissingFrontmatter | SkillError::MalformedFrontmatter { .. } => {
             "keep the assembled frontmatter to the flat `key: value` subset"
         }
         SkillError::InvalidUtf8 => "write the skill in valid UTF-8",
-        SkillError::EmptyBody => "add instructions to the body — a skill without them is not a skill",
+        SkillError::EmptyBody => {
+            "add instructions to the body — a skill without them is not a skill"
+        }
         SkillError::BodyTooLarge { max, .. } => {
             return vec![format!("trim the body below the {max}-byte ceiling")]
         }
         SkillError::FileTooLarge { path, max, .. } => {
-            return vec![format!("trim `{path}` below the {max}-byte per-file ceiling")]
+            return vec![format!(
+                "trim `{path}` below the {max}-byte per-file ceiling"
+            )]
         }
         SkillError::PackageTooLarge { max, .. } => {
             return vec![format!("trim the package below the {max}-byte ceiling")]
@@ -969,7 +988,10 @@ fn revision_notes_for_scan(scan: &ScanReport) -> Vec<String> {
     for finding in &scan.findings {
         let text = match finding.kind {
             ScanKind::EmbeddedScript => {
-                format!("remove the embedded `<script` tag from `{}`", finding.location)
+                format!(
+                    "remove the embedded `<script` tag from `{}`",
+                    finding.location
+                )
             }
             ScanKind::CredentialedUrl => format!(
                 "remove the credentialed URL from `{}` — credentials never belong in skill content",
@@ -1054,7 +1076,10 @@ mod tests {
         assert_eq!(receipt["valid"], json!(false));
         assert_eq!(receipt["content_hash"], Value::Null);
         assert_eq!(receipt["findings"][0]["stage"], json!("validation"));
-        assert!(!receipt["suggested_revision_notes"].as_array().unwrap().is_empty());
+        assert!(!receipt["suggested_revision_notes"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert_eq!(session.draft_count(), 0);
     }
 
@@ -1134,6 +1159,9 @@ mod tests {
             .unwrap();
         assert_eq!(receipt["valid"], json!(true));
         assert!(receipt["content_hash"].is_string());
-        assert!(receipt["publish_seam"].as_str().unwrap().contains("ConnectorManifest"));
+        assert!(receipt["publish_seam"]
+            .as_str()
+            .unwrap()
+            .contains("ConnectorManifest"));
     }
 }

@@ -350,7 +350,9 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
     let block = &rest[..block_end];
     // `close_end + 1` steps over the newline terminating the closing
     // delimiter; the split above guarantees one exists.
-    let body = rest[close_end + 1..].trim_start_matches(['\r', '\n']).to_owned();
+    let body = rest[close_end + 1..]
+        .trim_start_matches(['\r', '\n'])
+        .to_owned();
 
     let mut name = None;
     let mut description = None;
@@ -525,7 +527,9 @@ fn validate_member_path(path: &str) -> Result<MemberKind, SkillError> {
         return Err(refuse("must not contain empty, `.`, or `..` components"));
     }
     if components.len() < 2 {
-        return Err(refuse("must name a file beneath `references/` or `assets/`"));
+        return Err(refuse(
+            "must name a file beneath `references/` or `assets/`",
+        ));
     }
     match components[0] {
         "references" => Ok(MemberKind::Reference),
@@ -665,10 +669,13 @@ impl SkillPackage {
                 let relative = relative
                     .components()
                     .map(|component| {
-                        component.as_os_str().to_str().ok_or_else(|| SkillError::InvalidPath {
-                            path: path.display().to_string(),
-                            reason: "member names must be valid UTF-8",
-                        })
+                        component
+                            .as_os_str()
+                            .to_str()
+                            .ok_or_else(|| SkillError::InvalidPath {
+                                path: path.display().to_string(),
+                                reason: "member names must be valid UTF-8",
+                            })
                     })
                     .collect::<Result<Vec<_>, _>>()?
                     .join("/");
@@ -738,13 +745,20 @@ fn canonical_bytes(package: &SkillPackage) -> Vec<u8> {
     let frontmatter = &package.frontmatter;
     field("name", frontmatter.name.as_bytes());
     field("description", frontmatter.description.as_bytes());
-    field("license", frontmatter.license.as_deref().unwrap_or("").as_bytes());
+    field(
+        "license",
+        frontmatter.license.as_deref().unwrap_or("").as_bytes(),
+    );
     for tool in &frontmatter.allowed_tools {
         field("allowed-tool", tool.as_bytes());
     }
     field(
         "compatibility",
-        frontmatter.compatibility.as_deref().unwrap_or("").as_bytes(),
+        frontmatter
+            .compatibility
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes(),
     );
     field("body", package.body.as_bytes());
     for (path, bytes) in &package.references {
@@ -880,7 +894,10 @@ fn emit_occurrences(
             break;
         }
         let detail = if index == MAX_FINDINGS_PER_KIND - 1 && total > MAX_FINDINGS_PER_KIND {
-            format!("{detail} ({} further occurrence(s) unreported)", total - MAX_FINDINGS_PER_KIND)
+            format!(
+                "{detail} ({} further occurrence(s) unreported)",
+                total - MAX_FINDINGS_PER_KIND
+            )
         } else {
             detail
         };
@@ -967,7 +984,9 @@ fn scan_base64_blobs(location: &str, text: &str, findings: &mut Vec<ScanFinding>
         }
         let run = run_end - run_start;
         if run >= BASE64_BLOB_MIN_CHARS {
-            occurrences.push(format!("base64 blob of {run} characters at byte offset {run_start}"));
+            occurrences.push(format!(
+                "base64 blob of {run} characters at byte offset {run_start}"
+            ));
         }
         index = run_end.max(index);
     }
@@ -1276,9 +1295,9 @@ impl SkillRegistry {
     ) -> Option<Arc<SkillVersion>> {
         let versions = self.skills.get(name)?;
         match selector {
-            SkillVersionSelector::Revision(revision) => versions
-                .get(revision.checked_sub(1)? as usize)
-                .cloned(),
+            SkillVersionSelector::Revision(revision) => {
+                versions.get(revision.checked_sub(1)? as usize).cloned()
+            }
             SkillVersionSelector::ContentHash(hash) => versions
                 .iter()
                 .find(|version| version.content_hash() == hash)

@@ -42,7 +42,10 @@ const FAKE_MCP_SCRIPT: &str = r#"while IFS= read -r l; do id=$(printf '%s' "$l" 
 
 /// Unique temp store root, removed at the end of each test (best effort).
 fn temp_store() -> PathBuf {
-    std::env::temp_dir().join(format!("rusty-server-connectors-test-{}", uuid::Uuid::new_v4()))
+    std::env::temp_dir().join(format!(
+        "rusty-server-connectors-test-{}",
+        uuid::Uuid::new_v4()
+    ))
 }
 
 /// An app over `store` with the config customized by `configure`. No
@@ -312,13 +315,7 @@ async fn instantiation_bridges_credential_slots_through_the_vault() {
     assert!(message.contains("conn-missing"), "message: {message}");
 
     // The happy path: slot → connection binding, instance pending.
-    let (status, v) = instantiate(
-        &app,
-        None,
-        &hash,
-        json!({"api_key": connection_id}),
-    )
-    .await;
+    let (status, v) = instantiate(&app, None, &hash, json!({"api_key": connection_id})).await;
     assert_eq!(status, StatusCode::CREATED, "instantiate failed: {v}");
     let instance = &v["instance"];
     assert_eq!(instance["state"], "pending");
@@ -388,10 +385,7 @@ async fn connect_serves_a_generation_pinned_catalog() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "body: {v}");
-    assert!(v["message"]
-        .as_str()
-        .unwrap()
-        .contains("live generation 1"));
+    assert!(v["message"].as_str().unwrap().contains("live generation 1"));
 
     // Already healthy: a second connect is a guard violation, not a
     // reconnect.
@@ -747,8 +741,14 @@ async fn no_connector_answer_carries_credential_material() {
     for (method, uri) in [
         ("GET", "/connectors/manifests".to_owned()),
         ("GET", "/connectors/instances".to_owned()),
-        ("GET", format!("/connectors/instances/{instance_id}/catalog")),
-        ("POST", format!("/connectors/instances/{instance_id}/health")),
+        (
+            "GET",
+            format!("/connectors/instances/{instance_id}/catalog"),
+        ),
+        (
+            "POST",
+            format!("/connectors/instances/{instance_id}/health"),
+        ),
         ("POST", "/connectors/sweep".to_owned()),
     ] {
         let (status, v) = call(&app, method, &uri, None).await;
