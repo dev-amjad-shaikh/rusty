@@ -127,6 +127,19 @@
 //!   provenance). For approved, skill-shaped gaps the self-build path
 //!   drafts through the unchanged composer and stages the publish behind
 //!   its approval gate — the harness proposes, the approval disposes.
+//! - **The goals plane** ([`goals`]): durable, revisioned objectives an
+//!   agent works toward across steps and turns. A [`goals::Goal`] carries a
+//!   content-derived id (re-stating a goal converges on the same record), a
+//!   phase in the closed machine (`active | paused | blocked | complete`),
+//!   a monotonic revision, a closed [`goals::GoalProvenance`] vocabulary
+//!   (`operator:*` / `harness:*` / `agent:*`), and an optional work-round
+//!   cap that auto-blocks the goal when spent — attributed to
+//!   `harness:goals`, never laundered through the caller. The
+//!   [`goals::GoalStore`] persists goals and their audit trail (every
+//!   change journaled: who, from → to, why, when) in one atomically
+//!   rewritten, format-versioned, tamper-evident JSON file; the
+//!   `create_goal` / `get_goal` / `update_goal` tools expose the plane as
+//!   journaled, effect-classed calls.
 //! - **The configuration registry** ([`registry`], R0.11): the
 //!   prompt/configuration registry — named, owned [`registry::ArtifactRecord`]s
 //!   indexing the candidate pipeline (a commit *is* a candidate, never a fork
@@ -242,6 +255,7 @@ pub mod durable;
 pub mod effects;
 pub mod error;
 pub mod executor;
+pub mod goals;
 pub mod graph;
 pub mod hooks;
 pub mod inbox;
@@ -348,6 +362,12 @@ pub mod prelude {
     };
     pub use crate::error::{LlmErrorClass, Result, RustyError};
     pub use crate::executor::{ExecutionOutcome, Executor, GraphEvent, RunConfig};
+    pub use crate::goals::{
+        parse_actor, CreateGoalTool, GetGoalTool, Goal, GoalAuditEntry, GoalAuditKind, GoalPhase,
+        GoalProvenance, GoalStore, UpdateGoalTool, GOALS_FORMAT_VERSION, GOAL_ID_PREFIX,
+        HARNESS_GOALS_PROVENANCE, MAX_GOAL_ACTOR_BYTES, MAX_GOAL_DESCRIPTION_BYTES,
+        MAX_GOAL_REASON_BYTES, MAX_GOAL_TITLE_BYTES, MAX_GOAL_TRAIL_VIEW,
+    };
     pub use crate::graph::{ConditionalRouter, Edge, Graph, GraphBuilder, Route, Send};
     pub use crate::inbox::{
         CancelCause, ConsumptionPoint, DroppedMessages, Inbox, InboxBounds, InboxConsumption,
