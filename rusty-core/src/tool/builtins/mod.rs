@@ -4,6 +4,19 @@
 //! search belongs behind a connector; this module supplies the safe local
 //! capabilities needed to prove the complete agent loop without pretending a
 //! network provider exists.
+//!
+//! The system-execution packs live in submodules because they are the
+//! *dangerous* capabilities: containment first, explicit effect classes, and
+//! approval-gated dispatch through the R0.7 effect kernel.
+//!
+//! - [`cli`] — local command execution under an explicit allowlist, a
+//!   canonical cwd jail, a scrubbed environment, and stream-capped output.
+//! - [`browser`] — browser use behind a [`browser::BrowserDriver`] seam:
+//!   a deterministic virtual driver for tests and offline flows, plus the
+//!   HTTP-only CDP subset (frame commands honestly deferred).
+//! - [`computer`] — desktop screenshot/click/type behind a
+//!   [`computer::ComputerDriver`] seam: interaction disabled by default,
+//!   every mutating call an irreversible, approval-gated effect.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -13,6 +26,10 @@ use serde_json::{json, Value};
 use super::Tool;
 use crate::error::{Result, RustyError};
 use crate::record::Effect;
+
+pub mod browser;
+pub mod cli;
+pub mod computer;
 
 /// Default maximum document size returned by [`SandboxedDocumentReaderTool`].
 pub const DEFAULT_DOCUMENT_BYTES: usize = 256 * 1024;
@@ -65,7 +82,7 @@ impl Tool for CalculatorTool {
             other => {
                 return Err(RustyError::Tool(format!(
                     "calculator operation `{other}` is not supported"
-                )))
+                )));
             }
         };
         if !result.is_finite() {
@@ -390,6 +407,21 @@ fn bounded_excerpt(text: &str, max_chars: usize) -> String {
         excerpt.push('…');
     }
     excerpt
+}
+
+/// Lowercase hex encoding for binary tool payloads (screenshots). `serde_json`
+/// has no byte-string shape and the crate takes no base64 dependency, so the
+/// browser/computer packs return image bytes as hex — unambiguous, padded
+/// never, and dependency-free. Payloads are byte-capped upstream, so the 2×
+/// expansion is itself bounded.
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(DIGITS[(byte >> 4) as usize] as char);
+        encoded.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 fn document_kind(path: &Path) -> Result<&'static str> {
