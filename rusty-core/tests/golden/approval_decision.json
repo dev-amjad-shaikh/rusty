@@ -1,0 +1,18 @@
+[
+  {
+    "decision": "approved_once",
+    "approved_by": "ops:ada"
+  },
+  {
+    "decision": "rejected",
+    "decided_by": "ops:ada",
+    "reason": "out of policy"
+  },
+  {
+    "decision": "cancelled"
+  },
+  {
+    "decision": "unavailable",
+    "reason": "no approval token presented"
+  }
+]

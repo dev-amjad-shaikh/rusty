@@ -66,10 +66,12 @@ use crate::error::{Result, RustyError};
 use crate::executor::{ExecutionOutcome, Executor, RunConfig, DEFAULT_MAX_STEPS};
 use crate::graph::Graph;
 use crate::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
-use crate::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall, Usage};
-use crate::record::{sha256_hex, Effect, EventStatus, PayloadRef, RunEvent, RunEventKind};
+use crate::llm::{ChatMessage, ChatModel, ChatResponse, TokenChunk, ToolCall, Usage};
+use crate::record::{
+    sha256_hex, Effect, EventStatus, PayloadRef, RunConfigDeclaration, RunEvent, RunEventKind,
+};
 use crate::state::{State, StateSpec};
-use crate::tool::Tool;
+use crate::tool::{Tool, ToolGuard};
 
 /// The current on-disk format version of [`ReplayFixture`].
 ///
@@ -90,6 +92,23 @@ pub const SERVABLE_KINDS: [RunEventKind; 4] = [
     RunEventKind::ToolCall,
     RunEventKind::RemoteCall,
     RunEventKind::WasmCall,
+];
+
+/// Evidence journaled *inside* a served effect's execution (evidence and
+/// admission wave): the approval gate's asked/decided pair, recorded by the
+/// gated tool mid-call. Exact replay never re-executes the call, so the
+/// pair cannot be re-derived the way executor events are — the replaying
+/// wrapper re-journals it from the record alongside the served effect. The
+/// rule is strict by construction: such an event is replayable only when it
+/// immediately precedes a servable event in the recorded journal (no
+/// re-derived event in between), which is exactly the shape a gate inside a
+/// tool call produces. Gate evidence found anywhere else — a gate used
+/// outside a journaled effect, or a run that stopped between the decision
+/// and the effect's own record — makes the journal not exactly replayable,
+/// and [`ExactReplay::new`] says so.
+const NESTED_EVIDENCE_KINDS: [RunEventKind; 2] = [
+    RunEventKind::ApprovalAsked,
+    RunEventKind::ApprovalDecided,
 ];
 
 fn is_servable(kind: RunEventKind) -> bool {
@@ -215,6 +234,15 @@ fn resolve_opt(snapshot: &JournalSnapshot, payload: Option<&PayloadRef>) -> Opti
     payload.and_then(|payload| resolve_in(snapshot, payload))
 }
 
+/// Look through a payload reference against an artifact map — the
+/// `ReplaySource`-local half of [`resolve_in`], which keys on a snapshot.
+fn resolve_ref(artifacts: &BTreeMap<String, Value>, payload: &PayloadRef) -> Option<Value> {
+    match payload {
+        PayloadRef::Inline(value) => Some(value.clone()),
+        PayloadRef::Artifact(reference) => artifacts.get(&reference.sha256).cloned(),
+    }
+}
+
 /// Canonical-content hash of a request value: `sha256` of its `serde_json`
 /// serialization (map keys sort deterministically, so equal values hash
 /// equal). This is the same computation [`PayloadRef::content_hash`] applies
@@ -236,20 +264,22 @@ pub struct ServedEffect {
 
     /// The event's resolved output payload (the journaled response).
     pub output: Option<Value>,
+
+    /// Gate evidence recorded inside this effect's execution (see
+    /// [`NESTED_EVIDENCE_KINDS`]), re-journaled alongside the served effect
+    /// because the gated call never re-executes. Empty for every effect
+    /// journaled before the approval wave.
+    pub nested: Vec<ServedEffect>,
 }
 
 impl ServedEffect {
-    /// Re-journal this served effect into the replay run's journal under
-    /// causal parent `parent`, returning the new event id.
-    ///
-    /// The replayed event reproduces the recorded one exactly — kind, node,
-    /// effect class, payloads, latency, tokens, cost, status — while the
-    /// journal assigns the replay run's own `seq` and `recorded_at` (which
-    /// match the recorded run's when the determinism seams are aligned).
-    pub fn rejournal(&self, journal: &Journal, parent: impl Into<String>) -> String {
+    /// The event as an [`EventDraft`] reproducing the recorded one exactly —
+    /// kind, node, effect class, payloads, latency, tokens, cost, status —
+    /// everything but the causal parent, which the two journaling paths
+    /// supply differently.
+    fn recorded_draft(&self) -> EventDraft {
         let mut draft = EventDraft::new(self.event.kind, self.event.effect)
-            .status(self.event.status)
-            .parent(parent);
+            .status(self.event.status);
         if let Some(node) = &self.event.node_id {
             draft = draft.node(node.clone());
         }
@@ -268,7 +298,30 @@ impl ServedEffect {
         if let Some(cost_usd) = self.event.cost_usd {
             draft = draft.cost_usd(cost_usd);
         }
-        journal.record(draft)
+        draft
+    }
+
+    /// Re-journal this served effect into the replay run's journal under
+    /// causal parent `parent`, returning the new event id.
+    ///
+    /// The replayed event reproduces the recorded one exactly — kind, node,
+    /// effect class, payloads, latency, tokens, cost, status — while the
+    /// journal assigns the replay run's own `seq` and `recorded_at` (which
+    /// match the recorded run's when the determinism seams are aligned).
+    pub fn rejournal(&self, journal: &Journal, parent: impl Into<String>) -> String {
+        journal.record(self.recorded_draft().parent(parent))
+    }
+
+    /// Re-journal nested gate evidence, keeping its recorded causal parent:
+    /// the parent's id is `{run_id}:{seq}`, and the replayed journal
+    /// reproduces both, so the recorded parent id resolves in the replayed
+    /// journal unchanged.
+    fn rejournal_recorded(&self, journal: &Journal) -> String {
+        let draft = self.recorded_draft();
+        match &self.event.parent {
+            Some(parent) => journal.record(draft.parent(parent.clone())),
+            None => journal.record(draft),
+        }
     }
 }
 
@@ -276,6 +329,12 @@ impl ServedEffect {
 struct ReplaySourceInner {
     /// The snapshot's servable events, in `seq` order.
     servable: Vec<RunEvent>,
+    /// Gate evidence nested inside each servable event, parallel to
+    /// `servable` (see [`NESTED_EVIDENCE_KINDS`]).
+    nested: Vec<Vec<RunEvent>>,
+    /// Recorded seqs of gate evidence NOT immediately preceding a servable
+    /// event — evidence exact replay can neither serve nor re-derive.
+    stray: Vec<u64>,
     /// The snapshot's artifact map, for payload resolution.
     artifacts: BTreeMap<String, Value>,
     /// Position of the next unserved event. Strictly ordered: exact replay
@@ -304,14 +363,30 @@ impl ReplaySource {
     /// [`ReplayFixture::import`]); unresolved artifact references simply fail
     /// to match.
     pub fn new(snapshot: &JournalSnapshot) -> Self {
+        // Walk the journal once, in seq order: servable effects fill the
+        // cursor; gate evidence accumulates until the servable event it
+        // nests inside claims it; any other event kind flushes the pending
+        // evidence to the stray list (see NESTED_EVIDENCE_KINDS).
+        let mut servable = Vec::new();
+        let mut nested = Vec::new();
+        let mut pending: Vec<RunEvent> = Vec::new();
+        let mut stray = Vec::new();
+        for event in &snapshot.events {
+            if is_servable(event.kind) {
+                servable.push(event.clone());
+                nested.push(std::mem::take(&mut pending));
+            } else if NESTED_EVIDENCE_KINDS.contains(&event.kind) {
+                pending.push(event.clone());
+            } else if !pending.is_empty() {
+                stray.extend(pending.drain(..).map(|event| event.seq));
+            }
+        }
+        stray.extend(pending.drain(..).map(|event| event.seq));
         Self {
             inner: Arc::new(Mutex::new(ReplaySourceInner {
-                servable: snapshot
-                    .events
-                    .iter()
-                    .filter(|event| is_servable(event.kind))
-                    .cloned()
-                    .collect(),
+                servable,
+                nested,
+                stray,
                 artifacts: snapshot.artifacts.clone(),
                 cursor: 0,
             })),
@@ -386,10 +461,33 @@ impl ReplaySource {
                 PayloadRef::Inline(value) => Some(value.clone()),
                 PayloadRef::Artifact(reference) => inner.artifacts.get(&reference.sha256).cloned(),
             }),
+            nested: inner.nested[inner.cursor]
+                .iter()
+                .map(|nested| ServedEffect {
+                    input: nested
+                        .input
+                        .as_ref()
+                        .and_then(|payload| resolve_ref(&inner.artifacts, payload)),
+                    output: nested
+                        .output
+                        .as_ref()
+                        .and_then(|payload| resolve_ref(&inner.artifacts, payload)),
+                    event: nested.clone(),
+                    nested: Vec::new(),
+                })
+                .collect(),
             event: event.clone(),
         };
         inner.cursor += 1;
         Ok(served)
+    }
+
+    /// Recorded seqs of gate evidence exact replay can neither serve nor
+    /// re-derive (not nested immediately before a servable effect; see
+    /// [`NESTED_EVIDENCE_KINDS`]). Empty for every journal the replay
+    /// boundary should accept.
+    pub fn stray_nested(&self) -> Vec<u64> {
+        self.lock().stray.clone()
     }
 
     /// `true` when every recorded effect has been served. Verification treats
@@ -423,6 +521,7 @@ pub struct RecordingChatModel {
     journal: Journal,
     parent: String,
     node_id: Option<String>,
+    capture_chunks: bool,
 }
 
 impl RecordingChatModel {
@@ -434,6 +533,7 @@ impl RecordingChatModel {
             journal,
             parent: parent.into(),
             node_id: None,
+            capture_chunks: false,
         }
     }
 
@@ -441,6 +541,20 @@ impl RecordingChatModel {
     /// event's `node_id`).
     pub fn node(mut self, node_id: impl Into<String>) -> Self {
         self.node_id = Some(node_id.into());
+        self
+    }
+
+    /// Builder-style: capture streaming chunks as evidence when the wrapper
+    /// is driven through [`ChatModel::chat_stream`]. Off by default — with
+    /// capture off the journaled event is byte-identical to the pre-stream
+    /// shape, so existing journals keep replaying. With capture on, the
+    /// model-call event's output gains a `chunks` array (each chunk's
+    /// `delta` and `finish`, plus the provider's raw chunk when the wire
+    /// supplied one) alongside the `message` / `model` / `usage` keys
+    /// [`model_call_response`] freezes. Chunks are record-side evidence
+    /// only: exact replay serves the completed response, never the deltas.
+    pub fn with_chunk_capture(mut self, capture: bool) -> Self {
+        self.capture_chunks = capture;
         self
     }
 
@@ -452,23 +566,24 @@ impl RecordingChatModel {
         }
         draft
     }
-}
 
-#[async_trait]
-impl ChatModel for RecordingChatModel {
-    async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
-        let started = self.journal.clock().now();
-        let result = self.inner.chat(messages, tools).await;
-        let latency_ms = (self.journal.clock().now() - started)
-            .num_milliseconds()
-            .max(0) as u64;
-        let draft = self
-            .draft()
-            .input(model_call_request(messages, tools))
-            .latency_ms(latency_ms);
+    /// Journal the call's outcome and return it: the shared tail of `chat`
+    /// and `chat_stream`. `chunks` is `Some` only under chunk capture.
+    fn journal_outcome(
+        &self,
+        latency_ms: u64,
+        input: Value,
+        chunks: Option<Vec<Value>>,
+        result: Result<ChatResponse>,
+    ) -> Result<ChatResponse> {
+        let draft = self.draft().input(input).latency_ms(latency_ms);
         match result {
             Ok(response) => {
-                let mut draft = draft.output(model_call_response(&response));
+                let mut output = model_call_response(&response);
+                if let Some(chunks) = chunks {
+                    output["chunks"] = Value::Array(chunks);
+                }
+                let mut draft = draft.output(output);
                 if let Some(usage) = response.usage {
                     draft = draft.tokens(usage);
                     // The cost producer: pricing is operator configuration on
@@ -492,6 +607,51 @@ impl ChatModel for RecordingChatModel {
             }
         }
     }
+}
+
+#[async_trait]
+impl ChatModel for RecordingChatModel {
+    async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
+        let started = self.journal.clock().now();
+        let result = self.inner.chat(messages, tools).await;
+        let latency_ms = (self.journal.clock().now() - started)
+            .num_milliseconds()
+            .max(0) as u64;
+        self.journal_outcome(latency_ms, model_call_request(messages, tools), None, result)
+    }
+
+    async fn chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        let started = self.journal.clock().now();
+        let capture = self.capture_chunks;
+        let mut chunks: Vec<Value> = Vec::new();
+        let result = self
+            .inner
+            .chat_stream(messages, tools, &mut |chunk| {
+                if capture {
+                    let mut entry = json!({ "delta": chunk.delta.clone(), "finish": chunk.finish });
+                    if let Some(raw) = &chunk.raw {
+                        entry["raw"] = raw.clone();
+                    }
+                    chunks.push(entry);
+                }
+                on_token(chunk)
+            })
+            .await;
+        let latency_ms = (self.journal.clock().now() - started)
+            .num_milliseconds()
+            .max(0) as u64;
+        self.journal_outcome(
+            latency_ms,
+            model_call_request(messages, tools),
+            capture.then_some(chunks),
+            result,
+        )
+    }
 
     fn effect(&self) -> Effect {
         self.inner.effect()
@@ -512,6 +672,9 @@ impl ChatModel for RecordingChatModel {
 /// sequence + request hash and answered with the recorded response; the
 /// served event is re-journaled into the replay run's journal so the
 /// replayed evidence reproduces the recorded evidence byte-for-byte.
+/// `chat_stream` keeps the trait's default (one synthetic chunk over the
+/// served response): streamed deltas are record-side evidence
+/// ([`RecordingChatModel::with_chunk_capture`]), never replay inputs.
 pub struct ReplayingChatModel {
     inner: Arc<dyn ChatModel>,
     source: ReplaySource,
@@ -545,6 +708,13 @@ impl ChatModel for ReplayingChatModel {
             RunEventKind::ModelCall,
             &model_call_request(messages, tools),
         )?;
+        // Gate evidence recorded inside the served call is re-journaled
+        // first: in the recorded journal it precedes the effect's own
+        // event, and the journal's clock reads must interleave exactly as
+        // the recorded run's did for `recorded_at` to reproduce.
+        for nested in &served.nested {
+            nested.rejournal_recorded(&self.journal);
+        }
         // Clock-read parity with RecordingChatModel (two reads per call)
         // keeps the logical clock's tick sequence aligned with the recorded
         // run, so the replayed journal's timestamps reproduce it exactly.
@@ -743,6 +913,11 @@ impl Tool for ReplayingTool {
     async fn call(&self, args: Value) -> Result<Value> {
         let request = tool_call_request(self.inner.name(), &args);
         let served = self.source.serve(RunEventKind::ToolCall, &request)?;
+        // Gate evidence recorded inside the served call is re-journaled
+        // first — see ReplayingChatModel.
+        for nested in &served.nested {
+            nested.rejournal_recorded(&self.journal);
+        }
         // Clock-read parity with RecordingTool; see ReplayingChatModel.
         let _started = self.journal.clock().now();
         let _ended = self.journal.clock().now();
@@ -794,24 +969,35 @@ impl ExactReplay {
     ///
     /// Fails with [`RustyError::Replay`] when the snapshot fails integrity
     /// verification (tampered head hash, corrupted artifacts, dangling
-    /// references), or with [`RustyError::Serialization`] when an event
-    /// cannot be re-hashed. Exact replay of *resumed* runs (journals whose
-    /// first event is a resume) is deferred: their evidence begins mid-run
-    /// against checkpointed state the journal does not carry.
+    /// references), when the journal carries gate evidence exact replay can
+    /// neither serve nor re-derive (see [`NESTED_EVIDENCE_KINDS`]), or with
+    /// [`RustyError::Serialization`] when an event cannot be re-hashed.
+    /// Exact replay of *resumed* runs (journals holding a resume event) is
+    /// deferred: their evidence continues mid-run against checkpointed state
+    /// the journal does not carry.
     pub fn new(snapshot: JournalSnapshot) -> Result<Self> {
         verify_snapshot(&snapshot)?;
         if snapshot
             .events
-            .first()
-            .is_some_and(|event| event.kind == RunEventKind::Resume)
+            .iter()
+            .any(|event| event.kind == RunEventKind::Resume)
         {
             return Err(replay_error(
-                "exact replay of resumed runs is not supported: the journal begins with a \
-                 resume event, whose pre-resume state lives in a checkpoint the journal does \
+                "exact replay of resumed runs is not supported: the journal holds a resume \
+                 event, whose pre-resume state lives in a checkpoint the journal does \
                  not carry — replay the original run's journal instead",
             ));
         }
         let source = ReplaySource::new(&snapshot);
+        let stray = source.stray_nested();
+        if !stray.is_empty() {
+            return Err(replay_error(format!(
+                "exact replay cannot reproduce the gate evidence at recorded seqs {stray:?}: \
+                 approval events replay only nested immediately before the effect they gated, \
+                 but this journal holds them elsewhere (a gate used outside a journaled \
+                 effect, or a run that stopped between the decision and the effect's record)"
+            )));
+        }
         Ok(Self { snapshot, source })
     }
 
@@ -871,10 +1057,27 @@ impl ExactReplay {
             Some(checkpointer) => Executor::with_checkpointer(checkpointer.clone()),
             None => Executor::new(),
         };
-        let config = RunConfig::new(self.snapshot.thread_id.clone())
+        let mut config = RunConfig::new(self.snapshot.thread_id.clone())
             .with_max_steps(params.max_steps)
             .with_rng(params.rng.clone())
-            .with_journal(params.journal.clone());
+            .with_journal(params.journal.clone())
+            .with_tool_guards(params.tool_guards.clone());
+        // The envelope is served from the log: the replayed run re-declares
+        // the recorded configuration exactly, so its journaled declaration —
+        // and every request shaped by it — is a pure function of the
+        // recorded evidence rather than of whatever the replay caller
+        // happened to configure.
+        if let Some(declaration) = declaration_in(&self.snapshot)? {
+            config = config
+                .with_graph_version(declaration.graph_version)
+                .with_policy_version(declaration.policy_version);
+            if let Some(allowlist) = declaration.tool_allowlist {
+                config = config.with_tool_allowlist(allowlist);
+            }
+            if let Some(manifest) = declaration.manifest {
+                config = config.with_manifest(manifest);
+            }
+        }
         let outcome = executor.run(graph, spec, initial_state, config).await?;
         Ok(ReplayOutcome {
             outcome,
@@ -901,6 +1104,35 @@ impl ExactReplay {
                  `{}`/`{}`",
                 recorded.run_id, recorded.thread_id, replayed.run_id, replayed.thread_id
             )));
+        }
+        // The envelope assertion: the replayed run's declared configuration
+        // must reproduce the recorded one field-for-field. Checked before
+        // the event walk so a config drift names its field instead of
+        // surfacing as an anonymous event mismatch.
+        let recorded_declaration = declaration_in(recorded)?;
+        let replayed_declaration = declaration_in(replayed)?;
+        match (&recorded_declaration, &replayed_declaration) {
+            (None, None) => {}
+            (None, Some(_)) => {
+                return Err(replay_error(
+                    "replay envelope divergence: the recorded run declared no configuration \
+                     envelope, but the replayed run declared one",
+                ));
+            }
+            (Some(_), None) => {
+                return Err(replay_error(
+                    "replay envelope divergence: the recorded run declared a configuration \
+                     envelope, but the replayed run declared none",
+                ));
+            }
+            (Some(recorded), Some(replayed)) => {
+                if let Some(divergence) = envelope_divergence(recorded, replayed) {
+                    return Err(replay_error(format!(
+                        "replay envelope divergence: {divergence} — the replayed run's \
+                         declared configuration differs from the recorded one"
+                    )));
+                }
+            }
         }
         if recorded.events.len() != replayed.events.len() {
             return Err(replay_error(format!(
@@ -962,11 +1194,164 @@ fn summarize_event(event: &RunEvent) -> String {
     )
 }
 
+/// The run-config declaration journaled in `snapshot`, when the run
+/// declared one. A second declaration, or one that does not decode, is
+/// evidence the journal is inconsistent — fail loudly rather than guess
+/// which envelope the run answered to.
+fn declaration_in(snapshot: &JournalSnapshot) -> Result<Option<RunConfigDeclaration>> {
+    let mut declaration: Option<RunConfigDeclaration> = None;
+    for event in &snapshot.events {
+        if event.kind != RunEventKind::RunConfigDeclared {
+            continue;
+        }
+        if declaration.is_some() {
+            return Err(replay_error(format!(
+                "journal holds more than one run-config declaration (second at seq {}): the \
+                 envelope is journaled once, at run start",
+                event.seq
+            )));
+        }
+        let output = resolve_opt(snapshot, event.output.as_ref()).ok_or_else(|| {
+            replay_error(format!(
+                "run-config declaration at seq {} carries no output payload",
+                event.seq
+            ))
+        })?;
+        declaration = Some(serde_json::from_value(output).map_err(|error| {
+            replay_error(format!(
+                "run-config declaration at seq {} does not decode: {error}",
+                event.seq
+            ))
+        })?);
+    }
+    Ok(declaration)
+}
+
+/// The first envelope field on which two declarations disagree, named with
+/// both sides — the divergence report exact replay fails with. `None` when
+/// the declarations agree on every field.
+fn envelope_divergence(
+    recorded: &RunConfigDeclaration,
+    replayed: &RunConfigDeclaration,
+) -> Option<String> {
+    if recorded.graph_version != replayed.graph_version {
+        return Some(format!(
+            "graph_version: recorded `{:?}`, replayed `{:?}`",
+            recorded.graph_version, replayed.graph_version
+        ));
+    }
+    if recorded.graph_hash != replayed.graph_hash {
+        return Some(format!(
+            "graph_hash: recorded {}, replayed {}",
+            recorded.graph_hash, replayed.graph_hash
+        ));
+    }
+    if recorded.policy_version != replayed.policy_version {
+        return Some(format!(
+            "policy_version: recorded `{:?}`, replayed `{:?}`",
+            recorded.policy_version, replayed.policy_version
+        ));
+    }
+    if recorded.tool_allowlist != replayed.tool_allowlist {
+        return Some(format!(
+            "tool_allowlist: recorded {:?}, replayed {:?}",
+            recorded.tool_allowlist, replayed.tool_allowlist
+        ));
+    }
+    manifest_divergence(recorded.manifest.as_ref(), replayed.manifest.as_ref())
+}
+
+/// Manifest-level envelope comparison, naming the drifting pin. Digests
+/// name content, so a named pin IS the divergence report.
+fn manifest_divergence(
+    recorded: Option<&crate::record::RunManifest>,
+    replayed: Option<&crate::record::RunManifest>,
+) -> Option<String> {
+    let (Some(recorded), Some(replayed)) = (recorded, replayed) else {
+        return (recorded.is_some() != replayed.is_some()).then(|| {
+            let presence = |pinned: bool| if pinned { "pinned" } else { "absent" };
+            format!(
+                "manifest: recorded {}, replayed {}",
+                presence(recorded.is_some()),
+                presence(replayed.is_some())
+            )
+        });
+    };
+    if recorded.model != replayed.model {
+        return Some(format!(
+            "manifest.model: recorded {:?}, replayed {:?}",
+            recorded.model, replayed.model
+        ));
+    }
+    if recorded.model_params != replayed.model_params {
+        return Some(format!(
+            "manifest.model_params: recorded {:?}, replayed {:?}",
+            recorded.model_params, replayed.model_params
+        ));
+    }
+    if recorded.tool_schemas != replayed.tool_schemas {
+        for (tool, digest) in &recorded.tool_schemas {
+            match replayed.tool_schemas.get(tool) {
+                None => {
+                    return Some(format!(
+                        "manifest.tool_schemas.{tool}: recorded {digest}, replayed <absent>"
+                    ));
+                }
+                Some(other) if other != digest => {
+                    return Some(format!(
+                        "manifest.tool_schemas.{tool}: recorded {digest}, replayed {other}"
+                    ));
+                }
+                _ => {}
+            }
+        }
+        for tool in replayed.tool_schemas.keys() {
+            if !recorded.tool_schemas.contains_key(tool) {
+                return Some(format!(
+                    "manifest.tool_schemas.{tool}: recorded <absent>, replayed present"
+                ));
+            }
+        }
+        return Some("manifest.tool_schemas: maps differ".to_owned());
+    }
+    if recorded.prompts != replayed.prompts {
+        return Some("manifest.prompts: pinned prompt digests differ".to_owned());
+    }
+    if recorded.memory_schema != replayed.memory_schema {
+        return Some(format!(
+            "manifest.memory_schema: recorded {:?}, replayed {:?}",
+            recorded.memory_schema, replayed.memory_schema
+        ));
+    }
+    if recorded.capsules != replayed.capsules {
+        return Some("manifest.capsules: pinned capsule versions differ".to_owned());
+    }
+    if recorded.middleware != replayed.middleware {
+        return Some("manifest.middleware: pinned composition digests differ".to_owned());
+    }
+    if recorded.capability_set != replayed.capability_set {
+        return Some(format!(
+            "manifest.capability_set: recorded {:?}, replayed {:?}",
+            recorded.capability_set, replayed.capability_set
+        ));
+    }
+    None
+}
+
 /// Per-run parameters of an exact replay: the fresh journal (recorded run's
 /// identity plus matching logical clock), the RNG (the recorded run's seed
 /// for byte-identical checkpoint ids), an optional checkpointer (present iff
 /// the recorded run had one — checkpoint-written events are part of the
-/// evidence), and the step limit.
+/// evidence), the step limit, and the deny-only tool guards.
+///
+/// Guards are code, not evidence: the journaled envelope pins the run's
+/// *configuration* (allowlist, manifest, versions), but a guard's verdict is
+/// re-derived at replay by re-running the guard itself — so the replay caller
+/// must register the same guards the recorded run carried, exactly as it
+/// supplies the same graph topology and tool identities. A replay without
+/// the recorded run's guards does not re-deny the calls they denied and
+/// fails loudly at the first such call (the recorded world has no tool call
+/// to serve for it).
 pub struct ReplayParams {
     /// The replay run's journal; build with [`ExactReplay::fresh_journal`].
     pub journal: Journal,
@@ -982,6 +1367,12 @@ pub struct ReplayParams {
 
     /// Super-step limit, as in [`RunConfig::max_steps`].
     pub max_steps: usize,
+
+    /// The deny-only tool guards the recorded run carried (empty when it
+    /// carried none). Re-run at replay so a journaled
+    /// [`crate::record::RunEventKind::ToolCallDenied`] is re-derived, never
+    /// served.
+    pub tool_guards: Vec<Arc<dyn ToolGuard>>,
 }
 
 impl ReplayParams {
@@ -993,6 +1384,7 @@ impl ReplayParams {
             rng,
             checkpointer: None,
             max_steps: DEFAULT_MAX_STEPS,
+            tool_guards: Vec::new(),
         }
     }
 
@@ -1005,6 +1397,13 @@ impl ReplayParams {
     /// Builder-style: override the step limit.
     pub fn with_max_steps(mut self, max_steps: usize) -> Self {
         self.max_steps = max_steps;
+        self
+    }
+
+    /// Builder-style: re-derive the recorded run's guard verdicts with the
+    /// same guards.
+    pub fn with_tool_guards(mut self, guards: Vec<Arc<dyn ToolGuard>>) -> Self {
+        self.tool_guards = guards;
         self
     }
 }

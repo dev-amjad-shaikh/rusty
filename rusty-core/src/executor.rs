@@ -247,6 +247,18 @@ pub struct RunConfig {
     /// run deliberately tool-free. Prebuilt agents enforce the subset at
     /// both model-schema and dispatch boundaries.
     pub tool_allowlist: Option<Vec<String>>,
+
+    /// Deny-only dispatch guards (evidence and admission wave): registered
+    /// per run, evaluated on every finalized tool call after allowlist
+    /// admission and before the effect boundary. Guards can only narrow
+    /// what the allowlist admitted — [`crate::tool::ToolGuard`] returns
+    /// `Option<GuardDenial>`, there is no allow result — so no registration
+    /// order can turn a denial into permission. Denials block dispatch and
+    /// are journaled as
+    /// [`crate::record::RunEventKind::ToolCallDenied`] when the dispatching
+    /// node carries a guard journal (the prebuilt ReAct tools node does in
+    /// every evidence mode). Empty by default: no guards, no new behavior.
+    pub tool_guards: Vec<Arc<dyn crate::tool::ToolGuard>>,
 }
 
 impl Default for RunConfig {
@@ -278,6 +290,7 @@ impl RunConfig {
             effect_approvals: Vec::new(),
             effect_admission: None,
             tool_allowlist: None,
+            tool_guards: Vec::new(),
         }
     }
 
@@ -393,6 +406,14 @@ impl RunConfig {
         tools.sort_unstable();
         tools.dedup();
         self.tool_allowlist = Some(tools);
+        self
+    }
+
+    /// Builder-style: register the run's deny-only tool guards (see the
+    /// [`RunConfig::tool_guards`] field docs and [`crate::tool::ToolGuard`]
+    /// for the monotonicity contract).
+    pub fn with_tool_guards(mut self, guards: Vec<Arc<dyn crate::tool::ToolGuard>>) -> Self {
+        self.tool_guards = guards;
         self
     }
 
@@ -830,6 +851,42 @@ impl Executor {
             }];
         }
 
+        // ---- run-config declaration (evidence and admission wave) ----
+        //
+        // The config half of the evidence envelope: when the run declares
+        // anything beyond the static floor — a manifest, an allowlist, an
+        // explicit policy or graph version — journal it once at the start,
+        // so the run's journaled requests are a pure function of the log
+        // and exact replay can re-derive and assert the envelope. A run
+        // that declares nothing journals nothing: absent means undeclared,
+        // never a default (the RunManifest discipline applied to the whole
+        // envelope), which keeps journals recorded before this wave
+        // replaying byte-identically. The declaration sits after the
+        // init/resume block so it carries the *effective* policy version —
+        // a resumed run re-declares under the version its checkpoint header
+        // pins, and its `Resume` event precedes the declaration (resumed
+        // journals are not exact-replayable regardless; see
+        // [`crate::replay::ExactReplay::new`]).
+        if config.manifest.is_some()
+            || config.tool_allowlist.is_some()
+            || config.policy_version.is_some()
+            || config.graph_version.is_some()
+        {
+            let declaration = crate::record::RunConfigDeclaration {
+                graph_version: recorder.graph_version.clone(),
+                graph_hash: recorder.graph_hash.clone(),
+                policy_version: recorder.policy_version.clone(),
+                tool_allowlist: config.tool_allowlist.clone(),
+                manifest: config.manifest.clone(),
+            };
+            recorder.record(
+                EventDraft::new(RunEventKind::RunConfigDeclared, Effect::Pure).output(
+                    serde_json::to_value(&declaration)
+                        .expect("a RunConfigDeclaration always serializes"),
+                ),
+            );
+        }
+
         // One shared context for the whole run: clones handed to parallel
         // nodes share its approval ledger, and later super-steps observe
         // tokens already consumed by earlier calls. An explicitly injected
@@ -1050,6 +1107,7 @@ impl Executor {
             let chain = self.middleware.clone();
             let effect_admission = effect_admission.clone();
             let effect_journal = effect_journal.clone();
+            let tool_guards = config.tool_guards.clone();
             join_set.spawn(
                 async move {
                     let node_started = clock.now();
@@ -1062,7 +1120,8 @@ impl Executor {
                         node.run(
                             NodeContext::new(node_state, node_config)
                                 .with_optional_effect_journal(effect_journal)
-                                .with_optional_effect_admission(effect_admission),
+                                .with_optional_effect_admission(effect_admission)
+                                .with_tool_guards(tool_guards),
                         )
                         .await
                     } else {
@@ -1077,7 +1136,8 @@ impl Executor {
                                 let ctx = NodeContext::new(call.state().clone(), node_config)
                                     .with_middleware(chain.clone())
                                     .with_optional_effect_journal(effect_journal)
-                                    .with_optional_effect_admission(effect_admission);
+                                    .with_optional_effect_admission(effect_admission)
+                                    .with_tool_guards(tool_guards);
                                 let node = Arc::clone(&node);
                                 async move { node.run(ctx).await }
                             })

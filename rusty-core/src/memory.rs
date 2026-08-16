@@ -1695,6 +1695,9 @@ impl MemoryReplaySource {
                 PayloadRef::Artifact(reference) => inner.artifacts.get(&reference.sha256).cloned(),
             }),
             event: event.clone(),
+            // Memory reads record no nested evidence; the field is the
+            // approval pairs nested under model and tool calls.
+            nested: Vec::new(),
         };
         inner.cursor += 1;
         Ok(served)

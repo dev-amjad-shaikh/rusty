@@ -56,14 +56,15 @@ use serde_json::{json, Value};
 use crate::connector::canonical_json_hash;
 use crate::connector::manifest::{validate_text_field, MAX_ARG_LEN, MAX_ARGS, MAX_COMMAND_LEN};
 use crate::effects::{
-    admit_irreversible, ApprovalToken, EffectId, IrreversibleEffect, TypedEffect,
+    admit_irreversible, ApprovalToken, EffectId, EffectViolation, IrreversibleEffect, TypedEffect,
 };
 use crate::error::{Result, RustyError};
-use crate::record::{Effect, PayloadRef};
+use crate::record::{ApprovalDecision, ApprovalRequest, Effect, PayloadRef};
 use crate::skill::{
     scan_package, ScanFinding, ScanKind, ScanReport, ScanSeverity, SkillError, SkillPackage,
     SkillRegistry, SkillSource,
 };
+use crate::tool::approval::ApprovalGate;
 use crate::tool::{validate_tool_contract, Tool};
 
 /// The provenance name recorded for composer-published skills: the registry
@@ -419,15 +420,28 @@ impl Tool for ComposeSkillTool {
 /// scoped to the draft's derived effect id (mint it against
 /// [`publish_effect_id`]). Fail-closed in both directions — an unknown or
 /// denied draft hash refuses, and so does a missing or mis-scoped token.
+///
+/// The admission is a decision in the closed
+/// [`ApprovalDecision`] vocabulary (evidence and admission wave): a token
+/// present and scoped decides [`ApprovalDecision::ApprovedOnce`], a token
+/// scoped to a different effect id decides [`ApprovalDecision::Rejected`],
+/// and a missing or malformed token decides [`ApprovalDecision::Unavailable`]
+/// — there is no decider to consult. With an [`ApprovalGate`] attached
+/// ([`PublishComposedSkillTool::with_approval_gate`]) every ask is journaled
+/// as the asked/decided pair before the admission runs, so the publish
+/// boundary is evidence whoever operated it; without a gate the behavior is
+/// byte-identical to before the wave.
 pub struct PublishComposedSkillTool {
     session: Arc<ComposerSession>,
     registry: Arc<Mutex<SkillRegistry>>,
+    approval_gate: Option<ApprovalGate>,
 }
 
 impl std::fmt::Debug for PublishComposedSkillTool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PublishComposedSkillTool")
             .field("session", &self.session)
+            .field("approval_gate", &self.approval_gate.is_some())
             .finish()
     }
 }
@@ -435,7 +449,18 @@ impl std::fmt::Debug for PublishComposedSkillTool {
 impl PublishComposedSkillTool {
     /// A publishing tool bound to `session` and writing into `registry`.
     pub fn new(session: Arc<ComposerSession>, registry: Arc<Mutex<SkillRegistry>>) -> Self {
-        Self { session, registry }
+        Self {
+            session,
+            registry,
+            approval_gate: None,
+        }
+    }
+
+    /// Attach the gate that journals every publish ask as the asked/decided
+    /// pair of [`ApprovalDecision`]s.
+    pub fn with_approval_gate(mut self, gate: ApprovalGate) -> Self {
+        self.approval_gate = Some(gate);
+        self
     }
 }
 
@@ -479,6 +504,8 @@ impl Tool for PublishComposedSkillTool {
     }
 
     async fn call(&self, args: Value) -> Result<Value> {
+        // The draft lookup stays first: an unknown draft refuses before any
+        // ask is journaled — there is nothing to approve.
         let content_hash = required_string(&args, "content_hash")?;
         let draft = self.session.draft(content_hash).ok_or_else(|| {
             RustyError::Tool(format!(
@@ -487,14 +514,68 @@ impl Tool for PublishComposedSkillTool {
             ))
         })?;
 
-        let approval_value = args.get("approval").cloned().ok_or_else(|| {
-            RustyError::Tool("`approval` must name the scoped approval token".into())
-        })?;
-        let token: ApprovalToken = serde_json::from_value(approval_value).map_err(|error| {
-            RustyError::Tool(format!("`approval` is not an approval token: {error}"))
-        })?;
         let effect = PublishSkillEffect::new(content_hash);
-        admit_irreversible(&effect, self.session.scope(), Some(&token)).map_err(|violation| {
+        let request = ApprovalRequest {
+            kind: PUBLISH_SKILL_EFFECT_KIND.to_owned(),
+            effect_id: Some(effect.effect_id(self.session.scope()).as_str().to_owned()),
+            detail: Some(json!({ "content_hash": content_hash })),
+        };
+        // Every admission path below ends in a decision of the closed
+        // vocabulary; with a gate attached the asked/decided pair is
+        // journaled before the tool acts on it.
+        let decide = |decision: ApprovalDecision| match &self.approval_gate {
+            Some(gate) => gate.decide(&request, decision),
+            None => decision,
+        };
+
+        let approval_value = match args.get("approval").cloned() {
+            Some(value) => value,
+            None => {
+                decide(ApprovalDecision::Unavailable {
+                    reason: Some("no approval token presented".into()),
+                });
+                return Err(RustyError::Tool(
+                    "`approval` must name the scoped approval token".into(),
+                ));
+            }
+        };
+        let token: ApprovalToken = match serde_json::from_value(approval_value) {
+            Ok(token) => token,
+            Err(error) => {
+                decide(ApprovalDecision::Unavailable {
+                    reason: Some("the presented approval is not an approval token".into()),
+                });
+                return Err(RustyError::Tool(format!(
+                    "`approval` is not an approval token: {error}"
+                )));
+            }
+        };
+
+        let verdict = admit_irreversible(&effect, self.session.scope(), Some(&token));
+        match &verdict {
+            Ok(()) => {
+                decide(ApprovalDecision::ApprovedOnce {
+                    approved_by: token.approved_by().to_owned(),
+                });
+            }
+            Err(EffectViolation::ApprovalScopeMismatch { .. }) => {
+                decide(ApprovalDecision::Rejected {
+                    decided_by: token.approved_by().to_owned(),
+                    reason: Some(
+                        "the token is scoped to a different effect id — approvals are \
+                         not transferable"
+                            .into(),
+                    ),
+                });
+            }
+            Err(_) => {
+                decide(ApprovalDecision::Rejected {
+                    decided_by: token.approved_by().to_owned(),
+                    reason: Some("the admission refused the presented token".into()),
+                });
+            }
+        }
+        verdict.map_err(|violation| {
             RustyError::Tool(format!("publish admission denied: {violation}"))
         })?;
 

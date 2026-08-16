@@ -850,6 +850,63 @@ pub enum RunEventKind {
     /// evidence. An [`Effect::Pure`] record in the shadow run's journal.
     /// Output carries the journaled [`crate::deploy::ShadowVerdict`].
     ShadowVerdict,
+
+    /// The run declared its configuration envelope at start (evidence and
+    /// admission wave): the graph version and topology hash, the active
+    /// policy version, the tool allowlist, and the pinned [`RunManifest`] —
+    /// the config half of the model-call envelope, so a journaled run's
+    /// requests are a pure function of the log. Journaled once as the run's
+    /// first event, and only when the run declares something beyond the
+    /// static floor — absent means undeclared, never a default (the
+    /// [`RunManifest`] discipline applied to the whole envelope), so
+    /// journals recorded before this variant keep replaying
+    /// byte-identically. An [`Effect::Pure`] record: the declaration changes
+    /// nothing, it *is* the fact. Output carries the journaled
+    /// [`RunConfigDeclaration`]. Exact replay re-derives the declaration
+    /// from the recorded event and asserts field-level agreement, naming
+    /// the diverging field when they differ.
+    RunConfigDeclared,
+
+    /// A run-registered tool guard denied a dispatch (evidence and
+    /// admission wave): the guard layer evaluated the finalized call —
+    /// after allowlist admission, before the effect boundary, so a denial
+    /// never burns a one-shot approval — and at least one guard returned a
+    /// [`crate::tool::GuardDenial`]. Guards are deny-only
+    /// ([`crate::tool::ToolGuard::check`] returns `Option<GuardDenial>`;
+    /// there is no allow result), every guard is evaluated, and any denial
+    /// blocks the dispatch — no ordering of guards can turn a denial into
+    /// permission. An [`Effect::Pure`] record: nothing executed, so there
+    /// is no external effect to classify — the event is the evidence that
+    /// nothing happened (the [`RunEventKind::CapsuleDenied`] precedent).
+    /// Input carries the canonical [`crate::replay::tool_call_request`]
+    /// shape; output carries the journaled [`crate::tool::GuardDenialRecord`]
+    /// — every denying guard named, so the denial is attributable to a
+    /// declaration, not a stack trace. Exact replay re-derives the denial
+    /// by re-running the same registered guards; the event is never served.
+    ToolCallDenied,
+
+    /// An approval gate asked for a decision (evidence and admission wave):
+    /// the asked half of the closed approval pair, journaled **before** the
+    /// decision resolves — a gate whose asks leave no evidence is a gate an
+    /// audit cannot distinguish from never having run (the
+    /// [`RunEventKind::GateDecisionRecorded`] principle). An
+    /// [`Effect::Pure`] record. Input carries the journaled
+    /// [`ApprovalRequest`] — the asking surface and, when occurrence-scoped,
+    /// the effect id. The event's causal parent anchors the pair inside the
+    /// open turn (the node-input event id, the same discipline
+    /// [`crate::react`] parents model and tool effects with).
+    ApprovalAsked,
+
+    /// An approval gate's decision landed (evidence and admission wave):
+    /// the decided half of the pair, parented to its `ApprovalAsked` event.
+    /// An [`Effect::Pure`] record. Output carries the journaled
+    /// [`ApprovalOutcome`] — the closed [`ApprovalDecision`] vocabulary, in
+    /// which only `approved_once` grants and every other outcome denies.
+    /// Exact replay re-journals the pair from the record when it is nested
+    /// inside a served effect (the gated call never re-executes), and
+    /// refuses journals whose gate evidence is not so nested — see
+    /// [`crate::replay`].
+    ApprovalDecided,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.
@@ -1699,6 +1756,152 @@ fn canonical_json_digest(value: &Value) -> String {
     let bytes = serde_json::to_vec(&canonicalize_value(value))
         .expect("a serde_json::Value always serializes");
     sha256_hex(&bytes)
+}
+
+/// The configuration envelope a run declares at start (evidence and
+/// admission wave), journaled as [`RunEventKind::RunConfigDeclared`].
+///
+/// The model-call event already pins the request half of the envelope — the
+/// messages and the resolved, post-allowlist tool schemas, canonically
+/// ordered, hashed, and matched on replay. This is the other half: the run
+/// configuration those requests were shaped by. With both halves journaled,
+/// a recorded run's model requests are a pure function of the log, and
+/// exact replay asserts the whole envelope rather than trusting it.
+///
+/// Deliberately excluded: driver bounds that shape no request — the step
+/// limit and the cancellation token are safety rails of the driving
+/// process, not evidence about what the run asked of the world.
+///
+/// Sparse on the wire: the allowlist and the manifest are absent when the
+/// run declared neither, so the declaration of a run that pinned only its
+/// graph version carries exactly that pin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunConfigDeclaration {
+    /// The application-declared graph version, resolved as the checkpoint
+    /// headers stamp it (`"unversioned"` when the application pins none).
+    pub graph_version: String,
+
+    /// SHA-256 of the compiled graph topology (`Graph::topology_hash`).
+    pub graph_hash: String,
+
+    /// The executor policy version the run bound, resolved as the
+    /// checkpoint headers stamp it.
+    pub policy_version: PolicyVersion,
+
+    /// The run's normalized tool allowlist (sorted, deduplicated — see
+    /// [`crate::executor::RunConfig::with_tool_allowlist`]). The resolved
+    /// schema set itself is pinned per call in the model-call input; this
+    /// pins the admission decision that produced it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_allowlist: Option<Vec<String>>,
+
+    /// The versioned run manifest the run pinned (model identity, model
+    /// parameters digest, prompt and tool-schema digests, and the later
+    /// pin families) — carried whole so the journaled envelope names the
+    /// exact configuration, not a digest of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<RunManifest>,
+}
+
+/// The closed approval vocabulary (evidence and admission wave): every
+/// approval gate in the harness decides in these terms and no others.
+///
+/// Exactly one variant grants — [`ApprovalDecision::ApprovedOnce`], with
+/// allowed-once semantics: the decision admits the single occurrence it was
+/// asked about and is spent by admitting it. Every other outcome denies,
+/// so the vocabulary is fail-closed by construction: an unanswered ask
+/// (`Unavailable`), a withdrawn ask (`Cancelled`), and a refused ask
+/// (`Rejected`) are three different facts with one shared consequence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum ApprovalDecision {
+    /// The ask was approved for this occurrence only. The only granting
+    /// outcome.
+    ApprovedOnce {
+        /// Who approved — a human operator id, a policy name, a token's
+        /// `approved_by`. Evidence, not authentication.
+        approved_by: String,
+    },
+
+    /// A decider considered the ask and refused it.
+    Rejected {
+        /// Who refused.
+        decided_by: String,
+        /// Why, when the decider gave a reason.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
+    /// The ask was withdrawn before a decider answered.
+    Cancelled {
+        /// Why, when the withdrawal gave a reason.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
+    /// No decider was available to answer the ask — a missing token, an
+    /// unreachable approver, a gate with no decision source. Denies,
+    /// indistinguishable from a refusal at the gate and deliberately
+    /// distinguishable from one in the evidence.
+    Unavailable {
+        /// Why no decider answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+}
+
+impl ApprovalDecision {
+    /// Whether this decision grants the ask. Only
+    /// [`ApprovalDecision::ApprovedOnce`] does — the fail-closed half of the
+    /// vocabulary, one line long so it cannot drift.
+    pub fn grants(&self) -> bool {
+        matches!(self, Self::ApprovedOnce { .. })
+    }
+
+    /// Who approved, when the decision is the granting variant.
+    pub fn approved_by(&self) -> Option<&str> {
+        match self {
+            Self::ApprovedOnce { approved_by } => Some(approved_by),
+            _ => None,
+        }
+    }
+}
+
+/// The asked half of an approval pair (evidence and admission wave),
+/// journaled as the input of [`RunEventKind::ApprovalAsked`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalRequest {
+    /// The surface asking — an effect kind (`publish_composed_skill`), a
+    /// capability pack's gate name. Free-form within the asking plane's own
+    /// stability rules: it joins the pair to the surface's evidence.
+    pub kind: String,
+
+    /// The occurrence id the ask is scoped to, when occurrence-scoped (the
+    /// effect kernel's derived effect id, as a bare digest string).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_id: Option<String>,
+
+    /// Asker-supplied context for the decider and the audit (the draft's
+    /// content hash, the command a CLI gate would run). Bounded by the
+    /// asking plane; never secret-bearing — the journal is evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Value>,
+}
+
+/// The decided half of an approval pair (evidence and admission wave),
+/// journaled as the output of [`RunEventKind::ApprovalDecided`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalOutcome {
+    /// The surface that asked — echoed from the [`ApprovalRequest`] so the
+    /// decided event reads standalone.
+    pub kind: String,
+
+    /// The occurrence id the decision binds, echoing the ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_id: Option<String>,
+
+    /// The decision, in the closed vocabulary.
+    pub decision: ApprovalDecision,
 }
 
 /// The provenance header stamped into every checkpoint.

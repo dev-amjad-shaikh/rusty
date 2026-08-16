@@ -1,0 +1,15 @@
+{
+  "graph_version": "graph-v3",
+  "graph_hash": "ab8131f2e59c4b8dbf2b1808ddcf2b53cb75b4e2caad7d8ca2472740b13c1d2e",
+  "policy_version": "static-v0",
+  "tool_allowlist": [
+    "echo",
+    "search"
+  ],
+  "manifest": {
+    "tool_schemas": {
+      "echo": "9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca7"
+    },
+    "model": "gpt-5.2-2026-06-01"
+  }
+}

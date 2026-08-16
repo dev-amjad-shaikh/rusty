@@ -17,9 +17,12 @@ use serde_json::{json, Value};
 
 use crate::effects::{EffectAdmissionContext, EffectRequest};
 use crate::error::{Result, RustyError};
+use crate::journal::{EventDraft, Journal};
 use crate::llm::{ChatMessage, ToolCall};
 use crate::middleware::{MiddlewareChain, ToolInvocation};
+use crate::record::{Effect, RunEventKind};
 
+pub mod approval;
 pub mod builtins;
 
 /// Maximum serialized size of one advertised tool argument schema.
@@ -37,6 +40,101 @@ pub const MAX_TOOL_DESCRIPTION_BYTES: usize = 4 * 1024;
 /// Only [`crate::executor::Executor`] writes this key. Prebuilt agents read
 /// it to narrow both model-visible schemas and executable dispatch.
 pub const TOOL_ALLOWLIST_KEY: &str = "__rusty_tool_allowlist";
+
+/// One finalized tool call as a guard sees it (evidence and admission
+/// wave): the tool name, the post-middleware arguments, the tool's declared
+/// effect class, and the run scope (the thread id) the dispatch happens in.
+///
+/// The view is borrowed and read-only: a guard inspects, it never rewrites.
+/// Admission-time mutation is the middleware layer's job; by the time a
+/// guard runs, the call is final.
+#[derive(Debug)]
+pub struct GuardedCall<'a> {
+    /// The resolved tool name (post-allowlist admission).
+    pub tool: &'a str,
+    /// The finalized, model-supplied arguments.
+    pub arguments: &'a Value,
+    /// The effect class the tool declared for itself.
+    pub effect: Effect,
+    /// The run scope (thread id) the dispatch happens in.
+    pub scope: &'a str,
+}
+
+/// One guard's refusal of one call, attributable by construction: the guard
+/// names itself and states its reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardDenial {
+    /// The denying guard's own name ([`ToolGuard::name`]).
+    pub guard: String,
+    /// Why the guard refused, in terms an audit can act on.
+    pub reason: String,
+}
+
+impl GuardDenial {
+    /// A denial from `guard` with `reason`.
+    pub fn new(guard: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            guard: guard.into(),
+            reason: reason.into(),
+        }
+    }
+}
+
+/// The journaled record of a guard-denied dispatch (evidence and admission
+/// wave): the output payload of [`RunEventKind::ToolCallDenied`]. Every
+/// guard that denied is listed — guards compose as any-denial-denies, and
+/// the evidence names each of them, so the record is attributable to
+/// declarations rather than to whichever guard happened to answer first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GuardDenialRecord {
+    /// The tool whose dispatch was blocked.
+    pub tool: String,
+    /// The effect class the tool declared.
+    pub effect: Effect,
+    /// The run scope the denial happened in.
+    pub scope: String,
+    /// Every denial the registered guards returned for this call, in
+    /// registration order.
+    pub denials: Vec<GuardDenial>,
+}
+
+/// A deny-only dispatch guard (evidence and admission wave).
+///
+/// A guard sees the finalized call and either denies it or stays silent —
+/// [`ToolGuard::check`] returns `Option<GuardDenial>` and there is
+/// deliberately no allow result. The layer is monotonic: nothing a guard
+/// can return widens access, so no registration order can undo another
+/// guard's denial, and a guard added to a run can only ever narrow what the
+/// allowlist admitted.
+///
+/// Guards are registered per run ([`crate::executor::RunConfig::with_tool_guards`])
+/// and evaluated at dispatch, after allowlist admission and before the
+/// effect boundary: a denial blocks the call before any one-shot approval
+/// token is consumed. Every registered guard is evaluated on every call —
+/// no short-circuit — so a denial can never hide behind an earlier guard's
+/// pass. Denials are journaled as [`RunEventKind::ToolCallDenied`] when the
+/// dispatcher carries a guard journal
+/// ([`ToolExecutor::with_guard_journal`]); exact replay re-derives them by
+/// re-running the same guards, never by serving them.
+pub trait ToolGuard: std::fmt::Debug + Send + Sync {
+    /// The guard's own name, journaled with every denial it returns.
+    fn name(&self) -> &str;
+
+    /// Judge one finalized call. `Some(denial)` blocks the dispatch; `None`
+    /// is silence, not permission — the call proceeds only because no guard
+    /// denied it.
+    fn check(&self, call: &GuardedCall<'_>) -> Option<GuardDenial>;
+}
+
+/// The journal handle a [`ToolExecutor`] records guard denials into: the
+/// run's journal plus the causal parent of the current invocation (the
+/// node-input event id, the same anchor the recording wrappers use).
+#[derive(Debug, Clone)]
+pub(crate) struct GuardEvidence {
+    pub(crate) journal: Journal,
+    pub(crate) parent: String,
+}
+
 
 /// The executable contract Studio and other clients may safely present.
 ///
@@ -315,6 +413,8 @@ pub struct ToolExecutor {
     registry: ToolRegistry,
     middleware: MiddlewareChain,
     effect_admission: Option<EffectAdmissionContext>,
+    guards: Vec<Arc<dyn ToolGuard>>,
+    guard_evidence: Option<GuardEvidence>,
     thread_id: String,
     node: String,
 }
@@ -360,9 +460,36 @@ impl ToolExecutor {
         self
     }
 
+    /// Builder-style: evaluate the run's deny-only guards on every
+    /// finalized call, after allowlist admission and before the effect
+    /// boundary. See [`ToolGuard`] for the monotonicity contract.
+    pub fn with_tool_guards(mut self, guards: Vec<Arc<dyn ToolGuard>>) -> Self {
+        self.guards = guards;
+        self
+    }
+
+    /// Builder-style: journal guard denials into `journal` with causal
+    /// parent `parent` (the current invocation's node-input event id).
+    /// Without this handle a denial still blocks the dispatch — a guard's
+    /// verdict is authoritative — but no evidence handle means no
+    /// [`RunEventKind::ToolCallDenied`] event, so evidence-carrying runs
+    /// should always attach it. The prebuilt ReAct tools node does.
+    pub fn with_guard_journal(mut self, journal: Journal, parent: impl Into<String>) -> Self {
+        self.guard_evidence = Some(GuardEvidence {
+            journal,
+            parent: parent.into(),
+        });
+        self
+    }
+
     /// The attached middleware chain (empty when none was added).
     pub fn middleware(&self) -> &MiddlewareChain {
         &self.middleware
+    }
+
+    /// The run's registered deny-only guards (empty when none were added).
+    pub fn guards(&self) -> &[Arc<dyn ToolGuard>] {
+        &self.guards
     }
 
     /// The attached effect boundary, if enforcement is enabled.
@@ -386,25 +513,48 @@ impl ToolExecutor {
             let registry = self.registry.clone();
             let chain = self.middleware.clone();
             let effect_admission = self.effect_admission.clone();
+            let guards = self.guards.clone();
+            let guard_evidence = self.guard_evidence.clone();
             let thread_id = self.thread_id.clone();
             let node = self.node.clone();
             async move {
                 let result = std::panic::AssertUnwindSafe(async {
+                    // The dispatch closure takes the call by value: the
+                    // future it returns must own the call it dispatches, or
+                    // the borrow would tie the future to the closure's
+                    // argument lifetime and fail to escape `run_tool`.
+                    let dispatch = |call: ToolCall| {
+                        let registry = registry.clone();
+                        let effect_admission = effect_admission.clone();
+                        let guards = guards.clone();
+                        let guard_evidence = guard_evidence.clone();
+                        let thread_id = thread_id.clone();
+                        let node = node.clone();
+                        async move {
+                            dispatch_tool(
+                                &registry,
+                                &call,
+                                effect_admission.as_ref(),
+                                &guards,
+                                guard_evidence.as_ref(),
+                                &thread_id,
+                                &node,
+                            )
+                            .await
+                        }
+                    };
                     let value = if chain.is_empty() {
-                        dispatch_tool(&registry, call, effect_admission.as_ref()).await?
+                        dispatch(call.clone()).await?
                     } else {
-                        let mut invocation = ToolInvocation::new(thread_id, node, call.clone());
+                        let mut invocation =
+                            ToolInvocation::new(thread_id.clone(), node.clone(), call.clone());
                         chain
                             .run_tool(&mut invocation, |invocation| {
-                                let registry = registry.clone();
-                                let effect_admission = effect_admission.clone();
-                                let call = invocation.call().clone();
-                                async move {
-                                    // The lookup happens after before-hooks,
-                                    // so a layer may rewrite the arguments —
-                                    // or the target tool name itself.
-                                    dispatch_tool(&registry, &call, effect_admission.as_ref()).await
-                                }
+                                // The lookup happens after before-hooks, so a
+                                // layer may rewrite the arguments — or the
+                                // target tool name itself; guards judge the
+                                // finalized call, after that rewrite.
+                                dispatch(invocation.call().clone())
                             })
                             .await?
                     };
@@ -451,10 +601,58 @@ async fn dispatch_tool(
     registry: &ToolRegistry,
     call: &ToolCall,
     effect_admission: Option<&EffectAdmissionContext>,
+    guards: &[Arc<dyn ToolGuard>],
+    guard_evidence: Option<&GuardEvidence>,
+    scope: &str,
+    node: &str,
 ) -> Result<Value> {
     let tool = registry
         .get(&call.name)
         .ok_or_else(|| RustyError::Tool(format!("unknown tool `{}`", call.name)))?;
+    // The guard layer: deny-only, evaluated on the finalized call after
+    // allowlist admission (the restricted registry lookup above) and before
+    // the effect boundary, so a denial never burns a one-shot approval.
+    // Every guard is evaluated — no short-circuit — so no registration
+    // order can hide a denial behind an earlier pass.
+    if !guards.is_empty() {
+        let guarded = GuardedCall {
+            tool: &call.name,
+            arguments: &call.arguments,
+            effect: tool.effect(),
+            scope,
+        };
+        let denials: Vec<GuardDenial> = guards
+            .iter()
+            .filter_map(|guard| guard.check(&guarded))
+            .collect();
+        if !denials.is_empty() {
+            if let Some(evidence) = guard_evidence {
+                let record = GuardDenialRecord {
+                    tool: call.name.clone(),
+                    effect: tool.effect(),
+                    scope: scope.to_owned(),
+                    denials: denials.clone(),
+                };
+                let mut draft = EventDraft::new(RunEventKind::ToolCallDenied, Effect::Pure)
+                    .input(crate::replay::tool_call_request(&call.name, &call.arguments))
+                    .output(serde_json::to_value(&record)?)
+                    .parent(evidence.parent.clone());
+                if !node.is_empty() {
+                    draft = draft.node(node.to_owned());
+                }
+                evidence.journal.record(draft);
+            }
+            let reasons = denials
+                .iter()
+                .map(|denial| format!("guard `{}`: {}", denial.guard, denial.reason))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(RustyError::Tool(format!(
+                "tool guard denied `{}`: {reasons}",
+                call.name
+            )));
+        }
+    }
     if let Some(context) = effect_admission {
         let request = tool.effect_request(call);
         if let Err(violation) = context.admit(&request) {

@@ -388,6 +388,7 @@ fn build_react_agent(
                                 ));
                             }
                             ToolExecutor::new(wrapped)
+                                .with_guard_journal(journal.clone(), parent.clone())
                         }
                         None => tool_executor,
                     },
@@ -404,6 +405,7 @@ fn build_react_agent(
                             ));
                         }
                         ToolExecutor::new(wrapped)
+                            .with_guard_journal(journal.clone(), parent.clone())
                     }
                     EvidenceMode::Replay { source, journal } => {
                         let parent = invocation_parent(&ctx, TOOLS_NODE)?;
@@ -420,6 +422,7 @@ fn build_react_agent(
                             )));
                         }
                         ToolExecutor::new(wrapped)
+                            .with_guard_journal(journal.clone(), parent.clone())
                     }
                 };
             // The executor attaches both cross-cutting boundaries to the
@@ -428,7 +431,8 @@ fn build_react_agent(
             // the recording/replay wrapper (and ultimately the tool) runs.
             tool_executor = tool_executor
                 .with_middleware(ctx.middleware().clone())
-                .with_call_context(ctx.thread_id(), TOOLS_NODE);
+                .with_call_context(ctx.thread_id(), TOOLS_NODE)
+                .with_tool_guards(ctx.tool_guards().to_vec());
             if let Some(admission) = ctx.effect_admission() {
                 tool_executor = tool_executor.with_effect_admission(admission.clone());
             }

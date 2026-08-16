@@ -499,7 +499,9 @@ async fn divergent_graph_fails_loudly_with_sequence_and_hashes() {
         "node wraps: {message}"
     );
     assert!(message.contains("divergence"), "got: {message}");
-    assert!(message.contains("seq 2"), "got: {message}");
+    // The recorded run declares its envelope at seq 0 (it pins a graph
+    // version), so the first model call sits at seq 3.
+    assert!(message.contains("seq 3"), "got: {message}");
 }
 
 #[tokio::test]

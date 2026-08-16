@@ -28,6 +28,7 @@ use crate::error::{Result, RustyError};
 use crate::journal::Journal;
 use crate::middleware::MiddlewareChain;
 use crate::state::State;
+use crate::tool::ToolGuard;
 
 /// Per-run, per-node configuration handed to every node invocation.
 ///
@@ -73,6 +74,7 @@ pub struct NodeContext {
     middleware: MiddlewareChain,
     effect_admission: Option<EffectAdmissionContext>,
     effect_journal: Option<Journal>,
+    tool_guards: Vec<Arc<dyn ToolGuard>>,
 }
 
 impl NodeContext {
@@ -86,6 +88,7 @@ impl NodeContext {
             middleware: MiddlewareChain::new(),
             effect_admission: None,
             effect_journal: None,
+            tool_guards: Vec::new(),
         }
     }
 
@@ -151,6 +154,19 @@ impl NodeContext {
 
     pub(crate) fn with_optional_effect_journal(mut self, journal: Option<Journal>) -> Self {
         self.effect_journal = journal;
+        self
+    }
+
+    /// The run's registered deny-only tool guards (evidence and admission
+    /// wave). Nodes dispatching tools should pass them to
+    /// [`crate::tool::ToolExecutor::with_tool_guards`]. The prebuilt ReAct
+    /// tools node does so automatically. Empty when the run registered none.
+    pub fn tool_guards(&self) -> &[Arc<dyn ToolGuard>] {
+        &self.tool_guards
+    }
+
+    pub(crate) fn with_tool_guards(mut self, guards: Vec<Arc<dyn ToolGuard>>) -> Self {
+        self.tool_guards = guards;
         self
     }
 
