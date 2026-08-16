@@ -157,12 +157,17 @@ pub enum CandidateKind {
     /// An ordered middleware layer list plus per-layer configuration
     /// (R0.11).
     MiddlewareComposition,
+    /// A context assembly policy — section layouts, budget splits, the
+    /// tokenizer pin, the compaction trigger (R0.13 wave 1). Surface
+    /// `context:{name}`.
+    ContextPolicy,
 }
 
 impl CandidateKind {
     /// The wire name (`prompt` / `policy` / `memory_set` /
     /// `tool_permission` / `tool_contract` / `model_settings` /
-    /// `memory_configuration` / `middleware_composition`).
+    /// `memory_configuration` / `middleware_composition` /
+    /// `context_policy`).
     pub fn as_str(&self) -> &'static str {
         match self {
             CandidateKind::Prompt => "prompt",
@@ -173,6 +178,7 @@ impl CandidateKind {
             CandidateKind::ModelSettings => "model_settings",
             CandidateKind::MemoryConfiguration => "memory_configuration",
             CandidateKind::MiddlewareComposition => "middleware_composition",
+            CandidateKind::ContextPolicy => "context_policy",
         }
     }
 }
@@ -300,6 +306,21 @@ pub enum CandidateContent {
         /// here, untouched there).
         layers: Vec<MiddlewareLayerConfig>,
     },
+    /// A context assembly policy (R0.13 wave 1): the section layouts,
+    /// budget splits, tokenizer pin, and compaction trigger the context
+    /// pipeline ([`crate::context`]) assembles under. Deliberately a new
+    /// kind rather than an optional-field overload: `memory_config` governs
+    /// what reads return; the context policy governs the whole assembly.
+    /// `Value`-bodied while the policy schema moves — the shipped
+    /// [`CandidateContent::Policy`] precedent (`parameters: Value`); the
+    /// typed parse is `ContextPolicy::from_value`, fail-closed on an
+    /// unknown schema version.
+    ContextPolicy {
+        /// The policy's name (the registry artifact's key part).
+        name: String,
+        /// The policy body (a `context-policy-v1` document).
+        policy: Value,
+    },
 }
 
 /// One layer in a [`CandidateContent::MiddlewareComposition`]: the layer's
@@ -423,6 +444,7 @@ impl Candidate {
             CandidateContent::ModelSettings { .. } => CandidateKind::ModelSettings,
             CandidateContent::MemoryConfiguration { .. } => CandidateKind::MemoryConfiguration,
             CandidateContent::MiddlewareComposition { .. } => CandidateKind::MiddlewareComposition,
+            CandidateContent::ContextPolicy { .. } => CandidateKind::ContextPolicy,
         }
     }
 
@@ -459,6 +481,9 @@ impl Candidate {
             }
             CandidateContent::MiddlewareComposition { name, .. } => {
                 surface_for_kind(CandidateKind::MiddlewareComposition, name)
+            }
+            CandidateContent::ContextPolicy { name, .. } => {
+                surface_for_kind(CandidateKind::ContextPolicy, name)
             }
         }
     }
@@ -506,7 +531,7 @@ impl Candidate {
 /// The surface key for one kind's named surface: `prompt:{name}` /
 /// `policy:{family}` / `memory:{scope-address}` / `tool:{tool}` /
 /// `tool_contract:{tool}` / `model_settings:{name}` /
-/// `memory_config:{name}` / `middleware:{name}`.
+/// `memory_config:{name}` / `middleware:{name}` / `context:{name}`.
 ///
 /// [`Candidate::surface`] builds its key through this function, and the
 /// configuration registry (`crate::registry`) keys artifacts by the same
@@ -522,6 +547,7 @@ pub fn surface_for_kind(kind: CandidateKind, name: &str) -> SurfaceKey {
         CandidateKind::ModelSettings => "model_settings",
         CandidateKind::MemoryConfiguration => "memory_config",
         CandidateKind::MiddlewareComposition => "middleware",
+        CandidateKind::ContextPolicy => "context",
     };
     SurfaceKey::new(format!("{prefix}:{name}"))
 }
@@ -1150,6 +1176,12 @@ fn is_approval_envelope_rule(rule: &EnvelopeRule) -> bool {
     *rule == EnvelopeRule::Approval
 }
 
+/// The wave-1 envelope answer for `context_policy` candidates (see
+/// [`PromotionEnvelope::rule_for`]): approval, always, declared as a
+/// constant rather than an envelope field so the shipped envelope wire
+/// shape is untouched.
+const CONTEXT_POLICY_ENVELOPE_RULE: EnvelopeRule = EnvelopeRule::Approval;
+
 impl PromotionEnvelope {
     /// The R0.8 default (design open question 6): `memory_set` candidates
     /// at run and agent scope with a clean verdict may auto-promote;
@@ -1178,6 +1210,13 @@ impl PromotionEnvelope {
     }
 
     /// The rule for `kind`.
+    ///
+    /// R0.13's `context_policy` has no envelope field yet: the wave-1 rule
+    /// is the conservative constant — a context policy steers every run's
+    /// assembly, the semantic blast radius the registry kinds already price
+    /// — so it answers [`EnvelopeRule::Approval`] without growing the
+    /// envelope's wire shape. A declarable rule lands with its wave's
+    /// golden, additively, if a deployment needs one.
     pub fn rule_for(&self, kind: CandidateKind) -> &EnvelopeRule {
         match kind {
             CandidateKind::Prompt => &self.prompt,
@@ -1188,6 +1227,7 @@ impl PromotionEnvelope {
             CandidateKind::ModelSettings => &self.model_settings,
             CandidateKind::MemoryConfiguration => &self.memory_configuration,
             CandidateKind::MiddlewareComposition => &self.middleware_composition,
+            CandidateKind::ContextPolicy => &CONTEXT_POLICY_ENVELOPE_RULE,
         }
     }
 
