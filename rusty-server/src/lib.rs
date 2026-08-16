@@ -187,6 +187,7 @@ mod replay;
 mod routes;
 mod runs;
 mod server_store;
+mod skills;
 mod sse;
 mod store;
 mod supervision;
@@ -281,6 +282,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "policy",
     "receipts",
     "registry",
+    "skills",
     "store",
     "tasks",
     "threads",

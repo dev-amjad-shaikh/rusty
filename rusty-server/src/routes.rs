@@ -164,6 +164,10 @@ pub(crate) struct AppState {
     /// dataset, experiment, and gate records persisted under
     /// `{store_path}/evaluations/`.
     pub evaluation_state: crate::evaluations::EvaluationState,
+    /// The skill plane (skill slice): one `SkillRegistry` per tenant over
+    /// the durable version files under `{store_path}/skills/` — file-backed
+    /// on either store backend, the receipt-keyring precedent.
+    pub skills: crate::skills::SkillPlane,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -275,6 +279,7 @@ pub(crate) fn build_router(
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
         evaluation_state: crate::evaluations::init_evaluation_state(),
+        skills: crate::skills::SkillPlane::load(&config.store_path),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // The durable pending-run queue's boot half: replay persisted queue
@@ -450,6 +455,29 @@ pub(crate) fn build_router(
         .route("/memory/forget", post(forget_memory))
         .route("/memory/forget_scope", post(forget_memory_scope))
         .route("/memory/{memory_id}", get(get_memory))
+        // The skill plane (skill slice): governed `SKILL.md` packages —
+        // register (parse + scan + immutable version), the tier-1 metadata
+        // catalog, on-demand tier-2 body and tier-3 member files, pinned
+        // versions, and the append-only history. The static segments win
+        // over `/skills/{name}` the way they do over `/memory/{memory_id}`.
+        .route(
+            "/skills",
+            post(crate::skills::register_skill).get(crate::skills::list_skills),
+        )
+        .route("/skills/{name}", get(crate::skills::get_skill))
+        .route("/skills/{name}/body", get(crate::skills::get_skill_body))
+        .route(
+            "/skills/{name}/history",
+            get(crate::skills::get_skill_history),
+        )
+        .route(
+            "/skills/{name}/versions/{revision}",
+            get(crate::skills::get_skill_version),
+        )
+        .route(
+            "/skills/{name}/files/{*path}",
+            get(crate::skills::get_skill_file),
+        )
         // The learning-candidate lifecycle (R0.8 wave 3): creation plus
         // the three journaled transitions, and the version-pointer
         // listing. Every transition requires `run_id` — the journal is

@@ -215,6 +215,7 @@ pub mod record;
 pub mod registry;
 pub mod remote;
 pub mod replay;
+pub mod skill;
 pub mod state;
 pub mod team_trace;
 pub mod tool;
