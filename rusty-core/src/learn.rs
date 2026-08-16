@@ -163,13 +163,16 @@ pub enum CandidateKind {
     /// tokenizer pin, the compaction trigger (R0.13 wave 1). Surface
     /// `context:{name}`.
     ContextPolicy,
+    /// A distilled skill package, by content address (R0.13 wave 4).
+    /// Surface `skill:{name}`.
+    Skill,
 }
 
 impl CandidateKind {
     /// The wire name (`prompt` / `policy` / `memory_set` /
     /// `tool_permission` / `tool_contract` / `model_settings` /
     /// `memory_configuration` / `middleware_composition` /
-    /// `context_policy`).
+    /// `context_policy` / `skill`).
     pub fn as_str(&self) -> &'static str {
         match self {
             CandidateKind::Prompt => "prompt",
@@ -181,6 +184,7 @@ impl CandidateKind {
             CandidateKind::MemoryConfiguration => "memory_configuration",
             CandidateKind::MiddlewareComposition => "middleware_composition",
             CandidateKind::ContextPolicy => "context_policy",
+            CandidateKind::Skill => "skill",
         }
     }
 }
@@ -351,6 +355,31 @@ pub enum CandidateContent {
         /// The policy body (a `context-policy-v1` document).
         policy: Value,
     },
+    /// A distilled skill package, by content address (R0.13 wave 4). The
+    /// candidate names the package's own digest
+    /// ([`crate::skill::SkillPackage::content_hash`]) — candidate identity
+    /// and package identity are one digest's reference, and no package
+    /// bytes live inside the candidate (the registry holds the bytes; the
+    /// candidate holds the address). The variant appends under the
+    /// established evolution rule: existing kinds, their content shapes,
+    /// and their goldens are untouched.
+    Skill {
+        /// The skill's name (the registry key; the surface's name part).
+        name: String,
+        /// The package's content address, minted by the skill plane's own
+        /// fail-closed parse — a candidate whose hash no validated package
+        /// produces is unbindable at consumption.
+        content_hash: String,
+        /// The run-facing binding (trigger tags, the declared tool set),
+        /// when the distiller declares one. `Value`-bodied while the
+        /// binding schema lands with the skills plane — the
+        /// [`CandidateContent::ContextPolicy`] precedent (`policy: Value`);
+        /// absent from the wire while unset. The typed parse is the skills
+        /// plane's; the candidate pipeline carries the declaration
+        /// opaquely, the wave-3 discipline for `selection` applied here.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<Value>,
+    },
 }
 
 /// One layer in a [`CandidateContent::MiddlewareComposition`]: the layer's
@@ -475,6 +504,7 @@ impl Candidate {
             CandidateContent::MemoryConfiguration { .. } => CandidateKind::MemoryConfiguration,
             CandidateContent::MiddlewareComposition { .. } => CandidateKind::MiddlewareComposition,
             CandidateContent::ContextPolicy { .. } => CandidateKind::ContextPolicy,
+            CandidateContent::Skill { .. } => CandidateKind::Skill,
         }
     }
 
@@ -515,6 +545,7 @@ impl Candidate {
             CandidateContent::ContextPolicy { name, .. } => {
                 surface_for_kind(CandidateKind::ContextPolicy, name)
             }
+            CandidateContent::Skill { name, .. } => surface_for_kind(CandidateKind::Skill, name),
         }
     }
 
@@ -561,7 +592,8 @@ impl Candidate {
 /// The surface key for one kind's named surface: `prompt:{name}` /
 /// `policy:{family}` / `memory:{scope-address}` / `tool:{tool}` /
 /// `tool_contract:{tool}` / `model_settings:{name}` /
-/// `memory_config:{name}` / `middleware:{name}` / `context:{name}`.
+/// `memory_config:{name}` / `middleware:{name}` / `context:{name}` /
+/// `skill:{name}`.
 ///
 /// [`Candidate::surface`] builds its key through this function, and the
 /// configuration registry (`crate::registry`) keys artifacts by the same
@@ -578,6 +610,7 @@ pub fn surface_for_kind(kind: CandidateKind, name: &str) -> SurfaceKey {
         CandidateKind::MemoryConfiguration => "memory_config",
         CandidateKind::MiddlewareComposition => "middleware",
         CandidateKind::ContextPolicy => "context",
+        CandidateKind::Skill => "skill",
     };
     SurfaceKey::new(format!("{prefix}:{name}"))
 }
@@ -1212,6 +1245,13 @@ fn is_approval_envelope_rule(rule: &EnvelopeRule) -> bool {
 /// shape is untouched.
 const CONTEXT_POLICY_ENVELOPE_RULE: EnvelopeRule = EnvelopeRule::Approval;
 
+/// The wave-4 envelope answer for `skill` candidates (see
+/// [`PromotionEnvelope::rule_for`]): approval, always — a wrong skill
+/// steers every run that selects it, the semantic blast radius R0.8
+/// already priced for prompts. Declared as a constant rather than an
+/// envelope field so the shipped envelope wire shape is untouched.
+const SKILL_ENVELOPE_RULE: EnvelopeRule = EnvelopeRule::Approval;
+
 impl PromotionEnvelope {
     /// The R0.8 default (design open question 6): `memory_set` candidates
     /// at run and agent scope with a clean verdict may auto-promote;
@@ -1258,6 +1298,7 @@ impl PromotionEnvelope {
             CandidateKind::MemoryConfiguration => &self.memory_configuration,
             CandidateKind::MiddlewareComposition => &self.middleware_composition,
             CandidateKind::ContextPolicy => &CONTEXT_POLICY_ENVELOPE_RULE,
+            CandidateKind::Skill => &SKILL_ENVELOPE_RULE,
         }
     }
 

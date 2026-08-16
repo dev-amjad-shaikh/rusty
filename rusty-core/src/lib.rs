@@ -234,6 +234,7 @@ pub mod registry;
 pub mod remote;
 pub mod replay;
 pub mod skill;
+pub mod skill_distill;
 pub mod skills;
 pub mod state;
 pub mod team_trace;
