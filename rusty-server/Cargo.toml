@@ -71,13 +71,14 @@ sqlx = { version = "0.8", default-features = false, features = [
 # Server-only by design — the core crate's contracts stay engine-free — and
 # pure Rust with no native deps. The major is pinned like the rest.
 cedar-policy = { version = "4", optional = true }
+# The connector plane's HTTP provider transport (`ReqwestTransport`
+# implementing core's `HttpTransport`): rustls only, no native TLS, with
+# `stream` for the byte-ceiling-enforced incremental read.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["full", "test-util"] }
-# Graceful-shutdown tests drive `serve_with_shutdown` over real sockets;
-# the load_envelope example needs `stream` for incremental SSE reads.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 # Trigger tests sign webhook bodies the way an external sender would.
 hmac = "0.12"
 sha2 = "0.10"

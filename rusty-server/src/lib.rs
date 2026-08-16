@@ -168,6 +168,7 @@ mod auth;
 mod broker;
 pub mod capsule_policy;
 mod capsules;
+mod connectors;
 mod coordination;
 mod crons;
 mod deploy;

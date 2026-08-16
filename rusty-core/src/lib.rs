@@ -194,6 +194,7 @@ pub mod capsule_host;
 pub mod checkpoint;
 #[cfg(feature = "postgres")]
 pub mod checkpoint_postgres;
+pub mod connector;
 pub mod deploy;
 pub mod durable;
 pub mod effects;
