@@ -180,7 +180,8 @@ roadmap's sentence made a path of ids.
 ### The connection model
 
 One entity, the `Connection` — a named, tenant-scoped record: provider kind (closed enum,
-additive-evolution: `oauth2_authorization_code`, `oauth2_client_credentials`, `api_key`,
+additive-evolution: `oauth2_authorization_code`, `oauth2_client_credentials`,
+`oauth2_password`, `api_key`,
 `basic`); subject (the per-user binding — a user id within the tenant; absent for
 service-level connections); the consent scope set (provider-semantics strings, recorded
 when the human consents); token material (access token, refresh token where the provider
@@ -534,6 +535,22 @@ row it can read.
 > codes. The Postgres-backed re-run of the proof is deferred to the
 > follow-up hardening pass (the custody invariants it would re-exercise
 > are the wave-3 backend tests').
+>
+> **Password-grant connections: implemented (2026-08-16).** The third
+> OAuth flow, `oauth2_password`, joins the same lifecycle rather than
+> beside it: registration and re-auth take a `password_grant` payload on
+> the two existing doors (`POST /connections`,
+> `POST /connections/{id}/consent`, mutually exclusive with the other
+> material paths), the server exchanges it through the same
+> `OAuthProvider` seam (`ReqwestOAuthProvider` in
+> `rusty-server/src/oauth.rs`) before sealing, and the sealed material
+> keeps the grant inputs — client id, username, password, token
+> endpoint — as custody so `refresh_if_due` re-mints access tokens with
+> no human in the loop: the refresh token leads, the sealed password is
+> the fallback when the token is absent or refused. Rotation preserves
+> the grant inputs across every refresh; a permanent refusal walks the
+> same `needs_reauth` path as the other flows, and re-auth re-exchanges
+> fresh credentials through the consent door.
 
 ## Open questions
 

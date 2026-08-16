@@ -95,6 +95,16 @@
 .slotRow select:hover { border-color: var(--rust); }
 .slotRow .errorInline { grid-column: 1 / -1; }
 .errorInline { margin: 0; color: #f4b7aa; font-size: 12px; line-height: 1.45; }
+.registerRow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.registerRow .quiet { max-width: 520px; line-height: 1.45; }
+.connectionForm { display: grid; gap: 12px; padding: 14px 15px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--glass-fill); }
+.connectionFormHead h3 { margin: 0 0 5px; font-size: 14px; font-weight: 400; }
+.connectionFormHead p { max-width: 640px; margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.grantField { display: grid; grid-template-columns: minmax(170px, .55fr) minmax(0, 1fr); gap: 3px 14px; align-items: center; }
+.grantField label { color: var(--text-faint); font: 400 10px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+.grantField input { width: 100%; min-height: 34px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 10px; background: var(--surface-1); color: var(--text); font: 300 12px var(--mono); }
+.grantField input:hover { border-color: var(--rust); }
+.grantField small { grid-column: 2; color: var(--text-faint); font-size: 11px; }
 
 /* ------------------------------------------------------------ catalog */
 .catalog { display: grid; gap: 12px; }
@@ -156,6 +166,8 @@
   .sectionHead > button { align-self: flex-start; }
   .registerForm { grid-template-columns: 1fr; }
   .slotRow { grid-template-columns: 1fr; }
+  .grantField { grid-template-columns: 1fr; }
+  .grantField small { grid-column: 1; }
   .row { grid-template-columns: 1fr; }
   .panelMeta div { grid-template-columns: 1fr; gap: 3px; }
   .pinForm { flex-wrap: wrap; }

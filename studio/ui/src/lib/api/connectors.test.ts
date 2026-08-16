@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectorManifestSchema } from "./connectors";
+import { connectorManifestSchema, passwordGrantSchema, vaultConnectionSchema } from "./connectors";
 
 // The connector plane's contract tests: the fixtures below are trimmed
 // copies of the exact JSON the runtime's service packs serialize (see
@@ -126,5 +126,42 @@ describe("connector manifest contract", () => {
       provider: { kind: "grpc_stream", target: "localhost:50051" },
     };
     expect(connectorManifestSchema.safeParse(forged).success).toBe(false);
+  });
+});
+
+describe("oauth2_password vault connection contract", () => {
+  const grant = {
+    token_url: "https://dev394299.service-now.com/oauth_token.do",
+    client_id: "client",
+    client_secret: "secret",
+    username: "nexus.connector",
+    password: "password",
+  };
+
+  it("admits a well-formed password grant", () => {
+    expect(passwordGrantSchema.parse(grant)).toEqual(grant);
+  });
+
+  it("rejects a non-https token endpoint", () => {
+    expect(passwordGrantSchema.safeParse({ ...grant, token_url: "http://dev394299.service-now.com/oauth_token.do" }).success).toBe(false);
+  });
+
+  it("rejects an empty secret", () => {
+    expect(passwordGrantSchema.safeParse({ ...grant, client_secret: "" }).success).toBe(false);
+  });
+
+  it("parses an oauth2_password vault record and rejects unknown providers", () => {
+    const record = {
+      connection_id: "conn-1",
+      provider: "oauth2_password",
+      subject: "nexus.connector",
+      scopes: [],
+      status: "active",
+      health: { consecutive_failures: 0 },
+      created_at: "2026-08-16T10:00:00Z",
+      updated_at: "2026-08-16T10:00:00Z",
+    };
+    expect(vaultConnectionSchema.parse(record).provider).toBe("oauth2_password");
+    expect(vaultConnectionSchema.safeParse({ ...record, provider: "saml" }).success).toBe(false);
   });
 });

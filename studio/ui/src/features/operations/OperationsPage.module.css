@@ -35,5 +35,8 @@
 .systemCard b { font-size: 12px; }
 .systemCard span { max-width: calc(100% - 32px); color: var(--text-muted); font-size: 10px; line-height: 1.45; }
 .systemCard i { position: absolute; right: 13px; bottom: 11px; color: var(--text-faint); font-style: normal; }
+.modeNav { display: flex; gap: 6px; margin: -12px 0 28px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-1); width: fit-content; }
+.modeNav a { padding: 7px 14px; border-radius: 8px; color: var(--text-muted); text-decoration: none; font-size: 12px; font-weight: 600; }
+.modeNav a[aria-current="page"] { background: var(--surface-3); color: var(--text); }
 @media (max-width: 760px) { .attention > header, .evidenceHead { align-items: flex-start; flex-direction: column; } .attentionList li { grid-template-columns: auto minmax(0, 1fr); } .attentionList button { grid-column: 2; justify-self: start; } .evidence dl { grid-template-columns: 1fr; } }
-@media (max-width: 620px) { .attention { min-height: 200px; padding: 22px 17px; } .systemsHead { align-items: flex-start; flex-direction: column; } .systemGrid { grid-template-columns: 1fr; } .systemCard { min-height: 90px; } .evidence { padding: 20px 17px; } }
+@media (max-width: 620px) { .attention { min-height: 200px; padding: 22px 17px; } .systemsHead { align-items: flex-start; flex-direction: column; } .systemGrid { grid-template-columns: 1fr; } .systemCard { min-height: 90px; } .evidence { padding: 20px 17px; } .modeNav { width: 100%; justify-content: stretch; } .modeNav a { flex: 1; text-align: center; } }

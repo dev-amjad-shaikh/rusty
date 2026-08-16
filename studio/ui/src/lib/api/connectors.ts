@@ -308,12 +308,25 @@ export async function getInstanceCatalog(connection: ConnectionIdentity, instanc
 // Vault connections (slot bindings resolve through these)
 // ------------------------------------------------------------------ //
 
+// ConnectionRecord (rusty-core/src/broker.rs): `health` is always
+// present; its refresh/failure fields are omitted until they happen.
+const connectionHealthSchema = z.object({
+  last_refresh_at: dateTime.optional(),
+  last_failure: z.object({
+    class: z.enum(["transient", "rate_limited", "timeout", "invalid_input", "dependency_failure", "resource_exhausted", "cancelled", "unknown"]),
+    detail: z.string(),
+    at: dateTime,
+  }).strict().optional(),
+  consecutive_failures: z.number().int().nonnegative(),
+}).strict();
+
 export const vaultConnectionSchema = z.object({
   connection_id: z.string().min(1),
-  provider: z.enum(["oauth2_authorization_code", "oauth2_client_credentials", "api_key", "basic"]),
+  provider: z.enum(["oauth2_authorization_code", "oauth2_client_credentials", "oauth2_password", "api_key", "basic"]),
   subject: z.string().optional(),
   scopes: z.array(z.string()),
   status: z.enum(["active", "needs_reauth", "revoked"]),
+  health: connectionHealthSchema,
   created_at: dateTime,
   updated_at: dateTime,
 }).strict();
@@ -325,6 +338,39 @@ const vaultConnectionListSchema = z.object({ connections: z.array(vaultConnectio
 export async function listVaultConnections(connection: ConnectionIdentity): Promise<VaultConnection[]> {
   const { text } = await requestText(connection, "/connections");
   return parseJson(text, vaultConnectionListSchema, "Vault connections").connections;
+}
+
+/// The `password_grant` registration payload: the resource-owner
+/// credentials the server exchanges with the token endpoint before
+/// sealing. Mirrors `PasswordGrant::validate` in the runtime — an
+/// `https://` endpoint and four non-empty, bounded values.
+export const passwordGrantSchema = z.object({
+  token_url: z.string().startsWith("https://", "The token endpoint must be an https:// URL.").max(2048),
+  client_id: z.string().min(1, "client_id is required").max(1024),
+  client_secret: z.string().min(1, "client_secret is required").max(1024),
+  username: z.string().min(1, "username is required").max(1024),
+  password: z.string().min(1, "password is required").max(1024),
+}).strict();
+
+export type PasswordGrant = z.infer<typeof passwordGrantSchema>;
+
+const connectionReceiptSchema = z.object({ connection: vaultConnectionSchema }).strict();
+
+/// `POST /connections` with the password grant: the exchange happens
+/// server-side (the provider's refusal is the form's 422), and the grant
+/// inputs are sealed with the minted tokens so refresh re-mints without a
+/// human. The receipt carries the public record — never the material.
+export async function registerVaultConnection(connection: ConnectionIdentity, grant: PasswordGrant): Promise<VaultConnection> {
+  const { status, text } = await requestText(connection, "/connections", {
+    method: "POST",
+    body: JSON.stringify({ provider: "oauth2_password", password_grant: grant }),
+  });
+  if (status !== 201) throw new StudioApiError("Connection registration returned an unproven receipt.", status, true);
+  const { connection: record } = parseMutationJson(text, connectionReceiptSchema, "Connection receipt", status);
+  if (record.provider !== "oauth2_password") {
+    throw new StudioApiError("Connection receipt named a different provider.", status, true);
+  }
+  return record;
 }
 
 // ------------------------------------------------------------------ //

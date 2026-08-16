@@ -7,8 +7,10 @@ import {
   slotNamedInError,
   type ConnectorInstance,
   type ConnectorManifest,
+  type VaultConnection,
 } from "../../lib/api/connectors";
 import { providerKindLabel } from "./lifecycle";
+import { RegisterConnectionForm } from "./RegisterConnectionForm";
 import styles from "./ConnectorsPage.module.css";
 
 export function InstantiatePanel({
@@ -28,6 +30,7 @@ export function InstantiatePanel({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [bindings, setBindings] = useState<Record<string, string>>({});
   const [slotError, setSlotError] = useState<{ slot: string | null; message: string } | null>(null);
+  const [registering, setRegistering] = useState(false);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -37,6 +40,20 @@ export function InstantiatePanel({
     queryKey: [scope, "connections"],
     queryFn: () => listVaultConnections(connection),
   });
+
+  // A freshly registered connection binds every still-empty slot: the
+  // form's whole purpose here is arming this manifest's bindings.
+  function onConnectionRegistered(record: VaultConnection) {
+    setRegistering(false);
+    setSlotError(null);
+    setBindings((current) => {
+      const next = { ...current };
+      for (const slot of manifest.credential_slots) {
+        if (!next[slot.name]) next[slot.name] = record.connection_id;
+      }
+      return next;
+    });
+  }
 
   const create = useMutation({
     mutationFn: () => createConnectorInstance(connection, {
@@ -82,6 +99,31 @@ export function InstantiatePanel({
         vault connection — the slot carries a connection id, never secret material. Raw secrets cannot be entered here.
       </p>
 
+      {registering ? (
+        <RegisterConnectionForm
+          connection={connection}
+          scope={scope}
+          onRegistered={onConnectionRegistered}
+          onCancel={() => setRegistering(false)}
+        />
+      ) : (
+        manifest.credential_slots.length > 0 && (
+          <div className={styles.registerRow}>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setRegistering(true)}
+              disabled={create.isPending}
+            >
+              Register a connection
+            </button>
+            <span className={styles.quiet}>
+              Exchange OAuth client credentials for a vault connection, then bind it to the slots below.
+            </span>
+          </div>
+        )
+      )}
+
       <form onSubmit={submit}>
         {manifest.credential_slots.length === 0 ? (
           <p className={styles.quiet}>This manifest declares no credential slots.</p>
@@ -102,7 +144,17 @@ export function InstantiatePanel({
                       {connections.error instanceof Error ? connections.error.message : "Vault connections could not be loaded."}
                     </span>
                   ) : vaultList.length === 0 ? (
-                    <span className={styles.quiet}>No vault connections in this workspace. Register a connection first.</span>
+                    <span className={styles.quiet}>
+                      No vault connections in this workspace.{" "}
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => setRegistering(true)}
+                        disabled={create.isPending}
+                      >
+                        Register a connection
+                      </button>
+                    </span>
                   ) : (
                     <select
                       id={`slot-${slot.name}`}

@@ -2375,6 +2375,13 @@ struct RegisterConnectionPayload {
     /// wave 4).
     #[serde(default)]
     authorization_code: Option<String>,
+    /// The resource-owner password grant to exchange for the initial
+    /// grant (provider `oauth2_password`). Exchanged through the
+    /// deployment's OAuth provider at registration; the grant inputs are
+    /// sealed with the minted tokens so the refresh lifecycle can
+    /// re-mint without a human.
+    #[serde(default)]
+    password_grant: Option<rusty_agent_runtime::broker::PasswordGrant>,
 }
 
 /// `POST /connections/{id}/consent` body. All fields optional, one
@@ -2383,8 +2390,10 @@ struct RegisterConnectionPayload {
 /// `authorization_code` (R0.11 wave 4) exchanges a fresh grant through
 /// the OAuth provider and seals that — both material paths journal
 /// `connection_refreshed` when the ceiling stands, and the reseal keeps
-/// the envelope's identity. `token` and `authorization_code` are
-/// mutually exclusive.
+/// the envelope's identity. `password_grant` re-exchanges an
+/// `oauth2_password` connection's credentials — the re-auth path out of
+/// `needs_reauth` for the password flow. The material paths are mutually
+/// exclusive.
 #[derive(Debug, Deserialize)]
 struct ConsentConnectionPayload {
     #[serde(default)]
@@ -2393,6 +2402,8 @@ struct ConsentConnectionPayload {
     token: Option<rusty_agent_runtime::broker::TokenMaterial>,
     #[serde(default)]
     authorization_code: Option<String>,
+    #[serde(default)]
+    password_grant: Option<rusty_agent_runtime::broker::PasswordGrant>,
 }
 
 /// `POST /connections/{id}/revoke` body (an empty object revokes without
@@ -2449,7 +2460,51 @@ async fn exchange_authorization_code(
         access_token: grant.access_token,
         refresh_token: grant.refresh_token,
         client_secret: None,
+        client_id: None,
+        username: None,
+        password: None,
+        token_url: None,
         expires_at: grant.expires_at,
+    })
+}
+
+/// Exchange a resource-owner password grant through the deployment's OAuth
+/// provider — the registration (and re-auth) act of an `oauth2_password`
+/// connection. The sealed material keeps the grant inputs alongside the
+/// minted tokens: the password grant's whole point is that the refresh
+/// lifecycle can re-mint access tokens without a human, so the password,
+/// client credentials, and token endpoint persist as custody (the
+/// `client_secret` precedent, extended to the full presentation set).
+/// `409` when no provider is configured; the provider's terminal refusal
+/// is the client's `422`, a transient failure a `500`.
+async fn exchange_password_grant(
+    state: &AppState,
+    grant: &rusty_agent_runtime::broker::PasswordGrant,
+) -> Result<rusty_agent_runtime::broker::TokenMaterial, ApiError> {
+    grant.validate().map_err(invalid_connection_input)?;
+    let Some((provider, _)) = state.broker.oauth() else {
+        return Err(ApiError::conflict(
+            "no OAuth provider is configured on this server — a password-grant exchange \
+             requires one (`ServerConfig::with_oauth_provider`)"
+                .to_owned(),
+        ));
+    };
+    let minted = provider.exchange_password(grant).await.map_err(|failure| {
+        if failure.permanent {
+            ApiError::unprocessable(format!("the password grant was refused: {failure}"))
+        } else {
+            ApiError::internal(format!("the password grant exchange failed: {failure}"))
+        }
+    })?;
+    Ok(rusty_agent_runtime::broker::TokenMaterial {
+        access_token: minted.access_token,
+        refresh_token: minted.refresh_token,
+        client_secret: Some(grant.client_secret.clone()),
+        client_id: Some(grant.client_id.clone()),
+        username: Some(grant.username.clone()),
+        password: Some(grant.password.clone()),
+        token_url: Some(grant.token_url.clone()),
+        expires_at: minted.expires_at,
     })
 }
 
@@ -2462,16 +2517,23 @@ async fn register_connection(
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<RegisterConnectionPayload>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    if payload.token.is_some() == payload.authorization_code.is_some() {
+    let paths = payload.token.is_some() as u8
+        + payload.authorization_code.is_some() as u8
+        + payload.password_grant.is_some() as u8;
+    if paths != 1 {
         return Err(ApiError::unprocessable(
-            "exactly one of `token` or `authorization_code` registers a connection — the \
-             material is sealed verbatim, or the code is exchanged through the deployment's \
-             OAuth provider; never both, never neither"
+            "exactly one of `token`, `authorization_code`, or `password_grant` registers a \
+             connection — the material is sealed verbatim, the code or the grant is exchanged \
+             through the deployment's OAuth provider; never more than one, never neither"
                 .to_owned(),
         ));
     }
-    let token = match (&payload.token, &payload.authorization_code) {
-        (Some(token), None) => {
+    let token = match (
+        &payload.token,
+        &payload.authorization_code,
+        &payload.password_grant,
+    ) {
+        (Some(token), None, None) => {
             if token.access_token.is_empty() {
                 return Err(ApiError::unprocessable(
                     "token.access_token must not be empty".to_owned(),
@@ -2479,7 +2541,19 @@ async fn register_connection(
             }
             token.clone()
         }
-        (None, Some(code)) => exchange_authorization_code(&state, code, &payload.scopes).await?,
+        (None, Some(code), None) => {
+            exchange_authorization_code(&state, code, &payload.scopes).await?
+        }
+        (None, None, Some(grant)) => {
+            if payload.provider != rusty_agent_runtime::broker::ConnectionProvider::Oauth2Password {
+                return Err(ApiError::unprocessable(
+                    "password_grant registers an `oauth2_password` connection — the provider \
+                     field must say so"
+                        .to_owned(),
+                ));
+            }
+            exchange_password_grant(&state, grant).await?
+        }
         _ => unreachable!("the exclusivity gate passed"),
     };
     rusty_agent_runtime::broker::validate_connection_fields(
@@ -2547,16 +2621,24 @@ async fn consent_connection(
     Path(connection_id): Path<String>,
     Json(payload): Json<ConsentConnectionPayload>,
 ) -> Result<Json<Value>, ApiError> {
-    if payload.scopes.is_none() && payload.token.is_none() && payload.authorization_code.is_none() {
+    if payload.scopes.is_none()
+        && payload.token.is_none()
+        && payload.authorization_code.is_none()
+        && payload.password_grant.is_none()
+    {
         return Err(ApiError::unprocessable(
-            "a consent act needs `scopes`, `token`, and/or `authorization_code`".to_owned(),
+            "a consent act needs `scopes`, `token`, `authorization_code`, and/or `password_grant`"
+                .to_owned(),
         ));
     }
-    if payload.token.is_some() && payload.authorization_code.is_some() {
+    let material_paths = payload.token.is_some() as u8
+        + payload.authorization_code.is_some() as u8
+        + payload.password_grant.is_some() as u8;
+    if material_paths > 1 {
         return Err(ApiError::unprocessable(
-            "`token` and `authorization_code` are mutually exclusive — the material is sealed \
-             verbatim, or the code is exchanged through the deployment's OAuth provider; \
-             never both"
+            "`token`, `authorization_code`, and `password_grant` are mutually exclusive — the \
+             material is sealed verbatim, or the code or grant is exchanged through the \
+             deployment's OAuth provider; never more than one"
                 .to_owned(),
         ));
     }
@@ -2564,9 +2646,13 @@ async fn consent_connection(
         rusty_agent_runtime::broker::validate_connection_fields(None, scopes)
             .map_err(invalid_connection_input)?;
     }
-    let token = match (&payload.token, &payload.authorization_code) {
-        (None, None) => None,
-        (Some(token), None) => {
+    let token = match (
+        &payload.token,
+        &payload.authorization_code,
+        &payload.password_grant,
+    ) {
+        (None, None, None) => None,
+        (Some(token), None, None) => {
             if token.access_token.is_empty() {
                 return Err(ApiError::unprocessable(
                     "token.access_token must not be empty".to_owned(),
@@ -2574,7 +2660,7 @@ async fn consent_connection(
             }
             Some(token.clone())
         }
-        (None, Some(code)) => {
+        (None, Some(code), None) => {
             // The exchange's scope set is the act's new ceiling when the
             // act declares one, else the connection's standing set — the
             // provider answers for the same set the consent records.
@@ -2594,6 +2680,7 @@ async fn consent_connection(
             };
             Some(exchange_authorization_code(&state, code, &scopes).await?)
         }
+        (None, None, Some(grant)) => Some(exchange_password_grant(&state, grant).await?),
         _ => unreachable!("the exclusivity gate passed"),
     };
     match state

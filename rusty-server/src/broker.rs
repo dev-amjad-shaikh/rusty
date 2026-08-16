@@ -59,11 +59,11 @@ use std::time::Duration;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use rusty_agent_runtime::broker::{
-    hex_decode, hex_encode, new_connection_id, new_handle_id, scopes_missing, BrokerDenial,
-    ClassifiedFailure, ConnectionConsent, ConnectionProvider, ConnectionReauthRequired,
-    ConnectionRecord, ConnectionRefresh, ConnectionRevocation, ConnectionStatus, CredentialHandle,
-    CredentialUse, HandleClaims, HandleIssuance, OAuthProvider, SealedCredential, StoredConnection,
-    TokenMaterial, SEALED_FORMAT_VERSION,
+    BrokerDenial, ClassifiedFailure, ConnectionConsent, ConnectionProvider,
+    ConnectionReauthRequired, ConnectionRecord, ConnectionRefresh, ConnectionRevocation,
+    ConnectionStatus, CredentialHandle, CredentialUse, HandleClaims, HandleIssuance, OAuthProvider,
+    SEALED_FORMAT_VERSION, SealedCredential, StoredConnection, TokenMaterial, hex_decode,
+    hex_encode, new_connection_id, new_handle_id, scopes_missing,
 };
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
 use rusty_agent_runtime::record::{Effect, RunEventKind};
@@ -71,8 +71,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
 use chacha20poly1305::XChaCha20Poly1305;
+use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
 
 use crate::server_store::{ConnectionUpdate, ServerStore, StoreResult};
 
@@ -855,7 +855,7 @@ impl Broker {
                 RevokeOutcome::Applied { .. } | RevokeOutcome::Converged(_) => {}
                 RevokeOutcome::Unknown => return Ok(false),
                 RevokeOutcome::Conflict => {
-                    return Err("connection changed under deletion; retry".to_string())
+                    return Err("connection changed under deletion; retry".to_string());
                 }
             }
         }
@@ -1221,12 +1221,17 @@ impl Broker {
         if expires_at > now + refresh_window_for(&record.connection_id, *window) {
             return Ok(None);
         }
-        // The two OAuth flows refresh on different material: an
+        // The OAuth flows refresh on different material: an
         // authorization-code connection presents its refresh token, a
-        // client-credentials connection re-presents its client secret.
+        // client-credentials connection re-presents its client secret, a
+        // password connection presents its refresh token and falls back
+        // to the sealed password when the token is absent or refused.
         let has_refresh_path = match record.provider {
             ConnectionProvider::Oauth2AuthorizationCode => material.refresh_token.is_some(),
             ConnectionProvider::Oauth2ClientCredentials => material.client_secret.is_some(),
+            ConnectionProvider::Oauth2Password => {
+                material.refresh_token.is_some() || material.password.is_some()
+            }
             _ => unreachable!("the is_oauth gate passed"),
         };
         if !has_refresh_path {
@@ -1245,12 +1250,18 @@ impl Broker {
                     access_token: grant.access_token,
                     // Providers that rotate refresh tokens return a new
                     // one; providers that don't return `None` and the
-                    // presented one carries over. The client secret is
-                    // custody, not a grant output — it persists.
+                    // presented one carries over. The grant inputs — client
+                    // credentials, the password-grant material, the token
+                    // endpoint — are custody, not grant outputs: they
+                    // persist across every rotation.
                     refresh_token: grant
                         .refresh_token
                         .or_else(|| material.refresh_token.clone()),
                     client_secret: material.client_secret.clone(),
+                    client_id: material.client_id.clone(),
+                    username: material.username.clone(),
+                    password: material.password.clone(),
+                    token_url: material.token_url.clone(),
                     expires_at: grant.expires_at,
                 };
                 let (key_id, master) = self.active_master().await?;
@@ -1527,6 +1538,10 @@ mod tests {
             access_token: "sk-live-MARKER-9f2e".into(),
             refresh_token: Some("rt-MARKER-41ab".into()),
             client_secret: None,
+            client_id: None,
+            username: None,
+            password: None,
+            token_url: None,
             expires_at: Some(DateTime::<Utc>::from_timestamp_millis(1_800_003_600_000).unwrap()),
         }
     }
@@ -1588,6 +1603,10 @@ mod tests {
             access_token: "sk-live-ROTATED".into(),
             refresh_token: None,
             client_secret: None,
+            client_id: None,
+            username: None,
+            password: None,
+            token_url: None,
             expires_at: None,
         };
         let second = reseal(&key_id, &master, "conn-abc", &first, &rotated).unwrap();
@@ -1863,6 +1882,10 @@ mod tests {
             access_token: "sk-live-ROTATED".into(),
             refresh_token: None,
             client_secret: None,
+            client_id: None,
+            username: None,
+            password: None,
+            token_url: None,
             expires_at: None,
         };
         match b
@@ -1952,6 +1975,10 @@ mod tests {
             access_token: "sk-live-DUE".into(),
             refresh_token: Some("rt-due".into()),
             client_secret: None,
+            client_id: None,
+            username: None,
+            password: None,
+            token_url: None,
             expires_at: Some(Utc::now() + chrono::Duration::seconds(60)),
         }
     }
@@ -2082,9 +2109,11 @@ mod tests {
         let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
         assert_eq!(resolved.material.access_token, "sk-live-DUE");
         assert_eq!(provider.call_counts(), (0, 0));
-        assert!(!journal_kinds(&store)
-            .await
-            .contains(&RunEventKind::ConnectionRefreshed));
+        assert!(
+            !journal_kinds(&store)
+                .await
+                .contains(&RunEventKind::ConnectionRefreshed)
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2220,6 +2249,10 @@ mod tests {
                     access_token: "sk-live-DEAD".into(),
                     refresh_token: None,
                     client_secret: None,
+                    client_id: None,
+                    username: None,
+                    password: None,
+                    token_url: None,
                     expires_at: Some(expired),
                 },
             )
@@ -2282,6 +2315,10 @@ mod tests {
                     access_token: "cc-token-0".into(),
                     refresh_token: None,
                     client_secret: Some("cc-secret-MARKER".into()),
+                    client_id: None,
+                    username: None,
+                    password: None,
+                    token_url: None,
                     expires_at: Some(Utc::now() + chrono::Duration::seconds(60)),
                 },
             )
@@ -2298,6 +2335,92 @@ mod tests {
             Some("cc-secret-MARKER")
         );
         assert_eq!(provider.call_counts(), (0, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn password_connection_refresh_rotates_and_keeps_the_grant_material() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new());
+        let (b, _) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let record = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2Password,
+                None,
+                BTreeSet::new(),
+                &TokenMaterial {
+                    access_token: "sn-token-0".into(),
+                    refresh_token: Some("sn-rt-0".into()),
+                    client_secret: Some("cs-MARKER".into()),
+                    client_id: Some("ci-MARKER".into()),
+                    username: Some("nexus.connector".into()),
+                    password: Some("pw-MARKER".into()),
+                    token_url: Some("https://dev394299.service-now.com/oauth_token.do".into()),
+                    expires_at: Some(Utc::now() + chrono::Duration::seconds(60)),
+                },
+            )
+            .await
+            .unwrap();
+        let resolved = issue_and_resolve(&b, &record.connection_id).await.unwrap();
+        // Rotated beneath the presented refresh token, and the whole
+        // grant material — client credentials, username, password, token
+        // endpoint — carried over as custody for the next rotation.
+        assert_eq!(resolved.material.access_token, "scripted-token-0");
+        assert_eq!(resolved.material.refresh_token.as_deref(), Some("sn-rt-0"));
+        assert_eq!(resolved.material.client_id.as_deref(), Some("ci-MARKER"));
+        assert_eq!(
+            resolved.material.client_secret.as_deref(),
+            Some("cs-MARKER")
+        );
+        assert_eq!(
+            resolved.material.username.as_deref(),
+            Some("nexus.connector")
+        );
+        assert_eq!(resolved.material.password.as_deref(), Some("pw-MARKER"));
+        assert_eq!(
+            resolved.material.token_url.as_deref(),
+            Some("https://dev394299.service-now.com/oauth_token.do")
+        );
+        assert_eq!(provider.call_counts(), (0, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn password_connection_without_any_refresh_material_fails_closed_when_expired() {
+        let root = temp_store();
+        let provider = Arc::new(ScriptedOAuthProvider::new());
+        let (b, _) = oauth_broker(&root, Arc::clone(&provider), DEFAULT_REFRESH_WINDOW);
+        let expired = Utc::now() - chrono::Duration::seconds(60);
+        let dead = b
+            .register(
+                "acme",
+                ConnectionProvider::Oauth2Password,
+                None,
+                BTreeSet::new(),
+                &TokenMaterial {
+                    access_token: "sn-token-0".into(),
+                    refresh_token: None,
+                    client_secret: None,
+                    client_id: None,
+                    username: None,
+                    password: None,
+                    token_url: None,
+                    expires_at: Some(expired),
+                },
+            )
+            .await
+            .unwrap();
+        // No refresh token and no password: nothing to re-present, and
+        // the provider is never called.
+        let err = issue_and_resolve(&b, &dead.connection_id)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+            "got: {err}"
+        );
+        assert_eq!(provider.call_counts(), (0, 0));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2336,6 +2459,10 @@ mod tests {
                 access_token: "sk-static".into(),
                 refresh_token: None,
                 client_secret: None,
+                client_id: None,
+                username: None,
+                password: None,
+                token_url: None,
                 expires_at: None,
             },
         )
@@ -2353,9 +2480,11 @@ mod tests {
         );
         let after = b.get("acme", &due.connection_id).await.unwrap().unwrap();
         assert!(after.health.last_refresh_at.is_some());
-        assert!(journal_kinds(&store)
-            .await
-            .contains(&RunEventKind::ConnectionRefreshed));
+        assert!(
+            journal_kinds(&store)
+                .await
+                .contains(&RunEventKind::ConnectionRefreshed)
+        );
 
         // A second due connection whose refresh the provider refuses
         // terminally: the pass flips it (journaled) and counts it.

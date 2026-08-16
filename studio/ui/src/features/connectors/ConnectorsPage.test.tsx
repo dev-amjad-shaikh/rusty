@@ -14,9 +14,11 @@ import {
   listConnectorManifests,
   listVaultConnections,
   registerConnectorManifest,
+  registerVaultConnection,
   sweepConnectors,
   type ConnectorInstance,
   type ConnectorManifest,
+  type VaultConnection,
 } from "../../lib/api/connectors";
 import { useConnectionStore } from "../../state/connection";
 import { ConnectorsPage } from "./ConnectorsPage";
@@ -36,6 +38,7 @@ vi.mock("../../lib/api/connectors", async (importActual) => {
     sweepConnectors: vi.fn(),
     getInstanceCatalog: vi.fn(),
     listVaultConnections: vi.fn(),
+    registerVaultConnection: vi.fn(),
   };
 });
 
@@ -191,7 +194,7 @@ describe("Connectors", () => {
     openWorkspace();
     vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
     vi.mocked(listVaultConnections).mockResolvedValue([
-      { connection_id: "conn-0123456789abcdef0123456789abcdef", provider: "api_key", scopes: ["search"], status: "active", created_at: "2026-08-11T00:00:00Z", updated_at: "2026-08-11T00:00:00Z" },
+      { connection_id: "conn-0123456789abcdef0123456789abcdef", provider: "api_key", scopes: ["search"], status: "active", health: { consecutive_failures: 0 }, created_at: "2026-08-11T00:00:00Z", updated_at: "2026-08-11T00:00:00Z" },
     ]);
     const created = instance({ instance_id: "inst-000002" });
     vi.mocked(createConnectorInstance).mockResolvedValue(created);
@@ -216,11 +219,82 @@ describe("Connectors", () => {
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
   });
 
+  it("registers an oauth2_password connection from the instantiate panel and binds it to the slots", async () => {
+    openWorkspace();
+    vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
+    const registered: VaultConnection = {
+      connection_id: "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      provider: "oauth2_password",
+      subject: "nexus.connector",
+      scopes: [],
+      status: "active",
+      health: { consecutive_failures: 0 },
+      created_at: "2026-08-16T10:00:00Z",
+      updated_at: "2026-08-16T10:00:00Z",
+    };
+    // The vault starts empty; the receipt's invalidation re-lists it with the new record.
+    vi.mocked(listVaultConnections).mockResolvedValueOnce([]).mockResolvedValue([registered]);
+    vi.mocked(registerVaultConnection).mockResolvedValue(registered);
+    vi.mocked(createConnectorInstance).mockResolvedValue(instance({ instance_id: "inst-000009" }));
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Instantiate" }));
+    const panel = await screen.findByRole("complementary");
+    expect(panel).toHaveTextContent("No vault connections in this workspace");
+    await userEvent.click(within(panel).getAllByRole("button", { name: "Register a connection" })[0]);
+    expect(await within(panel).findByRole("heading", { name: "Register a vault connection" })).toBeVisible();
+
+    // Client-side validation: a plain-http token endpoint never leaves the form.
+    await userEvent.click(within(panel).getByLabelText("Token endpoint URL"));
+    await userEvent.paste("http://dev394299.service-now.com/oauth_token.do");
+    await userEvent.click(within(panel).getByLabelText("OAuth client ID"));
+    await userEvent.paste("client-id");
+    await userEvent.click(within(panel).getByLabelText("OAuth client secret"));
+    await userEvent.paste("client-secret");
+    await userEvent.click(within(panel).getByLabelText("Username"));
+    await userEvent.paste("nexus.connector");
+    await userEvent.click(within(panel).getByLabelText("Password"));
+    await userEvent.paste("account-password");
+    await userEvent.click(within(panel).getByRole("button", { name: "Register connection" }));
+    expect(await within(panel).findByRole("alert")).toHaveTextContent("https://");
+    expect(registerVaultConnection).not.toHaveBeenCalled();
+
+    await userEvent.clear(within(panel).getByLabelText("Token endpoint URL"));
+    await userEvent.click(within(panel).getByLabelText("Token endpoint URL"));
+    await userEvent.paste("https://dev394299.service-now.com/oauth_token.do");
+    await userEvent.click(within(panel).getByRole("button", { name: "Register connection" }));
+
+    await waitFor(() => expect(registerVaultConnection).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(registerVaultConnection).mock.calls[0][1]).toEqual({
+      token_url: "https://dev394299.service-now.com/oauth_token.do",
+      client_id: "client-id",
+      client_secret: "client-secret",
+      username: "nexus.connector",
+      password: "account-password",
+    });
+
+    // The receipt stays visible until the operator binds it into the slots.
+    const receipt = await within(panel).findByRole("status");
+    expect(receipt).toHaveTextContent("Connection registered.");
+    expect(receipt).toHaveTextContent("conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    await userEvent.click(within(receipt).getByRole("button", { name: "Bind and continue" }));
+
+    // Every still-empty slot is bound to the new connection id.
+    const select = within(panel).getByLabelText(/api_key/);
+    await waitFor(() => expect(select).toHaveValue("conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+    await userEvent.click(within(panel).getByRole("button", { name: "Instantiate connector" }));
+    await waitFor(() => expect(createConnectorInstance).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createConnectorInstance).mock.calls[0][1]).toEqual({
+      manifest_hash: manifestHash,
+      credentials: { api_key: "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    });
+  });
+
   it("reflects the server's missing-slot 422 inline on the named slot", async () => {
     openWorkspace();
     vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
     vi.mocked(listVaultConnections).mockResolvedValue([
-      { connection_id: "conn-0123456789abcdef0123456789abcdef", provider: "api_key", scopes: [], status: "active", created_at: "2026-08-11T00:00:00Z", updated_at: "2026-08-11T00:00:00Z" },
+      { connection_id: "conn-0123456789abcdef0123456789abcdef", provider: "api_key", scopes: [], status: "active", health: { consecutive_failures: 0 }, created_at: "2026-08-11T00:00:00Z", updated_at: "2026-08-11T00:00:00Z" },
     ]);
     vi.mocked(createConnectorInstance).mockRejectedValue(
       new StudioApiError("credential slot `api_key` requires a connection id in `credentials`", 422),

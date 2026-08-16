@@ -93,6 +93,20 @@ export const eventKindSchema = z.enum([
   "connection_needs_reauth", "artifact_committed", "artifact_retention_released",
   "artifact_pruned", "artifact_unavailable", "capsule_resolved", "capsule_call", "capsule_denied",
   "signing_key_rotated",
+  "deployment_resolved",
+  "revision_registered",
+  "revision_promoted",
+  "revision_rolled_back",
+  "environment_declared",
+  "env_secret_set",
+  "env_secret_revoked",
+  "env_secret_denied",
+  "gate_decision_recorded",
+  "canary_declared",
+  "canary_cleared",
+  "shadow_run_started",
+  "shadow_effect_refused",
+  "shadow_verdict",
 ]);
 
 export const eventStatusSchema = z.enum(["ok", "error", "interrupted"]);

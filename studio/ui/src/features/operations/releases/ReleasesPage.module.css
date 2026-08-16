@@ -1,0 +1,565 @@
+.modeNav {
+  display: flex;
+  gap: 6px;
+  margin: -12px 0 28px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-1);
+  width: fit-content;
+}
+
+.modeNav a {
+  padding: 7px 14px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.modeNav a[aria-current="page"] {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 240px 1fr 280px;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.emptyWorkspace {
+  grid-column: 2 / -1;
+  padding: 48px 24px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.envList {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-1);
+  padding: 18px;
+}
+
+.envList header {
+  margin-bottom: 14px;
+}
+
+.envList h2 {
+  margin: 6px 0 0;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.envList ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.envList li button {
+  width: 100%;
+  text-align: left;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-0);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.envList li button.selected,
+.envList li button:hover {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+
+.envList li button b {
+  display: block;
+  font-size: 13px;
+}
+
+.envList li button span {
+  display: block;
+  color: var(--text-faint);
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.emptyList {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.decision {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-1);
+  padding: 22px;
+}
+
+.decision h2 {
+  margin: 6px 0 0;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.actionForm {
+  margin-top: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.actionForm label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.actionForm input[type="text"],
+.actionForm input[type="number"] {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-0);
+  color: var(--text);
+}
+
+.ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ack input {
+  margin-top: 2px;
+}
+
+.actionRow {
+  display: flex;
+  gap: 10px;
+}
+
+.noAction {
+  margin-top: 18px;
+  color: var(--text-muted);
+}
+
+.approvalNotice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.inspector {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-1);
+  padding: 18px;
+}
+
+.inspector h2 {
+  margin: 6px 0 16px;
+  font-size: 16px;
+}
+
+.inspector dl {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.inspector dt {
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.inspector dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.spine {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-1);
+}
+
+.spine ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.spine li {
+  flex: 1 1 0;
+  min-width: 120px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-0);
+  text-align: center;
+}
+
+.spine li[data-state="ready"],
+.spine li[data-state="active"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.spine li span {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.spine li code {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.revisions {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-1);
+  padding: 18px;
+  margin-bottom: 24px;
+}
+
+.revisions h2 {
+  margin: 6px 0 16px;
+  font-size: 16px;
+}
+
+.revisions ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.revisions li button {
+  width: 100%;
+  text-align: left;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-0);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.revisions li.selectedRev button {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.revisions code {
+  font-size: 12px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.revisions span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.revisions small {
+  display: block;
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+
+.revisionDetail {
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface-2);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.revisionDetail h2 {
+  margin: 6px 0 16px;
+  font-size: 18px;
+}
+
+.revisionDetail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+
+.revisionDetail dt {
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.revisionDetail dd {
+  margin: 4px 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.timeline {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-1);
+  padding: 18px;
+  margin-bottom: 24px;
+}
+
+.timeline h2 {
+  margin: 6px 0 16px;
+  font-size: 16px;
+}
+
+.timeline ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.timeline li button {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-0);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.timeline li.selectedEvent button {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.timeline time {
+  display: block;
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.timeline strong {
+  display: block;
+  font-size: 13px;
+}
+
+.timeline span {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.secrets {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-1);
+  padding: 18px;
+}
+
+.secrets h2 {
+  margin: 6px 0 16px;
+  font-size: 16px;
+}
+
+.secrets ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.secrets li {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-0);
+}
+
+.secrets li b {
+  display: block;
+  font-size: 13px;
+}
+
+.secrets li span,
+.secrets li small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 100;
+}
+
+.dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow);
+}
+
+.dialog header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dialog header button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dialogBody {
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.dialogBody label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dialogBody input,
+.dialogBody select {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-0);
+  color: var(--text);
+}
+
+.dialogBody .chk {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.review {
+  padding: 12px;
+  border-left: 3px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.error {
+  padding: 10px 12px;
+  border-left: 3px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 1024px) {
+  .workspace {
+    grid-template-columns: 200px 1fr;
+  }
+  .inspector {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .envList,
+  .decision,
+  .inspector {
+    grid-column: 1 / -1;
+  }
+  .spine ol {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 390px) {
+  .page-header {
+    flex-direction: column;
+  }
+  .actions {
+    width: 100%;
+  }
+  .actions button {
+    flex: 1;
+  }
+}

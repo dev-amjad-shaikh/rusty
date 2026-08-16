@@ -20,6 +20,11 @@ export function evidencePreview(value: string, maxBytes = 500) {
   return truncated ? `${output}…` : output;
 }
 
+export function shortId(value: string, length = 12) {
+  if (value.length <= length * 2) return value;
+  return `${value.slice(0, length)}…${value.slice(-length)}`;
+}
+
 export function bytePreview(value: string, maxBytes: number) {
   const bytes = new TextEncoder().encode(value);
   if (bytes.byteLength <= maxBytes) return { text: value, truncated: false, bytes: bytes.byteLength };

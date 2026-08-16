@@ -1,20 +1,23 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { lazy } from "react";
-import { createRootRouteWithContext, createRoute, createRouter } from "@tanstack/react-router";
+import {
+  createRootRouteWithContext,
+  createRoute,
+  createRouter,
+  redirect,
+} from "@tanstack/react-router";
 import { AppShell } from "./app/AppShell";
-
-const AgentsPage = lazy(() => import("./features/agents/AgentsPage").then((module) => ({ default: module.AgentsPage })));
-const AgentBuilderPage = lazy(() => import("./features/agents/AgentBuilderPage").then((module) => ({ default: module.AgentBuilderPage })));
-const AgentWorkspace = lazy(() => import("./features/agents/AgentWorkspace").then((module) => ({ default: module.AgentWorkspace })));
-const PromptStudio = lazy(() => import("./features/prompts/PromptStudio").then((module) => ({ default: module.PromptStudio })));
-const WorkPage = lazy(() => import("./features/work/WorkPage").then((module) => ({ default: module.WorkPage })));
-const RunComparePage = lazy(() => import("./features/work/RunComparePage").then((module) => ({ default: module.RunComparePage })));
-const OperationsPage = lazy(() => import("./features/operations/OperationsPage").then((module) => ({ default: module.OperationsPage })));
-const CommandCenter = lazy(() => import("./features/command-center/CommandCenter").then((module) => ({ default: module.CommandCenter })));
-const SkillsPage = lazy(() => import("./features/skills-tools/SkillsPage").then((module) => ({ default: module.SkillsPage })));
-const KnowledgePage = lazy(() => import("./features/knowledge/KnowledgePage").then((module) => ({ default: module.KnowledgePage })));
-const MemoryPage = lazy(() => import("./features/memory/MemoryPage").then((module) => ({ default: module.MemoryPage })));
-const ConnectorsPage = lazy(() => import("./features/connectors/ConnectorsPage").then((module) => ({ default: module.ConnectorsPage })));
+import { AgentsPage } from "./features/agents/AgentsPage";
+import { AgentBuilderPage } from "./features/agents/AgentBuilderPage";
+import { AgentWorkspace } from "./features/agents/AgentWorkspace";
+import { PromptStudio } from "./features/prompts/PromptStudio";
+import { WorkPage } from "./features/work/WorkPage";
+import { RunComparePage } from "./features/work/RunComparePage";
+import { SkillsPage } from "./features/skills-tools/SkillsPage";
+import { KnowledgePage } from "./features/knowledge/KnowledgePage";
+import { MemoryPage } from "./features/memory/MemoryPage";
+import { ConnectorsPage } from "./features/connectors/ConnectorsPage";
+import { OperationsPage } from "./features/operations/OperationsPage";
+import { ReleasesPage } from "./features/operations/releases/ReleasesPage";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -28,25 +31,28 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: CommandCenter,
+  beforeLoad: () => { throw redirect({ to: "/work" }); },
 });
 
 const agentsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents", component: AgentsPage });
 const agentBuilderRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents/new", component: AgentBuilderPage });
 const agentRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents/$assistantId", component: AgentWorkspace });
 const promptsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents/prompts", component: PromptStudio });
+const skillsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/skills", component: SkillsPage });
+const knowledgeRoute = createRoute({ getParentRoute: () => rootRoute, path: "/knowledge", component: KnowledgePage });
 const workRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work", component: WorkPage });
 const workCompareRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/compare", component: RunComparePage });
 const workRunRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId", component: WorkPage });
 const workTraceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId/trace", component: WorkPage });
 const workEvaluateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId/evaluate", component: WorkPage });
-const operationsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations", component: OperationsPage });
-const skillsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/skills", component: SkillsPage });
-const knowledgeRoute = createRoute({ getParentRoute: () => rootRoute, path: "/knowledge", component: KnowledgePage });
 const memoryRoute = createRoute({ getParentRoute: () => rootRoute, path: "/memory", component: MemoryPage });
 const connectorsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/connectors", component: ConnectorsPage });
+const operationsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations", component: OperationsPage });
+const releasesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations/releases", component: ReleasesPage });
+const releasesEnvironmentRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations/releases/$environment", component: ReleasesPage });
+const releasesRevisionRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations/releases/$environment/revisions/$revisionId", component: ReleasesPage });
 
-const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, agentBuilderRoute, agentRoute, promptsRoute, skillsRoute, knowledgeRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, memoryRoute, connectorsRoute, operationsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, agentBuilderRoute, agentRoute, promptsRoute, skillsRoute, knowledgeRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, memoryRoute, connectorsRoute, operationsRoute, releasesRoute, releasesEnvironmentRoute, releasesRevisionRoute]);
 
 export const router = createRouter({
   routeTree,

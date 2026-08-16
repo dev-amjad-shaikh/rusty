@@ -17,12 +17,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::body::{to_bytes, Body, Bytes};
-use axum::http::{Request, StatusCode};
 use axum::Router;
+use axum::body::{Body, Bytes, to_bytes};
+use axum::http::{Request, StatusCode};
 use rusty_agent_runtime::broker::{ScriptedOAuthProvider, TokenGrant};
-use rusty_agent_server::{router, GraphRegistry, ServerConfig};
-use serde_json::{json, Value};
+use rusty_agent_server::{GraphRegistry, ServerConfig, router};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 /// The plaintext credential every registration here seals. Distinctive,
@@ -122,10 +122,12 @@ async fn register(app: &Router, auth: Option<(&str, &str)>) -> Value {
     let (status, v) = call_as(app, auth, "POST", "/connections", Some(register_payload())).await;
     assert_eq!(status, StatusCode::CREATED, "register failed: {v}");
     let record = &v["connection"];
-    assert!(record["connection_id"]
-        .as_str()
-        .unwrap()
-        .starts_with("conn-"));
+    assert!(
+        record["connection_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("conn-")
+    );
     assert_eq!(record["status"], "active");
     record.clone()
 }
@@ -836,6 +838,162 @@ async fn a_refused_authorization_code_is_422_and_nothing_lands() {
     assert!(v["message"].as_str().unwrap().contains("invalid_grant"));
     // Nothing landed: the list stays empty, and the broker journal has
     // no registration for the refused act.
+    let (status, v) = call(&app, "GET", "/connections", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["connections"].as_array().unwrap().len(), 0);
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+// --------------------------------------------------------------------- //
+// The password grant over HTTP
+// --------------------------------------------------------------------- //
+
+/// A valid password-grant registration body (marker secrets — the leak
+/// scans hunt them).
+fn password_grant_body() -> Value {
+    json!({
+        "provider": "oauth2_password",
+        "password_grant": {
+            "token_url": "https://dev394299.service-now.com/oauth_token.do",
+            "client_id": "ci-MARKER",
+            "client_secret": "cs-MARKER",
+            "username": "nexus.connector",
+            "password": "pw-MARKER",
+        },
+    })
+}
+
+#[tokio::test]
+async fn register_and_reauth_with_password_grant() {
+    let provider = ScriptedOAuthProvider::new()
+        .with_password(
+            "nexus.connector",
+            grant("sn-token-v1-MARKER", Some("sn-rt-v1-MARKER")),
+        )
+        .with_password(
+            "nexus.connector-2",
+            grant("sn-token-v2-MARKER", Some("sn-rt-v2-MARKER")),
+        );
+    let (app, store) = oauth_app(provider);
+
+    // The exchange happens at the provider seam; the minted grant and the
+    // re-presentation material are sealed before they touch the store.
+    let (status, v) = call(&app, "POST", "/connections", Some(password_grant_body())).await;
+    assert_eq!(status, StatusCode::CREATED, "register failed: {v}");
+    assert_eq!(v["connection"]["provider"], "oauth2_password");
+    let connection_id = v["connection"]["connection_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Re-auth through the same path (rotated credentials at the provider):
+    // the connection id stands, and the material-only act journals
+    // `connection_refreshed`.
+    let mut reauth = password_grant_body();
+    reauth["password_grant"]["username"] = json!("nexus.connector-2");
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/connections/{connection_id}/consent"),
+        Some(json!({ "password_grant": reauth["password_grant"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "consent failed: {v}");
+    assert_eq!(v["journaled"], "connection_refreshed");
+
+    // The grant inputs, the minted tokens, the refresh tokens: nowhere
+    // the server writes, and nothing the journal carries.
+    let raw = store_bytes(&store);
+    for marker in [
+        "ci-MARKER",
+        "cs-MARKER",
+        "pw-MARKER",
+        "nexus.connector",
+        "sn-token-v1-MARKER",
+        "sn-token-v2-MARKER",
+        "sn-rt-v1-MARKER",
+        "sn-rt-v2-MARKER",
+    ] {
+        assert!(
+            !raw.windows(marker.len()).any(|w| w == marker.as_bytes()),
+            "the store leaked {marker}"
+        );
+    }
+    let (status, v) = call(&app, "GET", "/broker/journal", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let journal = serde_json::to_string(&v).unwrap();
+    assert!(journal.contains("connection_registered"));
+    assert!(journal.contains("connection_refreshed"));
+    assert!(!journal.contains("sn-token"), "journal: {journal}");
+    assert!(!journal.contains("pw-MARKER"), "journal: {journal}");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn password_grant_requires_the_password_provider_kind() {
+    let (app, store) = oauth_app(ScriptedOAuthProvider::new());
+    let mut body = password_grant_body();
+    body["provider"] = json!("api_key");
+    let (status, v) = call(&app, "POST", "/connections", Some(body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "got: {v}");
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn password_grant_without_a_provider_is_409() {
+    let (app, store) = app();
+    let (status, v) = call(&app, "POST", "/connections", Some(password_grant_body())).await;
+    assert_eq!(status, StatusCode::CONFLICT, "got: {v}");
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn password_grant_shares_the_exclusivity_gate() {
+    let (app, store) = app();
+    // Password grant plus either other path → 422.
+    for body in [
+        json!({
+            "provider": "oauth2_password",
+            "token": {"access_token": MARKER},
+            "password_grant": password_grant_body()["password_grant"],
+        }),
+        json!({
+            "provider": "oauth2_password",
+            "authorization_code": "code-1",
+            "password_grant": password_grant_body()["password_grant"],
+        }),
+    ] {
+        let (status, v) = call(&app, "POST", "/connections", Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "got: {v}");
+    }
+    // Consent: password grant plus token → 422.
+    let record = register(&app, None).await;
+    let connection_id = record["connection_id"].as_str().unwrap();
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/connections/{connection_id}/consent"),
+        Some(json!({
+            "token": {"access_token": MARKER},
+            "password_grant": password_grant_body()["password_grant"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "got: {v}");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn a_refused_password_grant_is_422_and_nothing_lands() {
+    // An unknown resource owner is the provider's `invalid_grant` —
+    // permanent, the client's to fix.
+    let (app, store) = oauth_app(ScriptedOAuthProvider::new());
+    let (status, v) = call(&app, "POST", "/connections", Some(password_grant_body())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "got: {v}");
+    assert!(v["message"].as_str().unwrap().contains("invalid_grant"));
     let (status, v) = call(&app, "GET", "/connections", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["connections"].as_array().unwrap().len(), 0);

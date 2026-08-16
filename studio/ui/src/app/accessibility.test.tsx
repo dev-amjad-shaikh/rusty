@@ -5,12 +5,13 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AgentsPage } from "../features/agents/AgentsPage";
 import { OperationsPage } from "../features/operations/OperationsPage";
+import { ReleasesPage } from "../features/operations/releases/ReleasesPage";
 import { WorkPage } from "../features/work/WorkPage";
 import { CommandCenter } from "../features/command-center/CommandCenter";
 import { useConnectionStore } from "../state/connection";
 import { AppShell } from "./AppShell";
 
-async function scan(path: "/" | "/agents" | "/work" | "/operations") {
+async function scan(path: "/" | "/agents" | "/work" | "/operations" | "/operations/releases") {
   useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", discoveryAttempt: 0, discoveryError: "", suggestedOrigin: "", dialogOpen: false });
   const root = createRootRoute({ component: AppShell });
   const routes = [
@@ -18,6 +19,7 @@ async function scan(path: "/" | "/agents" | "/work" | "/operations") {
     createRoute({ getParentRoute: () => root, path: "/agents", component: AgentsPage }),
     createRoute({ getParentRoute: () => root, path: "/work", component: WorkPage }),
     createRoute({ getParentRoute: () => root, path: "/operations", component: OperationsPage }),
+    createRoute({ getParentRoute: () => root, path: "/operations/releases", component: ReleasesPage }),
   ];
   const router = createRouter({ routeTree: root.addChildren(routes), history: createMemoryHistory({ initialEntries: [path] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -27,7 +29,7 @@ async function scan(path: "/" | "/agents" | "/work" | "/operations") {
 }
 
 describe("typed Studio accessibility", () => {
-  it.each(["/", "/agents", "/work", "/operations"] as const)("has no automated WCAG A/AA violations on %s", async (path) => {
+  it.each(["/", "/agents", "/work", "/operations", "/operations/releases"] as const)("has no automated WCAG A/AA violations on %s", async (path) => {
     await expect(scan(path)).resolves.toEqual([]);
   });
 });

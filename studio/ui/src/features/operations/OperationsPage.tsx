@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { getOperationsSnapshot, type OperationAttentionItem } from "../../lib/api/client";
 import { useConnectionStore } from "../../state/connection";
@@ -15,9 +15,33 @@ const systems = [
   { key: "schedules", label: "Schedules", detail: "Recurring execution" },
 ] as const;
 
+const modes = [
+  { to: "/operations" as const, label: "Attention" },
+  { to: "/operations/releases" as const, label: "Releases" },
+  { to: "/operations" as const, hash: "systems", label: "Systems" },
+];
+
 function observedTime(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? "Observation time unavailable" : date.toLocaleString();
+}
+
+function ModeNav() {
+  const { pathname, hash } = useLocation({ select: (location) => ({ pathname: location.pathname, hash: location.hash }) });
+  return (
+    <nav className={styles.modeNav} aria-label="Operations modes">
+      {modes.map((mode) => (
+        <Link
+          key={mode.label}
+          to={mode.to}
+          hash={mode.hash}
+          aria-current={pathname === mode.to && (mode.hash ? hash === `#${mode.hash}` : true) ? "page" : undefined}
+        >
+          {mode.label}
+        </Link>
+      ))}
+    </nav>
+  );
 }
 
 function EvidencePanel({ item, close, headingRef }: { item: OperationAttentionItem; close: () => void; headingRef: RefObject<HTMLHeadingElement | null> }) {
@@ -86,6 +110,9 @@ export function OperationsPage() {
       (attentionHeadingRef.current ?? pageHeadingRef.current)?.focus();
     }
   }, [selected?.id]);
+  useEffect(() => {
+    if (window.location.hash === "#systems") document.getElementById("systems-heading")?.scrollIntoView({ behavior: "smooth" });
+  }, []);
   function closeEvidence() {
     setSelected(null);
     requestAnimationFrame(() => reviewTriggerRef.current?.focus());
@@ -113,6 +140,7 @@ export function OperationsPage() {
 
   return <section className={`page ${styles.operationsPage}`} aria-labelledby="operations-heading">
     <PageHeader headingId="operations-heading" headingRef={pageHeadingRef} eyebrow="Operate" title="Operations" description="Review failed work first. Schedules and automations stay quiet until they need attention." actions={!connection ? <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button> : <button className="secondary-button" type="button" onClick={() => snapshot.refetch()} disabled={snapshot.isFetching}>{snapshot.isFetching ? "Refreshing…" : "Refresh"}</button>} />
+    <ModeNav />
 
     {!connection ? <div className="empty-state"><span className="eyebrow">Attention queue</span><h2>Open a workspace to review operations</h2><p>Failures and routine systems will remain clearly separated.</p></div>
       : snapshot.isLoading ? <div className={styles.loading}>Loading operational evidence…</div>
@@ -130,7 +158,7 @@ export function OperationsPage() {
           </li>)}</ol> : <p className={styles.clearCopy}>{taskStatusUnavailable ? "Refresh to check for work that may need attention." : "There are no dead or terminally failed tasks."}</p>}
         </section>
         {selected && <EvidencePanel item={selected} close={closeEvidence} headingRef={evidenceHeadingRef} />}
-        <section className={styles.systems} aria-labelledby="systems-heading">
+        <section className={styles.systems} id="systems" aria-labelledby="systems-heading">
           <div className={styles.systemsHead}><h2 id="systems-heading">Routine systems</h2><span>Current inventory</span></div>
           <div className={styles.systemGrid}>{systems.map((system) => {
             const count = data?.systems[system.key];

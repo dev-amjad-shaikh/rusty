@@ -23,8 +23,8 @@ use rusty_agent_runtime::tool::builtins::{
     CalculatorTool, KnowledgeDocument, KnowledgeSearchTool, SandboxedDocumentReaderTool,
     TextInspectorTool,
 };
-use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
-use serde_json::{json, Value};
+use rusty_agent_server::{GraphRegistry, ServerConfig, serve};
+use serde_json::{Value, json};
 
 /// A deterministic local model that exercises the complete tool pipeline on
 /// every new thread. It keeps the demo credential-free while producing real
@@ -153,7 +153,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .expect("RUSTY_DEMO_ADDR must be a socket address"),
         std::env::var("RUSTY_DEMO_STORE")
             .unwrap_or_else(|_| "./data/server-demo-checkpoints".to_string()),
-    );
+    )
+    // The demo deployment speaks the consent-free OAuth flows (password,
+    // client-credentials) against the token endpoint each connection
+    // records — ServiceNow's `/oauth_token.do` is the reference shape.
+    .with_oauth_provider(Arc::new(
+        rusty_agent_server::oauth::ReqwestOAuthProvider::new(),
+    ));
 
     // The menu below is printed with the *actual* address so the test-hook
     // override stays honest when a human runs the demo with it set.
@@ -193,7 +199,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("    -d '{{\"graph\": \"react_agent\"}}' | jq -r .thread_id)");
     println!("  curl -s -X POST {base}/threads/$REACT/runs/wait \\");
     println!("    -H 'content-type: application/json' \\");
-    println!("    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"say pong\"}}]}}}}' | jq\n");
+    println!(
+        "    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"say pong\"}}]}}}}' | jq\n"
+    );
 
     serve(registry, config).await?;
     Ok(())

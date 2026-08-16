@@ -122,6 +122,11 @@ pub enum ConnectionProvider {
     Oauth2AuthorizationCode,
     /// An OAuth 2.0 client-credentials grant (service-to-service).
     Oauth2ClientCredentials,
+    /// An OAuth 2.0 resource-owner password grant: the sealed material
+    /// holds the account's username and password (and the client
+    /// credentials) so the refresh lifecycle can re-mint access tokens
+    /// without a human in the loop.
+    Oauth2Password,
     /// A static API key presented as a bearer or header credential.
     ApiKey,
     /// HTTP basic authentication (username:password material).
@@ -349,6 +354,30 @@ pub struct TokenMaterial {
     /// this struct; redacted in `Debug`; absent for every other flow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
+
+    /// The client id of an `oauth2_password` (or client-credentials)
+    /// connection: the client's public identifier, presented on every
+    /// grant. Custody, not a grant output — it persists across rotations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+
+    /// The resource-owner username of an `oauth2_password` connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+
+    /// The resource-owner password of an `oauth2_password` connection:
+    /// the durable secret the refresh path re-presents when the refresh
+    /// token is absent or refused. Sealed like everything else here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+
+    /// The token endpoint the refresh path posts to (ServiceNow:
+    /// `https://<instance>.service-now.com/oauth_token.do`). Endpoint
+    /// configuration, not credential material — but it rides the sealed
+    /// envelope because refresh needs it and the public record stays
+    /// provider-neutral.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_url: Option<String>,
 }
 
 impl std::fmt::Debug for TokenMaterial {
@@ -364,6 +393,10 @@ impl std::fmt::Debug for TokenMaterial {
                 "client_secret",
                 &self.client_secret.as_ref().map(|_| "[redacted]"),
             )
+            .field("client_id", &self.client_id.as_ref().map(|_| "[redacted]"))
+            .field("username", &self.username.as_ref().map(|_| "[redacted]"))
+            .field("password", &self.password.as_ref().map(|_| "[redacted]"))
+            .field("token_url", &self.token_url)
             .finish()
     }
 }
@@ -913,6 +946,85 @@ pub struct CredentialUse {
 // The OAuth lifecycle (R0.11 Extension Plane, wave 4)
 // --------------------------------------------------------------------- //
 
+/// Maximum length of a password-grant token endpoint URL.
+pub const MAX_TOKEN_URL_LEN: usize = 2048;
+
+/// Maximum length of one password-grant presentation value (client id,
+/// client secret, username, password).
+pub const MAX_GRANT_VALUE_LEN: usize = 1024;
+
+/// The inputs of an OAuth 2.0 resource-owner password grant registration:
+/// the token endpoint plus the four presentation values. Like
+/// [`TokenMaterial`], this type carries credential bytes and follows the
+/// same posture — redacted in `Debug`, never journaled or served: the
+/// registration route exchanges it for the initial grant through the
+/// deployment's [`OAuthProvider`] and seals the outcome; the journaled
+/// `connection_registered` event is the evidence.
+///
+/// `Serialize`/`Deserialize` exist because the registration route
+/// deserializes it; there is intentionally no `Display`.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct PasswordGrant {
+    /// The token endpoint the grant posts to (`https://` only — the
+    /// password crosses this wire, so plaintext transport is refused).
+    pub token_url: String,
+    /// The OAuth client id.
+    pub client_id: String,
+    /// The OAuth client secret.
+    pub client_secret: String,
+    /// The resource-owner username.
+    pub username: String,
+    /// The resource-owner password.
+    pub password: String,
+}
+
+impl PasswordGrant {
+    /// Contract validation, run at the HTTP boundary before any exchange:
+    /// an `https://` endpoint and four non-empty, bounded, control-free
+    /// values. Secrets take no charset rule beyond that — a password's
+    /// alphabet is the provider's business, not ours.
+    pub fn validate(&self) -> Result<()> {
+        if !self.token_url.starts_with("https://")
+            || self.token_url.len() == "https://".len()
+            || self.token_url.len() > MAX_TOKEN_URL_LEN
+            || self.token_url.chars().any(char::is_control)
+            || self.token_url.contains(char::is_whitespace)
+        {
+            return Err(invalid(format!(
+                "password grant token_url must be an `https://` URL of at most {MAX_TOKEN_URL_LEN} bytes, whitespace- and control-free"
+            )));
+        }
+        for (what, value) in [
+            ("client_id", &self.client_id),
+            ("client_secret", &self.client_secret),
+            ("username", &self.username),
+            ("password", &self.password),
+        ] {
+            if value.is_empty()
+                || value.len() > MAX_GRANT_VALUE_LEN
+                || value.chars().any(char::is_control)
+            {
+                return Err(invalid(format!(
+                    "password grant {what} must be non-empty, control-free, and at most {MAX_GRANT_VALUE_LEN} bytes"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for PasswordGrant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasswordGrant")
+            .field("token_url", &self.token_url)
+            .field("client_id", &"[redacted]")
+            .field("client_secret", &"[redacted]")
+            .field("username", &"[redacted]")
+            .field("password", &"[redacted]")
+            .finish()
+    }
+}
+
 /// A successful grant from a provider: token exchange (the back half of
 /// the human's consent act) or a refresh. Like [`TokenMaterial`], this
 /// type carries credential bytes and follows the same posture — redacted
@@ -1016,6 +1128,7 @@ impl ConnectionProvider {
             self,
             ConnectionProvider::Oauth2AuthorizationCode
                 | ConnectionProvider::Oauth2ClientCredentials
+                | ConnectionProvider::Oauth2Password
         )
     }
 }
@@ -1041,6 +1154,15 @@ pub trait OAuthProvider: std::fmt::Debug + Send + Sync {
         &self,
         code: &str,
         scopes: &BTreeSet<String>,
+    ) -> std::result::Result<TokenGrant, OAuthFailure>;
+
+    /// Exchange a resource-owner password grant for the initial token
+    /// grant — the registration (and re-auth) act of an
+    /// `oauth2_password` connection. Providers that do not speak the flow
+    /// answer a terminal refusal, never a panic.
+    async fn exchange_password(
+        &self,
+        grant: &PasswordGrant,
     ) -> std::result::Result<TokenGrant, OAuthFailure>;
 
     /// Refresh the connection's access token. The two OAuth flows differ
@@ -1078,6 +1200,7 @@ enum ScriptedOutcome {
 #[derive(Debug)]
 pub struct ScriptedOAuthProvider {
     codes: Mutex<std::collections::HashMap<String, ScriptedOutcome>>,
+    passwords: Mutex<std::collections::HashMap<String, ScriptedOutcome>>,
     refresh_script: Mutex<std::collections::VecDeque<ScriptedOutcome>>,
     counter: std::sync::atomic::AtomicU64,
     token_prefix: String,
@@ -1098,6 +1221,7 @@ impl ScriptedOAuthProvider {
     pub fn new() -> Self {
         Self {
             codes: Mutex::new(std::collections::HashMap::new()),
+            passwords: Mutex::new(std::collections::HashMap::new()),
             refresh_script: Mutex::new(std::collections::VecDeque::new()),
             counter: std::sync::atomic::AtomicU64::new(0),
             token_prefix: "scripted-token".to_owned(),
@@ -1135,6 +1259,24 @@ impl ScriptedOAuthProvider {
             .lock()
             .expect("scripted provider lock")
             .insert(code.into(), ScriptedOutcome::Fail(failure));
+        self
+    }
+
+    /// Script the password grant for `username` to exchange for `grant`.
+    pub fn with_password(self, username: impl Into<String>, grant: TokenGrant) -> Self {
+        self.passwords
+            .lock()
+            .expect("scripted provider lock")
+            .insert(username.into(), ScriptedOutcome::Grant(grant));
+        self
+    }
+
+    /// Script the password grant for `username` to fail with `failure`.
+    pub fn with_password_failure(self, username: impl Into<String>, failure: OAuthFailure) -> Self {
+        self.passwords
+            .lock()
+            .expect("scripted provider lock")
+            .insert(username.into(), ScriptedOutcome::Fail(failure));
         self
     }
 
@@ -1222,6 +1364,31 @@ impl OAuthProvider for ScriptedOAuthProvider {
             // broker's permanent-failure path is what a test drives.
             None => Err(OAuthFailure::permanent(format!(
                 "invalid_grant: unknown authorization code `{code}`"
+            ))),
+        }
+    }
+
+    async fn exchange_password(
+        &self,
+        grant: &PasswordGrant,
+    ) -> std::result::Result<TokenGrant, OAuthFailure> {
+        self.exchanges
+            .lock()
+            .expect("scripted provider lock")
+            .push(grant.username.clone());
+        let outcome = self
+            .passwords
+            .lock()
+            .expect("scripted provider lock")
+            .get(&grant.username)
+            .cloned();
+        match outcome {
+            Some(outcome) => self.resolve(outcome, None),
+            // Same posture as an unknown authorization code: the provider's
+            // refusal, not a scripting gap.
+            None => Err(OAuthFailure::permanent(format!(
+                "invalid_grant: unknown resource owner `{}`",
+                grant.username
             ))),
         }
     }
@@ -1749,11 +1916,18 @@ mod tests {
             refresh_token: Some("rt-MARKER".into()),
             expires_at: Some(ts(1_800_000_300_000)),
             client_secret: Some("cs-MARKER".into()),
+            client_id: Some("ci-MARKER".into()),
+            username: Some("user-MARKER".into()),
+            password: Some("pw-MARKER".into()),
+            token_url: Some("https://idp.example.com/token".into()),
         };
         let rendered = format!("{material:?}");
         assert!(!rendered.contains("sk-live-MARKER"), "got: {rendered}");
         assert!(!rendered.contains("rt-MARKER"), "got: {rendered}");
         assert!(!rendered.contains("cs-MARKER"), "got: {rendered}");
+        assert!(!rendered.contains("ci-MARKER"), "got: {rendered}");
+        assert!(!rendered.contains("user-MARKER"), "got: {rendered}");
+        assert!(!rendered.contains("pw-MARKER"), "got: {rendered}");
         assert!(rendered.contains("[redacted]"));
         // The sealed form is the store contract: `client_secret` rides
         // the same skip-when-absent rule, so pre-wave-4 envelopes are
@@ -1806,6 +1980,10 @@ mod tests {
             refresh_token: Some("rt-1".into()),
             expires_at: None,
             client_secret: None,
+            client_id: None,
+            username: None,
+            password: None,
+            token_url: None,
         };
         let err = provider.refresh(&record, &material).await.unwrap_err();
         assert!(!err.permanent, "got: {err}");
@@ -1822,6 +2000,88 @@ mod tests {
         let rendered = format!("{rotated:?}");
         assert!(!rendered.contains("proof-token-1"), "got: {rendered}");
         assert!(rendered.contains("[redacted]"));
+    }
+
+    #[tokio::test]
+    async fn scripted_provider_password_exchanges_as_scripted() {
+        let provider = ScriptedOAuthProvider::new().with_password(
+            "nexus.connector",
+            TokenGrant {
+                access_token: "password-minted".into(),
+                refresh_token: Some("rt-password".into()),
+                expires_at: Some(ts(1_800_003_600_000)),
+            },
+        );
+        let grant = PasswordGrant {
+            token_url: "https://dev394299.service-now.com/oauth_token.do".into(),
+            client_id: "ci-MARKER".into(),
+            client_secret: "cs-MARKER".into(),
+            username: "nexus.connector".into(),
+            password: "pw-MARKER".into(),
+        };
+        let minted = provider.exchange_password(&grant).await.unwrap();
+        assert_eq!(minted.access_token, "password-minted");
+        // An unknown resource owner is the provider's permanent refusal,
+        // and the grant's Debug shows the endpoint — never the secrets.
+        let unknown = PasswordGrant {
+            username: "nobody".into(),
+            ..grant.clone()
+        };
+        let err = provider.exchange_password(&unknown).await.unwrap_err();
+        assert!(err.permanent, "got: {err}");
+        let rendered = format!("{grant:?}");
+        assert!(rendered.contains("https://dev394299.service-now.com/oauth_token.do"));
+        assert!(!rendered.contains("nexus.connector"), "got: {rendered}");
+        assert!(!rendered.contains("ci-MARKER"), "got: {rendered}");
+        assert!(!rendered.contains("cs-MARKER"), "got: {rendered}");
+        assert!(!rendered.contains("pw-MARKER"), "got: {rendered}");
+        assert_eq!(provider.call_counts(), (2, 0));
+    }
+
+    #[test]
+    fn password_grant_validation_is_fail_closed() {
+        let good = PasswordGrant {
+            token_url: "https://idp.example.com/token".into(),
+            client_id: "client".into(),
+            client_secret: "secret".into(),
+            username: "user".into(),
+            password: "pw".into(),
+        };
+        good.validate().unwrap();
+        // A password's alphabet is the provider's business.
+        let exotic = PasswordGrant {
+            password: "=1C$}%I0F@58s(cuvNPBS<Q,K3Z5?[A(yq{hki2+Yg}%8hqY2dFoN7qkx{a8lN^]0IUXhE-{wcNZQjyDzXO8}c*1X?*)z[rej:Nr".into(),
+            ..good.clone()
+        };
+        exotic.validate().unwrap();
+        for bad in [
+            PasswordGrant {
+                token_url: "http://idp.example.com/token".into(),
+                ..good.clone()
+            },
+            PasswordGrant {
+                token_url: "https://".into(),
+                ..good.clone()
+            },
+            PasswordGrant {
+                token_url: format!("https://{}.example.com", "x".repeat(2048)),
+                ..good.clone()
+            },
+            PasswordGrant {
+                client_id: String::new(),
+                ..good.clone()
+            },
+            PasswordGrant {
+                password: "pw\nwith-control".into(),
+                ..good.clone()
+            },
+            PasswordGrant {
+                username: "u".repeat(1025),
+                ..good.clone()
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?} must be refused");
+        }
     }
 
     #[test]

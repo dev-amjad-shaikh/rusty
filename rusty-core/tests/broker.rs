@@ -39,15 +39,15 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use rusty_agent_runtime::broker::{
-    scopes_missing, BrokerDenial, BrokerDenialReason, ClassifiedFailure, ConnectionConsent,
+    BrokerDenial, BrokerDenialReason, CONNECTION_ID_PREFIX, ClassifiedFailure, ConnectionConsent,
     ConnectionHealth, ConnectionProvider, ConnectionReauthRequired, ConnectionRecord,
     ConnectionRefresh, ConnectionRevocation, ConnectionStatus, CredentialBroker, CredentialHandle,
-    CredentialMediator, CredentialRequirement, CredentialTool, CredentialUse, HandleClaims,
-    HandleIssuance, IssueRequest, ResolvedCredential, SealedCredential, StoredConnection,
-    TokenMaterial, CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, SEALED_FORMAT_VERSION,
+    CredentialMediator, CredentialRequirement, CredentialTool, CredentialUse, HANDLE_ID_PREFIX,
+    HandleClaims, HandleIssuance, IssueRequest, ResolvedCredential, SEALED_FORMAT_VERSION,
+    SealedCredential, StoredConnection, TokenMaterial, scopes_missing,
 };
 use rusty_agent_runtime::durable::ErrorClass;
 use rusty_agent_runtime::error::Result as RuntimeResult;
@@ -277,6 +277,10 @@ fn resolved_credential_debug_never_shows_bytes() {
             access_token: "sk-live-MARKER".into(),
             refresh_token: Some("rt-MARKER".into()),
             client_secret: None,
+            client_id: None,
+            username: None,
+            password: None,
+            token_url: None,
             expires_at: None,
         },
     };
@@ -329,6 +333,10 @@ impl ScriptedBroker {
                 access_token: MARKER.into(),
                 refresh_token: None,
                 client_secret: None,
+                client_id: None,
+                username: None,
+                password: None,
+                token_url: None,
                 expires_at: None,
             },
             issued_offset_ms: std::sync::atomic::AtomicI64::new(0),
@@ -716,7 +724,7 @@ mod capsule_mediation {
     };
     use rusty_agent_runtime::capsule_host::{CapsuleHost, CapsuleInvocation};
     use rusty_agent_runtime::journal::{Clock, Journal};
-    use rusty_agent_runtime::record::{sha256_hex, RunEventKind};
+    use rusty_agent_runtime::record::{RunEventKind, sha256_hex};
 
     const REALLOC: &str = r#"
     (global $heap (mut i32) (i32.const 1024))
