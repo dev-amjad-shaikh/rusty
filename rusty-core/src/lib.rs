@@ -236,6 +236,7 @@ pub mod skill;
 pub mod state;
 pub mod team_trace;
 pub mod tool;
+pub mod tool_select;
 pub mod twin;
 #[cfg(feature = "wasm")]
 pub mod wasm_node;
