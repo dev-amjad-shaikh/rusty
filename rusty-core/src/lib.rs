@@ -222,6 +222,7 @@ pub mod learn;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
+pub mod memory_tiers;
 pub mod middleware;
 pub mod node;
 #[cfg(feature = "genai")]

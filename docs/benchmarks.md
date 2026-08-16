@@ -996,6 +996,107 @@ actions, features, propensities, version).
 > parity, byte-exact reversion.**
 
 
+## Memory recall — utility re-ranking vs the zero-weight floor (2026-08-16)
+
+R0.13 wave 2's deferred-vector decision rests on one measurement: **does
+the journaled utility signal (which records appeared in successful runs)
+close recall headroom that the shipped rank leaves on the table?** This
+section publishes it. The whole measurement is one deterministic
+integration test (`rusty-core/tests/memory_tiers.rs`,
+`utility_rerank_beats_the_zero_weight_floor_on_recorded_evidence`); the
+numbers below are pinned by the test's own assertions, so they reproduce
+on any machine that can run the suite.
+
+**Reproduce:**
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# The measurement prints on stderr; the assertions pin the figures:
+cargo test -p rusty-agent-runtime --test memory_tiers \
+  utility_rerank_beats -- --nocapture
+```
+
+### Method
+
+**The workload (synthetic, journaled).** One user-scope namespace holding
+24 *relevant* records (3 key domains × 8 facts each: priority 0,
+confidence 0.7) and 6 *stale* records (2 per domain: same tags, priority
+10, confidence 0.95 — the base rank prefers them). Uniform content, so
+every record costs the same estimate and the budget arithmetic is exact.
+378 synthetic runs then journal real `MemoryRead` events through the
+shipped `JournaledMemory` seam: each relevant record appears in 12
+successful graded runs and one failed run; each stale record in 10 failed
+runs and one `Ok` run graded below the 6000-bps success bar (a graded run
+below the bar counts as a failure — it completed, poorly).
+
+**The arms.** `build_utility_index` rolls the journals into the derived
+index at one stamped instant. Each held-out domain query (`tag = domain`,
+matching 8 relevant + 2 stale) assembles twice through
+`TieredMemoryDriver`: the **floor** arm (utility weight zero, no
+over-fetch — the shipped rank) and the **weighted** arm (utility weight 4,
+200% over-fetch). The section budget packs exactly 6 of the 10 matched
+records, so the budget-limited recall ceiling is 75%. Recall is
+`|packed ∩ relevant| / |relevant|` per domain, aggregated.
+
+### Environment
+
+| | |
+|---|---|
+| CPU | Apple M2 Max (12 cores: 8 performance + 4 efficiency) |
+| OS | macOS, arm64 |
+| Rust | rustc 1.97.1 (8bab26f4f 2026-07-14) |
+| Date of run | 2026-08-16 |
+| Crate version | R0.13 wave 2, unreleased, on top of `rusty-agent-runtime` 0.12.0 |
+
+### Results
+
+The derived signal read back from the journaled evidence: relevant records
+at **8666 bps** smoothed success rate (12 successes, 1 failure), stale at
+**769 bps** (0 successes, 11 failures).
+
+| Arm | Recall (aggregate) | Per domain | Estimated tokens spent |
+|---|---|---|---|
+| floor (weight 0, no over-fetch) | 12/24 = **50.0%** | 2 stale + 4 relevant packed | 288 |
+| weighted (weight 4, 200% over-fetch) | 18/24 = **75.0%** | 6 relevant packed | 288 |
+
+The weighted arm hits the budget-limited ceiling — the 2 unpacked relevant
+records per domain are the budget's, not the rank's — at **identical
+token cost** (the budget caps both arms; over-fetch widens the candidate
+pool, not the packed section). Under the floor, zero weight flattens every
+score and the stable sort keeps the shipped rank byte-for-byte within each
+tier (asserted separately against `assemble()`).
+
+### Interpretation
+
+- **The signal the journals already hold moves recall without an
+  embedding model, an embedding journal contract, or an index to
+  govern.** On this planted-signal workload the headroom the base rank
+  leaves (priority-10 stale records crowding out proven-useful ones) is
+  closed entirely by the re-rank, at cost parity. That is the R0.10
+  discipline applied: measure headroom before buying machinery.
+- **The floor is one pointer move away and is the measurement's own
+  baseline.** Weight zero is the shipped rank; the weighted arm is a
+  `memory_config` candidate's `rank` member, promotable and rollable-back
+  through the learn gate (byte-exact, proven in the same test file).
+- **What this does not show.** Planted signal on synthetic journals is the
+  machinery's proof, not a production recall claim: real workloads have
+  noisier outcomes and less separable records. The honest reading for the
+  vector decision: utility re-ranking has earned first refusal on recall
+  gaps; a published gap *remaining* on recorded production workloads —
+  measured this same way — is the case for the reserved
+  `MemoryRecord.embedding` field, and not before.
+
+### Verdict
+
+> **Utility re-ranking beats the zero-weight floor on recorded evidence:
+> 75.0% vs 50.0% recall of the known-relevant set (the budget-limited
+> ceiling), at identical estimated-token cost, with the signal derived
+> entirely from journaled `MemoryRead` assemblies joined against terminal
+> status and eval scores. The vector question stays deferred — by
+> measurement, not by fiat.**
+
+
 ## Capacity envelope (R1.0)
 
 The R1.0 gate measures the server's capacity envelope: how much load one
