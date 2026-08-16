@@ -1,0 +1,10 @@
+{
+  "trigger_tags": [
+    "web",
+    "research"
+  ],
+  "task_shape": "open-ended lookup tasks",
+  "tools": [
+    "web.search"
+  ]
+}

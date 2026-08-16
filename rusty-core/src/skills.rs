@@ -388,7 +388,7 @@ pub fn resolve_active_skill(
     registry: &SkillRegistry,
     pointer: &VersionPointer,
     run_id: &str,
-    pin: impl Fn(&CandidateId) -> Option<SkillPin>,
+    pin: &dyn Fn(&CandidateId) -> Option<SkillPin>,
 ) -> std::result::Result<Option<ActiveSkill>, SkillsError> {
     let Some((candidate_id, _binding)) = pointer_admission(pointer, run_id) else {
         return Ok(None);
@@ -426,11 +426,11 @@ pub fn resolve_active_set(
     registry: &SkillRegistry,
     pointers: &[VersionPointer],
     run_id: &str,
-    pin: impl Fn(&CandidateId) -> Option<SkillPin>,
+    pin: &dyn Fn(&CandidateId) -> Option<SkillPin>,
 ) -> std::result::Result<ActiveSkillSet, SkillsError> {
     let mut skills = Vec::new();
     for pointer in pointers {
-        if let Some(skill) = resolve_active_skill(registry, pointer, run_id, &pin)? {
+        if let Some(skill) = resolve_active_skill(registry, pointer, run_id, pin)? {
             skills.push(skill);
         }
     }
@@ -640,8 +640,11 @@ pub fn select_skills(
 // --------------------------------------------------------------------- //
 
 /// Build the skills section's entries: the shortlist as tier-1 metadata,
-/// with tier-2 bodies attached for the skills the active set binds.
-/// Active skills absent from the shortlist still enter the section —
+/// with tier-2 bodies attached for the skills the active set binds. An
+/// active skill's entry pins the *bound* revision and content hash — the
+/// learn pointer's choice — never the catalog's latest: the manifest's
+/// `name@revision:hash` ids must name the version whose body the model
+/// saw. Active skills absent from the shortlist still enter the section —
 /// activation is the learn pointer's decision, not the shortlist's —
 /// appended in name order after the ranked entries.
 ///
@@ -666,14 +669,21 @@ pub fn skill_section_entries(
     let mut carried: BTreeSet<&str> = BTreeSet::new();
     for ranked in &selection.selected {
         carried.insert(ranked.name.as_str());
-        let body = match active.find(&ranked.name) {
-            Some(active_skill) => Some(body_of(&active_skill.name, &active_skill.content_hash)?),
-            None => None,
+        // An active skill's pin is the bound revision — the learn
+        // pointer's choice, which the manifest must name: the body the
+        // model saw is the pinned version's, never the catalog latest's.
+        let (revision, content_hash, body) = match active.find(&ranked.name) {
+            Some(active_skill) => (
+                active_skill.revision.to_string(),
+                active_skill.content_hash.clone(),
+                Some(body_of(&active_skill.name, &active_skill.content_hash)?),
+            ),
+            None => (ranked.revision.to_string(), ranked.content_hash.clone(), None),
         };
         entries.push(SkillSectionEntry {
             name: ranked.name.clone(),
-            revision: ranked.revision.to_string(),
-            content_hash: ranked.content_hash.clone(),
+            revision,
+            content_hash,
             metadata: ranked.metadata.clone(),
             body,
         });
@@ -1161,7 +1171,7 @@ mod tests {
         let ghost_id = CandidateId::from("cand-ghost".to_string());
         let mut pointer = VersionPointer::new(SurfaceKey::new("skill:alpha"));
         pointer.active = Some(ghost_id.clone());
-        let err = resolve_active_skill(&registry, &pointer, "run-1", |id| {
+        let err = resolve_active_skill(&registry, &pointer, "run-1", &|id| {
             (id == &ghost_id).then(|| SkillPin {
                 name: ghost.name.clone(),
                 content_hash: ghost.content_hash.clone(),
