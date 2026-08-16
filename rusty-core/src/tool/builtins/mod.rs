@@ -11,6 +11,9 @@
 //!
 //! - [`cli`] — local command execution under an explicit allowlist, a
 //!   canonical cwd jail, a scrubbed environment, and stream-capped output.
+//! - [`codemode`] — code mode: model-authored JSON programs (bounded step
+//!   lists with reference splicing and parallel fan-out) interpreted
+//!   against the run's own tool executor.
 //! - [`browser`] — browser use behind a [`browser::BrowserDriver`] seam:
 //!   a deterministic virtual driver for tests and offline flows, plus the
 //!   HTTP-only CDP subset (frame commands honestly deferred).
@@ -29,6 +32,7 @@ use crate::record::Effect;
 
 pub mod browser;
 pub mod cli;
+pub mod codemode;
 pub mod computer;
 
 /// Default maximum document size returned by [`SandboxedDocumentReaderTool`].

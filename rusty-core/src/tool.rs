@@ -519,79 +519,87 @@ impl ToolExecutor {
     /// caught and reported as an `ERROR:` tool message instead of taking
     /// down the batch (and the executor task driving it).
     pub async fn execute_batch(&self, calls: &[ToolCall]) -> Vec<ChatMessage> {
-        let futures = calls.iter().map(|call| {
-            let registry = self.registry.clone();
-            let chain = self.middleware.clone();
-            let effect_admission = self.effect_admission.clone();
-            let guards = self.guards.clone();
-            let guard_evidence = self.guard_evidence.clone();
-            let thread_id = self.thread_id.clone();
-            let node = self.node.clone();
-            async move {
-                let result = std::panic::AssertUnwindSafe(async {
-                    // The dispatch closure takes the call by value: the
-                    // future it returns must own the call it dispatches, or
-                    // the borrow would tie the future to the closure's
-                    // argument lifetime and fail to escape `run_tool`.
-                    let dispatch = |call: ToolCall| {
-                        let registry = registry.clone();
-                        let effect_admission = effect_admission.clone();
-                        let guards = guards.clone();
-                        let guard_evidence = guard_evidence.clone();
-                        let thread_id = thread_id.clone();
-                        let node = node.clone();
-                        async move {
-                            dispatch_tool(
-                                &registry,
-                                &call,
-                                effect_admission.as_ref(),
-                                &guards,
-                                guard_evidence.as_ref(),
-                                &thread_id,
-                                &node,
-                            )
-                            .await
-                        }
-                    };
-                    let value = if chain.is_empty() {
-                        dispatch(call.clone()).await?
-                    } else {
-                        let mut invocation =
-                            ToolInvocation::new(thread_id.clone(), node.clone(), call.clone());
-                        chain
-                            .run_tool(&mut invocation, |invocation| {
-                                // The lookup happens after before-hooks, so a
-                                // layer may rewrite the arguments — or the
-                                // target tool name itself; guards judge the
-                                // finalized call, after that rewrite.
-                                dispatch(invocation.call().clone())
-                            })
-                            .await?
-                    };
-                    Ok::<String, RustyError>(match value {
-                        Value::String(s) => s,
-                        other => other.to_string(),
-                    })
-                })
-                .catch_unwind()
-                .await;
-                match result {
-                    Ok(Ok(content)) => ChatMessage::tool_result(&call.id, content),
-                    Ok(Err(e)) => ChatMessage::tool_result(&call.id, format!("ERROR: {e}")),
-                    Err(payload) => ChatMessage::tool_result(
-                        &call.id,
-                        format!(
-                            "ERROR: tool `{}` panicked: {}",
-                            call.name,
-                            // `&*`: `&payload` would unsize-coerce the *Box*
-                            // itself into `&dyn Any`, hiding the real payload.
-                            panic_message(&*payload)
-                        ),
-                    ),
-                }
+        let futures = calls.iter().map(|call| async move {
+            match self.execute_one(call).await {
+                Ok(Value::String(content)) => ChatMessage::tool_result(&call.id, content),
+                Ok(other) => ChatMessage::tool_result(&call.id, other.to_string()),
+                Err(error) => ChatMessage::tool_result(&call.id, format!("ERROR: {error}")),
             }
         });
         futures::future::join_all(futures).await
+    }
+
+    /// Dispatch one call through the full admission pipeline and return the
+    /// raw result.
+    ///
+    /// This is [`ToolExecutor::execute_batch`]'s singular form for drivers
+    /// that steer on the `Result` itself — the code-mode interpreter
+    /// ([`builtins::codemode`]) fails or tolerates a program step on it —
+    /// rather than the batch's failure-isolating `ERROR:` tool message.
+    /// Middleware, guards, the effect boundary, and panic containment apply
+    /// exactly as in the batch path; only the result channel differs (a
+    /// contained panic surfaces as an `Err`, not a message).
+    pub async fn execute_one(&self, call: &ToolCall) -> Result<Value> {
+        let registry = self.registry.clone();
+        let chain = self.middleware.clone();
+        let effect_admission = self.effect_admission.clone();
+        let guards = self.guards.clone();
+        let guard_evidence = self.guard_evidence.clone();
+        let thread_id = self.thread_id.clone();
+        let node = self.node.clone();
+        let result = std::panic::AssertUnwindSafe(async {
+            // The dispatch closure takes the call by value: the future it
+            // returns must own the call it dispatches, or the borrow would
+            // tie the future to the closure's argument lifetime and fail to
+            // escape `run_tool`.
+            let dispatch = |call: ToolCall| {
+                let registry = registry.clone();
+                let effect_admission = effect_admission.clone();
+                let guards = guards.clone();
+                let guard_evidence = guard_evidence.clone();
+                let thread_id = thread_id.clone();
+                let node = node.clone();
+                async move {
+                    dispatch_tool(
+                        &registry,
+                        &call,
+                        effect_admission.as_ref(),
+                        &guards,
+                        guard_evidence.as_ref(),
+                        &thread_id,
+                        &node,
+                    )
+                    .await
+                }
+            };
+            if chain.is_empty() {
+                dispatch(call.clone()).await
+            } else {
+                let mut invocation =
+                    ToolInvocation::new(thread_id.clone(), node.clone(), call.clone());
+                chain
+                    .run_tool(&mut invocation, |invocation| {
+                        // The lookup happens after before-hooks, so a layer
+                        // may rewrite the arguments — or the target tool name
+                        // itself; guards judge the finalized call, after that
+                        // rewrite.
+                        dispatch(invocation.call().clone())
+                    })
+                    .await
+            }
+        })
+        .catch_unwind()
+        .await;
+        match result {
+            Ok(value) => value,
+            Err(payload) => Err(RustyError::Tool(format!(
+                "tool `{}` panicked: {}",
+                call.name,
+                // `&*`: `&payload` would unsize-coerce the *Box* itself into
+                // `&dyn Any`, hiding the real payload.
+                panic_message(&*payload)
+            ))),
+        }
     }
 }
 
@@ -775,6 +783,28 @@ mod tests {
     }
 
     struct Panic;
+
+    #[tokio::test]
+    async fn execute_one_returns_the_raw_result() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Echo);
+        registry.register(Fail);
+        let executor = ToolExecutor::new(registry);
+
+        // The singular form hands the driver the `Result` itself — no
+        // string conversion, no `ERROR:` channel — so the code-mode
+        // interpreter can fail or tolerate a step on it.
+        let value = executor
+            .execute_one(&ToolCall::new("c1", "echo", json!({"text": "hi"})))
+            .await
+            .unwrap();
+        assert_eq!(value, json!("hi"));
+        let error = executor
+            .execute_one(&ToolCall::new("c2", "fail", json!({})))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("boom"));
+    }
 
     #[async_trait]
     impl Tool for Panic {
