@@ -235,6 +235,49 @@ async fn absent_allowlist_preserves_the_full_registry() {
 }
 
 #[tokio::test]
+async fn the_status_view_reports_the_admitted_selection() {
+    // A bare allowlist surfaces as the run's declared selection.
+    let (app, store) = test_app(Some("calculator"));
+    let thread = create_thread(&app, "capable").await;
+    let (status, terminal) = run_wait(
+        &app,
+        &thread,
+        json!({"input": input(), "config": {"tool_allowlist": ["calculator"]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "run failed: {terminal}");
+    let run_id = terminal["run_id"].as_str().unwrap();
+    let (status, view) = call(&app, "GET", &format!("/runs/{run_id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "status view failed: {view}");
+    assert_eq!(view["capability_tools"], json!(["calculator"]));
+    let _ = std::fs::remove_dir_all(store);
+
+    // An inline capability set surfaces its tool members; an unrestricted
+    // run answers null (byte-identical prior shape for unselected runs).
+    let (app, store) = test_app(Some("calculator"));
+    let thread = create_thread(&app, "capable").await;
+    let (status, terminal) = run_wait(
+        &app,
+        &thread,
+        json!({"input": input(), "config": {"capability_set": {"tools": ["inspect_text"]}}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "run failed: {terminal}");
+    let run_id = terminal["run_id"].as_str().unwrap();
+    let (status, view) = call(&app, "GET", &format!("/runs/{run_id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "status view failed: {view}");
+    assert_eq!(view["capability_tools"], json!(["inspect_text"]));
+
+    let (status, terminal) = run_wait(&app, &thread, json!({"input": input()})).await;
+    assert_eq!(status, StatusCode::OK, "run failed: {terminal}");
+    let run_id = terminal["run_id"].as_str().unwrap();
+    let (status, view) = call(&app, "GET", &format!("/runs/{run_id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "status view failed: {view}");
+    assert_eq!(view["capability_tools"], Value::Null);
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
 async fn unknown_and_duplicate_members_fail_admission_on_every_endpoint() {
     let (app, store) = test_app(None);
     let thread = create_thread(&app, "capable").await;

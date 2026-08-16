@@ -1798,8 +1798,11 @@ async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<(
 
 /// `GET /runs/{run_id}` — poll a run's lifecycle status; once terminal, the
 /// response carries the run's `output` / `error` / `interrupt` fields.
-/// Runs are tenant-scoped through their thread: a run whose thread belongs
-/// to another tenant answers 404.
+/// `capability_tools` reports the tool selection admitted with the run
+/// (the explicit allowlist or the capability set's tool members; `null`
+/// for an unrestricted run) — the same declaration the replay endpoint
+/// re-validates. Runs are tenant-scoped through their thread: a run whose
+/// thread belongs to another tenant answers 404.
 async fn get_run(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
@@ -1822,6 +1825,7 @@ async fn get_run(
         "metadata": info.metadata,
         "attempt": info.attempt,
         "status": info.status.as_str(),
+        "capability_tools": info.capability_tools,
     });
     if let Some(terminal) = info.terminal {
         if let (Some(body), Some(terminal)) = (body.as_object_mut(), terminal.as_object()) {
