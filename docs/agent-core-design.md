@@ -59,13 +59,23 @@ those stops being adjacent planes and become one agent core.
   Unmodified: R0.13 composes it.
 - **The candidate pipeline** (`learn.rs`) — `Candidate`, `CandidateKind`,
   `PromotionEnvelope`, `admit_promotion`, `VersionPointer`, canary by seeded
-  draw. One additive extension, flagged under coordination: a `Skill`
-  candidate kind.
+  draw. R0.13's contract deltas, enumerated (the per-wave detail is in the
+  coordination notes): one new variant family — `CandidateKind::ContextPolicy`
+  with `CandidateContent::ContextPolicy { name, policy }` (Wave 1) and
+  `CandidateKind::Skill` with `CandidateContent::Skill { name, content_hash,
+  binding }` (Wave 4) — plus additive optional-field extensions to two
+  existing fixed-shape contents: `MemoryConfiguration` gains `rank` and
+  `maintenance` members (Wave 2), `ToolContract` gains a `selection` member
+  (Wave 3). Both shapes are legal under the established evolution rule —
+  new variants append, optional fields stay absent from the wire while
+  unset, old records keep deserializing, golden files pin every wire shape.
 - **The configuration registry** (`registry.rs`) — named artifacts indexing
-  candidates, environment-tagged pointers, admission resolution. Context
-  policies, consolidation policies, and tool-selection policies are registry
-  artifacts of the existing `memory_config` / `tool_contract` families —
-  no new configuration machinery.
+  candidates, environment-tagged pointers, admission resolution. R0.13's
+  policies are registry artifacts: the context policy under its own
+  `context:{name}` surface, consolidation and rank configuration as optional
+  members of the existing `memory_config` family, per-tool selection
+  metadata as an optional member of the existing `tool_contract` family —
+  no new registry machinery.
 - **The skill plane** (`skill.rs`) — `SkillPackage` validation,
   `scan_package`, content-addressed `SkillVersion`s, the append-only
   `SkillRegistry` with its forward-only latest pointer and three disclosure
@@ -165,13 +175,20 @@ Consolidation exists as a durable task; what does not exist is *when* it
 runs. R0.13 makes scheduling declarative: a **`ConsolidationPolicy`** — per
 scope and key domain, trigger thresholds (record count, aggregate token
 footprint, age of oldest unconsolidated record), and the distiller to invoke
-— stored as a registry artifact of the existing `memory_config` family, so
-changing the schedule is a governed, promotable, environment-tagged change
-rather than an operator edit. The scheduler itself is the server's cron
-machinery evaluating the policy's thresholds against store statistics; each
-triggered consolidation is the shipped journaled durable task. A policy
-change never alters a record — it alters *when distillation is proposed* —
-so the gate math is unchanged.
+— carried as an additive optional `maintenance` member on the existing
+`CandidateContent::MemoryConfiguration` artifact (surface
+`memory_config:{name}`, unchanged). The home decision, stated: the shipped
+`MemoryConfiguration` shape is `{name, budget, default_filters,
+schema_version}` — retrieval settings — and consolidation scheduling is
+memory-plane configuration, so it extends that family as an optional member
+rather than minting a variant; a `memory_config` candidate may carry
+retrieval settings, maintenance policy, rank weights (below), or any
+subset. Changing the schedule is thus a governed, promotable,
+environment-tagged change rather than an operator edit. The scheduler itself
+is the server's cron machinery evaluating the policy's thresholds against
+store statistics; each triggered consolidation is the shipped journaled
+durable task. A policy change never alters a record — it alters *when
+distillation is proposed* — so the gate math is unchanged.
 
 ### Compression of aged memories
 
@@ -212,18 +229,36 @@ disciplines keep it honest:
 1. **Derived, never stored on the record.** `MemoryRecord` is immutable;
    utility lives in the index, rebuilt from journals byte-identically. A
    record's content address never changes because a statistic moved.
-2. **Assembly consumes a journaled snapshot.** Live assembly reads the
-   utility index as of a stamped instant; the resolved rank inputs travel in
-   the journaled `MemoryRead` request, so exact replay serves the recorded
-   assembly byte-identically and the determinism contract is the shipped
-   one. Utility is a *rank input*, applied by the assembly driver alongside
-   priority/confidence/recency — the shipped `assemble()` total order stays
-   the tie-breaking floor beneath it.
-3. **The weights are configuration.** How much utility moves rank is a
-   `memory_config` artifact — promoted through the candidate gate with
-   replay + experiment evidence, rolled back by pointer. The floor
-   (utility weight zero, the shipped rank) is the `static-v0` of retrieval:
-   always legal, always the baseline every candidate is measured against.
+2. **Over-fetch, then re-rank in the assembly driver.** The journaled read
+   cannot carry utility: `JournaledMemory::read` journals exactly the
+   resolved query plus the budget, and `memory.rs` stays unmodified this
+   release. So the pipeline does the ranking in two stages. Stage one is the
+   shipped journaled read with an **over-fetch** — a policy-declared
+   multiplier on the section's budget, so the journaled `MemoryRead`
+   returns a packed superset under the shipped rank. Stage two is the
+   assembly driver, outside the journaled seam: it re-ranks the over-fetched
+   records under the policy-pinned utility weights (read from the utility
+   index as of a stamped instant) and re-packs against the section's true
+   budget. The semantics are stated precisely because they are easy to get
+   wrong: re-ranking *after* `assemble()`'s budget packing can change only
+   the order of the packed set, never which records are in it — the base
+   rank already made the cut. Over-fetch is what makes re-ranking
+   meaningful: the superset gives the re-rank candidates the base rank
+   would have dropped, and the final re-pack is where utility actually
+   changes selection. Determinism and replay hold because both stages are
+   pinned: the journaled `MemoryRead` serves the over-fetched set
+   byte-identically, and the journaled section manifest (the manifest
+   message inside the `ModelCall` input) pins the weights and the
+   utility-snapshot stamp the driver applied, so a replayed assembly
+   re-derives — and the served model call re-matches — byte-identically.
+   The shipped `assemble()` total order stays the tie-breaking floor beneath
+   the re-rank.
+3. **The weights are configuration.** How much utility moves rank is the
+   additive optional `rank` member of the `memory_config` artifact —
+   promoted through the candidate gate with replay + experiment evidence,
+   rolled back by pointer. The floor (utility weight zero, the shipped
+   rank) is the `static-v0` of retrieval: always legal, always the baseline
+   every candidate is measured against.
 
 The utility signal is also the distillation input for memory hygiene:
 records with sustained zero successful-use and expired validity become
@@ -238,7 +273,17 @@ operation; no policy auto-deletes.
 The core of the release: a first-class, deterministic, in-run context
 assembly pipeline that turns the prompt from string concatenation into a
 governed artifact. One type, `ContextPipeline`, driven by a versioned
-**`ContextPolicy`** (a registry artifact, environment-tagged, promotable):
+**`ContextPolicy`** — a candidate of the new additive kind
+`CandidateKind::ContextPolicy` (`CandidateContent::ContextPolicy { name,
+policy }`, surface `context:{name}`), indexed as a registry artifact,
+environment-tagged and promotable like every other surface. The home
+decision, stated: no existing family names this surface — `memory_config`
+governs what reads return, and the pipeline governs the whole assembly —
+so it is a new variant, not an optional-field overload; a context candidate
+may carry section layouts, budget splits, the tokenizer pin, the compaction
+trigger, and the tools section's shortlist policy (cutoff, `k`, feature
+weights — tool *selection* is assembly policy, so it lives here rather than
+in a fourth artifact type):
 
 ```text
 ┌────────────────────────────────────────────────────────────────┐
@@ -282,9 +327,15 @@ The pipeline's invariants are the release's contract:
 - **The assembly is the journal payload.** No new event kind: the assembled
   messages *are* the `ModelCall` input the Flight Recorder has journaled
   since R0.5, and the section manifest rides inside it as a reserved
-  metadata message (or the request's existing extra field). The prompt a
-  model saw is reconstructable from the journal — the R0.8 auditability
-  argument, now covering the whole context, not just the memory section.
+  metadata message. `ChatModel` is `chat(messages, tools)` — there is no
+  request side-channel — so the manifest message is the sole carrier, and
+  it is model-visible context: it is budgeted as its own accounting line
+  (its estimated tokens come off the top of the budget before sections
+  pack), its wording is policy-pinned so its behavioral influence is
+  versioned with everything else, and the golden assembly pins it
+  byte-for-byte. The prompt a model saw is reconstructable from the
+  journal — the R0.8 auditability argument, now covering the whole
+  context, not just the memory section.
 
 ### Mid-run history compaction
 
@@ -292,16 +343,58 @@ Long runs drown their own history. The shipped answer — nothing; the
 `messages` channel grows — is honest but bounded by the model's window.
 R0.13's compaction is a **pipeline operation, not a state mutation**: when
 the history section exceeds its compaction trigger, the pipeline issues a
-summarization model call (an ordinary journaled `ModelCall`) over the oldest
-span and substitutes the summary in the *assembled* history section. The
-`messages` channel itself is untouched — the journal and checkpoints keep
-the verbatim history as evidence, which is what makes the compaction
-revisable: a later evaluation can re-assemble with a different trigger and
-compare. Compaction carries a watermark (the compacted prefix's event span)
-recorded in the section manifest, so an auditor reads exactly which messages
-the model stopped seeing and what summary replaced them. ReAct consumes this
-unchanged: the compaction happens inside the model wrapper (below), never in
-`react.rs`.
+summarization model call over the oldest span and substitutes the summary
+in the *assembled* history section. The `messages` channel itself is
+untouched — the journal and checkpoints keep the verbatim history as
+evidence, which is what makes the compaction revisable: a later evaluation
+can re-assemble with a different trigger and compare. Compaction carries a
+watermark (the compacted prefix's event span) recorded in the section
+manifest, so an auditor reads exactly which messages the model stopped
+seeing and what summary replaced them.
+
+**The journaling wiring, specified exactly.** The summarization call must
+journal and replay-serve like every other model call, and the naive version
+of this design — "the model wrapper issues an ordinary journaled
+`ModelCall`" — does not survive contact with the seams. `ChatModel` is
+`chat(messages, tools)`, full stop: a wrapper receives no
+`PARENT_EVENT_KEY` (the executor hands it to node code, not to models), no
+`ReplaySource`, and no record/replay mode switch — `react.rs` owns the mode
+and wraps whatever model it was passed, so in replay mode the assembling
+wrapper's inner model is a panic-on-call sentinel by construction. The
+feasible wiring keeps compaction in the pipeline and puts the evidence
+machinery where the application can reach it — at construction:
+
+- The application builds `AssemblingChatModel` with a dedicated
+  **summarizer slot**, wrapped per mode exactly as the run's own model is:
+  recording mode gets `RecordingChatModel::new(summarizer, journal.clone(),
+  CONTEXT_PIPELINE_PARENT)`; replay mode gets `ReplayingChatModel::new(
+  sentinel, source.clone(), journal)` over the **run's own `ReplaySource`**
+  (it is `Clone`, and the serving rule — sequence plus canonical request
+  hash — is unchanged: the compaction call is simply one more journaled
+  `ModelCall` in the run's stream, served in order); unjournaled mode gets
+  the bare summarizer. The wrapper pair and its mode switch live in
+  application construction code, next to the `create_react_agent_*` call
+  that made the same choice for the primary model.
+- **Parentage rule for pipeline-internal effects** (stated once, applied
+  everywhere): the wrapper cannot learn the invocation's node-input parent,
+  so pipeline-internal effects journal under a static, documented parent —
+  the reserved constant `CONTEXT_PIPELINE_PARENT` naming the pipeline as
+  their causal origin. The audit walk is honest about what this costs:
+  causal attachment is to the run, not to the specific node invocation that
+  triggered the compaction, and the true ordering is recovered from the
+  journal's sequence numbers. `parent: None` was the alternative and is
+  rejected: an unparented event is indistinguishable from a wiring bug,
+  while the static marker says deliberately where the effect came from.
+- **Replay determinism of the trigger.** The compaction decision is a pure
+  function of the history prefix plus the pinned policy, and the summary
+  content is replay-served through the shared `ReplaySource` — so the
+  replayed pipeline re-fires the trigger at the same watermark, substitutes
+  the same summary, and the assembled request hash-matches the recorded
+  `ModelCall` it precedes. A compacted run is exactly replayable; Wave 1's
+  exit criterion below asserts it.
+
+ReAct consumes this unchanged: the compaction happens inside the model
+wrapper (below), never in `react.rs`.
 
 ### Token accounting: the precise seam, the estimate as floor
 
@@ -328,9 +421,16 @@ from the shipped `ToolCapability` (name, description, schema, effect class —
 derived, never separately authored, the `tool.rs` rule) plus an
 operator-governed overlay: capability tags, a when-to-use note, a cost/latency
 class, `parallel_safe` and `batchable` flags, and prerequisite tools. The
-overlay is a registry artifact of the existing `tool_contract` family —
-governed, versioned, promotable — so selection metadata changes move through
-the same gate as everything else.
+overlay's candidate home is an additive optional `selection` member on the
+existing `CandidateContent::ToolContract` (shipped shape `{tool, schema}`;
+surface `tool_contract:{tool}` unchanged) — the home decision: the overlay
+is per-tool metadata, and the per-tool artifact family already exists, so it
+extends rather than mints; a `tool_contract` candidate may carry the schema,
+the selection overlay, or both. The selection *policy* (cutoff, `k`,
+feature weights) is deliberately not per-tool and not its own artifact type:
+it is assembly policy and lives in the `ContextPolicy`'s tools section
+(above). Everything moves through the same candidate gate as every other
+surface.
 
 **Ranked shortlisting** engages when the registry grows past a declared
 cutoff: `select(features, manifests, k)` scores manifests structurally —
@@ -342,8 +442,18 @@ embeddings, per the vector decision, and the features are the assembly's own
 declared sections, journaled with the assembly.
 
 **Call outcome learning** derives from evidence that already exists: every
-journaled `ToolCall` carries the tool, the arguments, the outcome, the
-latency, and the error class. A durable task rolls these into per-tool (and
+journaled `ToolCall` carries the tool, the arguments, the outcome payload,
+and the latency. One honest wrinkle, decided: the failure side of that
+payload is a *string* (the failure-isolation channel's `ERROR: …` tool
+message), not a structured class — `ErrorClass` taxonomy exists on the
+durable-task path, not on tool results. So the roll-up's contract is
+two-tier: `ValidatingTool`'s violation payload (below) is the **structured
+contract** — a machine-readable JSON body under a reserved `ERROR:` prefix
+shape (`ERROR: {"kind":"argument_validation","violations":[…]}`) that the
+roll-up parses for validation-failure classes — and every other failure is
+counted as an opaque error string, classed by nothing more than its tool
+and its prefix. The decision favors one writer of structure over parsing
+free-form tool prose. A durable task rolls the journals into per-tool (and
 per argument-pattern-digest) success rates, validation-failure rates, and
 latency percentiles — the same derived-index discipline as memory utility.
 Selection consumes the snapshot as one rank input; argument-repair learning
@@ -358,23 +468,33 @@ the *policy metadata* the executor's caller needs to batch well:
 tool collapse into one — a tool-declared capability, honored by the
 dispatching node), and per-tool concurrency hints bounded above by the run's
 budgets and pool quotas, which a policy may only narrow, never widen (the
-R0.10 rule). The ReAct consumption of a partitioned batch is composition —
-a middleware layer may reject or rewrite calls, and the tools node's own
-code is application-side — not an executor change.
+R0.10 rule). The enforcement rule, stated once for the whole layer:
+**enforcement that must be evidenced goes through `Tool` wrappers** — a
+wrapped tool's refusal or validation failure is a journaled `ToolCall`
+event, attributable and replayable — **while middleware rejections are
+unjournaled policy**: the middleware hook's reject path never reaches
+dispatch, so nothing records it. Middleware is therefore for
+observe-and-rewrite and for policy that needs no evidence trail; anything an
+auditor must see (validation, skill-active narrowing, argument gating) is a
+wrapper. The ReAct consumption of a partitioned batch is composition —
+middleware for the unjournaled half, wrappers for the evidenced half, and
+the tools node's own code is application-side — not an executor change.
 
 **Argument validation and repair.** A `ValidatingTool` wrapper — pure
 composition over `Arc<dyn Tool>` — validates arguments against the tool's
-JSON schema *before* dispatch and, on failure, returns a structured
-`ERROR:` payload naming the violations instead of calling the tool. The
-repair loop is then the model's own next iteration through the shipped
-failure-isolation channel: it observes the violations and re-issues the
-call. No silent coercion (the v0.5 calculator bug's lesson: quoted numerics
-silently computing `0 op 0` is the failure mode this wrapper exists to make
-loud); repair hints are declarative schema metadata, not guesswork.
-Validation failures journal as ordinary `ToolCall` events with the violation
-payload, which is exactly the evidence the outcome-learning roll-up reads —
-and the evidence a distiller turns into correction examples, prompt
-candidates, or skill candidates when a tool's failure pattern repeats.
+JSON schema *before* dispatch and, on failure, returns the structured
+violation payload (the reserved `ERROR: {"kind":"argument_validation",
+"violations":[…]}` shape declared above — the one structured contract the
+outcome roll-up parses) instead of calling the tool. The repair loop is
+then the model's own next iteration through the shipped failure-isolation
+channel: it observes the violations and re-issues the call. No silent
+coercion (the v0.5 calculator bug's lesson: quoted numerics silently
+computing `0 op 0` is the failure mode this wrapper exists to make loud);
+repair hints are declarative schema metadata, not guesswork. Validation
+failures journal as ordinary `ToolCall` events with the violation payload,
+which is exactly the evidence the outcome-learning roll-up reads — and the
+evidence a distiller turns into correction examples, prompt candidates, or
+skill candidates when a tool's failure pattern repeats.
 
 ### Consuming it from ReAct without touching `react.rs`
 
@@ -387,14 +507,21 @@ Four composition seams, all shipped, no claimed files modified:
 2. **A `ChatModel` wrapper** — `AssemblingChatModel` runs the context
    pipeline (sections, budgets, compaction, tool shortlist) and then calls
    the inner model, exactly the pattern `RecordingChatModel` already
-   establishes. `create_react_agent(model, tools)` receives the wrapper;
-   `react.rs` never knows.
+   establishes. Its summarizer slot is wrapped per mode by the application
+   (the compaction section's wiring: recording/replaying pair over the
+   run's journal and shared `ReplaySource`), because the mode switch is
+   construction-time knowledge the wrapper cannot recover from the
+   `ChatModel` seam. `create_react_agent(model, tools)` receives the
+   wrapper; `react.rs` never knows.
 3. **Tool wrappers** — `ValidatingTool` (and any call-policy wrapper) wrap
    tools before registration; `ToolRegistry` holds `Arc<dyn Tool>`, so
    wrapped tools are indistinguishable from native ones.
 4. **Middleware** — the shipped `MiddlewareChain` tool hooks can rewrite or
-   reject calls (argument-policy enforcement), and model hooks wrap the
-   same seam the assembler uses.
+   reject calls, and model hooks wrap the same seam the assembler uses. Per
+   the enforcement rule above, middleware carries the *unjournaled* policy
+   (observe, rewrite, reject without an evidence trail); every enforcement
+   an auditor must see is a `Tool` wrapper so the refusal journals as a
+   `ToolCall`.
 
 ## Skills
 
@@ -409,20 +536,41 @@ it): **selection and governed activation**.
   when-to-use metadata beyond the description (trigger tags matched
   structurally against the task section, task-shape notes, cost class) and
   tool bindings made *enforceable*: the frontmatter's advisory
-  `allowed-tools` becomes a declared tool set that narrows the run's
-  allowlist while the skill is active, through the shipped
-  `restricted_to`/allowlist mechanism. A skill can only narrow the run's
+  `allowed-tools` becomes a declared tool set that narrows what a call may
+  reach while the skill is active. The mechanism, decided after checking
+  the seams: the run's static allowlist cannot carry this — the executor
+  writes `TOOL_ALLOWLIST_KEY` once per run, and dispatch under it succeeds
+  for every tool on the list regardless of which skill is active this
+  invocation. Skill-active narrowing is per-invocation state, so it is a
+  journaled gating **`Tool` wrapper**: registered around the affected
+  tools, it reads the assembly's active-skill set (handed over at wrapper
+  construction per the same per-mode wiring as the summarizer slot),
+  refuses a call outside the active skill's declared set with a structured
+  `ERROR:` payload, and that refusal journals as a `ToolCall` — the
+  evidenced-enforcement rule, applied. A skill can only narrow the run's
   tools, never widen them — capabilities-over-trust applied to context.
 - **Registry composition, answered.** The R0.11 configuration registry is
   *not* the skill store — `SkillRegistry` already is, with package-native
   concerns (scan reports, disclosure tiers, member hygiene) the config
-  registry has no business holding. What R0.11's machinery *does* supply is
-  the governed activation: a skill's **active version per environment is a
+  registry has no business holding. What the learn plane supplies is the
+  governed activation: a skill's **active version per environment is a
   learn-plane `VersionPointer`** over the surface `skill:{name}`, moved by
-  candidate promotion, bound at admission through the same pointer-admission
-  rule prompts use. `SkillRegistry`'s forward-only latest pointer remains
-  authorship history; the learn pointer is the production surface. Two
-  pointers, two jobs, one content-addressed version set they both name.
+  candidate promotion. The binding mechanism is stated precisely, because
+  it is weaker than the prompt path and the difference matters: prompts
+  resolve through the registry's `pointer_admission` + `resolution_pin`
+  into run-manifest digest pins and a journaled `ConfigResolved` event —
+  none of which exists for `skill:*`, `context:*`, or `memory_config:*`
+  surfaces (the run manifest's pin set is frozen in the claimed
+  `record.rs`). R0.13's surfaces bind through the **generic
+  `pointer_admission` rule only** — the tagged pointer, the canary draw,
+  the active version — and the *pin* is the journaled section manifest:
+  every assembly's manifest message carries the resolved candidate id and
+  content hash for each policy and skill it applied, journaled inside the
+  `ModelCall` input and replay-served with it. That is the whole mechanism:
+  no manifest pin, no `ConfigResolved`, and the audit walk reads the
+  manifest message instead. `SkillRegistry`'s forward-only latest pointer
+  remains authorship history; the learn pointer is the production surface.
+  Two pointers, two jobs, one content-addressed version set they both name.
 - **Selection during assembly** — the skills section of the pipeline
   shortlists tier-1 metadata structurally (trigger-tag overlap, declared
   tool availability after narrowing) and loads tier-2 bodies only for the
@@ -507,13 +655,20 @@ flowchart LR
 
 What is **new** in R0.13, exhaustively: the `context.rs` pipeline
 (`ContextPipeline`, `ContextPolicy`, `ContextAssembly`, `TokenCounter`
-seam, compaction), `tool_select.rs` (`ToolManifest`, `select`,
-`ValidatingTool`, outcome roll-up), `skills.rs` (`SkillBinding`, skill
-shortlisting), the memory utility index and consolidation policies
-(`memory_tiers.rs`), one additive `CandidateKind::Skill`, and the reference
-distillers. Everything else — candidates, envelopes, pointers, replay, the
-twin, eval composition, journaled memory, skill packages — is shipped
-machinery consumed as designed.
+seam, compaction with its per-mode summarizer wiring and the
+`CONTEXT_PIPELINE_PARENT` constant), `tool_select.rs` (`ToolManifest`,
+`select`, `ValidatingTool`, the gating skill-narrowing wrapper, the outcome
+roll-up), `skills.rs` (`SkillBinding`, skill shortlisting), the memory
+utility index and consolidation policies (`memory_tiers.rs`), the reference
+distillers — and the `learn.rs` contract deltas, per wave: Wave 1 adds
+`CandidateKind::ContextPolicy` / `CandidateContent::ContextPolicy` with its
+`surface_for_kind` arm (`context:{name}`); Wave 2 adds the optional `rank`
+and `maintenance` members to `CandidateContent::MemoryConfiguration`; Wave
+3 adds the optional `selection` member to `CandidateContent::ToolContract`;
+Wave 4 adds `CandidateKind::Skill` / `CandidateContent::Skill` with its
+surface arm (`skill:{name}`). Everything else — candidates, envelopes,
+pointers, replay, the twin, eval composition, journaled memory, skill
+packages — is shipped machinery consumed as designed.
 
 ### Evidence without new event kinds
 
@@ -521,11 +676,18 @@ machinery consumed as designed.
 context assemblies and skill selections journal **inside the journaled
 `ModelCall` request** (the assembled messages plus a manifest message
 carrying section budgets, record ids, tool shortlist, skill name/revision/
-hash pins) — the request hash therefore covers the whole context, and exact
-replay serves it unchanged. Memory operations journal through the shipped
+hash pins, resolved policy candidate ids, and utility/rank pins) — the
+request hash therefore covers the whole context, and exact replay serves it
+unchanged. Memory operations journal through the shipped
 `MemoryRead`/`MemoryWrite`/`MemoryForget` kinds; tool calls through
 `ToolCall`; candidate lifecycle through the four existing candidate kinds;
-policy decisions through `PolicyDecision`. The honest edge: assembly
+policy decisions through `PolicyDecision`. Pipeline-internal effects — the
+compaction summarization call is the one this release introduces — journal
+under the static documented parent `CONTEXT_PIPELINE_PARENT` (the parentage
+rule from the compaction section): the audit walk reaches them by journal
+sequence and reads their causal origin from the marker, accepting the
+honest cost that attachment is to the run rather than to the triggering
+node invocation. The honest edge: assembly
 *determinism* is proven by test (equal inputs → byte-equal assembly) rather
 than pinned by a dedicated assembly event — the journaled model call is the
 evidence of what the model saw, and it is sufficient because the model call
@@ -540,12 +702,17 @@ is the only consumer of the assembly.
   candidates per the roadmap, unchanged.
 - **No changes to claimed files.** `record.rs`, `executor.rs`, `react.rs`,
   `composer.rs`, `tool/**`, `checkpoint*` are other streams'. R0.13 is new
-  modules plus additive `lib.rs` mod lines, plus one additive
-  `CandidateKind` variant in the unclaimed `learn.rs` (flagged below).
+  modules plus additive `lib.rs` mod lines, plus the additive `learn.rs`
+  contract deltas enumerated above (two new candidate kinds, two
+  optional-field content extensions — flagged under coordination).
 - **No new journal event kinds.** The evidence strategy above rides
-  existing kinds; additive `RunEventKind` growth (e.g. a dedicated
-  `SkillLoaded` event, which `skill.rs`'s docs already anticipate) waits for
-  a wave where `record.rs` is unclaimed.
+  existing kinds. One additive `RunEventKind` is foreseeable — a dedicated
+  `SkillLoaded` event, which would let skill loads journal as first-class
+  effects rather than riding the manifest message — but that variant is
+  this design's own coinage, not a commitment the skill plane has made
+  (`skill.rs`'s docs say only that load journaling belongs to a
+  run-integration slice and that `RunEventKind` is deliberately untouched
+  there). It is deferred to a wave where `record.rs` is unclaimed.
 - **No online or in-run learning.** Assembly policies, rankings, and skills
   change between runs, by pointer, through the gate. In-run writes are
   governed memory writes — journaled, scoped, inert beyond retrieval.
@@ -566,16 +733,25 @@ is the only consumer of the assembly.
 **Wave 1 — the context pipeline and tool manifests.** New modules
 `context.rs` (`ContextPipeline`, `ContextPolicy`, section producers,
 per-section budgets, the `TokenCounter` seam with the shipped estimate as
-the floor implementation, history compaction with watermarks) and
-`tool_select.rs` (`ToolManifest` derived from `ToolCapability` plus the
-governed overlay, structural `select` shortlisting, `ValidatingTool`), plus
-the ReAct consumption recipe (`AssemblingChatModel`, construction-time
+the floor implementation, history compaction with watermarks and the
+per-mode summarizer wiring — `RecordingChatModel` / `ReplayingChatModel`
+around the summarizer over the run's shared `ReplaySource`, parented by
+`CONTEXT_PIPELINE_PARENT`) and `tool_select.rs` (`ToolManifest` derived
+from `ToolCapability` plus the governed overlay, structural `select`
+shortlisting, `ValidatingTool`), plus the `learn.rs` delta of the wave
+(`CandidateKind::ContextPolicy` + surface arm) and the ReAct consumption
+recipe (`AssemblingChatModel` with its summarizer slot, construction-time
 `restricted_to` narrowing) as an example. Depends on nothing unshipped.
 *Independently valuable:* deterministic, budgeted, journaled context with
 schema-validated tool calls is a win with zero learning. **Exit:** equal
 inputs and pinned policy produce byte-identical assemblies across processes
-(a checked-in golden pins one); an exact replay of a pipeline-assembled run
-serves the journaled model calls with zero outbound calls; a registry of 40
+(a checked-in golden pins one, manifest message included); an exact replay
+of a pipeline-assembled run serves the journaled model calls with zero
+outbound calls — **including a run whose history section compacted
+mid-run**: the replayed pipeline re-fires the trigger at the same
+watermark, the summarization call is served from the same journal through
+the shared `ReplaySource`, and the assembled request hash-matches the
+recorded `ModelCall` it precedes; a registry of 40
 tools shortlists to a pinned top-k with the full ranking in the section
 manifest; a malformed tool call returns a structured violation and the
 repaired call succeeds, both journaled.
@@ -583,31 +759,41 @@ repaired call succeeds, both journaled.
 **Wave 2 — memory organization and optimization.** New module
 `memory_tiers.rs`: the tier overlay (tier-aware assembly sections),
 hierarchical key grammar and write-gate validation, `ConsolidationPolicy`
-as a `memory_config` artifact with threshold triggers, content-equal dedup
-at the write gate, and the **utility index** — the derived projection of
-journaled `MemoryRead` assemblies joined against terminal status and eval
-scores — consumed as a journaled rank input with policy-pinned weights.
-Includes the recall measurement that decides the vector question, published
-in `benchmarks.md`. **Exit:** a scheduled consolidation policy triggers the
-shipped durable consolidation on threshold, superseding sources with
-dependent-summary invalidation intact; utility re-ranking under a promoted
-`memory_config` candidate improves task success on the recorded dataset at
-non-inferior cost, with the zero-weight floor as baseline and byte-exact
-rollback; the index rebuilds from journals byte-identically.
+as the optional `maintenance` member of `memory_config` artifacts with
+threshold triggers, content-equal dedup at the write gate, and the
+**utility index** — the derived projection of journaled `MemoryRead`
+assemblies joined against terminal status and eval scores — consumed
+through the two-stage assembly of the utility section above: over-fetch
+through the shipped journaled read, re-rank and re-pack in the assembly
+driver, weights and snapshot stamp pinned in the journaled section
+manifest (the optional `rank` member of `memory_config` carries the
+weights). Includes the recall measurement that decides the vector question,
+published in `benchmarks.md`. **Exit:** a scheduled consolidation policy
+triggers the shipped durable consolidation on threshold, superseding
+sources with dependent-summary invalidation intact; utility re-ranking
+under a promoted `memory_config` candidate improves task success on the
+recorded dataset at non-inferior cost, with the zero-weight floor as
+baseline and byte-exact rollback; a replayed run re-derives the re-ranked
+assembly byte-identically from the served over-fetched read plus the
+manifest pins; the index rebuilds from journals byte-identically.
 
 **Wave 3 — tool selection and call-outcome learning.** The outcome roll-up
 (durable task over journaled `ToolCall` events: per-tool and per
-argument-pattern success, latency, validation-failure rates), selection
-policies promoted through the gate as `tool_contract` artifacts, batching
-metadata (`parallel_safe` / `batchable`) consumed by dispatching nodes, and
-the argument-repair distiller (repeated validation failures → correction
-examples and prompt candidates through the R0.8 loop). Depends on Wave 1's
-manifests and Wave 2's derived-index discipline. **Exit:** a learned
-selection policy distilled from journaled outcomes promotes through the
-envelope (scoped approval) and measurably reduces invalid and failed tool
-calls on the recorded dataset at non-inferior completion; rollback restores
-the prior shortlist byte-exactly; every transition journaled through the
-existing candidate kinds.
+argument-pattern success, latency, validation-failure rates parsed from the
+`ValidatingTool` structured contract — every other failure counted as an
+opaque error string), per-tool selection metadata promoted through the gate
+as the optional `selection` member of `tool_contract` artifacts (the
+selection *policy* — cutoff, `k`, weights — promotes as the tools section
+of a `context` candidate), batching metadata (`parallel_safe` /
+`batchable`) consumed by dispatching nodes, and the argument-repair
+distiller (repeated validation failures → correction examples and prompt
+candidates through the R0.8 loop). Depends on Wave 1's manifests and Wave
+2's derived-index discipline. **Exit:** a learned selection policy
+distilled from journaled outcomes promotes through the envelope (scoped
+approval) and measurably reduces invalid and failed tool calls on the
+recorded dataset at non-inferior completion; rollback restores the prior
+shortlist byte-exactly; every transition journaled through the existing
+candidate kinds.
 
 **Wave 4 — skills and the end-to-end loop.** New module `skills.rs`
 (`SkillBinding`, structural skill shortlisting into the pipeline's skills
@@ -631,17 +817,27 @@ returns, byte-exact.
 
 Flagged before Wave 1 lands:
 
-1. **`CandidateKind::Skill` placement.** The additive variant must live in
-   `learn.rs` (where `CandidateContent` is), which is unclaimed but shared.
-   Leaning: one variant with a content-hash reference to the skill package —
-   no package bytes inside the candidate — keeping the diff minimal and
-   merge-friendly. If another stream is concurrently extending
-   `CandidateKind`, sequence the merges; golden files pin the outcome.
-2. **Section-manifest carrier.** A reserved manifest message inside the
-   journaled `ModelCall` input versus a request extra field. Leaning: the
-   manifest message — providers ignore unknown content parts less reliably
-   than they ignore a text segment, and the manifest must be inside the
-   request hash either way.
+1. **The `learn.rs` delta set.** Four artifact types needed homes and got
+   them (decisions above): `ContextPolicy` as a new variant (Wave 1),
+   consolidation and rank configuration as optional members on
+   `MemoryConfiguration` (Wave 2), per-tool selection metadata as an
+   optional member on `ToolContract` (Wave 3), and `Skill` as a new variant
+   with a content-hash reference to the package — no package bytes inside
+   the candidate (Wave 4). The open part is sequencing, not shape:
+   `learn.rs` is unclaimed but shared, so if another stream is concurrently
+   extending `CandidateKind` or these content structs, the merges are
+   sequenced and the golden files pin the outcome. Variant contents stay
+   `Value`-bodied where the policy schema is still moving (`ContextPolicy`),
+   matching the shipped `Policy { parameters: Value }` precedent.
+2. **Section-manifest carrier — decided.** The manifest rides as a reserved
+   metadata message inside the journaled `ModelCall` input; there is no
+   alternative carrier, because `ChatModel` is `chat(messages, tools)` and
+   the request has no side-channel. The consequences are accepted and
+   priced: the manifest is model-visible context, so its estimated tokens
+   come off the budget as their own accounting line, its wording is
+   policy-pinned so its behavioral influence versions with the rest of the
+   context, and the Wave 1 golden assembly pins it byte-for-byte — a
+   wording change is a visible, reviewable diff, never a silent drift.
 3. **Utility weight bounds.** How far a utility signal may move rank before
    the assembly stops being predictable. Leaning: utility perturbs order
    within a declared band around the shipped rank (priority/confidence/
@@ -668,14 +864,29 @@ Flagged before Wave 1 lands:
 
 ## Coordination notes for the other streams
 
-- **`record.rs` owner:** R0.13 adds no `RunEventKind` variants. The future
-  `SkillLoaded` event `skill.rs` anticipates is deliberately deferred to a
-  wave where the record plane is unclaimed; flagging it here so it lands
-  once, cleanly.
-- **`learn.rs`:** one additive `CandidateKind::Skill` +
-  `CandidateContent::Skill` variant and its `surface_for_kind` arm
-  (`skill:{name}`), appended; existing variants, goldens, and gate behavior
-  untouched.
+- **`record.rs` owner:** R0.13 adds no `RunEventKind` variants. One future
+  variant is foreseeable — a dedicated `SkillLoaded` event, this design's
+  own proposal, not a commitment from the skill plane — deliberately
+  deferred to a wave where the record plane is unclaimed; flagging it here
+  so it lands once, cleanly.
+- **`learn.rs`:** the contract deltas, per wave — Wave 1:
+  `CandidateKind::ContextPolicy` + `CandidateContent::ContextPolicy
+  { name, policy }` and its `surface_for_kind` arm (`context:{name}`);
+  Wave 2: optional `rank` and `maintenance` members on
+  `CandidateContent::MemoryConfiguration`; Wave 3: optional `selection`
+  member on `CandidateContent::ToolContract`; Wave 4:
+  `CandidateKind::Skill` + `CandidateContent::Skill { name, content_hash,
+  binding }` and its surface arm (`skill:{name}`). All appended; existing
+  variants, content shapes, goldens, and gate behavior untouched; each
+  delta lands with its wave's goldens.
+- **`rusty-server` owner:** this release is core-only in design, but three
+  waves have server-side work queued behind them — the cron-evaluated
+  `ConsolidationPolicy` triggers and store-statistics reads (Wave 2), the
+  utility-index and tool-outcome roll-up durable task kinds with their
+  derived-index storage on both backends (Waves 2–3), and the `skill:*` /
+  `context:*` pointer store (the learn pointer machinery's server half,
+  Wave 4). The affected server file scopes will need register entries when
+  those waves start; none is claimed this wave.
 - **`tool/**` owner:** consumed read-only. `restricted_to`, `ToolCapability`,
   `ToolExecutor` batch semantics, and the middleware hooks are sufficient —
   if they stop being sufficient, that is a request to your stream, not a
