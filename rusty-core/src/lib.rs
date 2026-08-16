@@ -234,6 +234,7 @@ pub mod effects;
 pub mod error;
 pub mod executor;
 pub mod graph;
+pub mod hooks;
 pub mod inbox;
 pub mod journal;
 pub mod knowledge;

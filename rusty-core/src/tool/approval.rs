@@ -33,10 +33,45 @@
 //! take an [`ApprovalGate`] and decide in [`crate::record::ApprovalDecision`]
 //! directly.
 
+use std::sync::Arc;
+
 use serde_json::Value;
 
 use crate::journal::{EventDraft, Journal};
 use crate::record::{ApprovalDecision, ApprovalOutcome, ApprovalRequest, Effect, RunEventKind};
+
+/// A decision source for gates that ask (parity wave): maps an
+/// [`ApprovalRequest`] into the closed [`ApprovalDecision`] vocabulary.
+///
+/// Shared by the permission presets ([`crate::capability`]) and the Claude
+/// Code hook bridge ([`crate::hooks`]) so every asking plane speaks exactly
+/// one vocabulary — and so a run can wire one answerer (an operator prompt,
+/// a policy engine) behind every gate. An answerer that cannot answer
+/// returns [`ApprovalDecision::Unavailable`], which denies like any other
+/// non-grant: the vocabulary stays fail-closed however it is sourced.
+pub type ApprovalAnswerer = Arc<dyn Fn(&ApprovalRequest) -> ApprovalDecision + Send + Sync>;
+
+/// A one-line rendering of a decision for guard denial reasons
+/// (`pub(crate)`: the preset and hook guards phrase their denials with it).
+pub(crate) fn decision_summary(decision: &ApprovalDecision) -> String {
+    match decision {
+        ApprovalDecision::ApprovedOnce { approved_by } => {
+            format!("approved once by `{approved_by}`")
+        }
+        ApprovalDecision::Rejected { decided_by, reason } => match reason {
+            Some(reason) => format!("rejected by `{decided_by}`: {reason}"),
+            None => format!("rejected by `{decided_by}`"),
+        },
+        ApprovalDecision::Cancelled { reason } => match reason {
+            Some(reason) => format!("cancelled: {reason}"),
+            None => "cancelled".to_owned(),
+        },
+        ApprovalDecision::Unavailable { reason } => match reason {
+            Some(reason) => format!("no decider available: {reason}"),
+            None => "no decider available".to_owned(),
+        },
+    }
+}
 
 /// A journaling approval gate: writes the asked/decided pair of
 /// [`crate::record::ApprovalDecision`]s into a run's journal.
