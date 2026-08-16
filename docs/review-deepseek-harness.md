@@ -62,3 +62,38 @@ Turn/step loop with durable inbox ≈ rusty's executor + pending runs; capabilit
 3. Plugin kernel with RAII guards (P1-4), then wire composer publishing through it
 4. Sandbox seam for `run_cli` (P1-5)
 5. Render intents for Studio (P1-6)
+
+## Addendum: the two pillars in depth
+
+### Traceability — the honest scorecard
+
+Rusty's journal is closer to dsh's session log than the first pass suggested: `RunEventKind::ModelCall` already records the request (messages + tool schemas), so the "model-visible means logged" gap is not the log's *existence* but its *completeness proof*. Corrected comparison:
+
+**Where rusty is already stronger**
+- A *closed* event vocabulary matched exhaustively — dsh's merge-extensible event map needs `ignorable` markers and refusal-to-reconstruct rules to stay safe; rusty's compiler enforces totality.
+- Effects are classified and journaled per call (read-only/idempotent/compensatable/irreversible), with deterministic idempotency keys and effect receipts — dsh has no effect taxonomy; its approvals sit beside the log, not inside a taxonomy.
+- Replay is *verified* (server-side exact replay answers `verified: true` or names the divergence), plus run diff, fork, and time-travel — dsh's story is reconstructability, not verification.
+- Evals are first-class (datasets sourced from run evidence); dsh has none.
+
+**Where dsh is genuinely stronger**
+- **Streaming fidelity**: raw `assistant/chunk` events give token-level replay; rusty journals request/response, not the stream between.
+- **Derived surface**: `surfaceOp` replace-spans with `sourceEventSeqs` citations let compaction rewrite the conversation surface while the log stays immutable; rusty has no compaction projection yet.
+- **Operational traceability**: telemetry as a mirrored ledger with a redaction *waterfall*, and a token meter that replays the log into request-pressure and per-surface pricing; rusty has journal evidence but no metering/analytics derived from it.
+- **Cross-session introspection as agent tools** (`session_search`, `session_trace`) — the agent can query its own history's evidence; rusty's journals are operator-visible, not agent-visible.
+- **Format-versioned headers** with explicit upgrade refusal — rusty's store evolution is quieter than that.
+
+Net: rusty's evidence is stronger for *verification*, dsh's for *operations*. The P0 item shrinks accordingly: journal the run-config half of the envelope (model parameters, resolved capability set) alongside the already-journaled messages+schemas, add optional chunk capture, and make replay *assert* envelope equality.
+
+### Flexibility — what "everything is a plugin" actually buys, and rusty's idiomatic answer
+
+dsh's total-plugin model buys five concrete things: any row of the composition tree is replaceable by config (no privileged core); hot unload/reload with guaranteed unwind; deployments as data (profile/bundle/patch trees, so per-tenant assemblies need no code branch); per-agent scoped contributions in one process; and a third-party distribution channel.
+
+The costs are real too: dependency injection at runtime gives up compile-time contract checking precisely where a harness most needs it (tool admission, secrets, effects), and their own README warns of compatibility-breaking churn — the flexibility tax is paid in auditability.
+
+Rusty's answer should not imitate the ideology; it should deliver the same five wins through three mechanisms it already half-has:
+
+1. **Trait seams for provider swaps** (already done — `ChatModel`, `HttpApiTransport`, `BrowserDriver`, `CredentialBroker`, checkpoint stores). This covers "replace any provider," at compile time, with exhaustiveness checking dsh cannot have.
+2. **Data-plane extension** (already done — connector manifests, SKILL.md packages, composed tool recipes: content-addressed, validated, scanned). This covers "deployments as data" and "third-party distribution" without running third-party *code*.
+3. **The missing piece — runtime code plugins**: a `PluginKernel` whose registrations return RAII guards (dropped LIFO on unload — ownership giving us for free what Cordis needs a runtime for), with **WASM capsules as the guest vehicle** (`capsule_host` + journaled `WasmCall` already exist). Sandboxed, capability-granted, journaled guest modules are the Rust-native "everything can be a plugin": hot-loadable, memory-safe, effect-admitted, evidence-recorded — without dissolving the typed planes into runtime DI.
+
+That combination delivers dsh's flexibility profile where it matters (per-tenant assemblies, hot reload, third-party extension, composer-published capabilities) while keeping every extension point auditable at the boundary where it enters the system.
