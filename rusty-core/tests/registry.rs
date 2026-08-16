@@ -101,6 +101,7 @@ fn tool_contract_candidate() -> Candidate {
                 },
                 "required": ["query"],
             }),
+            selection: None,
         },
         operator(),
         EvidenceSpan::default(),
@@ -134,6 +135,8 @@ fn memory_configuration_candidate() -> Candidate {
                 ..MemoryQuery::default()
             },
             schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
+            rank: None,
+            maintenance: Vec::new(),
         },
         operator(),
         EvidenceSpan::default(),
@@ -849,6 +852,8 @@ fn resolution_pin_refuses_kinds_without_a_manifest_digest_slot() {
             budget: ContextBudget::new(4096),
             default_filters: MemoryQuery::default(),
             schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
+            rank: None,
+            maintenance: Vec::new(),
         },
     ] {
         let candidate =

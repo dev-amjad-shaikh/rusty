@@ -1,0 +1,9 @@
+{
+  "tags": [
+    "web",
+    "research"
+  ],
+  "when_to_use": "For open questions needing current information.",
+  "cost_class": "medium",
+  "batchable": true
+}

@@ -80,7 +80,9 @@ use crate::memory::{
     apply_query, ContextBudget, MemoryQuery, MemoryRecord, MemoryScope, MemoryStore,
     ProvenanceAuthor, ScopeAddress,
 };
+use crate::memory_tiers::{ConsolidationPolicy, RankPolicy};
 use crate::record::{sha256_hex, DecisionFamily, RunManifest};
+use crate::tool_select::ToolSelectionOverlay;
 
 fn invalid(message: impl Into<String>) -> RustyError {
     // Candidate construction and application are state updates to the
@@ -157,12 +159,20 @@ pub enum CandidateKind {
     /// An ordered middleware layer list plus per-layer configuration
     /// (R0.11).
     MiddlewareComposition,
+    /// A context assembly policy — section layouts, budget splits, the
+    /// tokenizer pin, the compaction trigger (R0.13 wave 1). Surface
+    /// `context:{name}`.
+    ContextPolicy,
+    /// A distilled skill package, by content address (R0.13 wave 4).
+    /// Surface `skill:{name}`.
+    Skill,
 }
 
 impl CandidateKind {
     /// The wire name (`prompt` / `policy` / `memory_set` /
     /// `tool_permission` / `tool_contract` / `model_settings` /
-    /// `memory_configuration` / `middleware_composition`).
+    /// `memory_configuration` / `middleware_composition` /
+    /// `context_policy` / `skill`).
     pub fn as_str(&self) -> &'static str {
         match self {
             CandidateKind::Prompt => "prompt",
@@ -173,6 +183,8 @@ impl CandidateKind {
             CandidateKind::ModelSettings => "model_settings",
             CandidateKind::MemoryConfiguration => "memory_configuration",
             CandidateKind::MiddlewareComposition => "middleware_composition",
+            CandidateKind::ContextPolicy => "context_policy",
+            CandidateKind::Skill => "skill",
         }
     }
 }
@@ -257,6 +269,18 @@ pub enum CandidateContent {
         tool: String,
         /// The parameters schema the tool declares.
         schema: Value,
+        /// The operator-governed selection overlay (R0.13 wave 3):
+        /// capability tags, the when-to-use note, cost class, batching
+        /// flags, prerequisites — the per-tool selection metadata
+        /// [`crate::tool_select::ToolManifest`] assembles. Additive and
+        /// optional — absent from the wire while unset, so pre-R0.13
+        /// `tool_contract` artifacts keep their shape (and their content
+        /// addresses) byte-for-byte. A `tool_contract` candidate may carry
+        /// the schema, the selection overlay, or both; validation is at
+        /// consumption ([`crate::tool_select::ToolManifest::with_overlay`]),
+        /// the wave-2 discipline for `rank`/`maintenance` applied here.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selection: Option<ToolSelectionOverlay>,
     },
     /// A model id plus its parameters (R0.11). The pair is what
     /// [`RunManifest::pin_model`] pins: the provider-precise model id
@@ -286,6 +310,22 @@ pub enum CandidateContent {
         default_filters: MemoryQuery,
         /// The memory record-schema version the settings assume.
         schema_version: String,
+        /// The utility re-rank policy (R0.13 wave 2): how far the derived
+        /// utility signal may move retrieval order, and the over-fetch the
+        /// two-stage assembly reads. Additive and optional — absent from
+        /// the wire while unset, so pre-R0.13 `memory_config` artifacts
+        /// keep their shape (and their content addresses) byte-for-byte.
+        /// The floor is `RankPolicy::default()` — utility weight zero, no
+        /// over-fetch — the `static-v0` of retrieval.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rank: Option<RankPolicy>,
+        /// The consolidation schedule (R0.13 wave 2): declarative trigger
+        /// thresholds per scope and key domain. Additive and optional —
+        /// absent from the wire while empty. A maintenance change alters
+        /// *when distillation is proposed*, never a record, so the gate
+        /// math is unchanged.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        maintenance: Vec<ConsolidationPolicy>,
     },
     /// An ordered middleware layer list plus per-layer configuration
     /// (R0.11): interception policy versioned like everything else. The
@@ -299,6 +339,45 @@ pub enum CandidateContent {
         /// after-hooks in reverse (the chain's onion semantics, governed
         /// here, untouched there).
         layers: Vec<MiddlewareLayerConfig>,
+    },
+    /// A context assembly policy (R0.13 wave 1): the section layouts,
+    /// budget splits, tokenizer pin, and compaction trigger the context
+    /// pipeline ([`crate::context`]) assembles under. Deliberately a new
+    /// kind rather than an optional-field overload: `memory_config` governs
+    /// what reads return; the context policy governs the whole assembly.
+    /// `Value`-bodied while the policy schema moves — the shipped
+    /// [`CandidateContent::Policy`] precedent (`parameters: Value`); the
+    /// typed parse is `ContextPolicy::from_value`, fail-closed on an
+    /// unknown schema version.
+    ContextPolicy {
+        /// The policy's name (the registry artifact's key part).
+        name: String,
+        /// The policy body (a `context-policy-v1` document).
+        policy: Value,
+    },
+    /// A distilled skill package, by content address (R0.13 wave 4). The
+    /// candidate names the package's own digest
+    /// ([`crate::skill::SkillPackage::content_hash`]) — candidate identity
+    /// and package identity are one digest's reference, and no package
+    /// bytes live inside the candidate (the registry holds the bytes; the
+    /// candidate holds the address). The variant appends under the
+    /// established evolution rule: existing kinds, their content shapes,
+    /// and their goldens are untouched.
+    Skill {
+        /// The skill's name (the registry key; the surface's name part).
+        name: String,
+        /// The package's content address, minted by the skill plane's own
+        /// fail-closed parse — a candidate whose hash no validated package
+        /// produces is unbindable at consumption.
+        content_hash: String,
+        /// The run-facing binding (trigger tags, the declared tool set),
+        /// when the distiller declares one — typed as the skills plane's
+        /// [`crate::skills::SkillBinding`], validated fail-closed at
+        /// distillation, and absent from the wire while unset, so
+        /// binding-free candidates keep their content addresses
+        /// byte-for-byte. Extract it with [`crate::skills::skill_pin`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<crate::skills::SkillBinding>,
     },
 }
 
@@ -423,6 +502,8 @@ impl Candidate {
             CandidateContent::ModelSettings { .. } => CandidateKind::ModelSettings,
             CandidateContent::MemoryConfiguration { .. } => CandidateKind::MemoryConfiguration,
             CandidateContent::MiddlewareComposition { .. } => CandidateKind::MiddlewareComposition,
+            CandidateContent::ContextPolicy { .. } => CandidateKind::ContextPolicy,
+            CandidateContent::Skill { .. } => CandidateKind::Skill,
         }
     }
 
@@ -460,6 +541,10 @@ impl Candidate {
             CandidateContent::MiddlewareComposition { name, .. } => {
                 surface_for_kind(CandidateKind::MiddlewareComposition, name)
             }
+            CandidateContent::ContextPolicy { name, .. } => {
+                surface_for_kind(CandidateKind::ContextPolicy, name)
+            }
+            CandidateContent::Skill { name, .. } => surface_for_kind(CandidateKind::Skill, name),
         }
     }
 
@@ -506,7 +591,8 @@ impl Candidate {
 /// The surface key for one kind's named surface: `prompt:{name}` /
 /// `policy:{family}` / `memory:{scope-address}` / `tool:{tool}` /
 /// `tool_contract:{tool}` / `model_settings:{name}` /
-/// `memory_config:{name}` / `middleware:{name}`.
+/// `memory_config:{name}` / `middleware:{name}` / `context:{name}` /
+/// `skill:{name}`.
 ///
 /// [`Candidate::surface`] builds its key through this function, and the
 /// configuration registry (`crate::registry`) keys artifacts by the same
@@ -522,6 +608,8 @@ pub fn surface_for_kind(kind: CandidateKind, name: &str) -> SurfaceKey {
         CandidateKind::ModelSettings => "model_settings",
         CandidateKind::MemoryConfiguration => "memory_config",
         CandidateKind::MiddlewareComposition => "middleware",
+        CandidateKind::ContextPolicy => "context",
+        CandidateKind::Skill => "skill",
     };
     SurfaceKey::new(format!("{prefix}:{name}"))
 }
@@ -1150,6 +1238,19 @@ fn is_approval_envelope_rule(rule: &EnvelopeRule) -> bool {
     *rule == EnvelopeRule::Approval
 }
 
+/// The wave-1 envelope answer for `context_policy` candidates (see
+/// [`PromotionEnvelope::rule_for`]): approval, always, declared as a
+/// constant rather than an envelope field so the shipped envelope wire
+/// shape is untouched.
+const CONTEXT_POLICY_ENVELOPE_RULE: EnvelopeRule = EnvelopeRule::Approval;
+
+/// The wave-4 envelope answer for `skill` candidates (see
+/// [`PromotionEnvelope::rule_for`]): approval, always — a wrong skill
+/// steers every run that selects it, the semantic blast radius R0.8
+/// already priced for prompts. Declared as a constant rather than an
+/// envelope field so the shipped envelope wire shape is untouched.
+const SKILL_ENVELOPE_RULE: EnvelopeRule = EnvelopeRule::Approval;
+
 impl PromotionEnvelope {
     /// The R0.8 default (design open question 6): `memory_set` candidates
     /// at run and agent scope with a clean verdict may auto-promote;
@@ -1178,6 +1279,13 @@ impl PromotionEnvelope {
     }
 
     /// The rule for `kind`.
+    ///
+    /// R0.13's `context_policy` has no envelope field yet: the wave-1 rule
+    /// is the conservative constant — a context policy steers every run's
+    /// assembly, the semantic blast radius the registry kinds already price
+    /// — so it answers [`EnvelopeRule::Approval`] without growing the
+    /// envelope's wire shape. A declarable rule lands with its wave's
+    /// golden, additively, if a deployment needs one.
     pub fn rule_for(&self, kind: CandidateKind) -> &EnvelopeRule {
         match kind {
             CandidateKind::Prompt => &self.prompt,
@@ -1188,6 +1296,8 @@ impl PromotionEnvelope {
             CandidateKind::ModelSettings => &self.model_settings,
             CandidateKind::MemoryConfiguration => &self.memory_configuration,
             CandidateKind::MiddlewareComposition => &self.middleware_composition,
+            CandidateKind::ContextPolicy => &CONTEXT_POLICY_ENVELOPE_RULE,
+            CandidateKind::Skill => &SKILL_ENVELOPE_RULE,
         }
     }
 

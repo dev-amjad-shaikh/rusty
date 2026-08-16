@@ -1,0 +1,35 @@
+{
+  "candidate_id": "45f130a6124dc500e1370157b9bef0a563446f07b442cb5b04ff9c016d949a8e",
+  "content": {
+    "kind": "memory_configuration",
+    "name": "recall",
+    "budget": {
+      "max_tokens": 4096,
+      "overflow": "truncate"
+    },
+    "default_filters": {},
+    "schema_version": "memory-v1",
+    "rank": {
+      "utility_weight": 4,
+      "over_fetch_percent": 200
+    },
+    "maintenance": [
+      {
+        "scope": "agent",
+        "key_domain": "episode",
+        "max_records": 3,
+        "distiller": "episode-distiller"
+      }
+    ]
+  },
+  "distilled_by": {
+    "type": "distiller",
+    "name": "utility-distiller"
+  },
+  "evidence": {
+    "run_ids": [
+      "run-abc"
+    ]
+  },
+  "created_at": "2025-06-16T18:53:22Z"
+}
