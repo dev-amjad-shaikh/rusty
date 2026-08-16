@@ -311,6 +311,17 @@ impl ToolRegistry {
         self
     }
 
+    /// Remove a tool by name, returning what was registered.
+    ///
+    /// The removal half of the plugin kernel's revertible registrations
+    /// ([`crate::plugin`]): a registration guard removes exactly the entry
+    /// it inserted when its plugin unloads. Static composition has no use
+    /// for it — a plane built once never unregisters — so no existing
+    /// caller changes shape.
+    pub fn unregister(&mut self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.remove(name)
+    }
+
     /// Look up a tool by name.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.get(name).cloned()

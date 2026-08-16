@@ -110,6 +110,13 @@ pub enum RustyError {
     #[error("tool error: {0}")]
     Tool(String),
 
+    /// Plugin kernel failures ([`crate::plugin`]): a duplicate identity, an
+    /// `apply` that failed or panicked midway (its partial registrations
+    /// already unwound), an unload of a plugin that is not active, or a
+    /// hot reload whose old registrations survived unloading.
+    #[error("plugin error: {0}")]
+    Plugin(String),
+
     /// Exact-replay failures (Flight Recorder, R0.5): the run diverged from
     /// the journaled evidence (request-hash mismatch, effect-order violation,
     /// unserved recorded effects), a journal snapshot or fixture failed

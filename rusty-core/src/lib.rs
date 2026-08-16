@@ -161,6 +161,15 @@
 //!   default, structurally — and the registry resolving `RunManifest`
 //!   capsule pins to content addresses lives in `rusty-agent-server`; these are
 //!   the pure contracts both sides agree on.
+//! - **The plugin kernel** ([`plugin`]): hot load/unload of capability
+//!   bundles with revertible registrations — every registration a plugin
+//!   makes through [`plugin::PluginContext`] returns a
+//!   [`plugin::RegistrationGuard`] whose `Drop` removes exactly that entry,
+//!   the kernel collects each plugin's guards into its [`plugin::Fiber`],
+//!   and unloading unwinds the stack LIFO, so a failed `apply` leaves no
+//!   half-registrations and an unloaded plugin's tools are gone from the
+//!   dispatch surface. Behind the `wasm` feature, `CapsulePlugin` adapts a
+//!   WASM capsule into a plugin through the same guarded path.
 //! - **Signed run receipts** ([`receipt`], R0.9 wave 3): the Ed25519-signed
 //!   [`receipt::RunReceipt`] over the journal head, the run manifest
 //!   digests and resolved capsule ids, the effect and denials ledgers, and
@@ -223,6 +232,7 @@ pub mod mcp;
 pub mod memory;
 pub mod middleware;
 pub mod node;
+pub mod plugin;
 #[cfg(feature = "genai")]
 pub mod provider_genai;
 pub mod react;
@@ -347,6 +357,12 @@ pub mod prelude {
         ToolInvocation,
     };
     pub use crate::node::{Command, Node, NodeConfig, NodeContext, NodeOutput};
+    #[cfg(feature = "wasm")]
+    pub use crate::plugin::CapsulePlugin;
+    pub use crate::plugin::{
+        Fiber, FiberState, Plugin, PluginContext, PluginKernel, RegistrationGuard,
+        MAX_PLUGIN_CONFIG_BYTES, MAX_PLUGIN_ID_LEN,
+    };
     #[cfg(feature = "genai")]
     pub use crate::provider_genai::GenaiChatModel;
     pub use crate::react::{
