@@ -101,6 +101,7 @@ fn tool_contract_candidate() -> Candidate {
                 },
                 "required": ["query"],
             }),
+            selection: None,
         },
         operator(),
         EvidenceSpan::default(),

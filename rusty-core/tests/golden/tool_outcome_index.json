@@ -1,0 +1,82 @@
+{
+  "stamp": "2025-06-17T22:40:10Z",
+  "tools": {
+    "http.get": {
+      "stats": {
+        "calls": 4,
+        "successes": 2,
+        "validation_failures": 2
+      },
+      "opaque_failures": 0,
+      "latencies_ms": [
+        2,
+        3,
+        30,
+        50
+      ],
+      "patterns": {
+        "5053e1730f3834bc9b72672fdb107ac4c91a8483ea6a3991c5bb1aedab6c5e34": {
+          "calls": 2,
+          "successes": 0,
+          "validation_failures": 2,
+          "opaque_failures": 0
+        },
+        "6d80a0278b7d483ff5abdaf46b1c74bd1a0f2564470381704a68394dbcb4e8f4": {
+          "calls": 2,
+          "successes": 2,
+          "validation_failures": 0,
+          "opaque_failures": 0
+        }
+      },
+      "violations": [
+        {
+          "path": "/url",
+          "rule": "type",
+          "count": 2,
+          "example_message": "expected \"string\", found integer"
+        }
+      ]
+    },
+    "search.legacy": {
+      "stats": {
+        "calls": 3,
+        "successes": 1,
+        "validation_failures": 1
+      },
+      "opaque_failures": 1,
+      "latencies_ms": [
+        1,
+        12,
+        400
+      ],
+      "patterns": {
+        "4c1755e16b74629189d30779e4c05394bb78570fb81099b854498491c6980c75": {
+          "calls": 2,
+          "successes": 1,
+          "validation_failures": 0,
+          "opaque_failures": 1
+        },
+        "e1c5793267eed7aa8dff53b31b5ad963cfbeb339c8110b82a52fab175fa3595e": {
+          "calls": 1,
+          "successes": 0,
+          "validation_failures": 1,
+          "opaque_failures": 0
+        }
+      },
+      "violations": [
+        {
+          "path": "",
+          "rule": "required",
+          "count": 1,
+          "example_message": "missing required property `query`"
+        },
+        {
+          "path": "/limit",
+          "rule": "type",
+          "count": 1,
+          "example_message": "expected \"integer\", found string"
+        }
+      ]
+    }
+  }
+}

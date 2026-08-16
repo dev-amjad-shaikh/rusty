@@ -1,0 +1,35 @@
+{
+  "candidate_id": "34821672a999cb775c2c3687dc39652e2af02b594d62143de3d9b8323f94f148",
+  "content": {
+    "kind": "tool_contract",
+    "tool": "search.v2",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "selection": {
+      "tags": [
+        "search"
+      ]
+    }
+  },
+  "distilled_by": {
+    "type": "distiller",
+    "name": "tool-outcome-distiller"
+  },
+  "evidence": {
+    "run_ids": [
+      "run-a"
+    ]
+  },
+  "created_at": "2025-06-17T22:40:02Z"
+}

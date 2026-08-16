@@ -348,7 +348,7 @@ pub(crate) async fn resolve_admission(
             CandidateContent::Prompt { name, prompt } => {
                 manifest.pin_prompt(name.clone(), prompt.as_str())
             }
-            CandidateContent::ToolContract { tool, schema } => {
+            CandidateContent::ToolContract { tool, schema, .. } => {
                 manifest.pin_tool_schema(tool.clone(), schema)
             }
             CandidateContent::ModelSettings {
