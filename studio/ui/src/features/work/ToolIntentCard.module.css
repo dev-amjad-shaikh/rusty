@@ -1,0 +1,27 @@
+.card { display: grid; gap: 10px; margin: 0 0 18px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-0); }
+.command { margin: 0; font: 11px var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.command span { color: var(--text-faint); }
+.meta { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.meta code { color: var(--text-muted); font-family: var(--mono); }
+.stream { max-height: 260px; overflow: auto; margin: 0; padding: 12px; border-radius: 8px; background: var(--canvas); color: #c8c0b4; font: 11px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.stderr { border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
+.clamped { margin: 0; color: var(--text-faint); font-size: 10px; }
+.diffGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.diffGrid figure { display: grid; gap: 6px; min-width: 0; margin: 0; }
+.diffGrid figcaption { color: var(--text-faint); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+.hits { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.hits li { display: grid; gap: 4px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--surface-1) 60%, transparent); }
+.hits li p { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.hitHead { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.hitHead b { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.hitHead code { overflow: hidden; color: var(--text-faint); font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.hitHead small { flex: none; margin-left: auto; color: var(--text-faint); font: 10px var(--mono); }
+.tableScroll { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.table { width: 100%; border-collapse: collapse; font-size: 10px; }
+.table th { position: sticky; top: 0; padding: 7px 9px; background: var(--surface-2); color: var(--text-faint); font: 700 9px var(--mono); text-align: left; text-transform: uppercase; letter-spacing: .06em; }
+.table td { padding: 7px 9px; border-top: 1px solid var(--line); color: var(--text-muted); font-family: var(--mono); overflow-wrap: anywhere; }
+.link { display: grid; gap: 4px; margin: 0; }
+.link b { font-size: 12px; }
+.link a { color: var(--blue); font: 11px var(--mono); overflow-wrap: anywhere; }
+.link a:hover { text-decoration: none; }
+@media (max-width: 520px) { .diffGrid { grid-template-columns: 1fr; } }

@@ -1,0 +1,464 @@
+{
+  "cases": [
+    {
+      "arguments": {
+        "args": [
+          "status",
+          "--short"
+        ],
+        "program": "git"
+      },
+      "intent": {
+        "command": "git status --short",
+        "cwd": ".",
+        "exit_code": 0,
+        "kind": "terminal",
+        "stderr": "",
+        "stdout": " M README.md\n",
+        "timed_out": false,
+        "truncated": false
+      },
+      "name": "run_cli argv renders as a terminal",
+      "result": {
+        "args": [
+          "status",
+          "--short"
+        ],
+        "cwd": ".",
+        "duration_ms": 12,
+        "exit_code": 0,
+        "program": "git",
+        "resolved": "/usr/bin/git",
+        "shell": false,
+        "stderr": "",
+        "stderr_bytes": 0,
+        "stdout": " M README.md\n",
+        "stdout_bytes": 11,
+        "timed_out": false,
+        "truncated": false
+      },
+      "tool": "run_cli"
+    },
+    {
+      "arguments": {
+        "command": "ls | head -5"
+      },
+      "intent": {
+        "command": "ls | head -5",
+        "cwd": "docs",
+        "exit_code": 1,
+        "kind": "terminal",
+        "stderr": "exit 1",
+        "stdout": "a\nb",
+        "timed_out": false,
+        "truncated": false
+      },
+      "name": "run_cli shell payload renders the command string",
+      "result": {
+        "args": [
+          "ls | head -5"
+        ],
+        "cwd": "docs",
+        "duration_ms": 4,
+        "exit_code": 1,
+        "program": "sh",
+        "resolved": "/bin/sh",
+        "shell": true,
+        "stderr": "exit 1",
+        "stderr_bytes": 9,
+        "stdout": "a\nb",
+        "stdout_bytes": 3,
+        "timed_out": false,
+        "truncated": false
+      },
+      "tool": "run_cli"
+    },
+    {
+      "arguments": {
+        "limit": 5,
+        "query": "effect kernel"
+      },
+      "intent": {
+        "hits": [
+          {
+            "excerpt": "the effect taxonomy",
+            "label": "Effect kernel",
+            "reference": "doc-1",
+            "score": 2
+          },
+          {
+            "excerpt": "served from the journal",
+            "label": "Replay",
+            "reference": "doc-2",
+            "score": 1
+          }
+        ],
+        "kind": "search",
+        "query": "effect kernel",
+        "truncated": false
+      },
+      "name": "search_knowledge renders as a search",
+      "result": {
+        "query": "effect kernel",
+        "results": [
+          {
+            "excerpt": "the effect taxonomy",
+            "id": "doc-1",
+            "score": 2,
+            "title": "Effect kernel"
+          },
+          {
+            "excerpt": "served from the journal",
+            "id": "doc-2",
+            "score": 1,
+            "title": "Replay"
+          }
+        ]
+      },
+      "tool": "search_knowledge"
+    },
+    {
+      "arguments": {
+        "query": "allowlist"
+      },
+      "intent": {
+        "hits": [
+          {
+            "excerpt": "not in the policy allowlist",
+            "label": "run-1:7",
+            "reference": "run-1",
+            "score": 1
+          }
+        ],
+        "kind": "search",
+        "query": "allowlist",
+        "truncated": false
+      },
+      "name": "session_search renders as a search keyed by event",
+      "result": {
+        "results": [
+          {
+            "event_id": "run-1:7",
+            "excerpt": "not in the policy allowlist",
+            "field": "output",
+            "kind": "tool_call",
+            "run_id": "run-1",
+            "score": 1,
+            "seq": 7,
+            "thread_id": "thread-1"
+          }
+        ]
+      },
+      "tool": "session_search"
+    },
+    {
+      "arguments": {
+        "path": "notes/design.md"
+      },
+      "intent": {
+        "excerpt": "# Design\n\nbody",
+        "format": "markdown",
+        "kind": "read",
+        "path": "notes/design.md",
+        "truncated": false
+      },
+      "name": "read_document renders as a read",
+      "result": {
+        "bytes": 15,
+        "content": "# Design\n\nbody",
+        "kind": "markdown",
+        "path": "notes/design.md"
+      },
+      "tool": "read_document"
+    },
+    {
+      "arguments": {
+        "url": "https://docs.rs/serde"
+      },
+      "intent": {
+        "kind": "link",
+        "title": "Serde",
+        "url": "https://docs.rs/serde"
+      },
+      "name": "browser_navigate renders as a link",
+      "result": {
+        "title": "Serde",
+        "url": "https://docs.rs/serde"
+      },
+      "tool": "browser_navigate"
+    },
+    {
+      "arguments": {},
+      "intent": {
+        "excerpt": "Hello, world.",
+        "kind": "web",
+        "title": null,
+        "truncated": false,
+        "url": "https://example.test/"
+      },
+      "name": "browser_read renders as a web card",
+      "result": {
+        "bytes": 13,
+        "text": "Hello, world.",
+        "truncated": false,
+        "url": "https://example.test/"
+      },
+      "tool": "browser_read"
+    },
+    {
+      "arguments": {
+        "event_id": "run-1:4",
+        "run_id": "run-1"
+      },
+      "intent": {
+        "columns": [
+          "role",
+          "seq",
+          "kind",
+          "node",
+          "status",
+          "latency_ms"
+        ],
+        "kind": "table",
+        "rows": [
+          [
+            "ancestor",
+            "3",
+            "model_call",
+            "agent",
+            "ok",
+            "30"
+          ],
+          [
+            "target",
+            "4",
+            "tool_call",
+            "tools",
+            "ok",
+            "9"
+          ],
+          [
+            "descendant",
+            "6",
+            "node_output",
+            "tools",
+            "ok",
+            "null"
+          ]
+        ],
+        "truncated": false
+      },
+      "name": "session_trace renders as a causal table",
+      "result": {
+        "ancestors": [
+          {
+            "effect": "non_idempotent",
+            "event_id": "run-1:3",
+            "kind": "model_call",
+            "latency_ms": 30,
+            "node_id": "agent",
+            "parent": "run-1:2",
+            "seq": 3,
+            "status": "ok"
+          }
+        ],
+        "descendants": [
+          {
+            "effect": "pure",
+            "event_id": "run-1:6",
+            "kind": "node_output",
+            "latency_ms": null,
+            "node_id": "tools",
+            "parent": "run-1:4",
+            "seq": 6,
+            "status": "ok"
+          }
+        ],
+        "target": {
+          "effect": "read_only",
+          "event_id": "run-1:4",
+          "kind": "tool_call",
+          "latency_ms": 9,
+          "node_id": "tools",
+          "parent": "run-1:3",
+          "seq": 4,
+          "status": "ok"
+        },
+        "truncated": false
+      },
+      "tool": "session_trace"
+    },
+    {
+      "arguments": {
+        "left": 6,
+        "operation": "multiply",
+        "right": 7
+      },
+      "intent": {
+        "columns": [
+          "operation",
+          "left",
+          "right",
+          "result"
+        ],
+        "kind": "table",
+        "rows": [
+          [
+            "multiply",
+            "6",
+            "7",
+            "42"
+          ]
+        ],
+        "truncated": false
+      },
+      "name": "calculator renders as a one-row table",
+      "result": {
+        "result": 42
+      },
+      "tool": "calculator"
+    },
+    {
+      "arguments": {
+        "text": "hello world"
+      },
+      "intent": {
+        "columns": [
+          "metric",
+          "value"
+        ],
+        "kind": "table",
+        "rows": [
+          [
+            "words",
+            "2"
+          ],
+          [
+            "characters",
+            "11"
+          ],
+          [
+            "bytes",
+            "11"
+          ],
+          [
+            "lines",
+            "1"
+          ]
+        ],
+        "truncated": false
+      },
+      "name": "inspect_text renders as a metrics table",
+      "result": {
+        "bytes": 11,
+        "characters": 11,
+        "lines": 1,
+        "words": 2
+      },
+      "tool": "inspect_text"
+    },
+    {
+      "arguments": {
+        "id": 42
+      },
+      "intent": {
+        "after": "new",
+        "before": "old",
+        "kind": "diff",
+        "path": "records/42.json",
+        "truncated": false
+      },
+      "name": "a before/after result renders as a diff for any tool",
+      "result": {
+        "after": "new",
+        "before": "old",
+        "path": "records/42.json"
+      },
+      "tool": "acme/update_record"
+    },
+    {
+      "arguments": {
+        "id": 1
+      },
+      "intent": {
+        "kind": "link",
+        "title": "Ticket 1",
+        "url": "https://acme.test/tickets/1"
+      },
+      "name": "a url result renders as a link for any tool",
+      "result": {
+        "title": "Ticket 1",
+        "url": "https://acme.test/tickets/1"
+      },
+      "tool": "acme/get_ticket"
+    },
+    {
+      "arguments": {},
+      "intent": {
+        "columns": [
+          "id",
+          "state",
+          "owner"
+        ],
+        "kind": "table",
+        "rows": [
+          [
+            "1",
+            "open",
+            ""
+          ],
+          [
+            "2",
+            "closed",
+            "sam"
+          ]
+        ],
+        "truncated": false
+      },
+      "name": "an array of flat objects renders as a table",
+      "result": [
+        {
+          "id": 1,
+          "state": "open"
+        },
+        {
+          "id": 2,
+          "owner": "sam",
+          "state": "closed"
+        }
+      ],
+      "tool": "acme/list_tickets"
+    },
+    {
+      "arguments": {},
+      "intent": {
+        "kind": "generic",
+        "reason": "no render intent matches the journaled result shape",
+        "summary": "{\"answer\":42}",
+        "tool": "mystery_tool"
+      },
+      "name": "an unknown tool falls back to generic",
+      "result": {
+        "answer": 42
+      },
+      "tool": "mystery_tool"
+    },
+    {
+      "arguments": {},
+      "intent": {
+        "kind": "generic",
+        "reason": "binary screenshot payloads stay in the journal; render intents carry text only",
+        "summary": "",
+        "tool": "browser_screenshot"
+      },
+      "name": "browser_screenshot declines to generic",
+      "result": {
+        "bytes": 4,
+        "data_hex": "deadbeef",
+        "url": null
+      },
+      "tool": "browser_screenshot"
+    }
+  ],
+  "version": 1
+}

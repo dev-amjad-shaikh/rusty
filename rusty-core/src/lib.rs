@@ -190,6 +190,15 @@
 //!   journaled rotation, the key history old receipts verify against)
 //!   lives in `rusty-agent-server`; these are the pure contracts both sides
 //!   agree on.
+//! - **Render intents** ([`render_intent`]): a closed, provider-neutral
+//!   presentation union for journaled tool calls —
+//!   [`render_intent::render_intent`] maps the recorded
+//!   `(tool name, arguments, result)` triple onto one bounded
+//!   [`render_intent::RenderIntent`] variant (terminal, diff, search, read,
+//!   table, link, web, generic) so any frontend renders rich evidence cards
+//!   with zero per-tool UI code. Derivation is pure and total, so a replayed
+//!   run renders byte-identical intents; anything unrecognized degrades to
+//!   the honest generic card with its reason.
 //!
 //! ## Quick sketch
 //!
@@ -253,6 +262,7 @@ pub mod receipt;
 pub mod record;
 pub mod registry;
 pub mod remote;
+pub mod render_intent;
 pub mod replay;
 pub mod self_improve;
 pub mod session_query;
@@ -411,6 +421,12 @@ pub mod prelude {
         diff_candidates, pointer_admission, resolution_pin, ArtifactCommit, ArtifactRecord,
         ConfigResolution, LeafChange, LeafModification, PointerBinding, RegistryDiff,
         RegistryError, TextDiffLine, MAX_ARTIFACT_NAME_LEN,
+    };
+    pub use crate::render_intent::{
+        render_intent, render_intent_from_event, RenderIntent, SearchHitView,
+        MAX_INTENT_EXCERPT_CHARS, MAX_INTENT_LABEL_CHARS, MAX_INTENT_SEARCH_HITS,
+        MAX_INTENT_SUMMARY_CHARS, MAX_INTENT_TABLE_COLUMNS, MAX_INTENT_TABLE_ROWS,
+        TRUNCATION_MARKER,
     };
     pub use crate::replay::{
         BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, JournalShadowSource,
