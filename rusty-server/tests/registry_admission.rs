@@ -351,6 +351,8 @@ fn memory_configuration_candidate(name: &str, millis: i64) -> Candidate {
             budget: ContextBudget::new(4096),
             default_filters: MemoryQuery::default(),
             schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
+            rank: None,
+            maintenance: Vec::new(),
         },
         ProvenanceAuthor::Distiller {
             name: "correction-loop".into(),

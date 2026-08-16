@@ -80,6 +80,7 @@ use crate::memory::{
     apply_query, ContextBudget, MemoryQuery, MemoryRecord, MemoryScope, MemoryStore,
     ProvenanceAuthor, ScopeAddress,
 };
+use crate::memory_tiers::{ConsolidationPolicy, RankPolicy};
 use crate::record::{sha256_hex, DecisionFamily, RunManifest};
 
 fn invalid(message: impl Into<String>) -> RustyError {
@@ -292,6 +293,22 @@ pub enum CandidateContent {
         default_filters: MemoryQuery,
         /// The memory record-schema version the settings assume.
         schema_version: String,
+        /// The utility re-rank policy (R0.13 wave 2): how far the derived
+        /// utility signal may move retrieval order, and the over-fetch the
+        /// two-stage assembly reads. Additive and optional — absent from
+        /// the wire while unset, so pre-R0.13 `memory_config` artifacts
+        /// keep their shape (and their content addresses) byte-for-byte.
+        /// The floor is `RankPolicy::default()` — utility weight zero, no
+        /// over-fetch — the `static-v0` of retrieval.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rank: Option<RankPolicy>,
+        /// The consolidation schedule (R0.13 wave 2): declarative trigger
+        /// thresholds per scope and key domain. Additive and optional —
+        /// absent from the wire while empty. A maintenance change alters
+        /// *when distillation is proposed*, never a record, so the gate
+        /// math is unchanged.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        maintenance: Vec<ConsolidationPolicy>,
     },
     /// An ordered middleware layer list plus per-layer configuration
     /// (R0.11): interception policy versioned like everything else. The
