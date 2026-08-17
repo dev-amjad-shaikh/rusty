@@ -1,8 +1,9 @@
 # Rusty Studio
 
 Rusty Studio is the product workspace for creating agents, doing real work with them, understanding what
-happened, and intervening when durable operations need attention. It runs locally against
-[`rusty-agent-server`](../rusty-server) without requiring a hosted control plane.
+happened, and intervening when durable operations need attention. It is the local companion of
+[`rusty-agent-server`](../rusty-server): when Studio is running, the backend is running on the same
+machine. There is no server picker and no hosted control plane.
 
 ## Product structure
 
@@ -17,13 +18,15 @@ Studio has three primary destinations:
   coordination. Routine work does not open on an operations dashboard; specialist tools remain available
   through contextual handoffs and progressive disclosure.
 
-The first disconnected screen leads with one connection action. System counts and technical compatibility
+While the local runtime boots, Studio shows a plain startup screen and keeps waiting for it; only a
+definitive refusal becomes an error with exact recovery guidance. System counts and technical compatibility
 evidence are secondary details, not the product's opening message.
 
 ## Development layout
 
-Studio 1.0 is a typed React application. The production bundle is committed so the local launch remains
-one command and does not require Node.js. The previous single-file console remains available only as an
+Studio 1.0 is a typed React application. The production bundle is committed so `studio/serve.py` can host
+Studio without Node.js; during development, `npm run dev` in `studio/ui` boots the local backend and the UI
+with one command. The previous single-file console remains available only as an
 advanced compatibility surface while its specialist workflows migrate.
 
 ```
@@ -101,13 +104,12 @@ advanced workflows have typed parity.
   switching threads keeps their bounded progress independent. The thread workspace shows only one primary
   surface at a time: **Run**, **Trace**, or **Evaluate**. Evaluation then exposes one selected tool at a time,
   so the default journey is not a wall of quality and release utilities.
-- **Connection Hub** — a guided **Reach server → Verify identity → Inspect features** handshake replaces
-  the raw connection form. Reusable profiles remember only non-secret server metadata by default. Access
-  keys stay in the browser session unless the user explicitly accepts a device-local plaintext warning;
-  legacy stored keys are migrated into the session boundary. A successful handshake verifies the exact
-  `rusty-server` identity, version, persistence kind, and registered behaviors, then performs bounded,
-  read-only compatibility checks for assistants, durable agents, tasks, governed memory, governed
-  learning, and capsules. Failed switches preserve the active workspace and explain how to recover.
+- **Local runtime** — the typed Studio talks to exactly one backend: the Rusty server on this machine.
+  Every API call goes through the same-origin `/api` proxy, so there is no connection form, server picker,
+  or workspace switcher. The only override is the build-time `VITE_RUSTY_API_KEY` for a local server that
+  is not in open mode; it is never shown in the UI. The header reports the server's proven identity,
+  version, persistence kind, and registered behaviors as a read-only status. The legacy console at
+  `/advanced/legacy` still carries its own Connection Hub for the advanced workflows that have not migrated.
 - **Evidence links** — the header's **Copy evidence link** action creates a URL for the current workspace
   and, where available, its selected agent, automation, remembered thread, or exact Recorder run. The URL
   contains only bounded identifiers: it strips server addresses, URL credentials, access keys, prompts,
@@ -570,7 +572,25 @@ advanced workflows have typed parity.
 
 ## How to open
 
-### Option A — `serve.py` (same-origin static host)
+### Development — `npm run dev` (backend + Studio in one command)
+
+```bash
+cd studio/ui
+npm ci
+npm run dev
+```
+
+This boots the repository's demo server (`rusty-agent-server`'s `examples/server_demo`) on
+`http://127.0.0.1:8100` — reusing one that is already answering there — waits until it proves itself via
+`/info`, then starts Vite on `http://127.0.0.1:8878`. The first launch can take a few minutes while cargo
+compiles; Studio shows "Starting the local runtime…" and keeps polling instead of failing. Ctrl-C stops
+both halves; a server Studio did not start is left running. `npm run dev:ui` starts only the Vite half
+when the backend is already up.
+
+If the local server has open mode disabled and refuses Studio, the startup screen says to set
+`VITE_RUSTY_API_KEY` and restart; the key is a build-time override and never appears in the UI.
+
+### Committed bundle — `serve.py` (same-origin static host, no Node.js)
 
 ```bash
 # terminal 1: the demo server
@@ -580,23 +600,13 @@ cargo run --example server_demo          # http://127.0.0.1:8100
 python3 studio/serve.py                  # http://127.0.0.1:8000/
 ```
 
-Open `http://127.0.0.1:8000/` and connect to **`http://127.0.0.1:8100`**. During local Vite development,
-Studio proxies that origin through `/api`; users always enter the server origin, never the proxy path. The local
-host also flushes SSE per chunk and sets
+Open `http://127.0.0.1:8000/`. Both the Vite proxy and `serve.py` forward `/api` to the local backend, so
+the browser only ever talks to its own origin. The local host also flushes SSE per chunk and sets
 `X-Accel-Buffering: no`, so streams render live.
 
 The typed product is served at `/`. The legacy console is available at `/advanced/legacy` during migration.
 
-### Option B — serve the production bundle from any static host
-
-```bash
-cd studio/ui/dist && python3 -m http.server 8000
-```
-
-Then connect to `http://127.0.0.1:8100`. Since `rusty-agent-server` (v0.3 and later) sends permissive CORS headers
-(see below), plain cross-origin calls from any static host just work.
-
-### Option C — build Studio after changing the typed source
+### Build Studio after changing the typed source
 
 ```bash
 cd studio/ui
