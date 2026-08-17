@@ -19,17 +19,13 @@
 //!
 //! The tool plane participates: [`PluginContext::register_tool`] inserts
 //! into the kernel's shared [`ToolRegistry`] and collects the guard. The
-//! skill and connector planes do not, on purpose:
+//! skill plane does not, on purpose:
 //!
 //! - **Skills** are an append-only, content-addressed audit trail. A
 //!   version that a run disclosed is replay evidence — its content hash is
 //!   what exact replay pins — so unpublishing on unload would falsify the
 //!   record of what the model saw. Publish stays the composer's governed,
 //!   approval-gated path; a reversible skill overlay is its own wave.
-//! - **Connector manifests** are idempotent content-addressed entries with
-//!   live tenant instances hanging off them; removal could strand sessions
-//!   the registry explicitly owns. Not a registration a guard can honestly
-//!   undo.
 //!
 //! # Ordering and dependencies
 //!

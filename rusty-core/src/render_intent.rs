@@ -18,8 +18,8 @@
 //! does, in TypeScript) render a replayed run exactly as the live run
 //! rendered.
 //!
-//! Boundedness follows the crate's evidence discipline
-//! ([`crate::connector::http_api`]'s sanitize/clamp precedent): every string
+//! Boundedness follows the crate's evidence discipline (the same
+//! sanitize/clamp precedent the bounded HTTP surfaces set): every string
 //! an intent carries is control-stripped and clamped at a char boundary with
 //! the explicit [`TRUNCATION_MARKER`], and collections are clamped to fixed
 //! ceilings with the structured `truncated` flag recording that clamping
@@ -149,7 +149,7 @@ pub enum RenderIntent {
     },
     /// Rectangular data: `session_trace` walks, `inspect_text` metrics,
     /// `calculator` results, and any result that is a JSON array of flat
-    /// objects (connector pack operations included).
+    /// objects.
     Table {
         /// Column headers, clamped to [`MAX_INTENT_TABLE_COLUMNS`].
         columns: Vec<String>,
@@ -158,7 +158,7 @@ pub enum RenderIntent {
         /// Whether rows or columns were clamped by this derivation's bound.
         truncated: bool,
     },
-    /// A navigable URL (`browser_navigate`, connector results carrying a
+    /// A navigable URL (`browser_navigate`, tool results carrying a
     /// `url`).
     Link {
         /// The URL, control-stripped and clamped.
@@ -535,7 +535,7 @@ fn calculator_intent(arguments: &Value, result: &Value) -> Option<RenderIntent> 
 }
 
 /// Shape-keyed derivations for tools the crate does not know by name —
-/// connector pack operations, MCP tools, embedder tools. A result that
+/// MCP tools, embedder tools. A result that
 /// *looks like* a diff, a link, or a rectangular dataset renders as one;
 /// anything else stays generic.
 fn structural_intent(result: &Value) -> Option<RenderIntent> {

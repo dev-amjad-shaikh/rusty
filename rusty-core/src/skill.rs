@@ -5,8 +5,7 @@
 //! A skill is versioned procedural knowledge, not an action surface: it
 //! alters model context through progressive disclosure and carries neither
 //! executable authority nor credentials (the capability-harness vocabulary:
-//! tools and connectors provide action; skills and knowledge provide
-//! context). The package format follows the emerging Agent Skills
+//! tools provide action; skills and knowledge provide context). The package format follows the emerging Agent Skills
 //! convention — one `SKILL.md` with YAML frontmatter (`name` and
 //! `description` required) plus a markdown body, with optional
 //! `references/` and `assets/` members beside it.
