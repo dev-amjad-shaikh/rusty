@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
-import { StudioApiError, type ConnectionIdentity } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import {
   manifestPayloadSchema,
   registerConnectorManifest,
@@ -41,12 +41,8 @@ interface FieldIssue {
 }
 
 export function RegisterManifestForm({
-  connection,
-  scope,
   onRegistered,
 }: {
-  connection: ConnectionIdentity;
-  scope: string;
   onRegistered: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -56,11 +52,11 @@ export function RegisterManifestForm({
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const register = useMutation({
-    mutationFn: (payload: ManifestPayload) => registerConnectorManifest(connection, payload),
+    mutationFn: (payload: ManifestPayload) => registerConnectorManifest(payload),
     onSuccess: async (result) => {
       setReceipt(result);
       setIssues([]);
-      await queryClient.invalidateQueries({ queryKey: [scope, "connectors", "manifests"] });
+      await queryClient.invalidateQueries({ queryKey: ["connectors", "manifests"] });
       requestAnimationFrame(() => receiptRef.current?.focus());
     },
   });

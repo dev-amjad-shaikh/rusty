@@ -3,23 +3,19 @@ import { Link } from "@tanstack/react-router";
 import { listAssistants } from "../../lib/api/client";
 import type { Assistant } from "../../lib/contracts";
 import { evidencePreview } from "../../lib/text";
-import { useConnectionStore } from "../../state/connection";
+import { useRuntimeStore } from "../../state/runtime";
 import { PageHeader } from "../../components/PageHeader";
 import { humanizeIdentifier } from "./AgentIntentEditor";
 import styles from "./AgentsPage.module.css";
 
 export function AgentsPage() {
-  const { connection, info, openDialog } = useConnectionStore();
-  const queryKey = connection
-    ? [connection.epoch, connection.origin, connection.tenantFingerprint, "assistants"]
-    : ["assistants", "disconnected"];
-  const catalog = useQuery({ queryKey, queryFn: () => listAssistants(connection!), enabled: Boolean(connection) });
+  const info = useRuntimeStore((state) => state.info);
+  const catalog = useQuery({ queryKey: ["assistants"], queryFn: () => listAssistants() });
   const agents = catalog.data ?? [];
-  const availableGraphs = new Set(info?.graphs.map((graph) => graph.name) ?? []);
+  const availableGraphs = new Set<string>(info?.graphs.map((graph) => graph.name) ?? []);
   const active = agents.filter((agent) => !agent.archived_at && availableGraphs.has(agent.graph)).length;
   const unavailable = agents.filter((agent) => !agent.archived_at && !availableGraphs.has(agent.graph)).length;
-  const portfolioSummary = !connection ? "Design locally. Save when a workspace is open."
-    : catalog.isLoading ? "Loading this workspace…"
+  const portfolioSummary = catalog.isLoading ? "Loading this workspace…"
     : catalog.isError ? "Agent count unavailable"
     : `${agents.length} in this workspace · ${active} available${unavailable ? ` · ${unavailable} need attention` : ""}`;
 
@@ -36,13 +32,7 @@ export function AgentsPage() {
         </div>}
       />
 
-      {!connection ? (
-        <div className={styles.portfolioEmpty}>
-          <span className={styles.emptyMark} aria-hidden="true">A</span>
-          <div><h2>Build your first agent</h2><p>Start the definition now, then choose a workspace when you are ready to save it.</p></div>
-          <div><Link className="primary-button" to="/agents/new">Start draft</Link><button className="secondary-button" type="button" onClick={openDialog}>Choose workspace</button></div>
-        </div>
-      ) : catalog.isLoading ? (
+      {catalog.isLoading ? (
         <div className={styles.loading} role="status">Loading agents…</div>
       ) : catalog.isError ? (
         <div className={styles.portfolioEmpty} role="alert">

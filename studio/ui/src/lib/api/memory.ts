@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { jsonEquivalent, parseJson, parseMutationJson, requestText, StudioApiError } from "./client";
-import type { ConnectionIdentity } from "./client";
 import { isUnicodeScalarString } from "../text";
 
 const instant = z.string().datetime({ offset: true });
@@ -159,8 +158,8 @@ function recordMatchesQuery(record: MemoryRecord, query: MemoryQueryInput) {
   return true;
 }
 
-export async function queryMemory(connection: ConnectionIdentity, query: MemoryQueryInput): Promise<MemoryRecord[]> {
-  const { text } = await requestText(connection, "/memory/query", { method: "POST", body: JSON.stringify(query) });
+export async function queryMemory(query: MemoryQueryInput): Promise<MemoryRecord[]> {
+  const { text } = await requestText("/memory/query", { method: "POST", body: JSON.stringify(query) });
   const { records } = parseJson(text, queryResponseSchema, "Memory query");
   const stray = records.find((record) => !recordMatchesQuery(record, query));
   if (stray) throw new StudioApiError("Memory query returned a record outside the exact filters.", 0);
@@ -179,7 +178,7 @@ export interface WriteMemoryInput {
   expires_at?: string;
 }
 
-export async function writeMemory(connection: ConnectionIdentity, input: WriteMemoryInput): Promise<WriteMemoryReceipt> {
+export async function writeMemory(input: WriteMemoryInput): Promise<WriteMemoryReceipt> {
   const strings = [input.scope.id, input.key ?? "", ...(input.tags ?? [])];
   if (input.author.type === "agent") strings.push(input.author.agent_id);
   if (input.author.type === "human") strings.push(input.author.human_id);
@@ -187,7 +186,7 @@ export async function writeMemory(connection: ConnectionIdentity, input: WriteMe
   if (!strings.every(isUnicodeScalarString)) {
     throw new StudioApiError("Memory write input contained invalid Unicode.", 0);
   }
-  const { status, text } = await requestText(connection, "/memory", { method: "POST", body: JSON.stringify(input) });
+  const { status, text } = await requestText("/memory", { method: "POST", body: JSON.stringify(input) });
   if (![200, 201].includes(status)) throw new StudioApiError("Memory write returned an unproven receipt.", status, true);
   const receipt = parseMutationJson(text, writeReceiptSchema, "Memory write receipt", status);
   if (receipt.created !== (status === 201) || receipt.memory_id !== receipt.record.memory_id) {
@@ -211,8 +210,8 @@ export async function writeMemory(connection: ConnectionIdentity, input: WriteMe
   return receipt;
 }
 
-export async function getMemory(connection: ConnectionIdentity, memoryId: string): Promise<MemoryRecord> {
-  const { text } = await requestText(connection, `/memory/${encodeURIComponent(memoryId)}`);
+export async function getMemory(memoryId: string): Promise<MemoryRecord> {
+  const { text } = await requestText(`/memory/${encodeURIComponent(memoryId)}`);
   const record = parseJson(text, memoryRecordSchema, "Memory record");
   if (record.memory_id !== memoryId) throw new StudioApiError("Memory record named a different content address.", 0);
   return record;
@@ -227,7 +226,7 @@ export interface CorrectionInput {
   rationale?: string;
 }
 
-export async function submitCorrection(connection: ConnectionIdentity, input: CorrectionInput): Promise<CorrectionReceipt> {
+export async function submitCorrection(input: CorrectionInput): Promise<CorrectionReceipt> {
   const body = {
     correction_id: input.correction_id,
     author: input.author,
@@ -236,7 +235,7 @@ export async function submitCorrection(connection: ConnectionIdentity, input: Co
     scope: input.scope,
     ...(input.rationale ? { rationale: input.rationale } : {}),
   };
-  const { status, text } = await requestText(connection, "/memory/corrections", { method: "POST", body: JSON.stringify(body) });
+  const { status, text } = await requestText("/memory/corrections", { method: "POST", body: JSON.stringify(body) });
   if (![200, 201].includes(status)) throw new StudioApiError("Correction returned an unproven receipt.", status, true);
   const receipt = parseMutationJson(text, correctionReceiptSchema, "Correction receipt", status);
   if (receipt.created !== (status === 201) || receipt.memory_id !== receipt.record.memory_id) {
@@ -256,8 +255,8 @@ export async function submitCorrection(connection: ConnectionIdentity, input: Co
   return receipt;
 }
 
-export async function listMemoryConflicts(connection: ConnectionIdentity, scope?: ScopeAddress): Promise<MemoryConflict[]> {
-  const { text } = await requestText(connection, "/memory/conflicts", { method: "POST", body: JSON.stringify(scope ? { scope } : {}) });
+export async function listMemoryConflicts(scope?: ScopeAddress): Promise<MemoryConflict[]> {
+  const { text } = await requestText("/memory/conflicts", { method: "POST", body: JSON.stringify(scope ? { scope } : {}) });
   const { conflicts } = parseJson(text, conflictsResponseSchema, "Memory conflicts");
   if (scope && conflicts.some((conflict) => !jsonEquivalent(conflict.scope, scope))) {
     throw new StudioApiError("Memory conflicts crossed the requested scope.", 0);
@@ -265,8 +264,8 @@ export async function listMemoryConflicts(connection: ConnectionIdentity, scope?
   return conflicts;
 }
 
-export async function forgetMemory(connection: ConnectionIdentity, memoryId: string, reason: ForgetReason): Promise<ForgetReceipt> {
-  const { status, text } = await requestText(connection, "/memory/forget", { method: "POST", body: JSON.stringify({ memory_id: memoryId, reason }) });
+export async function forgetMemory(memoryId: string, reason: ForgetReason): Promise<ForgetReceipt> {
+  const { status, text } = await requestText("/memory/forget", { method: "POST", body: JSON.stringify({ memory_id: memoryId, reason }) });
   if (status !== 200) throw new StudioApiError("Forgetting returned an unproven receipt.", status, true);
   const receipt = parseMutationJson(text, forgetReceiptSchema, "Forget receipt", status);
   if (receipt.tombstone.memory_id !== memoryId || !receipt.forgotten.includes(memoryId)) {

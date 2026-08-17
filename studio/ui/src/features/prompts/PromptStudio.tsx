@@ -37,24 +37,24 @@ export function PromptStudio() {
     setSourceRun(""); setError(""); setSaved("");
   }, [scope]);
 
-  const key = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "prompts"] : ["prompts", "disconnected"];
-  const catalog = useQuery({ queryKey: key, queryFn: () => listPromptArtifacts(connection!), enabled: Boolean(connection) });
+  const key = true ? ["prompts"] : ["prompts", "disconnected"];
+  const catalog = useQuery({ queryKey: key, queryFn: () => listPromptArtifacts(), enabled: Boolean(connection) });
   useEffect(() => {
     if (!creating && !selectedName && catalog.data?.length) setSelectedName(promptName(catalog.data[0].surface));
   }, [catalog.data, creating, selectedName]);
   const history = useQuery({
-    queryKey: connection && selectedName ? [...key, selectedName, "history"] : ["prompt-history", "idle"],
-    queryFn: () => getPromptHistory(connection!, selectedName),
-    enabled: Boolean(connection && selectedName && !creating),
+    queryKey: [...key, selectedName || "idle", "history"],
+    queryFn: () => getPromptHistory(selectedName),
+    enabled: Boolean(selectedName && !creating),
   });
   useEffect(() => {
     const latest = history.data?.commits.at(-1)?.candidate_id ?? "";
     if (latest && !history.data?.commits.some((item) => item.candidate_id === selectedVersion)) setSelectedVersion(latest);
   }, [history.data, selectedVersion]);
   const version = useQuery({
-    queryKey: connection && selectedVersion ? [...key, "version", selectedVersion] : ["prompt-version", "idle"],
-    queryFn: () => getPromptCandidate(connection!, selectedVersion),
-    enabled: Boolean(connection && selectedVersion),
+    queryKey: [...key, "version", selectedVersion || "idle"],
+    queryFn: () => getPromptCandidate(selectedVersion),
+    enabled: Boolean(selectedVersion),
   });
   useEffect(() => {
     if (!creating && version.data) {
@@ -75,15 +75,15 @@ export function PromptStudio() {
       if (bytes(draft) > 256 * 1024) throw new Error("Studio authors prompts up to 256 KiB. Split larger instructions before versioning them here.");
       if (!sourceRun || !sourceRuns.some((item) => item.run.run_id === sourceRun)) throw new Error("Choose the completed run that informed this prompt version.");
       try {
-        const receipt = await savePromptVersion(connection, { name, prompt: draft, humanId: author.trim(), runId: sourceRun, artifactExists: Boolean(catalog.data?.some((item) => promptName(item.surface) === name)) });
+        const receipt = await savePromptVersion({ name, prompt: draft, humanId: author.trim(), runId: sourceRun, artifactExists: Boolean(catalog.data?.some((item) => promptName(item.surface) === name)) });
         return { receipt, initiatingScope: connectionScope(connection) };
       } catch (caught) {
         if (!(caught instanceof StudioApiError) || !caught.mayHaveCommitted) throw caught;
         try {
-          const exactHistory = await getPromptHistory(connection, name);
+          const exactHistory = await getPromptHistory(name);
           const candidateId = exactHistory.commits.at(-1)?.candidate_id;
           if (candidateId) {
-            const candidate = await getPromptCandidate(connection, candidateId);
+            const candidate = await getPromptCandidate(candidateId);
             const runs = candidate.candidate.evidence?.run_ids ?? [];
             if (candidate.candidate.content.name === name && candidate.candidate.content.prompt === draft && runs.includes(sourceRun)) {
               return { receipt: { candidateId, created: false, committed: true }, initiatingScope: connectionScope(connection) };

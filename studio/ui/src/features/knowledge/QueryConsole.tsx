@@ -1,6 +1,5 @@
 import { type FormEvent, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import type { ConnectionIdentity } from "../../lib/api/client";
 import {
   KNOWLEDGE_DEFAULT_MAX_RESULT_BYTES,
   KNOWLEDGE_DEFAULT_MAX_RESULTS,
@@ -12,7 +11,7 @@ import {
 import { formatBytes } from "./format";
 import styles from "./KnowledgePage.module.css";
 
-export function QueryConsole({ connection }: { connection: ConnectionIdentity }) {
+export function QueryConsole() {
   const [text, setText] = useState("");
   const [maxResults, setMaxResults] = useState(KNOWLEDGE_DEFAULT_MAX_RESULTS);
   const [maxBytes, setMaxBytes] = useState(KNOWLEDGE_DEFAULT_MAX_RESULT_BYTES);
@@ -23,7 +22,7 @@ export function QueryConsole({ connection }: { connection: ConnectionIdentity })
   const canRun = text.trim().length > 0 && limitsValid;
 
   const run = useMutation({
-    mutationFn: () => queryKnowledge(connection, text.trim(), { max_results: maxResults, max_bytes: maxBytes }),
+    mutationFn: () => queryKnowledge(text.trim(), { max_results: maxResults, max_bytes: maxBytes }),
     onSuccess: (result) => setResponse(result),
   });
 

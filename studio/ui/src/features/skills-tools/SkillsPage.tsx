@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { connectionScope } from "../../lib/api/client";
 import { getSkill, listSkills, type SkillDetail, type SkillMetadata } from "../../lib/api/skills";
 import { evidencePreview } from "../../lib/text";
 import type { InfoGraph, ToolCapability } from "../../lib/contracts";
-import { useConnectionStore } from "../../state/connection";
+import { useRuntimeStore } from "../../state/runtime";
 import { PageHeader } from "../../components/PageHeader";
 import { SkillDetailDrawer } from "./SkillDetailDrawer";
 import { PublishSkill } from "./PublishSkill";
@@ -13,23 +12,22 @@ import styles from "./SkillsPage.module.css";
 type View = "skills" | "tools";
 
 export function SkillsPage() {
-  const { connection, info, openDialog } = useConnectionStore();
+  const info = useRuntimeStore((state) => state.info);
   const [view, setView] = useState<View>("skills");
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [publishing, setPublishing] = useState(false);
-  const scope = connection ? connectionScope(connection) : "disconnected";
-  const key = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "skills"] : ["skills", "disconnected"];
-  const catalog = useQuery({ queryKey: key, queryFn: () => listSkills(connection!), enabled: Boolean(connection) });
+  const key = ["skills"];
+  const catalog = useQuery({ queryKey: key, queryFn: () => listSkills() });
   const skills = useMemo(() => [...(catalog.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [catalog.data]);
 
   const receipts = useQueries({
-    queries: connection ? skills.slice(0, 100).map((skill) => ({
+    queries: skills.slice(0, 100).map((skill) => ({
       queryKey: [...key, "receipt", skill.name],
-      queryFn: () => getSkill(connection, skill.name),
+      queryFn: () => getSkill(skill.name),
       retry: false,
       staleTime: 60_000,
-    })) : [],
+    })),
   });
   const receiptByName = useMemo(() => {
     const map = new Map<string, { receipt: SkillDetail | null; pending: boolean }>();
@@ -42,8 +40,7 @@ export function SkillsPage() {
 
   const graphs = info?.graphs ?? [];
   const toolCount = graphs.reduce((sum, graph) => sum + (graph.tools?.length ?? 0), 0);
-  const summary = !connection ? "Publish a skill package once a workspace is open."
-    : catalog.isLoading ? "Loading this workspace…"
+  const summary = catalog.isLoading ? "Loading this workspace…"
     : catalog.isError ? "Skill count unavailable"
     : `${skills.length} skill${skills.length === 1 ? "" : "s"} published · ${toolCount} tool${toolCount === 1 ? "" : "s"} included by behaviors`;
 
@@ -60,28 +57,19 @@ export function SkillsPage() {
         eyebrow="Build"
         title="Skills & Tools"
         description={summary}
-        detail={connection && catalog.data ? <span className={styles.registryBadge}>registry · {skills.length} admitted</span> : undefined}
+        detail={catalog.data ? <span className={styles.registryBadge}>registry · {skills.length} admitted</span> : undefined}
         actions={<div className={styles.headerActions}>
-          {connection && <div className={styles.viewToggle} role="group" aria-label="Skills and tools view">
+          <div className={styles.viewToggle} role="group" aria-label="Skills and tools view">
             <button type="button" aria-pressed={view === "skills"} onClick={() => setView("skills")}>Skills</button>
             <button type="button" aria-pressed={view === "tools"} onClick={() => setView("tools")}>Tools</button>
-          </div>}
-          {connection && !publishing && <button className="primary-button" type="button" onClick={() => setPublishing(true)}>Publish skill</button>}
+          </div>
+          {!publishing && <button className="primary-button" type="button" onClick={() => setPublishing(true)}>Publish skill</button>}
           {publishing && <button className="secondary-button" type="button" onClick={() => setPublishing(false)}>Back to library</button>}
         </div>}
       />
 
-      {!connection ? (
-        <div className="empty-state">
-          <span className="eyebrow">Skill registry</span>
-          <h2>Open a workspace to review skills and tools</h2>
-          <p>Published skill packages and the executable tools of each behavior live in your Rusty workspace; Studio does not host a separate copy.</p>
-          <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>
-        </div>
-      ) : publishing ? (
+      {publishing ? (
         <PublishSkill
-          connection={connection}
-          scope={scope}
           onCancel={() => setPublishing(false)}
           onPublished={(name) => { setPublishing(false); setSelected(name); setView("skills"); }}
         />
@@ -123,8 +111,8 @@ export function SkillsPage() {
         </>
       )}
 
-      {connection && selected && !publishing && (
-        <SkillDetailDrawer connection={connection} scope={scope} name={selected} onClose={() => setSelected("")} />
+      {selected && !publishing && (
+        <SkillDetailDrawer name={selected} onClose={() => setSelected("")} />
       )}
     </section>
   );

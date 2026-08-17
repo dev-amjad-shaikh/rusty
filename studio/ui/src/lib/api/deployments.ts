@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requestText, parseJson, parseMutationJson, StudioApiError, type ConnectionIdentity } from "./client";
+import { requestText, parseJson, parseMutationJson, StudioApiError } from "./client";
 
 const id = z.string().min(1).max(256);
 const instant = z.string().datetime({ offset: true });
@@ -203,13 +203,12 @@ function parse<T>(text: string, schema: z.ZodType<T>, context: string): T {
   return parseJson(text, schema, context);
 }
 
-export async function listEnvironments(connection: ConnectionIdentity): Promise<DeploymentEnvironment[]> {
-  const { text } = await requestText(connection, "/deployments/environments");
+export async function listEnvironments(): Promise<DeploymentEnvironment[]> {
+  const { text } = await requestText("/deployments/environments");
   return parse(text, environmentListSchema, "Environment list").environments;
 }
 
 export async function declareEnvironment(
-  connection: ConnectionIdentity,
   input: {
     name: string;
     gate: { policy: string; dataset_version: string } | null;
@@ -217,7 +216,7 @@ export async function declareEnvironment(
     author: { type: "human"; human_id: string } | { type: "system" };
   },
 ): Promise<{ created: boolean; environment: DeploymentEnvironment }> {
-  const { status, text } = await requestText(connection, "/deployments/environments", {
+  const { status, text } = await requestText("/deployments/environments", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -233,23 +232,22 @@ export async function declareEnvironment(
   return { created: status === 201, environment: receipt.environment };
 }
 
-export async function getEnvironment(connection: ConnectionIdentity, name: string): Promise<DeploymentEnvironment> {
-  const { text } = await requestText(connection, `/deployments/environments/${encodeURIComponent(name)}`);
+export async function getEnvironment(name: string): Promise<DeploymentEnvironment> {
+  const { text } = await requestText(`/deployments/environments/${encodeURIComponent(name)}`);
   return parse(text, environmentResponseSchema, `Environment ${name}`).environment;
 }
 
-export async function listRevisions(connection: ConnectionIdentity): Promise<DeploymentRevision[]> {
-  const { text } = await requestText(connection, "/deployments/revisions");
+export async function listRevisions(): Promise<DeploymentRevision[]> {
+  const { text } = await requestText("/deployments/revisions");
   return parse(text, revisionListSchema, "Revision list").revisions;
 }
 
-export async function getRevision(connection: ConnectionIdentity, revisionId: string): Promise<DeploymentRevision> {
-  const { text } = await requestText(connection, `/deployments/revisions/${encodeURIComponent(revisionId)}`);
+export async function getRevision(revisionId: string): Promise<DeploymentRevision> {
+  const { text } = await requestText(`/deployments/revisions/${encodeURIComponent(revisionId)}`);
   return parse(text, revisionResponseSchema, "Revision").revision;
 }
 
 export async function createRevision(
-  connection: ConnectionIdentity,
   input: {
     graph: string;
     source_environment: string;
@@ -257,7 +255,7 @@ export async function createRevision(
     author: { type: "human"; human_id: string } | { type: "system" };
   },
 ): Promise<{ created: boolean; revision: DeploymentRevision }> {
-  const { status, text } = await requestText(connection, "/deployments/revisions", {
+  const { status, text } = await requestText("/deployments/revisions", {
     method: "POST",
     body: JSON.stringify(input),
   }, 512 * 1024);
@@ -273,18 +271,17 @@ export async function createRevision(
   return { created: status === 201, revision: receipt.revision };
 }
 
-export async function getDeploymentHealth(connection: ConnectionIdentity): Promise<DeploymentHealth> {
-  const { text } = await requestText(connection, "/deployments/health");
+export async function getDeploymentHealth(): Promise<DeploymentHealth> {
+  const { text } = await requestText("/deployments/health");
   return parse(text, deploymentHealthSchema, "Deployment health");
 }
 
-export async function getEnvironmentPointer(connection: ConnectionIdentity, name: string): Promise<DeploymentPointer> {
-  const { text } = await requestText(connection, `/deployments/environments/${encodeURIComponent(name)}/pointer`);
+export async function getEnvironmentPointer(name: string): Promise<DeploymentPointer> {
+  const { text } = await requestText(`/deployments/environments/${encodeURIComponent(name)}/pointer`);
   return parse(text, pointerResponseSchema, "Deployment pointer").pointer;
 }
 
 export async function promoteRevision(
-  connection: ConnectionIdentity,
   environment: string,
   input: {
     revision_id: string;
@@ -292,7 +289,6 @@ export async function promoteRevision(
   },
 ): Promise<{ pointer: DeploymentPointer }> {
   const { status, text } = await requestText(
-    connection,
     `/deployments/environments/${encodeURIComponent(environment)}/promote`,
     { method: "POST", body: JSON.stringify(input) },
     512 * 1024,
@@ -306,7 +302,6 @@ export async function promoteRevision(
 }
 
 export async function rollbackRevision(
-  connection: ConnectionIdentity,
   environment: string,
   input: {
     author: { type: "human"; human_id: string } | { type: "system" };
@@ -314,7 +309,6 @@ export async function rollbackRevision(
   },
 ): Promise<{ pointer: DeploymentPointer }> {
   const { status, text } = await requestText(
-    connection,
     `/deployments/environments/${encodeURIComponent(environment)}/rollback`,
     { method: "POST", body: JSON.stringify(input) },
     512 * 1024,
@@ -326,7 +320,6 @@ export async function rollbackRevision(
 }
 
 export async function declareCanary(
-  connection: ConnectionIdentity,
   environment: string,
   input: {
     revision_id: string;
@@ -335,7 +328,6 @@ export async function declareCanary(
   },
 ): Promise<{ pointer: DeploymentPointer }> {
   const { status, text } = await requestText(
-    connection,
     `/deployments/environments/${encodeURIComponent(environment)}/canary`,
     { method: "PUT", body: JSON.stringify(input) },
     512 * 1024,
@@ -349,12 +341,10 @@ export async function declareCanary(
 }
 
 export async function clearCanary(
-  connection: ConnectionIdentity,
   environment: string,
   author: { type: "human"; human_id: string } | { type: "system" },
 ): Promise<{ applied: boolean; pointer: DeploymentPointer }> {
   const { status, text } = await requestText(
-    connection,
     `/deployments/environments/${encodeURIComponent(environment)}/canary`,
     { method: "DELETE", body: JSON.stringify({ author }) },
     512 * 1024,
@@ -365,7 +355,6 @@ export async function clearCanary(
 }
 
 export async function createShadow(
-  connection: ConnectionIdentity,
   input: {
     revision_id: string;
     source: unknown;
@@ -374,7 +363,6 @@ export async function createShadow(
   },
 ): Promise<ShadowVerdict> {
   const { status, text } = await requestText(
-    connection,
     "/deployments/shadows",
     { method: "POST", body: JSON.stringify(input) },
     512 * 1024,
@@ -383,13 +371,13 @@ export async function createShadow(
   return parseMutationJson(text, shadowVerdictSchema, "Shadow receipt", status);
 }
 
-export async function getDeploymentJournal(connection: ConnectionIdentity): Promise<DeploymentJournal> {
-  const { text } = await requestText(connection, "/deployments/journal");
+export async function getDeploymentJournal(): Promise<DeploymentJournal> {
+  const { text } = await requestText("/deployments/journal");
   return parse(text, deploymentJournalSchema, "Deployment journal");
 }
 
-export async function listSecrets(connection: ConnectionIdentity, environment?: string): Promise<DeploymentSecret[]> {
+export async function listSecrets(environment?: string): Promise<DeploymentSecret[]> {
   const query = environment ? `?environment=${encodeURIComponent(environment)}` : "";
-  const { text } = await requestText(connection, `/deployments/secrets${query}`);
+  const { text } = await requestText(`/deployments/secrets${query}`);
   return parse(text, secretListSchema, "Secret metadata").secrets;
 }

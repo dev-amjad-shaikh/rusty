@@ -52,28 +52,27 @@ function ModeNav() {
 }
 
 function useReleaseQueries(enabled: boolean) {
-  const { connection } = useConnectionStore();
   const baseKey = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint] : ["releases", "disconnected"];
   const health = useQuery({
     queryKey: [...baseKey, "deployment-health"],
-    queryFn: () => getDeploymentHealth(connection!),
+    queryFn: () => getDeploymentHealth(),
     enabled: Boolean(enabled && connection),
     refetchInterval: 15_000,
   });
   const revisions = useQuery({
     queryKey: [...baseKey, "revisions"],
-    queryFn: () => listRevisions(connection!),
+    queryFn: () => listRevisions(),
     enabled: Boolean(enabled && connection),
   });
   const journal = useQuery({
     queryKey: [...baseKey, "deployment-journal"],
-    queryFn: () => getDeploymentJournal(connection!),
+    queryFn: () => getDeploymentJournal(),
     enabled: Boolean(enabled && connection),
     refetchInterval: 15_000,
   });
   const environments = useQuery({
     queryKey: [...baseKey, "environments"],
-    queryFn: () => listEnvironments(connection!),
+    queryFn: () => listEnvironments(),
     enabled: Boolean(enabled && connection),
   });
   return { health, revisions, journal, environments, connection };
@@ -298,7 +297,6 @@ function eventSummary(event: DeploymentEvent): { title: string; detail: string }
 }
 
 function DeclareEnvironmentDialog({ open, onClose, onDeclare }: { open: boolean; onClose: () => void; onDeclare: (created: boolean) => void }) {
-  const { connection } = useConnectionStore();
   const [name, setName] = useState("");
   const [policy, setPolicy] = useState("");
   const [dataset, setDataset] = useState("");
@@ -306,7 +304,7 @@ function DeclareEnvironmentDialog({ open, onClose, onDeclare }: { open: boolean;
   const [authorId, setAuthorId] = useState("");
   const [error, setError] = useState("");
   const declare = useMutation({
-    mutationFn: () => declareEnvironment(connection!, {
+    mutationFn: () => declareEnvironment({
       name: name.trim(),
       gate: policy.trim() && dataset.trim() ? { policy: policy.trim(), dataset_version: dataset.trim() } : null,
       approval_required: approval,
@@ -349,14 +347,13 @@ function CreateRevisionDialog({
   environments: DeploymentEnvironment[] | undefined;
   onCreated: () => void;
 }) {
-  const { connection } = useConnectionStore();
   const [graph, setGraph] = useState("");
   const [sourceEnv, setSourceEnv] = useState("");
   const [surfaces, setSurfaces] = useState("");
   const [authorId, setAuthorId] = useState("");
   const [error, setError] = useState("");
   const create = useMutation({
-    mutationFn: () => createRevision(connection!, {
+    mutationFn: () => createRevision({
       graph: graph.trim(),
       source_environment: sourceEnv,
       surfaces: surfaces.split(",").map((s) => s.trim()).filter(Boolean),
@@ -393,11 +390,10 @@ function CreateRevisionDialog({
 }
 
 function SecretsPanel({ environment }: { environment?: string }) {
-  const { connection } = useConnectionStore();
   const secrets = useQuery({
-    queryKey: connection && environment ? [connection.epoch, connection.origin, connection.tenantFingerprint, "secrets", environment] : ["secrets", "idle"],
-    queryFn: () => listSecrets(connection!, environment),
-    enabled: Boolean(connection && environment),
+    queryKey: ["secrets", environment ?? "idle"],
+    queryFn: () => listSecrets(environment),
+    enabled: Boolean(environment),
   });
   if (!environment) return null;
   return (
@@ -432,9 +428,9 @@ export function ReleasesPage() {
   const env = environments.data?.find((item) => item.name === selectedEnv);
   const board = health.data?.environments.find((item) => item.environment === selectedEnv);
   const pointer = useQuery({
-    queryKey: connection && selectedEnv ? [connection.epoch, connection.origin, connection.tenantFingerprint, "pointer", selectedEnv] : ["pointer", "idle"],
-    queryFn: () => getEnvironmentPointer(connection!, selectedEnv!),
-    enabled: Boolean(connection && selectedEnv),
+    queryKey: ["pointer", selectedEnv ?? "idle"],
+    queryFn: () => getEnvironmentPointer(selectedEnv!),
+    enabled: Boolean(selectedEnv),
   });
   const selectedRevision = useMemo(() => {
     if (!params.revisionId) return null;
@@ -442,7 +438,6 @@ export function ReleasesPage() {
   }, [params.revisionId, revisions.data]);
 
   const invalidate = () => {
-    if (!connection) return;
     const base = [connection.epoch, connection.origin, connection.tenantFingerprint];
     queryClient.invalidateQueries({ queryKey: [...base, "deployment-health"] });
     queryClient.invalidateQueries({ queryKey: [...base, "revisions"] });
@@ -452,21 +447,21 @@ export function ReleasesPage() {
 
   const promote = useMutation({
     mutationFn: ({ revisionId, authorId }: { revisionId: string; authorId: string }) =>
-      promoteRevision(connection!, selectedEnv!, { revision_id: revisionId, author: author(authorId) }),
+      promoteRevision(selectedEnv!, { revision_id: revisionId, author: author(authorId) }),
     onSuccess: invalidate,
   });
   const canary = useMutation({
     mutationFn: ({ revisionId, authorId, fraction }: { revisionId: string; authorId: string; fraction: number }) =>
-      declareCanary(connection!, selectedEnv!, { revision_id: revisionId, fraction, author: author(authorId) }),
+      declareCanary(selectedEnv!, { revision_id: revisionId, fraction, author: author(authorId) }),
     onSuccess: invalidate,
   });
   const rollback = useMutation({
     mutationFn: ({ authorId, cause }: { authorId: string; cause: string }) =>
-      rollbackRevision(connection!, selectedEnv!, { author: author(authorId), cause }),
+      rollbackRevision(selectedEnv!, { author: author(authorId), cause }),
     onSuccess: invalidate,
   });
   const clear = useMutation({
-    mutationFn: ({ authorId }: { authorId: string }) => clearCanary(connection!, selectedEnv!, author(authorId)),
+    mutationFn: ({ authorId }: { authorId: string }) => clearCanary(selectedEnv!, author(authorId)),
     onSuccess: invalidate,
   });
 

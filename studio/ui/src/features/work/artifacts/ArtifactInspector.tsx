@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArtifactImage } from "./ArtifactImage";
 import { getRunArtifactBytes, getRunArtifactNamed, getRunArtifactPreview, listRunArtifactVersions, releaseRunArtifact, type ArtifactPreview, type RunArtifact } from "../../../lib/api/artifacts";
-import { useConnectionStore } from "../../../state/connection";
 import { bytePreview } from "../../../lib/text";
 import styles from "./Artifacts.module.css";
 
@@ -90,11 +89,10 @@ async function streamDownload(response: Response, filename: string) {
 }
 
 function VersionsPanel({ name }: { name: string }) {
-  const { connection } = useConnectionStore();
   const versions = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-versions", name] : ["artifact-versions", "idle"],
-    queryFn: () => listRunArtifactVersions(connection!, name),
-    enabled: Boolean(connection && name),
+    queryKey: ["artifact-versions", name],
+    queryFn: () => listRunArtifactVersions(name),
+    enabled: Boolean(name),
   });
   if (versions.isLoading) return <p className={styles.emptyPreview}>Loading version history…</p>;
   if (versions.isError) return <p className={styles.emptyPreview}>Version history could not be loaded.</p>;
@@ -126,13 +124,11 @@ export function releaseOutcomeCopy(result: Pick<ReleaseResult, "converged" | "pr
 }
 
 function ReleasePanel({ artifact, onReleased }: { artifact: RunArtifact; onReleased: (result: ReleaseResult) => Promise<void> | void }) {
-  const { connection } = useConnectionStore();
   const [author, setAuthor] = useState("");
   const [reason, setReason] = useState("");
   const release = useMutation({
     mutationFn: () => {
-      if (!connection) throw new Error("Not connected.");
-      return releaseRunArtifact(connection, artifact.artifact_id, { released_by: author, reason: reason || undefined });
+      return releaseRunArtifact(artifact.artifact_id, { released_by: author, reason: reason || undefined });
     },
     onSuccess: async (result) => { setAuthor(""); setReason(""); await onReleased(result); },
   });
@@ -149,7 +145,6 @@ function ReleasePanel({ artifact, onReleased }: { artifact: RunArtifact; onRelea
 }
 
 export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact; onClose: () => void }) {
-  const { connection } = useConnectionStore();
   const queryClient = useQueryClient();
   const [view, setView] = useState<"preview" | "versions" | "release">("preview");
   const [releaseSummary, setReleaseSummary] = useState("");
@@ -164,24 +159,23 @@ export function ArtifactInspector({ artifact, onClose }: { artifact: RunArtifact
     const frame = requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, []);
-  const previewKey = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-preview", artifact.artifact_id] : ["artifact-preview", "idle"];
+  const previewKey = ["artifact-preview", artifact.artifact_id];
   const preview = useQuery({
     queryKey: previewKey,
-    queryFn: () => getRunArtifactPreview(connection!, artifact.artifact_id),
-    enabled: Boolean(connection) && previewAvailability !== "removed",
+    queryFn: () => getRunArtifactPreview(artifact.artifact_id),
+    enabled: previewAvailability !== "removed",
   });
   useEffect(() => {
     if (previewAvailability === "removed") queryClient.removeQueries({ queryKey: previewKey, exact: true });
-  }, [previewAvailability, queryClient, connection?.epoch, connection?.origin, connection?.tenantFingerprint, artifact.artifact_id]);
+  }, [previewAvailability, queryClient, artifact.artifact_id]);
   const named = useQuery({
-    queryKey: connection && artifact.name ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact-named", artifact.name] : ["artifact-named", "idle"],
-    queryFn: () => getRunArtifactNamed(connection!, artifact.name!),
-    enabled: Boolean(connection && artifact.name),
+    queryKey: ["artifact-named", artifact.name ?? "idle"],
+    queryFn: () => getRunArtifactNamed(artifact.name!),
+    enabled: Boolean(artifact.name),
   });
   const download = useMutation({
     mutationFn: async () => {
-      if (!connection) throw new Error("Not connected.");
-      const response = await getRunArtifactBytes(connection, artifact.artifact_id);
+      const response = await getRunArtifactBytes(artifact.artifact_id);
       const filename = artifact.name ? `${artifact.name.replace(/[^A-Za-z0-9._-]/g, "_")}` : `artifact-${artifact.artifact_id.slice(0, 16)}`;
       const extension = artifact.media_type ? `.${artifact.media_type.split("/").pop() ?? "bin"}` : "";
       await streamDownload(response, `${filename}${extension}`);

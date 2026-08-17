@@ -20,20 +20,11 @@ import { evidencePreview, isUnicodeScalarString } from "../text";
 
 const DEFAULT_LIMIT = 8 * 1024 * 1024;
 
-export interface ConnectionIdentity {
-  epoch: number;
-  origin: string;
-  apiKey: string;
-  tenantFingerprint: string;
-}
+export const LOCAL_ORIGIN = "http://127.0.0.1:8100";
 
-export function connectionScope(connection: ConnectionIdentity) {
-  return `${connection.epoch}|${connection.origin}|${connection.tenantFingerprint}`;
-}
-
-export function mutationScope(connection: ConnectionIdentity) {
-  return JSON.stringify([connection.origin.replace(/\/$/, ""), connection.tenantFingerprint]);
-}
+// Studio is the local companion of one Rusty backend. The only override is an
+// access key for a server that is not in open mode; there is no UI for it.
+const apiKey = import.meta.env.VITE_RUSTY_API_KEY ?? "";
 
 export class StudioApiError extends Error {
   constructor(
@@ -46,10 +37,8 @@ export class StudioApiError extends Error {
   }
 }
 
-export function endpoint(connection: ConnectionIdentity, path: string) {
-  const normalized = connection.origin.replace(/\/$/, "");
-  if (import.meta.env.DEV && normalized === "http://127.0.0.1:8100") return `/api${path}`;
-  return `${normalized}${path}`;
+export function endpoint(path: string) {
+  return `/api${path}`;
 }
 
 async function readBounded(response: Response, maxBytes = DEFAULT_LIMIT) {
@@ -87,19 +76,18 @@ function errorMessage(text: string, status: number) {
 }
 
 export async function requestText(
-  connection: ConnectionIdentity,
   path: string,
   init: RequestInit = {},
   maxBytes = DEFAULT_LIMIT,
 ) {
   let response: Response;
   try {
-    response = await fetch(endpoint(connection, path), {
+    response = await fetch(endpoint(path), {
       ...init,
       headers: {
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...(connection.apiKey ? { "X-Api-Key": connection.apiKey } : {}),
+        ...(apiKey ? { "X-Api-Key": apiKey } : {}),
         ...init.headers,
       },
     });
@@ -135,13 +123,13 @@ export function parseMutationJson<T>(text: string, schema: z.ZodType<T>, context
   }
 }
 
-export async function getServerInfo(connection: ConnectionIdentity): Promise<ServerInfo> {
-  const { text } = await requestText(connection, "/info", {}, 512 * 1024);
+export async function getServerInfo(): Promise<ServerInfo> {
+  const { text } = await requestText("/info", {}, 512 * 1024);
   return parseJson(text, serverInfoSchema, "Server information");
 }
 
-export async function listAssistants(connection: ConnectionIdentity): Promise<Assistant[]> {
-  const { text } = await requestText(connection, "/assistants");
+export async function listAssistants(): Promise<Assistant[]> {
+  const { text } = await requestText("/assistants");
   return parseJson(text, assistantCatalogSchema, "Assistant catalog");
 }
 
@@ -153,8 +141,8 @@ export interface CreateAssistantInput {
   metadata: unknown;
 }
 
-export async function createAssistant(connection: ConnectionIdentity, input: CreateAssistantInput): Promise<Assistant> {
-  const { status, text } = await requestText(connection, "/assistants", { method: "POST", body: JSON.stringify(input) });
+export async function createAssistant(input: CreateAssistantInput): Promise<Assistant> {
+  const { status, text } = await requestText("/assistants", { method: "POST", body: JSON.stringify(input) });
   if (status !== 201) throw new StudioApiError("Assistant creation returned an unproven receipt.", status, true);
   const assistant = parseMutationJson(text, assistantSchema, "Assistant receipt", status);
   if (assistant.assistant_id !== input.assistant_id || assistant.name !== input.name || assistant.graph !== input.graph
@@ -177,8 +165,8 @@ export function jsonEquivalent(left: unknown, right: unknown): boolean {
     && jsonEquivalent(leftRecord[key], rightRecord[key]));
 }
 
-export async function createThread(connection: ConnectionIdentity, graph: string, assistantId: string): Promise<Thread> {
-  const { status, text } = await requestText(connection, "/threads", {
+export async function createThread(graph: string, assistantId: string): Promise<Thread> {
+  const { status, text } = await requestText("/threads", {
     method: "POST",
     body: JSON.stringify({ graph, metadata: { assistant_id: assistantId } }),
   }, 512 * 1024);
@@ -191,13 +179,12 @@ export async function createThread(connection: ConnectionIdentity, graph: string
 }
 
 export async function startRun(
-  connection: ConnectionIdentity,
   thread: Thread,
   assistantId: string,
   expectedActiveVersionId: string,
   objective: string,
 ): Promise<RunReceipt> {
-  const { status, text } = await requestText(connection, `/threads/${encodeURIComponent(thread.thread_id)}/runs`, {
+  const { status, text } = await requestText(`/threads/${encodeURIComponent(thread.thread_id)}/runs`, {
     method: "POST",
     body: JSON.stringify({
       input: { objective },
@@ -213,8 +200,8 @@ export async function startRun(
   return receipt;
 }
 
-export async function getRun(connection: ConnectionIdentity, runId: string): Promise<RunSnapshot> {
-  const { text } = await requestText(connection, `/runs/${encodeURIComponent(runId)}`);
+export async function getRun(runId: string): Promise<RunSnapshot> {
+  const { text } = await requestText(`/runs/${encodeURIComponent(runId)}`);
   return parseJson(text, runSnapshotSchema, "Run status");
 }
 
@@ -258,8 +245,8 @@ function parseRunEvidence(text: string): RunEvidence {
   return runEvidenceSchema.parse({ run_id: envelope.run_id, complete: envelope.complete, events });
 }
 
-export async function getRunEvidence(connection: ConnectionIdentity, runId: string): Promise<RunEvidence> {
-  const { text } = await requestText(connection, `/runs/${encodeURIComponent(runId)}/events`);
+export async function getRunEvidence(runId: string): Promise<RunEvidence> {
+  const { text } = await requestText(`/runs/${encodeURIComponent(runId)}/events`);
   const evidence = parseRunEvidence(text);
   if (evidence.run_id !== runId || evidence.events.some((event: RunEvent) => event.run_id !== runId)) {
     throw new StudioApiError("Run evidence crossed run identity.", 0);
@@ -318,8 +305,8 @@ export interface OperationsSnapshot {
   unavailable: string[];
 }
 
-async function projected<T>(connection: ConnectionIdentity, path: string, schema: z.ZodType<T>, context: string) {
-  const { text } = await requestText(connection, path);
+async function projected<T>(path: string, schema: z.ZodType<T>, context: string) {
+  const { text } = await requestText(path);
   return parseJson(text, schema, context);
 }
 
@@ -328,13 +315,13 @@ const artifactUnavailableOutputSchema = z.object({
   surface: z.string(),
 }).passthrough();
 
-export async function getOperationsSnapshot(connection: ConnectionIdentity): Promise<OperationsSnapshot> {
+export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
   const [deadResult, failedResult, schedulesResult, triggersResult, artifactsJournalResult] = await Promise.allSettled([
-    projected(connection, "/tasks?status=dead", operationTasksSchema, "Dead-letter tasks"),
-    projected(connection, "/tasks?status=failed", operationTasksSchema, "Failed tasks"),
-    projected(connection, "/crons", cronSummarySchema, "Schedule catalog"),
-    projected(connection, "/triggers", triggerSummarySchema, "Automation catalog"),
-    projected(connection, "/artifacts/journal", runEvidenceSchema, "Artifact evidence chain"),
+    projected("/tasks?status=dead", operationTasksSchema, "Dead-letter tasks"),
+    projected("/tasks?status=failed", operationTasksSchema, "Failed tasks"),
+    projected("/crons", cronSummarySchema, "Schedule catalog"),
+    projected("/triggers", triggerSummarySchema, "Automation catalog"),
+    projected("/artifacts/journal", runEvidenceSchema, "Artifact evidence chain"),
   ]);
   const unavailable: string[] = [];
   if (deadResult.status === "rejected" || failedResult.status === "rejected") unavailable.push("task queue");
@@ -433,22 +420,22 @@ export type PromptArtifact = z.infer<typeof promptArtifactSchema>;
 export type PromptHistory = z.infer<typeof promptHistorySchema>;
 export type PromptCandidateRecord = z.infer<typeof promptCandidateSchema>;
 
-export async function listPromptArtifacts(connection: ConnectionIdentity) {
-  const { text } = await requestText(connection, "/registry/artifacts?family=prompt");
+export async function listPromptArtifacts() {
+  const { text } = await requestText("/registry/artifacts?family=prompt");
   return parseJson(text, promptArtifactsSchema, "Prompt library").artifacts;
 }
 
 function promptPath(name: string) { return encodeURIComponent(name); }
 
-export async function getPromptHistory(connection: ConnectionIdentity, name: string) {
-  const { text } = await requestText(connection, `/registry/artifacts/prompt/${promptPath(name)}/commits`);
+export async function getPromptHistory(name: string) {
+  const { text } = await requestText(`/registry/artifacts/prompt/${promptPath(name)}/commits`);
   const history = parseJson(text, promptHistorySchema, "Prompt history");
   if (history.surface !== `prompt:${name}`) throw new StudioApiError("Prompt history named a different artifact.", 0);
   return history;
 }
 
-export async function getPromptCandidate(connection: ConnectionIdentity, candidateId: string) {
-  const { text } = await requestText(connection, `/learn/candidates/${encodeURIComponent(candidateId)}`);
+export async function getPromptCandidate(candidateId: string) {
+  const { text } = await requestText(`/learn/candidates/${encodeURIComponent(candidateId)}`);
   const record = parseJson(text, promptCandidateSchema, "Prompt version");
   if (record.candidate.candidate_id !== candidateId) throw new StudioApiError("Prompt version named a different candidate.", 0);
   return record;
@@ -461,7 +448,7 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function savePromptVersion(connection: ConnectionIdentity, input: SavePromptVersionInput) {
+export async function savePromptVersion(input: SavePromptVersionInput) {
   if (![input.name, input.prompt, input.humanId, input.runId].every(isUnicodeScalarString)) {
     throw new StudioApiError("Prompt version input contained invalid Unicode.", 0);
   }
@@ -469,7 +456,7 @@ export async function savePromptVersion(connection: ConnectionIdentity, input: S
   const candidateId = await sha256(JSON.stringify(content));
   const createdAt = new Date().toISOString();
   if (!input.artifactExists) {
-    const declaration = await requestText(connection, "/registry/artifacts", { method: "POST", body: JSON.stringify({ family: "prompt", name: input.name, owner: { type: "human", human_id: input.humanId } }) }, 512 * 1024);
+    const declaration = await requestText("/registry/artifacts", { method: "POST", body: JSON.stringify({ family: "prompt", name: input.name, owner: { type: "human", human_id: input.humanId } }) }, 512 * 1024);
     if (![200, 201].includes(declaration.status)) throw new StudioApiError("Prompt declaration returned an unproven receipt.", declaration.status, true);
     const declarationSchema = z.object({ surface: z.string(), created: z.boolean(), artifact: promptArtifactSchema }).strict();
     const receipt = parseMutationJson(declaration.text, declarationSchema, "Prompt declaration receipt", declaration.status);
@@ -477,14 +464,14 @@ export async function savePromptVersion(connection: ConnectionIdentity, input: S
       || !jsonEquivalent(receipt.artifact.owner, { type: "human", human_id: input.humanId })) throw new StudioApiError("Prompt declaration receipt did not match the mutation status or owner.", declaration.status, true);
   }
   const candidate = { candidate_id: candidateId, content, distilled_by: { type: "human", human_id: input.humanId }, evidence: { run_ids: [input.runId] }, created_at: createdAt };
-  const creation = await requestText(connection, "/learn/candidates", { method: "POST", body: JSON.stringify({ candidate, run_id: input.runId }) }, 1024 * 1024);
+  const creation = await requestText("/learn/candidates", { method: "POST", body: JSON.stringify({ candidate, run_id: input.runId }) }, 1024 * 1024);
   if (![200, 201].includes(creation.status)) throw new StudioApiError("Prompt version returned an unproven receipt.", creation.status, true);
   const creationSchema = z.object({ candidate_id: z.string(), created: z.boolean(), record: promptCandidateSchema }).strict();
   const created = parseMutationJson(creation.text, creationSchema, "Prompt version receipt", creation.status);
   if (created.candidate_id !== candidateId || created.record.candidate.candidate_id !== candidateId || created.record.candidate.content.name !== input.name || created.record.candidate.content.prompt !== input.prompt || created.created !== (creation.status === 201)
     || !jsonEquivalent(created.record.candidate.distilled_by, { type: "human", human_id: input.humanId })
     || !jsonEquivalent(created.record.candidate.evidence?.run_ids, [input.runId])) throw new StudioApiError("Prompt version receipt did not match the reviewed draft, evidence, author, or mutation status.", creation.status, true);
-  const commit = await requestText(connection, `/registry/artifacts/prompt/${promptPath(input.name)}/commits`, { method: "POST", body: JSON.stringify({ candidate_id: candidateId }) }, 512 * 1024);
+  const commit = await requestText(`/registry/artifacts/prompt/${promptPath(input.name)}/commits`, { method: "POST", body: JSON.stringify({ candidate_id: candidateId }) }, 512 * 1024);
   if (commit.status !== 200) throw new StudioApiError("Prompt commit returned an unproven receipt.", commit.status, true);
   const commitSchema = z.union([
     z.object({ surface: z.string(), committed: z.literal(true), commit: promptCommitSchema, commits: z.number().int().positive() }).strict(),

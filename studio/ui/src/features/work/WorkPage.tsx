@@ -56,27 +56,26 @@ export function WorkPage() {
   useEffect(() => { setRecentIds(connection ? readRecentWork(durableScope) : []); }, [connection, durableScope]);
 
   const assistants = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "assistants"] : ["assistants", "disconnected"],
-    queryFn: () => listAssistants(connection!),
-    enabled: Boolean(connection),
+    queryKey: ["assistants"],
+    queryFn: () => listAssistants(),
   });
   const run = useQuery({
-    queryKey: connection && params.runId ? [connection.epoch, connection.origin, connection.tenantFingerprint, "run", params.runId] : ["run", "idle"],
-    queryFn: () => getRun(connection!, params.runId!),
-    enabled: Boolean(connection && params.runId),
+    queryKey: ["run", params.runId ?? "idle"],
+    queryFn: () => getRun(params.runId!),
+    enabled: Boolean(params.runId),
     refetchInterval: (query) => query.state.data && ["success", "error", "interrupted", "cancelled"].includes(query.state.data.status) ? false : 1_000,
   });
   const evidence = useQuery({
-    queryKey: connection && params.runId ? [connection.epoch, connection.origin, connection.tenantFingerprint, "run-evidence", params.runId] : ["run-evidence", "idle"],
-    queryFn: () => getRunEvidence(connection!, params.runId!),
-    enabled: Boolean(connection && params.runId),
+    queryKey: ["run-evidence", params.runId ?? "idle"],
+    queryFn: () => getRunEvidence(params.runId!),
+    enabled: Boolean(params.runId),
     refetchInterval: (query) => query.state.data?.complete ? false : 1_250,
     retry: (count, caught) => caught instanceof StudioApiError && caught.status === 404 ? count < 3 : count < 1,
   });
   const recentRuns = useQueries({
     queries: connection && !params.runId ? recentIds.slice(0, 6).map((item) => ({
-      queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "recent-run", item.runId],
-      queryFn: () => getRun(connection, item.runId),
+      queryKey: ["recent-run", item.runId],
+      queryFn: () => getRun(item.runId),
       retry: false,
       staleTime: 15_000,
     })) : [],

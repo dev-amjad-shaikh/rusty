@@ -4,7 +4,6 @@ import {
   parseMutationJson,
   requestText,
   StudioApiError,
-  type ConnectionIdentity,
 } from "./client";
 import { isUnicodeScalarString } from "../text";
 
@@ -178,13 +177,13 @@ function sourcePath(sourceId: string) {
   return `/knowledge/sources/${encodeURIComponent(sourceId)}`;
 }
 
-export async function listKnowledgeSources(connection: ConnectionIdentity): Promise<KnowledgeLibrary> {
-  const { text } = await requestText(connection, "/knowledge/sources");
+export async function listKnowledgeSources(): Promise<KnowledgeLibrary> {
+  const { text } = await requestText("/knowledge/sources");
   return parseJson(text, librarySchema, "Knowledge library");
 }
 
-export async function getKnowledgeSource(connection: ConnectionIdentity, sourceId: string): Promise<KnowledgeSourceDetail> {
-  const { text } = await requestText(connection, sourcePath(sourceId));
+export async function getKnowledgeSource(sourceId: string): Promise<KnowledgeSourceDetail> {
+  const { text } = await requestText(sourcePath(sourceId));
   const detail = parseJson(text, sourceDetailSchema, "Knowledge source");
   if ("source" in detail && detail.source.source_id !== sourceId) {
     throw new StudioApiError("Knowledge source named a different source.", 0);
@@ -196,14 +195,12 @@ export async function getKnowledgeSource(connection: ConnectionIdentity, sourceI
 }
 
 export async function getKnowledgeChunk(
-  connection: ConnectionIdentity,
   sourceId: string,
   chunkId: string | number,
   versionHash?: string,
 ): Promise<KnowledgeChunkFetch> {
   const pin = versionHash ? `?version=${encodeURIComponent(versionHash)}` : "";
   const { text } = await requestText(
-    connection,
     `${sourcePath(sourceId)}/chunks/${encodeURIComponent(String(chunkId))}${pin}`,
   );
   const chunk = parseJson(text, chunkFetchSchema, "Knowledge chunk");
@@ -227,7 +224,6 @@ export interface RegisterKnowledgeSourceInput {
 }
 
 export async function registerKnowledgeSource(
-  connection: ConnectionIdentity,
   input: RegisterKnowledgeSourceInput,
 ): Promise<KnowledgeRegisterReceipt> {
   if (![input.source_id, input.title, input.author, input.body].every(isUnicodeScalarString)) {
@@ -242,7 +238,7 @@ export async function registerKnowledgeSource(
   };
   if (input.confidence !== undefined) payload.confidence = input.confidence;
   if (input.retention !== undefined) payload.retention = input.retention;
-  const { status, text } = await requestText(connection, "/knowledge/sources", {
+  const { status, text } = await requestText("/knowledge/sources", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -257,7 +253,6 @@ export async function registerKnowledgeSource(
 }
 
 export async function correctKnowledgeSource(
-  connection: ConnectionIdentity,
   sourceId: string,
   author: string,
   body: string,
@@ -265,7 +260,7 @@ export async function correctKnowledgeSource(
   if (![author, body].every(isUnicodeScalarString)) {
     throw new StudioApiError("Correction input contained invalid Unicode.", 0);
   }
-  const { status, text } = await requestText(connection, `${sourcePath(sourceId)}/correct`, {
+  const { status, text } = await requestText(`${sourcePath(sourceId)}/correct`, {
     method: "POST",
     body: JSON.stringify({ author, body }),
   });
@@ -285,7 +280,6 @@ export interface KnowledgeQueryLimits {
 }
 
 export async function queryKnowledge(
-  connection: ConnectionIdentity,
   textQuery: string,
   limits?: KnowledgeQueryLimits,
 ): Promise<KnowledgeQueryResponse> {
@@ -296,7 +290,7 @@ export async function queryKnowledge(
   if (limits && (limits.max_results !== undefined || limits.max_bytes !== undefined)) {
     payload.limits = limits;
   }
-  const { text } = await requestText(connection, "/knowledge/query", {
+  const { text } = await requestText("/knowledge/query", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -304,10 +298,9 @@ export async function queryKnowledge(
 }
 
 export async function planKnowledgeRetention(
-  connection: ConnectionIdentity,
   asOf?: string,
 ): Promise<KnowledgeRetentionPlan> {
-  const { text } = await requestText(connection, "/knowledge/retention/plan", {
+  const { text } = await requestText("/knowledge/retention/plan", {
     method: "POST",
     body: JSON.stringify(asOf ? { as_of: asOf } : {}),
   });
@@ -315,10 +308,9 @@ export async function planKnowledgeRetention(
 }
 
 export async function applyKnowledgeRetention(
-  connection: ConnectionIdentity,
   asOf?: string,
 ): Promise<KnowledgeRetentionReceipt> {
-  const { status, text } = await requestText(connection, "/knowledge/retention/apply", {
+  const { status, text } = await requestText("/knowledge/retention/apply", {
     method: "POST",
     body: JSON.stringify(asOf ? { as_of: asOf } : {}),
   });

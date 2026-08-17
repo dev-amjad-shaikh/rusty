@@ -1,6 +1,5 @@
 import { type FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ConnectionIdentity } from "../../lib/api/client";
 import {
   correctKnowledgeSource,
   getKnowledgeChunk,
@@ -16,17 +15,15 @@ import { bodyByteSize, formatBytes, formatInstant, hashPreview, retentionState }
 import styles from "./KnowledgePage.module.css";
 
 export function SourceDetail({
-  connection,
   sourceId,
   onBack,
 }: {
-  connection: ConnectionIdentity;
   sourceId: string;
   onBack: () => void;
 }) {
   const detail = useQuery({
-    queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "knowledge", "source", sourceId],
-    queryFn: () => getKnowledgeSource(connection, sourceId),
+    queryKey: ["knowledge", "source", sourceId],
+    queryFn: () => getKnowledgeSource(sourceId),
   });
 
   if (detail.isLoading) return <div className={styles.loading} role="status">Loading source…</div>;
@@ -47,7 +44,7 @@ export function SourceDetail({
   }
   if (!detail.data) return null;
   if ("tombstone" in detail.data) return <TombstoneView tombstone={detail.data.tombstone} />;
-  return <LiveSource connection={connection} sourceId={sourceId} detail={detail.data} />;
+  return <LiveSource sourceId={sourceId} detail={detail.data} />;
 }
 
 function TombstoneView({ tombstone }: { tombstone: KnowledgeSourceTombstone }) {
@@ -70,11 +67,9 @@ function TombstoneView({ tombstone }: { tombstone: KnowledgeSourceTombstone }) {
 }
 
 function LiveSource({
-  connection,
   sourceId,
   detail,
 }: {
-  connection: ConnectionIdentity;
   sourceId: string;
   detail: { source: KnowledgeSource; versions: number; chunks: KnowledgeChunkRecord[] };
 }) {
@@ -87,8 +82,8 @@ function LiveSource({
   const retentionClass = retention.tone === "pinned" ? styles.chipPinned : retention.tone === "live" ? styles.chipLive : styles.chipExpired;
 
   const chunk = useQuery({
-    queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "knowledge", "chunk", sourceId, openChunk, versionPin],
-    queryFn: () => getKnowledgeChunk(connection, sourceId, openChunk!, versionPin === source.content_hash ? undefined : versionPin),
+    queryKey: ["knowledge", "chunk", sourceId, openChunk, versionPin],
+    queryFn: () => getKnowledgeChunk(sourceId, openChunk!, versionPin === source.content_hash ? undefined : versionPin),
     enabled: openChunk !== null,
   });
 
@@ -146,14 +141,14 @@ function LiveSource({
         )}
         {correcting && (
           <CorrectionForm
-            connection={connection}
+           
             sourceId={sourceId}
             defaultAuthor={source.author}
             onCorrected={() => {
               setCorrecting(false);
               setOpenChunk(null);
               setVersionPin("");
-              queryClient.invalidateQueries({ queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "knowledge"] });
+              queryClient.invalidateQueries({ queryKey: ["knowledge"] });
             }}
             onCancel={() => setCorrecting(false)}
           />
@@ -236,13 +231,11 @@ function LiveSource({
 }
 
 function CorrectionForm({
-  connection,
   sourceId,
   defaultAuthor,
   onCorrected,
   onCancel,
 }: {
-  connection: ConnectionIdentity;
   sourceId: string;
   defaultAuthor: string;
   onCorrected: () => void;
@@ -256,7 +249,7 @@ function CorrectionForm({
   const canSubmit = author.trim().length > 0 && body.length > 0 && !overCap;
 
   const correct = useMutation({
-    mutationFn: () => correctKnowledgeSource(connection, sourceId, author.trim(), body),
+    mutationFn: () => correctKnowledgeSource(sourceId, author.trim(), body),
     onSuccess: (result) => setReceipt(result),
   });
 

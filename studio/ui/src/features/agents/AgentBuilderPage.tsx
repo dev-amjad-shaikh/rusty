@@ -1,9 +1,9 @@
 import { type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
-import { connectionScope, createAssistant, jsonEquivalent, listAssistants, mutationScope, StudioApiError } from "../../lib/api/client";
+import { createAssistant, jsonEquivalent, listAssistants, StudioApiError } from "../../lib/api/client";
 import { useAgentMutationStore } from "../../state/agents";
-import { useConnectionStore } from "../../state/connection";
+import { useRuntimeStore } from "../../state/runtime";
 import { PageHeader } from "../../components/PageHeader";
 import type { Assistant } from "../../lib/contracts";
 import { evidencePreview } from "../../lib/text";
@@ -24,20 +24,18 @@ import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 
 interface BuilderSession { draft: AgentDraft; visited: Set<Capability>; assistantId: string }
 interface CompletedCreate { assistant: Assistant }
-interface CreationReviewState { draft: AgentDraft; input: CreateOperation["input"]; initiatingScope: string }
-const builderSessions = new Map<string, BuilderSession>();
-const completedCreates = new Map<string, CompletedCreate>();
-const builderErrors = new Map<string, string>();
+interface CreationReviewState { draft: AgentDraft; input: CreateOperation["input"] }
+// Page memory: one draft survives in-place refreshes of this page, nothing more.
+let builderSession: BuilderSession | null = null;
+let completedCreate: CompletedCreate | null = null;
+let builderError = "";
 
 export function clearAgentBuilderMemory() {
-  builderSessions.clear();
-  completedCreates.clear();
-  builderErrors.clear();
+  builderSession = null;
+  completedCreate = null;
+  builderError = "";
 }
 interface CreateOperation {
-  connection: NonNullable<ReturnType<typeof useConnectionStore.getState>["connection"]>;
-  initiatingScope: string;
-  durableScope: string;
   input: ReturnType<typeof agentVersionFields> & { assistant_id: string };
 }
 
@@ -45,118 +43,71 @@ export function AgentBuilderPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const work = useWorkStore();
-  const { connection, info, openDialog } = useConnectionStore();
-  const exactConnectionScope = connection ? connectionScope(connection) : "disconnected";
-  const durableMutationScope = connection ? mutationScope(connection) : "disconnected";
-  const initialSession = builderSessions.get(durableMutationScope);
-  const [visited, setVisited] = useState<Set<Capability>>(() => new Set(initialSession?.visited ?? ["purpose"]));
-  const [draft, setDraft] = useState<AgentDraft>(() => initialSession?.draft ?? emptyAgentDraft());
-  const [error, setError] = useState(() => builderErrors.get(durableMutationScope) ?? "");
-  const [assistantId, setAssistantId] = useState<string>(() => initialSession?.assistantId ?? crypto.randomUUID());
+  const info = useRuntimeStore((state) => state.info);
+  const [visited, setVisited] = useState<Set<Capability>>(() => new Set(builderSession?.visited ?? ["purpose"]));
+  const [draft, setDraft] = useState<AgentDraft>(() => builderSession?.draft ?? emptyAgentDraft());
+  const [error, setError] = useState(() => builderError);
+  const [assistantId, setAssistantId] = useState<string>(() => builderSession?.assistantId ?? crypto.randomUUID());
   const [validationRequest, setValidationRequest] = useState<{ capability: Capability; nonce: number } | null>(null);
   const [creationReview, setCreationReview] = useState<CreationReviewState | null>(null);
   const builderHeading = useRef<HTMLHeadingElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const completeHeading = useRef<HTMLHeadingElement>(null);
   const reviewAgentButton = useRef<HTMLButtonElement>(null);
-  const previousWorkspace = useRef(durableMutationScope);
-  const [completedCreate, setCompletedCreate] = useState<CompletedCreate | null>(() => completedCreates.get(durableMutationScope) ?? null);
+  const [completed, setCompleted] = useState<CompletedCreate | null>(() => completedCreate);
   const mutationState = useAgentMutationStore();
-  const uncertainty = mutationState.uncertainByConnection[durableMutationScope] ?? "";
+  const uncertainty = mutationState.uncertain;
   const builderChanged = !jsonEquivalent(draft, emptyAgentDraft());
-  const hiddenDraftChanged = [...builderSessions.entries()].some(([scope, session]) => scope !== durableMutationScope && !jsonEquivalent(session.draft, emptyAgentDraft()));
   useEffect(() => {
-    if (completedCreate || previousWorkspace.current !== durableMutationScope) return;
-    builderSessions.set(durableMutationScope, { draft, visited: new Set(visited), assistantId });
-  }, [assistantId, completedCreate, draft, durableMutationScope, visited]);
+    if (completed) return;
+    builderSession = { draft, visited: new Set(visited), assistantId };
+  }, [assistantId, completed, draft, visited]);
   useEffect(() => {
-    if (completedCreate) requestAnimationFrame(() => completeHeading.current?.focus());
-  }, [completedCreate]);
-  useEffect(() => {
-    if (!creationReview || creationReview.initiatingScope === exactConnectionScope) return;
-    setCreationReview(null);
-    setError("The workspace connection changed. Review this agent again against the current workspace before creating it.");
-  }, [creationReview, exactConnectionScope]);
-  useEffect(() => {
-    const previous = previousWorkspace.current;
-    previousWorkspace.current = durableMutationScope;
-    if (previous === durableMutationScope) return;
-    builderSessions.set(previous, { draft, visited: new Set(visited), assistantId });
-    if (previous === "disconnected" && durableMutationScope !== "disconnected" && !builderChanged) builderSessions.delete(previous);
-    const completed = completedCreates.get(durableMutationScope) ?? null;
-    const next = builderSessions.get(durableMutationScope);
-    if (previous === "disconnected" && durableMutationScope !== "disconnected" && builderChanged && !next) {
-      builderSessions.set(durableMutationScope, { draft, visited: new Set(visited), assistantId });
-      builderSessions.delete(previous);
-      return;
-    }
-    setCompletedCreate(completed);
-    setVisited(completed ? new Set(["purpose"]) : next ? new Set(next.visited) : new Set(["purpose"]));
-    setDraft(completed ? emptyAgentDraft() : next?.draft ?? emptyAgentDraft());
-    setAssistantId(completed ? crypto.randomUUID() : next?.assistantId ?? crypto.randomUUID());
-    setError(builderErrors.get(durableMutationScope) ?? "");
-    setValidationRequest(null);
-    setCreationReview(null);
-    // Each connection owns its own page-memory draft. Switching back restores it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [durableMutationScope]);
+    if (completed) requestAnimationFrame(() => completeHeading.current?.focus());
+  }, [completed]);
 
-  const queryKey = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "assistants"] : ["assistants", "disconnected"];
   const create = useMutation({
     mutationFn: async (operation: CreateOperation) => {
-      const { connection: initiatingConnection, input } = operation;
+      const { input } = operation;
       try {
-        const assistant = await createAssistant(initiatingConnection, input);
-        return { assistant, operation };
+        const assistant = await createAssistant(input);
+        return { assistant };
       } catch (caught) {
         if (!(caught instanceof StudioApiError) || !caught.mayHaveCommitted) throw caught;
         try {
-          const catalog = await listAssistants(initiatingConnection);
+          const catalog = await listAssistants();
           const assistant = catalog.find((item) => item.assistant_id === input.assistant_id);
           if (assistant && assistant.name === input.name && assistant.graph === input.graph
             && jsonEquivalent(assistant.config, input.config) && jsonEquivalent(assistant.metadata, input.metadata)) {
-            return { assistant, operation };
+            return { assistant };
           }
         } catch { /* keep the uncertainty lock */ }
-        mutationState.markUncertain(operation.durableScope, "Rusty may have created this agent, but Studio could not prove the result. Check the portfolio before allowing another create attempt.");
+        mutationState.markUncertain("Rusty may have created this agent, but Studio could not prove the result. Check the portfolio before allowing another create attempt.");
         throw new StudioApiError("The create result is uncertain. Studio locked retry to avoid a duplicate agent.", caught.status, true);
       }
     },
-    onSuccess: ({ assistant, operation }) => {
-      const completed = { assistant };
-      completedCreates.set(operation.durableScope, completed);
-      builderSessions.delete(operation.durableScope);
-      builderErrors.delete(operation.durableScope);
-      mutationState.clearUncertain(operation.durableScope);
-      const operationQueryKey = [operation.connection.epoch, operation.connection.origin, operation.connection.tenantFingerprint, "assistants"];
-      queryClient.setQueryData(operationQueryKey, (value: unknown) => Array.isArray(value) && !value.some((item) => item && typeof item === "object" && "assistant_id" in item && item.assistant_id === assistant.assistant_id) ? [...value, assistant] : Array.isArray(value) ? value : [assistant]);
-      const current = useConnectionStore.getState().connection;
-      if (!current) return;
-      if (mutationScope(current) === operation.durableScope && connectionScope(current) !== operation.initiatingScope) {
-        setCompletedCreate(completed);
-        setDraft(emptyAgentDraft()); setAssistantId(crypto.randomUUID()); setVisited(new Set(["purpose"])); setError("");
-        setCreationReview(null);
-        queryClient.invalidateQueries({ queryKey: [current.epoch, current.origin, current.tenantFingerprint, "assistants"] });
-        return;
-      }
-      if (connectionScope(current) !== operation.initiatingScope) return;
-      setCompletedCreate(completed);
+    onSuccess: ({ assistant }) => {
+      completedCreate = { assistant };
+      builderSession = null;
+      builderError = "";
+      mutationState.clearUncertain();
+      queryClient.setQueryData(["assistants"], (value: unknown) => Array.isArray(value) && !value.some((item) => item && typeof item === "object" && "assistant_id" in item && item.assistant_id === assistant.assistant_id) ? [...value, assistant] : Array.isArray(value) ? value : [assistant]);
+      setCompleted(completedCreate);
       setDraft(emptyAgentDraft()); setAssistantId(crypto.randomUUID()); setVisited(new Set(["purpose"])); setError("");
       setCreationReview(null);
+      void queryClient.invalidateQueries({ queryKey: ["assistants"] });
     },
-    onError: (caught, operation) => {
-      const current = useConnectionStore.getState().connection;
+    onError: (caught) => {
       const message = caught instanceof Error ? caught.message : "The agent could not be created.";
-      builderErrors.set(operation.durableScope, message);
-      if (!current || mutationScope(current) !== operation.durableScope) return;
+      builderError = message;
       setValidationRequest(null);
       setCreationReview(null);
       setError(message);
     },
   });
   const routeBlocker = useBlocker({
-    shouldBlockFn: () => builderChanged || hiddenDraftChanged || create.isPending,
-    enableBeforeUnload: () => builderChanged || hiddenDraftChanged || create.isPending,
+    shouldBlockFn: () => builderChanged || create.isPending,
+    enableBeforeUnload: () => builderChanged || create.isPending,
     withResolver: true,
   });
 
@@ -170,21 +121,19 @@ export function AgentBuilderPage() {
     guardrails: visited.has("guardrails"),
   }), [draft, visited]);
   const requiredPurposeReady = Boolean(draft.name.trim() && draft.responsibility.trim() && draft.graph);
-  const parkedDraftCount = [...builderSessions.entries()].filter(([scope, session]) => scope !== durableMutationScope && !jsonEquivalent(session.draft, emptyAgentDraft())).length;
 
   function update<K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
-    builderErrors.delete(durableMutationScope);
+    builderError = "";
     setError("");
     setValidationRequest(null);
     setCreationReview(null);
   }
   function openCreationReview() {
-    if (!connection) { openDialog(); return; }
-    if (uncertainty || completedCreate) return;
+    if (uncertainty || completed) return;
     try {
       const input = { assistant_id: assistantId, ...agentVersionFields(draft) };
-      setCreationReview({ draft: structuredClone(draft), input, initiatingScope: exactConnectionScope });
+      setCreationReview({ draft: structuredClone(draft), input });
       setError("");
       setValidationRequest(null);
       requestAnimationFrame(() => reviewHeading.current?.focus());
@@ -197,26 +146,20 @@ export function AgentBuilderPage() {
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!connection || !creationReview || uncertainty || completedCreate) return;
-    const initiatingConnection = connection;
-    create.mutate({
-      connection: initiatingConnection,
-      initiatingScope: connectionScope(initiatingConnection),
-      durableScope: mutationScope(initiatingConnection),
-      input: creationReview.input,
-    });
+    if (!creationReview || uncertainty || completed) return;
+    create.mutate({ input: creationReview.input });
   }
   function openCompletedCreate() {
-    if (!completedCreate) return;
-    completedCreates.delete(durableMutationScope);
-    setCompletedCreate(null);
+    if (!completed) return;
+    completedCreate = null;
+    setCompleted(null);
     setDraft(emptyAgentDraft()); setAssistantId(crypto.randomUUID()); setVisited(new Set(["purpose"])); setError("");
-    navigate({ to: "/agents/$assistantId", params: { assistantId: completedCreate.assistant.assistant_id } });
+    navigate({ to: "/agents/$assistantId", params: { assistantId: completed.assistant.assistant_id } });
   }
   function startCompletedCreate() {
-    if (!completedCreate || !connection) return;
-    completedCreates.delete(durableMutationScope);
-    work.prepare(connectionScope(connection), completedCreate.assistant);
+    if (!completed) return;
+    completedCreate = null;
+    work.prepare(completed.assistant);
     navigate({ to: "/work" });
   }
   function returnToEditing() {
@@ -225,29 +168,29 @@ export function AgentBuilderPage() {
   }
 
   return <section className={`${styles.builderPage} page`} aria-labelledby="agent-builder-heading">
-    {routeBlocker.status === "blocked" && <UnsavedChangesDialog pending={create.isPending} title={parkedDraftCount ? `Discard ${parkedDraftCount + (builderChanged ? 1 : 0)} workspace drafts?` : undefined} message={parkedDraftCount ? "Drafts are parked in more than one workspace. Continuing will discard every parked definition from this page." : undefined} discardLabel={parkedDraftCount ? "Discard all drafts" : undefined} returnFocusRef={builderHeading} onKeep={routeBlocker.reset} onDiscard={() => { builderSessions.clear(); builderErrors.clear(); setDraft(emptyAgentDraft()); setVisited(new Set(["purpose"])); setError(""); setValidationRequest(null); routeBlocker.proceed(); }} />}
+    {routeBlocker.status === "blocked" && <UnsavedChangesDialog pending={create.isPending} returnFocusRef={builderHeading} onKeep={routeBlocker.reset} onDiscard={() => { builderSession = null; builderError = ""; setDraft(emptyAgentDraft()); setVisited(new Set(["purpose"])); setError(""); setValidationRequest(null); routeBlocker.proceed(); }} />}
     <PageHeader
       headingId="agent-builder-heading"
       headingRef={builderHeading}
       eyebrow={<><Link to="/agents" activeOptions={{ exact: true }}>Agents</Link><span aria-hidden="true"> / </span><span>Builder</span></>}
       title="New agent"
       detail={<span className={styles.builderBadge}>Guided draft</span>}
-      actions={<div className={styles.draftState}>{connection ? <Link to="/agents/prompts">Prompt library</Link> : <button type="button" onClick={openDialog}>Choose workspace</button>}<span>{completedCreate ? "version 1 created" : "draft · page memory only"}</span></div>}
+      actions={<div className={styles.draftState}><Link to="/agents/prompts">Prompt library</Link><span>{completed ? "version 1 created" : "draft · page memory only"}</span></div>}
       variant="compact"
     />
     <form className={styles.builder} id="agent-builder" onSubmit={submit} aria-busy={create.isPending}>
-      {completedCreate ? <CreationCompletePanel completed={completedCreate} headingRef={completeHeading} onStart={startCompletedCreate} onReview={openCompletedCreate} />
+      {completed ? <CreationCompletePanel completed={completed} headingRef={completeHeading} onStart={startCompletedCreate} onReview={openCompletedCreate} />
         : creationReview ? <CreationReviewPanel review={creationReview} headingRef={reviewHeading} pending={create.isPending} onBack={returnToEditing} /> : <>
       <fieldset className={styles.builderGrid} disabled={create.isPending}>
       <AgentIntentEditor draft={draft} onChange={update} graphs={info?.graphs ?? []} progress={progress} validationRequest={validationRequest} validationMessage={error} onCapabilityVisit={(capability) => setVisited((current) => new Set(current).add(capability))} />
       <aside className={styles.review} aria-labelledby="agent-shape-heading">
         <div className={styles.shapeCard}><span className="eyebrow">Agent shape</span><h2 id="agent-shape-heading" className="sr-only">Agent shape</h2>
         <dl>{capabilities.map((item) => <div key={item.key}><dt>{item.label}</dt><dd>{progress[item.key] ? capabilitySummary(item.key, draft) : "Not set"}</dd></div>)}</dl></div>
-        {uncertainty && <div className={styles.error} role="alert"><p>{uncertainty}</p><button type="button" onClick={() => { mutationState.clearUncertain(durableMutationScope); builderErrors.delete(durableMutationScope); setError(""); }}>I checked the server — allow retry</button></div>}
+        {uncertainty && <div className={styles.error} role="alert"><p>{uncertainty}</p><button type="button" onClick={() => { mutationState.clearUncertain(); builderError = ""; setError(""); }}>I checked the server — allow retry</button></div>}
         {error && !validationRequest && !uncertainty && <p className={styles.error} role="alert">{error}</p>}
-        <button ref={reviewAgentButton} className="primary-button" type="button" onClick={openCreationReview} disabled={create.isPending || Boolean(uncertainty) || !requiredPurposeReady}>{uncertainty ? "Create locked" : !requiredPurposeReady ? "Add name, behavior, and responsibility" : !connection ? "Choose workspace to save" : "Review agent"}</button>
-        <p className={styles.boundary}>{connection ? "Nothing runs until you create version 1." : "This draft stays here until you choose a workspace."}</p>
-        {connection && <details className={styles.runtimeBoundary}><summary>Runtime boundary</summary><p>Requirements apply only where the selected behavior and deployment support them.</p></details>}
+        <button ref={reviewAgentButton} className="primary-button" type="button" onClick={openCreationReview} disabled={create.isPending || Boolean(uncertainty) || !requiredPurposeReady}>{uncertainty ? "Create locked" : !requiredPurposeReady ? "Add name, behavior, and responsibility" : "Review agent"}</button>
+        <p className={styles.boundary}>Nothing runs until you create version 1.</p>
+        <details className={styles.runtimeBoundary}><summary>Runtime boundary</summary><p>Requirements apply only where the selected behavior and deployment support them.</p></details>
       </aside>
       </fieldset>
       </>}

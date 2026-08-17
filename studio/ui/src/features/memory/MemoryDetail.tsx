@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { connectionScope, StudioApiError } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import { forgetMemory, getMemory, type ForgetReason, type ForgetReceipt, type MemoryConflict, type MemoryRecord } from "../../lib/api/memory";
-import { useConnectionStore } from "../../state/connection";
 import {
   contentText,
   evidenceSummary,
@@ -40,30 +39,29 @@ export function MemoryDetail({
   onForgotten: () => void;
   onClose: () => void;
 }) {
-  const { connection } = useConnectionStore();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const fromResults = records.find((record) => record.memory_id === memoryId) ?? null;
   const fetched = useQuery({
-    queryKey: connection && !fromResults ? [connection.epoch, connection.origin, connection.tenantFingerprint, "memory-record", memoryId] : ["memory-record", "idle"],
-    queryFn: () => getMemory(connection!, memoryId),
-    enabled: Boolean(connection && !fromResults),
+    queryKey: ["memory-record", memoryId],
+    queryFn: () => getMemory(memoryId),
+    enabled: Boolean(!fromResults),
   });
   const record = fromResults ?? fetched.data ?? null;
 
   const chain = useQuery({
-    queryKey: connection && record?.supersedes ? [connection.epoch, connection.origin, connection.tenantFingerprint, "memory-chain", record.memory_id] : ["memory-chain", "idle"],
+    queryKey: ["memory-chain", record?.supersedes ? record.memory_id : "idle"],
     queryFn: async () => {
       const ancestors: MemoryRecord[] = [];
       let cursor = record!.supersedes!;
       for (let depth = 0; depth < 8; depth += 1) {
-        const ancestor = await getMemory(connection!, cursor);
+        const ancestor = await getMemory(cursor);
         ancestors.push(ancestor);
         if (!ancestor.supersedes) break;
         cursor = ancestor.supersedes;
       }
       return ancestors;
     },
-    enabled: Boolean(connection && record?.supersedes),
+    enabled: Boolean(record?.supersedes),
   });
 
   useEffect(() => { headingRef.current?.focus(); }, [memoryId]);
@@ -191,7 +189,6 @@ export function MemoryDetail({
 }
 
 function ForgetPanel({ record, onForgotten }: { record: MemoryRecord; onForgotten: () => void }) {
-  const { connection } = useConnectionStore();
   const [armed, setArmed] = useState(false);
   const [reason, setReason] = useState<ForgetReason>("retracted");
   const [confirmation, setConfirmation] = useState("");
@@ -205,26 +202,20 @@ function ForgetPanel({ record, onForgotten }: { record: MemoryRecord; onForgotte
     setConfirmation("");
     setError("");
     setReceipt(null);
-  }, [record.memory_id, connection?.epoch, connection?.origin, connection?.tenantFingerprint]);
+  }, [record.memory_id]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!connection || !exactMatch || pending) return;
-    const scopeAtStart = connectionScope(connection);
+    if (!exactMatch || pending) return;
     setPending(true);
     setError("");
     try {
-      const result = await forgetMemory(connection, record.memory_id, reason);
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
+      const result = await forgetMemory(record.memory_id, reason);
       setReceipt(result);
     } catch (caught) {
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
       setError(caught instanceof StudioApiError ? caught.message : "The record could not be forgotten.");
     } finally {
-      const current = useConnectionStore.getState().connection;
-      if (current && connectionScope(current) === scopeAtStart) setPending(false);
+      setPending(false);
     }
   }
 

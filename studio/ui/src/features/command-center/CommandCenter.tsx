@@ -2,10 +2,10 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import type { Assistant, RunSnapshot } from "../../lib/contracts";
-import { connectionScope, getOperationsSnapshot, getRun, listAssistants, type OperationAttentionItem } from "../../lib/api/client";
+import { getOperationsSnapshot, getRun, listAssistants, type OperationAttentionItem } from "../../lib/api/client";
 import { evidencePreview } from "../../lib/text";
-import { durableConnectionScope, readRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
-import { useConnectionStore } from "../../state/connection";
+import { readRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
+import { useRuntimeStore } from "../../state/runtime";
 import { useWorkStore } from "../../state/work";
 import { PageHeader } from "../../components/PageHeader";
 import { RustyCardFrame, type RustyCardTone } from "../../components/RustyCardFrame";
@@ -30,26 +30,23 @@ const lanes: Array<{ key: RunLane; label: string }> = [
 export function CommandCenter() {
   const navigate = useNavigate();
   const work = useWorkStore();
-  const { connection, info, openDialog } = useConnectionStore();
+  const info = useRuntimeStore((state) => state.info);
   const [boardFilter, setBoardFilter] = useState<BoardFilter>("all");
   const allWorkFilterRef = useRef<HTMLButtonElement>(null);
-  const scope = connection ? durableConnectionScope(connection) : "disconnected";
-  const recentIdentities = connection ? readRecentWork(scope) : [];
+  const recentIdentities = readRecentWork();
   const assistants = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "assistants"] : ["command-agents", "disconnected"],
-    queryFn: () => listAssistants(connection!),
-    enabled: Boolean(connection),
+    queryKey: ["assistants"],
+    queryFn: () => listAssistants(),
   });
   const operations = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "operations"] : ["command-operations", "disconnected"],
-    queryFn: () => getOperationsSnapshot(connection!),
-    enabled: Boolean(connection),
+    queryKey: ["operations"],
+    queryFn: () => getOperationsSnapshot(),
     refetchInterval: 15_000,
   });
   const recentQueries = useQueries({
     queries: recentIdentities.map((identity) => ({
-      queryKey: [connection!.epoch, connection!.origin, connection!.tenantFingerprint, "run", identity.runId],
-      queryFn: () => getRun(connection!, identity.runId),
+      queryKey: ["run", identity.runId],
+      queryFn: () => getRun(identity.runId),
       retry: false,
     })),
   });
@@ -84,19 +81,10 @@ export function CommandCenter() {
   const verifiedFilterEmpty = boardFilter !== "all" && visibleBoardEmpty && !loadingRuns && !operations.isLoading && !evidencePartial;
 
   function beginFirstWork() {
-    if (!connection || !starterAgent) return;
-    work.prepare(connectionScope(connection), starterAgent);
+    if (!starterAgent) return;
+    work.prepare(starterAgent);
     navigate({ to: "/work" });
   }
-
-  if (!connection) return <section className={`page ${styles.command}`} aria-labelledby="command-heading">
-    <PageHeader headingId="command-heading" eyebrow="Command center" title="Work board" description="Open a Rusty workspace to see work in motion and the exceptions that need you." actions={<button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>} />
-    <div className={styles.offlineGrid}>
-      <article><span>01</span><h2>Build</h2><p>Shape a versioned agent with models, memory, tools, output, and guardrails.</p><Link to="/agents">Start a local draft</Link></article>
-      <article><span>02</span><h2>Run</h2><p>Give the agent an objective and follow its exact run evidence in one workspace.</p><button type="button" onClick={openDialog}>Open a workspace</button></article>
-      <article><span>03</span><h2>Improve</h2><p>Turn a completed run into evaluation evidence, then compare before release.</p><Link to="/work">See the run workspace</Link></article>
-    </div>
-  </section>;
 
   return <section className={`page ${styles.command}`} aria-labelledby="command-heading">
     <PageHeader

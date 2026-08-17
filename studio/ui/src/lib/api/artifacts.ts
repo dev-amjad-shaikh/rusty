@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { endpoint, parseJson, parseMutationJson, requestText, StudioApiError } from "./client";
-import type { ConnectionIdentity } from "./client";
 
 const id = z.string().min(1).max(256);
 const sha256hex = z.string().regex(/^[0-9a-f]{64}$/);
@@ -88,38 +87,37 @@ const releaseResponseSchema = z.object({
   journal_event_id: id,
 }).strict();
 
-export async function listRunArtifacts(connection: ConnectionIdentity, options: { run_id?: string; name?: string; media_kind?: MediaKind } = {}) {
+export async function listRunArtifacts(options: { run_id?: string; name?: string; media_kind?: MediaKind } = {}) {
   const params = new URLSearchParams();
   if (options.run_id) params.set("run_id", options.run_id);
   if (options.name) params.set("name", options.name);
   if (options.media_kind) params.set("media_kind", options.media_kind);
-  const { text } = await requestText(connection, `/artifacts?${params.toString()}`);
+  const { text } = await requestText(`/artifacts?${params.toString()}`);
   return parseJson(text, artifactListSchema, "Artifact list");
 }
 
-export async function getRunArtifact(connection: ConnectionIdentity, artifactId: string) {
-  const { text } = await requestText(connection, `/artifacts/${artifactId}`);
+export async function getRunArtifact(artifactId: string) {
+  const { text } = await requestText(`/artifacts/${artifactId}`);
   return parseJson(text, runArtifactSchema, "Artifact");
 }
 
-export async function getRunArtifactNamed(connection: ConnectionIdentity, name: string) {
-  const { text } = await requestText(connection, `/artifacts/names/${name}`);
+export async function getRunArtifactNamed(name: string) {
+  const { text } = await requestText(`/artifacts/names/${name}`);
   return parseJson(text, runArtifactSchema, "Named artifact");
 }
 
-export async function listRunArtifactVersions(connection: ConnectionIdentity, name: string) {
-  const { text } = await requestText(connection, `/artifacts/names/${name}/versions`);
+export async function listRunArtifactVersions(name: string) {
+  const { text } = await requestText(`/artifacts/names/${name}/versions`);
   return parseJson(text, namedVersionsSchema, "Artifact versions");
 }
 
-export async function getRunArtifactPreview(connection: ConnectionIdentity, artifactId: string) {
-  const { text } = await requestText(connection, `/artifacts/${artifactId}/preview`);
+export async function getRunArtifactPreview(artifactId: string) {
+  const { text } = await requestText(`/artifacts/${artifactId}/preview`);
   return parseJson(text, previewResponseSchema, "Artifact preview");
 }
 
-export async function getRunArtifactBytes(connection: ConnectionIdentity, artifactId: string) {
-  const response = await fetch(endpoint(connection, `/artifacts/${artifactId}/bytes`), {
-    headers: connection.apiKey ? { "X-Api-Key": connection.apiKey } : {},
+export async function getRunArtifactBytes(artifactId: string) {
+  const response = await fetch(endpoint(`/artifacts/${artifactId}/bytes`), {
   });
   if (!response.ok) {
     throw new StudioApiError(`Artifact bytes returned ${response.status}.`, response.status, response.status >= 500);
@@ -127,8 +125,8 @@ export async function getRunArtifactBytes(connection: ConnectionIdentity, artifa
   return response;
 }
 
-export async function releaseRunArtifact(connection: ConnectionIdentity, artifactId: string, input: { released_by: string; reason?: string }) {
-  const { text, status } = await requestText(connection, `/artifacts/${artifactId}/release`, {
+export async function releaseRunArtifact(artifactId: string, input: { released_by: string; reason?: string }) {
+  const { text, status } = await requestText(`/artifacts/${artifactId}/release`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

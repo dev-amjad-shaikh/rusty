@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { endpoint, parseJson, parseMutationJson, requestText, StudioApiError, type ConnectionIdentity } from "./client";
+import { endpoint, parseJson, parseMutationJson, requestText, StudioApiError } from "./client";
 import { isUnicodeScalarString } from "../text";
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
@@ -86,27 +86,27 @@ function checkReceiptIdentity(receipt: SkillReceipt | SkillDetail | PublishRecei
   }
 }
 
-export async function listSkills(connection: ConnectionIdentity): Promise<SkillMetadata[]> {
-  const { text } = await requestText(connection, "/skills");
+export async function listSkills(): Promise<SkillMetadata[]> {
+  const { text } = await requestText("/skills");
   return parseJson(text, skillListSchema, "Skill catalog").skills;
 }
 
-export async function getSkill(connection: ConnectionIdentity, name: string): Promise<SkillDetail> {
-  const { status, text } = await requestText(connection, skillPath(name));
+export async function getSkill(name: string): Promise<SkillDetail> {
+  const { status, text } = await requestText(skillPath(name));
   const detail = parseJson(text, skillDetailSchema, "Skill detail");
   checkReceiptIdentity(detail, name, status);
   return detail;
 }
 
-export async function getSkillBody(connection: ConnectionIdentity, name: string): Promise<SkillBody> {
-  const { status, text } = await requestText(connection, `${skillPath(name)}/body`);
+export async function getSkillBody(name: string): Promise<SkillBody> {
+  const { status, text } = await requestText(`${skillPath(name)}/body`);
   const body = parseJson(text, skillBodySchema, "Skill body");
   if (body.name !== name) throw new StudioApiError("Skill body crossed skill identity.", status);
   return body;
 }
 
-export async function getSkillHistory(connection: ConnectionIdentity, name: string): Promise<SkillMetadata[]> {
-  const { status, text } = await requestText(connection, `${skillPath(name)}/history`);
+export async function getSkillHistory(name: string): Promise<SkillMetadata[]> {
+  const { status, text } = await requestText(`${skillPath(name)}/history`);
   const history = parseJson(text, skillHistorySchema, "Skill history");
   if (history.name !== name || !history.history.length || history.history.some((entry) => entry.name !== name)) {
     throw new StudioApiError("Skill history crossed skill identity.", status);
@@ -117,8 +117,8 @@ export async function getSkillHistory(connection: ConnectionIdentity, name: stri
   return history.history;
 }
 
-export async function getSkillVersion(connection: ConnectionIdentity, name: string, revision: number): Promise<SkillReceipt> {
-  const { status, text } = await requestText(connection, `${skillPath(name)}/versions/${encodeURIComponent(String(revision))}`);
+export async function getSkillVersion(name: string, revision: number): Promise<SkillReceipt> {
+  const { status, text } = await requestText(`${skillPath(name)}/versions/${encodeURIComponent(String(revision))}`);
   const receipt = parseJson(text, skillVersionSchema, "Skill version");
   checkReceiptIdentity(receipt, name, status);
   if (receipt.revision !== revision) throw new StudioApiError("Skill version named a different revision.", status);
@@ -131,11 +131,11 @@ export interface SkillFile {
   bytes: Uint8Array;
 }
 
-export async function getSkillFile(connection: ConnectionIdentity, name: string, path: string, maxBytes = 1024 * 1024): Promise<SkillFile> {
+export async function getSkillFile(name: string, path: string, maxBytes = 1024 * 1024): Promise<SkillFile> {
   let response: Response;
   try {
-    response = await fetch(endpoint(connection, `${skillPath(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`), {
-      headers: { ...(connection.apiKey ? { "X-Api-Key": connection.apiKey } : {}) },
+    response = await fetch(endpoint(`${skillPath(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`), {
+      headers: {},
     });
   } catch {
     throw new StudioApiError("Rusty could not be reached.", 0);
@@ -167,7 +167,7 @@ function encodeHex(bytes: Uint8Array) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function publishSkill(connection: ConnectionIdentity, input: PublishSkillInput, expectedName: string): Promise<PublishReceipt> {
+export async function publishSkill(input: PublishSkillInput, expectedName: string): Promise<PublishReceipt> {
   if (![input.skillMd, input.author, ...Object.keys(input.references), ...Object.values(input.references),
     ...Object.keys(input.assets), ...Object.values(input.assets)].every(isUnicodeScalarString)) {
     throw new StudioApiError("Skill package input contained invalid Unicode.", 0);
@@ -176,12 +176,11 @@ export async function publishSkill(connection: ConnectionIdentity, input: Publis
   const payload = JSON.stringify({ skill_md: input.skillMd, references: input.references, assets, author: input.author });
   let response: Response;
   try {
-    response = await fetch(endpoint(connection, "/skills"), {
+    response = await fetch(endpoint("/skills"), {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        ...(connection.apiKey ? { "X-Api-Key": connection.apiKey } : {}),
       },
       body: payload,
     });

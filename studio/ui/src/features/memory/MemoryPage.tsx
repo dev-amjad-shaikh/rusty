@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { connectionScope, StudioApiError } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import { listMemoryConflicts, queryMemory, type MemoryQueryInput, type MemoryRecord } from "../../lib/api/memory";
-import { useConnectionStore } from "../../state/connection";
 import { PageHeader } from "../../components/PageHeader";
 import { ConflictInbox } from "./ConflictInbox";
 import { CorrectionPanel } from "./CorrectionPanel";
@@ -20,9 +19,7 @@ interface SearchState {
 }
 
 export function MemoryPage() {
-  const { connection, openDialog } = useConnectionStore();
   const queryClient = useQueryClient();
-  const scope = connection ? connectionScope(connection) : "disconnected";
   const [tab, setTab] = useState<MemoryTab>("ledger");
   const [search, setSearch] = useState<SearchState | null>(null);
   const [searchError, setSearchError] = useState("");
@@ -31,18 +28,9 @@ export function MemoryPage() {
   const [correctionTargetId, setCorrectionTargetId] = useState("");
 
   const conflicts = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "memory-conflicts"] : ["memory-conflicts", "disconnected"],
-    queryFn: () => listMemoryConflicts(connection!),
-    enabled: Boolean(connection),
+    queryKey: ["memory-conflicts"],
+    queryFn: () => listMemoryConflicts(),
   });
-
-  useEffect(() => {
-    setTab("ledger");
-    setSearch(null);
-    setSearchError("");
-    setSelectedId("");
-    setCorrectionTargetId("");
-  }, [connection?.epoch, connection?.origin, connection?.tenantFingerprint]);
 
   const conflictedIds = useMemo(
     () => new Set((conflicts.data ?? []).flatMap((conflict) => conflict.memory_ids)),
@@ -50,24 +38,17 @@ export function MemoryPage() {
   );
 
   async function runSearch(query: MemoryQueryInput) {
-    if (!connection) return;
-    const scopeAtStart = scope;
     setSearching(true);
     setSearchError("");
     try {
-      const records = await queryMemory(connection, query);
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
+      const records = await queryMemory(query);
       setSearch({ query, records, searchedAt: new Date() });
       setSelectedId("");
     } catch (caught) {
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
       setSearch(null);
       setSearchError(caught instanceof StudioApiError ? caught.message : "The memory query could not be completed.");
     } finally {
-      const current = useConnectionStore.getState().connection;
-      if (current && connectionScope(current) === scopeAtStart) setSearching(false);
+      setSearching(false);
     }
   }
 
@@ -87,7 +68,7 @@ export function MemoryPage() {
   }
 
   function afterMutation() {
-    void queryClient.invalidateQueries({ queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "memory-conflicts"] : undefined });
+    void queryClient.invalidateQueries({ queryKey: ["memory-conflicts"] });
     if (search) void runSearch(search.query);
   }
 
@@ -106,66 +87,53 @@ export function MemoryPage() {
         eyebrow="Learn"
         title="Memory ledger"
         description="See what Rusty remembers, whose memory it is, who wrote it, and the evidence behind every record. Corrections write new attributed records — nothing is edited in place."
-        actions={connection
-          ? <button className="secondary-button" type="button" onClick={refreshEvidence} disabled={searching || conflicts.isFetching}>{searching || conflicts.isFetching ? "Refreshing…" : "Refresh"}</button>
-          : <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>}
+        actions={<button className="secondary-button" type="button" onClick={refreshEvidence} disabled={searching || conflicts.isFetching}>{searching || conflicts.isFetching ? "Refreshing…" : "Refresh"}</button>}
       />
 
-      {!connection ? (
-        <div className="empty-state">
-          <span className="eyebrow">Governed memory</span>
-          <h2>Open a workspace to inspect memory</h2>
-          <p>The ledger reads the tenant's governed memory namespace: content-addressed, immutable records with mandatory provenance.</p>
-          <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button>
-        </div>
-      ) : (
-        <>
-          <nav className={styles.tabs} aria-label="Memory sections">
-            {tabs.map((item) => (
-              <button key={item.key} type="button" aria-pressed={tab === item.key} onClick={() => setTab(item.key)}>
-                {item.label}
-                {item.signal ? <span className={styles.tabSignal}>{item.signal}</span> : null}
-              </button>
-            ))}
-          </nav>
+      <nav className={styles.tabs} aria-label="Memory sections">
+        {tabs.map((item) => (
+          <button key={item.key} type="button" aria-pressed={tab === item.key} onClick={() => setTab(item.key)}>
+            {item.label}
+            {item.signal ? <span className={styles.tabSignal}>{item.signal}</span> : null}
+          </button>
+        ))}
+      </nav>
 
-          {tab === "ledger" && (
-            <LedgerView
-              search={search}
-              searching={searching}
-              searchError={searchError}
-              onSearch={runSearch}
-              conflictedIds={conflictedIds}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              detail={selectedId ? (
-                <MemoryDetail
-                  memoryId={selectedId}
-                  records={search?.records ?? []}
-                  conflicts={conflicts.data ?? []}
-                  onSelect={inspectRecord}
-                  onCorrect={correctRecord}
-                  onForgotten={() => { setSelectedId(""); afterMutation(); }}
-                  onClose={() => setSelectedId("")}
-                />
-              ) : null}
+      {tab === "ledger" && (
+        <LedgerView
+          search={search}
+          searching={searching}
+          searchError={searchError}
+          onSearch={runSearch}
+          conflictedIds={conflictedIds}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          detail={selectedId ? (
+            <MemoryDetail
+              memoryId={selectedId}
+              records={search?.records ?? []}
+              conflicts={conflicts.data ?? []}
+              onSelect={inspectRecord}
+              onCorrect={correctRecord}
+              onForgotten={() => { setSelectedId(""); afterMutation(); }}
+              onClose={() => setSelectedId("")}
             />
-          )}
-          {tab === "create" && (
-            <CreateMemoryPanel onCreated={(receipt) => { afterMutation(); inspectRecord(receipt.memory_id); }} />
-          )}
-          {tab === "correct" && (
-            <CorrectionPanel
-              key={correctionTargetId || "blank"}
-              initialTargetId={correctionTargetId}
-              onSubmitted={() => afterMutation()}
-              onInspect={inspectRecord}
-            />
-          )}
-          {tab === "conflicts" && (
-            <ConflictInbox conflicts={conflicts} onInspect={inspectRecord} />
-          )}
-        </>
+          ) : null}
+        />
+      )}
+      {tab === "create" && (
+        <CreateMemoryPanel onCreated={(receipt) => { afterMutation(); inspectRecord(receipt.memory_id); }} />
+      )}
+      {tab === "correct" && (
+        <CorrectionPanel
+          key={correctionTargetId || "blank"}
+          initialTargetId={correctionTargetId}
+          onSubmitted={() => afterMutation()}
+          onInspect={inspectRecord}
+        />
+      )}
+      {tab === "conflicts" && (
+        <ConflictInbox conflicts={conflicts} onInspect={inspectRecord} />
       )}
     </section>
   );

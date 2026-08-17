@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
-import { StudioApiError, type ConnectionIdentity } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import {
   passwordGrantSchema,
   registerVaultConnection,
@@ -22,13 +22,9 @@ const fields: { key: keyof typeof passwordGrantSchema.shape; label: string; secr
 ];
 
 export function RegisterConnectionForm({
-  connection,
-  scope,
   onRegistered,
   onCancel,
 }: {
-  connection: ConnectionIdentity;
-  scope: string;
   onRegistered: (record: VaultConnection) => void;
   onCancel: () => void;
 }) {
@@ -38,10 +34,10 @@ export function RegisterConnectionForm({
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const register = useMutation({
-    mutationFn: registerVaultConnection.bind(null, connection),
+    mutationFn: registerVaultConnection,
     onSuccess: async () => {
       setIssues([]);
-      await queryClient.invalidateQueries({ queryKey: [scope, "connections"] });
+      await queryClient.invalidateQueries({ queryKey: ["connections"] });
       requestAnimationFrame(() => receiptRef.current?.focus());
     },
   });

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ConnectionIdentity } from "../../lib/api/client";
 import { listKnowledgeSources, type ListedKnowledgeSource, type KnowledgeSourceKind } from "../../lib/api/knowledge";
 import { evidencePreview } from "../../lib/text";
 import { formatInstant, hashPreview, retentionState } from "./format";
@@ -15,19 +14,17 @@ const kindFilters: Array<{ value: "" | KnowledgeSourceKind; label: string }> = [
 ];
 
 export function SourceLibrary({
-  connection,
   onOpenSource,
   onRegister,
 }: {
-  connection: ConnectionIdentity;
   onOpenSource: (sourceId: string) => void;
   onRegister: () => void;
 }) {
   const [filter, setFilter] = useState("");
   const [kind, setKind] = useState<"" | KnowledgeSourceKind>("");
   const library = useQuery({
-    queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "knowledge", "sources"],
-    queryFn: () => listKnowledgeSources(connection),
+    queryKey: ["knowledge", "sources"],
+    queryFn: () => listKnowledgeSources(),
   });
 
   const sources = useMemo(

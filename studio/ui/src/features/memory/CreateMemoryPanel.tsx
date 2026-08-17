@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { connectionScope, StudioApiError } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import { writeMemory, type MemoryRecord, type WriteMemoryReceipt } from "../../lib/api/memory";
-import { useConnectionStore } from "../../state/connection";
 import { authorFromFields, labelError, localInstantToIso, parseContentJson } from "./memoryModel";
 import styles from "./MemoryPage.module.css";
 
@@ -14,7 +13,6 @@ const kindOptions: { value: MemoryRecord["kind"]; hint: string }[] = [
 ];
 
 export function CreateMemoryPanel({ onCreated }: { onCreated: (receipt: WriteMemoryReceipt) => void }) {
-  const { connection } = useConnectionStore();
   const [scopeType, setScopeType] = useState<string>("user");
   const [scopeId, setScopeId] = useState("");
   const [kind, setKind] = useState<string>("fact");
@@ -33,7 +31,7 @@ export function CreateMemoryPanel({ onCreated }: { onCreated: (receipt: WriteMem
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!connection || pending) return;
+    if (pending) return;
     const next: Record<string, string> = {};
     const scopeIdError = labelError("The scope identity", scopeId, true);
     if (scopeIdError) next.scopeId = scopeIdError;
@@ -66,13 +64,11 @@ export function CreateMemoryPanel({ onCreated }: { onCreated: (receipt: WriteMem
     if (until.error) next.validUntil = until.error;
     setErrors(next);
     if (Object.keys(next).length || !author) return;
-
-    const scopeAtStart = connectionScope(connection);
     setPending(true);
     setError("");
     setReceipt(null);
     try {
-      const result = await writeMemory(connection, {
+      const result = await writeMemory({
         kind: kind as MemoryRecord["kind"],
         scope: { scope: scopeType as (typeof writeScopes)[number], id: scopeId },
         content: parsed.value,
@@ -83,16 +79,11 @@ export function CreateMemoryPanel({ onCreated }: { onCreated: (receipt: WriteMem
         ...(until.iso ? { valid_until: until.iso } : {}),
         ...(expiry.iso ? { expires_at: expiry.iso } : {}),
       });
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
       setReceipt(result);
     } catch (caught) {
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
       setError(caught instanceof StudioApiError ? caught.message : "The memory could not be written.");
     } finally {
-      const current = useConnectionStore.getState().connection;
-      if (current && connectionScope(current) === scopeAtStart) setPending(false);
+      setPending(false);
     }
   }
 

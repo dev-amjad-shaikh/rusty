@@ -32,7 +32,6 @@ interface GateOperation {
 }
 
 export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
-  const { connection } = useConnectionStore();
   const scope = connection ? connectionScope(connection) : "disconnected";
   const [datasetName, setDatasetName] = useState("agent-regression");
   const [datasetVersion, setDatasetVersion] = useState(() => new Date().toISOString().slice(0, 10));
@@ -60,20 +59,20 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
 
   const datasets = useQuery({
     queryKey: [scope, "evaluation-datasets"],
-    queryFn: () => listDatasets(connection!), enabled: Boolean(connection),
+    queryFn: () => listDatasets(), enabled: Boolean(connection),
   });
   const experiments = useQuery({
     queryKey: [scope, "evaluation-experiments"],
-    queryFn: () => listExperiments(connection!), enabled: Boolean(connection),
+    queryFn: () => listExperiments(), enabled: Boolean(connection),
     refetchInterval: (query) => query.state.data?.experiments.some((item) => ["queued", "running"].includes(item.status.phase)) ? 1_000 : false,
   });
   const candidates = useQuery({
     queryKey: [scope, "evaluation-candidates"],
-    queryFn: () => listEvaluationCandidates(connection!), enabled: Boolean(connection),
+    queryFn: () => listEvaluationCandidates(), enabled: Boolean(connection),
   });
   const gates = useQuery({
     queryKey: [scope, "evaluation-gates"],
-    queryFn: () => listGates(connection!), enabled: Boolean(connection),
+    queryFn: () => listGates(), enabled: Boolean(connection),
   });
   const experimentItems = experiments.data?.experiments;
   const activeSummary = experimentItems?.find((item) => item.experiment_id === selectedExperiment)
@@ -82,8 +81,8 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
     ?? null;
   const experimentDetail = useQuery({
     queryKey: [scope, "evaluation-experiment", activeSummary?.experiment_id],
-    queryFn: () => getExperiment(connection!, activeSummary!.experiment_id),
-    enabled: Boolean(connection && activeSummary),
+    queryFn: () => getExperiment(activeSummary!.experiment_id),
+    enabled: Boolean(activeSummary),
     refetchInterval: activeSummary && ["queued", "running"].includes(activeSummary.status.phase) ? 1_000 : false,
   });
   const activeExperiment = experimentDetail.data ?? null;
@@ -92,20 +91,20 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   const [selectedName, selectedVersion] = splitDataset(datasetKey);
   const durableCases = useQuery({
     queryKey: [scope, "evaluation-cases", activeExperiment?.dataset_name, activeExperiment?.dataset_version],
-    queryFn: () => getDatasetCases(connection!, activeExperiment!.dataset_name, activeExperiment!.dataset_version),
-    enabled: Boolean(connection && activeExperiment?.dataset_name && activeExperiment?.dataset_version),
+    queryFn: () => getDatasetCases(activeExperiment!.dataset_name, activeExperiment!.dataset_version),
+    enabled: Boolean(activeExperiment?.dataset_name && activeExperiment?.dataset_version),
   });
 
   const publish = useMutation({
     mutationFn: async (operation: PublishOperation) => {
       if (!connection) throw new Error("Open a workspace first.");
-      return createDataset(connection, { name: operation.name, version: operation.version, cases: operation.cases });
+      return createDataset({ name: operation.name, version: operation.version, cases: operation.cases });
     },
     onSuccess: async (record, operation) => {
       if (currentScope() !== operation.scope) return;
       await datasets.refetch();
       if (currentScope() !== operation.scope) return;
-      const exact = await getDatasetCases(connection!, record.name, record.version);
+      const exact = await getDatasetCases(record.name, record.version);
       if (currentScope() !== operation.scope) return;
       if (!jsonEquivalent(exact.map(stripServerCapture), operation.cases.map(stripServerCapture))) {
         setError("Rusty returned a dataset version that did not match the reviewed cases.");
@@ -122,7 +121,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
         if (currentScope() !== operation.scope) return;
         const match = refreshed.data?.datasets.find((item) => item.name === operation.name && item.version === operation.version);
         if (match && match.case_count === operation.cases.length) {
-          const exact = await getDatasetCases(connection!, match.name, match.version);
+          const exact = await getDatasetCases(match.name, match.version);
           if (currentScope() !== operation.scope) return;
           if (jsonEquivalent(exact.map(stripServerCapture), operation.cases.map(stripServerCapture))) { setSelectedDataset(datasetIdentity(match.name, match.version)); setMessage("Rusty already has this exact dataset version."); setError(""); return; }
         }
@@ -134,7 +133,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   const start = useMutation({
     mutationFn: async (operation: ExperimentOperation) => {
       if (!connection) throw new Error("Open a workspace first.");
-      return createExperiment(connection, operation.payload);
+      return createExperiment(operation.payload);
     },
     onSuccess: async (record, operation) => {
       if (currentScope() !== operation.scope) return;
@@ -156,7 +155,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   });
 
   const stop = useMutation({
-    mutationFn: (_initiatingScope: string) => cancelExperiment(connection!, activeExperiment!.experiment_id),
+    mutationFn: (_initiatingScope: string) => cancelExperiment(activeExperiment!.experiment_id),
     onSuccess: async (_record, initiatingScope) => { if (currentScope() !== initiatingScope) return; await experiments.refetch(); if (currentScope() !== initiatingScope) return; setMessage("Cancellation requested."); setError(""); },
     onError: (caught, initiatingScope) => { if (currentScope() === initiatingScope) setError(caught instanceof Error ? caught.message : "Cancellation could not be confirmed."); },
   });
@@ -164,7 +163,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   const gate = useMutation({
     mutationFn: async (operation: GateOperation) => {
       if (!connection) throw new Error("Open a workspace first.");
-      return createGate(connection, operation.payload);
+      return createGate(operation.payload);
     },
     onSuccess: async (record, operation) => {
       if (currentScope() !== operation.scope) return;
