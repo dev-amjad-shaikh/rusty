@@ -43,7 +43,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("Studio product architecture", () => {
   it("exposes only implemented lifecycle destinations", () => {
-    expect(primaryDestinations.map((item) => item.label)).toEqual(["Command Center", "Agent Portfolio", "Agent Builder", "Prompt Library", "Skills & Tools", "Knowledge", "Run & Evaluate", "Memory", "Connectors", "Operations"]);
+    expect(primaryDestinations.map((item) => item.label)).toEqual(["Command Center", "Agent Portfolio", "Agent Builder", "Prompt Library", "Skills & Tools", "Knowledge", "Run & Evaluate", "Memory", "Operations"]);
   });
 
   it("presents the local workspace without connection controls", async () => {
