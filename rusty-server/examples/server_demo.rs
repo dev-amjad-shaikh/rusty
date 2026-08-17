@@ -218,8 +218,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Seed the connector plane once the listener is up (see the function's
     // docs): Studio's credential walkthrough needs the ServiceNow pack on a
     // fresh store, and the POST is idempotent by content hash on an old one.
-    let seed_instance = std::env::var("RUSTY_DEMO_SERVICENOW_INSTANCE")
-        .unwrap_or_else(|_| "example".to_string());
+    let seed_instance =
+        std::env::var("RUSTY_DEMO_SERVICENOW_INSTANCE").unwrap_or_else(|_| "example".to_string());
     {
         let seed_addr = config.bind_addr;
         let seed_instance = seed_instance.clone();
