@@ -92,8 +92,8 @@ The costs are real too: dependency injection at runtime gives up compile-time co
 
 Rusty's answer should not imitate the ideology; it should deliver the same five wins through three mechanisms it already half-has:
 
-1. **Trait seams for provider swaps** (already done — `ChatModel`, `HttpApiTransport`, `BrowserDriver`, `CredentialBroker`, checkpoint stores). This covers "replace any provider," at compile time, with exhaustiveness checking dsh cannot have.
-2. **Data-plane extension** (already done — connector manifests, SKILL.md packages, composed tool recipes: content-addressed, validated, scanned). This covers "deployments as data" and "third-party distribution" without running third-party *code*.
+1. **Trait seams for provider swaps** (already done — `ChatModel`, `BrowserDriver`, `CredentialBroker`, checkpoint stores). This covers "replace any provider," at compile time, with exhaustiveness checking dsh cannot have.
+2. **Data-plane extension** (already done — SKILL.md packages, composed tool recipes: content-addressed, validated, scanned). This covers "deployments as data" and "third-party distribution" without running third-party *code*.
 3. **The missing piece — runtime code plugins**: a `PluginKernel` whose registrations return RAII guards (dropped LIFO on unload — ownership giving us for free what Cordis needs a runtime for), with **WASM capsules as the guest vehicle** (`capsule_host` + journaled `WasmCall` already exist). Sandboxed, capability-granted, journaled guest modules are the Rust-native "everything can be a plugin": hot-loadable, memory-safe, effect-admitted, evidence-recorded — without dissolving the typed planes into runtime DI.
 
 That combination delivers dsh's flexibility profile where it matters (per-tenant assemblies, hot reload, third-party extension, composer-published capabilities) while keeping every extension point auditable at the boundary where it enters the system.
