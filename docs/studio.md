@@ -613,7 +613,13 @@ remains a valid workaround in all three cases — the browser only ever talks to
 ## Demo flow (against `examples/server_demo`)
 
 The demo registers two graphs on `127.0.0.1:8100`: `pipeline` (channel `log`, two nodes `first → second`,
-no network) and `react_agent` (channel `messages`, scripted model + echo tool, no network).
+no network) and `react_agent` (channel `messages`, scripted model + echo tool, no network). It also seeds
+the ServiceNow Table API pack manifest into the connector plane on boot (idempotent by content hash), pinned
+to the clearly-labelled placeholder instance `https://example.service-now.com` — to point the walkthrough at
+a real tenant, register the pack for your instance label instead
+(`cargo run -p rusty-agent-runtime --example pack_manifests -- <instance>` prints the manifests for
+`POST /connectors/manifests`, or use Connectors → Register manifest); `RUSTY_DEMO_SERVICENOW_INSTANCE`
+changes the label the demo seeds.
 
 1. Start both processes (Option A above). Open `http://127.0.0.1:8000/`, connect to `http://127.0.0.1:8100`,
    **Connect** — the header shows the server version and both graphs.
