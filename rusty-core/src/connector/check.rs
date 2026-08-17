@@ -46,6 +46,9 @@ pub struct CheckRequest {
     pub headers: Vec<(String, String)>,
     /// The timeout the transport must enforce.
     pub timeout: Duration,
+    /// The response byte ceiling — the operation's declared ceiling,
+    /// clamped to the surface cap.
+    pub max_response_bytes: usize,
 }
 
 /// The transport's reply.
@@ -167,6 +170,7 @@ pub fn render_operation_request(
         url,
         headers,
         timeout: DEFAULT_CHECK_TIMEOUT,
+        max_response_bytes: operation.response_ceiling(),
     })
 }
 
