@@ -45,6 +45,12 @@ pub const MAX_SLOT_NAME_LEN: usize = 64;
 /// Maximum length of a credential slot description.
 pub const MAX_SLOT_DESCRIPTION_LEN: usize = 256;
 
+/// Maximum number of non-secret config params a manifest may declare.
+pub const MAX_CONFIG_PARAMS: usize = 16;
+
+/// Maximum length of a config param description.
+pub const MAX_CONFIG_PARAM_DESCRIPTION_LEN: usize = 256;
+
 /// Maximum length of an MCP stdio command path/name.
 pub const MAX_COMMAND_LEN: usize = 512;
 
@@ -115,6 +121,23 @@ pub struct CredentialSlot {
     /// Slot name, e.g. `api_key` (`[a-z][a-z0-9_]*`).
     pub name: String,
     /// Human-facing note on what the credential unlocks. May be empty.
+    pub description: String,
+}
+
+/// A named non-secret configuration parameter an instance supplies.
+///
+/// The counterpart of [`CredentialSlot`] for values that are not secrets:
+/// instance identity (a ServiceNow subdomain), region, environment. The
+/// manifest declares the *name*; the value arrives at instantiation and
+/// lives on the instance, never in the content-pinned manifest. An
+/// `http-api` [`HttpApiSpec::base_url`] may carry `{param}` placeholders
+/// naming these params; the executor substitutes the instance's values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigParam {
+    /// Param name, e.g. `instance` (`[a-zA-Z][a-zA-Z0-9_]*` — the
+    /// placeholder charset, so the name can appear as `{name}`).
+    pub name: String,
+    /// Human-facing note on what the value selects. May be empty.
     pub description: String,
 }
 
@@ -373,6 +396,12 @@ pub struct HttpApiSpec {
     /// operations egress tenant data and credentials, so plaintext
     /// transport is rejected at declaration. No query string or fragment:
     /// query material belongs to operations and auth styles.
+    ///
+    /// `{param}` placeholders (e.g. `https://{instance}.service-now.com`)
+    /// name the manifest's [`ConnectorManifest::config_params`]; the
+    /// instance's non-secret config values substitute in at request time.
+    /// A placeholder naming an undeclared param fails declaration, so a
+    /// literal-only base URL needs no config at all.
     pub base_url: String,
     /// How calls authenticate, or `None` for a public endpoint.
     pub auth: Option<HttpApiAuth>,
@@ -431,6 +460,12 @@ pub struct ConnectorManifest {
     pub capabilities: Vec<String>,
     /// Credential slots an instance requires.
     pub credential_slots: Vec<CredentialSlot>,
+    /// Non-secret config params an instance supplies (instance identity,
+    /// region, …). Defaults to empty so manifests declared before this
+    /// field existed deserialize unchanged; omitted from serialization
+    /// when empty, which keeps their content hashes stable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_params: Vec<ConfigParam>,
     /// SHA-256 of the canonical serialization of every field above.
     pub hash: String,
 }
@@ -445,6 +480,8 @@ struct ManifestContent<'a> {
     provider: &'a ProviderKind,
     capabilities: &'a [String],
     credential_slots: &'a [CredentialSlot],
+    #[serde(skip_serializing_if = "<[ConfigParam]>::is_empty")]
+    config_params: &'a [ConfigParam],
 }
 
 impl ConnectorManifest {
@@ -452,8 +489,36 @@ impl ConnectorManifest {
     ///
     /// `capabilities`, `credential_slots`, and the env allowlist are
     /// canonicalized (sorted/deduplicated) so semantically equal manifests
-    /// hash equal regardless of declaration order.
+    /// hash equal regardless of declaration order. Config params attach
+    /// through [`ConnectorManifest::new_with_config`] — they must be
+    /// present at construction, since an `http-api` base-url placeholder
+    /// validates against them.
     pub fn new(
+        id: impl Into<String>,
+        version: impl Into<String>,
+        display_name: impl Into<String>,
+        description: impl Into<String>,
+        provider: ProviderKind,
+        capabilities: Vec<String>,
+        credential_slots: Vec<CredentialSlot>,
+    ) -> Result<Self> {
+        Self::new_with_config(
+            id,
+            version,
+            display_name,
+            description,
+            provider,
+            capabilities,
+            credential_slots,
+            Vec::new(),
+        )
+    }
+
+    /// [`ConnectorManifest::new`] with the non-secret config params
+    /// declared. Sorted by name during canonicalization; an `http-api`
+    /// base-url `{placeholder}` that names none of them fails validation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_config(
         id: impl Into<String>,
         version: impl Into<String>,
         display_name: impl Into<String>,
@@ -461,10 +526,12 @@ impl ConnectorManifest {
         mut provider: ProviderKind,
         mut capabilities: Vec<String>,
         mut credential_slots: Vec<CredentialSlot>,
+        mut config_params: Vec<ConfigParam>,
     ) -> Result<Self> {
         capabilities.sort();
         capabilities.dedup();
         credential_slots.sort_by(|left, right| left.name.cmp(&right.name));
+        config_params.sort_by(|left, right| left.name.cmp(&right.name));
         match &mut provider {
             ProviderKind::McpStdio(spec) => {
                 spec.env_allowlist.sort();
@@ -481,6 +548,7 @@ impl ConnectorManifest {
             provider,
             capabilities,
             credential_slots,
+            config_params,
             hash: String::new(),
         };
         manifest.validate()?;
@@ -499,6 +567,7 @@ impl ConnectorManifest {
             provider: &self.provider,
             capabilities: &self.capabilities,
             credential_slots: &self.credential_slots,
+            config_params: &self.config_params,
         };
         // Serializing this view is infallible: every field is a string, a
         // string vec, or an already-serializable spec struct.
@@ -559,6 +628,40 @@ impl ConnectorManifest {
                 return Err(conn_err(format!(
                     "manifest `{}` declares credential slot `{}` twice",
                     self.id, slot.name
+                )));
+            }
+        }
+
+        if self.config_params.len() > MAX_CONFIG_PARAMS {
+            return Err(conn_err(format!(
+                "manifest `{}` declares {} config params, above the {MAX_CONFIG_PARAMS} cap",
+                self.id,
+                self.config_params.len()
+            )));
+        }
+        for (index, param) in self.config_params.iter().enumerate() {
+            // The placeholder charset: a param name must be spellable as
+            // `{name}` in a base-url template.
+            validate_param_name(&param.name)?;
+            validate_text_field(
+                "config param description",
+                &param.description,
+                MAX_CONFIG_PARAM_DESCRIPTION_LEN,
+                true,
+            )?;
+            if self.config_params[..index]
+                .iter()
+                .any(|p| p.name == param.name)
+            {
+                return Err(conn_err(format!(
+                    "manifest `{}` declares config param `{}` twice",
+                    self.id, param.name
+                )));
+            }
+            if self.credential_slots.iter().any(|s| s.name == param.name) {
+                return Err(conn_err(format!(
+                    "manifest `{}` declares `{}` as both a credential slot and a config param",
+                    self.id, param.name
                 )));
             }
         }
@@ -678,6 +781,17 @@ impl ConnectorManifest {
                 "manifest `{}` http-api base URL must not contain whitespace, control characters, a query string, or a fragment",
                 self.id
             )));
+        }
+        // Every `{param}` placeholder names a declared config param — an
+        // instance can only supply what the manifest declared, so a typo'd
+        // placeholder fails here, not at request time.
+        for name in extract_placeholders(&spec.base_url)? {
+            if !self.config_params.iter().any(|param| param.name == name) {
+                return Err(conn_err(format!(
+                    "manifest `{}` http-api base URL placeholder `{{{name}}}` names no declared config param",
+                    self.id
+                )));
+            }
         }
 
         if spec.default_headers.len() > MAX_DEFAULT_HEADERS {
@@ -1000,14 +1114,14 @@ impl ConnectorManifest {
                 return Err(conn_err(format!(
                     "manifest `{}` operation `{}` is GET and must be `read_only`, not `{effect:?}`",
                     self.id, operation.name
-                )))
+                )));
             }
             (HttpMethod::Delete, OperationEffect::Irreversible) => {}
             (HttpMethod::Delete, effect) => {
                 return Err(conn_err(format!(
                     "manifest `{}` operation `{}` is DELETE and must be `irreversible`, not `{effect:?}`",
                     self.id, operation.name
-                )))
+                )));
             }
             (_, OperationEffect::ReadOnly) => {
                 return Err(conn_err(format!(
@@ -1015,7 +1129,7 @@ impl ConnectorManifest {
                     self.id,
                     operation.name,
                     operation.method.as_str()
-                )))
+                )));
             }
             (HttpMethod::Post, OperationEffect::Idempotent) => {}
             (_, OperationEffect::Idempotent) => {
@@ -1024,7 +1138,7 @@ impl ConnectorManifest {
                     self.id,
                     operation.name,
                     operation.method.as_str()
-                )))
+                )));
             }
             _ => {}
         }
@@ -1036,13 +1150,13 @@ impl ConnectorManifest {
                 return Err(conn_err(format!(
                     "manifest `{}` operation `{}` declares idempotency-key header `{header}` without an `idempotent` effect",
                     self.id, operation.name
-                )))
+                )));
             }
             (None, OperationEffect::Idempotent) => {
                 return Err(conn_err(format!(
                     "manifest `{}` operation `{}` is `idempotent` and must declare its idempotency-key header",
                     self.id, operation.name
-                )))
+                )));
             }
             (None, _) => {}
         }
@@ -1242,8 +1356,9 @@ fn route_param<'a>(
 /// real APIs spell camelCase (`maxResults`, `timeMin`, `addLabelIds`) and
 /// a manifest must declare the wire's spelling exactly. (Credential slot
 /// names stay `[a-z][a-z0-9_]*` — those are the host's keys, not the
-/// wire's.)
-fn validate_param_name(name: &str) -> Result<()> {
+/// wire's.) Config param names share this rule: a `{name}` placeholder is
+/// how the name appears in a base-url template.
+pub(crate) fn validate_param_name(name: &str) -> Result<()> {
     let valid = !name.is_empty()
         && name.len() <= MAX_SLOT_NAME_LEN
         && name

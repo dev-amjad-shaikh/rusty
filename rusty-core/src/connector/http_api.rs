@@ -31,24 +31,25 @@
 //!   instance id at the server wiring; token *acquisition* flows (OAuth
 //!   dances) are out of scope — slots carry already-usable secrets.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::conn_err;
 use super::credential::CredentialHandle;
 use super::manifest::{
-    ConnectorManifest, HttpApiAuth, HttpApiOperation, HttpMethod, OperationBody,
-    MAX_HTTP_API_RESPONSE_BYTES,
+    ConnectorManifest, HttpApiAuth, HttpApiOperation, HttpMethod, MAX_HTTP_API_RESPONSE_BYTES,
+    OperationBody,
 };
 use super::provider::{
-    provider_kind_name, ConnectorProvider, HttpResponse, ProviderSession, MAX_DERIVED_TOOL_NAME_LEN,
+    ConnectorProvider, HttpResponse, MAX_DERIVED_TOOL_NAME_LEN, ProviderSession, provider_kind_name,
 };
 use crate::error::Result;
 use crate::record::sha256_hex;
-use crate::tool::{Tool, ToolCapability, MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_SCHEMA_BYTES};
+use crate::tool::{MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_SCHEMA_BYTES, Tool, ToolCapability};
 
 /// Default per-call timeout for `http-api` operations.
 pub const DEFAULT_HTTP_API_TIMEOUT: Duration = Duration::from_secs(30);
@@ -119,6 +120,7 @@ pub fn derive_idempotency_key(scope: &str, operation: &str, args: &Value) -> Str
 #[derive(Clone)]
 pub struct HttpApiProvider {
     base_url: String,
+    config: BTreeMap<String, String>,
     auth: Option<HttpApiAuth>,
     default_headers: Vec<(String, String)>,
     health_check: Option<String>,
@@ -136,6 +138,7 @@ impl std::fmt::Debug for HttpApiProvider {
         // declared configuration — slot names, never secrets — only.
         f.debug_struct("HttpApiProvider")
             .field("base_url", &self.base_url)
+            .field("config", &self.config)
             .field("auth", &self.auth)
             .field("default_headers", &self.default_headers)
             .field("health_check", &self.health_check)
@@ -156,6 +159,7 @@ impl HttpApiProvider {
         match &manifest.provider {
             super::manifest::ProviderKind::HttpApi(spec) => Ok(Self {
                 base_url: spec.base_url.clone(),
+                config: BTreeMap::new(),
                 auth: spec.auth.clone(),
                 default_headers: spec.default_headers.clone(),
                 health_check: spec.health_check.clone(),
@@ -170,6 +174,15 @@ impl HttpApiProvider {
                 provider_kind_name(other)
             ))),
         }
+    }
+
+    /// Builder-style: the instance's non-secret config values, substituted
+    /// into `{param}` placeholders in the base URL at request time. A
+    /// manifest with a literal base URL never needs this — the URL is used
+    /// byte-identically.
+    pub fn with_config(mut self, config: BTreeMap<String, String>) -> Self {
+        self.config = config;
+        self
     }
 
     /// Builder-style: override the default per-call timeout (operations
@@ -451,7 +464,11 @@ impl HttpApiProvider {
             ));
         }
 
-        let mut url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let mut url = format!(
+            "{}{}",
+            resolve_base_url(&self.base_url, &self.config)?.trim_end_matches('/'),
+            path
+        );
         if !query.is_empty() {
             let pairs = query
                 .iter()
@@ -523,14 +540,11 @@ impl HttpApiProvider {
         };
         match &op.response.projection {
             None => Ok(value),
-            Some(pointer) => value
-                .pointer(pointer)
-                .cloned()
-                .ok_or_else(|| {
-                    conn_err(format!(
-                        "operation `{operation}` projection `{pointer}` did not resolve in the response"
-                    ))
-                }),
+            Some(pointer) => value.pointer(pointer).cloned().ok_or_else(|| {
+                conn_err(format!(
+                    "operation `{operation}` projection `{pointer}` did not resolve in the response"
+                ))
+            }),
         }
     }
 }
@@ -541,6 +555,7 @@ impl ConnectorProvider for HttpApiProvider {
         &self,
         manifest: &ConnectorManifest,
         credentials: &[CredentialHandle],
+        config: &BTreeMap<String, String>,
     ) -> Result<Box<dyn ProviderSession>> {
         match &manifest.provider {
             super::manifest::ProviderKind::HttpApi(_) => {}
@@ -549,13 +564,18 @@ impl ConnectorProvider for HttpApiProvider {
                     "manifest `{}` is {}; HttpApiProvider cannot serve it",
                     manifest.id,
                     provider_kind_name(other)
-                )))
+                )));
             }
         }
+        // The provider is per-manifest and shared; the config is
+        // per-instance. The session — and the health check below — run on
+        // a configured clone so two instances of one manifest resolve
+        // their own base URLs.
+        let configured = self.clone().with_config(config.clone());
         // Fail closed on slot resolution: the registry already fails
         // pending instances with unresolved slots, but a provider reached
         // directly must not discover a missing credential at first call.
-        if let Some(auth) = &self.auth {
+        if let Some(auth) = &configured.auth {
             for slot in auth.referenced_slots() {
                 resolve_slot(credentials, slot)?;
             }
@@ -563,20 +583,23 @@ impl ConnectorProvider for HttpApiProvider {
         // The health check runs only when the host wired a transport for
         // it; validation guarantees the named operation is a parameterless
         // read-only GET.
-        if let (Some(operation), Some(transport)) = (&self.health_check, &self.health_transport) {
-            self.execute(
-                transport.as_ref(),
-                credentials,
-                "connect",
-                operation,
-                &json!({}),
-            )
-            .await
-            .map_err(|e| conn_err(format!("health check `{operation}` failed: {e}")))?;
+        if let (Some(operation), Some(transport)) =
+            (&configured.health_check, &self.health_transport)
+        {
+            configured
+                .execute(
+                    transport.as_ref(),
+                    credentials,
+                    "connect",
+                    operation,
+                    &json!({}),
+                )
+                .await
+                .map_err(|e| conn_err(format!("health check `{operation}` failed: {e}")))?;
         }
         Ok(Box::new(HttpApiSession {
             connector_id: manifest.id.clone(),
-            provider: self.clone(),
+            provider: configured,
         }))
     }
 }
@@ -716,6 +739,66 @@ impl Tool for HttpApiTool {
             )
             .await
     }
+}
+
+/// Resolve a base-url template against an instance's non-secret config:
+/// every `{param}` placeholder substitutes the config value verbatim
+/// (`{{`/`}}` are literal braces, as everywhere in this plane). A template
+/// without placeholders returns byte-identically. The result is held to
+/// the declaration's own rule — `https://`, no query string, no fragment,
+/// no whitespace or control characters — so a config value that would
+/// smuggle URL structure fails here, at both instantiation (the server's
+/// 422) and request time (fail-closed).
+pub fn resolve_base_url(template: &str, config: &BTreeMap<String, String>) -> Result<String> {
+    let mut out = String::with_capacity(template.len());
+    let bytes = template.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' if bytes.get(index + 1) == Some(&b'{') => {
+                out.push('{');
+                index += 2;
+            }
+            b'}' if bytes.get(index + 1) == Some(&b'}') => {
+                out.push('}');
+                index += 2;
+            }
+            b'{' => {
+                let close = template[index + 1..]
+                    .find('}')
+                    .map(|offset| index + 1 + offset)
+                    .expect("manifest validation rejects unclosed placeholders");
+                let name = &template[index + 1..close];
+                let value = config.get(name).ok_or_else(|| {
+                    conn_err(format!(
+                        "config param `{name}` has no value; the instance cannot resolve the base URL"
+                    ))
+                })?;
+                out.push_str(value);
+                index = close + 1;
+            }
+            _ => {
+                let ch = template[index..]
+                    .chars()
+                    .next()
+                    .expect("index is in bounds");
+                out.push(ch);
+                index += ch.len_utf8();
+            }
+        }
+    }
+    if !out.starts_with("https://")
+        || out.len() == "https://".len()
+        || out.chars().any(char::is_control)
+        || out.contains(char::is_whitespace)
+        || out.contains('?')
+        || out.contains('#')
+    {
+        return Err(conn_err(format!(
+            "resolved base URL `{out}` must be an `https://` URL without whitespace, control characters, a query string, or a fragment"
+        )));
+    }
+    Ok(out)
 }
 
 /// The credential handle for `slot`, or a fail-closed error naming the

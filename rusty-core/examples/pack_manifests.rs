@@ -8,20 +8,18 @@
 //! done
 //! ```
 //!
-//! The ServiceNow pack is instance-scoped: pass the instance label as the
-//! first argument (default `example`, which yields
-//! `https://example.service-now.com`). Manifests are content-addressed, so
+//! The ServiceNow pack is instance-agnostic: it declares an `instance`
+//! config param and pins `https://{instance}.service-now.com`; the
+//! subdomain arrives at instantiation (`POST /connectors/instances` with
+//! `config`), never in the manifest. Manifests are content-addressed, so
 //! re-seeding the same server is idempotent — the plane answers
 //! `already_registered: true` for anything it already holds.
 
 use rusty_agent_runtime::connector::{manifest::ConnectorManifest, packs};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let instance = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "example".to_owned());
     let manifests: Vec<ConnectorManifest> = vec![
-        packs::servicenow(&instance)?,
+        packs::servicenow()?,
         packs::gmail()?,
         packs::slack()?,
         packs::linear()?,

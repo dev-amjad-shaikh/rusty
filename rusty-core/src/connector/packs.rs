@@ -27,12 +27,11 @@
 //! parameter charset is `[a-zA-Z][a-zA-Z0-9_]*` precisely so a manifest
 //! can say what the endpoint expects to read.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use super::conn_err;
 use super::manifest::{
-    ConnectorManifest, CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiSpec, HttpMethod,
-    OperationBody, OperationEffect, ProviderKind, ResponseExtraction,
+    ConfigParam, ConnectorManifest, CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiSpec,
+    HttpMethod, OperationBody, OperationEffect, ProviderKind, ResponseExtraction,
 };
 use crate::error::Result;
 
@@ -154,8 +153,9 @@ fn pack(
     operations: Vec<HttpApiOperation>,
     capabilities: &[&str],
     credential_slots: &[(&str, &str)],
+    config_params: &[(&str, &str)],
 ) -> Result<ConnectorManifest> {
-    ConnectorManifest::new(
+    ConnectorManifest::new_with_config(
         id,
         "1",
         display_name,
@@ -174,6 +174,13 @@ fn pack(
         credential_slots
             .iter()
             .map(|(name, description)| CredentialSlot {
+                name: name.to_string(),
+                description: description.to_string(),
+            })
+            .collect(),
+        config_params
+            .iter()
+            .map(|(name, description)| ConfigParam {
                 name: name.to_string(),
                 description: description.to_string(),
             })
@@ -205,19 +212,14 @@ const SN_WRITE_FIELDS: &[&str] = &[
     "due_date",
 ];
 
-/// The ServiceNow Table API pack for one instance
-/// (`https://<instance>.service-now.com`).
+/// The ServiceNow Table API pack.
 ///
-/// `instance` becomes a hostname segment verbatim, so it must be a DNS
-/// label — a full domain, scheme, or path is rejected rather than silently
-/// composed into a URL.
-pub fn servicenow(instance: &str) -> Result<ConnectorManifest> {
-    if !is_dns_label(instance) {
-        return Err(conn_err(format!(
-            "servicenow instance `{instance}` must be a DNS label (`[a-z0-9]([a-z0-9-]*[a-z0-9])?`, at most 63 bytes)"
-        )));
-    }
-
+/// Instance-agnostic, as a real connector platform ships it: the manifest
+/// declares an `instance` config param and pins
+/// `https://{instance}.service-now.com`; the subdomain arrives with the
+/// instance's non-secret config at instantiation, never in the
+/// content-pinned manifest.
+pub fn servicenow() -> Result<ConnectorManifest> {
     let mut list = get(
         "list-records",
         "List records from a ServiceNow table, with sysparm filtering and pagination.",
@@ -315,10 +317,8 @@ pub fn servicenow(instance: &str) -> Result<ConnectorManifest> {
     pack(
         "servicenow",
         "ServiceNow",
-        &format!(
-            "ServiceNow Table API for the `{instance}` instance: list, get, create, update, and delete records in any table."
-        ),
-        &format!("https://{instance}.service-now.com"),
+        "ServiceNow Table API: list, get, create, update, and delete records in any table.",
+        "https://{instance}.service-now.com",
         HttpApiAuth::Basic {
             username_slot: "username".to_owned(),
             password_slot: "password".to_owned(),
@@ -331,19 +331,11 @@ pub fn servicenow(instance: &str) -> Result<ConnectorManifest> {
             ("username", "ServiceNow user name for basic authentication."),
             ("password", "ServiceNow password for basic authentication."),
         ],
+        &[(
+            "instance",
+            "ServiceNow instance subdomain (`<instance>.service-now.com`).",
+        )],
     )
-}
-
-/// `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, at most 63 bytes: the RFC 1035 label
-/// shape a ServiceNow instance name must have to compose into a hostname.
-fn is_dns_label(label: &str) -> bool {
-    !label.is_empty()
-        && label.len() <= 63
-        && label
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        && !label.starts_with('-')
-        && !label.ends_with('-')
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +431,7 @@ pub fn gmail() -> Result<ConnectorManifest> {
             "access_token",
             "OAuth access token with the gmail.modify scope.",
         )],
+        &[],
     )
 }
 
@@ -556,6 +549,7 @@ pub fn slack() -> Result<ConnectorManifest> {
             "bot_token",
             "Slack bot token (xoxb-…) with the scopes the operations need.",
         )],
+        &[],
     )
 }
 
@@ -687,6 +681,7 @@ pub fn linear() -> Result<ConnectorManifest> {
             "api_key",
             "Linear OAuth access token, sent as a bearer token.",
         )],
+        &[],
     )
 }
 
@@ -835,12 +830,21 @@ pub fn notion() -> Result<ConnectorManifest> {
         // any HTTP token.
         &[("Notion-Version", "2022-06-28")],
         None,
-        vec![search, get_page, get_database, query_database, children, create, update],
+        vec![
+            search,
+            get_page,
+            get_database,
+            query_database,
+            children,
+            create,
+            update,
+        ],
         &["notion workspace"],
         &[(
             "integration_token",
             "Notion internal integration token for a workspace the integration is shared with.",
         )],
+        &[],
     )
 }
 
@@ -990,11 +994,10 @@ pub fn google_calendar() -> Result<ConnectorManifest> {
         Some("list-calendars"),
         vec![list_calendars, list, get_event, create, update, delete],
         &["calendar read/write"],
-        &[
-            (
-                "access_token",
-                "OAuth access token with calendar read and event scopes (the health check lists calendars, so a read scope such as calendar.readonly is needed alongside calendar.events).",
-            ),
-        ],
+        &[(
+            "access_token",
+            "OAuth access token with calendar read and event scopes (the health check lists calendars, so a read scope such as calendar.readonly is needed alongside calendar.events).",
+        )],
+        &[],
     )
 }

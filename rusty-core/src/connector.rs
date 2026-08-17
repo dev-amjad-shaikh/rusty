@@ -54,24 +54,25 @@ pub mod registry;
 
 pub use credential::{CredentialBroker, CredentialHandle, InMemoryCredentialBroker};
 pub use http_api::{
-    derive_idempotency_key, HttpApiProvider, HttpApiRequest, HttpApiTool, HttpApiTransport,
-    DEFAULT_HTTP_API_TIMEOUT, IDEMPOTENCY_KEY_DOMAIN, MAX_HTTP_API_ERROR_BODY_BYTES,
-    MAX_HTTP_API_REQUEST_BYTES,
+    DEFAULT_HTTP_API_TIMEOUT, HttpApiProvider, HttpApiRequest, HttpApiTool, HttpApiTransport,
+    IDEMPOTENCY_KEY_DOMAIN, MAX_HTTP_API_ERROR_BODY_BYTES, MAX_HTTP_API_REQUEST_BYTES,
+    derive_idempotency_key, resolve_base_url,
 };
 pub use instance::{
-    CatalogGeneration, CatalogPin, ConnectorInstance, LifecycleState,
-    DEFAULT_DEGRADE_AFTER_FAILURES, MAX_INSTANCE_ERROR_BYTES, MAX_TENANT_ID_LEN,
+    CatalogGeneration, CatalogPin, ConnectorInstance, DEFAULT_DEGRADE_AFTER_FAILURES,
+    LifecycleState, MAX_CONFIG_KEYS, MAX_CONFIG_VALUE_LEN, MAX_INSTANCE_ERROR_BYTES,
+    MAX_TENANT_ID_LEN,
 };
 pub use manifest::{
-    ConnectorManifest, CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiSpec, HttpMethod,
-    HttpSearchSpec, McpStdioSpec, OperationBody, OperationEffect, ProviderKind, ResponseExtraction,
-    SearchAuth,
+    ConfigParam, ConnectorManifest, CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiSpec,
+    HttpMethod, HttpSearchSpec, MAX_CONFIG_PARAMS, McpStdioSpec, OperationBody, OperationEffect,
+    ProviderKind, ResponseExtraction, SearchAuth,
 };
 pub use provider::{
-    default_provider, ConnectorProvider, ConnectorSearchTool, HttpRequest, HttpResponse,
-    HttpSearchProvider, HttpTransport, McpSession, McpStdioProvider, ProviderSession, SearchHit,
-    SearchRequest, DEFAULT_SEARCH_RESULT_COUNT, DEFAULT_SEARCH_TIMEOUT, MAX_SEARCH_QUERY_BYTES,
-    MAX_SEARCH_RESPONSE_BYTES, MAX_SEARCH_RESULT_COUNT,
+    ConnectorProvider, ConnectorSearchTool, DEFAULT_SEARCH_RESULT_COUNT, DEFAULT_SEARCH_TIMEOUT,
+    HttpRequest, HttpResponse, HttpSearchProvider, HttpTransport, MAX_SEARCH_QUERY_BYTES,
+    MAX_SEARCH_RESPONSE_BYTES, MAX_SEARCH_RESULT_COUNT, McpSession, McpStdioProvider,
+    ProviderSession, SearchHit, SearchRequest, default_provider,
 };
 pub use registry::{ConnectorRegistry, SweepOutcome};
 

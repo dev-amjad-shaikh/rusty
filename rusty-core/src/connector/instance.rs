@@ -15,6 +15,7 @@
 //! [`CatalogPin`], never "latest".
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use super::conn_err;
 use crate::error::Result;
@@ -22,6 +23,12 @@ use crate::tool::ToolCapability;
 
 /// Maximum length of a tenant id.
 pub const MAX_TENANT_ID_LEN: usize = 128;
+
+/// Maximum number of non-secret config entries an instance carries.
+pub const MAX_CONFIG_KEYS: usize = 16;
+
+/// Maximum length of one config value.
+pub const MAX_CONFIG_VALUE_LEN: usize = 2048;
 
 /// Maximum size of the error string a `failed`/`degraded` state carries.
 /// Longer reasons are truncated at a char boundary with a marker, so a
@@ -124,6 +131,13 @@ pub struct ConnectorInstance {
     pub manifest_hash: String,
     /// The tenant this instance serves.
     pub tenant_id: String,
+    /// The non-secret config values (e.g. the ServiceNow instance
+    /// subdomain) supplied at instantiation, keyed by the manifest's
+    /// declared config param names. Substituted into the provider's
+    /// base-url template at request time; persisted with the instance
+    /// record so a restart replays it exactly.
+    #[serde(default)]
+    config: BTreeMap<String, String>,
     state: LifecycleState,
     consecutive_failures: u32,
     last_health_check_ms: Option<u64>,
@@ -153,11 +167,43 @@ impl ConnectorInstance {
             connector_id: connector_id.into(),
             manifest_hash: manifest_hash.into(),
             tenant_id,
+            config: BTreeMap::new(),
             state: LifecycleState::Pending,
             consecutive_failures: 0,
             last_health_check_ms: None,
             catalog: None,
         })
+    }
+
+    /// Builder-style: the instance's non-secret config values. Bounded
+    /// fail-closed — the registry checks the keys against the manifest's
+    /// declared params; here the shape itself is held: few keys, valid
+    /// param names, non-empty control-free values.
+    pub fn with_config(mut self, config: BTreeMap<String, String>) -> Result<Self> {
+        if config.len() > MAX_CONFIG_KEYS {
+            return Err(conn_err(format!(
+                "instance config declares {} keys, above the {MAX_CONFIG_KEYS} cap",
+                config.len()
+            )));
+        }
+        for (name, value) in &config {
+            super::manifest::validate_param_name(name)?;
+            if value.is_empty()
+                || value.len() > MAX_CONFIG_VALUE_LEN
+                || value.chars().any(char::is_control)
+            {
+                return Err(conn_err(format!(
+                    "config value for `{name}` must be non-empty, control-free, and at most {MAX_CONFIG_VALUE_LEN} bytes"
+                )));
+            }
+        }
+        self.config = config;
+        Ok(self)
+    }
+
+    /// The non-secret config values supplied at instantiation.
+    pub fn config(&self) -> &BTreeMap<String, String> {
+        &self.config
     }
 
     /// The current lifecycle state.

@@ -4,23 +4,23 @@
 //! idempotency-key determinism, byte ceilings, error mapping, and
 //! lifecycle integration with the existing registry.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use rusty_agent_runtime::connector::manifest::MAX_HTTP_API_RESPONSE_BYTES;
 use rusty_agent_runtime::connector::{
-    derive_idempotency_key, ConnectorManifest, ConnectorProvider, ConnectorRegistry,
-    CredentialHandle, CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiProvider,
-    HttpApiRequest, HttpApiTool, HttpApiTransport, HttpMethod, HttpResponse,
-    InMemoryCredentialBroker, LifecycleState, OperationBody, OperationEffect, ProviderKind,
-    ResponseExtraction, MAX_HTTP_API_ERROR_BODY_BYTES, MAX_HTTP_API_REQUEST_BYTES,
+    ConfigParam, ConnectorManifest, ConnectorProvider, ConnectorRegistry, CredentialHandle,
+    CredentialSlot, HttpApiAuth, HttpApiOperation, HttpApiProvider, HttpApiRequest, HttpApiTool,
+    HttpApiTransport, HttpMethod, HttpResponse, InMemoryCredentialBroker, LifecycleState,
+    MAX_HTTP_API_ERROR_BODY_BYTES, MAX_HTTP_API_REQUEST_BYTES, OperationBody, OperationEffect,
+    ProviderKind, ResponseExtraction, derive_idempotency_key, resolve_base_url,
 };
 use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::tool::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -1106,7 +1106,7 @@ async fn http_api_catalog_is_namespaced_sorted_and_effect_honest() {
     // The session serves the same derivation, so registry generations pin
     // exactly what dispatch executes.
     let mut session = provider
-        .connect(&manifest, &bearer_credentials())
+        .connect(&manifest, &bearer_credentials(), &Default::default())
         .await
         .expect("connect");
     let served = session.catalog().await.expect("session catalog");
@@ -1277,7 +1277,7 @@ async fn http_api_connect_fails_closed_on_unresolved_slots() {
     let manifest = api_manifest("tickets");
     let provider = HttpApiProvider::from_manifest(&manifest).expect("provider");
     let error = provider
-        .connect(&manifest, &[])
+        .connect(&manifest, &[], &Default::default())
         .await
         .expect_err("missing credential must fail connect")
         .to_string();
@@ -1299,7 +1299,7 @@ async fn http_api_connect_fails_closed_on_unresolved_slots() {
     )
     .expect("valid search manifest");
     let error = provider
-        .connect(&search, &[])
+        .connect(&search, &[], &Default::default())
         .await
         .expect_err("wrong kind must fail")
         .to_string();
@@ -1974,10 +1974,12 @@ async fn http_api_integrates_with_registry_lifecycle_and_generations() {
         "graphql operation advertised"
     );
     let pin = registry.catalog_pin(&instance_id).expect("pin");
-    assert!(registry
-        .instance(&instance_id)
-        .expect("instance")
-        .verify_pin(&pin));
+    assert!(
+        registry
+            .instance(&instance_id)
+            .expect("instance")
+            .verify_pin(&pin)
+    );
 
     // The declarative catalog never changes bytes, so the sweep holds the
     // generation steady.
@@ -2005,5 +2007,264 @@ async fn http_api_integrates_with_registry_lifecycle_and_generations() {
     assert_eq!(
         registry.instance(&instance_id).expect("instance").state(),
         &LifecycleState::Healthy
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Config params and base-url placeholders
+// ---------------------------------------------------------------------------
+
+/// A manifest whose base URL templates the `{instance}` config param.
+fn placeholder_manifest() -> ConnectorManifest {
+    ConnectorManifest::new_with_config(
+        "tickets",
+        "1.0.0",
+        "Test API",
+        "A test HTTP API connector.",
+        ProviderKind::HttpApi(rusty_agent_runtime::connector::HttpApiSpec {
+            base_url: "https://{instance}.example.com".to_owned(),
+            auth: Some(bearer_auth()),
+            default_headers: vec![],
+            health_check: Some("ping".to_owned()),
+            operations: all_ops(),
+        }),
+        vec!["rest api".to_owned()],
+        vec![slot("api_token")],
+        vec![ConfigParam {
+            name: "instance".to_owned(),
+            description: "The tenant's instance subdomain.".to_owned(),
+        }],
+    )
+    .expect("valid placeholder manifest")
+}
+
+/// Rebuild `manifest` with a different base URL and config params.
+fn rebased(
+    manifest: &ConnectorManifest,
+    base_url: &str,
+    config_params: Vec<ConfigParam>,
+) -> Result<ConnectorManifest> {
+    let ProviderKind::HttpApi(spec) = &manifest.provider else {
+        panic!("http-api manifest")
+    };
+    let mut spec = spec.clone();
+    spec.base_url = base_url.to_owned();
+    ConnectorManifest::new_with_config(
+        "tickets",
+        "1.0.0",
+        "Test API",
+        "A test HTTP API connector.",
+        ProviderKind::HttpApi(spec),
+        manifest.capabilities.clone(),
+        manifest.credential_slots.clone(),
+        config_params,
+    )
+}
+
+#[test]
+fn base_url_placeholders_must_name_declared_config_params() {
+    // A placeholder with no declared config params fails construction.
+    let bare = http_api_manifest("tickets", None, vec![], None, vec![ping()], vec![])
+        .expect("valid manifest");
+    let error = manifest_error(rebased(&bare, "https://{instance}.example.com", vec![]));
+    assert!(
+        error.contains("placeholder `{instance}` names no declared config param"),
+        "{error}"
+    );
+
+    // Declaring the param admits the template.
+    let declared = rebased(
+        &bare,
+        "https://{instance}.example.com",
+        vec![ConfigParam {
+            name: "instance".to_owned(),
+            description: String::new(),
+        }],
+    )
+    .expect("declared param admits the template");
+    assert!(declared.verify_hash());
+
+    // Non-https literals stay rejected, placeholders or not.
+    for bad in [
+        "http://api.example.com",
+        "https://",
+        "http://{instance}.example.com",
+    ] {
+        let rejected = rebased(
+            &bare,
+            bad,
+            vec![ConfigParam {
+                name: "instance".to_owned(),
+                description: String::new(),
+            }],
+        );
+        assert!(rejected.is_err(), "{bad} must be rejected");
+    }
+}
+
+#[test]
+fn config_params_commit_to_the_hash_and_default_empty() {
+    let bare = api_manifest("tickets");
+    // Existing manifests carry no config params: the field defaults empty
+    // and stays out of the serialization, so content hashes are stable.
+    assert!(bare.config_params.is_empty());
+    let value = serde_json::to_value(&bare).expect("serialize");
+    assert!(value.get("config_params").is_none(), "got: {value}");
+    let restored: ConnectorManifest = serde_json::from_value(value).expect("deserialize");
+    assert!(restored.verify_hash(), "old-shape manifest must re-verify");
+    assert_eq!(restored.hash, bare.hash);
+
+    // Declaring a param is content: the hash moves.
+    let with_params = rebased(
+        &bare,
+        BASE_URL,
+        vec![ConfigParam {
+            name: "instance".to_owned(),
+            description: "The tenant's instance subdomain.".to_owned(),
+        }],
+    )
+    .expect("config params");
+    assert_ne!(with_params.hash, bare.hash);
+    assert!(with_params.verify_hash());
+
+    // Declaration order canonicalizes away.
+    let reordered = rebased(
+        &bare,
+        BASE_URL,
+        vec![
+            ConfigParam {
+                name: "region".to_owned(),
+                description: String::new(),
+            },
+            ConfigParam {
+                name: "instance".to_owned(),
+                description: String::new(),
+            },
+        ],
+    )
+    .expect("config params");
+    assert_eq!(
+        reordered.config_params[0].name, "instance",
+        "sorted by name"
+    );
+
+    // Duplicates and slot collisions fail.
+    let dup = rebased(
+        &bare,
+        BASE_URL,
+        vec![
+            ConfigParam {
+                name: "instance".to_owned(),
+                description: String::new(),
+            },
+            ConfigParam {
+                name: "instance".to_owned(),
+                description: String::new(),
+            },
+        ],
+    );
+    assert!(dup.is_err(), "duplicate param must be rejected");
+    let collision = rebased(
+        &bare,
+        BASE_URL,
+        vec![ConfigParam {
+            name: "api_token".to_owned(),
+            description: String::new(),
+        }],
+    );
+    assert!(collision.is_err(), "slot name collision must be rejected");
+}
+
+#[test]
+fn resolve_base_url_passes_literals_through_and_guards_substitutions() {
+    // A literal template resolves byte-identically, config or not.
+    let literal = resolve_base_url(BASE_URL, &BTreeMap::new()).expect("literal");
+    assert_eq!(literal, BASE_URL);
+    let configured = BTreeMap::from([("instance".to_owned(), "dev123".to_owned())]);
+    assert_eq!(
+        resolve_base_url(BASE_URL, &configured).expect("literal"),
+        BASE_URL
+    );
+
+    // Placeholders substitute from the config.
+    assert_eq!(
+        resolve_base_url("https://{instance}.example.com", &configured).expect("substituted"),
+        "https://dev123.example.com"
+    );
+
+    // A missing value fails closed; a value smuggling URL structure fails
+    // the same rule the declaration enforces.
+    let error = resolve_base_url("https://{instance}.example.com", &BTreeMap::new())
+        .expect_err("missing value must fail")
+        .to_string();
+    assert!(error.contains("config param `instance`"), "{error}");
+    for hostile in ["dev123?debug=1", "dev123#frag", "dev 123"] {
+        let config = BTreeMap::from([("instance".to_owned(), hostile.to_owned())]);
+        assert!(
+            resolve_base_url("https://{instance}.example.com", &config).is_err(),
+            "{hostile} must be rejected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn execute_and_health_check_substitute_instance_config() {
+    let manifest = placeholder_manifest();
+    let transport = Arc::new(FakeApiTransport::default());
+    let provider = HttpApiProvider::from_manifest(&manifest)
+        .expect("provider")
+        .with_health_transport(transport.clone());
+
+    // The health check inside connect resolves the substituted URL.
+    transport.push_json(200, json!({"ok": true}));
+    let config = BTreeMap::from([("instance".to_owned(), "dev123".to_owned())]);
+    let session = provider
+        .connect(&manifest, &bearer_credentials(), &config)
+        .await
+        .expect("connect");
+    let captured = transport.captured();
+    assert_eq!(captured[0].url, "https://dev123.example.com/v1/ping");
+    session.shutdown().await.expect("shutdown");
+
+    // Operation calls substitute identically.
+    transport.push_json(200, json!({"issues": []}));
+    let configured = HttpApiProvider::from_manifest(&manifest)
+        .expect("provider")
+        .with_config(config);
+    configured
+        .execute(
+            transport.as_ref(),
+            &bearer_credentials(),
+            "inst-000001",
+            "list-issues",
+            &json!({"team": "eng"}),
+        )
+        .await
+        .expect("execute");
+    let captured = transport.captured();
+    assert_eq!(
+        captured[1].url,
+        "https://dev123.example.com/v1/issues?team=eng"
+    );
+
+    // Two instances of one manifest resolve their own base URLs.
+    let other = BTreeMap::from([("instance".to_owned(), "prod9".to_owned())]);
+    transport.push_json(200, json!({"issues": []}));
+    HttpApiProvider::from_manifest(&manifest)
+        .expect("provider")
+        .with_config(other)
+        .execute(
+            transport.as_ref(),
+            &bearer_credentials(),
+            "inst-000002",
+            "list-issues",
+            &json!({"team": "eng"}),
+        )
+        .await
+        .expect("execute");
+    let captured = transport.captured();
+    assert_eq!(
+        captured[2].url,
+        "https://prod9.example.com/v1/issues?team=eng"
     );
 }
