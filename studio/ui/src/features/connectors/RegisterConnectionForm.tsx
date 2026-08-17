@@ -49,12 +49,19 @@ export function RegisterConnectionForm({
   chaining,
   onRegistered,
   onCancel,
+  beforeSubmit,
 }: {
   manifest: ConnectorManifest;
   /** The panel is turning a successful registration straight into the instantiate call. */
   chaining: boolean;
   onRegistered: (bindings: Record<string, string>) => void;
   onCancel: () => void;
+  /**
+   * The panel's pre-flight gate (config params need values before any
+   * credential crosses the wire). Returning false aborts the submission —
+   * the gate owns surfacing why.
+   */
+  beforeSubmit?: () => boolean;
 }) {
   const queryClient = useQueryClient();
   const flow = credentialFlow(manifest);
@@ -99,6 +106,7 @@ export function RegisterConnectionForm({
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (beforeSubmit && !beforeSubmit()) return;
     if (flow.kind === "basic") {
       const checked = basicConnectionSchema.safeParse({
         username: values.username?.trim() ?? "",
@@ -119,6 +127,7 @@ export function RegisterConnectionForm({
 
   function submitGrant(event: FormEvent) {
     event.preventDefault();
+    if (beforeSubmit && !beforeSubmit()) return;
     const checked = passwordGrantSchema.safeParse({
       token_url: values.token_url?.trim() ?? "",
       client_id: values.client_id?.trim() ?? "",

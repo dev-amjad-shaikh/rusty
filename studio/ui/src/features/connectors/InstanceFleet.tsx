@@ -51,6 +51,11 @@ function InstanceRow({
         <div>
           <b>{manifestName ?? evidencePreview(instance.connector_id, 64)}</b>
           <small><code>{instance.instance_id}</code> · {evidencePreview(instance.connector_id, 64)}</small>
+          {Object.keys(instance.config).length > 0 && (
+            <small>
+              <code>{Object.entries(instance.config).map(([name, value]) => `${name}=${value}`).join(" ")}</code>
+            </small>
+          )}
         </div>
       </div>
       <div role="cell" data-label="State">

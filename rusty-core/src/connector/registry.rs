@@ -19,11 +19,11 @@ use std::sync::Arc;
 use super::conn_err;
 use super::credential::{CredentialBroker, CredentialHandle};
 use super::instance::{
-    CatalogGeneration, CatalogPin, ConnectorInstance, LifecycleState,
-    DEFAULT_DEGRADE_AFTER_FAILURES,
+    CatalogGeneration, CatalogPin, ConnectorInstance, DEFAULT_DEGRADE_AFTER_FAILURES,
+    LifecycleState,
 };
 use super::manifest::ConnectorManifest;
-use super::provider::{default_provider, ConnectorProvider, ProviderSession};
+use super::provider::{ConnectorProvider, ProviderSession, default_provider};
 use crate::error::Result;
 
 /// One registered manifest plus the provider that realizes it.
@@ -175,15 +175,49 @@ impl ConnectorRegistry {
         tenant_id: &str,
         broker: &dyn CredentialBroker,
     ) -> Result<String> {
+        self.instantiate_with_config(manifest_hash, tenant_id, BTreeMap::new(), broker)
+    }
+
+    /// Instantiate with the manifest's non-secret config params supplied.
+    ///
+    /// The config must name exactly the params the manifest declares — a
+    /// missing or empty value and an undeclared key are both errors, never
+    /// a partially configured instance. The values land on the instance
+    /// and reach the provider at connect time, where base-url placeholders
+    /// substitute from them.
+    pub fn instantiate_with_config(
+        &mut self,
+        manifest_hash: &str,
+        tenant_id: &str,
+        config: BTreeMap<String, String>,
+        broker: &dyn CredentialBroker,
+    ) -> Result<String> {
         let entry = self.manifests.get(manifest_hash).ok_or_else(|| {
             conn_err(format!(
                 "no manifest registered under hash `{manifest_hash}`"
             ))
         })?;
 
+        for param in &entry.manifest.config_params {
+            if !config.contains_key(&param.name) {
+                return Err(conn_err(format!(
+                    "config param `{}` requires a value in `config`",
+                    param.name
+                )));
+            }
+        }
+        for key in config.keys() {
+            if !entry.manifest.config_params.iter().any(|p| &p.name == key) {
+                return Err(conn_err(format!(
+                    "config key `{key}` is not a config param the manifest declares"
+                )));
+            }
+        }
+
         let instance_id = format!("inst-{:06}", self.next_instance_seq);
         let mut instance =
-            ConnectorInstance::new(&instance_id, &entry.manifest.id, manifest_hash, tenant_id)?;
+            ConnectorInstance::new(&instance_id, &entry.manifest.id, manifest_hash, tenant_id)?
+                .with_config(config)?;
 
         let mut credentials = Vec::with_capacity(entry.manifest.credential_slots.len());
         let mut missing = Vec::new();
@@ -276,7 +310,11 @@ impl ConnectorRegistry {
             })?
             .manifest;
 
-        match entry.provider.connect(manifest, &entry.credentials).await {
+        match entry
+            .provider
+            .connect(manifest, &entry.credentials, entry.instance.config())
+            .await
+        {
             Err(error) => {
                 entry.instance.record_connect_failure(error.to_string())?;
             }

@@ -23,7 +23,9 @@
 //! - **Persistence.** Manifests (`{tenant}/{hash}`) and instance records
 //!   (`{tenant}/{instance_id}`) ride the `ServerStore` backends — one JSON
 //!   file per record under `{store_path}/connectors/…` on the file
-//!   backend, one `server_connectors` row per record on Postgres. Live
+//!   backend, one `server_connectors` row per record on Postgres. A record
+//!   persists the slot → connection-id binding and the non-secret config
+//!   values — the replay inputs of a restart — never secret material. Live
 //!   sessions are deliberately not durable: on boot every instance
 //!   restores as `pending` (or `failed` when its credentials no longer
 //!   resolve) and reconnects on demand.
@@ -48,14 +50,14 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::{Mutex, OnceCell};
 
 use rusty_agent_runtime::broker::{BrokerDenialReason, CredentialRequirement, IssueRequest};
 use rusty_agent_runtime::connector::{
-    default_provider, ConnectorInstance, ConnectorManifest, ConnectorRegistry, CredentialSlot,
-    HttpTransport, InMemoryCredentialBroker, LifecycleState, SweepOutcome,
-    MAX_SEARCH_RESPONSE_BYTES,
+    ConnectorInstance, ConnectorManifest, ConnectorRegistry, CredentialSlot, HttpTransport,
+    InMemoryCredentialBroker, LifecycleState, MAX_SEARCH_RESPONSE_BYTES, ProviderKind,
+    SweepOutcome, default_provider, resolve_base_url,
 };
 use rusty_agent_runtime::error::RustyError;
 use rusty_agent_runtime::tool::ToolCapability;
@@ -95,6 +97,12 @@ pub(crate) struct ConnectorInstanceRecord {
     /// Slot name → connection id, as declared at instantiation. Reused at
     /// boot to re-resolve credentials; carries no secret bytes.
     pub credential_connections: BTreeMap<String, String>,
+    /// Config param name → value, as supplied at instantiation
+    /// (non-secret: instance identity, region, …). Replayed at boot so the
+    /// restored instance resolves the same base URL. Defaults to empty for
+    /// records persisted before config params existed.
+    #[serde(default)]
+    pub config: BTreeMap<String, String>,
     /// The lifecycle state name (`pending`, `healthy`, …).
     pub state: String,
     /// The bounded reason for `failed`/`degraded`, else `None`.
@@ -392,7 +400,12 @@ impl ConnectorPlane {
             let credentials = self
                 .resolve_slots_lenient(&tenant, &record.credential_connections)
                 .await;
-            match registry.instantiate(&record.manifest_hash, &tenant, &credentials) {
+            match registry.instantiate_with_config(
+                &record.manifest_hash,
+                &tenant,
+                record.config.clone(),
+                &credentials,
+            ) {
                 Ok(minted) => {
                     if minted != record.instance_id {
                         // Mint order drifted from the persisted record —
@@ -604,6 +617,7 @@ fn instance_view(record: &ConnectorInstanceRecord) -> Value {
         "connector_id": record.connector_id,
         "manifest_hash": record.manifest_hash,
         "credential_slots": record.credential_connections.keys().collect::<Vec<_>>(),
+        "config": record.config,
         "state": record.state,
         "state_reason": record.state_reason,
         "consecutive_failures": record.consecutive_failures,
@@ -666,6 +680,8 @@ pub(crate) struct CreateManifestPayload {
     #[serde(default)]
     credential_slots: Vec<CredentialSlot>,
     #[serde(default)]
+    config_params: Vec<rusty_agent_runtime::connector::ConfigParam>,
+    #[serde(default)]
     hash: Option<String>,
 }
 
@@ -680,7 +696,7 @@ pub(crate) async fn create_connector_manifest(
     Json(payload): Json<CreateManifestPayload>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     plane(&state).ensure_restored().await?;
-    let manifest = ConnectorManifest::new(
+    let manifest = ConnectorManifest::new_with_config(
         payload.id,
         payload.version,
         payload.display_name,
@@ -688,6 +704,7 @@ pub(crate) async fn create_connector_manifest(
         payload.provider,
         payload.capabilities,
         payload.credential_slots,
+        payload.config_params,
     )
     .map_err(|e| ApiError::unprocessable(e.to_string()))?;
     if let Some(declared) = &payload.hash {
@@ -748,8 +765,8 @@ pub(crate) async fn list_connector_manifests(
     Ok(Json(json!({ "manifests": manifests })))
 }
 
-/// `POST /connectors/instances` body: the manifest pin plus the slot →
-/// connection binding.
+/// `POST /connectors/instances` body: the manifest pin, the slot →
+/// connection binding, and the non-secret config values.
 #[derive(Debug, Deserialize)]
 pub(crate) struct CreateInstancePayload {
     manifest_hash: String,
@@ -757,12 +774,19 @@ pub(crate) struct CreateInstancePayload {
     /// declares must appear; the material never crosses this boundary.
     #[serde(default)]
     credentials: BTreeMap<String, String>,
+    /// Config param name → value. The set must match the manifest's
+    /// declared config params exactly — a missing or empty value and an
+    /// undeclared key are both 422s.
+    #[serde(default)]
+    config: BTreeMap<String, String>,
 }
 
 /// `POST /connectors/instances` — instantiate a manifest for the caller's
 /// tenant. `404` when the tenant holds no manifest under the hash; `422`
-/// when a declared slot is unbound or its connection refuses issuance
-/// (the answer names the slot, never the secret). `201` with the instance
+/// when the config set does not match the manifest's declared config
+/// params, a substituted base URL fails the https/no-query rule, a
+/// declared slot is unbound, or its connection refuses issuance (the
+/// answer names the slot, never the secret). `201` with the instance
 /// view; the instance starts `pending`.
 pub(crate) async fn create_connector_instance(
     AxumState(state): AxumState<Arc<AppState>>,
@@ -782,6 +806,30 @@ pub(crate) async fn create_connector_instance(
                 payload.manifest_hash
             ))
         })?;
+    // Config validation precedes any vault work: the set must match the
+    // manifest's declared config params exactly, and an `http-api` base
+    // URL with placeholders must resolve to an `https://` URL without a
+    // query string or fragment — the same rule declaration enforces,
+    // re-checked on the substituted result.
+    for param in &manifest.config_params {
+        if !payload.config.contains_key(&param.name) {
+            return Err(ApiError::unprocessable(format!(
+                "config param `{}` requires a value in `config`",
+                param.name
+            )));
+        }
+    }
+    for key in payload.config.keys() {
+        if !manifest.config_params.iter().any(|p| &p.name == key) {
+            return Err(ApiError::unprocessable(format!(
+                "config key `{key}` is not a config param the manifest declares"
+            )));
+        }
+    }
+    if let ProviderKind::HttpApi(spec) = &manifest.provider {
+        resolve_base_url(&spec.base_url, &payload.config)
+            .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+    }
     let credentials = plane
         .resolve_slots_strict(
             tenant.tenant(),
@@ -794,7 +842,12 @@ pub(crate) async fn create_connector_instance(
         .registry
         .lock()
         .await
-        .instantiate(&manifest.hash, tenant.tenant(), &credentials)
+        .instantiate_with_config(
+            &manifest.hash,
+            tenant.tenant(),
+            payload.config.clone(),
+            &credentials,
+        )
         .map_err(|e| ApiError::unprocessable(e.to_string()))?;
     let now = Utc::now();
     let record = ConnectorInstanceRecord {
@@ -802,6 +855,7 @@ pub(crate) async fn create_connector_instance(
         connector_id: manifest.id.clone(),
         manifest_hash: manifest.hash.clone(),
         credential_connections: payload.credentials,
+        config: payload.config,
         state: "pending".to_owned(),
         state_reason: None,
         consecutive_failures: 0,
@@ -1034,6 +1088,7 @@ mod tests {
             connector_id: "test-conn".to_owned(),
             manifest_hash: "ab".repeat(32),
             credential_connections: BTreeMap::new(),
+            config: BTreeMap::new(),
             state: "healthy".to_owned(),
             state_reason: None,
             consecutive_failures: 0,

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   apiKeyConnectionSchema,
   basicConnectionSchema,
+  configParamNamedInError,
+  connectorInstanceSchema,
   connectorManifestSchema,
   passwordGrantSchema,
+  slotNamedInError,
   vaultConnectionSchema,
 } from "./connectors";
 
@@ -18,7 +21,7 @@ const httpApiManifest = {
   description: "ServiceNow Table API: list, read, create, update, and delete records on any table.",
   provider: {
     kind: "http_api",
-    base_url: "https://example.service-now.com",
+    base_url: "https://{instance}.service-now.com",
     auth: { style: "basic", username_slot: "username", password_slot: "password" },
     default_headers: [],
     health_check: null,
@@ -70,6 +73,9 @@ const httpApiManifest = {
     { name: "password", description: "Instance password or OAuth client secret." },
     { name: "username", description: "Integration user name." },
   ],
+  config_params: [
+    { name: "instance", description: "ServiceNow instance subdomain (`<instance>.service-now.com`)." },
+  ],
   hash: "ab".repeat(32),
 };
 
@@ -77,6 +83,8 @@ const graphqlManifest = {
   ...httpApiManifest,
   id: "linear",
   display_name: "Linear",
+  // The linear pack declares no config params; the server omits the key.
+  config_params: [],
   provider: {
     kind: "http_api",
     base_url: "https://api.linear.app",
@@ -132,6 +140,60 @@ describe("connector manifest contract", () => {
       provider: { kind: "grpc_stream", target: "localhost:50051" },
     };
     expect(connectorManifestSchema.safeParse(forged).success).toBe(false);
+  });
+
+  it("parses declared config params and defaults a missing key to empty", () => {
+    const withParams = connectorManifestSchema.parse(httpApiManifest);
+    expect(withParams.config_params).toEqual([
+      { name: "instance", description: "ServiceNow instance subdomain (`<instance>.service-now.com`)." },
+    ]);
+    // Old manifests carry no `config_params` key at all — they still parse.
+    const { config_params: _omitted, ...withoutParams } = httpApiManifest;
+    expect(connectorManifestSchema.parse(withoutParams).config_params).toEqual([]);
+  });
+
+  it("bounds config params the way the runtime does", () => {
+    const tooMany = {
+      ...httpApiManifest,
+      config_params: Array.from({ length: 17 }, (_, index) => ({ name: `p${index}`, description: "" })),
+    };
+    expect(connectorManifestSchema.safeParse(tooMany).success).toBe(false);
+    const nameless = { ...httpApiManifest, config_params: [{ name: "", description: "" }] };
+    expect(connectorManifestSchema.safeParse(nameless).success).toBe(false);
+  });
+});
+
+describe("connector instance contract", () => {
+  const record = {
+    instance_id: "inst-1",
+    connector_id: "servicenow",
+    manifest_hash: "ab".repeat(32),
+    credential_slots: ["username", "password"],
+    state: "pending",
+    state_reason: null,
+    consecutive_failures: 0,
+    last_health_check_ms: null,
+    catalog_generation: null,
+    catalog_hash: null,
+    config: { instance: "dev123" },
+    created_at: "2026-08-11T00:00:00Z",
+    updated_at: "2026-08-11T00:00:00Z",
+  };
+
+  it("requires the config map the instance view always emits", () => {
+    expect(connectorInstanceSchema.parse(record).config).toEqual({ instance: "dev123" });
+    expect(connectorInstanceSchema.parse({ ...record, config: {} }).config).toEqual({});
+    const { config: _omitted, ...withoutConfig } = record;
+    expect(connectorInstanceSchema.safeParse(withoutConfig).success).toBe(false);
+  });
+});
+
+describe("server error reading", () => {
+  it("extracts the config key an instantiate 422 names", () => {
+    expect(configParamNamedInError("config param `instance` requires a value")).toBe("instance");
+    expect(configParamNamedInError("config key `region` is not a config param the manifest declares")).toBe("region");
+    expect(configParamNamedInError("credential slot `api_key` requires a connection id")).toBeNull();
+    expect(slotNamedInError("credential slot `api_key` requires a connection id")).toBe("api_key");
   });
 });
 

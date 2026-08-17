@@ -3,7 +3,7 @@
 //! service's documentation describes — against a scripted transport,
 //! never the network.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -14,7 +14,7 @@ use rusty_agent_runtime::connector::{
 };
 use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::record::Effect;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -80,6 +80,19 @@ fn provider(manifest: &ConnectorManifest) -> HttpApiProvider {
     HttpApiProvider::from_manifest(manifest).expect("provider from manifest")
 }
 
+/// The provider as an instance runs it: configured with the test
+/// tenant's values (`acme` for every declared config param). Placeholder
+/// substitution into the base URL is part of what these tests prove; for
+/// packs with a literal base URL the empty config is byte-identical.
+fn configured_provider(manifest: &ConnectorManifest) -> HttpApiProvider {
+    let config: BTreeMap<String, String> = manifest
+        .config_params
+        .iter()
+        .map(|param| (param.name.clone(), "acme".to_owned()))
+        .collect();
+    provider(manifest).with_config(config)
+}
+
 /// The derived catalog as `name → wire effect` pairs, sorted by name.
 fn catalog_effects(manifest: &ConnectorManifest) -> Vec<(String, Effect)> {
     provider(manifest)
@@ -108,7 +121,7 @@ async fn call(
 ) -> (Value, HttpApiRequest) {
     let transport = FakeTransport::default();
     transport.push_json(200, reply);
-    let result = provider(manifest)
+    let result = configured_provider(manifest)
         .execute(&transport, credentials, "inst-000001", operation, &args)
         .await
         .expect("execute");
@@ -124,7 +137,7 @@ async fn call(
 #[test]
 fn all_packs_construct_and_verify() {
     let manifests = vec![
-        packs::servicenow("acme").expect("servicenow"),
+        packs::servicenow().expect("servicenow"),
         packs::gmail().expect("gmail"),
         packs::slack().expect("slack"),
         packs::linear().expect("linear"),
@@ -165,7 +178,7 @@ fn all_packs_construct_and_verify() {
 // ---------------------------------------------------------------------------
 
 fn servicenow() -> ConnectorManifest {
-    packs::servicenow("acme").expect("servicenow manifest")
+    packs::servicenow().expect("servicenow manifest")
 }
 
 fn servicenow_credentials() -> Vec<CredentialHandle> {
@@ -173,26 +186,35 @@ fn servicenow_credentials() -> Vec<CredentialHandle> {
 }
 
 #[test]
-fn servicenow_rejects_bad_instance_labels() {
-    let long = "a".repeat(64);
-    for bad in [
-        "",                 // empty
-        "-acme",            // leading hyphen
-        "acme-",            // trailing hyphen
-        "ACME",             // uppercase
-        "ac_me",            // underscore is not a label character
-        "ac me",            // whitespace
-        "acme.example.com", // dots: the constructor takes the label only
-        long.as_str(),      // over 63 bytes
-    ] {
-        let error = packs::servicenow(bad)
-            .expect_err("bad instance must be rejected")
-            .to_string();
-        assert!(error.contains("DNS label"), "{bad}: {error}");
-    }
-    for good in ["a", "acme", "ac-me", "acme2", "a1-b2"] {
-        packs::servicenow(good).expect("valid instance");
-    }
+fn servicenow_is_instance_agnostic() {
+    let manifest = servicenow();
+    // The manifest pins the template; the instance supplies the subdomain.
+    assert_eq!(
+        http_api_spec(&manifest).base_url,
+        "https://{instance}.service-now.com"
+    );
+    assert_eq!(manifest.config_params.len(), 1);
+    assert_eq!(manifest.config_params[0].name, "instance");
+    assert!(manifest.verify_hash());
+}
+
+#[tokio::test]
+async fn servicenow_without_instance_config_fails_closed() {
+    let manifest = servicenow();
+    let transport = FakeTransport::default();
+    let error = provider(&manifest)
+        .execute(
+            &transport,
+            &servicenow_credentials(),
+            "inst-000001",
+            "list-records",
+            &json!({"table": "incident"}),
+        )
+        .await
+        .expect_err("an unresolved placeholder must fail the call")
+        .to_string();
+    assert!(error.contains("config param `instance`"), "{error}");
+    assert!(transport.captured().is_empty(), "no request went out");
 }
 
 #[test]
@@ -307,7 +329,7 @@ async fn servicenow_delete_record_is_bodyless() {
         status: 204,
         body: Vec::new(),
     });
-    provider(&manifest)
+    configured_provider(&manifest)
         .execute(
             &transport,
             &servicenow_credentials(),
@@ -333,7 +355,7 @@ async fn servicenow_rejects_bad_arguments() {
     let credentials = servicenow_credentials();
     let transport = FakeTransport::default();
 
-    let error = provider(&manifest)
+    let error = configured_provider(&manifest)
         .execute(
             &transport,
             &credentials,
@@ -349,7 +371,7 @@ async fn servicenow_rejects_bad_arguments() {
         "{error}"
     );
 
-    let error = provider(&manifest)
+    let error = configured_provider(&manifest)
         .execute(
             &transport,
             &credentials,

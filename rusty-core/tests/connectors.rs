@@ -2,23 +2,24 @@
 //! catalog generations, and the registry — one coherent suite over the
 //! public `connector` module surface.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use rusty_agent_runtime::connector::packs;
 use rusty_agent_runtime::connector::{
     ConnectorInstance, ConnectorManifest, ConnectorProvider, ConnectorRegistry,
     ConnectorSearchTool, CredentialHandle, CredentialSlot, HttpRequest, HttpResponse,
     HttpSearchProvider, HttpSearchSpec, HttpTransport, InMemoryCredentialBroker, LifecycleState,
-    McpSession, McpStdioProvider, McpStdioSpec, ProviderKind, ProviderSession, SearchAuth,
-    SearchRequest, MAX_SEARCH_RESPONSE_BYTES,
+    MAX_CONFIG_VALUE_LEN, MAX_SEARCH_RESPONSE_BYTES, McpSession, McpStdioProvider, McpStdioSpec,
+    ProviderKind, ProviderSession, SearchAuth, SearchRequest,
 };
 use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::mcp::McpClient;
 use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::tool::{Tool, ToolCapability};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
 
@@ -161,6 +162,7 @@ impl ConnectorProvider for DuplexMcpProvider {
         &self,
         manifest: &ConnectorManifest,
         _credentials: &[CredentialHandle],
+        _config: &std::collections::BTreeMap<String, String>,
     ) -> Result<Box<dyn ProviderSession>> {
         let (client, _server) =
             fake_mcp_server(Arc::clone(&self.tools), Arc::clone(&self.fail_list));
@@ -286,16 +288,18 @@ fn manifest_rejects_bad_versions_and_text_fields() {
         ConnectorManifest::new("ok-id", "1.0.0", " padded", "Desc.", spec(), vec![], vec![])
             .is_err()
     );
-    assert!(ConnectorManifest::new(
-        "ok-id",
-        "1.0.0",
-        "Name",
-        "d".repeat(4097),
-        spec(),
-        vec![],
-        vec![]
-    )
-    .is_err());
+    assert!(
+        ConnectorManifest::new(
+            "ok-id",
+            "1.0.0",
+            "Name",
+            "d".repeat(4097),
+            spec(),
+            vec![],
+            vec![]
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -312,42 +316,52 @@ fn manifest_rejects_bad_mcp_stdio_specs() {
         )
     };
     // Missing command.
-    assert!(manifest_with(McpStdioSpec {
-        command: String::new(),
-        args: vec![],
-        env_allowlist: vec![],
-    })
-    .is_err());
+    assert!(
+        manifest_with(McpStdioSpec {
+            command: String::new(),
+            args: vec![],
+            env_allowlist: vec![],
+        })
+        .is_err()
+    );
     // Control character in an argument.
-    assert!(manifest_with(McpStdioSpec {
-        command: "server".to_owned(),
-        args: vec!["bad\narg".to_owned()],
-        env_allowlist: vec![],
-    })
-    .is_err());
+    assert!(
+        manifest_with(McpStdioSpec {
+            command: "server".to_owned(),
+            args: vec!["bad\narg".to_owned()],
+            env_allowlist: vec![],
+        })
+        .is_err()
+    );
     // Too many arguments.
-    assert!(manifest_with(McpStdioSpec {
-        command: "server".to_owned(),
-        args: vec!["a".to_owned(); 65],
-        env_allowlist: vec![],
-    })
-    .is_err());
+    assert!(
+        manifest_with(McpStdioSpec {
+            command: "server".to_owned(),
+            args: vec!["a".to_owned(); 65],
+            env_allowlist: vec![],
+        })
+        .is_err()
+    );
     // Invalid env names: leading digit, dash.
     for bad in ["1PATH", "HAS-DASH"] {
-        assert!(manifest_with(McpStdioSpec {
-            command: "server".to_owned(),
-            args: vec![],
-            env_allowlist: vec![bad.to_owned()],
-        })
-        .is_err());
+        assert!(
+            manifest_with(McpStdioSpec {
+                command: "server".to_owned(),
+                args: vec![],
+                env_allowlist: vec![bad.to_owned()],
+            })
+            .is_err()
+        );
     }
     // Over-long allowlist.
-    assert!(manifest_with(McpStdioSpec {
-        command: "server".to_owned(),
-        args: vec![],
-        env_allowlist: (0..33).map(|i| format!("VAR_{i}")).collect(),
-    })
-    .is_err());
+    assert!(
+        manifest_with(McpStdioSpec {
+            command: "server".to_owned(),
+            args: vec![],
+            env_allowlist: (0..33).map(|i| format!("VAR_{i}")).collect(),
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -370,56 +384,66 @@ fn manifest_rejects_bad_http_search_specs() {
         }]
     };
     // Plaintext transport is rejected.
-    assert!(manifest_with(
-        HttpSearchSpec {
-            base_url: "http://search.example.com".to_owned(),
-            auth: None,
-        },
-        vec![],
-    )
-    .is_err());
+    assert!(
+        manifest_with(
+            HttpSearchSpec {
+                base_url: "http://search.example.com".to_owned(),
+                auth: None,
+            },
+            vec![],
+        )
+        .is_err()
+    );
     // Missing scheme entirely.
-    assert!(manifest_with(
-        HttpSearchSpec {
-            base_url: "search.example.com".to_owned(),
-            auth: None,
-        },
-        vec![],
-    )
-    .is_err());
+    assert!(
+        manifest_with(
+            HttpSearchSpec {
+                base_url: "search.example.com".to_owned(),
+                auth: None,
+            },
+            vec![],
+        )
+        .is_err()
+    );
     // Whitespace in the URL.
-    assert!(manifest_with(
-        HttpSearchSpec {
-            base_url: "https://search.example.com/has space".to_owned(),
-            auth: None,
-        },
-        vec![],
-    )
-    .is_err());
+    assert!(
+        manifest_with(
+            HttpSearchSpec {
+                base_url: "https://search.example.com/has space".to_owned(),
+                auth: None,
+            },
+            vec![],
+        )
+        .is_err()
+    );
     // Invalid header name.
-    assert!(manifest_with(
-        HttpSearchSpec {
-            base_url: "https://search.example.com".to_owned(),
-            auth: Some(SearchAuth {
-                header: "Bad Header".to_owned(),
-                credential_slot: "api_key".to_owned(),
-            }),
-        },
-        api_key(),
-    )
-    .is_err());
+    assert!(
+        manifest_with(
+            HttpSearchSpec {
+                base_url: "https://search.example.com".to_owned(),
+                auth: Some(SearchAuth {
+                    header: "Bad Header".to_owned(),
+                    credential_slot: "api_key".to_owned(),
+                }),
+            },
+            api_key(),
+        )
+        .is_err()
+    );
     // Auth referencing an undeclared slot.
-    assert!(manifest_with(
-        HttpSearchSpec {
-            base_url: "https://search.example.com".to_owned(),
-            auth: Some(SearchAuth {
-                header: "x-api-key".to_owned(),
-                credential_slot: "api_key".to_owned(),
-            }),
-        },
-        vec![],
-    )
-    .is_err());
+    assert!(
+        manifest_with(
+            HttpSearchSpec {
+                base_url: "https://search.example.com".to_owned(),
+                auth: Some(SearchAuth {
+                    header: "x-api-key".to_owned(),
+                    credential_slot: "api_key".to_owned(),
+                }),
+            },
+            vec![],
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -433,50 +457,56 @@ fn manifest_rejects_capability_and_slot_overflow() {
     };
     // Too many (distinct) capability entries — duplicates are deduped at
     // construction, so the overflow needs distinct strings.
-    assert!(ConnectorManifest::new(
-        "ok-id",
-        "1.0.0",
-        "Name",
-        "Desc.",
-        spec(),
-        (0..65).map(|i| format!("cap-{i}")).collect(),
-        vec![],
-    )
-    .is_err());
+    assert!(
+        ConnectorManifest::new(
+            "ok-id",
+            "1.0.0",
+            "Name",
+            "Desc.",
+            spec(),
+            (0..65).map(|i| format!("cap-{i}")).collect(),
+            vec![],
+        )
+        .is_err()
+    );
     // Duplicate slot names.
-    assert!(ConnectorManifest::new(
-        "ok-id",
-        "1.0.0",
-        "Name",
-        "Desc.",
-        spec(),
-        vec![],
-        vec![
-            CredentialSlot {
-                name: "api_key".to_owned(),
-                description: String::new(),
-            },
-            CredentialSlot {
-                name: "api_key".to_owned(),
-                description: "again".to_owned(),
-            },
-        ],
-    )
-    .is_err());
+    assert!(
+        ConnectorManifest::new(
+            "ok-id",
+            "1.0.0",
+            "Name",
+            "Desc.",
+            spec(),
+            vec![],
+            vec![
+                CredentialSlot {
+                    name: "api_key".to_owned(),
+                    description: String::new(),
+                },
+                CredentialSlot {
+                    name: "api_key".to_owned(),
+                    description: "again".to_owned(),
+                },
+            ],
+        )
+        .is_err()
+    );
     // Bad slot name.
-    assert!(ConnectorManifest::new(
-        "ok-id",
-        "1.0.0",
-        "Name",
-        "Desc.",
-        spec(),
-        vec![],
-        vec![CredentialSlot {
-            name: "ApiKey".to_owned(),
-            description: String::new(),
-        }],
-    )
-    .is_err());
+    assert!(
+        ConnectorManifest::new(
+            "ok-id",
+            "1.0.0",
+            "Name",
+            "Desc.",
+            spec(),
+            vec![],
+            vec![CredentialSlot {
+                name: "ApiKey".to_owned(),
+                description: String::new(),
+            }],
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -666,9 +696,125 @@ fn missing_credential_lands_instance_in_failed_with_reason() {
     ));
 
     // Unknown manifest hashes error the call itself.
-    assert!(registry
-        .instantiate("no-such-hash", "acme", &broker)
-        .is_err());
+    assert!(
+        registry
+            .instantiate("no-such-hash", "acme", &broker)
+            .is_err()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Instance config params
+// ---------------------------------------------------------------------------
+
+#[test]
+fn instantiate_requires_exactly_the_declared_config_params() {
+    let mut registry = ConnectorRegistry::new();
+    let hash = registry
+        .register_manifest_with_default(packs::servicenow().expect("servicenow"))
+        .expect("register");
+    let mut broker = InMemoryCredentialBroker::new();
+    broker.insert("acme", "username", "ada");
+    broker.insert("acme", "password", "p@ss");
+
+    // A missing declared param errors the call.
+    let err = registry
+        .instantiate_with_config(&hash, "acme", BTreeMap::new(), &broker)
+        .expect_err("missing config param must error");
+    assert!(
+        err.to_string().contains("config param `instance`"),
+        "got: {err}"
+    );
+
+    // An undeclared key errors the call.
+    let err = registry
+        .instantiate_with_config(
+            &hash,
+            "acme",
+            BTreeMap::from([
+                ("instance".to_owned(), "dev123".to_owned()),
+                ("region".to_owned(), "eu".to_owned()),
+            ]),
+            &broker,
+        )
+        .expect_err("undeclared config key must error");
+    assert!(
+        err.to_string().contains("config key `region`"),
+        "got: {err}"
+    );
+
+    // Empty and oversized values fail the instance's own bounds.
+    for value in [String::new(), "x".repeat(MAX_CONFIG_VALUE_LEN + 1)] {
+        assert!(
+            registry
+                .instantiate_with_config(
+                    &hash,
+                    "acme",
+                    BTreeMap::from([("instance".to_owned(), value)]),
+                    &broker,
+                )
+                .is_err()
+        );
+    }
+
+    // The exact declared set instantiates and the value lands on the
+    // instance, non-secret and replayable.
+    let id = registry
+        .instantiate_with_config(
+            &hash,
+            "acme",
+            BTreeMap::from([("instance".to_owned(), "dev123".to_owned())]),
+            &broker,
+        )
+        .expect("instantiate");
+    let instance = registry.instance(&id).expect("instance");
+    assert_eq!(
+        instance.config().get("instance").map(String::as_str),
+        Some("dev123")
+    );
+    assert!(matches!(instance.state(), LifecycleState::Pending));
+
+    // A manifest declaring no config params takes none.
+    let search = registry
+        .register_manifest_with_default(http_manifest("web-search"))
+        .expect("register");
+    assert!(
+        registry
+            .instantiate_with_config(
+                &search,
+                "acme",
+                BTreeMap::from([("instance".to_owned(), "dev123".to_owned())]),
+                &broker,
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn instance_config_survives_serde_round_trip() {
+    let instance = ConnectorInstance::new("inst-000001", "servicenow", "ab".repeat(32), "acme")
+        .expect("instance")
+        .with_config(BTreeMap::from([(
+            "instance".to_owned(),
+            "dev123".to_owned(),
+        )]))
+        .expect("config");
+    let value = serde_json::to_value(&instance).expect("serialize");
+    assert_eq!(value["config"]["instance"], "dev123");
+    let restored: ConnectorInstance = serde_json::from_value(value).expect("deserialize");
+    assert_eq!(
+        restored.config().get("instance").map(String::as_str),
+        Some("dev123")
+    );
+
+    // Instances persisted before config existed deserialize with an empty
+    // map (the field defaults).
+    let bare = ConnectorInstance::new("inst-000002", "web-search", "cd".repeat(32), "acme")
+        .expect("instance");
+    let mut value = serde_json::to_value(&bare).expect("serialize");
+    value.as_object_mut().expect("object").remove("config");
+    let restored: ConnectorInstance = serde_json::from_value(value).expect("deserialize");
+    assert!(restored.config().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -827,12 +973,16 @@ async fn http_search_returns_ranked_hits_and_sends_auth_header() {
     let captured = transport.captured();
     assert_eq!(captured.len(), 1);
     assert_eq!(captured[0].url, "https://search.example.com/query");
-    assert!(captured[0]
-        .headers
-        .contains(&("content-type".to_owned(), "application/json".to_owned())));
-    assert!(captured[0]
-        .headers
-        .contains(&("x-api-key".to_owned(), "sekret-token".to_owned())));
+    assert!(
+        captured[0]
+            .headers
+            .contains(&("content-type".to_owned(), "application/json".to_owned()))
+    );
+    assert!(
+        captured[0]
+            .headers
+            .contains(&("x-api-key".to_owned(), "sekret-token".to_owned()))
+    );
     let body: Value = serde_json::from_slice(&captured[0].body).expect("request json");
     assert_eq!(body["query"], json!("rusty harness"));
 }
@@ -984,14 +1134,18 @@ fn search_request_validates_query_and_count() {
     assert!(SearchRequest::new("").is_err());
     assert!(SearchRequest::new("  padded").is_err());
     assert!(SearchRequest::new("x".repeat(1025)).is_err());
-    assert!(SearchRequest::new("ok")
-        .expect("request")
-        .with_max_results(0)
-        .is_err());
-    assert!(SearchRequest::new("ok")
-        .expect("request")
-        .with_max_results(21)
-        .is_err());
+    assert!(
+        SearchRequest::new("ok")
+            .expect("request")
+            .with_max_results(0)
+            .is_err()
+    );
+    assert!(
+        SearchRequest::new("ok")
+            .expect("request")
+            .with_max_results(21)
+            .is_err()
+    );
     let request = SearchRequest::new("ok").expect("request");
     assert_eq!(request.max_results(), 5);
 }
@@ -1036,9 +1190,11 @@ fn lifecycle_transitions_and_guards() {
     assert!(matches!(instance.state(), LifecycleState::Pending));
 
     // Success out of `connecting` only.
-    assert!(instance
-        .record_connect_success(1_000, vec![capability("test-conn/a")])
-        .is_err());
+    assert!(
+        instance
+            .record_connect_success(1_000, vec![capability("test-conn/a")])
+            .is_err()
+    );
 
     // pending → connecting → healthy.
     instance.begin_connect().expect("begin");
@@ -1053,9 +1209,11 @@ fn lifecycle_transitions_and_guards() {
     );
 
     // Health failures degrade at the threshold.
-    assert!(!instance
-        .record_health_failure("flaky", 2_000, 3)
-        .expect("failure"));
+    assert!(
+        !instance
+            .record_health_failure("flaky", 2_000, 3)
+            .expect("failure")
+    );
     assert!(matches!(instance.state(), LifecycleState::Healthy));
     assert_eq!(instance.consecutive_failures(), 1);
     instance

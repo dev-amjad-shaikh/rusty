@@ -15,11 +15,11 @@
 
 use std::path::PathBuf;
 
-use axum::body::{to_bytes, Body, Bytes};
-use axum::http::{Request, StatusCode};
 use axum::Router;
-use rusty_agent_server::{router, GraphRegistry, ServerConfig};
-use serde_json::{json, Value};
+use axum::body::{Body, Bytes, to_bytes};
+use axum::http::{Request, StatusCode};
+use rusty_agent_server::{GraphRegistry, ServerConfig, router};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 /// The plaintext credential the vault-bridge tests register. Distinctive,
@@ -785,6 +785,155 @@ async fn no_connector_answer_carries_credential_material() {
             file.display()
         );
     }
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+// --------------------------------------------------------------------- //
+// Instance config params
+// --------------------------------------------------------------------- //
+
+/// An `http-api` manifest templating its base URL on the `instance`
+/// config param — the ServiceNow pack's shape, trimmed to one operation.
+fn tenant_api_manifest() -> Value {
+    json!({
+        "id": "tenant-api",
+        "version": "1.0.0",
+        "display_name": "Tenant API",
+        "description": "An http-api connector whose base URL templates the instance subdomain.",
+        "provider": {
+            "kind": "http_api",
+            "base_url": "https://{instance}.example.test",
+            "auth": {"style": "basic", "username_slot": "username", "password_slot": "password"},
+            "default_headers": [],
+            "health_check": null,
+            "operations": [{
+                "name": "ping",
+                "description": "Ping the tenant API.",
+                "method": "GET",
+                "path": "/v1/ping",
+                "params_schema": {"type": "object"},
+                "query_params": [],
+                "body": {"type": "none"},
+                "effect": "read_only",
+                "response": {"projection": null, "max_bytes": null},
+                "timeout_ms": null,
+                "idempotency_key_header": null,
+            }],
+        },
+        "capabilities": ["tenant api"],
+        "credential_slots": [
+            {"name": "username", "description": "The user name."},
+            {"name": "password", "description": "The password."},
+        ],
+        "config_params": [{"name": "instance", "description": "The instance subdomain."}],
+    })
+}
+
+/// Instantiate with credentials and config; returns `(status, body)`.
+async fn instantiate_full(
+    app: &Router,
+    manifest_hash: &str,
+    credentials: Value,
+    config: Value,
+) -> (StatusCode, Value) {
+    call(
+        app,
+        "POST",
+        "/connectors/instances",
+        Some(json!({
+            "manifest_hash": manifest_hash,
+            "credentials": credentials,
+            "config": config,
+        })),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn instantiate_validates_config_against_the_manifest() {
+    let (app, store) = app();
+    let receipt = publish(&app, None, tenant_api_manifest()).await;
+    let hash = receipt["manifest_hash"].as_str().unwrap().to_owned();
+    // Both basic-auth slots may bind the same connection — the bridge
+    // resolves each slot through its own id, and one id is fine here.
+    let connection_id = register_connection(&app, None).await;
+    let credentials = json!({"username": connection_id, "password": connection_id});
+
+    // A missing declared param is a 422 naming it — before any vault work.
+    let (status, v) = instantiate_full(&app, &hash, credentials.clone(), json!({})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "body: {v}");
+    assert!(v.to_string().contains("config param `instance`"), "{v}");
+
+    // An undeclared key is a 422 naming it.
+    let (status, v) = instantiate_full(
+        &app,
+        &hash,
+        credentials.clone(),
+        json!({"instance": "dev123", "region": "eu"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "body: {v}");
+    assert!(v.to_string().contains("config key `region`"), "{v}");
+
+    // Empty, oversized, and URL-structure-smuggling values all fail.
+    for bad in [
+        json!({"instance": ""}),
+        json!({"instance": "x".repeat(2049)}),
+        json!({"instance": "dev123?debug=1"}),
+        json!({"instance": "dev123#frag"}),
+    ] {
+        let (status, v) = instantiate_full(&app, &hash, credentials.clone(), bad).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "body: {v}");
+    }
+
+    // The exact declared set instantiates; the view carries the config
+    // (non-secret) and no credential material.
+    let (status, v) =
+        instantiate_full(&app, &hash, credentials, json!({"instance": "dev123"})).await;
+    assert_eq!(status, StatusCode::CREATED, "instantiate failed: {v}");
+    assert_eq!(v["instance"]["config"]["instance"], "dev123");
+    assert!(!v.to_string().contains(MARKER));
+
+    // A manifest declaring no config params rejects an unexpected key.
+    let receipt = publish(&app, None, search_manifest()).await;
+    let hash = receipt["manifest_hash"].as_str().unwrap().to_owned();
+    let (status, v) = instantiate_full(&app, &hash, json!({}), json!({"instance": "dev123"})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "body: {v}");
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn instance_config_persists_and_replays_across_a_restart() {
+    let store = temp_store();
+    let first = app_with(store.clone(), |config| config);
+    let receipt = publish(&first, None, tenant_api_manifest()).await;
+    let hash = receipt["manifest_hash"].as_str().unwrap().to_owned();
+    let connection_id = register_connection(&first, None).await;
+    let credentials = json!({"username": connection_id, "password": connection_id});
+    let (status, v) =
+        instantiate_full(&first, &hash, credentials, json!({"instance": "dev123"})).await;
+    assert_eq!(status, StatusCode::CREATED, "instantiate failed: {v}");
+    let instance_id = v["instance"]["instance_id"].as_str().unwrap().to_owned();
+    drop(first);
+
+    // A fresh process over the same root replays the config exactly: the
+    // restored instance carries it and reconnects against the substituted
+    // base URL (the pack declares no health check, so connect is the
+    // declarative catalog derivation — no network).
+    let second = app_with(store.clone(), |config| config);
+    let (status, v) = call(&second, "GET", "/connectors/instances", None).await;
+    assert_eq!(status, StatusCode::OK, "post-restart list failed: {v}");
+    let instances = v["instances"].as_array().unwrap();
+    assert_eq!(instances.len(), 1);
+    assert_eq!(instances[0]["instance_id"], instance_id);
+    assert_eq!(instances[0]["config"]["instance"], "dev123");
+    assert_eq!(instances[0]["state"], "pending");
+
+    let connected = connect_healthy(&second, &instance_id).await;
+    assert_eq!(connected["instance"]["config"]["instance"], "dev123");
+    assert_eq!(connected["instance"]["catalog_generation"], 1);
 
     let _ = std::fs::remove_dir_all(store);
 }

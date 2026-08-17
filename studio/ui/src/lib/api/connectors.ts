@@ -14,6 +14,15 @@ export const credentialSlotSchema = z.object({
   description: z.string().max(256),
 }).strict();
 
+// Mirrors `ConfigParam` in `connector/manifest.rs`: non-secret per-instance
+// values the operator supplies at instantiate time (e.g. a ServiceNow
+// subdomain), which the manifest's base url references as `{name}`
+// placeholders.
+export const configParamSchema = z.object({
+  name: z.string().min(1).max(64),
+  description: z.string().max(256),
+}).strict();
+
 const searchAuthSchema = z.object({
   header: z.string().min(1).max(128),
   credential_slot: z.string().min(1).max(64),
@@ -108,6 +117,9 @@ export const connectorManifestSchema = z.object({
   provider: providerKindSchema,
   capabilities: z.array(z.string().max(256)).max(64),
   credential_slots: z.array(credentialSlotSchema).max(16),
+  // The server omits the key when empty; default fills it so the type is
+  // non-optional either way.
+  config_params: z.array(configParamSchema).max(16).default([]),
   hash: sha256hex,
 }).strict();
 
@@ -121,10 +133,12 @@ export const manifestPayloadSchema = z.object({
   provider: providerKindSchema,
   capabilities: z.array(z.string()).optional(),
   credential_slots: z.array(credentialSlotSchema).optional(),
+  config_params: z.array(configParamSchema).optional(),
   hash: z.string().optional(),
 }).strict();
 
 export type CredentialSlot = z.infer<typeof credentialSlotSchema>;
+export type ConfigParam = z.infer<typeof configParamSchema>;
 export type ProviderKind = z.infer<typeof providerKindSchema>;
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
 export type ManifestPayload = z.infer<typeof manifestPayloadSchema>;
@@ -179,6 +193,10 @@ export const connectorInstanceSchema = z.object({
   last_health_check_ms: z.number().int().nonnegative().nullable(),
   catalog_generation: z.number().int().positive().nullable(),
   catalog_hash: sha256hex.nullable(),
+  // Non-secret per-instance config (the manifest's declared config params,
+  // e.g. a ServiceNow subdomain). Always present in the view — empty object
+  // when the manifest declares no params.
+  config: z.record(z.string(), z.string()),
   created_at: dateTime,
   updated_at: dateTime,
 }).strict();
@@ -217,6 +235,9 @@ export async function listConnectorInstances(): Promise<ConnectorInstance[]> {
 export interface CreateInstanceInput {
   manifest_hash: string;
   credentials: Record<string, string>;
+  // Every config param the manifest declares must carry a value — the
+  // server answers an exact-set mismatch (missing or extra key) with a 422.
+  config: Record<string, string>;
 }
 
 export async function createConnectorInstance(input: CreateInstanceInput): Promise<ConnectorInstance> {
@@ -469,6 +490,15 @@ export async function registerVaultConnection(grant: PasswordGrant): Promise<Vau
 /// message to the exact row.
 export function slotNamedInError(message: string): string | null {
   const match = /credential slot `([^`]+)`/.exec(message);
+  return match ? match[1] : null;
+}
+
+/// The instantiate 422 also names a refused config key
+/// (`config param `instance` requires a value`,
+/// `config key `instance` is not a config param the manifest declares`).
+/// Extract it so the panel can pin the message to the config field.
+export function configParamNamedInError(message: string): string | null {
+  const match = /config (?:param|key) `([^`]+)`/.exec(message);
   return match ? match[1] : null;
 }
 

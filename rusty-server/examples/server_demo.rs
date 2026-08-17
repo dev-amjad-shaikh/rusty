@@ -24,8 +24,8 @@ use rusty_agent_runtime::tool::builtins::{
     CalculatorTool, KnowledgeDocument, KnowledgeSearchTool, SandboxedDocumentReaderTool,
     TextInspectorTool,
 };
-use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
-use serde_json::{json, Value};
+use rusty_agent_server::{GraphRegistry, ServerConfig, serve};
+use serde_json::{Value, json};
 
 /// A deterministic local model that exercises the complete tool pipeline on
 /// every new thread. It keeps the demo credential-free while producing real
@@ -142,17 +142,13 @@ fn build_react_graph() -> Result<(Graph, StateSpec, ToolRegistry)> {
 /// restart against a store that already holds the pack converges with
 /// `already_registered: true`, and nothing here blocks serving.
 ///
-/// The pack pins the placeholder `example` instance
-/// (`https://example.service-now.com`); `RUSTY_DEMO_SERVICENOW_INSTANCE`
-/// names a real instance label for a demo pointed at a live tenant. To
-/// keep the pinned manifest and reach the same instance, register the
-/// pack's manifest for that label through `POST /connectors/manifests`
-/// (see `rusty-agent-runtime`'s `pack_manifests` example).
-async fn seed_servicenow_manifest(
-    addr: std::net::SocketAddr,
-    instance: &str,
-) -> std::result::Result<(), String> {
-    let manifest = packs::servicenow(instance).map_err(|e| e.to_string())?;
+/// The pack is instance-agnostic: it declares an `instance` config param
+/// and pins `https://{instance}.service-now.com`. The operator names the
+/// real instance at instantiation — Studio's instantiate journey asks for
+/// it next to the credentials, or `POST /connectors/instances` takes it as
+/// `config: {"instance": "<subdomain>"}`.
+async fn seed_servicenow_manifest(addr: std::net::SocketAddr) -> std::result::Result<(), String> {
+    let manifest = packs::servicenow().map_err(|e| e.to_string())?;
     let base = format!("http://{addr}");
     let client = reqwest::Client::new();
 
@@ -218,13 +214,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Seed the connector plane once the listener is up (see the function's
     // docs): Studio's credential walkthrough needs the ServiceNow pack on a
     // fresh store, and the POST is idempotent by content hash on an old one.
-    let seed_instance =
-        std::env::var("RUSTY_DEMO_SERVICENOW_INSTANCE").unwrap_or_else(|_| "example".to_string());
     {
         let seed_addr = config.bind_addr;
-        let seed_instance = seed_instance.clone();
         tokio::spawn(async move {
-            if let Err(error) = seed_servicenow_manifest(seed_addr, &seed_instance).await {
+            if let Err(error) = seed_servicenow_manifest(seed_addr).await {
                 tracing::warn!(error = %error, "ServiceNow demo manifest seeding skipped");
             }
         });
@@ -263,7 +256,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("    -H 'content-type: application/json' -d '{{\"run_id\": \"'$RUN_ID'\"}}' | jq");
     println!("  curl -s '{base}/runs/diff?base='$RUN_ID'&branch='$FORK_RUN_ID'' | jq\n");
     println!("  # connector plane: the ServiceNow Table API pack manifest is seeded");
-    println!("  # on boot, pinned to the placeholder `{seed_instance}` instance");
+    println!("  # on boot, instance-agnostic; instantiation supplies the subdomain");
+    println!("  # as config: {{\"instance\": \"<subdomain>\"}}");
     println!("  curl -s {base}/connectors/manifests | jq\n");
     println!("  # ReAct agent (deterministic local model; no network)");
     println!("  REACT=$(curl -s -X POST {base}/threads \\");

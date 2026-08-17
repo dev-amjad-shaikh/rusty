@@ -34,29 +34,29 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
 use rusty_agent_runtime::composer::{
-    publish_effect_id, ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession,
-    PublishComposedSkillTool,
+    ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession, PublishComposedSkillTool,
+    publish_effect_id,
 };
 use rusty_agent_runtime::connector::{
-    packs, CredentialHandle, HttpApiProvider, HttpApiRequest, HttpApiTool, HttpApiTransport,
-    HttpMethod, HttpResponse,
+    CredentialHandle, HttpApiProvider, HttpApiRequest, HttpApiTool, HttpApiTransport, HttpMethod,
+    HttpResponse, packs,
 };
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::learn::Candidate;
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::self_improve::{
     BacklogEntry, BacklogProvenance, BacklogStatus, BacklogStore, BuildGapSkillTool,
-    CapabilityInspection, InspectCapabilitiesTool, Plane, ProposeBacklogTool,
-    FEATURE_CAPABILITY_SETS, HARNESS_PROVENANCE,
+    CapabilityInspection, FEATURE_CAPABILITY_SETS, HARNESS_PROVENANCE, InspectCapabilitiesTool,
+    Plane, ProposeBacklogTool,
 };
 use rusty_agent_runtime::skill::{SkillPackage, SkillRegistry};
 use rusty_agent_runtime::tool::builtins::cli::{CliPolicy, CliTool};
 use rusty_agent_server::{
-    serve, ExperimentOutcome, GraphRegistry, ServerConfig, StudioExperimentConfig,
-    StudioExperimentEvaluator,
+    ExperimentOutcome, GraphRegistry, ServerConfig, StudioExperimentConfig,
+    StudioExperimentEvaluator, serve,
 };
 use rusty_eval::{Dataset, ExperimentReport};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The fixture day every calendar journey runs against. Fixed so the slot
 /// arithmetic above stays a documented, testable fact rather than a moving
@@ -880,8 +880,8 @@ impl ChatModel for CalendarModel {
                         .unwrap_or_default();
                     if Self::wants_booking(&user) {
                         match first_free_slot(&items) {
-                            Some((start, end)) => ChatMessage::assistant_tool_calls(vec![
-                                ToolCall::new(
+                            Some((start, end)) => {
+                                ChatMessage::assistant_tool_calls(vec![ToolCall::new(
                                     "call_create_event",
                                     "google-calendar:create-event",
                                     json!({
@@ -891,8 +891,8 @@ impl ChatModel for CalendarModel {
                                         "start": {"dateTime": start, "timeZone": "UTC"},
                                         "end": {"dateTime": end, "timeZone": "UTC"},
                                     }),
-                                ),
-                            ]),
+                                )])
+                            }
                             None => ChatMessage::assistant(format!(
                                 "No free 30-minute slot remains in the 09:00–17:00 window on {DEMO_DAY}; nothing was booked."
                             )),
@@ -1161,7 +1161,9 @@ impl ChatModel for ComposerModel {
                     "Composed and published `{}` at revision {} (approved by {}), and listed the skills directory read-only.",
                     receipt["name"].as_str().unwrap_or(COMPOSED_NAME),
                     receipt["revision"].as_i64().unwrap_or(1),
-                    receipt["approved_by"].as_str().unwrap_or("ops:harness-demo")
+                    receipt["approved_by"]
+                        .as_str()
+                        .unwrap_or("ops:harness-demo")
                 ))
             }
         };
@@ -1194,8 +1196,7 @@ const RUNBOOK_BODY: &str = "# Incident Review\n\n1. List the open priority-1 inc
 /// rationale are the entry's identity — keep them byte-stable so restarts
 /// converge on the same content-derived id).
 const RUNBOOK_ENTRY_TITLE: &str = "Ship the incident-review runbook skill";
-const RUNBOOK_ENTRY_RATIONALE: &str =
-    "operator-runbooks is Absent: no `runbook-*` skill is registered, and the incident-review \
+const RUNBOOK_ENTRY_RATIONALE: &str = "operator-runbooks is Absent: no `runbook-*` skill is registered, and the incident-review \
      workflow recurs across sessions — it belongs in a governed, scanned package.";
 
 /// The self-improver: introspect the demo's own registries, record backlog
@@ -1413,10 +1414,15 @@ fn build_calendar_graph() -> Result<(Graph, StateSpec, ToolRegistry)> {
     Ok((graph, spec, tools))
 }
 
-/// `servicenow_operator`: the ServiceNow pack over the fixture tenant.
+/// `servicenow_operator`: the ServiceNow pack over the fixture tenant. The
+/// pack is instance-agnostic, so the fixture instance (`harness`) arrives
+/// as the provider's config — the same path a real instance takes.
 fn build_servicenow_graph() -> Result<(Graph, StateSpec, ToolRegistry)> {
-    let manifest = packs::servicenow("harness")?;
-    let provider = HttpApiProvider::from_manifest(&manifest)?;
+    let manifest = packs::servicenow()?;
+    let provider =
+        HttpApiProvider::from_manifest(&manifest)?.with_config(std::collections::BTreeMap::from([
+            ("instance".to_owned(), "harness".to_owned()),
+        ]));
     let transport: Arc<dyn HttpApiTransport> = Arc::new(ServiceNowFixture::seeded());
     let credentials = || -> Result<Vec<CredentialHandle>> {
         Ok(vec![
@@ -1586,10 +1592,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .into_iter()
         .flat_map(|tools| tools.names().map(str::to_owned).collect::<Vec<_>>())
         .collect();
-    let connector_manifest_ids = vec![
-        packs::google_calendar()?.id,
-        packs::servicenow("harness")?.id,
-    ];
+    let connector_manifest_ids = vec![packs::google_calendar()?.id, packs::servicenow()?.id];
     let (self_improver, self_improver_spec, self_improver_tools) =
         build_self_improver_graph(backlog, skills, host_tool_names, connector_manifest_ids)?;
 
@@ -1636,19 +1639,25 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("    -d '{{\"graph\": \"calendar_manager\"}}' | jq -r .thread_id)");
     println!("  curl -s -X POST {base}/threads/$THREAD/runs/wait \\");
     println!("    -H 'content-type: application/json' \\");
-    println!("    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Show my day and book a 30-minute slot.\"}}]}}}}' | jq\n");
+    println!(
+        "    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Show my day and book a 30-minute slot.\"}}]}}}}' | jq\n"
+    );
     println!("  # the same booking under a per-run tool allowlist (create is refused,");
     println!("  # the run still completes, and the refusal is journaled)");
     println!("  curl -s -X POST {base}/threads/$THREAD/runs/wait \\");
     println!("    -H 'content-type: application/json' \\");
-    println!("    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Show my day and book a 30-minute slot.\"}}]}}, \"config\": {{\"tool_allowlist\": [\"google-calendar:list-events\"]}}}}' | jq\n");
+    println!(
+        "    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Show my day and book a 30-minute slot.\"}}]}}, \"config\": {{\"tool_allowlist\": [\"google-calendar:list-events\"]}}}}' | jq\n"
+    );
     println!("  # the ServiceNow operator files a KB article from the open incidents");
     println!("  SN=$(curl -s -X POST {base}/threads \\");
     println!("    -H 'content-type: application/json' \\");
     println!("    -d '{{\"graph\": \"servicenow_operator\"}}' | jq -r .thread_id)");
     println!("  curl -s -X POST {base}/threads/$SN/runs/wait \\");
     println!("    -H 'content-type: application/json' \\");
-    println!("    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Show open high-priority incidents and file a KB article about the top theme.\"}}]}}}}' | jq\n");
+    println!(
+        "    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Show open high-priority incidents and file a KB article about the top theme.\"}}]}}}}' | jq\n"
+    );
     println!("  # the composer drafts a skill, publishes it under its pre-minted");
     println!("  # approval, and proves run_cli is read-only and allowlisted");
     println!("  STUDIO=$(curl -s -X POST {base}/threads \\");
@@ -1656,7 +1665,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("    -d '{{\"graph\": \"composer_studio\"}}' | jq -r .thread_id)");
     println!("  curl -s -X POST {base}/threads/$STUDIO/runs/wait \\");
     println!("    -H 'content-type: application/json' \\");
-    println!("    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Compose the standup brief skill, publish it, and list the skills directory.\"}}]}}}}' | jq\n");
+    println!(
+        "    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Compose the standup brief skill, publish it, and list the skills directory.\"}}]}}}}' | jq\n"
+    );
     println!("  # the self-improver introspects its own capabilities, records backlog");
     println!("  # entries for the top gaps, and stages a runbook skill behind the");
     println!("  # composer's approval gate (publishing stays with the operator)");
@@ -1665,7 +1676,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("    -d '{{\"graph\": \"self_improver\"}}' | jq -r .thread_id)");
     println!("  curl -s -X POST {base}/threads/$LOOP/runs/wait \\");
     println!("    -H 'content-type: application/json' \\");
-    println!("    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Inspect your capabilities, record the top gaps, and stage the runbook skill.\"}}]}}}}' | jq\n");
+    println!(
+        "    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"Inspect your capabilities, record the top gaps, and stage the runbook skill.\"}}]}}}}' | jq\n"
+    );
     println!("  # every run's journaled evidence (run_id is in the terminal JSON)");
     println!("  curl -s {base}/runs/$RUN_ID/events | jq\n");
     println!("  # the governed surfaces the flow test drives: skills, memory,");

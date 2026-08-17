@@ -12,13 +12,14 @@
 //! tests drive a scripted fake and real reqwest wiring is a server-slice
 //! concern.
 
+use std::collections::BTreeMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::process::{Child, Command};
 
 use super::conn_err;
@@ -27,7 +28,7 @@ use super::manifest::{ConnectorManifest, ProviderKind, SearchAuth};
 use crate::error::Result;
 use crate::mcp::{McpClient, McpToolInfo};
 use crate::record::Effect;
-use crate::tool::{Tool, ToolCapability, MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_SCHEMA_BYTES};
+use crate::tool::{MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_SCHEMA_BYTES, Tool, ToolCapability};
 
 /// Maximum length of one derived catalog tool name (`<connector>/<tool>`).
 pub(crate) const MAX_DERIVED_TOOL_NAME_LEN: usize = 128;
@@ -62,7 +63,9 @@ pub trait ProviderSession: std::fmt::Debug + Send + Sync {
 ///
 /// `credentials` are the handles resolved for the manifest's declared
 /// slots, owned by the registry entry; providers read secrets at the
-/// moment of use and store none.
+/// moment of use and store none. `config` carries the instance's
+/// non-secret config values (the manifest's declared config params);
+/// providers whose manifests declare no placeholders ignore it.
 #[async_trait]
 pub trait ConnectorProvider: std::fmt::Debug + Send + Sync {
     /// Establish a session for `manifest`. A provider given a manifest of
@@ -71,6 +74,7 @@ pub trait ConnectorProvider: std::fmt::Debug + Send + Sync {
         &self,
         manifest: &ConnectorManifest,
         credentials: &[CredentialHandle],
+        config: &BTreeMap<String, String>,
     ) -> Result<Box<dyn ProviderSession>>;
 }
 
@@ -123,6 +127,7 @@ impl ConnectorProvider for McpStdioProvider {
         &self,
         manifest: &ConnectorManifest,
         _credentials: &[CredentialHandle],
+        _config: &BTreeMap<String, String>,
     ) -> Result<Box<dyn ProviderSession>> {
         let spec = match &manifest.provider {
             ProviderKind::McpStdio(spec) => spec,
@@ -131,7 +136,7 @@ impl ConnectorProvider for McpStdioProvider {
                     "manifest `{}` is {}; McpStdioProvider cannot serve it",
                     manifest.id,
                     provider_kind_name(&manifest.provider)
-                )))
+                )));
             }
         };
         let (client, child) = spawn_stdio(spec)?;
@@ -597,6 +602,7 @@ impl ConnectorProvider for HttpSearchProvider {
         &self,
         manifest: &ConnectorManifest,
         _credentials: &[CredentialHandle],
+        _config: &BTreeMap<String, String>,
     ) -> Result<Box<dyn ProviderSession>> {
         match &manifest.provider {
             ProviderKind::HttpSearch(_) => Ok(Box::new(HttpSearchSession {
