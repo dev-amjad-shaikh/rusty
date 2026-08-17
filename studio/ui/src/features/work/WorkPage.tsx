@@ -2,11 +2,10 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { parse as parseLossless, stringify as stringifyLossless } from "lossless-json";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { connectionScope, createThread, getRun, getRunEvidence, listAssistants, mutationScope, startRun, StudioApiError } from "../../lib/api/client";
+import { createThread, getRun, getRunEvidence, listAssistants, startRun, StudioApiError } from "../../lib/api/client";
 import type { Assistant, RunEvent, RunEvidence, RunSnapshot } from "../../lib/contracts";
-import { useConnectionStore } from "../../state/connection";
 import { type EvaluationCase, evaluationDatasetJsonl, useWorkStore } from "../../state/work";
-import { durableConnectionScope, readRecentWork, rememberRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
+import { readRecentWork, rememberRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
 import { bytePreview } from "../../lib/text";
 import { ArtifactTray } from "./artifacts/ArtifactTray";
 import { EvaluationLane } from "./evaluations/EvaluationLane";
@@ -22,38 +21,19 @@ export function WorkPage() {
   const params = useParams({ strict: false }) as { threadId?: string; runId?: string };
   const pathname = useLocation({ select: (location) => location.pathname });
   const stage: Stage = pathname.endsWith("/trace") ? "trace" : pathname.endsWith("/evaluate") ? "evaluate" : "run";
-  const { connection, openDialog } = useConnectionStore();
   const work = useWorkStore();
-  const scope = connection ? connectionScope(connection) : "disconnected";
-  const durableScope = connection ? durableConnectionScope(connection) : "disconnected";
-  const durableMutationScope = connection ? mutationScope(connection) : "disconnected";
-  const ownedWork = work.connectionKey === scope;
-  const ownsRoute = ownedWork && (!params.runId || (work.receipt?.run_id === params.runId && work.thread?.thread_id === params.threadId));
+  const ownsRoute = !params.runId || (work.receipt?.run_id === params.runId && work.thread?.thread_id === params.threadId);
   const [selectedAgentId, setSelectedAgentId] = useState(work.assistant?.assistant_id ?? "");
   const [objective, setObjective] = useState(work.objective);
   const [error, setError] = useState("");
-  const [recentIds, setRecentIds] = useState<RecentWorkIdentity[]>(() => connection ? readRecentWork(durableScope) : []);
-  const uncertainty = work.uncertainByConnection[durableMutationScope] ?? "";
-  const draftScope = useRef(scope);
-  const drafts = useRef(new Map<string, { selectedAgentId: string; objective: string }>());
+  const [recentIds, setRecentIds] = useState<RecentWorkIdentity[]>(() => readRecentWork());
+  const uncertainty = work.uncertain;
   const launchOwner = useRef({ mounted: true, operationId: "" });
 
   useEffect(() => {
     launchOwner.current.mounted = true;
     return () => { launchOwner.current.mounted = false; };
   }, []);
-
-  useEffect(() => {
-    if (draftScope.current === scope) return;
-    drafts.current.set(draftScope.current, { selectedAgentId, objective });
-    const next = drafts.current.get(scope);
-    setSelectedAgentId(next?.selectedAgentId ?? (ownedWork ? work.assistant?.assistant_id ?? "" : ""));
-    setObjective(next?.objective ?? (ownedWork ? work.objective : ""));
-    setError("");
-    draftScope.current = scope;
-  }, [objective, ownedWork, scope, selectedAgentId, work.assistant?.assistant_id, work.objective]);
-
-  useEffect(() => { setRecentIds(connection ? readRecentWork(durableScope) : []); }, [connection, durableScope]);
 
   const assistants = useQuery({
     queryKey: ["assistants"],
@@ -73,7 +53,7 @@ export function WorkPage() {
     retry: (count, caught) => caught instanceof StudioApiError && caught.status === 404 ? count < 3 : count < 1,
   });
   const recentRuns = useQueries({
-    queries: connection && !params.runId ? recentIds.slice(0, 6).map((item) => ({
+    queries: !params.runId ? recentIds.slice(0, 6).map((item) => ({
       queryKey: ["recent-run", item.runId],
       queryFn: () => getRun(item.runId),
       retry: false,
@@ -81,40 +61,36 @@ export function WorkPage() {
     })) : [],
   });
   const launch = useMutation({
-    mutationFn: async (input: { connection: NonNullable<typeof connection>; scope: string; mutationScope: string; durableScope: string; operationId: string; agent: Assistant; objective: string }) => {
+    mutationFn: async (input: { operationId: string; agent: Assistant; objective: string }) => {
       let threadCreated = false;
       try {
-        const thread = await createThread(input.connection, input.agent.graph, input.agent.assistant_id);
+        const thread = await createThread(input.agent.graph, input.agent.assistant_id);
         threadCreated = true;
-        const receipt = await startRun(input.connection, thread, input.agent.assistant_id, input.agent.active_version_id, input.objective);
+        const receipt = await startRun(thread, input.agent.assistant_id, input.agent.active_version_id, input.objective);
         return { ...input, thread, receipt };
       } catch (caught) {
         if (caught instanceof StudioApiError && caught.status === 409 && !caught.mayHaveCommitted) {
           throw new StudioApiError("This agent changed after you opened it. Review the current active version, then choose the agent again.", 409);
         }
         if (threadCreated || (caught instanceof StudioApiError && caught.mayHaveCommitted)) {
-          work.markUncertain(input.mutationScope, "Rusty may have accepted part or all of this launch. Check server work before allowing another run.");
+          work.markUncertain("Rusty may have accepted part or all of this launch. Check server work before allowing another run.");
           throw new StudioApiError("The launch result is uncertain. Studio locked retry to avoid duplicate work.", caught instanceof StudioApiError ? caught.status : 0, true);
         }
         throw caught;
       }
     },
-    onSuccess: ({ agent, thread, receipt, objective: exactObjective, scope: initiatingScope, durableScope: initiatingDurableScope, operationId }) => {
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== initiatingScope) return;
-      const recent = rememberRecentWork(initiatingDurableScope, { threadId: thread.thread_id, runId: receipt.run_id });
+    onSuccess: ({ agent, thread, receipt, objective: exactObjective, operationId }) => {
+      const recent = rememberRecentWork({ threadId: thread.thread_id, runId: receipt.run_id });
       if (!launchOwner.current.mounted || launchOwner.current.operationId !== operationId) return;
-      work.clearUncertain(mutationScope(current));
-      work.begin(initiatingScope, agent, exactObjective, thread, receipt);
+      work.clearUncertain();
+      work.begin(agent, exactObjective, thread, receipt);
       setRecentIds(recent);
       setError("");
       navigate({ to: "/work/$threadId/runs/$runId", params: { threadId: thread.thread_id, runId: receipt.run_id } });
     },
     onError: (caught, input) => {
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scope) return;
       if (caught instanceof StudioApiError && caught.status === 409 && !caught.mayHaveCommitted) {
-        work.expirePrepared(input.scope, input.agent.assistant_id, input.agent.active_version_id);
+        work.expirePrepared(input.agent.assistant_id, input.agent.active_version_id);
       }
       if (!launchOwner.current.mounted || launchOwner.current.operationId !== input.operationId) return;
       if (caught instanceof StudioApiError && caught.status === 409 && !caught.mayHaveCommitted) {
@@ -126,7 +102,6 @@ export function WorkPage() {
   });
 
   function submitLaunch() {
-    if (!connection) { openDialog(); return; }
     if (uncertainty) return;
     const prepared = ownsRoute && work.assistant?.assistant_id === selectedAgentId ? work.assistant : null;
     const agent = prepared ?? assistants.data?.find((item) => item.assistant_id === selectedAgentId && !item.archived_at);
@@ -136,7 +111,7 @@ export function WorkPage() {
     setError("");
     const operationId = crypto.randomUUID();
     launchOwner.current.operationId = operationId;
-    launch.mutate({ connection, scope, mutationScope: durableMutationScope, durableScope, operationId, agent, objective: exactObjective });
+    launch.mutate({ operationId, agent, objective: exactObjective });
   }
 
   const exactRun = run.data && run.data.run_id === params.runId && run.data.thread_id === params.threadId ? run.data : null;
@@ -153,13 +128,13 @@ export function WorkPage() {
   useEffect(() => {
     if (!exactRun || exactRun.run_id !== params.runId || exactRun.thread_id !== params.threadId) return;
     if (recentIds.some((item) => item.runId === exactRun.run_id && item.threadId === exactRun.thread_id)) return;
-    setRecentIds(rememberRecentWork(durableScope, { threadId: exactRun.thread_id, runId: exactRun.run_id }));
-  }, [durableScope, exactRun, params.runId, params.threadId, recentIds]);
-  const currentComparisons = work.comparisons.filter((item) => item.connectionKey === scope);
+    setRecentIds(rememberRecentWork({ threadId: exactRun.thread_id, runId: exactRun.run_id }));
+  }, [exactRun, params.runId, params.threadId, recentIds]);
+  const currentComparisons = work.comparisons;
   useEffect(() => {
     if (!exactRun || !exactEvidence?.complete || currentComparisons.some((item) => item.run.run_id === exactRun.run_id) || !["success", "error", "interrupted", "cancelled"].includes(exactRun.status)) return;
-    work.rememberRun({ connectionKey: scope, run: exactRun, evidence: exactEvidence, agentName: activeAgent?.name ?? exactRun.graph, objective: routeObjective });
-  }, [activeAgent, currentComparisons, exactEvidence, exactRun, routeObjective, scope, work]);
+    work.rememberRun({ run: exactRun, evidence: exactEvidence, agentName: activeAgent?.name ?? exactRun.graph, objective: routeObjective });
+  }, [activeAgent, currentComparisons, exactEvidence, exactRun, routeObjective, work]);
 
   function openStage(next: Stage) {
     if (!params.runId || !params.threadId) return;
@@ -170,16 +145,16 @@ export function WorkPage() {
   return (
     <section className={`page ${styles.workPage}`} aria-labelledby="work-heading">
       <PageHeader headingId="work-heading" eyebrow="Work" title="Run & evaluate" description="Start a task, follow its exact trace, and turn the result into an evaluation." actions={currentComparisons.length >= 2 ? <Link className="secondary-button" to="/work/compare">Compare runs</Link> : undefined} />
-      {!connection ? <div className="empty-state"><span className="eyebrow">One continuous workspace</span><h2>Open a workspace to start work</h2><p>Your agents, runs, and evidence live together in a Rusty workspace.</p><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div> : (
+      {(
         <div className={styles.workspace}>
           <header className={styles.contextBar}><div><span>Agent</span><b>{activeAgent?.name ?? exactRun?.graph ?? "New work"}</b></div><div><span>Status</span><b className={styles.status}>{exactRun?.status ?? (launch.isPending ? "starting" : "not started")}</b></div><div className={styles.identity}><span>Thread / run</span><code>{params.threadId ? `${short(params.threadId)} / ${short(params.runId ?? "")}` : "Created when you start"}</code></div></header>
           <nav className={styles.stages} aria-label="Work stages">{stages.map((item, index) => <button type="button" key={item} aria-current={stage === item ? "step" : undefined} onClick={() => openStage(item)} disabled={(item === "trace" && !traceReady) || (item === "evaluate" && !evaluationReady) || (!params.runId && item !== "run")}><span>{index + 1}</span>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
-          {stage === "run" && !routedRun && uncertainty ? <div className="empty-state" role="alert"><span className="eyebrow">Launch needs review</span><h2>Check Rusty before starting again</h2><p>{uncertainty}</p><button className="secondary-button" type="button" onClick={() => { work.clearUncertain(durableMutationScope); setError(""); }}>I checked the server — allow another run</button></div> : null}
+          {stage === "run" && !routedRun && uncertainty ? <div className="empty-state" role="alert"><span className="eyebrow">Launch needs review</span><h2>Check Rusty before starting again</h2><p>{uncertainty}</p><button className="secondary-button" type="button" onClick={() => { work.clearUncertain(); setError(""); }}>I checked the server — allow another run</button></div> : null}
           {stage === "run" && ((!routedRun && !uncertainty) || (routedRun && exactRun && exactEvidence && !run.isError && !evidence.isError && !envelopeMismatch)) && <RunWorkspace assistants={assistants.data ?? []} selectedAgentId={selectedAgentId} setSelectedAgentId={setSelectedAgentId} objective={routedRun ? routeObjective : objective} setObjective={setObjective} submit={submitLaunch} pending={launch.isPending} error={error} run={exactRun} evidence={exactEvidence} recent={recentIds.slice(0, 6).map((identity, index) => ({ identity, run: recentRuns[index]?.data ?? null, loading: recentRuns[index]?.isLoading ?? false, unavailable: recentRuns[index]?.isError ?? false }))} openTrace={() => openStage("trace")} />}
           {routedRun && (run.isError || evidence.isError || envelopeMismatch) && <div className="empty-state" role="alert"><span className="eyebrow">Run evidence unavailable</span><h2>This workspace could not prove the requested run</h2><p>{envelopeMismatch ? "The run status and journal did not agree with this exact thread and run." : run.error instanceof Error ? run.error.message : evidence.error instanceof Error ? evidence.error.message : "Reload the exact run evidence."}</p><button className="secondary-button" type="button" onClick={() => { run.refetch(); evidence.refetch(); }}>Retry evidence</button></div>}
           {routedRun && !run.isError && !evidence.isError && !envelopeMismatch && (!exactRun || !exactEvidence) && <div className={styles.loading} aria-live="polite">Loading exact run evidence…</div>}
           {stage === "trace" && exactRun && exactEvidence && !run.isError && !evidence.isError && !envelopeMismatch && <TraceWorkspace evidence={exactEvidence} run={exactRun} openEvaluate={() => openStage("evaluate")} />}
-          {stage === "evaluate" && exactEvidence && exactRun && params.threadId && !run.isError && !evidence.isError && !envelopeMismatch && <EvaluateWorkspace key={`${params.threadId}\0${exactRun.run_id}`} connectionKey={scope} evidence={exactEvidence} run={exactRun} threadId={params.threadId} agent={activeAgent} objective={routeObjective} />}
+          {stage === "evaluate" && exactEvidence && exactRun && params.threadId && !run.isError && !evidence.isError && !envelopeMismatch && <EvaluateWorkspace key={`${params.threadId}\0${exactRun.run_id}`} evidence={exactEvidence} run={exactRun} threadId={params.threadId} agent={activeAgent} objective={routeObjective} />}
           {routedRun && stage !== "evaluate" && exactRun && exactEvidence && !run.isError && !evidence.isError && !envelopeMismatch && params.runId && <ArtifactTray runId={params.runId} />}
         </div>
       )}
@@ -262,10 +237,10 @@ export function traceGraphLayout(events: RunEvent[], context: RunEvent[] = event
   return events.map((event, index) => ({ event, x: 26 + (depthCache.get(event.id) ?? 0) * 196, y: 24 + index * 74 }));
 }
 
-function EvaluateWorkspace({ connectionKey, evidence, run, threadId, agent, objective }: { connectionKey: string; evidence: RunEvidence; run: RunSnapshot; threadId: string; agent: Assistant | null; objective: string }) {
+function EvaluateWorkspace({ evidence, run, threadId, agent, objective }: { evidence: RunEvidence; run: RunSnapshot; threadId: string; agent: Assistant | null; objective: string }) {
   const addCase = useWorkStore((state) => state.addCase);
   const allCases = useWorkStore((state) => state.cases);
-  const cases = useMemo(() => allCases.filter((item) => item.connectionKey === connectionKey), [allCases, connectionKey]);
+  const cases = allCases;
   const [caseId, setCaseId] = useState(`run-${run.run_id.slice(0, 8)}`);
   const outputOptions = useMemo(() => evaluationOutputOptions(run.output), [run.output]);
   const [pointer, setPointer] = useState(outputOptions[0]?.pointer ?? "");
@@ -287,7 +262,7 @@ function EvaluateWorkspace({ connectionKey, evidence, run, threadId, agent, obje
     if (cases.some((item) => item.caseId === cleanId)) { setCaseError("Each case name must be unique in this dataset."); return; }
     if (cases.length >= 100) { setCaseError("Download this 100-case dataset before starting another."); return; }
     if (!run.assistant_id) { setCaseError("This run does not carry an exact agent identity, so it cannot be published as an agent evaluation case."); return; }
-    const value = { connectionKey, caseId: cleanId, runId: run.run_id, threadId, agentName: agent?.name ?? run.assistant_id, agentId: run.assistant_id, objective, pointer, expected: expectedValue };
+    const value = { caseId: cleanId, runId: run.run_id, threadId, agentName: agent?.name ?? run.assistant_id, agentId: run.assistant_id, objective, pointer, expected: expectedValue };
     const preview = [...cases, { ...value, id: "preview", createdAt: new Date().toISOString() }];
     if (utf8(evaluationDatasetJsonl(preview)) > 128 * 1024) { setCaseError("Download this dataset before adding more source material."); return; }
     addCase(value); setCaseError(""); setSaved(true);

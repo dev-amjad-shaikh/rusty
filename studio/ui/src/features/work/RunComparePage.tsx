@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { connectionScope } from "../../lib/api/client";
 import type { RunEvent } from "../../lib/contracts";
-import { useConnectionStore } from "../../state/connection";
 import { type ComparisonRun, useWorkStore } from "../../state/work";
 import { PageHeader } from "../../components/PageHeader";
 import styles from "./RunComparePage.module.css";
@@ -22,10 +20,7 @@ function totals(item: ComparisonRun) {
 }
 
 export function RunComparePage() {
-  const connection = useConnectionStore((state) => state.connection);
-  const scope = connection ? connectionScope(connection) : "disconnected";
-  const allRuns = useWorkStore((state) => state.comparisons);
-  const runs = useMemo(() => allRuns.filter((item) => item.connectionKey === scope), [allRuns, scope]);
+  const runs = useWorkStore((state) => state.comparisons);
   const [baselineId, setBaselineId] = useState(runs.at(-2)?.run.run_id ?? runs[0]?.run.run_id ?? "");
   const [candidateId, setCandidateId] = useState(runs.at(-1)?.run.run_id ?? "");
   useEffect(() => {

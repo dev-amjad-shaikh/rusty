@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { useConnectionStore } from "../../../state/connection";
-import { connectionScope } from "../../../lib/api/client";
 import {
   clearCanary,
   createRevision,
@@ -52,30 +50,30 @@ function ModeNav() {
 }
 
 function useReleaseQueries(enabled: boolean) {
-  const baseKey = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint] : ["releases", "disconnected"];
+  const baseKey = ["releases"];
   const health = useQuery({
     queryKey: [...baseKey, "deployment-health"],
     queryFn: () => getDeploymentHealth(),
-    enabled: Boolean(enabled && connection),
+    enabled,
     refetchInterval: 15_000,
   });
   const revisions = useQuery({
     queryKey: [...baseKey, "revisions"],
     queryFn: () => listRevisions(),
-    enabled: Boolean(enabled && connection),
+    enabled,
   });
   const journal = useQuery({
     queryKey: [...baseKey, "deployment-journal"],
     queryFn: () => getDeploymentJournal(),
-    enabled: Boolean(enabled && connection),
+    enabled,
     refetchInterval: 15_000,
   });
   const environments = useQuery({
     queryKey: [...baseKey, "environments"],
     queryFn: () => listEnvironments(),
-    enabled: Boolean(enabled && connection),
+    enabled,
   });
-  return { health, revisions, journal, environments, connection };
+  return { health, revisions, journal, environments };
 }
 
 type ReleaseAction =
@@ -415,11 +413,10 @@ function SecretsPanel({ environment }: { environment?: string }) {
 }
 
 export function ReleasesPage() {
-  const { connection, openDialog } = useConnectionStore();
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { environment?: string; revisionId?: string };
   const queryClient = useQueryClient();
-  const { health, revisions, journal, environments } = useReleaseQueries(Boolean(connection));
+  const { health, revisions, journal, environments } = useReleaseQueries(true);
   const [declareOpen, setDeclareOpen] = useState(false);
   const [createRevOpen, setCreateRevOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
@@ -438,7 +435,7 @@ export function ReleasesPage() {
   }, [params.revisionId, revisions.data]);
 
   const invalidate = () => {
-    const base = [connection.epoch, connection.origin, connection.tenantFingerprint];
+    const base = ["releases"];
     queryClient.invalidateQueries({ queryKey: [...base, "deployment-health"] });
     queryClient.invalidateQueries({ queryKey: [...base, "revisions"] });
     queryClient.invalidateQueries({ queryKey: [...base, "deployment-journal"] });
@@ -497,21 +494,14 @@ export function ReleasesPage() {
     <section className="page" aria-labelledby="releases-heading">
       <header className="page-header">
         <div><span className="eyebrow">Operations</span><h1 id="releases-heading">Releases</h1><p>Move reviewed changes through environments with exact evidence.</p></div>
-        {!connection && <button type="button" className="primary-button" onClick={openDialog}>Connect Rusty</button>}
-        {connection && (
-          <div className={styles.actions}>
-            <button type="button" className="secondary-button" onClick={() => setDeclareOpen(true)}>Create environment</button>
-            <button type="button" className="secondary-button" onClick={() => setCreateRevOpen(true)}>Prepare revision</button>
-          </div>
-        )}
+        <div className={styles.actions}>
+          <button type="button" className="secondary-button" onClick={() => setDeclareOpen(true)}>Create environment</button>
+          <button type="button" className="secondary-button" onClick={() => setCreateRevOpen(true)}>Prepare revision</button>
+        </div>
       </header>
       <ModeNav />
 
-      {!connection ? (
-        <div className="empty-state"><span className="eyebrow">Releases</span><h2>Connect to manage releases</h2><p>Environments, revisions, gates, canaries, and rollback require a Rusty server.</p></div>
-      ) : (
-        <>
-          <div className={styles.workspace}>
+      <div className={styles.workspace}>
             <EnvironmentList environments={environments.data} selected={selectedEnv} onSelect={selectEnvironment} />
             {env && (
               <>
@@ -554,8 +544,6 @@ export function ReleasesPage() {
           )}
           <DeploymentTimeline events={journal.data?.events ?? []} selectedId={selectedEventId} onSelect={setSelectedEventId} />
           <SecretsPanel environment={selectedEnv} />
-        </>
-      )}
       <DeclareEnvironmentDialog open={declareOpen} onClose={() => setDeclareOpen(false)} onDeclare={() => { setDeclareOpen(false); invalidate(); }} />
       <CreateRevisionDialog open={createRevOpen} onClose={() => setCreateRevOpen(false)} environments={environments.data} onCreated={() => { setCreateRevOpen(false); invalidate(); }} />
     </section>
