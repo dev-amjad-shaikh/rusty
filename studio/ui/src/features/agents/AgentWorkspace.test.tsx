@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Assistant } from "../../lib/contracts";
 import { assistantVersionContentAddress } from "../../lib/api/assistants";
-import { useConnectionStore } from "../../state/connection";
+import { useRuntimeStore } from "../../state/runtime";
 import { useWorkStore } from "../../state/work";
 import { AgentWorkspace } from "./AgentWorkspace";
 
@@ -92,10 +92,11 @@ function renderWorkspace() {
 }
 
 beforeEach(() => {
-  useConnectionStore.setState({
-    connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "tenant" },
+  useRuntimeStore.setState({
+    status: "ready",
     info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
-    dialogOpen: false,
+    error: "",
+    attempt: 0,
   });
   useWorkStore.getState().clear();
 });
@@ -128,7 +129,7 @@ describe("Agent Workspace", () => {
     let hasDraft = false;
     let activeVersionId = v1;
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      const path = new URL(url).pathname;
+      const path = new URL(url, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path.endsWith(`/versions/${v2}/activate`) && init?.method === "POST") {
         activeVersionId = v2;
         const target = exactVersion();
@@ -167,7 +168,7 @@ describe("Agent Workspace", () => {
   it("confirms archive separately and preserves version history", async () => {
     let archived = false;
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      const path = new URL(url).pathname;
+      const path = new URL(url, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path.endsWith("/archive") && init?.method === "POST") {
         archived = true;
         return json({ assistant: assistant({ archived_at: "2026-08-11T02:00:00Z" }), changed: true, lifecycle: "archived" });
@@ -241,7 +242,7 @@ describe("Agent Workspace", () => {
     const advancedMetadata = { ...baseMetadata, release_channel: "canary" };
     const advancedVersionId = await assistantVersionContentAddress({ parent_version_id: v1, name: "Research analyst", graph: "research", config: advancedConfig, metadata: advancedMetadata });
     const advancedVersion = { version_id: advancedVersionId, parent_version_id: v1, name: "Research analyst", graph: "research", config: advancedConfig, metadata: advancedMetadata, created_at: "2026-08-11T01:00:00Z", active: false };
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => new URL(url).pathname.endsWith(`/versions/${advancedVersionId}`)
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => new URL(url, "http://studio.local").pathname.replace(/^\/api/, "").endsWith(`/versions/${advancedVersionId}`)
       ? json({ assistant_id: "analyst", active_version_id: v1, version: advancedVersion })
       : json({ ...history(), assistant: assistant({ version_count: 2 }), versions: [{ version_id: advancedVersionId, parent_version_id: v1, graph: "research", created_at: advancedVersion.created_at, active: false }, ...history().versions] })));
     renderWorkspace();
@@ -257,7 +258,7 @@ describe("Agent Workspace", () => {
     const goalsMetadata = { ...baseMetadata, goals: "Every claim is supported by a cited source" };
     const goalsVersionId = await assistantVersionContentAddress({ parent_version_id: v1, name: "Research analyst", graph: "research", config: baseConfig, metadata: goalsMetadata });
     const goalsVersion = { version_id: goalsVersionId, parent_version_id: v1, name: "Research analyst", graph: "research", config: baseConfig, metadata: goalsMetadata, created_at: "2026-08-11T01:00:00Z", active: false };
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => new URL(url).pathname.endsWith(`/versions/${goalsVersionId}`)
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => new URL(url, "http://studio.local").pathname.replace(/^\/api/, "").endsWith(`/versions/${goalsVersionId}`)
       ? json({ assistant_id: "analyst", active_version_id: v1, version: goalsVersion })
       : json({ ...history(), assistant: assistant({ version_count: 2 }), versions: [{ version_id: goalsVersionId, parent_version_id: v1, graph: "research", created_at: goalsVersion.created_at, active: false }, ...history().versions] })));
     renderWorkspace();
@@ -265,27 +266,6 @@ describe("Agent Workspace", () => {
     await userEvent.click(await screen.findByRole("button", { name: `Review version ${goalsVersionId.slice(0, 10)}…${goalsVersionId.slice(-6)}` }));
     expect(await screen.findByRole("heading", { name: "Goals" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Advanced settings" })).not.toBeInTheDocument();
-  });
-
-  it("does not let a late version receipt cross into a new connection", async () => {
-    let finishPost!: (response: Response) => void;
-    const pendingPost = new Promise<Response>((resolve) => { finishPost = resolve; });
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => init?.method === "POST" ? pendingPost : json(history())));
-    renderWorkspace();
-
-    await userEvent.click(await screen.findByRole("button", { name: "Create version" }));
-    const responsibility = screen.getByLabelText("Responsibility");
-    await userEvent.clear(responsibility);
-    await userEvent.type(responsibility, "A connection-owned revision");
-    await userEvent.click(screen.getByRole("button", { name: "Save draft version" }));
-    expect(screen.getByRole("button", { name: "Saving version…" })).toBeDisabled();
-
-    useConnectionStore.setState((state) => ({ connection: state.connection && { ...state.connection, epoch: 2, tenantFingerprint: "other-tenant" } }));
-    await screen.findByRole("heading", { name: "What this agent is set up to do" });
-    finishPost(new Response(JSON.stringify({ assistant_id: "analyst", created: true, active_version_id: v1, version: exactVersion() }), { status: 201 }));
-
-    await waitFor(() => expect(screen.queryByText("Draft version saved. The active version is unchanged.")).not.toBeInTheDocument());
-    expect(screen.getAllByText("Verify claims and cite evidence")[0]).toBeVisible();
   });
 
   it("does not let a late version receipt take over another agent", async () => {
@@ -296,7 +276,7 @@ describe("Agent Workspace", () => {
     const reviewer = assistant({ assistant_id: "reviewer", name: "Policy reviewer", metadata: reviewerMetadata, active_version_id: reviewerV1 });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === "POST") return pendingPost;
-      return new URL(url).pathname.includes("/assistants/reviewer/") ? json(history(reviewerV1, false, reviewer)) : json(history());
+      return new URL(url, "http://studio.local").pathname.replace(/^\/api/, "").includes("/assistants/reviewer/") ? json(history(reviewerV1, false, reviewer)) : json(history());
     }));
     const { router } = renderWorkspace();
 

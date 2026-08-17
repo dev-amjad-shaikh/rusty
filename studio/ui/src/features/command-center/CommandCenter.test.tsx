@@ -3,12 +3,10 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../state/connection";
-import { durableConnectionScope, rememberRecentWork } from "../../state/recentWork";
+import { useRuntimeStore } from "../../state/runtime";
+import { rememberRecentWork } from "../../state/recentWork";
 import { useWorkStore } from "../../state/work";
 import { CommandCenter } from "./CommandCenter";
-
-const connection = { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "tenant" };
 
 function renderCenter() {
   const root = createRootRoute();
@@ -32,7 +30,7 @@ const emptyJournal = { run_id: "artifact-journal", events: [], complete: false }
 
 beforeEach(() => {
   sessionStorage.clear();
-  useConnectionStore.setState({ connection, info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "react_agent", channels: [] }] }, workspaceStatus: "ready", dialogOpen: false });
+  useRuntimeStore.setState({ status: "ready", info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "react_agent", channels: [] }] }, error: "", attempt: 0 });
   useWorkStore.getState().clear();
 });
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
@@ -40,17 +38,16 @@ afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 describe("v4 Command Center", () => {
   it("groups exact recent runs and current exceptions without inventing a tenant-wide catalog", async () => {
     const user = userEvent.setup();
-    const scope = durableConnectionScope(connection);
-    for (const id of ["run-pending", "run-running", "run-success", "run-interrupted", "run-error", "run-cancelled"]) rememberRecentWork(scope, { threadId: `thread-${id}`, runId: id });
+    for (const id of ["run-pending", "run-running", "run-success", "run-interrupted", "run-error", "run-cancelled"]) rememberRecentWork({ threadId: `thread-${id}`, runId: id });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/assistants") return response([{ assistant_id: "agent-1", name: "Research agent", graph: "react_agent", config: {}, metadata: {}, created_at: "2026-08-11T00:00:00Z", active_version_id: "version-1", version_count: 1 }]);
-      if (url.pathname.startsWith("/runs/")) { const id = decodeURIComponent(url.pathname.slice(6)); const status = id.replace("run-", "") as "pending" | "running" | "success" | "interrupted" | "error" | "cancelled"; return response(run(id, `thread-${id}`, status)); }
-      if (url.pathname === "/tasks" && url.search === "?status=dead") return response([{ task_id: "task-1", kind: "publish_report", pool: "default", status: "dead", last_error: "Provider rejected the write.", next_attempt_at: null, run_id: null, thread_id: null, updated_at: "2026-08-11T00:00:00Z" }]);
-      if (url.pathname === "/tasks") return response([]);
-      if (url.pathname === "/crons") return response([{ cron_id: "daily" }]);
-      if (url.pathname === "/triggers") return response([{ trigger_id: "webhook", enabled: true }]);
-      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([{ assistant_id: "agent-1", name: "Research agent", graph: "react_agent", config: {}, metadata: {}, created_at: "2026-08-11T00:00:00Z", active_version_id: "version-1", version_count: 1 }]);
+      if (url.pathname.replace(/^\/api/, "").startsWith("/runs/")) { const id = decodeURIComponent(url.pathname.replace(/^\/api/, "").slice(6)); const status = id.replace("run-", "") as "pending" | "running" | "success" | "interrupted" | "error" | "cancelled"; return response(run(id, `thread-${id}`, status)); }
+      if (url.pathname.replace(/^\/api/, "") === "/tasks" && url.search === "?status=dead") return response([{ task_id: "task-1", kind: "publish_report", pool: "default", status: "dead", last_error: "Provider rejected the write.", next_attempt_at: null, run_id: null, thread_id: null, updated_at: "2026-08-11T00:00:00Z" }]);
+      if (url.pathname.replace(/^\/api/, "") === "/tasks") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/crons") return response([{ cron_id: "daily" }]);
+      if (url.pathname.replace(/^\/api/, "") === "/triggers") return response([{ trigger_id: "webhook", enabled: true }]);
+      if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
     renderCenter();
@@ -80,12 +77,12 @@ describe("v4 Command Center", () => {
   });
 
   it("does not admit a crossed run identity and discloses the missing proof", async () => {
-    rememberRecentWork(durableConnectionScope(connection), { threadId: "thread-a", runId: "run-a" });
+    rememberRecentWork({ threadId: "thread-a", runId: "run-a" });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/assistants") return response([]);
-      if (url.pathname === "/runs/run-a") return response(run("run-crossed", "thread-a", "success"));
-      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/runs/run-a") return response(run("run-crossed", "thread-a", "success"));
+      if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       return response([]);
     }));
     renderCenter();
@@ -97,10 +94,10 @@ describe("v4 Command Center", () => {
 
   it("reports unavailable operational sources instead of an all-clear", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/assistants") return response([]);
-      if (url.pathname === "/tasks") return Promise.reject(new Error("offline"));
-      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/tasks") return Promise.reject(new Error("offline"));
+      if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       return response([]);
     }));
     renderCenter();
@@ -111,12 +108,12 @@ describe("v4 Command Center", () => {
 
   it("keeps the Needs you lane bounded and hands off every additional exception", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/assistants") return response([]);
-      if (url.pathname === "/tasks" && url.search === "?status=dead") return response(Array.from({ length: 8 }, (_, index) => ({ task_id: `task-${index}`, kind: `job_${index}`, pool: "default", status: "dead", last_error: "Stopped.", next_attempt_at: null, run_id: null, thread_id: null, updated_at: "2026-08-11T00:00:00Z" })));
-      if (url.pathname === "/tasks") return response([]);
-      if (url.pathname === "/crons" || url.pathname === "/triggers") return response([]);
-      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/tasks" && url.search === "?status=dead") return response(Array.from({ length: 8 }, (_, index) => ({ task_id: `task-${index}`, kind: `job_${index}`, pool: "default", status: "dead", last_error: "Stopped.", next_attempt_at: null, run_id: null, thread_id: null, updated_at: "2026-08-11T00:00:00Z" })));
+      if (url.pathname.replace(/^\/api/, "") === "/tasks") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
     renderCenter();
@@ -126,19 +123,11 @@ describe("v4 Command Center", () => {
     expect(screen.getByText("0 running · 8 need you · 0 stuck")).toBeVisible();
   });
 
-  it("offers useful local work before a workspace is connected", async () => {
-    useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
-    renderCenter();
-    expect(await screen.findByRole("heading", { name: "Work board" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Start a local draft" })).toHaveAttribute("href", "/agents");
-    expect(screen.getByRole("button", { name: "Choose workspace" })).toBeVisible();
-  });
-
   it("turns a verified empty board into a next action instead of five captions", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/assistants" || url.pathname === "/tasks" || url.pathname === "/crons" || url.pathname === "/triggers") return response([]);
-      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/assistants" || url.pathname.replace(/^\/api/, "") === "/tasks" || url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
     renderCenter();
@@ -152,10 +141,10 @@ describe("v4 Command Center", () => {
     const user = userEvent.setup();
     const agent = { assistant_id: "agent-1", name: "Research agent", graph: "react_agent", config: {}, metadata: {}, created_at: "2026-08-11T00:00:00Z", active_version_id: "version-1", version_count: 1 };
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/assistants") return response([agent]);
-      if (url.pathname === "/tasks" || url.pathname === "/crons" || url.pathname === "/triggers") return response([]);
-      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([agent]);
+      if (url.pathname.replace(/^\/api/, "") === "/tasks" || url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
     renderCenter();
@@ -167,12 +156,12 @@ describe("v4 Command Center", () => {
 
   it("explains an empty filtered projection and returns to all work", async () => {
     const user = userEvent.setup();
-    rememberRecentWork(durableConnectionScope(connection), { threadId: "thread-running", runId: "run-running" });
+    rememberRecentWork({ threadId: "thread-running", runId: "run-running" });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/assistants" || url.pathname === "/tasks" || url.pathname === "/crons" || url.pathname === "/triggers") return response([]);
-      if (url.pathname === "/runs/run-running") return response(run("run-running", "thread-running", "running"));
-      if (url.pathname === "/artifacts/journal") return response(emptyJournal);
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/assistants" || url.pathname.replace(/^\/api/, "") === "/tasks" || url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/runs/run-running") return response(run("run-running", "thread-running", "running"));
+      if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
     renderCenter();

@@ -3,8 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listKnowledgeSources } from "../../lib/api/knowledge";
-import { useConnectionStore } from "../../state/connection";
-import { emptyLibrary, HASH_B, listedSource, testConnection } from "./fixtures";
+import { emptyLibrary, HASH_B, listedSource } from "./fixtures";
 import { KnowledgePage } from "./KnowledgePage";
 
 vi.mock("../../lib/api/knowledge", async (importOriginal) => {
@@ -27,26 +26,12 @@ function renderPage() {
   return render(<QueryClientProvider client={client}><KnowledgePage /></QueryClientProvider>);
 }
 
-function connect() {
-  useConnectionStore.setState({ connection: testConnection, workspaceStatus: "ready" });
-}
-
 beforeEach(() => {
-  useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
   vi.mocked(listKnowledgeSources).mockReset().mockResolvedValue(emptyLibrary());
 });
 
 describe("Knowledge library", () => {
-  it("asks for a workspace when disconnected", async () => {
-    renderPage();
-    expect(await screen.findByRole("heading", { name: "Knowledge" })).toBeVisible();
-    expect(screen.getByText("Knowledge needs a workspace")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Choose workspace" })).toBeEnabled();
-    expect(listKnowledgeSources).not.toHaveBeenCalled();
-  });
-
   it("shows an empty state with a register CTA when the library is empty", async () => {
-    connect();
     renderPage();
     expect(await screen.findByText("No sources yet")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Register first source" }));
@@ -54,7 +39,6 @@ describe("Knowledge library", () => {
   });
 
   it("renders sources in deterministic order with provenance and retention state", async () => {
-    connect();
     vi.mocked(listKnowledgeSources).mockResolvedValue({
       sources: [
         listedSource({ source_id: "vendor-directory", title: "Vendor directory", kind: "csv", author: "agent:ingest-2", version: 4, supersedes: HASH_B }),
@@ -84,7 +68,6 @@ describe("Knowledge library", () => {
   });
 
   it("filters by title, id, author, and kind", async () => {
-    connect();
     vi.mocked(listKnowledgeSources).mockResolvedValue({
       sources: [
         listedSource({ source_id: "travel-policy", title: "Travel policy" }),
@@ -107,7 +90,6 @@ describe("Knowledge library", () => {
   });
 
   it("names the failure and offers retry when the library cannot be loaded", async () => {
-    connect();
     vi.mocked(listKnowledgeSources).mockRejectedValue(new Error("Rusty could not be reached."));
     renderPage();
     expect(await screen.findByText("Sources could not be loaded")).toBeVisible();
@@ -118,7 +100,6 @@ describe("Knowledge library", () => {
   });
 
   it("switches between sources, the query console, and retention", async () => {
-    connect();
     renderPage();
     await screen.findByText("No sources yet");
     await userEvent.click(screen.getByRole("button", { name: "Test retrieval" }));

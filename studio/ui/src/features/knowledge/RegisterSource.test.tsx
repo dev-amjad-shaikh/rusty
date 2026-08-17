@@ -7,8 +7,7 @@ import {
   listKnowledgeSources,
   registerKnowledgeSource,
 } from "../../lib/api/knowledge";
-import { useConnectionStore } from "../../state/connection";
-import { chunkRecord, emptyLibrary, fullSource, HASH_A, testConnection } from "./fixtures";
+import { chunkRecord, emptyLibrary, fullSource, HASH_A } from "./fixtures";
 import { KnowledgePage } from "./KnowledgePage";
 
 vi.mock("../../lib/api/knowledge", async (importOriginal) => {
@@ -39,7 +38,6 @@ async function openRegisterForm() {
 }
 
 beforeEach(() => {
-  useConnectionStore.setState({ connection: testConnection, info: null, workspaceStatus: "ready", dialogOpen: false });
   vi.mocked(listKnowledgeSources).mockReset().mockResolvedValue(emptyLibrary());
   vi.mocked(registerKnowledgeSource).mockReset();
   vi.mocked(getKnowledgeSource).mockReset();
@@ -73,7 +71,7 @@ describe("Register source", () => {
     expect(await screen.findByText("Source registered")).toBeVisible();
     expect(screen.getByText(HASH_A)).toBeVisible();
     expect(screen.getByText("3", { selector: "dd" })).toBeVisible();
-    expect(registerKnowledgeSource).toHaveBeenCalledWith(testConnection, {
+    expect(registerKnowledgeSource).toHaveBeenCalledWith({
       source_id: "travel-policy",
       kind: "markdown",
       title: "Travel policy",
@@ -155,7 +153,7 @@ describe("Register source", () => {
     fireEvent.change(screen.getByLabelText(/^Expires at/), { target: { value: "2030-01-01T00:00" } });
     await userEvent.click(screen.getByRole("button", { name: "Register source" }));
     await screen.findByText("Source registered");
-    expect(registerKnowledgeSource).toHaveBeenCalledWith(testConnection, expect.objectContaining({
+    expect(registerKnowledgeSource).toHaveBeenCalledWith(expect.objectContaining({
       retention: { policy: "ttl", expires_at: new Date("2030-01-01T00:00").toISOString() },
     }));
   });

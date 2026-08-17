@@ -3,7 +3,6 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../state/connection";
 import { useWorkStore } from "../../state/work";
 import { PromptStudio } from "./PromptStudio";
 
@@ -19,21 +18,20 @@ function renderPage() {
 }
 
 beforeEach(() => {
-  useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" }, info: null, dialogOpen: false });
-  useWorkStore.setState({ connectionKey: "1|https://rusty.example|a", assistant: null, objective: "", thread: null, receipt: { run_id: "run-1", thread_id: "thread-1", status: "running" }, cases: [], comparisons: [{ connectionKey: "1|https://rusty.example|a", run: { run_id: "run-1", thread_id: "thread-1", graph: "research", attempt: 1, status: "success" }, evidence: { run_id: "run-1", events: [], complete: true }, agentName: "Analyst", objective: "Verify", capturedAt: "2026-08-11T00:00:00Z" }] });
+  useWorkStore.setState({ assistant: null, objective: "", thread: null, receipt: { run_id: "run-1", thread_id: "thread-1", status: "running" }, cases: [], comparisons: [{ run: { run_id: "run-1", thread_id: "thread-1", graph: "research", attempt: 1, status: "success" }, evidence: { run_id: "run-1", events: [], complete: true }, agentName: "Analyst", objective: "Verify", capturedAt: "2026-08-11T00:00:00Z" }] });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("prompt workshop", () => {
   it("loads immutable history, edits, and saves a run-attributed version", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const url = new URL(input);
+      const url = new URL(input, "http://studio.local");
       const body = init?.body ? JSON.parse(String(init.body)) : null;
-      if (url.pathname === "/registry/artifacts" && init?.method !== "POST") return Promise.resolve(response({ artifacts: [{ surface: "prompt:system", family: "prompt", owner: { type: "human", human_id: "amjad" }, commits: [{ candidate_id: originalId, committed_at: "2026-08-11T00:00:00Z" }], created_at: "2026-08-11T00:00:00Z" }] }));
-      if (url.pathname.endsWith("/commits") && init?.method !== "POST") return Promise.resolve(response({ surface: "prompt:system", family: "prompt", owner: { type: "human", human_id: "amjad" }, commits: [{ candidate_id: originalId, committed_at: "2026-08-11T00:00:00Z", author: { type: "human", human_id: "amjad" }, status: "promoted" }] }));
-      if (url.pathname === `/learn/candidates/${originalId}`) return Promise.resolve(response({ candidate: { candidate_id: originalId, content: { kind: "prompt", name: "system", prompt: "Be accurate." }, distilled_by: { type: "human", human_id: "amjad" }, created_at: "2026-08-11T00:00:00Z" }, status: "promoted" }));
-      if (url.pathname === "/learn/candidates" && init?.method === "POST") return Promise.resolve(response({ candidate_id: body.candidate.candidate_id, created: true, record: { candidate: body.candidate, status: "created" } }, 201));
-      if (url.pathname.endsWith("/commits") && init?.method === "POST") return Promise.resolve(response({ surface: "prompt:system", committed: true, commit: { candidate_id: body.candidate_id, committed_at: "2026-08-11T00:00:01Z" }, commits: 2 }));
+      if (url.pathname.replace(/^\/api/, "") === "/registry/artifacts" && init?.method !== "POST") return Promise.resolve(response({ artifacts: [{ surface: "prompt:system", family: "prompt", owner: { type: "human", human_id: "amjad" }, commits: [{ candidate_id: originalId, committed_at: "2026-08-11T00:00:00Z" }], created_at: "2026-08-11T00:00:00Z" }] }));
+      if (url.pathname.replace(/^\/api/, "").endsWith("/commits") && init?.method !== "POST") return Promise.resolve(response({ surface: "prompt:system", family: "prompt", owner: { type: "human", human_id: "amjad" }, commits: [{ candidate_id: originalId, committed_at: "2026-08-11T00:00:00Z", author: { type: "human", human_id: "amjad" }, status: "promoted" }] }));
+      if (url.pathname.replace(/^\/api/, "") === `/learn/candidates/${originalId}`) return Promise.resolve(response({ candidate: { candidate_id: originalId, content: { kind: "prompt", name: "system", prompt: "Be accurate." }, distilled_by: { type: "human", human_id: "amjad" }, created_at: "2026-08-11T00:00:00Z" }, status: "promoted" }));
+      if (url.pathname.replace(/^\/api/, "") === "/learn/candidates" && init?.method === "POST") return Promise.resolve(response({ candidate_id: body.candidate.candidate_id, created: true, record: { candidate: body.candidate, status: "created" } }, 201));
+      if (url.pathname.replace(/^\/api/, "").endsWith("/commits") && init?.method === "POST") return Promise.resolve(response({ surface: "prompt:system", committed: true, commit: { candidate_id: body.candidate_id, committed_at: "2026-08-11T00:00:01Z" }, commits: 2 }));
       throw new Error(`unexpected ${url} ${init?.method ?? "GET"}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -47,22 +45,5 @@ describe("prompt workshop", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("is in the prompt history"));
     const candidateRequest = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/learn/candidates") && (init as RequestInit)?.method === "POST");
     expect(JSON.parse(String((candidateRequest?.[1] as RequestInit).body))).toMatchObject({ run_id: "run-1", candidate: { content: { prompt: "Be accurate and concise." }, distilled_by: { human_id: "amjad" } } });
-  });
-
-  it("clears prompt selection and draft when tenant ownership changes", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const url = new URL(input);
-      const tenant = new Headers(init?.headers).get("X-Api-Key");
-      if (tenant === "key-b" && url.pathname === "/registry/artifacts") return Promise.resolve(response({ artifacts: [] }));
-      if (url.pathname === "/registry/artifacts") return Promise.resolve(response({ artifacts: [{ surface: "prompt:system", family: "prompt", owner: { type: "human", human_id: "a" }, commits: [{ candidate_id: originalId, committed_at: "2026-08-11T00:00:00Z" }], created_at: "2026-08-11T00:00:00Z" }] }));
-      if (url.pathname.endsWith("/commits")) return Promise.resolve(response({ surface: "prompt:system", family: "prompt", owner: { type: "human", human_id: "a" }, commits: [{ candidate_id: originalId, committed_at: "2026-08-11T00:00:00Z", author: { type: "human", human_id: "a" }, status: "created" }] }));
-      if (url.pathname.includes("/learn/candidates/")) return Promise.resolve(response({ candidate: { candidate_id: originalId, content: { kind: "prompt", name: "system", prompt: "Tenant A secret draft" }, distilled_by: { type: "human", human_id: "a" }, created_at: "2026-08-11T00:00:00Z" }, status: "created" }));
-      throw new Error(`unexpected ${url}`);
-    }));
-    renderPage();
-    expect(await screen.findByDisplayValue("Tenant A secret draft")).toBeVisible();
-    useConnectionStore.setState({ connection: { epoch: 2, origin: "https://rusty.example", apiKey: "key-b", tenantFingerprint: "b" } });
-    await waitFor(() => expect(screen.queryByDisplayValue("Tenant A secret draft")).not.toBeInTheDocument());
-    expect(await screen.findByText("No prompts yet. Create one after reviewing a Work run.")).toBeVisible();
   });
 });

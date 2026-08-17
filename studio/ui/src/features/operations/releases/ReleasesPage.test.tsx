@@ -2,8 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../../state/connection";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReleasesPage } from "./ReleasesPage";
 
 function renderPage(initialEntry = "/operations/releases") {
@@ -20,9 +19,6 @@ function renderPage(initialEntry = "/operations/releases") {
 
 function response(value: unknown, status = 200) { return new Response(JSON.stringify(value), { status }); }
 
-beforeEach(() => {
-  useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" }, info: null, dialogOpen: false });
-});
 afterEach(() => vi.unstubAllGlobals());
 
 const sampleRevision = {
@@ -57,23 +53,16 @@ const sampleBoard = {
 
 function mockDeploymentApis() {
   vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-    const url = new URL(input);
-    if (url.pathname === "/deployments/health") return Promise.resolve(response({ environments: [], deployment_chain_head: null }));
-    if (url.pathname === "/deployments/environments") return Promise.resolve(response({ environments: [sampleEnvironment] }));
-    if (url.pathname === "/deployments/revisions") return Promise.resolve(response({ revisions: [sampleRevision] }));
-    if (url.pathname === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [], complete: false }));
+    const url = new URL(input, "http://studio.local");
+    if (url.pathname.replace(/^\/api/, "") === "/deployments/health") return Promise.resolve(response({ environments: [], deployment_chain_head: null }));
+    if (url.pathname.replace(/^\/api/, "") === "/deployments/environments") return Promise.resolve(response({ environments: [sampleEnvironment] }));
+    if (url.pathname.replace(/^\/api/, "") === "/deployments/revisions") return Promise.resolve(response({ revisions: [sampleRevision] }));
+    if (url.pathname.replace(/^\/api/, "") === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [], complete: false }));
     throw new Error(`unexpected ${url}`);
   }));
 }
 
 describe("Releases workspace", () => {
-  it("asks to connect when there is no server connection", async () => {
-    useConnectionStore.setState({ connection: null });
-    renderPage();
-    expect(await screen.findByRole("heading", { name: "Connect to manage releases" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Connect Rusty" })).toBeVisible();
-  });
-
   it("lists environments and revisions after loading", async () => {
     mockDeploymentApis();
     renderPage();
@@ -84,13 +73,13 @@ describe("Releases workspace", () => {
 
   it("shows the current decision when an environment is selected", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/deployments/health") return Promise.resolve(response({ environments: [sampleBoard], deployment_chain_head: null }));
-      if (url.pathname === "/deployments/environments") return Promise.resolve(response({ environments: [sampleEnvironment] }));
-      if (url.pathname === "/deployments/revisions") return Promise.resolve(response({ revisions: [sampleRevision] }));
-      if (url.pathname === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [], complete: false }));
-      if (url.pathname === "/deployments/environments/staging/pointer") return Promise.resolve(response({ pointer: { surface: "deployment:staging" } }));
-      if (url.pathname === "/deployments/secrets") return Promise.resolve(response({ secrets: [] }));
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/health") return Promise.resolve(response({ environments: [sampleBoard], deployment_chain_head: null }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/environments") return Promise.resolve(response({ environments: [sampleEnvironment] }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/revisions") return Promise.resolve(response({ revisions: [sampleRevision] }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [], complete: false }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/environments/staging/pointer") return Promise.resolve(response({ pointer: { surface: "deployment:staging" } }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/secrets") return Promise.resolve(response({ secrets: [] }));
       throw new Error(`unexpected ${url}`);
     }));
     renderPage("/operations/releases/staging");
@@ -101,14 +90,14 @@ describe("Releases workspace", () => {
 
   it("declares a new environment and refreshes the list", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const url = new URL(input);
-      if (url.pathname === "/deployments/environments" && init?.method === "POST") {
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/environments" && init?.method === "POST") {
         return Promise.resolve(response({ created: true, environment: { name: "prod", approval_required: false, created_by: { type: "human", human_id: "ops" }, created_at: "2026-08-11T00:00:00Z" } }, 201));
       }
-      if (url.pathname === "/deployments/health") return Promise.resolve(response({ environments: [], deployment_chain_head: null }));
-      if (url.pathname === "/deployments/environments") return Promise.resolve(response({ environments: [sampleEnvironment, { name: "prod", approval_required: false, created_by: { type: "human", human_id: "ops" }, created_at: "2026-08-11T00:00:00Z" }] }));
-      if (url.pathname === "/deployments/revisions") return Promise.resolve(response({ revisions: [] }));
-      if (url.pathname === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [], complete: false }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/health") return Promise.resolve(response({ environments: [], deployment_chain_head: null }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/environments") return Promise.resolve(response({ environments: [sampleEnvironment, { name: "prod", approval_required: false, created_by: { type: "human", human_id: "ops" }, created_at: "2026-08-11T00:00:00Z" }] }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/revisions") return Promise.resolve(response({ revisions: [] }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [], complete: false }));
       throw new Error(`unexpected ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -125,11 +114,11 @@ describe("Releases workspace", () => {
 
   it("renders deployment timeline events in plain language", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const url = new URL(input);
-      if (url.pathname === "/deployments/health") return Promise.resolve(response({ environments: [], deployment_chain_head: "head" }));
-      if (url.pathname === "/deployments/environments") return Promise.resolve(response({ environments: [] }));
-      if (url.pathname === "/deployments/revisions") return Promise.resolve(response({ revisions: [] }));
-      if (url.pathname === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [{ id: "deployments:0", run_id: "deployments", thread_id: "deployments", node_id: null, seq: 0, kind: "environment_declared", effect: "pure", input: null, output: { kind: "inline", value: { declaration: { environment: "staging" } } }, latency_ms: null, tokens: null, cost_usd: null, status: "ok", parent: null, recorded_at: "2026-08-11T00:00:00Z" }], complete: false }));
+      const url = new URL(input, "http://studio.local");
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/health") return Promise.resolve(response({ environments: [], deployment_chain_head: "head" }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/environments") return Promise.resolve(response({ environments: [] }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/revisions") return Promise.resolve(response({ revisions: [] }));
+      if (url.pathname.replace(/^\/api/, "") === "/deployments/journal") return Promise.resolve(response({ run_id: "deployments", events: [{ id: "deployments:0", run_id: "deployments", thread_id: "deployments", node_id: null, seq: 0, kind: "environment_declared", effect: "pure", input: null, output: { kind: "inline", value: { declaration: { environment: "staging" } } }, latency_ms: null, tokens: null, cost_usd: null, status: "ok", parent: null, recorded_at: "2026-08-11T00:00:00Z" }], complete: false }));
       throw new Error(`unexpected ${url}`);
     }));
     renderPage();

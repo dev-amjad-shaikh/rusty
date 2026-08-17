@@ -3,7 +3,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../state/connection";
+import { useRuntimeStore } from "../../state/runtime";
 import { SkillsPage } from "./SkillsPage";
 import { clearPublishedMembers } from "./publishedMembers";
 import { memberPathProblem, parseSkillFrontmatter } from "./PublishSkill";
@@ -38,8 +38,8 @@ function receipt(name: string, revision = 1, options: { revisions?: number; auth
 }
 
 function connected() {
-  useConnectionStore.setState({
-    connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+  useRuntimeStore.setState({
+    status: "ready",
     info: {
       service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp",
       graphs: [
@@ -50,28 +50,22 @@ function connected() {
         { name: "digest", channels: [] },
       ],
     },
-    dialogOpen: false,
+    error: "",
+    attempt: 0,
   });
 }
 
 beforeEach(() => {
   clearPublishedMembers();
-  useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", discoveryAttempt: 0, discoveryError: "", suggestedOrigin: "", dialogOpen: false });
+  useRuntimeStore.setState({ status: "ready", info: null, error: "", attempt: 0 });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Skills & Tools", () => {
-  it("asks for a workspace before reading the registry", async () => {
-    renderPage();
-    expect(await screen.findByRole("heading", { name: "Open a workspace to review skills and tools" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Choose workspace" }));
-    expect(useConnectionStore.getState().dialogOpen).toBe(true);
-  });
-
   it("lists published skills in deterministic name order with receipt evidence and filters them", async () => {
     connected();
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/skills") return json({ skills: [metadata("web-research", 2), metadata("alpha-checks"), metadata("ledger-review")] });
       if (path === "/skills/web-research") return json(receipt("web-research", 2, { revisions: 2, author: "operator:ada" }));
       if (path === "/skills/alpha-checks") return json(receipt("alpha-checks", 1, { author: "pipeline:nightly" }));
@@ -120,7 +114,7 @@ describe("Skills & Tools", () => {
   it("opens the detail receipt, lazily loads the body on demand, and pins a revision from history", async () => {
     connected();
     const fetchMock = vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/skills") return json({ skills: [metadata("web-research", 2)] });
       if (path === "/skills/web-research") return json(receipt("web-research", 2, { revisions: 2 }));
       if (path === "/skills/web-research/history") return json({ name: "web-research", history: [metadata("web-research", 1), metadata("web-research", 2, "Search, then cite.")] });
@@ -141,11 +135,11 @@ describe("Skills & Tools", () => {
     expect(drawer).toHaveTextContent(hash("w"));
     expect(drawer).toHaveTextContent("operator:ada");
     expect(drawer).toHaveTextContent("clean — no findings");
-    expect(fetchMock.mock.calls.some((call) => new URL(String(call[0])).pathname === "/skills/web-research/body")).toBe(false);
+    expect(fetchMock.mock.calls.some((call) => new URL(String(call[0]), "http://studio.local").pathname.replace(/^\/api/, "") === "/skills/web-research/body")).toBe(false);
 
     await userEvent.click(screen.getByRole("button", { name: "Load instructions" }));
     expect(await screen.findByLabelText("Skill instructions")).toHaveTextContent("Search, then summarize.");
-    expect(fetchMock.mock.calls.some((call) => new URL(String(call[0])).pathname === "/skills/web-research/body")).toBe(true);
+    expect(fetchMock.mock.calls.some((call) => new URL(String(call[0]), "http://studio.local").pathname.replace(/^\/api/, "") === "/skills/web-research/body")).toBe(true);
 
     await userEvent.click(await screen.findByRole("button", { name: /r1/ }));
     expect(await screen.findByText(/Viewing pinned revision r1 of r2/)).toBeVisible();
@@ -161,7 +155,7 @@ describe("Skills & Tools", () => {
     connected();
     let posted: Record<string, unknown> | null = null;
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (init?.method === "POST" && path === "/skills") {
         posted = JSON.parse(String(init.body));
         const published = receipt("web-research", 1) as Record<string, unknown>;
@@ -214,7 +208,7 @@ describe("Skills & Tools", () => {
   it("renders scan denial findings readably and keeps the draft intact", async () => {
     connected();
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (init?.method === "POST" && path === "/skills") {
         return json({
           error: "scan_denied",

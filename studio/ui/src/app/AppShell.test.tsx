@@ -4,10 +4,21 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRef } from "react";
-import { useConnectionStore } from "../state/connection";
+import { useRuntimeStore } from "../state/runtime";
+import type { ServerInfo } from "../lib/contracts";
 import { UnsavedChangesDialog } from "../features/agents/UnsavedChangesDialog";
 import { AppShell } from "./AppShell";
 import { primaryDestinations } from "./navigation";
+
+const localInfo: ServerInfo = { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [] };
+
+function runtimeReady() {
+  useRuntimeStore.setState({ status: "ready", info: localInfo, error: "", attempt: 0 });
+}
+
+function runtimeUnavailable() {
+  useRuntimeStore.setState({ status: "unavailable", info: null, error: "", attempt: 0 });
+}
 
 function BlockingBuilder() {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -35,14 +46,12 @@ describe("Studio product architecture", () => {
     expect(primaryDestinations.map((item) => item.label)).toEqual(["Command Center", "Agent Portfolio", "Agent Builder", "Prompt Library", "Skills & Tools", "Knowledge", "Run & Evaluate", "Memory", "Connectors", "Operations"]);
   });
 
-  it("presents the current workspace without connection controls", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "tenant" },
-      info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [] },
-      workspaceStatus: "ready", dialogOpen: false,
-    });
+  it("presents the local workspace without connection controls", async () => {
+    runtimeReady();
     renderShell();
-    const switcher = await screen.findByRole("button", { name: "Switch workspace, currently rusty.example" });
+    const indicator = await screen.findByRole("status");
+    expect(indicator).toHaveTextContent("Local workspace");
+    expect(indicator).toHaveTextContent("Rusty 1");
     expect(screen.getByRole("link", { name: "Command Center — See work and exceptions" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Agent Portfolio — Review active definitions" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Agent Builder — Create a guided definition" })).toBeVisible();
@@ -50,15 +59,14 @@ describe("Studio product architecture", () => {
     expect(screen.getByRole("link", { name: "Run & Evaluate — Run, trace, and evaluate" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Operations — Review exceptions" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Skip to workspace" })).toHaveAttribute("href", "#studio-main");
-    expect(switcher).toHaveTextContent("rusty.example");
+    expect(screen.queryByRole("button", { name: /Switch workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Choose a Rusty workspace/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Disconnect")).not.toBeInTheDocument();
     expect(screen.queryByText("Connect")).not.toBeInTheDocument();
-    await userEvent.click(switcher);
-    expect(screen.getByRole("dialog", { name: "Switch workspace" })).toBeVisible();
   });
 
   it("uses an explicit mobile navigation disclosure", async () => {
-    useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
+    runtimeUnavailable();
     renderShell();
     const menu = await screen.findByRole("button", { name: "Menu" });
     expect(menu).toHaveAttribute("aria-expanded", "false");
@@ -68,7 +76,7 @@ describe("Studio product architecture", () => {
   });
 
   it("turns the v4 command surface into real workspace navigation", async () => {
-    useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
+    runtimeReady();
     renderShell();
     await userEvent.click(await screen.findByRole("button", { name: /Go to agents, work, prompts, or operations/ }));
     const dialog = screen.getByRole("dialog", { name: "Where do you want to go?" });
@@ -81,7 +89,7 @@ describe("Studio product architecture", () => {
   });
 
   it("returns command navigation focus to the exact opener", async () => {
-    useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
+    runtimeUnavailable();
     renderShell();
     const opener = await screen.findByRole("button", { name: /Go to agents, work, prompts, or operations/ });
     opener.focus();
@@ -89,16 +97,16 @@ describe("Studio product architecture", () => {
     await userEvent.click(screen.getByRole("button", { name: "Close navigation" }));
     await waitFor(() => expect(opener).toHaveFocus());
 
-    const workspace = screen.getByRole("button", { name: "Choose a Rusty workspace" });
-    workspace.focus();
+    const menu = screen.getByRole("button", { name: "Menu" });
+    menu.focus();
     await userEvent.keyboard("{Meta>}k{/Meta}");
     const dialog = await screen.findByRole("dialog", { name: "Where do you want to go?" });
     dialog.dispatchEvent(new Event("cancel", { bubbles: true, cancelable: true }));
-    await waitFor(() => expect(workspace).toHaveFocus());
+    await waitFor(() => expect(menu).toHaveFocus());
   });
 
   it("returns a blocked command handoff to the stable builder opener", async () => {
-    useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
+    runtimeReady();
     const { router } = renderShell("/agents/new", true);
     const opener = await screen.findByRole("button", { name: /Go to agents, work, prompts, or operations/ });
     await userEvent.click(opener);
@@ -111,21 +119,25 @@ describe("Studio product architecture", () => {
   });
 
   it("moves focus to the new workspace heading after primary navigation", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "tenant" },
-      info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [] },
-      workspaceStatus: "ready", dialogOpen: false,
-    });
+    runtimeReady();
     renderShell();
     await userEvent.click(await screen.findByRole("link", { name: "Operations — Review exceptions" }));
     await waitFor(() => expect(screen.getByRole("main", { name: "Operations workspace" })).toHaveFocus());
   });
 
-  it("keeps route content hidden until automatic discovery settles", async () => {
+  it("keeps route content hidden until the local runtime answers", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => {})));
-    useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "discovering", discoveryAttempt: 21, discoveryError: "", suggestedOrigin: "", dialogOpen: false });
+    useRuntimeStore.setState({ status: "starting", info: null, error: "", attempt: 0 });
     renderShell();
-    expect(await screen.findByRole("heading", { name: "Opening your workspace" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Starting the local runtime…" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Work area" })).not.toBeInTheDocument();
+  });
+
+  it("offers a retry when the local runtime refuses Studio", async () => {
+    useRuntimeStore.setState({ status: "unavailable", info: null, error: "This Rusty server needs an access key.", attempt: 0 });
+    renderShell();
+    expect(await screen.findByRole("alert")).toHaveTextContent("This Rusty server needs an access key.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Work area" })).not.toBeInTheDocument();
   });
 });

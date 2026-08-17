@@ -3,8 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listKnowledgeSources, queryKnowledge } from "../../lib/api/knowledge";
-import { useConnectionStore } from "../../state/connection";
-import { CHUNK_ADDR_1, CHUNK_ADDR_2, citedChunk, emptyLibrary, testConnection } from "./fixtures";
+import { CHUNK_ADDR_1, CHUNK_ADDR_2, citedChunk, emptyLibrary } from "./fixtures";
 import { KnowledgePage } from "./KnowledgePage";
 
 vi.mock("../../lib/api/knowledge", async (importOriginal) => {
@@ -35,7 +34,6 @@ async function openConsole() {
 }
 
 beforeEach(() => {
-  useConnectionStore.setState({ connection: testConnection, info: null, workspaceStatus: "ready", dialogOpen: false });
   vi.mocked(queryKnowledge).mockReset();
   vi.mocked(listKnowledgeSources).mockReset().mockResolvedValue(emptyLibrary());
 });
@@ -77,7 +75,7 @@ describe("Query console", () => {
     expect(cards[0]).toHaveTextContent("0–512");
     expect(cards[1]).toHaveTextContent("Per diem covers meals only.");
     expect(cards[1]).toHaveTextContent("per-diem#2");
-    expect(queryKnowledge).toHaveBeenCalledWith(testConnection, "hotel cap", { max_results: 6, max_bytes: 65536 });
+    expect(queryKnowledge).toHaveBeenCalledWith("hotel cap", { max_results: 6, max_bytes: 65536 });
   });
 
   it("says so when no live source matches", async () => {

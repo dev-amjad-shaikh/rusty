@@ -2,7 +2,6 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RunEvent } from "../../lib/contracts";
-import { useConnectionStore } from "../../state/connection";
 import { useWorkStore } from "../../state/work";
 import { RunComparePage } from "./RunComparePage";
 
@@ -19,11 +18,9 @@ function renderPage() {
 }
 
 beforeEach(() => {
-  useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" }, info: null, dialogOpen: false });
-  const connectionKey = "1|https://rusty.example|a";
   useWorkStore.setState({ comparisons: [
-    { connectionKey, run: { run_id: "run-a", thread_id: "thread-a", graph: "research", attempt: 1, status: "success", output: {} }, evidence: { run_id: "run-a", complete: true, events: [event("run-a", "thread-a", 0, "node_input", null, null), event("run-a", "thread-a", 1, "model_call", "120", "25")] }, agentName: "Analyst", objective: "Baseline answer", capturedAt: "2026-08-11T00:00:00Z" },
-    { connectionKey, run: { run_id: "run-b", thread_id: "thread-b", graph: "research", attempt: 1, status: "success", output: {} }, evidence: { run_id: "run-b", complete: true, events: [event("run-b", "thread-b", 0, "node_input", null, null), event("run-b", "thread-b", 1, "model_call", "90", "20"), event("run-b", "thread-b", 2, "tool_call", null, null)] }, agentName: "Analyst", objective: "Candidate answer", capturedAt: "2026-08-11T00:01:00Z" },
+    { run: { run_id: "run-a", thread_id: "thread-a", graph: "research", attempt: 1, status: "success", output: {} }, evidence: { run_id: "run-a", complete: true, events: [event("run-a", "thread-a", 0, "node_input", null, null), event("run-a", "thread-a", 1, "model_call", "120", "25")] }, agentName: "Analyst", objective: "Baseline answer", capturedAt: "2026-08-11T00:00:00Z" },
+    { run: { run_id: "run-b", thread_id: "thread-b", graph: "research", attempt: 1, status: "success", output: {} }, evidence: { run_id: "run-b", complete: true, events: [event("run-b", "thread-b", 0, "node_input", null, null), event("run-b", "thread-b", 1, "model_call", "90", "20"), event("run-b", "thread-b", 2, "tool_call", null, null)] }, agentName: "Analyst", objective: "Candidate answer", capturedAt: "2026-08-11T00:01:00Z" },
   ] });
 });
 

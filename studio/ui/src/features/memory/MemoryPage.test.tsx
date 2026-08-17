@@ -1,8 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../state/connection";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryPage } from "./MemoryPage";
 
 function setJson(label: RegExp, value: string) {
@@ -44,14 +43,11 @@ const newer = memoryRecord({
   content: { kind: "inline", value: { timezone: "Europe/Zurich" } },
 });
 
-beforeEach(() => {
-  useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "fp" }, info: null, dialogOpen: false });
-});
 afterEach(() => vi.unstubAllGlobals());
 
 function stubFetch(handler: (url: URL, init?: RequestInit) => Promise<Response> | Response | undefined) {
   const spy = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url, "http://studio.local");
     const result = handler(url, init);
     if (!result) return Promise.resolve(new Response("not stubbed", { status: 500 }));
     return Promise.resolve(result);
@@ -61,24 +57,17 @@ function stubFetch(handler: (url: URL, init?: RequestInit) => Promise<Response> 
 }
 
 describe("Memory ledger", () => {
-  it("requires a workspace before reading memory", () => {
-    useConnectionStore.setState({ connection: null });
-    renderPage();
-    expect(screen.getByRole("heading", { name: "Open a workspace to inspect memory" })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Choose workspace" })).not.toHaveLength(0);
-  });
-
   it("runs a scoped query and renders records with lifecycle badges", async () => {
     const fetchSpy = stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === "/memory/query") return json({ records: [newer, older] });
-      if (url.pathname === `/memory/${idA}`) return json(older);
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/query") return json({ records: [newer, older] });
+      if (url.pathname.replace(/^\/api/, "") === `/memory/${idA}`) return json(older);
       return undefined;
     });
     renderPage();
     await userEvent.click(screen.getByRole("button", { name: "Run query" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Inspect timezone, record bbbb/ })).toBeVisible());
-    const queryCall = fetchSpy.mock.calls.find(([input]) => new URL(String(input)).pathname === "/memory/query");
+    const queryCall = fetchSpy.mock.calls.find(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory/query");
     expect(JSON.parse(String(queryCall![1]?.body))).toEqual({});
     expect(screen.getByText("Europe/Zurich", { exact: false })).toBeVisible();
     expect(screen.getAllByText("Superseded")).not.toHaveLength(0);
@@ -87,9 +76,9 @@ describe("Memory ledger", () => {
 
   it("opens the citation detail with the provenance spine and supersession chain", async () => {
     stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === "/memory/query") return json({ records: [newer] });
-      if (url.pathname === `/memory/${idA}`) return json(older);
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/query") return json({ records: [newer] });
+      if (url.pathname.replace(/^\/api/, "") === `/memory/${idA}`) return json(older);
       return undefined;
     });
     renderPage();
@@ -106,8 +95,8 @@ describe("Memory ledger", () => {
   it("shows an honest empty state and a query error state", async () => {
     let fail = false;
     stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === "/memory/query") return fail ? json({ error: "store unavailable" }, 500) : json({ records: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/query") return fail ? json({ error: "store unavailable" }, 500) : json({ records: [] });
       return undefined;
     });
     renderPage();
@@ -120,8 +109,8 @@ describe("Memory ledger", () => {
 
   it("filters loaded results client-side without re-querying", async () => {
     const fetchSpy = stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === "/memory/query") return json({ records: [newer, memoryRecord({ memory_id: idC, key: "language", content: { kind: "inline", value: { language: "German" } } })] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/query") return json({ records: [newer, memoryRecord({ memory_id: idC, key: "language", content: { kind: "inline", value: { language: "German" } } })] });
       return undefined;
     });
     renderPage();
@@ -130,14 +119,14 @@ describe("Memory ledger", () => {
     await userEvent.type(screen.getByLabelText("Filter these results"), "zurich");
     await waitFor(() => expect(screen.queryByRole("button", { name: /Inspect language/ })).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: /Inspect timezone/ })).toBeVisible();
-    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input)).pathname === "/memory/query")).toHaveLength(1);
+    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory/query")).toHaveLength(1);
   });
 });
 
 describe("Create memory", () => {
   it("validates client-side before any write reaches the server", async () => {
     const fetchSpy = stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
       return undefined;
     });
     renderPage();
@@ -147,15 +136,15 @@ describe("Create memory", () => {
     setJson(/^Content/, "not json{");
     await userEvent.click(screen.getByRole("button", { name: "Write memory" }));
     expect(await screen.findByText(/must be valid JSON/)).toBeVisible();
-    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input)).pathname === "/memory")).toHaveLength(0);
+    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory")).toHaveLength(0);
   });
 
   it("writes a memory and shows the content-address receipt", async () => {
     const written = memoryRecord({ memory_id: idC, key: "timezone" });
     const fetchSpy = stubFetch((url, init) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === "/memory" && init?.method === "POST") return json({ memory_id: idC, created: true, record: written }, 201);
-      if (url.pathname === `/memory/${idC}`) return json(written);
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory" && init?.method === "POST") return json({ memory_id: idC, created: true, record: written }, 201);
+      if (url.pathname.replace(/^\/api/, "") === `/memory/${idC}`) return json(written);
       return undefined;
     });
     renderPage();
@@ -166,7 +155,7 @@ describe("Create memory", () => {
     setJson(/^Content/, '{"timezone":"Asia/Dubai"}');
     await userEvent.click(screen.getByRole("button", { name: "Write memory" }));
     expect(await screen.findByRole("heading", { name: "Memory written" })).toBeVisible();
-    const writeCall = fetchSpy.mock.calls.find(([input]) => new URL(String(input)).pathname === "/memory");
+    const writeCall = fetchSpy.mock.calls.find(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory");
     const body = JSON.parse(String(writeCall![1]?.body));
     expect(body).toMatchObject({ kind: "fact", scope: { scope: "user", id: "user-7" }, key: "timezone", author: { type: "human", human_id: "amjad" } });
     await userEvent.click(screen.getByRole("button", { name: "Inspect in the ledger" }));
@@ -186,9 +175,9 @@ describe("Corrections", () => {
       content: { kind: "inline", value: { timezone: "Europe/Berlin" } },
     });
     const fetchSpy = stubFetch((url, init) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === `/memory/${idB}`) return json(newer);
-      if (url.pathname === "/memory/corrections" && init?.method === "POST") {
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === `/memory/${idB}`) return json(newer);
+      if (url.pathname.replace(/^\/api/, "") === "/memory/corrections" && init?.method === "POST") {
         const payload = JSON.parse(String(init.body));
         return json({
           correction_id: payload.correction_id,
@@ -217,7 +206,7 @@ describe("Corrections", () => {
     await userEvent.click(screen.getByRole("button", { name: "Submit correction" }));
     expect(await screen.findByRole("heading", { name: "Correction held as a candidate" })).toBeVisible();
     expect(screen.getByText("Old → new")).toBeVisible();
-    const correctionCall = fetchSpy.mock.calls.find(([input]) => new URL(String(input)).pathname === "/memory/corrections");
+    const correctionCall = fetchSpy.mock.calls.find(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory/corrections");
     const body = JSON.parse(String(correctionCall![1]?.body));
     expect(body.target).toEqual({ type: "memory", memory_id: idB });
     expect(body.scope).toEqual({ scope: "user", id: "user-7" });
@@ -226,8 +215,8 @@ describe("Corrections", () => {
 
   it("blocks a correction that does not change what the record asserts", async () => {
     const fetchSpy = stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === `/memory/${idB}`) return json(newer);
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === `/memory/${idB}`) return json(newer);
       return undefined;
     });
     renderPage();
@@ -237,7 +226,7 @@ describe("Corrections", () => {
     await waitFor(() => expect((screen.getByLabelText(/^Corrected content/) as HTMLTextAreaElement).value).toContain("Europe/Zurich"));
     await userEvent.type(screen.getByLabelText("Your identity"), "maya");
     expect(screen.getByRole("button", { name: "Submit correction" })).toBeDisabled();
-    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input)).pathname === "/memory/corrections")).toHaveLength(0);
+    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory/corrections")).toHaveLength(0);
   });
 });
 
@@ -250,8 +239,8 @@ describe("Conflict inbox", () => {
       overlap: { valid_from: "2026-08-09T06:00:00Z" },
     };
     stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [conflict] });
-      if (url.pathname === "/memory/query") return json({ records: [older, newer] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [conflict] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/query") return json({ records: [older, newer] });
       return undefined;
     });
     renderPage();
@@ -266,7 +255,7 @@ describe("Conflict inbox", () => {
 
   it("treats an unreachable conflict check as unknown, never as an all-clear", async () => {
     stubFetch((url) => {
-      if (url.pathname === "/memory/conflicts") return json({ error: "offline" }, 503);
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ error: "offline" }, 503);
       return undefined;
     });
     renderPage();
@@ -279,9 +268,9 @@ describe("Conflict inbox", () => {
 describe("Forgetting", () => {
   function stubForgetFlow(receipt?: unknown) {
     return stubFetch((url, init) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === "/memory/query") return json({ records: [older] });
-      if (url.pathname === "/memory/forget" && init?.method === "POST") {
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/query") return json({ records: [older] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/forget" && init?.method === "POST") {
         return json(receipt ?? { forgotten: [idA], invalidated: [], tombstone: { memory_id: idA, scope: { scope: "user", id: "user-7" }, reason: "retracted" } });
       }
       return undefined;
@@ -306,22 +295,22 @@ describe("Forgetting", () => {
     expect(button).toBeDisabled();
     await userEvent.type(confirm, "f");
     expect(button).toBeDisabled();
-    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input)).pathname === "/memory/forget")).toHaveLength(0);
+    expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory/forget")).toHaveLength(0);
     await userEvent.clear(confirm);
     await userEvent.type(confirm, idA);
     expect(button).toBeEnabled();
     await userEvent.click(button);
-    await waitFor(() => expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input)).pathname === "/memory/forget")).toHaveLength(1));
-    const call = fetchSpy.mock.calls.find(([input]) => new URL(String(input)).pathname === "/memory/forget");
+    await waitFor(() => expect(fetchSpy.mock.calls.filter(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory/forget")).toHaveLength(1));
+    const call = fetchSpy.mock.calls.find(([input]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/memory/forget");
     expect(JSON.parse(String(call![1]?.body))).toEqual({ memory_id: idA, reason: "retracted" });
     expect(await screen.findByRole("heading", { name: /Forgotten — this cannot be undone/ })).toBeVisible();
   });
 
   it("surfaces a forget failure without pretending the record is gone", async () => {
     stubFetch((url, init) => {
-      if (url.pathname === "/memory/conflicts") return json({ conflicts: [] });
-      if (url.pathname === "/memory/query") return json({ records: [older] });
-      if (url.pathname === "/memory/forget" && init?.method === "POST") return json({ error: `memory \`${idA}\` not found` }, 404);
+      if (url.pathname.replace(/^\/api/, "") === "/memory/conflicts") return json({ conflicts: [] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/query") return json({ records: [older] });
+      if (url.pathname.replace(/^\/api/, "") === "/memory/forget" && init?.method === "POST") return json({ error: `memory \`${idA}\` not found` }, 404);
       return undefined;
     });
     await openForgetPanel();
