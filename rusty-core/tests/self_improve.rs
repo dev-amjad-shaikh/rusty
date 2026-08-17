@@ -58,7 +58,6 @@ fn proposal() -> SkillProposal {
 fn demo_snapshot() -> CapabilityInspection {
     CapabilityInspection {
         skill_names: vec![],
-        connector_manifest_ids: vec!["google-calendar".to_owned(), "servicenow".to_owned()],
         tool_names: vec![
             "compose_skill".to_owned(),
             "publish_composed_skill".to_owned(),
@@ -66,7 +65,6 @@ fn demo_snapshot() -> CapabilityInspection {
         ],
         planes: vec![
             Plane::Skills,
-            Plane::Connectors,
             Plane::Knowledge,
             Plane::Memory,
             Plane::Evidence,
@@ -97,7 +95,6 @@ fn catalog_covers_the_real_planes_and_the_known_gaps() {
     assert_eq!(ids.len(), sorted.len(), "catalog ids must be unique");
     for expected in [
         "skill-plane",
-        "connector-plane",
         "knowledge-plane",
         "memory-plane",
         "flight-recorder",

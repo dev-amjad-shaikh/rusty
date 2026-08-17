@@ -158,7 +158,7 @@ The two P0 gaps from the 2026-08-09 competitive review. Both extend existing gov
 
 ### Post-R1.0 candidates · breadth planes
 
-From the competitive review, sequenced after the stability release so the runtime moat is proven first: realtime/multimodal durable sessions (voice, barge-in, live approvals — a Rust-native low-latency showcase), durable knowledge-ingestion pipelines (connectors, chunking, ACL propagation, freshness, retrieval evaluation — *not* a generic RAG framework), agent catalog + fleet operations (ownership, health, bulk upgrade/revoke), application publishing (one-command API/widget/webhook/channel), and enterprise administration (OIDC/SAML, SCIM, RBAC/ABAC, audit export, spend limits).
+From the competitive review, sequenced after the stability release so the runtime moat is proven first: realtime/multimodal durable sessions (voice, barge-in, live approvals — a Rust-native low-latency showcase), durable knowledge-ingestion pipelines (source integrations, chunking, ACL propagation, freshness, retrieval evaluation — *not* a generic RAG framework), agent catalog + fleet operations (ownership, health, bulk upgrade/revoke), application publishing (one-command API/widget/webhook/channel), and enterprise administration (OIDC/SAML, SCIM, RBAC/ABAC, audit export, spend limits).
 
 ## Design principles
 

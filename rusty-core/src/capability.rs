@@ -2,7 +2,7 @@
 //! one agent version declares and one run resolves at admission.
 //!
 //! A [`CapabilitySet`] names exact members — tool names today, plus
-//! forward-compatible skill/connector references — and derives its identity
+//! forward-compatible skill references — and derives its identity
 //! (the set id) from the canonical serialization of those members, so two
 //! compositions are the same set if and only if they name the same members.
 //! The empty set is legitimate: it describes a deliberately tool-free
@@ -23,10 +23,10 @@
 //!   contains fails with a typed [`RustyError::Replay`] instead of
 //!   silently widening or narrowing the replayed run.
 //!
-//! Skill and connector members are opaque references with kind tags. Their
-//! planes land separately; the set records them verbatim today so the
-//! content address already covers them, and validation against their
-//! registries arrives with those planes.
+//! Skill members are opaque references with kind tags. Their plane lands
+//! separately; the set records them verbatim today so the content address
+//! already covers them, and validation against the skill registry arrives
+//! with that plane.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,24 +44,21 @@ use crate::tool::{GuardDenial, GuardedCall, ToolCapability, ToolGuard, ToolRegis
 /// follows.
 pub const CAPABILITY_SET_ID_PREFIX: &str = "cs-";
 
-/// Maximum length of one opaque skill/connector reference.
+/// Maximum length of one opaque skill reference.
 pub const MAX_CAPABILITY_REF_BYTES: usize = 256;
 
 /// Which capability plane a [`CapabilityRef`] belongs to.
 ///
 /// Tools are not referenced through this type: they are the execution
 /// plane this crate already owns, so a set names them directly. Only the
-/// planes this module does not interpret — skills and connectors — ride
-/// as opaque references.
+/// planes this module does not interpret — skills today — ride as opaque
+/// references.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityRefKind {
     /// A versioned skill package (procedural knowledge; the skill plane
     /// owns interpretation).
     Skill,
-    /// A connector instance or generation (the connector plane owns
-    /// interpretation).
-    Connector,
 }
 
 impl CapabilityRefKind {
@@ -69,12 +66,11 @@ impl CapabilityRefKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             CapabilityRefKind::Skill => "skill",
-            CapabilityRefKind::Connector => "connector",
         }
     }
 }
 
-/// An opaque, kind-tagged reference to a skill or connector plane member.
+/// An opaque, kind-tagged reference to a skill plane member.
 ///
 /// The reference string is interpreted only by the owning plane; this
 /// module checks shape (non-empty, trimmed, control-free, bounded) and
@@ -83,8 +79,7 @@ impl CapabilityRefKind {
 pub struct CapabilityRef {
     /// The plane that interprets `reference`.
     pub kind: CapabilityRefKind,
-    /// Opaque plane-specific reference (a skill package id, a connector
-    /// instance id).
+    /// Opaque plane-specific reference (a skill package id).
     pub reference: String,
 }
 
@@ -109,11 +104,6 @@ impl CapabilityRef {
     pub fn skill(reference: impl Into<String>) -> Result<Self> {
         Self::new(CapabilityRefKind::Skill, reference)
     }
-
-    /// A connector plane reference.
-    pub fn connector(reference: impl Into<String>) -> Result<Self> {
-        Self::new(CapabilityRefKind::Connector, reference)
-    }
 }
 
 /// The immutable, content-addressed capability composition of one agent
@@ -128,7 +118,7 @@ impl CapabilityRef {
 pub struct CapabilitySet {
     /// Exact tool names, sorted.
     tools: Vec<String>,
-    /// Skill/connector references, sorted by (kind, reference).
+    /// Skill references, sorted by (kind, reference).
     refs: Vec<CapabilityRef>,
     /// `cs-` + SHA-256 of the canonical member serialization.
     id: String,
@@ -169,7 +159,7 @@ impl CapabilitySet {
     /// Compose and validate a set against the executable catalog.
     ///
     /// Every tool member must appear in `catalog`; unknown names fail
-    /// closed. Skill/connector references are shape-checked and recorded
+    /// closed. Skill references are shape-checked and recorded
     /// verbatim — their planes validate them when those planes land. The
     /// empty composition is legitimate (a tool-free agent).
     pub fn compose(
@@ -224,7 +214,7 @@ impl CapabilitySet {
         &self.tools
     }
 
-    /// The skill/connector references, sorted by (kind, reference).
+    /// The skill references, sorted by (kind, reference).
     pub fn refs(&self) -> &[CapabilityRef] {
         &self.refs
     }
@@ -236,7 +226,7 @@ impl CapabilitySet {
     }
 
     /// Resolve the set into the exact tool allowlist the executor consumes
-    /// ([`crate::executor::RunConfig::tool_allowlist`]). Skill/connector
+    /// ([`crate::executor::RunConfig::tool_allowlist`]). Skill
     /// members never widen the tool plane.
     pub fn resolve_allowlist(&self) -> Vec<String> {
         self.tools.clone()
@@ -306,7 +296,7 @@ impl CapabilitySet {
     /// member makes that impossible, so the replay fails with a typed
     /// [`RustyError::Replay`] naming the missing member — it never
     /// silently narrows (drops the member) or widens (ignores the set).
-    /// Skill/connector references have no registry to check against yet;
+    /// Skill references have no registry to check against yet;
     /// the contract extends to them when their planes land.
     pub fn replay_guard(&self, registry: &ToolRegistry) -> Result<()> {
         for name in &self.tools {

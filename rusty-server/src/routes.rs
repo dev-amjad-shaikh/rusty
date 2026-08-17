@@ -66,7 +66,6 @@ use crate::assistants::{
 };
 use crate::auth::TenantContext;
 use crate::capsules::{CapsuleRecord, CapsuleWrite};
-use crate::connectors;
 use crate::coordination;
 use crate::crons::{self, CronRecord, OnRunCompleted};
 use crate::error::ApiError;
@@ -143,13 +142,6 @@ pub(crate) struct AppState {
     /// ([`crate::deploy::DEPLOYMENT_JOURNAL_RUN_ID`]) — the broker's
     /// chain discipline lifted to deployments.
     pub deployment: Arc<crate::deploy::DeploymentControl>,
-    /// The connector plane: content-addressed manifests, tenant-scoped
-    /// instances, and live provider sessions over the core
-    /// `connector` contracts, with credentials bridged from the
-    /// deployment's vault at instantiation and durable records over the
-    /// same store. Boot restore is lazy and exactly-once
-    /// ([`crate::connectors::ConnectorPlane`]).
-    pub connectors: Arc<crate::connectors::ConnectorPlane>,
     /// The MCP bridge's in-flight `tools/call` map (R0.9 wave 4): request
     /// id → run id, the lookup `notifications/cancelled` resolves. Lives
     /// on the state (not inside the handler) so the cancellation
@@ -274,10 +266,6 @@ pub(crate) fn build_router(
     let deployment = Arc::new(crate::deploy::DeploymentControl::new(Arc::clone(
         &server_store,
     )));
-    let connectors = Arc::new(crate::connectors::ConnectorPlane::new(
-        Arc::clone(&server_store),
-        Arc::clone(&broker),
-    ));
     let state = Arc::new(AppState {
         registry,
         config: config.clone(),
@@ -293,7 +281,6 @@ pub(crate) fn build_router(
         broker: Arc::clone(&broker),
         artifact_retention,
         deployment,
-        connectors,
         mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
         a2a_streams: Mutex::new(HashMap::new()),
         journal_locks: Mutex::new(HashMap::new()),
@@ -417,40 +404,6 @@ pub(crate) fn build_router(
             get(get_connection_health),
         )
         .route("/broker/journal", get(get_broker_journal))
-        // The connector plane: declared, content-addressed manifests;
-        // tenant-scoped instances with an explicit health/auth lifecycle;
-        // generation-pinned catalogs. Registration resolves credential
-        // slots through the deployment's vault — answers name slots and
-        // connections, never material. Cross-tenant ids are 404.
-        .route(
-            "/connectors/manifests",
-            post(connectors::create_connector_manifest).get(connectors::list_connector_manifests),
-        )
-        .route(
-            "/connectors/instances",
-            post(connectors::create_connector_instance).get(connectors::list_connector_instances),
-        )
-        .route(
-            "/connectors/instances/{instance_id}/connect",
-            post(connectors::connect_instance),
-        )
-        .route(
-            "/connectors/instances/{instance_id}/catalog",
-            get(connectors::get_instance_catalog),
-        )
-        .route(
-            "/connectors/instances/{instance_id}/health",
-            post(connectors::check_instance_health),
-        )
-        .route(
-            "/connectors/instances/{instance_id}/disable",
-            post(connectors::disable_instance),
-        )
-        .route(
-            "/connectors/instances/{instance_id}/enable",
-            post(connectors::enable_instance),
-        )
-        .route("/connectors/sweep", post(connectors::sweep_connectors))
         .route("/assistants", post(create_assistant).get(list_assistants))
         .route("/assistants/{assistant_id}", get(get_assistant))
         .route(

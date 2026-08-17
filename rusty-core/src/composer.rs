@@ -9,8 +9,8 @@
 //!    [`Effect::Pure`]): assemble the proposed package or definition, run
 //!    it through the *existing* validators — [`SkillPackage`]'s fail-closed
 //!    construction and [`scan_package`] for skills, the tool-contract rules
-//!    of [`crate::tool`] and the bounded-text rules of
-//!    [`crate::connector::manifest`] for tool definitions — and return a
+//!    of [`crate::tool`] and the bounded-text rules of this module for tool
+//!    definitions — and return a
 //!    structured [`DraftReceipt`]: machine-readable findings, the content
 //!    hash, and suggested revision notes. A draft is evidence, never an
 //!    action; nothing here registers anything.
@@ -30,21 +30,18 @@
 //! found; the receipt's `suggested_revision_notes` translate refusals into
 //! the vocabulary the composing agent can act on, so a denied draft is a
 //! correction, not a dead end. The composer never weakens a rule to make a
-//! draft pass: it reuses the skill plane's and connector plane's
-//! validators, so a package the composer accepts is one
+//! draft pass: it reuses the skill plane's validators and this module's
+//! bounded-text rules, so a package the composer accepts is one
 //! [`SkillRegistry::register`] accepts.
 //!
 //! # The publish seam for tool definitions
 //!
 //! Skill publishing lands here because the skill registry is an in-process
-//! value the composer can be handed. Tool definitions are different: their
-//! door is the connector plane's manifest admission
-//! ([`crate::connector::registry::ConnectorRegistry::register_manifest`]),
-//! which an operator reaches by wrapping drafts into a
-//! [`crate::connector::manifest::ConnectorManifest`]. That wrap is
-//! deliberately out of this slice — [`ComposeToolDefinitionTool`] receipts
-//! name the seam so callers route there instead of expecting the composer
-//! to cross it.
+//! value the composer can be handed. Tool definitions are different: the
+//! composer has no tool registry to write into, so admission of a validated
+//! definition is the host's door. That hop is deliberately out of this
+//! slice — [`ComposeToolDefinitionTool`] receipts name the seam so callers
+//! route there instead of expecting the composer to cross it.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -53,8 +50,6 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::connector::canonical_json_hash;
-use crate::connector::manifest::{validate_text_field, MAX_ARGS, MAX_ARG_LEN, MAX_COMMAND_LEN};
 use crate::effects::{
     admit_irreversible, ApprovalToken, EffectId, EffectViolation, IrreversibleEffect, TypedEffect,
 };
@@ -93,9 +88,17 @@ pub const MAX_RECIPE_TEMPLATE_BYTES: usize = 8 * 1024;
 pub const MAX_RECIPE_PATH_BYTES: usize = 1024;
 
 /// The HTTP methods a drafted `http` recipe may declare. Closed set: the
-/// recipe is data, and the set is what the connector plane's bounded HTTP
-/// surface can honor.
+/// recipe is data, and the set is what a bounded HTTP surface can honor.
 pub const RECIPE_HTTP_METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+/// The longest a `cli` recipe command (or allowlist entry) may be, in bytes.
+pub const MAX_COMMAND_LEN: usize = 512;
+
+/// The most argument templates a `cli` recipe may carry.
+pub const MAX_ARGS: usize = 64;
+
+/// The longest one `cli` recipe argument template may be, in bytes.
+pub const MAX_ARG_LEN: usize = 1024;
 
 /// One machine-readable observation from a compose call. Findings never
 /// echo the offending content: `detail` names the rule and the location,
@@ -610,11 +613,10 @@ impl Tool for PublishComposedSkillTool {
 /// allowlisted command), never arbitrary executable content.
 ///
 /// Validation reuses the planes that own the rules: the tool contract of
-/// [`crate::tool`] for name, description, and parameter schema, and the
-/// bounded-text rules of [`crate::connector::manifest`] for recipe fields.
-/// Publishing is out of this slice by design — the receipt names the seam
-/// (wrap the draft into a connector manifest; its registry admission is
-/// the door).
+/// [`crate::tool`] for name, description, and parameter schema, and this
+/// module's bounded-text rules for recipe fields. Publishing is out of
+/// this slice by design — the receipt names the seam (the host admits the
+/// validated definition into its own tool registry).
 ///
 /// [`Effect::Pure`]: a deterministic function of the input with no draft
 /// store — there is nothing here to publish.
@@ -632,8 +634,8 @@ impl std::fmt::Debug for ComposeToolDefinitionTool {
 
 /// The publish seam every tool-definition receipt names.
 const TOOL_DEFINITION_PUBLISH_SEAM: &str =
-    "tool definition drafts do not publish through the composer: wrap the draft into a \
-     ConnectorManifest and admit it through the connector plane's manifest registration";
+    "tool definition drafts do not publish through the composer: the host admits the validated \
+     definition into its own tool registry";
 
 impl ComposeToolDefinitionTool {
     /// A drafting tool whose `cli` recipes may name only commands in
@@ -663,7 +665,7 @@ impl Tool for ComposeToolDefinitionTool {
         "Draft a tool definition (name, description, parameter schema, effect class, and a \
          bounded declarative recipe: template transform, http path-template call, or \
          cli allowlisted call) and return a validation receipt. Publishing routes through \
-         the connector plane's manifest registration, not the composer."
+         the host's own tool registration, not the composer."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -755,10 +757,42 @@ impl Tool for ComposeToolDefinitionTool {
 // Recipe validation
 // --------------------------------------------------------------------- //
 
+/// Shared rule for human-facing text: trimmed, control-free, bounded.
+/// `allow_empty` distinguishes notes (may be empty) from primary fields.
+fn validate_text_field(
+    field: &str,
+    value: &str,
+    max_bytes: usize,
+    allow_empty: bool,
+) -> std::result::Result<(), RustyError> {
+    if (!allow_empty && value.is_empty())
+        || value != value.trim()
+        || value.len() > max_bytes
+        || value.chars().any(char::is_control)
+    {
+        return Err(RustyError::Tool(format!(
+            "{field} must be {}trimmed, control-free, and at most {max_bytes} bytes",
+            if allow_empty { "" } else { "non-empty, " }
+        )));
+    }
+    Ok(())
+}
+
+/// SHA-256 of the canonical JSON form of `value` — object keys sorted
+/// recursively — the digest convention draft content addresses share with
+/// the record model's manifest pins.
+fn canonical_json_hash(value: &serde_json::Value) -> String {
+    // Serializing a `Value` is infallible in practice (its maps always have
+    // string keys); see `PayloadRef::content_hash` for the same argument.
+    let bytes = serde_json::to_vec(&crate::record::canonicalize_value(value))
+        .expect("a serde_json::Value always serializes");
+    crate::record::sha256_hex(&bytes)
+}
+
 /// Validate one declarative recipe against the parameter schema it binds
 /// to. Every placeholder `{param}` in a template, path, or argument must
 /// name a declared schema property — a recipe that references undeclared
-/// input is a definition the connector plane could never honor.
+/// input is a definition no executor could ever honor.
 fn validate_recipe(
     recipe: &Value,
     parameters_schema: &Value,
@@ -1162,6 +1196,6 @@ mod tests {
         assert!(receipt["publish_seam"]
             .as_str()
             .unwrap()
-            .contains("ConnectorManifest"));
+            .contains("tool registry"));
     }
 }

@@ -15,7 +15,6 @@ import { RunComparePage } from "./features/work/RunComparePage";
 import { SkillsPage } from "./features/skills-tools/SkillsPage";
 import { KnowledgePage } from "./features/knowledge/KnowledgePage";
 import { MemoryPage } from "./features/memory/MemoryPage";
-import { ConnectorsPage } from "./features/connectors/ConnectorsPage";
 import { OperationsPage } from "./features/operations/OperationsPage";
 import { ReleasesPage } from "./features/operations/releases/ReleasesPage";
 
@@ -46,13 +45,12 @@ const workRunRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work
 const workTraceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId/trace", component: WorkPage });
 const workEvaluateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/work/$threadId/runs/$runId/evaluate", component: WorkPage });
 const memoryRoute = createRoute({ getParentRoute: () => rootRoute, path: "/memory", component: MemoryPage });
-const connectorsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/connectors", component: ConnectorsPage });
 const operationsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations", component: OperationsPage });
 const releasesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations/releases", component: ReleasesPage });
 const releasesEnvironmentRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations/releases/$environment", component: ReleasesPage });
 const releasesRevisionRoute = createRoute({ getParentRoute: () => rootRoute, path: "/operations/releases/$environment/revisions/$revisionId", component: ReleasesPage });
 
-const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, agentBuilderRoute, agentRoute, promptsRoute, skillsRoute, knowledgeRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, memoryRoute, connectorsRoute, operationsRoute, releasesRoute, releasesEnvironmentRoute, releasesRevisionRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, agentsRoute, agentBuilderRoute, agentRoute, promptsRoute, skillsRoute, knowledgeRoute, workRoute, workCompareRoute, workRunRoute, workTraceRoute, workEvaluateRoute, memoryRoute, operationsRoute, releasesRoute, releasesEnvironmentRoute, releasesRevisionRoute]);
 
 export const router = createRouter({
   routeTree,

@@ -36,7 +36,6 @@ use std::path::{Path, PathBuf};
 use rusty_agent_runtime::artifact::RunArtifact;
 use rusty_agent_runtime::broker::StoredConnection;
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
-use rusty_agent_runtime::connector::ConnectorManifest;
 use rusty_agent_runtime::deploy::{
     DeploymentPointer, DeploymentRevision, EnvSecretRecord, Environment, RevisionId,
     StoredEnvSecret,
@@ -65,7 +64,6 @@ use crate::capsule_policy::{
     self, CapsuleOverlayRecord, CapsulePolicyActivation, CapsulePolicyRecord, CapsulePolicyWrite,
 };
 use crate::capsules::{self, CapsuleRecord, CapsuleWrite};
-use crate::connectors::{self, ConnectorInstanceRecord};
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::deploy;
@@ -1023,68 +1021,6 @@ pub(crate) trait ServerStore: Send + Sync {
     /// reached only through `Broker::delete`, which revokes first.
     async fn delete_connection(&self, tenant: &str, connection_id: &str) -> StoreResult<bool>;
 
-    // -- Connectors (manifest + instance records) ----------------------- //
-
-    /// Insert a connector manifest keyed by its tenant-scoped content
-    /// hash. Manifests are immutable content-addressed declarations —
-    /// an existing row is always the same content (the route converges
-    /// it), so replacing is correct.
-    async fn put_connector_manifest(
-        &self,
-        tenant: &str,
-        manifest: &ConnectorManifest,
-    ) -> StoreResult<()>;
-
-    /// Fetch one connector manifest by content hash (`None` for unknown
-    /// or cross-tenant hashes — the store's indistinguishability rule).
-    async fn get_connector_manifest(
-        &self,
-        tenant: &str,
-        hash: &str,
-    ) -> StoreResult<Option<ConnectorManifest>>;
-
-    /// Every connector manifest the tenant holds (order unspecified;
-    /// callers sort).
-    async fn list_connector_manifests(&self, tenant: &str) -> StoreResult<Vec<ConnectorManifest>>;
-
-    /// Every connector manifest across every tenant, each paired with
-    /// its tenant (order unspecified). Boot restore's scan: the plane
-    /// re-registers the whole catalog before it serves, and per-tenant
-    /// listing would need a tenant roster the plane does not keep.
-    async fn list_all_connector_manifests(&self) -> StoreResult<Vec<(String, ConnectorManifest)>>;
-
-    /// Insert or replace a connector instance record (the lifecycle
-    /// mirror: `sync_record` rewrites state, failure counters, and the
-    /// served catalog after every transition).
-    async fn upsert_connector_instance(
-        &self,
-        tenant: &str,
-        record: &ConnectorInstanceRecord,
-    ) -> StoreResult<()>;
-
-    /// Fetch one connector instance record (`None` for unknown or
-    /// cross-tenant ids).
-    async fn get_connector_instance(
-        &self,
-        tenant: &str,
-        instance_id: &str,
-    ) -> StoreResult<Option<ConnectorInstanceRecord>>;
-
-    /// Every connector instance record the tenant holds (order
-    /// unspecified; callers sort).
-    async fn list_connector_instances(
-        &self,
-        tenant: &str,
-    ) -> StoreResult<Vec<ConnectorInstanceRecord>>;
-
-    /// Every connector instance record across every tenant, each paired
-    /// with its tenant (order unspecified). Boot restore's scan — the
-    /// plane re-instantiates in ascending instance-id order to
-    /// reproduce the registry's mint-order ids.
-    async fn list_all_connector_instances(
-        &self,
-    ) -> StoreResult<Vec<(String, ConnectorInstanceRecord)>>;
-
     // -- Deployments (R0.12 wave 3) ------------------------------------- //
 
     /// Insert a deployment revision; `false` (no write) when the
@@ -1392,17 +1328,6 @@ pub(crate) struct JsonFileStore {
     /// envelope's rule). The broker owns the cryptography; this index
     /// only ever holds ciphertext.
     connections: Mutex<HashMap<String, StoredConnection>>,
-    /// The connector plane's manifests keyed by tenant-scoped content
-    /// hash (`{tenant}/{hash}`), one file per record under
-    /// `{store_path}/connectors/manifests/` (path-keyed tenancy, the
-    /// learn-candidates rule).
-    connector_manifests: Mutex<HashMap<String, ConnectorManifest>>,
-    /// Connector instance records keyed by tenant-scoped instance id
-    /// (`{tenant}/{instance_id}`), one file per record under
-    /// `{store_path}/connectors/instances/`. Records carry the slot →
-    /// connection-id binding and the lifecycle mirror, never credential
-    /// material.
-    connector_instances: Mutex<HashMap<String, ConnectorInstanceRecord>>,
     /// The run artifact plane (R0.12 wave 1): records keyed by
     /// tenant-scoped content address, one file per record under
     /// `{store_path}/artifacts/records/` (path-keyed tenancy, the
@@ -1472,8 +1397,6 @@ impl JsonFileStore {
             #[cfg(feature = "capsules")]
             capsule_overlays: Mutex::new(capsule_policy::load_capsule_overlays(root)),
             connections: Mutex::new(crate::broker::load_connections(root)),
-            connector_manifests: Mutex::new(connectors::load_manifests(root)),
-            connector_instances: Mutex::new(connectors::load_instances(root)),
             run_artifacts: Mutex::new(crate::artifacts::load_records(root)),
             run_artifact_names: Mutex::new(crate::artifacts::load_names(root)),
             artifact_blobs: crate::artifacts::blob_store(root),
@@ -3521,107 +3444,6 @@ impl ServerStore for JsonFileStore {
         Ok(true)
     }
 
-    // -- Connectors ------------------------------------------------------ //
-
-    async fn put_connector_manifest(
-        &self,
-        tenant: &str,
-        manifest: &ConnectorManifest,
-    ) -> StoreResult<()> {
-        let scoped = crate::auth::scope_id(tenant, &manifest.hash);
-        let mut map = self.connector_manifests.lock().await;
-        // Hold the lock across the file write (the assistants convention).
-        connectors::persist_manifest(&self.root, &scoped, manifest)
-            .await
-            .map_err(io_err("persist connector manifest"))?;
-        map.insert(scoped, manifest.clone());
-        Ok(())
-    }
-
-    async fn get_connector_manifest(
-        &self,
-        tenant: &str,
-        hash: &str,
-    ) -> StoreResult<Option<ConnectorManifest>> {
-        let scoped = crate::auth::scope_id(tenant, hash);
-        Ok(self.connector_manifests.lock().await.get(&scoped).cloned())
-    }
-
-    async fn list_connector_manifests(&self, tenant: &str) -> StoreResult<Vec<ConnectorManifest>> {
-        let map = self.connector_manifests.lock().await;
-        Ok(map
-            .iter()
-            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
-            .map(|(_, manifest)| manifest.clone())
-            .collect())
-    }
-
-    async fn list_all_connector_manifests(&self) -> StoreResult<Vec<(String, ConnectorManifest)>> {
-        let map = self.connector_manifests.lock().await;
-        Ok(map
-            .iter()
-            .map(|(scoped, manifest)| {
-                (
-                    crate::auth::tenant_of_internal(scoped).to_owned(),
-                    manifest.clone(),
-                )
-            })
-            .collect())
-    }
-
-    async fn upsert_connector_instance(
-        &self,
-        tenant: &str,
-        record: &ConnectorInstanceRecord,
-    ) -> StoreResult<()> {
-        let scoped = crate::auth::scope_id(tenant, &record.instance_id);
-        let mut map = self.connector_instances.lock().await;
-        // Hold the lock across the file write (the assistants convention):
-        // a lifecycle transition's read-modify-write can't interleave
-        // with another transition's persist.
-        connectors::persist_instance(&self.root, &scoped, record)
-            .await
-            .map_err(io_err("persist connector instance"))?;
-        map.insert(scoped, record.clone());
-        Ok(())
-    }
-
-    async fn get_connector_instance(
-        &self,
-        tenant: &str,
-        instance_id: &str,
-    ) -> StoreResult<Option<ConnectorInstanceRecord>> {
-        let scoped = crate::auth::scope_id(tenant, instance_id);
-        Ok(self.connector_instances.lock().await.get(&scoped).cloned())
-    }
-
-    async fn list_connector_instances(
-        &self,
-        tenant: &str,
-    ) -> StoreResult<Vec<ConnectorInstanceRecord>> {
-        let map = self.connector_instances.lock().await;
-        Ok(map
-            .iter()
-            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
-            .map(|(_, record)| record.clone())
-            .collect())
-    }
-
-    async fn list_all_connector_instances(
-        &self,
-    ) -> StoreResult<Vec<(String, ConnectorInstanceRecord)>> {
-        let map = self.connector_instances.lock().await;
-        Ok(map
-            .iter()
-            .map(|(scoped, record)| {
-                (
-                    crate::auth::tenant_of_internal(scoped).to_owned(),
-                    record.clone(),
-                )
-            })
-            .collect())
-    }
-
     // -- Deployments (R0.12 wave 3) ------------------------------------- //
 
     async fn put_revision(&self, tenant: &str, record: &DeploymentRevision) -> StoreResult<bool> {
@@ -3889,7 +3711,6 @@ mod postgres {
     use rusty_agent_runtime::artifact::RunArtifact;
     use rusty_agent_runtime::broker::StoredConnection;
     use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
-    use rusty_agent_runtime::connector::ConnectorManifest;
     use rusty_agent_runtime::deploy::{
         DeploymentPointer, DeploymentRevision, EnvSecretRecord, Environment, RevisionId,
         StoredEnvSecret,
@@ -3922,7 +3743,6 @@ mod postgres {
         CapsuleOverlayRecord, CapsulePolicyActivation, CapsulePolicyRecord, CapsulePolicyWrite,
     };
     use crate::capsules::{CapsuleRecord, CapsuleWrite};
-    use crate::connectors::ConnectorInstanceRecord;
     use crate::coordination::CoordinationRecord;
     use crate::crons::CronRecord;
     use crate::memory;
@@ -4492,35 +4312,6 @@ mod postgres {
         CREATE INDEX IF NOT EXISTS server_connections_listing
             ON server_connections (tenant, connection_id)";
 
-    /// The connector plane: one row per record — manifests and instance
-    /// records share one table because they share one lifecycle
-    /// (tenant-scoped, insert/upsert, listed together at restore); the
-    /// `kind` column (`manifest` / `instance`) tells them apart, and the
-    /// key grammar makes cross-kind collisions impossible (manifests key
-    /// by content hash, instances by minted `inst-NNNNNN` id). The
-    /// `connector_id` column carries the record's own unscoped identity
-    /// (the hash for manifests, the instance id for instances) for
-    /// operator queries; `state` is the instance lifecycle mirror (`NULL`
-    /// for manifests). Instance records persist the slot → connection-id
-    /// binding, never credential material — the `server_connections`
-    /// custody rule. Additive: a new table, never an alteration.
-    pub(crate) const CREATE_CONNECTORS_SQL: &str = r#"
-        CREATE TABLE IF NOT EXISTS server_connectors (
-            connector_key TEXT PRIMARY KEY,
-            tenant        TEXT NOT NULL,
-            kind          TEXT NOT NULL,
-            connector_id  TEXT NOT NULL,
-            state         TEXT,
-            payload       JSONB NOT NULL,
-            updated_at    TIMESTAMPTZ NOT NULL,
-            created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-        )"#;
-
-    /// The tenant's connector records by kind (the list routes' scan).
-    pub(crate) const CREATE_CONNECTORS_INDEX_SQL: &str = "
-        CREATE INDEX IF NOT EXISTS server_connectors_listing
-            ON server_connectors (tenant, kind)";
-
     /// The deployment control plane (R0.12 wave 3): one row per record —
     /// revisions, environments, and the per-environment pointers share
     /// one table because they share one lifecycle (tenant-scoped,
@@ -4634,8 +4425,6 @@ mod postgres {
         CREATE_RUN_RECEIPTS_SQL,
         CREATE_CONNECTIONS_SQL,
         CREATE_CONNECTIONS_TENANT_INDEX_SQL,
-        CREATE_CONNECTORS_SQL,
-        CREATE_CONNECTORS_INDEX_SQL,
         CREATE_RUN_ARTIFACTS_SQL,
         CREATE_RUN_ARTIFACTS_INDEX_SQL,
         CREATE_DEPLOYMENTS_SQL,
@@ -5544,30 +5333,6 @@ mod postgres {
     pub(crate) const DELETE_CONNECTION_SQL: &str = r#"
         DELETE FROM server_connections WHERE connection_id = $1 AND tenant = $2
         RETURNING connection_id"#;
-
-    /// Connector statements. The payload is the whole record (manifest or
-    /// instance record) — instance records carry the slot → connection-id
-    /// binding, never credential material. Writes are upserts: manifests
-    /// converge identical re-declarations (content-addressed), instances
-    /// mirror every lifecycle transition.
-    pub(crate) const UPSERT_CONNECTOR_SQL: &str = r#"
-        INSERT INTO server_connectors (connector_key, tenant, kind, connector_id, state, payload, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (connector_key) DO UPDATE
-            SET state = EXCLUDED.state, payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at"#;
-
-    pub(crate) const SELECT_CONNECTOR_SQL: &str =
-        "SELECT payload FROM server_connectors WHERE connector_key = $1 AND kind = $2";
-
-    pub(crate) const LIST_CONNECTORS_SQL: &str =
-        "SELECT payload FROM server_connectors WHERE tenant = $1 AND kind = $2";
-
-    /// Boot restore's deployment-wide scan: every row of one kind, with
-    /// its tenant column — the payload is tenant-scoped by key, not by
-    /// content, so the tenant must come from the row (the
-    /// `LIST_ALL_CONNECTIONS_SQL` rule).
-    pub(crate) const LIST_ALL_CONNECTORS_SQL: &str =
-        "SELECT tenant, payload FROM server_connectors WHERE kind = $1";
 
     /// Insert-only revision and environment registration; returns no row
     /// on conflict → the record already exists (the route converges an
@@ -8950,144 +8715,6 @@ mod postgres {
             Ok(row.is_some())
         }
 
-        // -- Connectors ------------------------------------------------- //
-
-        async fn put_connector_manifest(
-            &self,
-            tenant: &str,
-            manifest: &ConnectorManifest,
-        ) -> StoreResult<()> {
-            sqlx::query(UPSERT_CONNECTOR_SQL)
-                .bind(crate::auth::scope_id(tenant, &manifest.hash))
-                .bind(tenant)
-                .bind("manifest")
-                .bind(&manifest.hash)
-                .bind(None::<String>)
-                .bind(record_to_payload(manifest)?)
-                .bind(chrono::Utc::now())
-                .execute(self.pool().await?)
-                .await
-                .map_err(db_err("upsert connector manifest"))?;
-            Ok(())
-        }
-
-        async fn get_connector_manifest(
-            &self,
-            tenant: &str,
-            hash: &str,
-        ) -> StoreResult<Option<ConnectorManifest>> {
-            let row = sqlx::query(SELECT_CONNECTOR_SQL)
-                .bind(crate::auth::scope_id(tenant, hash))
-                .bind("manifest")
-                .fetch_optional(self.pool().await?)
-                .await
-                .map_err(db_err("select connector manifest"))?;
-            row.map(|row| record_from_payload("connector manifest", row.get::<Value, _>("payload")))
-                .transpose()
-        }
-
-        async fn list_connector_manifests(
-            &self,
-            tenant: &str,
-        ) -> StoreResult<Vec<ConnectorManifest>> {
-            let rows = sqlx::query(LIST_CONNECTORS_SQL)
-                .bind(tenant)
-                .bind("manifest")
-                .fetch_all(self.pool().await?)
-                .await
-                .map_err(db_err("list connector manifests"))?;
-            rows.into_iter()
-                .map(|row| {
-                    record_from_payload("connector manifest", row.get::<Value, _>("payload"))
-                })
-                .collect()
-        }
-
-        async fn list_all_connector_manifests(
-            &self,
-        ) -> StoreResult<Vec<(String, ConnectorManifest)>> {
-            let rows = sqlx::query(LIST_ALL_CONNECTORS_SQL)
-                .bind("manifest")
-                .fetch_all(self.pool().await?)
-                .await
-                .map_err(db_err("list all connector manifests"))?;
-            rows.into_iter()
-                .map(|row| {
-                    let tenant = row.get::<String, _>("tenant");
-                    record_from_payload("connector manifest", row.get::<Value, _>("payload"))
-                        .map(|manifest| (tenant, manifest))
-                })
-                .collect()
-        }
-
-        async fn upsert_connector_instance(
-            &self,
-            tenant: &str,
-            record: &ConnectorInstanceRecord,
-        ) -> StoreResult<()> {
-            sqlx::query(UPSERT_CONNECTOR_SQL)
-                .bind(crate::auth::scope_id(tenant, &record.instance_id))
-                .bind(tenant)
-                .bind("instance")
-                .bind(&record.instance_id)
-                .bind(Some(record.state.clone()))
-                .bind(record_to_payload(record)?)
-                .bind(record.updated_at)
-                .execute(self.pool().await?)
-                .await
-                .map_err(db_err("upsert connector instance"))?;
-            Ok(())
-        }
-
-        async fn get_connector_instance(
-            &self,
-            tenant: &str,
-            instance_id: &str,
-        ) -> StoreResult<Option<ConnectorInstanceRecord>> {
-            let row = sqlx::query(SELECT_CONNECTOR_SQL)
-                .bind(crate::auth::scope_id(tenant, instance_id))
-                .bind("instance")
-                .fetch_optional(self.pool().await?)
-                .await
-                .map_err(db_err("select connector instance"))?;
-            row.map(|row| record_from_payload("connector instance", row.get::<Value, _>("payload")))
-                .transpose()
-        }
-
-        async fn list_connector_instances(
-            &self,
-            tenant: &str,
-        ) -> StoreResult<Vec<ConnectorInstanceRecord>> {
-            let rows = sqlx::query(LIST_CONNECTORS_SQL)
-                .bind(tenant)
-                .bind("instance")
-                .fetch_all(self.pool().await?)
-                .await
-                .map_err(db_err("list connector instances"))?;
-            rows.into_iter()
-                .map(|row| {
-                    record_from_payload("connector instance", row.get::<Value, _>("payload"))
-                })
-                .collect()
-        }
-
-        async fn list_all_connector_instances(
-            &self,
-        ) -> StoreResult<Vec<(String, ConnectorInstanceRecord)>> {
-            let rows = sqlx::query(LIST_ALL_CONNECTORS_SQL)
-                .bind("instance")
-                .fetch_all(self.pool().await?)
-                .await
-                .map_err(db_err("list all connector instances"))?;
-            rows.into_iter()
-                .map(|row| {
-                    let tenant = row.get::<String, _>("tenant");
-                    record_from_payload("connector instance", row.get::<Value, _>("payload"))
-                        .map(|record| (tenant, record))
-                })
-                .collect()
-        }
-
         // -- Deployments (R0.12 wave 3) --------------------------------- //
 
         async fn put_revision(
@@ -9619,14 +9246,6 @@ mod postgres {
             assert!(CREATE_CONNECTIONS_SQL.contains("connection_id TEXT PRIMARY KEY"));
             assert!(CREATE_CONNECTIONS_SQL.contains("payload       JSONB"));
             assert!(CREATE_CONNECTIONS_TENANT_INDEX_SQL.contains("server_connections"));
-            // The connector plane — one table for manifests and instance
-            // records, told apart by `kind`, the record inside the JSONB
-            // payload (slot bindings, never credential material).
-            assert!(CREATE_CONNECTORS_SQL.contains("server_connectors"));
-            assert!(CREATE_CONNECTORS_SQL.contains("connector_key TEXT PRIMARY KEY"));
-            assert!(CREATE_CONNECTORS_SQL.contains("kind          TEXT NOT NULL"));
-            assert!(CREATE_CONNECTORS_SQL.contains("payload       JSONB"));
-            assert!(CREATE_CONNECTORS_INDEX_SQL.contains("(tenant, kind)"));
             // R0.12 wave 3: the deployment control plane — one table for
             // revisions, environments, and pointers, told apart by `kind`,
             // the record inside the JSONB payload; and the env-secret

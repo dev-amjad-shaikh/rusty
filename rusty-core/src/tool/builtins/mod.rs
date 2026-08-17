@@ -1,9 +1,9 @@
 //! Small native tools for local harnesses, examples, and conformance tests.
 //!
 //! These tools are deliberately credential-free and deterministic. Network
-//! search belongs behind a connector; this module supplies the safe local
-//! capabilities needed to prove the complete agent loop without pretending a
-//! network provider exists.
+//! search belongs behind a host-side provider, not a built-in; this module
+//! supplies the safe local capabilities needed to prove the complete agent
+//! loop without pretending a network provider exists.
 //!
 //! The system-execution packs live in submodules because they are the
 //! *dangerous* capabilities: containment first, explicit effect classes, and

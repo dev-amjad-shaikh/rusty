@@ -342,7 +342,7 @@ master key (per-secret data keys wrapped by the master key, XChaCha20-Poly1305 w
 secret id as associated data — the broker's construction verbatim), stored as ciphertext
 on both backends, resolved at use inside host-side code, journaled as metadata (never
 bytes) on the deployment chain. There is no refresh, no consent, no provider — a static
-secret is set, read at admission or connector setup, rotated by replacement under the
+secret is set, read at admission or connection setup, rotated by replacement under the
 stable scoped name, and revoked by deletion; each act journals. Rotation beneath a stable
 scoped name is the broker's "rotate a credential without redeploying" argument applied to
 static material: what a run's evidence pins is the scoped name, not the value of the

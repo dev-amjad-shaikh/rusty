@@ -210,7 +210,7 @@ fn compose_addresses_members_canonically() {
     let narrower = CapabilitySet::compose(&names()[..1], &[], &catalog).unwrap();
     assert_ne!(set.id(), narrower.id());
 
-    // Skill/connector references ride under the same address.
+    // Skill references ride under the same address.
     let with_refs = CapabilitySet::compose(
         &names(),
         &[CapabilityRef::skill("research-pack@1.2.0").unwrap()],
@@ -358,7 +358,7 @@ fn serde_round_trip_recomputes_the_address() {
     let (_registry, catalog) = pack();
     let set = CapabilitySet::compose(
         &["calculator".to_string()],
-        &[CapabilityRef::connector("search@prod").unwrap()],
+        &[CapabilityRef::skill("search-pack@prod").unwrap()],
         &catalog,
     )
     .unwrap();

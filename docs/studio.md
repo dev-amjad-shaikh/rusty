@@ -613,14 +613,7 @@ remains a valid workaround in all three cases — the browser only ever talks to
 ## Demo flow (against `examples/server_demo`)
 
 The demo registers two graphs on `127.0.0.1:8100`: `pipeline` (channel `log`, two nodes `first → second`,
-no network) and `react_agent` (channel `messages`, scripted model + echo tool, no network). It also seeds
-the ServiceNow Table API pack manifest into the connector plane on boot (idempotent by content hash). The
-pack is instance-agnostic: its base url carries an `{instance}` placeholder declared as a config param, so
-the tenant subdomain is chosen at instantiate time rather than baked into the manifest — Connectors →
-Instantiate asks for the subdomain, previews the resolved base url as you type, and stores the value on the
-instance as non-secret config (visible on the fleet row, replayed across restarts). The same placeholder
-rule is available to any manifest: `cargo run -p rusty-agent-runtime --example pack_manifests` prints every
-pack's manifest JSON for `POST /connectors/manifests` (or use Connectors → Register manifest).
+no network) and `react_agent` (channel `messages`, scripted model + echo tool, no network).
 
 1. Start both processes (Option A above). Open `http://127.0.0.1:8000/`, connect to `http://127.0.0.1:8100`,
    **Connect** — the header shows the server version and both graphs.

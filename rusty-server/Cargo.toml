@@ -71,9 +71,9 @@ sqlx = { version = "0.8", default-features = false, features = [
 # Server-only by design — the core crate's contracts stay engine-free — and
 # pure Rust with no native deps. The major is pinned like the rest.
 cedar-policy = { version = "4", optional = true }
-# The connector plane's HTTP provider transport (`ReqwestTransport`
-# implementing core's `HttpTransport`): rustls only, no native TLS, with
-# `stream` for the byte-ceiling-enforced incremental read.
+# The HTTP transport behind the OAuth token endpoint and demos: rustls
+# only, no native TLS, with `stream` for byte-ceiling-enforced incremental
+# reads.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 [dev-dependencies]

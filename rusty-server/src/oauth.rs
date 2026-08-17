@@ -3,8 +3,8 @@
 //! consent screen — resource-owner password and client-credentials
 //! (ServiceNow's `/oauth_token.do` is the reference shape for both).
 //!
-//! The discipline mirrors the connector plane's `ReqwestTransport`:
-//! secrets leave the call only as form fields on the outbound request,
+//! The transport discipline: secrets leave the call only as form fields
+//! on the outbound request,
 //! the response body is read under a byte ceiling while streaming, and
 //! non-2xx statuses classify under the retry taxonomy — the RFC 6749
 //! terminal refusals (`invalid_grant`, `invalid_client`, a malformed

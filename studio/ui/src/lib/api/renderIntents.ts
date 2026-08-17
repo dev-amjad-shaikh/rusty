@@ -350,7 +350,7 @@ function namedIntent(tool: string, args: unknown, result: unknown): RenderIntent
 }
 
 // Shape-keyed derivations for tools the mirror does not know by name —
-// connector pack operations, MCP tools, embedder tools.
+// MCP tools, embedder tools.
 function structuralIntent(result: unknown): RenderIntent | null {
   if (isRecord(result)) {
     const before = asString(result.before);

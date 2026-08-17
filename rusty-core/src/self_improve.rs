@@ -144,8 +144,6 @@ pub const RUNBOOK_SKILL_PREFIX: &str = "runbook-";
 pub enum Plane {
     /// Validated, scanned SKILL.md packages in a versioned registry.
     Skills,
-    /// Content-addressed connector manifests and service packs.
-    Connectors,
     /// Content-addressed sources with cited chunk retrieval.
     Knowledge,
     /// Governed memory with corrections and supersession.
@@ -169,8 +167,6 @@ pub enum Plane {
 pub struct CapabilityInspection {
     /// Names registered in the skill registry the host holds.
     pub skill_names: Vec<String>,
-    /// Ids of the connector manifests the host loaded.
-    pub connector_manifest_ids: Vec<String>,
     /// Names registered across the host's tool registries.
     pub tool_names: Vec<String>,
     /// The planes the host wired.
@@ -185,8 +181,6 @@ impl CapabilityInspection {
     pub fn normalized(mut self) -> Self {
         self.skill_names.sort();
         self.skill_names.dedup();
-        self.connector_manifest_ids.sort();
-        self.connector_manifest_ids.dedup();
         self.tool_names.sort();
         self.tool_names.dedup();
         self.planes.sort();
@@ -288,7 +282,6 @@ impl Capability {
 fn plane_probe(plane: Plane) -> fn(&CapabilityInspection) -> CapabilityStatus {
     match plane {
         Plane::Skills => |i| flag(i.has_plane(Plane::Skills)),
-        Plane::Connectors => |i| flag(i.has_plane(Plane::Connectors)),
         Plane::Knowledge => |i| flag(i.has_plane(Plane::Knowledge)),
         Plane::Memory => |i| flag(i.has_plane(Plane::Memory)),
         Plane::Evidence => |i| flag(i.has_plane(Plane::Evidence)),
@@ -417,13 +410,6 @@ pub fn capability_catalog() -> Vec<Capability> {
             description: "validated, scanned SKILL.md packages in a versioned registry",
             build: BuildShape::CoreStream,
             probe: plane_probe(Plane::Skills),
-        },
-        Capability {
-            id: "connector-plane",
-            plane: Plane::Connectors,
-            description: "content-addressed connector manifests and service packs",
-            build: BuildShape::CoreStream,
-            probe: plane_probe(Plane::Connectors),
         },
         Capability {
             id: "knowledge-plane",

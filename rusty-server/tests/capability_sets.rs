@@ -331,7 +331,7 @@ async fn capability_set_composes_validates_and_excludes_a_bare_allowlist() {
     let (app, store) = test_app(Some("calculator"));
     let thread = create_thread(&app, "capable").await;
 
-    // A declared set resolves like an allowlist; opaque skill/connector
+    // A declared set resolves like an allowlist; opaque skill
     // references ride along under the set's content address.
     let (status, terminal) = run_wait(
         &app,
@@ -340,8 +340,7 @@ async fn capability_set_composes_validates_and_excludes_a_bare_allowlist() {
             "input": input(),
             "config": {"capability_set": {
                 "tools": ["calculator"],
-                "skills": ["research-pack@1.2.0"],
-                "connectors": ["search@prod"]
+                "skills": ["research-pack@1.2.0"]
             }}
         }),
     )

@@ -304,7 +304,7 @@ async fn valid_tool_definitions_receive_a_content_addressed_draft() {
         assert!(receipt["publish_seam"]
             .as_str()
             .unwrap()
-            .contains("ConnectorManifest"));
+            .contains("tool registry"));
     }
 }
 

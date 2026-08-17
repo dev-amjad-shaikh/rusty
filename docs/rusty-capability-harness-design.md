@@ -21,12 +21,12 @@ This slice does not claim that arbitrary assistant metadata dynamically rewires 
 Rusty uses five distinct concepts. They must not be collapsed into one generic plugin list.
 
 - **Tool** — a typed action the model may call. It has a stable name, description, JSON input schema, effect class, cancellable execution path, and canonical JSON result.
-- **Connector** — a lifecycle-managed provider of tools or resources. Native Rust, MCP, HTTP/SaaS, and remote-agent connectors are implementations behind the same boundary. Connectors own health, authentication, discovery, and shutdown; they do not grant an agent authority by themselves.
+- **Connector** — removed on 2026-08-17. The connector plane was judged the wrong design by the operator and deleted from the codebase; external action providers will be rebuilt on a different model. The credential broker that sat beneath it remains.
 - **Skill** — versioned procedural knowledge, normally a `SKILL.md` package plus optional references, scripts, and assets. Skills alter model context through progressive disclosure. They do not execute actions or carry credentials.
 - **Knowledge source** — governed facts and documents that retrieval may cite. It is distinct from procedural skills and from short-term thread memory.
-- **Capability set** — the immutable, content-addressed composition selected for one agent version and resolved for one run: model, tools, connector generations, skills, knowledge sources, memory policy, guardrails, approvals, and budgets.
+- **Capability set** — the immutable, content-addressed composition selected for one agent version and resolved for one run: model, tools, skills, knowledge sources, memory policy, guardrails, approvals, and budgets.
 
-The architectural rule is simple: tools and connectors provide action; skills and knowledge provide context; a capability set composes both under policy.
+The architectural rule is simple: tools provide action; skills and knowledge provide context; a capability set composes both under policy.
 
 ## Lessons adopted from other harnesses
 
@@ -108,7 +108,7 @@ Reusable native tools live under `rusty_agent_runtime::tool::builtins`:
 - `KnowledgeSearchTool` — read-only bounded lexical search over an immutable document set;
 - `SandboxedDocumentReaderTool` — read-only UTF-8 access under one canonical root for text, Markdown, JSON, CSV, HTML, and XML, with path traversal, symlink escape, binary content, and byte ceilings rejected.
 
-The pack is deterministic and requires no credentials or internet, so it can prove the harness in CI and in the local Studio. Web search is deliberately a connector, not a hidden network call inside a built-in tool. A later connector slice supplies search providers through the same tool contract and credential broker.
+The pack is deterministic and requires no credentials or internet, so it can prove the harness in CI and in the local Studio. Web search is deliberately not a hidden network call inside a built-in tool. A later extension slice supplies search providers through the same tool contract and credential broker.
 
 ### 3. Studio creation
 
@@ -158,11 +158,11 @@ No new shadow telemetry store is introduced.
 
 ## Subsequent complete slices
 
-1. **Connector plane** — connector manifests, tenant-scoped instances, health/auth lifecycle, MCP and HTTP search providers, credential handles, and catalog generations.
+1. ~~**Connector plane**~~ — removed on 2026-08-17. The shipped connector plane (manifests, tenant-scoped instances, health/auth lifecycle, catalog generations) was deleted as a wrong design; external providers return under a different model, still behind the credential broker.
 2. **Skill plane** — `SKILL.md` package parser, progressive disclosure, references/assets, provenance, security scan, immutable versions, and skill registry UI.
 3. **Resolved capability sets** — content-addressed per-agent composition, exact run-admission resolution, model/tool filtering, checkpoint pins, child-agent inheritance, and replay.
 4. **Knowledge plane** — governed sources, ingestion, chunk/content addresses, hybrid retrieval, citations, corrections, retention, and Studio knowledge workspace.
-5. **Harness SDK** — concise Rust builders for agents, connectors, skills, capability sets, sessions, handoffs, and guardrails, plus cassette-backed conformance tests.
+5. **Harness SDK** — concise Rust builders for agents, skills, capability sets, sessions, handoffs, and guardrails, plus cassette-backed conformance tests.
 6. **Ecosystem** — signed packages, registry/taps, trust policy, compatibility negotiation, observability dashboards, and release gates.
 
 Each slice must end in a real user journey and exact evidence. None should merge as an isolated catalog, caption, or test scaffold.
