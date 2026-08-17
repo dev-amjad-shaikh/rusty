@@ -353,6 +353,96 @@ export type PasswordGrant = z.infer<typeof passwordGrantSchema>;
 
 const connectionReceiptSchema = z.object({ connection: vaultConnectionSchema }).strict();
 
+/// One `POST /connections` with verbatim token material: the value seals
+/// as the connection's `access_token` — the exact field the connector
+/// plane's slot bridge resolves as the slot's secret
+/// (`rusty-server/src/connectors.rs::open_credential`). The broker applies
+/// no per-provider shape beyond a non-empty `access_token`, so `api_key`
+/// and `basic` connections differ only in the provider label and the
+/// self-describing custody fields (`username` / `password`).
+async function postStaticConnection(
+  provider: "api_key" | "basic",
+  accessToken: string,
+  custody: { username?: string; password?: string },
+  subject?: string,
+): Promise<VaultConnection> {
+  const { status, text } = await requestText("/connections", {
+    method: "POST",
+    body: JSON.stringify({
+      provider,
+      ...(subject ? { subject } : {}),
+      token: { access_token: accessToken, ...custody },
+    }),
+  });
+  if (status !== 201) throw new StudioApiError("Connection registration returned an unproven receipt.", status, true);
+  const { connection: record } = parseMutationJson(text, connectionReceiptSchema, "Connection receipt", status);
+  if (record.provider !== provider) {
+    throw new StudioApiError("Connection receipt named a different provider.", status, true);
+  }
+  return record;
+}
+
+/// The simple API-key flow: one value, sealed once, bound to the
+/// connector's single credential slot.
+export const apiKeyConnectionSchema = z.object({
+  key: z.string().min(1, "API key is required").max(1024),
+}).strict();
+
+export type ApiKeyConnection = z.infer<typeof apiKeyConnectionSchema>;
+
+export async function registerApiKeyConnection(
+  input: ApiKeyConnection,
+  subject?: string,
+): Promise<VaultConnection> {
+  return postStaticConnection("api_key", input.key, {}, subject);
+}
+
+/// The simple basic-auth flow. The connector plane resolves every declared
+/// slot through its own connection id and reads only the connection's
+/// `access_token` as the slot's secret, so one form registers a *pair*:
+/// the username connection feeds the username slot, the password
+/// connection the password slot. Both records carry the account as their
+/// subject so the vault list identifies them without the ids.
+export const basicConnectionSchema = z.object({
+  username: z.string().min(1, "Username is required").max(1024),
+  password: z.string().min(1, "Password is required").max(1024),
+}).strict();
+
+export type BasicConnection = z.infer<typeof basicConnectionSchema>;
+
+export interface BasicConnectionPair {
+  username_connection: VaultConnection;
+  password_connection: VaultConnection;
+}
+
+export async function registerBasicConnection(input: BasicConnection): Promise<BasicConnectionPair> {
+  const usernameConnection = await postStaticConnection(
+    "basic",
+    input.username,
+    { username: input.username },
+    input.username,
+  );
+  try {
+    const passwordConnection = await postStaticConnection(
+      "basic",
+      input.password,
+      { password: input.password },
+      input.username,
+    );
+    return { username_connection: usernameConnection, password_connection: passwordConnection };
+  } catch (error) {
+    // The username leg already committed; say so, or the operator re-enters
+    // credentials and the vault grows a silent duplicate.
+    const detail = error instanceof StudioApiError ? error.message : "The password connection could not be registered.";
+    const status = error instanceof StudioApiError ? error.status : 0;
+    throw new StudioApiError(
+      `${detail} The username half is already sealed in the vault as \`${usernameConnection.connection_id}\` and appears in the connection list.`,
+      status,
+      true,
+    );
+  }
+}
+
 /// `POST /connections` with the password grant: the exchange happens
 /// server-side (the provider's refusal is the form's 422), and the grant
 /// inputs are sealed with the minted tokens so refresh re-mints without a
