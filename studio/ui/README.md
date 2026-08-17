@@ -1,7 +1,6 @@
 # Rusty Studio frontend
 
-The default Studio experience is a typed React application. The legacy single-file console remains at
-`/advanced/legacy` while specialist workflows move into the new product.
+Rusty Studio is a typed React application.
 
 ```bash
 npm ci

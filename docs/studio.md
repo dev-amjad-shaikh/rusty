@@ -26,35 +26,18 @@ evidence are secondary details, not the product's opening message.
 
 Studio 1.0 is a typed React application. The production bundle is committed so `studio/serve.py` can host
 Studio without Node.js; during development, `npm run dev` in `studio/ui` boots the local backend and the UI
-with one command. The previous single-file console remains available only as an
-advanced compatibility surface while its specialist workflows migrate.
+with one command.
 
 ```
 studio/
 ├── ui/                ← React, TypeScript, routes, feature modules, and production bundle
 │   ├── src/           ← Agents, Work, Operations, shared contracts, and design system
 │   └── dist/          ← committed self-hostable production assets
-├── index.html         ← legacy console at /advanced/legacy
-├── serve.py           ← typed Studio host + same-origin API proxy
-├── test-recorder.mjs  ← node unit tests for the Flight Recorder timeline helpers
-├── test-receipts.mjs  ← signed run-proof contract, trust-boundary, and interaction tests
-├── test-tasks.mjs     ← node unit tests for the durable-tasks view helpers
-├── test-workbench.mjs ← node unit tests for the agent-creation and run journey
-├── test-fabric.mjs    ← node unit tests for durable teams and TeamTrace inspection
-├── test-memory.mjs    ← node unit tests for governed-memory inspection
-├── test-learn.mjs     ← node unit tests for the governed-learning control room
-├── test-registry.mjs  ← extension lineage, diff, runtime binding, and admission-evidence contract tests
-├── test-automations.mjs ← signed webhook lifecycle, event evidence, and replay-safety tests
-├── test-navigation.mjs ← non-secret workspace/evidence link and async ownership tests
-├── test-home.mjs      ← node unit tests for the evidence-led Home mission board
-├── test-connection.mjs ← node unit tests for connection profiles, secrets, and compatibility evidence
-├── test-product-shell.mjs ← three-destination shell, Operations, and capability-map tests
-└── test-all.mjs       ← discovers and runs every Studio test suite
+└── serve.py           ← typed Studio host + same-origin API proxy
 ```
 
 See [Studio 1.0 product architecture](studio-1.0-architecture.md) for route ownership, state boundaries,
-the visual trace model, and release gates. The legacy tests remain required until the corresponding
-advanced workflows have typed parity.
+the visual trace model, and release gates.
 
 ## What it does
 
@@ -108,8 +91,7 @@ advanced workflows have typed parity.
   Every API call goes through the same-origin `/api` proxy, so there is no connection form, server picker,
   or workspace switcher. The only override is the build-time `VITE_RUSTY_API_KEY` for a local server that
   is not in open mode; it is never shown in the UI. The header reports the server's proven identity,
-  version, persistence kind, and registered behaviors as a read-only status. The legacy console at
-  `/advanced/legacy` still carries its own Connection Hub for the advanced workflows that have not migrated.
+  version, persistence kind, and registered behaviors as a read-only status.
 - **Evidence links** — the header's **Copy evidence link** action creates a URL for the current workspace
   and, where available, its selected agent, automation, remembered thread, or exact Recorder run. The URL
   contains only bounded identifiers: it strips server addresses, URL credentials, access keys, prompts,
@@ -604,7 +586,7 @@ Open `http://127.0.0.1:8000/`. Both the Vite proxy and `serve.py` forward `/api`
 the browser only ever talks to its own origin. The local host also flushes SSE per chunk and sets
 `X-Accel-Buffering: no`, so streams render live.
 
-The typed product is served at `/`. The legacy console is available at `/advanced/legacy` during migration.
+The typed product is served at `/`.
 
 ### Build Studio after changing the typed source
 
@@ -813,6 +795,12 @@ no network) and `react_agent` (channel `messages`, scripted model + echo tool, n
   /runs/{run_id}`) 404s for runs created before a server restart.
 
 ## Verification performed
+
+> The single-file legacy console and its `studio/test-*.mjs` suites have been retired; the typed Studio
+> is the only experience. Current verification is `npm run typecheck && npm test && npm run build` in
+> `studio/ui` (CI also checks the committed `studio/ui/dist` stays in sync), plus the Rust test suites.
+> The entries below that reference `studio/test-*.mjs`, the Connection Hub, or `/advanced/legacy` are the
+> historical record of how the legacy console was verified, kept for provenance.
 
 - `node studio/test-all.mjs` — discovers every Studio suite and fails if any suite fails. The Agent
   Workbench suite covers configuration validation, the Runs with / Describes / Preserves contract,

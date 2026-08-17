@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Rusty Studio local server — typed product app + API proxy.
 
-The typed application under ``studio/ui`` is the default experience. This
+The typed application under ``studio/ui`` is the Studio experience. This
 lightweight host serves its deep routes and proxies ``/api/*`` to a Rusty
-server for same-origin local development. The specialist console remains
-available at ``/advanced/legacy`` while its workflows migrate.
+server for same-origin local development.
 
 Usage:
     python3 studio/serve.py [--port 8000] [--target http://127.0.0.1:8100]
@@ -21,7 +20,6 @@ import urllib.parse
 
 STUDIO_ROOT = pathlib.Path(__file__).resolve().parent
 ROOT = STUDIO_ROOT / "ui" / "dist"
-LEGACY = STUDIO_ROOT / "index.html"
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -37,25 +35,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/api" or path.startswith("/api/"):
             self._proxy()
-        elif path in ("/advanced/legacy", "/advanced/legacy/"):
-            self._serve_legacy()
         else:
             target = ROOT / path.lstrip("/")
             if path in ("/", "") or not target.is_file():
                 self.path = "/index.html"  # SPA route fallback
             super().do_GET()
-
-    def _serve_legacy(self):
-        try:
-            body = LEGACY.read_bytes()
-        except OSError:
-            self.send_error(404, "legacy Studio is unavailable")
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
 
     # -- proxy ------------------------------------------------------------
     def do_POST(self):
@@ -137,7 +121,6 @@ def main():
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"Rusty Studio       →  http://127.0.0.1:{args.port}/")
-    print(f"Advanced legacy    →  http://127.0.0.1:{args.port}/advanced/legacy")
     print(f"proxying /api/*    →  {args.target}")
     try:
         server.serve_forever()
