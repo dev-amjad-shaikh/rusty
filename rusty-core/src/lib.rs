@@ -249,6 +249,7 @@ pub mod checkpoint;
 #[cfg(feature = "postgres")]
 pub mod checkpoint_postgres;
 pub mod composer;
+pub mod connector;
 pub mod context;
 pub mod deploy;
 pub mod durable;
