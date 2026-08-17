@@ -36,6 +36,7 @@ use std::path::{Path, PathBuf};
 use rusty_agent_runtime::artifact::RunArtifact;
 use rusty_agent_runtime::broker::StoredConnection;
 use rusty_agent_runtime::checkpoint::{Checkpoint, Checkpointer, JsonFileCheckpointer};
+use rusty_agent_runtime::connector::{ConnectorInstance, ConnectorManifest};
 use rusty_agent_runtime::deploy::{
     DeploymentPointer, DeploymentRevision, EnvSecretRecord, Environment, RevisionId,
     StoredEnvSecret,
@@ -64,6 +65,7 @@ use crate::capsule_policy::{
     self, CapsuleOverlayRecord, CapsulePolicyActivation, CapsulePolicyRecord, CapsulePolicyWrite,
 };
 use crate::capsules::{self, CapsuleRecord, CapsuleWrite};
+use crate::connectors;
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::deploy;
@@ -10302,6 +10304,132 @@ impl KnowledgePlane {
             .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
             .map(|(_, tombstone)| tombstone.clone())
             .collect())
+    }
+}
+
+// --------------------------------------------------------------------- //
+// The connector surface (schema-driven configuration)
+// --------------------------------------------------------------------- //
+
+/// The file-backed connector store: every tenant's manifests and
+/// instances under `{store_path}/connectors/` (see [`crate::connectors`]
+/// for the layout), served from in-memory indexes rebuilt from disk at
+/// boot — the `KnowledgePlane` convention exactly: file-backed on every
+/// deployment in this slice, so a Postgres-configured deployment still
+/// serves connectors from these files.
+///
+/// Keys are tenant-scoped (`{tenant}/{id}` for named tenants, bare for
+/// the default tenant — [`crate::auth::scope_id`]); manifest keys are
+/// the scoped content hash, so a manifest two tenants register is two
+/// records and no cross-tenant read path exists.
+pub(crate) struct ConnectorPlane {
+    root: PathBuf,
+    /// Manifests keyed by tenant-scoped content hash.
+    manifests: Mutex<HashMap<String, ConnectorManifest>>,
+    /// Instance records keyed by tenant-scoped instance id.
+    instances: Mutex<HashMap<String, ConnectorInstance>>,
+}
+
+impl ConnectorPlane {
+    /// Rebuild the indexes from the files under `root` (boot). Records
+    /// replay byte-exactly: the file contents deserialize back into the
+    /// index, envelopes and all.
+    pub(crate) fn load(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            manifests: Mutex::new(connectors::load_manifests(root).into_iter().collect()),
+            instances: Mutex::new(connectors::load_instances(root).into_iter().collect()),
+        }
+    }
+
+    /// Store a manifest under its content hash. Write-once: an identical
+    /// re-registration converges (`false`); a different manifest under an
+    /// occupied hash is a collision and an error — the hash is the
+    /// identity.
+    pub(crate) async fn put_manifest(
+        &self,
+        tenant: &str,
+        manifest: &ConnectorManifest,
+    ) -> StoreResult<bool> {
+        let scoped = crate::auth::scope_id(tenant, &manifest.hash);
+        let mut map = self.manifests.lock().await;
+        match map.get(&scoped) {
+            Some(existing) if existing == manifest => return Ok(false),
+            Some(_) => {
+                return Err(format!(
+                    "a different manifest already occupies content hash {} — a manifest is \
+                     immutable, and its hash is its identity",
+                    manifest.hash
+                ))
+            }
+            None => {}
+        }
+        // Persist before the index insert, holding the lock across both
+        // (the knowledge convention): a failed write leaves nothing
+        // half-visible.
+        connectors::persist_manifest(&self.root, &scoped, manifest).await?;
+        map.insert(scoped, manifest.clone());
+        Ok(true)
+    }
+
+    pub(crate) async fn get_manifest(
+        &self,
+        tenant: &str,
+        hash: &str,
+    ) -> StoreResult<Option<ConnectorManifest>> {
+        let scoped = crate::auth::scope_id(tenant, hash);
+        Ok(self.manifests.lock().await.get(&scoped).cloned())
+    }
+
+    pub(crate) async fn list_manifests(
+        &self,
+        tenant: &str,
+    ) -> StoreResult<Vec<ConnectorManifest>> {
+        let map = self.manifests.lock().await;
+        let mut manifests: Vec<ConnectorManifest> = map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, manifest)| manifest.clone())
+            .collect();
+        manifests.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(manifests)
+    }
+
+    /// Store an instance record. Instance ids are server-minted, so a
+    /// collision is a bug, not a client error.
+    pub(crate) async fn put_instance(
+        &self,
+        tenant: &str,
+        instance: &ConnectorInstance,
+    ) -> StoreResult<()> {
+        let scoped = crate::auth::scope_id(tenant, &instance.instance_id);
+        let mut map = self.instances.lock().await;
+        connectors::persist_instance(&self.root, &scoped, instance).await?;
+        map.insert(scoped, instance.clone());
+        Ok(())
+    }
+
+    pub(crate) async fn get_instance(
+        &self,
+        tenant: &str,
+        instance_id: &str,
+    ) -> StoreResult<Option<ConnectorInstance>> {
+        let scoped = crate::auth::scope_id(tenant, instance_id);
+        Ok(self.instances.lock().await.get(&scoped).cloned())
+    }
+
+    pub(crate) async fn list_instances(
+        &self,
+        tenant: &str,
+    ) -> StoreResult<Vec<ConnectorInstance>> {
+        let map = self.instances.lock().await;
+        let mut instances: Vec<ConnectorInstance> = map
+            .iter()
+            .filter(|(scoped, _)| crate::auth::strip_owned(tenant, scoped).is_some())
+            .map(|(_, instance)| instance.clone())
+            .collect();
+        instances.sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+        Ok(instances)
     }
 }
 

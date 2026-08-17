@@ -153,6 +153,12 @@
 //! | `POST /knowledge/sources/{id}/correct` | mint the superseding version `{author, body}` → `201` (`404` unknown/purged; `400` contract violations — a byte-identical "correction" is not one). The old version stops serving retrieval immediately and stays addressable as evidence |
 //! | `POST /knowledge/query` | hybrid cited retrieval `{text, limits?, scope?}` → `200 {query, results}` — every result a `CitedChunk` (text *with* citation, never bare text) over the tenant's live sources; count/byte ceilings truncate (`400` invalid limits or a termless query) |
 //! | `POST /knowledge/retention/plan` / `POST /knowledge/retention/apply` | the retention sweep's dry-run report / its exact execution — chunks, bodies, and records removed (an address dies with its last reference), one metadata-only tombstone per purged source id. `{as_of?}` is the operator-declared sweep instant (default: now). No admin-role convention exists; the tenant key is the operator gate, as with `/memory/forget` |
+//! | `POST /connectors` | Connector surface (schema-driven configuration, `docs/connector-surface-design.md`): register a content-addressed manifest — id, `connection_specification` (draft-07 config schema), operation set, and the named parameterless read-only GET check → `201 {hash, registered: true}` (`200` + `registered: false` on an identical re-registration — content addressing converges; `400` a declaration that fails validation or whose hash does not match its content) |
+//! | `GET /connectors` | the tenant's manifests, sorted by connector id |
+//! | `POST /connectors/instances` | instantiate: `{manifest_hash, config}` — the config validates against the manifest's schema, `rusty_secret` fields extract and seal through the credential broker, and the stored record holds non-secret config plus sealed envelopes → `201` instance record with secrets masked as `{"rusty_secret": true}`; `404` unknown manifest; `422 {"error": "invalid_config", "message": "{path}: {reason}"}` names the failing schema path (e.g. `credentials.username: required property missing`) — the format Studio pins field errors from |
+//! | `GET /connectors/instances` | the tenant's instances, secrets masked, sorted by instance id |
+//! | `POST /connectors/check` | the setup/edit gate: `{manifest_hash, config}` (pre-save) or `{instance_id}` (live instance — sealed secrets open host-side for this call only) → `200 {"status": "succeeded"}` or `{"status": "failed", "message"}` (the Airbyte verdict contract); `422` a candidate config failing schema validation, `404` unknown manifest/instance, `400` a body carrying both or neither form |
+//! | `GET /connectors/instances/{id}/catalog` | the instance's derived tool catalog — one tool per manifest operation, namespaced `<connector-id>/<operation>` with the declared effect (`404` unknown/cross-tenant) |
 //!
 //! Runs support `command.resume` (HITL), `config.recursion_limit`, the
 //! `reject` / `enqueue` multitask strategies (one active run per thread),
@@ -174,6 +180,7 @@ mod auth;
 mod broker;
 pub mod capsule_policy;
 mod capsules;
+mod connectors;
 mod coordination;
 mod crons;
 mod deploy;
@@ -281,6 +288,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "capsules",
     "capsule_policies",
     "connections",
+    "connectors",
     "coordinations",
     "crons",
     "deployments",

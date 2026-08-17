@@ -174,6 +174,11 @@ pub(crate) struct AppState {
     /// every deployment in this slice; per-tenant views come through
     /// [`crate::knowledge::ServerKnowledgeStore`].
     pub knowledge: Arc<crate::server_store::KnowledgePlane>,
+    /// The connector surface (schema-driven configuration): manifests and
+    /// instances under `{store_path}/connectors/`, rebuilt from disk at
+    /// boot. File-backed on every deployment in this slice; secrets seal
+    /// through [`crate::broker::Broker`] and persist as envelopes only.
+    pub connectors: Arc<crate::server_store::ConnectorPlane>,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -287,6 +292,9 @@ pub(crate) fn build_router(
         evaluation_state: crate::evaluations::init_evaluation_state(),
         skills: crate::skills::SkillPlane::load(&config.store_path),
         knowledge: Arc::new(crate::server_store::KnowledgePlane::load(
+            &config.store_path,
+        )),
+        connectors: Arc::new(crate::server_store::ConnectorPlane::load(
             &config.store_path,
         )),
     });
@@ -517,6 +525,25 @@ pub(crate) fn build_router(
         .route(
             "/knowledge/sources/{source_id}/chunks/{chunk_id}",
             get(crate::knowledge::get_chunk),
+        )
+        // The connector surface (schema-driven configuration): content-
+        // addressed manifests, schema-validated instances with broker-
+        // sealed secrets, and the check gate. Tenant-isolated at the
+        // storage layer — cross-tenant answers `404`, never `403`. The
+        // static segments (`instances`, `check`) win over
+        // `{instance_id}`.
+        .route(
+            "/connectors",
+            post(crate::connectors::register_manifest).get(crate::connectors::list_manifests),
+        )
+        .route(
+            "/connectors/instances",
+            post(crate::connectors::register_instance).get(crate::connectors::list_instances),
+        )
+        .route("/connectors/check", post(crate::connectors::check))
+        .route(
+            "/connectors/instances/{instance_id}/catalog",
+            get(crate::connectors::instance_catalog),
         )
         // The learning-candidate lifecycle (R0.8 wave 3): creation plus
         // the three journaled transitions, and the version-pointer
