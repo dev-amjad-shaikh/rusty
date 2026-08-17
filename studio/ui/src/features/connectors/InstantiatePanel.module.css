@@ -1,0 +1,43 @@
+.instantiatePanel { position: sticky; bottom: 0; display: grid; gap: 14px; padding: 20px 22px; border: 1px solid var(--line-strong); border-radius: 10px; background: linear-gradient(158deg, rgb(23 17 14 / .97), rgb(17 13 11 / .97)); box-shadow: var(--glass-lift); animation: rise .4s cubic-bezier(.2,.7,.25,1) both; }
+.panelHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.panelHead h2 { margin: 0; font-size: 20px; font-weight: 300; letter-spacing: -.02em; }
+.panelHead .eyebrow { margin-bottom: 6px; }
+.panelMeta { display: grid; gap: 7px; margin: 0; }
+.panelMeta div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; }
+.panelMeta dt { color: var(--text-faint); font: 400 10px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+.panelMeta dd { min-width: 0; margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.panelMeta code { color: var(--text-muted); font: 300 11px var(--mono); }
+.panelNote { max-width: 720px; margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.55; }
+
+.slotBindings { display: grid; gap: 10px; }
+.slotRow { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr); gap: 4px 16px; align-items: center; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: rgb(255 236 214 / .045); }
+.slotRow[data-invalid] { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.slotRow label { display: grid; gap: 3px; }
+.slotRow label code { color: var(--rust-bright); font: 400 12px var(--mono); }
+.slotRow label small { color: var(--text-faint); font-size: 11.5px; line-height: 1.4; }
+.slotRow select { width: 100%; min-height: 38px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 7px 10px; background: var(--surface-1); color: var(--text); font: 300 12px var(--mono); }
+.slotRow select:hover { border-color: var(--rust); }
+.slotRow .errorInline { grid-column: 1 / -1; }
+
+.grantField { display: grid; grid-template-columns: minmax(170px, .55fr) minmax(0, 1fr); gap: 3px 14px; align-items: center; }
+.grantField label { color: var(--text-faint); font: 400 10px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+.grantField input { width: 100%; min-height: 34px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 10px; background: var(--surface-1); color: var(--text); font: 300 12px var(--mono); }
+.grantField input:hover { border-color: var(--rust); }
+.grantField small { grid-column: 2; color: var(--text-faint); font-size: 11px; }
+
+.errorInline { margin: 0; color: #f4b7aa; font-size: 12px; line-height: 1.45; }
+.quiet { color: var(--text-faint); font-size: 12px; }
+.error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: 6px; background: var(--danger-soft); color: #f4b7aa; font-size: 12.5px; line-height: 1.45; }
+.formActions { display: flex; justify-content: flex-end; gap: 9px; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 760px) {
+  .slotRow { grid-template-columns: 1fr; }
+  .grantField { grid-template-columns: 1fr; }
+  .grantField small { grid-column: 1; }
+  .panelMeta div { grid-template-columns: 1fr; gap: 3px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .instantiatePanel { transition: none; animation: none; }
+}

@@ -4,7 +4,7 @@ import type { ConnectorManifest } from "../../lib/api/connectors";
 import { evidencePreview } from "../../lib/text";
 import { providerKindLabel, shortHash } from "./lifecycle";
 import { RegisterManifestForm } from "./RegisterManifestForm";
-import styles from "./ConnectorsPage.module.css";
+import styles from "./ManifestGallery.module.css";
 
 export function ManifestGallery({
   manifests,

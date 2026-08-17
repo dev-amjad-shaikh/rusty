@@ -12,7 +12,7 @@ import {
 import { evidencePreview } from "../../lib/text";
 import { CatalogView } from "./CatalogView";
 import { allowedActions, healthCheckTime, shortHash, statePresentation } from "./lifecycle";
-import styles from "./ConnectorsPage.module.css";
+import styles from "./InstanceFleet.module.css";
 
 type LifecycleAction = "connect" | "health" | "disable" | "enable";
 
@@ -155,8 +155,6 @@ export function InstanceFleet({
           {list.map((instance) => (
             <InstanceRow
               key={instance.instance_id}
-             
-             
               instance={instance}
               manifestName={namesByHash.get(instance.manifest_hash) ?? null}
             />

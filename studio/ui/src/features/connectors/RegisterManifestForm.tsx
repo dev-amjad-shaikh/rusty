@@ -7,7 +7,7 @@ import {
   type ManifestPayload,
   type ManifestReceipt,
 } from "../../lib/api/connectors";
-import styles from "./ConnectorsPage.module.css";
+import styles from "./ManifestGallery.module.css";
 
 const manifestTemplate = `{
   "id": "brave-search",

@@ -9,15 +9,12 @@ import {
   type ConnectorInstance,
   type ConnectorManifest,
 } from "../../lib/api/connectors";
-import { connectionLabel, credentialFlow, providerKindLabel, resolvedBaseUrlPreview, usableConnections } from "./lifecycle";
-import { RegisterConnectionForm } from "./RegisterConnectionForm";
-import styles from "./ConnectorsPage.module.css";
-
-/// Field label for a config param: `instance_type` reads as "Instance type".
-function configParamLabel(name: string) {
-  const words = name.replace(/_/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+import { credentialFlow, providerKindLabel, usableConnections } from "./lifecycle";
+import { ConfigFields, trimmedConfig, validateConfig } from "./ConfigFields";
+import { CredentialPicker } from "./CredentialPicker";
+import { BasicAuthForm } from "./BasicAuthForm";
+import { ApiKeyForm } from "./ApiKeyForm";
+import styles from "./InstantiatePanel.module.css";
 
 export function InstantiatePanel({
   manifest,
@@ -34,20 +31,12 @@ export function InstantiatePanel({
   const [slotError, setSlotError] = useState<{ slot: string | null; message: string } | null>(null);
   const [config, setConfig] = useState<Record<string, string>>({});
   const [configError, setConfigError] = useState<{ param: string | null; message: string } | null>(null);
-  // `null` lets the vault answer decide: usable connections open the
-  // picker, an empty vault drops straight into credential entry.
   const [modeOverride, setModeOverride] = useState<"pick" | "new" | null>(null);
   const [chaining, setChaining] = useState(false);
 
-  useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
+  useEffect(() => { headingRef.current?.focus(); }, []);
 
-  const connections = useQuery({
-    queryKey: ["connections"],
-    queryFn: () => listVaultConnections(),
-  });
-
+  const connections = useQuery({ queryKey: ["connections"], queryFn: () => listVaultConnections() });
   const flow = credentialFlow(manifest);
   const usable = usableConnections(manifest, connections.data ?? []);
   const mode = modeOverride ?? (usable.length > 0 ? "pick" : "new");
@@ -62,42 +51,23 @@ export function InstantiatePanel({
     onError: (error) => {
       const message = error instanceof StudioApiError ? error.message : "The instance could not be created.";
       if (error instanceof StudioApiError) {
-        const configParam = configParamNamedInError(error.message);
+        const configParam = configParamNamedInError(message);
         if (configParam) setConfigError({ param: configParam, message });
-        else setSlotError({ slot: slotNamedInError(error.message), message });
+        else setSlotError({ slot: slotNamedInError(message), message });
       } else {
         setSlotError({ slot: null, message });
       }
-      // A credential-entry chain that fails at instantiation keeps the
-      // fresh bindings: the picker shows them, and retrying is one click.
       setChaining(false);
       setModeOverride("pick");
     },
   });
 
-  // Config values go out trimmed and limited to the manifest's declared
-  // params — the server answers any other shape with a 422.
-  function trimmedConfig(): Record<string, string> {
-    return Object.fromEntries(
-      manifest.config_params.map((param) => [param.name, (config[param.name] ?? "").trim()]),
-    );
-  }
-
-  // Every declared config param needs a value before either submit path
-  // runs; the server would refuse an empty one anyway.
   function gateConfig(): boolean {
-    setConfigError(null);
-    for (const param of manifest.config_params) {
-      if (!(config[param.name] ?? "").trim()) {
-        setConfigError({ param: param.name, message: `config param \`${param.name}\` requires a value` });
-        return false;
-      }
-    }
-    return true;
+    const error = validateConfig(manifest, config);
+    setConfigError(error);
+    return error === null;
   }
 
-  // Registration and instantiation in one motion: the form's bindings go
-  // straight into the create call, never through an id the operator reads.
   function onConnectionRegistered(freshBindings: Record<string, string>) {
     setSlotError(null);
     if (!gateConfig()) return;
@@ -109,22 +79,28 @@ export function InstantiatePanel({
       }
       return next;
     });
-    create.mutate({ credentials: freshBindings, config: trimmedConfig() });
+    create.mutate({ credentials: freshBindings, config: trimmedConfig(manifest, config) });
   }
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
+  function submitFromPicker() {
     setSlotError(null);
     if (!gateConfig()) return;
     create.mutate({
       credentials: Object.fromEntries(Object.entries(bindings).filter(([, id]) => id)),
-      config: trimmedConfig(),
+      config: trimmedConfig(manifest, config),
     });
+  }
+
+  function submitNoSlots(event: FormEvent) {
+    event.preventDefault();
+    create.mutate({ credentials: {}, config: trimmedConfig(manifest, config) });
   }
 
   const pending = chaining || create.isPending;
   const generalError = slotError && !slotError.slot ? slotError.message : null;
-  const baseUrlPreview = resolvedBaseUrlPreview(manifest, config);
+  const createError = create.isError && !slotError && !configError
+    ? (create.error instanceof StudioApiError ? create.error.message : "The instance could not be created.")
+    : null;
 
   return (
     <aside className={styles.instantiatePanel} aria-labelledby="instantiate-heading">
@@ -147,48 +123,17 @@ export function InstantiatePanel({
         here cross the form once and seal into the vault first.
       </p>
 
-      {manifest.config_params.length > 0 && (
-        <div className={styles.slotBindings} aria-label="Instance configuration">
-          {manifest.config_params.map((param) => {
-            const failed = configError?.param === param.name;
-            return (
-              <div className={styles.grantField} key={param.name}>
-                <label htmlFor={`config-${param.name}`}>{configParamLabel(param.name)}</label>
-                <input
-                  id={`config-${param.name}`}
-                  type="text"
-                  value={config[param.name] ?? ""}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={pending}
-                  aria-invalid={failed || undefined}
-                  aria-describedby={failed ? `config-${param.name}-error` : undefined}
-                  onChange={(event) => {
-                    setConfig((current) => ({ ...current, [param.name]: event.target.value }));
-                    if (failed) setConfigError(null);
-                  }}
-                />
-                {param.description && <small>{param.description}</small>}
-              </div>
-            );
-          })}
-          {baseUrlPreview && (
-            <p className={styles.quiet}>This instance will call <code>{baseUrlPreview}</code></p>
-          )}
-          {configError && (
-            <p
-              className={styles.errorInline}
-              role="alert"
-              id={configError.param ? `config-${configError.param}-error` : undefined}
-            >
-              {configError.message}
-            </p>
-          )}
-        </div>
-      )}
+      <ConfigFields
+        manifest={manifest}
+        values={config}
+        error={configError}
+        disabled={pending}
+        onChange={(name, value) => setConfig((current) => ({ ...current, [name]: value }))}
+        onClearError={() => setConfigError(null)}
+      />
 
       {manifest.credential_slots.length === 0 ? (
-        <form onSubmit={submit}>
+        <form onSubmit={submitNoSlots}>
           <p className={styles.quiet}>This manifest declares no credential slots.</p>
           <div className={styles.formActions}>
             <button className="secondary-button" type="button" onClick={onClose} disabled={pending}>Cancel</button>
@@ -211,82 +156,40 @@ export function InstantiatePanel({
               into the vault, binds the slots, and instantiates.
             </p>
           )}
-          <RegisterConnectionForm
-            manifest={manifest}
-            chaining={pending}
-            onRegistered={onConnectionRegistered}
-            onCancel={() => (usable.length > 0 ? setModeOverride("pick") : onClose())}
-            beforeSubmit={gateConfig}
-          />
+          {flow.kind === "basic" ? (
+            <BasicAuthForm
+              manifest={manifest}
+              pending={pending}
+              onRegistered={onConnectionRegistered}
+              onCancel={() => (usable.length > 0 ? setModeOverride("pick") : onClose())}
+              beforeSubmit={gateConfig}
+            />
+          ) : (
+            <ApiKeyForm
+              manifest={manifest}
+              pending={pending}
+              onRegistered={onConnectionRegistered}
+              onCancel={() => (usable.length > 0 ? setModeOverride("pick") : onClose())}
+              beforeSubmit={gateConfig}
+            />
+          )}
         </>
       ) : (
-        <form onSubmit={submit}>
-          <div className={styles.slotBindings}>
-            {manifest.credential_slots.map((slot) => {
-              const failed = slotError?.slot === slot.name;
-              return (
-                <div className={styles.slotRow} key={slot.name} data-invalid={failed || undefined}>
-                  <label htmlFor={`slot-${slot.name}`}>
-                    <code>{slot.name}</code>
-                    {slot.description && <small>{slot.description}</small>}
-                  </label>
-                  {usable.length === 0 ? (
-                    <span className={styles.quiet}>
-                      No usable vault connections in this workspace — every record is revoked, expired,
-                      or of another auth kind.
-                    </span>
-                  ) : (
-                    <select
-                      id={`slot-${slot.name}`}
-                      value={bindings[slot.name] ?? ""}
-                      disabled={pending}
-                      aria-invalid={failed || undefined}
-                      aria-describedby={failed ? `slot-${slot.name}-error` : undefined}
-                      onChange={(event) => {
-                        setBindings((current) => ({ ...current, [slot.name]: event.target.value }));
-                        if (failed) setSlotError(null);
-                      }}
-                    >
-                      <option value="">Choose a vault connection…</option>
-                      {usable.map((record) => (
-                        <option key={record.connection_id} value={record.connection_id}>
-                          {connectionLabel(record)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {failed && (
-                    <p className={styles.errorInline} role="alert" id={`slot-${slot.name}-error`}>{slotError.message}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {generalError && <p className={styles.error} role="alert">{generalError}</p>}
-          {create.isError && !slotError && !configError && (
-            <p className={styles.error} role="alert">
-              {create.error instanceof StudioApiError ? create.error.message : "The instance could not be created."}
-            </p>
-          )}
-
-          <div className={styles.formActions}>
-            {flow.kind !== "picker" && (
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => setModeOverride("new")}
-                disabled={pending}
-              >
-                Connect new credentials instead
-              </button>
-            )}
-            <button className="secondary-button" type="button" onClick={onClose} disabled={pending}>Cancel</button>
-            <button className="primary-button" type="submit" disabled={pending || usable.length === 0}>
-              {pending ? "Instantiating…" : "Instantiate connector"}
-            </button>
-          </div>
-        </form>
+        <CredentialPicker
+          manifest={manifest}
+          connections={connections.data ?? []}
+          bindings={bindings}
+          slotError={slotError}
+          generalError={generalError}
+          createError={createError}
+          pending={pending}
+          canSwitchToEntry={flow.kind !== "picker"}
+          onBind={(slot, id) => setBindings((current) => ({ ...current, [slot]: id }))}
+          onClearSlotError={() => setSlotError(null)}
+          onSwitchToEntry={() => setModeOverride("new")}
+          onCancel={onClose}
+          onSubmit={submitFromPicker}
+        />
       )}
     </aside>
   );

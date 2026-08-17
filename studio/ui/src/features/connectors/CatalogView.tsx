@@ -8,7 +8,7 @@ import {
 } from "../../lib/api/connectors";
 import { evidencePreview } from "../../lib/text";
 import { effectLabel, shortHash } from "./lifecycle";
-import styles from "./ConnectorsPage.module.css";
+import styles from "./CatalogView.module.css";
 
 export function CatalogView({
   instance,

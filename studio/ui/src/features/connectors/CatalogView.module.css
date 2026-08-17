@@ -1,0 +1,39 @@
+.catalog { display: grid; gap: 12px; }
+.catalogHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.catalogHead > div { display: flex; align-items: baseline; gap: 12px; }
+.generation { color: var(--text); font: 400 11px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+.catalogHead code { color: var(--text-faint); font: 300 11px var(--mono); }
+.pinForm { display: flex; align-items: center; gap: 8px; }
+.pinForm label { color: var(--text-faint); font: 400 9.5px var(--mono); text-transform: uppercase; letter-spacing: .14em; }
+.pinForm input { width: 84px; min-height: 32px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 9px; background: rgb(255 236 214 / .07); color: var(--text); font: 300 12px var(--mono); }
+.pinForm button { min-height: 32px; padding: 0 11px; font-size: 12px; }
+
+.toolList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.toolRow { display: grid; gap: 5px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: rgb(255 236 214 / .035); }
+.toolRow > div { display: flex; align-items: center; gap: 10px; }
+.toolRow code { overflow: hidden; color: var(--text); font: 400 12px var(--mono); text-overflow: ellipsis; }
+.toolRow p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+.effectBadge { display: inline-block; padding: 2px 8px; border-radius: 5px; background: rgb(255 236 214 / .08); color: var(--text-muted); font: 400 10px var(--mono); }
+.effectBadge[data-effect="pure"], .effectBadge[data-effect="read_only"] { background: rgb(95 191 127 / .12); color: #86d29d; }
+.effectBadge[data-effect="idempotent"] { background: rgb(148 182 200 / .13); color: var(--blue); }
+.effectBadge[data-effect="compensatable"] { background: rgb(239 177 95 / .13); color: var(--warning); }
+.effectBadge[data-effect="non_idempotent"] { background: rgb(224 106 74 / .12); color: #ef8e72; }
+
+.refreshNote { margin: 0; color: var(--text-faint); font-size: 11.5px; line-height: 1.5; }
+.pinMismatch { display: grid; gap: 10px; padding: 12px 14px; border-left: 2px solid var(--warning); background: rgb(239 177 95 / .08); }
+.pinMismatch p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.pinMismatch .formActions { justify-content: flex-start; }
+.preCatalog { padding: 12px 14px; border: 1px dashed var(--line-strong); border-radius: 8px; }
+.preCatalog p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+
+.quiet { color: var(--text-faint); font-size: 12px; }
+.error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: 6px; background: var(--danger-soft); color: #f4b7aa; font-size: 12.5px; line-height: 1.45; }
+.formActions { display: flex; justify-content: flex-end; gap: 9px; }
+
+@media (max-width: 760px) {
+  .pinForm { flex-wrap: wrap; }
+}
+@media (forced-colors: active) {
+  .effectBadge { border: 1px solid CanvasText; }
+}

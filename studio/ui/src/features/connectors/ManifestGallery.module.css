@@ -1,0 +1,69 @@
+.table { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--glass-fill); box-shadow: var(--glass-lift); backdrop-filter: blur(16px) saturate(125%); animation: rise .45s cubic-bezier(.2,.7,.25,1) both; }
+.tableHead, .row { display: grid; grid-template-columns: minmax(220px, 1.9fr) minmax(120px, .9fr) minmax(100px, .7fr) minmax(110px, .8fr) minmax(120px, .9fr); align-items: center; }
+.tableHead { min-height: 43px; border-bottom: 1px solid var(--line); color: var(--text-faint); font: 400 10px var(--mono); text-transform: uppercase; letter-spacing: .16em; }
+.tableHead > span, .row > * { min-width: 0; padding-inline: 16px; }
+.row { min-height: 68px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 12.5px; }
+.row:hover { background: rgb(255 236 214 / .045); }
+.row > code { overflow: hidden; color: var(--text-muted); font: 300 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.table > footer { padding: 10px 16px; color: var(--text-faint); font: 300 10.5px var(--mono); text-align: right; }
+
+.manifestIdentity { display: grid; gap: 6px; }
+.manifestIdentity > div { min-width: 0; display: grid; gap: 3px; }
+.manifestIdentity b { overflow: hidden; color: var(--text); font-size: 13.5px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.manifestIdentity small { overflow: hidden; color: var(--text-faint); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.manifestIdentity > code { color: var(--text-faint); font: 400 10.5px var(--mono); }
+.manifestIdentity > div + code { color: var(--text-faint); }
+
+.rowActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; padding-block: 10px; }
+.rowActions button { min-height: 32px; padding: 0 11px; font-size: 12px; }
+
+.providerBadge { display: inline-block; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--rust-bright); font: 500 9.5px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.slotList { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.slotList code { padding: 2px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--text-muted); font: 400 10.5px var(--mono); }
+
+.registerForm { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 22px; padding: 20px 22px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--glass-fill); box-shadow: var(--glass-lift); animation: rise .4s cubic-bezier(.2,.7,.25,1) both; }
+.registerCopy h3 { margin: 0 0 7px; font-size: 16px; font-weight: 350; }
+.registerCopy > p { margin: 0 0 14px; color: var(--text-muted); font-size: 12.5px; line-height: 1.55; }
+.fieldHints { display: grid; gap: 9px; margin: 0; }
+.fieldHints dt { margin-bottom: 2px; }
+.fieldHints dt code { color: var(--rust-bright); font: 400 10.5px var(--mono); }
+.fieldHints dd { margin: 0; color: var(--text-faint); font-size: 11.5px; line-height: 1.45; }
+.registerEditor { min-width: 0; display: grid; gap: 10px; align-content: start; }
+.registerEditor > label { color: var(--text-faint); font: 400 9.5px var(--mono); text-transform: uppercase; letter-spacing: .2em; }
+.registerEditor textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 6px; padding: 11px 12px; background: rgb(255 236 214 / .05); color: var(--text); font: 300 12px/1.6 var(--mono); resize: vertical; transition: border-color 120ms ease; }
+.registerEditor textarea:hover { background: rgb(255 236 214 / .07); }
+.registerEditor textarea::placeholder { color: var(--text-faint); opacity: .55; }
+.fieldErrors { padding: 10px 12px; border-left: 2px solid var(--warning); background: rgb(239 177 95 / .08); color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.fieldErrors b { display: block; margin-bottom: 5px; color: var(--text); font-weight: 400; }
+.fieldErrors ul { display: grid; gap: 4px; margin: 0; padding-left: 16px; }
+.fieldErrors code { color: var(--warning); font: 400 11px var(--mono); }
+.receipt { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--success) 42%, transparent); border-radius: 6px; background: rgb(95 191 127 / .08); color: var(--text-muted); font-size: 12.5px; }
+.receipt b { color: var(--text); font-weight: 400; }
+.receipt code { color: var(--rust-bright); font: 400 11px var(--mono); }
+.receipt button { justify-self: start; min-height: 30px; padding: 0 11px; font-size: 12px; }
+.formActions { display: flex; justify-content: flex-end; gap: 9px; }
+
+.quiet { color: var(--text-faint); font-size: 12px; }
+.error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: 6px; background: var(--danger-soft); color: #f4b7aa; font-size: 12.5px; line-height: 1.45; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 1020px) {
+  .tableHead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .table { display: grid; gap: 10px; padding: 10px; border-color: var(--line); background: transparent; box-shadow: none; }
+  .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; align-content: start; min-height: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--glass-fill); }
+  .row > * { padding: 0; }
+  .manifestIdentity { grid-column: 1 / -1; }
+  .row [data-label]::before { display: block; margin-bottom: 5px; color: var(--text-faint); font: 400 10px var(--mono); text-transform: uppercase; letter-spacing: .12em; content: attr(data-label); }
+  .rowActions { grid-column: 1 / -1; justify-content: flex-start; padding-block: 0; }
+}
+@media (max-width: 760px) {
+  .registerForm { grid-template-columns: 1fr; }
+  .row { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table, .registerForm, .row { transition: none; animation: none; }
+}
+@media (forced-colors: active) {
+  .providerBadge { border: 1px solid CanvasText; }
+}
