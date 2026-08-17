@@ -98,9 +98,9 @@ pub struct RunConfigPayload {
 /// The inline `config.capability_set` member list.
 ///
 /// Tool members are exact names validated against the graph's catalog.
-/// Skill/connector members are opaque references with kind tags, recorded
-/// into the set's content address today and validated by their own planes
-/// when those land.
+/// Skill members are opaque references with kind tags, recorded into the
+/// set's content address today and validated by the skill plane when that
+/// lands.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct CapabilitySetPayload {
     /// Exact tool names the set composes.
@@ -109,13 +109,10 @@ pub struct CapabilitySetPayload {
     /// Opaque skill references (the skill plane interprets them).
     #[serde(default)]
     pub skills: Vec<String>,
-    /// Opaque connector references (the connector plane interprets them).
-    #[serde(default)]
-    pub connectors: Vec<String>,
 }
 
 impl CapabilitySetPayload {
-    /// The shape-checked skill/connector references, kind-tagged.
+    /// The shape-checked skill references, kind-tagged.
     pub fn refs(
         &self,
     ) -> rusty_agent_runtime::error::Result<Vec<rusty_agent_runtime::capability::CapabilityRef>>
@@ -125,9 +122,6 @@ impl CapabilitySetPayload {
             .map(|reference| {
                 rusty_agent_runtime::capability::CapabilityRef::skill(reference.clone())
             })
-            .chain(self.connectors.iter().map(|reference| {
-                rusty_agent_runtime::capability::CapabilityRef::connector(reference.clone())
-            }))
             .collect()
     }
 }

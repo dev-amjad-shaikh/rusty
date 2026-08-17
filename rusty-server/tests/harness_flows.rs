@@ -1,36 +1,28 @@
 //! Harness flows — the harness demo's end-to-end proof, automated.
 //!
-//! `rusty-server/examples/harness_demo.rs` serves four scripted ReAct
-//! agents (calendar manager, ServiceNow operator, composer studio,
-//! self-improver) over stateful in-process fixtures. This suite spawns
-//! that example as a real process (the crash-recovery pattern: own port,
-//! own store, SIGKILL guard) and drives nine journeys over plain HTTP,
+//! `rusty-server/examples/harness_demo.rs` serves two scripted ReAct
+//! agents (composer studio, self-improver) plus the governed memory,
+//! knowledge, skills, and evaluation surfaces. This suite spawns that
+//! example as a real process (the crash-recovery pattern: own port, own
+//! store, SIGKILL guard) and drives six journeys over plain HTTP,
 //! asserting on the real responses and on `GET /runs/{id}/events` — the
 //! Flight Recorder journal is the evidence, not the model's say-so:
 //!
-//! 1. calendar: list the fixture day, book the first verified free slot
-//!    (09:30–10:00), then a follow-up summary that observes the booking;
-//! 2. servicenow: open high-priority incidents → KB article, then read the
-//!    KB back;
-//! 3. per-run tool allowlists: the same booking with `create-event` blocked
-//!    (the refusal is journaled and reported, the run still succeeds), and
-//!    with it allowed (books 11:30–12:00 — the fixture kept journey 1's
-//!    booking);
-//! 4. skills: both `examples/harness_skills` packages upload clean;
-//! 5. memory: write, read, query, correct, and re-query (the correction
+//! 1. skills: the `examples/harness_skills` package uploads clean, lists,
+//!    and reads back;
+//! 2. memory: write, read, query, correct, and re-query (the correction
 //!    supersedes);
-//! 6. knowledge: register a source and get a cited chunk back;
-//! 7. evals: a dataset case sourced from journey 1's run evidence, a
-//!    candidate, and an experiment that completes without regression;
-//! 8. composer: compose → approval-gated publish → read-only `run_cli`,
+//! 3. knowledge: register a source and get a cited chunk back;
+//! 4. composer: compose → approval-gated publish → read-only `run_cli`,
 //!    then a disallowed command refused by the policy;
-//! 9. self-improver: introspect the demo's own registries → record backlog
+//! 5. evals: a dataset case sourced from journey 4's run evidence, a
+//!    candidate, and an experiment that completes without regression;
+//! 6. self-improver: introspect the demo's own registries → record backlog
 //!    entries for the top gaps → draft the approved runbook entry's skill
 //!    through the composer and stage its publish (the gate stays shut).
 //!
-//! One sequential test, one server: journeys 1 and 3 share the calendar
-//! fixture by design, and the dataset case must match journey 1's run
-//! exactly, so the order below is load-bearing.
+//! One sequential test, one server: the journey-5 dataset case must match
+//! journey 4's run exactly, so the order below is load-bearing.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -41,14 +33,15 @@ use rusty_agent_runtime::memory::ProvenanceAuthor;
 use rusty_agent_runtime::skill::{scan_package, SkillPackage};
 use serde_json::{json, Value};
 
-/// The fixture day the demo's calendar is seeded with.
+/// The fixture day the demo's self-improver pins its logical clock to;
+/// reused as the journey-5 dataset version.
 const DEMO_DAY: &str = "2026-02-09";
 
-/// Journey 1's exact run input — the journey-7 dataset case must equal it
+/// Journey 4's exact run input — the journey-5 dataset case must equal it
 /// byte for byte (the server rejects sourced cases whose input does not
 /// match the run's recorded input).
-fn booking_input() -> Value {
-    json!({"messages": [{"role": "user", "content": "Show my day and book a 30-minute slot."}]})
+fn compose_input() -> Value {
+    json!({"messages": [{"role": "user", "content": "Compose the standup brief skill, publish it, and list the skills directory."}]})
 }
 
 fn example_binary(name: &str) -> PathBuf {
@@ -185,11 +178,10 @@ async fn run_on_thread(
     run
 }
 
-/// One journaled tool call: name, arguments, declared effect, status.
+/// One journaled tool call: name, declared effect, status.
 #[derive(Debug)]
 struct ToolEvidence {
     name: String,
-    arguments: Value,
     effect: String,
     status: String,
 }
@@ -211,10 +203,6 @@ async fn tool_calls(client: &reqwest::Client, base: &str, run_id: &str) -> Vec<T
                 .and_then(Value::as_str)
                 .expect("tool_call input names the tool")
                 .to_owned(),
-            arguments: event
-                .pointer("/input/value/arguments")
-                .cloned()
-                .expect("tool_call input carries arguments"),
             effect: event["effect"].as_str().expect("effect").to_owned(),
             status: event["status"].as_str().expect("status").to_owned(),
         })
@@ -258,236 +246,35 @@ async fn harness_flows_end_to_end() {
     let client = reqwest::Client::new();
     wait_ready(&client, &base).await;
 
-    // -- Journey 1: the calendar manager lists the day and books the first
-    //    verified free slot; a follow-up summary observes the booking.
-    let (status, assistant) = post(
-        &client,
-        &format!("{base}/assistants"),
-        json!({
-            "assistant_id": "calendar-coach",
-            "name": "Calendar Coach",
-            "graph": "calendar_manager",
-            "config": {},
-            "metadata": {}
-        }),
-    )
-    .await;
-    assert!(
-        status == reqwest::StatusCode::CREATED || status == reqwest::StatusCode::OK,
-        "assistant: {assistant}"
-    );
-
-    let (calendar_thread, booking_run) = run_on(
-        &client,
-        &base,
-        "calendar_manager",
-        json!({"assistant_id": "calendar-coach", "input": booking_input()}),
-    )
-    .await;
-    let booking_run_id = booking_run["run_id"].as_str().unwrap().to_owned();
-    let calls = tool_calls(&client, &base, &booking_run_id).await;
-    assert_eq!(
-        calls
-            .iter()
-            .map(|call| call.name.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "google-calendar:list-events",
-            "google-calendar:create-event"
-        ],
-        "journey 1 journal"
-    );
-    assert_eq!(calls[0].effect, "read_only");
-    assert_eq!(calls[1].effect, "compensatable");
-    assert!(calls.iter().all(|call| call.status == "ok"));
-    assert_eq!(
-        calls[1].arguments.pointer("/start/dateTime"),
-        Some(&json!(format!("{DEMO_DAY}T09:30:00Z"))),
-        "the first free 30-minute slot on {DEMO_DAY} is 09:30–10:00"
-    );
-    assert_eq!(
-        calls[1].arguments.pointer("/end/dateTime"),
-        Some(&json!(format!("{DEMO_DAY}T10:00:00Z")))
-    );
-    assert!(final_assistant_text(&booking_run).contains("Requested 30-minute meeting"));
-
-    let summary_run = run_on_thread(
-        &client,
-        &base,
-        &calendar_thread,
-        json!({"input": {"messages": [{"role": "user", "content": "Summarize my day."}]}}),
-    )
-    .await;
-    let summary = final_assistant_text(&summary_run);
-    assert!(
-        summary.contains("Requested 30-minute meeting"),
-        "the follow-up summary must observe journey 1's booking: {summary}"
-    );
-    assert!(
-        summary.contains("Quarterly planning review") && summary.contains("overlaps"),
-        "the seeded conflict pair must surface in the summary: {summary}"
-    );
-
-    // -- Journey 2: the ServiceNow operator distills the open high-priority
-    //    incidents into a KB article; a follow-up reads the KB back.
-    let (servicenow_thread, kb_run) = run_on(
-        &client,
-        &base,
-        "servicenow_operator",
-        json!({"input": {"messages": [{"role": "user", "content": "Show open high-priority incidents and file a KB article about the top theme."}]}}),
-    )
-    .await;
-    let kb_run_id = kb_run["run_id"].as_str().unwrap().to_owned();
-    let calls = tool_calls(&client, &base, &kb_run_id).await;
-    assert_eq!(
-        calls
-            .iter()
-            .map(|call| call.name.as_str())
-            .collect::<Vec<_>>(),
-        ["servicenow:list-records", "servicenow:create-record"],
-        "journey 2 journal"
-    );
-    assert_eq!(
-        calls[0].arguments["sysparm_query"],
-        json!("state=1^priority=1")
-    );
-    assert_eq!(calls[0].effect, "read_only");
-    assert_eq!(calls[1].arguments["table"], json!("kb_knowledge"));
-    assert_eq!(calls[1].effect, "compensatable");
-    assert!(
-        final_assistant_text(&kb_run).contains("KB0001001"),
-        "the filed article's number: {}",
-        final_assistant_text(&kb_run)
-    );
-
-    let kb_readback = run_on_thread(
-        &client,
-        &base,
-        &servicenow_thread,
-        json!({"input": {"messages": [{"role": "user", "content": "List the KB articles."}]}}),
-    )
-    .await;
-    let readback = final_assistant_text(&kb_readback);
-    assert!(
-        readback.contains("KB0001001") && readback.contains("VPN connectivity"),
-        "the KB read-back observes journey 2's article: {readback}"
-    );
-
-    // -- Journey 3: per-run tool allowlists. Blocked: create-event is
-    //    refused, the refusal is the run's tool message, and the journal
-    //    holds only the allowed listing. Allowed: the booking lands at
-    //    11:30–12:00 because the fixture kept journey 1's.
-    let (_blocked_thread, blocked_run) = run_on(
-        &client,
-        &base,
-        "calendar_manager",
-        json!({
-            "input": booking_input(),
-            "config": {"tool_allowlist": ["google-calendar:list-events"]}
-        }),
-    )
-    .await;
-    let blocked_run_id = blocked_run["run_id"].as_str().unwrap().to_owned();
-    let tool_messages = tool_message_contents(&blocked_run);
-    assert!(
-        tool_messages
-            .iter()
-            .any(|content| content.contains("unknown tool `google-calendar:create-event`")),
-        "the blocked booking must surface as a tool error: {tool_messages:?}"
-    );
-    let calls = tool_calls(&client, &base, &blocked_run_id).await;
-    assert_eq!(
-        calls
-            .iter()
-            .map(|call| call.name.as_str())
-            .collect::<Vec<_>>(),
-        ["google-calendar:list-events"],
-        "a refused call never reaches a tool, so the journal holds the allowed listing only"
-    );
-    assert!(
-        final_assistant_text(&blocked_run).contains("Nothing was booked"),
-        "the model must report the refusal honestly: {}",
-        final_assistant_text(&blocked_run)
-    );
-    let (status, blocked_status) = get(&client, &format!("{base}/runs/{blocked_run_id}")).await;
-    assert_eq!(status, reqwest::StatusCode::OK);
-    assert_eq!(
-        blocked_status["capability_tools"],
-        json!(["google-calendar:list-events"]),
-        "the run status view surfaces the admitted capability selection"
-    );
-
-    let blocked_summary = run_on_thread(
-        &client,
-        &base,
-        &_blocked_thread,
-        json!({"input": {"messages": [{"role": "user", "content": "Summarize my day."}]}}),
-    )
-    .await;
-    let text = final_assistant_text(&blocked_summary);
-    assert_eq!(
-        text.matches("Requested 30-minute meeting").count(),
-        1,
-        "only journey 1's booking exists; the blocked run created none: {text}"
-    );
-
-    let (_allowed_thread, allowed_run) = run_on(
-        &client,
-        &base,
-        "calendar_manager",
-        json!({
-            "input": booking_input(),
-            "config": {"tool_allowlist": ["google-calendar:list-events", "google-calendar:create-event"]}
-        }),
-    )
-    .await;
-    let allowed_run_id = allowed_run["run_id"].as_str().unwrap().to_owned();
-    let calls = tool_calls(&client, &base, &allowed_run_id).await;
-    assert_eq!(
-        calls
-            .iter()
-            .map(|call| call.name.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "google-calendar:list-events",
-            "google-calendar:create-event"
-        ]
-    );
-    assert_eq!(
-        calls[1].arguments.pointer("/start/dateTime"),
-        Some(&json!(format!("{DEMO_DAY}T11:30:00Z"))),
-        "with 09:30–10:00 taken, the next free slot is 11:30–12:00"
-    );
-
-    // -- Journey 4: both skill packages upload clean, list, and read back.
+    // -- Journey 1: the skill package uploads clean, lists, and reads back.
     let skills_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/harness_skills");
-    for name in ["calendar-management", "servicenow-operations"] {
-        // The packages must pass core's own validation and scan before the
-        // server ever sees them — the upload below is the wire half of the
-        // same contract.
-        let package = SkillPackage::from_dir(&skills_dir.join(name))
-            .unwrap_or_else(|e| panic!("{name} must parse as a skill package: {e}"));
-        assert!(scan_package(&package).is_clean(), "{name} must scan clean");
+    let name = "weekly-review";
+    // The package must pass core's own validation and scan before the
+    // server ever sees it — the upload below is the wire half of the
+    // same contract.
+    let package = SkillPackage::from_dir(&skills_dir.join(name))
+        .unwrap_or_else(|e| panic!("{name} must parse as a skill package: {e}"));
+    assert!(scan_package(&package).is_clean(), "{name} must scan clean");
 
-        let skill_md =
-            std::fs::read_to_string(skills_dir.join(name).join("SKILL.md")).expect("read SKILL.md");
-        let (status, receipt) = post(
-            &client,
-            &format!("{base}/skills"),
-            json!({"skill_md": skill_md, "author": "operator:harness-demo"}),
-        )
-        .await;
-        assert_eq!(
-            status,
-            reqwest::StatusCode::CREATED,
-            "register {name}: {receipt}"
-        );
-        assert_eq!(receipt["name"], json!(name));
-        assert_eq!(receipt["revision"], 1);
-        assert_eq!(receipt["already_registered"], false);
-        assert_eq!(receipt["content_hash"].as_str().unwrap().len(), 64);
-        assert_eq!(receipt["scan"]["clean"], true, "scan: {receipt}");
-    }
+    let skill_md =
+        std::fs::read_to_string(skills_dir.join(name).join("SKILL.md")).expect("read SKILL.md");
+    let (status, receipt) = post(
+        &client,
+        &format!("{base}/skills"),
+        json!({"skill_md": skill_md, "author": "operator:harness-demo"}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "register {name}: {receipt}"
+    );
+    assert_eq!(receipt["name"], json!(name));
+    assert_eq!(receipt["revision"], 1);
+    assert_eq!(receipt["already_registered"], false);
+    assert_eq!(receipt["content_hash"].as_str().unwrap().len(), 64);
+    assert_eq!(receipt["scan"]["clean"], true, "scan: {receipt}");
+
     let (status, list) = get(&client, &format!("{base}/skills")).await;
     assert_eq!(status, reqwest::StatusCode::OK, "list skills: {list}");
     let names: Vec<&str> = list["skills"]
@@ -496,35 +283,25 @@ async fn harness_flows_end_to_end() {
         .iter()
         .filter_map(|skill| skill["name"].as_str())
         .collect();
-    assert!(
-        names.contains(&"calendar-management") && names.contains(&"servicenow-operations"),
-        "both packages registered: {names:?}"
-    );
-    let (status, detail) = get(&client, &format!("{base}/skills/calendar-management")).await;
+    assert!(names.contains(&name), "the package registered: {names:?}");
+    let (status, detail) = get(&client, &format!("{base}/skills/{name}")).await;
     assert_eq!(status, reqwest::StatusCode::OK, "skill detail: {detail}");
     assert_eq!(
         detail["metadata"]["allowed_tools"],
-        json!([
-            "google-calendar:list-calendars",
-            "google-calendar:list-events",
-            "google-calendar:get-event",
-            "google-calendar:create-event",
-            "google-calendar:update-event",
-            "google-calendar:delete-event"
-        ]),
-        "frontmatter allowed-tools (`:`-spelled — the validator's charset excludes `/`)"
+        json!(["run_cli"]),
+        "frontmatter allowed-tools"
     );
-    let (status, body) = get(&client, &format!("{base}/skills/calendar-management/body")).await;
+    let (status, body) = get(&client, &format!("{base}/skills/{name}/body")).await;
     assert_eq!(status, reqwest::StatusCode::OK, "skill body: {body}");
     assert!(
         body["body"]
             .as_str()
             .expect("skill body text")
-            .contains("verified free slot"),
+            .contains("Gather before you summarize"),
         "the stored body is the authored guidance"
     );
 
-    // -- Journey 5: memory write, read, query, correct, re-query.
+    // -- Journey 2: memory write, read, query, correct, re-query.
     let (status, written) = post(
         &client,
         &format!("{base}/memory"),
@@ -588,7 +365,7 @@ async fn harness_flows_end_to_end() {
         "the corrected content is what retrieval serves"
     );
 
-    // -- Journey 6: knowledge ingest and cited retrieval.
+    // -- Journey 3: knowledge ingest and cited retrieval.
     let (status, source) = post(
         &client,
         &format!("{base}/knowledge/sources"),
@@ -634,106 +411,33 @@ async fn harness_flows_end_to_end() {
         "citations carry the chunk's content address"
     );
 
-    // -- Journey 7: a dataset case sourced from journey 1's run evidence,
-    //    a candidate over it, and an experiment that completes clean.
-    let dataset = json!({
-        "name": "calendar-day-flow",
-        "version": DEMO_DAY,
-        "cases": [{
-            "id": "book-30",
-            "input": booking_input(),
-            "expect": {"tool_trajectory": [
-                {"name": "google-calendar:list-events"},
-                {"name": "google-calendar:create-event"}
-            ]},
-            "tags": ["calendar"],
-            "source": {
-                "run_id": booking_run_id,
-                "thread_id": calendar_thread,
-                "agent_id": "calendar-coach",
-                "captured_at": "2020-01-01T00:00:00Z"
-            }
-        }]
-    });
-    let (status, created) = post(&client, &format!("{base}/datasets"), dataset).await;
-    assert_eq!(
-        status,
-        reqwest::StatusCode::CREATED,
-        "dataset from run evidence: {created}"
-    );
-    assert_eq!(created["case_count"], 1);
-    assert_eq!(created["digest"].as_str().unwrap().len(), 64);
 
-    let candidate = Candidate::new(
-        CandidateContent::Prompt {
-            name: "calendar_manager".into(),
-            prompt: "Answer precisely.".into(),
-        },
-        ProvenanceAuthor::Distiller {
-            name: "harness-demo".into(),
-        },
-        EvidenceSpan::default(),
-        DateTime::<Utc>::from_timestamp_millis(1_754_953_200_000).unwrap(),
-    )
-    .expect("candidate");
-    let candidate_id = candidate.candidate_id.to_string();
-    let (status, registered) = post(
+    // -- Journey 4: the composer drafts, publishes under its pre-minted
+    //    approval, and lists the skills directory read-only; a disallowed
+    //    command is refused by the CLI policy. The run rides an assistant
+    //    so journey 5 can source a dataset case from its evidence.
+    let (status, assistant) = post(
         &client,
-        &format!("{base}/learn/candidates"),
-        json!({"candidate": candidate, "run_id": booking_run_id}),
-    )
-    .await;
-    assert_eq!(
-        status,
-        reqwest::StatusCode::CREATED,
-        "candidate: {registered}"
-    );
-
-    let (status, started) = post(
-        &client,
-        &format!("{base}/experiments"),
+        &format!("{base}/assistants"),
         json!({
-            "experiment_id": "exp-calendar",
-            "candidate_id": candidate_id,
-            "dataset_name": "calendar-day-flow",
-            "dataset_version": DEMO_DAY,
-            "runs_per_case": 1,
-            "max_concurrency": 1,
-            "target_metric": "case_pass_rate",
-            "thresholds": {"max_pass_rate_drop": 0.05, "max_latency_p95_ratio": 1.25}
+            "assistant_id": "composer-coach",
+            "name": "Composer Coach",
+            "graph": "composer_studio",
+            "config": {},
+            "metadata": {}
         }),
     )
     .await;
-    assert_eq!(
-        status,
-        reqwest::StatusCode::CREATED,
-        "experiment: {started}"
-    );
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let settled = loop {
-        let (status, experiment) = get(&client, &format!("{base}/experiments/exp-calendar")).await;
-        assert_eq!(status, reqwest::StatusCode::OK, "experiment: {experiment}");
-        if experiment["status"]["phase"] == "complete" || experiment["status"]["phase"] == "failed"
-        {
-            break experiment;
-        }
-        assert!(Instant::now() < deadline, "experiment never settled");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    };
-    assert_eq!(settled["status"]["phase"], "complete", "settled: {settled}");
-    assert_eq!(
-        settled["comparison"]["regressed"], false,
-        "identical all-pass reports cannot regress: {settled}"
+    assert!(
+        status == reqwest::StatusCode::CREATED || status == reqwest::StatusCode::OK,
+        "assistant: {assistant}"
     );
 
-    // -- Journey 8: the composer drafts, publishes under its pre-minted
-    //    approval, and lists the skills directory read-only; a disallowed
-    //    command is refused by the CLI policy.
     let (composer_thread, compose_run) = run_on(
         &client,
         &base,
         "composer_studio",
-        json!({"input": {"messages": [{"role": "user", "content": "Compose the standup brief skill, publish it, and list the skills directory."}]}}),
+        json!({"assistant_id": "composer-coach", "input": compose_input()}),
     )
     .await;
     let compose_run_id = compose_run["run_id"].as_str().unwrap().to_owned();
@@ -744,7 +448,7 @@ async fn harness_flows_end_to_end() {
             .map(|call| call.name.as_str())
             .collect::<Vec<_>>(),
         ["compose_skill", "publish_composed_skill", "run_cli"],
-        "journey 8 journal"
+        "journey 4 journal"
     );
     assert_eq!(calls[0].effect, "pure");
     assert_eq!(calls[1].effect, "non_idempotent");
@@ -800,7 +504,100 @@ async fn harness_flows_end_to_end() {
         "the refusal is journaled as an errored call"
     );
 
-    // -- Journey 9: the self-improver introspects the demo's own
+    // -- Journey 5: a dataset case sourced from journey 4's run evidence,
+    //    a candidate over it, and an experiment that completes clean.
+    let dataset = json!({
+        "name": "composer-studio-flow",
+        "version": DEMO_DAY,
+        "cases": [{
+            "id": "compose-publish",
+            "input": compose_input(),
+            "expect": {"tool_trajectory": [
+                {"name": "compose_skill"},
+                {"name": "publish_composed_skill"},
+                {"name": "run_cli"}
+            ]},
+            "tags": ["composer"],
+            "source": {
+                "run_id": compose_run_id,
+                "thread_id": composer_thread,
+                "agent_id": "composer-coach",
+                "captured_at": "2020-01-01T00:00:00Z"
+            }
+        }]
+    });
+    let (status, created) = post(&client, &format!("{base}/datasets"), dataset).await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "dataset from run evidence: {created}"
+    );
+    assert_eq!(created["case_count"], 1);
+    assert_eq!(created["digest"].as_str().unwrap().len(), 64);
+
+    let candidate = Candidate::new(
+        CandidateContent::Prompt {
+            name: "composer_studio".into(),
+            prompt: "Answer precisely.".into(),
+        },
+        ProvenanceAuthor::Distiller {
+            name: "harness-demo".into(),
+        },
+        EvidenceSpan::default(),
+        DateTime::<Utc>::from_timestamp_millis(1_754_953_200_000).unwrap(),
+    )
+    .expect("candidate");
+    let candidate_id = candidate.candidate_id.to_string();
+    let (status, registered) = post(
+        &client,
+        &format!("{base}/learn/candidates"),
+        json!({"candidate": candidate, "run_id": compose_run_id}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "candidate: {registered}"
+    );
+
+    let (status, started) = post(
+        &client,
+        &format!("{base}/experiments"),
+        json!({
+            "experiment_id": "exp-composer",
+            "candidate_id": candidate_id,
+            "dataset_name": "composer-studio-flow",
+            "dataset_version": DEMO_DAY,
+            "runs_per_case": 1,
+            "max_concurrency": 1,
+            "target_metric": "case_pass_rate",
+            "thresholds": {"max_pass_rate_drop": 0.05, "max_latency_p95_ratio": 1.25}
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "experiment: {started}"
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let settled = loop {
+        let (status, experiment) = get(&client, &format!("{base}/experiments/exp-composer")).await;
+        assert_eq!(status, reqwest::StatusCode::OK, "experiment: {experiment}");
+        if experiment["status"]["phase"] == "complete" || experiment["status"]["phase"] == "failed"
+        {
+            break experiment;
+        }
+        assert!(Instant::now() < deadline, "experiment never settled");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(settled["status"]["phase"], "complete", "settled: {settled}");
+    assert_eq!(
+        settled["comparison"]["regressed"], false,
+        "identical all-pass reports cannot regress: {settled}"
+    );
+
+    // -- Journey 6: the self-improver introspects the demo's own
     //    registries, records backlog entries for the top gaps, then drafts
     //    the pre-approved runbook entry's skill through the composer and
     //    stages its publish — without crossing the approval gate.
@@ -869,7 +666,7 @@ async fn harness_flows_end_to_end() {
         report["assessments"].as_array().unwrap().len() as u64,
         "the counts are derived, not claimed: {report}"
     );
-    assert!(present >= 8, "the demo's real planes are present: {report}");
+    assert!(present >= 7, "the demo's real planes are present: {report}");
     let status_of = |id: &str| {
         report["assessments"]
             .as_array()
