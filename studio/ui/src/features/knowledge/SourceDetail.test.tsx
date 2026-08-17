@@ -7,7 +7,7 @@ import {
   getKnowledgeChunk,
   getKnowledgeSource,
 } from "../../lib/api/knowledge";
-import { CHUNK_ADDR_1, CHUNK_ADDR_2, chunkRecord, fullSource, HASH_A, HASH_B, HASH_C, testConnection } from "./fixtures";
+import { CHUNK_ADDR_1, CHUNK_ADDR_2, chunkRecord, fullSource, HASH_A, HASH_B, HASH_C } from "./fixtures";
 import { SourceDetail } from "./SourceDetail";
 
 vi.mock("../../lib/api/knowledge", async (importOriginal) => {
@@ -29,7 +29,7 @@ function renderDetail() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <SourceDetail connection={testConnection} sourceId="travel-policy" onBack={() => {}} />
+      <SourceDetail sourceId="travel-policy" onBack={() => {}} />
     </QueryClientProvider>,
   );
 }
@@ -82,7 +82,7 @@ describe("Source detail", () => {
     expect(await screen.findByText("Hotels in Berlin are capped at 140 EUR per night.")).toBeVisible();
     expect(screen.getByText(CHUNK_ADDR_1)).toBeVisible();
     expect(screen.getAllByText("0–512").length).toBeGreaterThan(1);
-    expect(getKnowledgeChunk).toHaveBeenCalledWith(testConnection, "travel-policy", 0, undefined);
+    expect(getKnowledgeChunk).toHaveBeenCalledWith("travel-policy", 0, undefined);
   });
 
   it("pins a superseded version when fetching evidence", async () => {
@@ -91,7 +91,7 @@ describe("Source detail", () => {
     await userEvent.click(viewButtons[0]);
     await screen.findByText("Hotels in Berlin are capped at 140 EUR per night.");
     await userEvent.selectOptions(screen.getByLabelText("Chunk version"), HASH_B);
-    await waitFor(() => expect(getKnowledgeChunk).toHaveBeenCalledWith(testConnection, "travel-policy", 0, HASH_B));
+    await waitFor(() => expect(getKnowledgeChunk).toHaveBeenCalledWith("travel-policy", 0, HASH_B));
   });
 
   it("names the failure when a chunk cannot be fetched", async () => {
@@ -119,7 +119,6 @@ describe("Source detail", () => {
     expect(screen.getByText(HASH_C)).toBeVisible();
     expect(screen.getByText("v3")).toBeVisible();
     expect(correctKnowledgeSource).toHaveBeenCalledWith(
-      testConnection,
       "travel-policy",
       "human:maya",
       "Hotels in Berlin are capped at 160 EUR per night.",

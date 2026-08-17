@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ConnectionIdentity } from "../../lib/api/client";
 import {
   getSkill,
   getSkillBody,
@@ -20,9 +19,7 @@ function hexPreview(bytes: Uint8Array, max = 128) {
   return bytes.byteLength > max ? `${shown} …` : shown;
 }
 
-export function SkillDetailDrawer({ connection, scope, name, onClose }: {
-  connection: ConnectionIdentity;
-  scope: string;
+export function SkillDetailDrawer({ name, onClose }: {
   name: string;
   onClose: () => void;
 }) {
@@ -43,29 +40,29 @@ export function SkillDetailDrawer({ connection, scope, name, onClose }: {
     return () => { if (dialog?.open && typeof dialog.close === "function") dialog.close(); };
   }, []);
 
-  const key = [scope, "skills", name];
-  const detail = useQuery({ queryKey: [...key, "receipt"], queryFn: () => getSkill(connection, name), retry: false });
+  const key = ["skills", name];
+  const detail = useQuery({ queryKey: [...key, "receipt"], queryFn: () => getSkill(name), retry: false });
   const history = useQuery({
     queryKey: [...key, "history"],
-    queryFn: () => getSkillHistory(connection, name),
+    queryFn: () => getSkillHistory(name),
     enabled: Boolean(detail.data),
     retry: false,
   });
   const version = useQuery({
     queryKey: [...key, "version", pinned],
-    queryFn: () => getSkillVersion(connection, name, pinned!),
+    queryFn: () => getSkillVersion(name, pinned!),
     enabled: pinned !== null,
     retry: false,
   });
   const body = useQuery({
     queryKey: [...key, "body"],
-    queryFn: () => getSkillBody(connection, name),
+    queryFn: () => getSkillBody(name),
     enabled: bodyRequested,
     retry: false,
   });
   const member = useQuery({
     queryKey: [...key, "file", memberRequest],
-    queryFn: () => getSkillFile(connection, name, memberRequest),
+    queryFn: () => getSkillFile(name, memberRequest),
     enabled: Boolean(memberRequest),
     retry: false,
   });
@@ -73,7 +70,7 @@ export function SkillDetailDrawer({ connection, scope, name, onClose }: {
   const viewingPinned = pinned !== null;
   const receipt: SkillReceipt | SkillDetail | null = viewingPinned ? version.data ?? null : detail.data ?? null;
   const latestRevision = detail.data?.revision ?? 0;
-  const knownMembers = publishedMembers(scope, name);
+  const knownMembers = publishedMembers(name);
 
   function requestMember(path: string) {
     const exact = path.trim();

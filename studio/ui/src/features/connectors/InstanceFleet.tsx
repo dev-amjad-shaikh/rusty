@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useState } from "react";
-import { StudioApiError, type ConnectionIdentity } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import {
   checkConnectorInstanceHealth,
   connectConnectorInstance,
@@ -17,13 +17,9 @@ import styles from "./ConnectorsPage.module.css";
 type LifecycleAction = "connect" | "health" | "disable" | "enable";
 
 function InstanceRow({
-  connection,
-  scope,
   instance,
   manifestName,
 }: {
-  connection: ConnectionIdentity;
-  scope: string;
   instance: ConnectorInstance;
   manifestName: string | null;
 }) {
@@ -32,14 +28,14 @@ function InstanceRow({
   const presentation = statePresentation[instance.state];
   const actions = allowedActions(instance.state);
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: [scope, "connectors", "instances"] });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["connectors", "instances"] });
 
   const action = useMutation({
     mutationFn: async (kind: LifecycleAction) => {
-      if (kind === "connect") return connectConnectorInstance(connection, instance.instance_id);
-      if (kind === "health") return checkConnectorInstanceHealth(connection, instance.instance_id);
-      if (kind === "disable") return disableConnectorInstance(connection, instance.instance_id);
-      return enableConnectorInstance(connection, instance.instance_id);
+      if (kind === "connect") return connectConnectorInstance(instance.instance_id);
+      if (kind === "health") return checkConnectorInstanceHealth(instance.instance_id);
+      if (kind === "disable") return disableConnectorInstance(instance.instance_id);
+      return enableConnectorInstance(instance.instance_id);
     },
     onSuccess: refresh,
   });
@@ -108,7 +104,7 @@ function InstanceRow({
       )}
       {catalogOpen && (
         <div className={styles.catalogSlot} id={`catalog-${instance.instance_id}`}>
-          <CatalogView connection={connection} scope={scope} instance={instance} />
+          <CatalogView instance={instance} />
         </div>
       )}
     </article>
@@ -116,13 +112,9 @@ function InstanceRow({
 }
 
 export function InstanceFleet({
-  connection,
-  scope,
   instances,
   manifests,
 }: {
-  connection: ConnectionIdentity;
-  scope: string;
   instances: UseQueryResult<ConnectorInstance[]>;
   manifests: ConnectorManifest[];
 }) {
@@ -158,8 +150,8 @@ export function InstanceFleet({
           {list.map((instance) => (
             <InstanceRow
               key={instance.instance_id}
-              connection={connection}
-              scope={scope}
+             
+             
               instance={instance}
               manifestName={namesByHash.get(instance.manifest_hash) ?? null}
             />

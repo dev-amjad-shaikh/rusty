@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { StudioApiError, type ConnectionIdentity } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import {
   createConnectorInstance,
   listVaultConnections,
@@ -14,14 +14,10 @@ import { RegisterConnectionForm } from "./RegisterConnectionForm";
 import styles from "./ConnectorsPage.module.css";
 
 export function InstantiatePanel({
-  connection,
-  scope,
   manifest,
   onClose,
   onCreated,
 }: {
-  connection: ConnectionIdentity;
-  scope: string;
   manifest: ConnectorManifest;
   onClose: () => void;
   onCreated: (instance: ConnectorInstance) => void;
@@ -37,8 +33,8 @@ export function InstantiatePanel({
   }, []);
 
   const connections = useQuery({
-    queryKey: [scope, "connections"],
-    queryFn: () => listVaultConnections(connection),
+    queryKey: ["connections"],
+    queryFn: () => listVaultConnections(),
   });
 
   // A freshly registered connection binds every still-empty slot: the
@@ -56,12 +52,12 @@ export function InstantiatePanel({
   }
 
   const create = useMutation({
-    mutationFn: () => createConnectorInstance(connection, {
+    mutationFn: () => createConnectorInstance({
       manifest_hash: manifest.hash,
       credentials: Object.fromEntries(Object.entries(bindings).filter(([, id]) => id)),
     }),
     onSuccess: async (instance) => {
-      await queryClient.invalidateQueries({ queryKey: [scope, "connectors", "instances"] });
+      await queryClient.invalidateQueries({ queryKey: ["connectors", "instances"] });
       onCreated(instance);
     },
     onError: (error) => {
@@ -101,8 +97,8 @@ export function InstantiatePanel({
 
       {registering ? (
         <RegisterConnectionForm
-          connection={connection}
-          scope={scope}
+         
+         
           onRegistered={onConnectionRegistered}
           onCancel={() => setRegistering(false)}
         />

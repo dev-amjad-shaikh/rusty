@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useBlocker, useNavigate, useParams } from "@tanstack/react-router";
-import { connectionScope, jsonEquivalent, StudioApiError } from "../../lib/api/client";
+import { jsonEquivalent, StudioApiError } from "../../lib/api/client";
 import {
   activateAssistantVersion,
   createAssistantVersion,
@@ -14,7 +14,7 @@ import {
 } from "../../lib/api/assistants";
 import type { Assistant } from "../../lib/contracts";
 import { evidencePreview } from "../../lib/text";
-import { useConnectionStore } from "../../state/connection";
+import { useRuntimeStore } from "../../state/runtime";
 import { useWorkStore } from "../../state/work";
 import { PageHeader } from "../../components/PageHeader";
 import {
@@ -39,10 +39,9 @@ export function AgentWorkspace() {
   const { assistantId } = useParams({ strict: false }) as { assistantId: string };
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { connection, info, openDialog } = useConnectionStore();
+  const info = useRuntimeStore((state) => state.info);
   const work = useWorkStore();
-  const scope = connection ? connectionScope(connection) : "disconnected";
-  const key = assistantHistoryKey(connection, assistantId);
+  const key = assistantHistoryKey(assistantId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<AgentDraft | null>(null);
   const [editSource, setEditSource] = useState<Assistant | null>(null);
@@ -57,27 +56,27 @@ export function AgentWorkspace() {
   const versionErrorRef = useRef<HTMLHeadingElement>(null);
   const createVersionRef = useRef<HTMLButtonElement>(null);
   const lifecycleHeadingRef = useRef<HTMLHeadingElement>(null);
-  const workspaceRef = useRef({ assistantId, scope, mounted: true });
-  workspaceRef.current = { assistantId, scope, mounted: true };
+  const workspaceRef = useRef({ assistantId, mounted: true });
+  workspaceRef.current = { assistantId, mounted: true };
 
   useEffect(() => () => { workspaceRef.current.mounted = false; }, []);
 
   useEffect(() => {
     setEditing(false); setDraft(null); setEditSource(null); setVersionReview(null);
     setActivationAcknowledged(false); setLifecycleReview(null); setDiscardAction(null); setError(""); setNotice("");
-  }, [assistantId, scope]);
+  }, [assistantId]);
 
   const history = useQuery({
     queryKey: key,
-    queryFn: () => listAssistantVersions(connection!, assistantId),
-    enabled: Boolean(connection && assistantId),
+    queryFn: () => listAssistantVersions(assistantId),
+    enabled: Boolean(assistantId),
   });
   const assistant = history.data?.assistant ?? null;
   const selectedVersionId = versionReview?.summary.version_id ?? "";
   const selectedVersion = useQuery({
-    queryKey: connection && selectedVersionId ? [...key, "version", selectedVersionId] : ["assistant-version", "idle"],
-    queryFn: () => getAssistantVersion(connection!, assistantId, versionReview!.summary, versionReview!.expectedActiveVersionId),
-    enabled: Boolean(connection && versionReview && !versionReview.summary.active),
+    queryKey: [...key, "version", selectedVersionId],
+    queryFn: () => getAssistantVersion(assistantId, versionReview!.summary, versionReview!.expectedActiveVersionId),
+    enabled: Boolean(versionReview && !versionReview.summary.active),
   });
 
   const activeDraft = useMemo(() => readDraft(assistant), [assistant]);
@@ -120,10 +119,10 @@ export function AgentWorkspace() {
   }, [selectedVersion.isError]);
 
   const saveVersion = useMutation({
-    mutationFn: async (input: { connection: NonNullable<typeof connection>; scope: string; source: Assistant; fields: NonNullable<typeof versionFields.fields> }) => {
+    mutationFn: async (input: { source: Assistant; fields: NonNullable<typeof versionFields.fields> }) => {
       try {
-        const receipt = await createAssistantVersion(input.connection, input.source.assistant_id, input.source.active_version_id, input.fields);
-        return { receipt, initiatingScope: input.scope, initiatingAssistantId: input.source.assistant_id, activeSnapshot: input.source };
+        const receipt = await createAssistantVersion(input.source.assistant_id, input.source.active_version_id, input.fields);
+        return { receipt, initiatingAssistantId: input.source.assistant_id, activeSnapshot: input.source };
       } catch (caught) {
         if (caught instanceof StudioApiError && caught.mayHaveCommitted) {
           throw new StudioApiError("Studio could not confirm the saved version. Retrying this unchanged draft is safe because Rusty converges identical content on the same base version.", caught.status, true);
@@ -131,8 +130,8 @@ export function AgentWorkspace() {
         throw caught;
       }
     },
-    onSuccess: async ({ receipt, initiatingScope, initiatingAssistantId, activeSnapshot }) => {
-      if (!ownsWorkspace(initiatingScope, initiatingAssistantId)) return;
+    onSuccess: async ({ receipt, initiatingAssistantId, activeSnapshot }) => {
+      if (!ownsWorkspace(initiatingAssistantId)) return;
       setEditing(false); setDraft(null); setEditSource(null); setError("");
       setVersionReview({
         summary: { version_id: receipt.version.version_id, parent_version_id: receipt.version.parent_version_id, graph: receipt.version.graph, created_at: receipt.version.created_at, active: false },
@@ -142,88 +141,86 @@ export function AgentWorkspace() {
       });
       setActivationAcknowledged(false);
       setNotice(receipt.created ? "Draft version saved. The active version is unchanged." : "This exact draft version was already saved. The active version is unchanged.");
-      await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(connection, initiatingAssistantId) });
-      if (ownsWorkspace(initiatingScope, initiatingAssistantId)) noticeRef.current?.focus({ preventScroll: true });
+      await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(initiatingAssistantId) });
+      if (ownsWorkspace(initiatingAssistantId)) noticeRef.current?.focus({ preventScroll: true });
     },
     onError: async (caught, input) => {
-      if (!ownsWorkspace(input.scope, input.source.assistant_id)) return;
+      if (!ownsWorkspace(input.source.assistant_id)) return;
       setError(caught instanceof Error ? caught.message : "The draft version could not be saved.");
-      if (caught instanceof StudioApiError && caught.status === 409) await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(input.connection, input.source.assistant_id) });
+      if (caught instanceof StudioApiError && caught.status === 409) await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(input.source.assistant_id) });
     },
   });
 
   const activation = useMutation({
-    mutationFn: async (input: { connection: NonNullable<typeof connection>; scope: string; assistantId: string; target: AssistantVersion; activeVersionId: string; versionCount: number }) => {
+    mutationFn: async (input: { assistantId: string; target: AssistantVersion; activeVersionId: string; versionCount: number }) => {
       try {
-        const receipt = await activateAssistantVersion(input.connection, input.assistantId, input.target, input.activeVersionId, input.versionCount);
-        return { assistant: receipt.assistant, reconciled: false, initiatingScope: input.scope, initiatingAssistantId: input.assistantId };
+        const receipt = await activateAssistantVersion(input.assistantId, input.target, input.activeVersionId, input.versionCount);
+        return { assistant: receipt.assistant, reconciled: false, initiatingAssistantId: input.assistantId };
       } catch (caught) {
         if (!(caught instanceof StudioApiError) || !caught.mayHaveCommitted) throw caught;
         let current: Assistant;
-        try { current = await getAssistant(input.connection, input.assistantId); }
+        try { current = await getAssistant(input.assistantId); }
         catch { throw new StudioApiError("Activation may have completed, but Studio could not refresh Rusty. Do not repeat it until server truth is available.", caught.status, true); }
         if (current.active_version_id === input.target.version_id && current.name === input.target.name && current.graph === input.target.graph
           && jsonEquivalent(current.config, input.target.config) && jsonEquivalent(current.metadata, input.target.metadata)) {
-          return { assistant: current, reconciled: true, initiatingScope: input.scope, initiatingAssistantId: input.assistantId };
+          return { assistant: current, reconciled: true, initiatingAssistantId: input.assistantId };
         }
         throw new StudioApiError("Rusty did not confirm which version is active. Studio refreshed server truth; review the current version before trying again.", caught.status, true);
       }
     },
-    onSuccess: async ({ assistant: activated, reconciled, initiatingScope, initiatingAssistantId }) => {
-      if (!ownsWorkspace(initiatingScope, initiatingAssistantId)) return;
+    onSuccess: async ({ assistant: activated, reconciled, initiatingAssistantId }) => {
+      if (!ownsWorkspace(initiatingAssistantId)) return;
       setVersionReview(null); setActivationAcknowledged(false); setError("");
       setNotice(reconciled ? "The reviewed version is active; Studio confirmed it after refreshing Rusty." : "The reviewed version is now active.");
-      const operationKey = assistantHistoryKey(connection, initiatingAssistantId);
+      const operationKey = assistantHistoryKey(initiatingAssistantId);
       queryClient.setQueryData(operationKey, (current: unknown) => replaceHistoryAssistant(current, activated));
       await queryClient.invalidateQueries({ queryKey: operationKey });
-      if (ownsWorkspace(initiatingScope, initiatingAssistantId)) noticeRef.current?.focus({ preventScroll: true });
+      if (ownsWorkspace(initiatingAssistantId)) noticeRef.current?.focus({ preventScroll: true });
     },
     onError: async (caught, input) => {
-      if (!ownsWorkspace(input.scope, input.assistantId)) return;
+      if (!ownsWorkspace(input.assistantId)) return;
       setError(caught instanceof Error ? caught.message : "The version could not be activated.");
       setActivationAcknowledged(false);
-      await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(input.connection, input.assistantId) });
+      await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(input.assistantId) });
     },
   });
 
   const lifecycle = useMutation({
-    mutationFn: async (input: { connection: NonNullable<typeof connection>; scope: string; snapshot: Assistant; action: LifecycleAction }) => {
+    mutationFn: async (input: { snapshot: Assistant; action: LifecycleAction }) => {
       try {
-        const receipt = await setAssistantLifecycle(input.connection, input.snapshot, input.action);
-        return { assistant: receipt.assistant, reconciled: false, action: input.action, initiatingScope: input.scope, initiatingAssistantId: input.snapshot.assistant_id };
+        const receipt = await setAssistantLifecycle(input.snapshot, input.action);
+        return { assistant: receipt.assistant, reconciled: false, action: input.action, initiatingAssistantId: input.snapshot.assistant_id };
       } catch (caught) {
         if (!(caught instanceof StudioApiError) || !caught.mayHaveCommitted) throw caught;
         let current: Assistant;
-        try { current = await getAssistant(input.connection, input.snapshot.assistant_id); }
+        try { current = await getAssistant(input.snapshot.assistant_id); }
         catch { throw new StudioApiError("The lifecycle change may have completed, but Studio could not refresh Rusty. Do not repeat it until server truth is available.", caught.status, true); }
         const expectedArchived = input.action === "archive";
         if (Boolean(current.archived_at) === expectedArchived && current.active_version_id === input.snapshot.active_version_id) {
-          return { assistant: current, reconciled: true, action: input.action, initiatingScope: input.scope, initiatingAssistantId: input.snapshot.assistant_id };
+          return { assistant: current, reconciled: true, action: input.action, initiatingAssistantId: input.snapshot.assistant_id };
         }
         throw new StudioApiError("Rusty did not confirm the lifecycle change. Studio refreshed the agent before allowing another attempt.", caught.status, true);
       }
     },
-    onSuccess: async ({ assistant: changed, reconciled, action, initiatingScope, initiatingAssistantId }) => {
-      if (!ownsWorkspace(initiatingScope, initiatingAssistantId)) return;
+    onSuccess: async ({ assistant: changed, reconciled, action, initiatingAssistantId }) => {
+      if (!ownsWorkspace(initiatingAssistantId)) return;
       setLifecycleReview(null); setError("");
       setNotice(`${action === "archive" ? "Agent archived" : "Agent restored"}${reconciled ? " after Studio confirmed server state" : ""}.`);
-      const operationKey = assistantHistoryKey(connection, initiatingAssistantId);
+      const operationKey = assistantHistoryKey(initiatingAssistantId);
       queryClient.setQueryData(operationKey, (current: unknown) => replaceHistoryAssistant(current, changed));
       await queryClient.invalidateQueries({ queryKey: operationKey });
-      if (ownsWorkspace(initiatingScope, initiatingAssistantId)) noticeRef.current?.focus({ preventScroll: true });
+      if (ownsWorkspace(initiatingAssistantId)) noticeRef.current?.focus({ preventScroll: true });
     },
     onError: async (caught, input) => {
-      if (!ownsWorkspace(input.scope, input.snapshot.assistant_id)) return;
+      if (!ownsWorkspace(input.snapshot.assistant_id)) return;
       setError(caught instanceof Error ? caught.message : "The lifecycle change could not be confirmed.");
-      await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(input.connection, input.snapshot.assistant_id) });
+      await queryClient.invalidateQueries({ queryKey: assistantHistoryKey(input.snapshot.assistant_id) });
     },
   });
 
-  function ownsWorkspace(expectedScope: string, expectedAssistantId: string) {
-    const current = useConnectionStore.getState().connection;
+  function ownsWorkspace(expectedAssistantId: string) {
     const workspace = workspaceRef.current;
-    return Boolean(workspace.mounted && workspace.scope === expectedScope && workspace.assistantId === expectedAssistantId
-      && current && connectionScope(current) === expectedScope);
+    return workspace.mounted && workspace.assistantId === expectedAssistantId;
   }
 
   function beginEdit() {
@@ -242,8 +239,8 @@ export function AgentWorkspace() {
   }
 
   function runActive() {
-    if (!assistant || !connection || assistant.archived_at || !info?.graphs.some((graph) => graph.name === assistant.graph)) return;
-    work.prepare(scope, assistant);
+    if (!assistant || assistant.archived_at || !info?.graphs.some((graph) => graph.name === assistant.graph)) return;
+    work.prepare(assistant);
     navigate({ to: "/work" });
   }
 
@@ -270,7 +267,6 @@ export function AgentWorkspace() {
   }
 
   const workspaceEyebrow = <><Link to="/agents" activeOptions={{ exact: true }}>Agents</Link><span aria-hidden="true"> / </span><span>Workspace</span></>;
-  if (!connection) return <section className="page" aria-labelledby="agent-heading"><PageHeader headingId="agent-heading" eyebrow={workspaceEyebrow} title="Open an agent" variant="compact" /><div className="empty-state"><h2>Open its workspace to continue</h2><p>The active definition and immutable history stay in your Rusty workspace.</p><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div></section>;
   if (history.isLoading) return <section className="page" aria-labelledby="agent-heading"><PageHeader headingId="agent-heading" eyebrow={workspaceEyebrow} title="Opening agent" variant="compact" /><div className={styles.loading} role="status">Loading agent…</div></section>;
   if (history.isError || !history.data || !assistant) return <section className="page" aria-labelledby="agent-heading"><PageHeader headingId="agent-heading" eyebrow={workspaceEyebrow} title="Agent unavailable" description={history.error instanceof Error ? history.error.message : "Rusty did not return this agent."} actions={<Link className="secondary-button" to="/agents">Back to agents</Link>} variant="compact" /><div className="empty-state"><h2>Reload the active definition</h2><button className="primary-button" type="button" onClick={() => history.refetch()}>Retry</button></div></section>;
 
@@ -301,7 +297,7 @@ export function AgentWorkspace() {
 
     {lifecycleReview && <section className={styles.lifecycleReview} aria-labelledby="lifecycle-heading">
       <div><span className="eyebrow">Confirm lifecycle</span><h2 ref={lifecycleHeadingRef} tabIndex={-1} id="lifecycle-heading">{lifecycleReview.action === "archive" ? "Archive this agent?" : "Restore this agent?"}</h2><p>{lifecycleReview.action === "archive" ? "New runs will stop. Existing runs and every version remain available." : "The reviewed active version will be available for new runs again."}</p></div>
-      <div><button type="button" className="secondary-button" onClick={() => setLifecycleReview(null)} disabled={lifecycle.isPending}>Cancel</button><button type="button" className="primary-button" onClick={() => lifecycle.mutate({ connection, scope, snapshot: lifecycleReview.snapshot, action: lifecycleReview.action })} disabled={lifecycle.isPending}>{lifecycle.isPending ? "Confirming…" : lifecycleReview.action === "archive" ? "Archive agent" : "Restore agent"}</button></div>
+      <div><button type="button" className="secondary-button" onClick={() => setLifecycleReview(null)} disabled={lifecycle.isPending}>Cancel</button><button type="button" className="primary-button" onClick={() => lifecycle.mutate({ snapshot: lifecycleReview.snapshot, action: lifecycleReview.action })} disabled={lifecycle.isPending}>{lifecycle.isPending ? "Confirming…" : lifecycleReview.action === "archive" ? "Archive agent" : "Restore agent"}</button></div>
     </section>}
 
     {(discardAction || routeBlocker.status === "blocked") && <UnsavedChangesDialog onKeep={() => { setDiscardAction(null); routeBlocker.reset?.(); }} onDiscard={() => { if (routeBlocker.status === "blocked") { closeDraft(); routeBlocker.proceed(); } else confirmDiscard(); }} />}
@@ -311,8 +307,8 @@ export function AgentWorkspace() {
         {editing && draft && editSource ? <>
           <header className={styles.sectionHeader}><div><span className="eyebrow">Draft version</span><h2>Draft a new definition</h2><p>Saving creates an immutable draft. It does not change what runs.</p></div><button type="button" onClick={() => draftChanged ? setDiscardAction("close") : closeDraft()}>Cancel</button></header>
           <AgentIntentEditor draft={draft} onChange={updateDraft} graphs={info?.graphs ?? []} />
-          <footer className={styles.saveBar}><div><b>{draftChanged ? "Unsaved definition" : "No changes yet"}</b><span>{versionFields.error || "The active version remains available after this draft is saved."}</span></div><button className="primary-button" type="button" disabled={saveVersion.isPending || !draftChanged || !versionFields.fields} onClick={() => versionFields.fields && saveVersion.mutate({ connection, scope, source: editSource, fields: versionFields.fields })}>{saveVersion.isPending ? "Saving version…" : "Save draft version"}</button></footer>
-        </> : target && versionReview ? <VersionReview headingRef={reviewHeadingRef} target={target} activeSnapshot={versionReview.activeSnapshot} activeDraft={reviewedActiveDraft} targetDraft={reviewedDraft} changes={reviewedChanges} acknowledged={activationAcknowledged} onAcknowledged={setActivationAcknowledged} onCancel={() => { const id = versionReview.summary.version_id; setVersionReview(null); setActivationAcknowledged(false); setError(""); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-review-version="${id}"]`)?.focus()); }} onActivate={() => activation.mutate({ connection, scope, assistantId, target, activeVersionId: versionReview.expectedActiveVersionId, versionCount: versionReview.expectedVersionCount })} pending={activation.isPending} />
+          <footer className={styles.saveBar}><div><b>{draftChanged ? "Unsaved definition" : "No changes yet"}</b><span>{versionFields.error || "The active version remains available after this draft is saved."}</span></div><button className="primary-button" type="button" disabled={saveVersion.isPending || !draftChanged || !versionFields.fields} onClick={() => versionFields.fields && saveVersion.mutate({ source: editSource, fields: versionFields.fields })}>{saveVersion.isPending ? "Saving version…" : "Save draft version"}</button></footer>
+        </> : target && versionReview ? <VersionReview headingRef={reviewHeadingRef} target={target} activeSnapshot={versionReview.activeSnapshot} activeDraft={reviewedActiveDraft} targetDraft={reviewedDraft} changes={reviewedChanges} acknowledged={activationAcknowledged} onAcknowledged={setActivationAcknowledged} onCancel={() => { const id = versionReview.summary.version_id; setVersionReview(null); setActivationAcknowledged(false); setError(""); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-review-version="${id}"]`)?.focus()); }} onActivate={() => activation.mutate({ assistantId, target, activeVersionId: versionReview.expectedActiveVersionId, versionCount: versionReview.expectedVersionCount })} pending={activation.isPending} />
         : selectedVersion.isLoading ? <div className={styles.loading} role="status">Loading immutable version…</div>
         : selectedVersion.isError ? <div className={styles.versionError} role="alert"><h2 ref={versionErrorRef} tabIndex={-1}>Version evidence unavailable</h2><p>{selectedVersion.error instanceof Error ? selectedVersion.error.message : "Rusty did not return the selected immutable version."}</p><div><button type="button" className="secondary-button" onClick={() => { const id = versionReview?.summary.version_id; setVersionReview(null); setError(""); requestAnimationFrame(() => id && document.querySelector<HTMLButtonElement>(`[data-review-version="${id}"]`)?.focus()); }}>Close review</button><button type="button" className="primary-button" onClick={() => selectedVersion.refetch()}>Retry</button></div></div>
         : <ActiveDefinition assistant={assistant} draft={activeDraft} />}
@@ -423,6 +419,6 @@ function agentDescription(assistant: Assistant) {
 
 function shortId(value: string) { return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value; }
 function formatTime(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
-function assistantHistoryKey(connection: ReturnType<typeof useConnectionStore.getState>["connection"], assistantId: string) {
-  return connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "assistant", assistantId, "history"] : ["assistant-history", "disconnected", assistantId];
+function assistantHistoryKey(assistantId: string) {
+  return ["assistant", assistantId, "history"];
 }

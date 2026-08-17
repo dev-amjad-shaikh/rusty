@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { ConnectionIdentity } from "../../lib/api/client";
 import type { ConnectorManifest } from "../../lib/api/connectors";
 import { evidencePreview } from "../../lib/text";
 import { providerKindLabel, shortHash } from "./lifecycle";
@@ -8,13 +7,9 @@ import { RegisterManifestForm } from "./RegisterManifestForm";
 import styles from "./ConnectorsPage.module.css";
 
 export function ManifestGallery({
-  connection,
-  scope,
   manifests,
   onInstantiate,
 }: {
-  connection: ConnectionIdentity;
-  scope: string;
   manifests: UseQueryResult<ConnectorManifest[]>;
   onInstantiate: (hash: string, trigger: HTMLButtonElement) => void;
 }) {
@@ -41,7 +36,7 @@ export function ManifestGallery({
       </header>
 
       {registerOpen && (
-        <RegisterManifestForm connection={connection} scope={scope} onRegistered={() => setRegisterOpen(false)} />
+        <RegisterManifestForm onRegistered={() => setRegisterOpen(false)} />
       )}
 
       {manifests.isLoading ? (

@@ -1,6 +1,4 @@
 import { useState } from "react";
-import type { ConnectionIdentity } from "../../lib/api/client";
-import { useConnectionStore } from "../../state/connection";
 import { PageHeader } from "../../components/PageHeader";
 import { SourceLibrary } from "./SourceLibrary";
 import { RegisterSourceForm } from "./RegisterSourceForm";
@@ -23,7 +21,6 @@ const mainTabs = [
 ];
 
 export function KnowledgePage() {
-  const { connection, openDialog } = useConnectionStore();
   const [view, setView] = useState<KnowledgeView>({ tab: "sources" });
   const activeTab = view.tab === "register" || view.tab === "source" ? "sources" : view.tab;
 
@@ -67,27 +64,22 @@ export function KnowledgePage() {
         ))}
       </nav>
 
-      {!connection ? (
-        <DisconnectedState openDialog={openDialog} />
-      ) : view.tab === "register" ? (
+      {view.tab === "register" ? (
         <RegisterSourceForm
-          connection={connection}
           onDone={(sourceId) => setView({ tab: "source", sourceId })}
           onCancel={() => setView({ tab: "sources" })}
         />
       ) : view.tab === "source" ? (
         <SourceDetail
-          connection={connection}
           sourceId={view.sourceId}
           onBack={() => setView({ tab: "sources" })}
         />
       ) : view.tab === "query" ? (
-        <QueryConsole connection={connection} />
+        <QueryConsole />
       ) : view.tab === "retention" ? (
-        <RetentionPanel connection={connection} />
+        <RetentionPanel />
       ) : (
         <SourceLibrary
-          connection={connection}
           onOpenSource={(sourceId) => setView({ tab: "source", sourceId })}
           onRegister={() => setView({ tab: "register" })}
         />
@@ -95,18 +87,3 @@ export function KnowledgePage() {
     </section>
   );
 }
-
-function DisconnectedState({ openDialog }: { openDialog: () => void }) {
-  return (
-    <div className={styles.emptyState}>
-      <span className={styles.emptyMark} aria-hidden="true">K</span>
-      <div>
-        <h2>Knowledge needs a workspace</h2>
-        <p>Sources, retrieval, and retention live in the connected tenant. Choose a workspace to open its library.</p>
-      </div>
-      <div><button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button></div>
-    </div>
-  );
-}
-
-export type { ConnectionIdentity as KnowledgeConnection };

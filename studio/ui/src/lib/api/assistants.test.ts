@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Assistant } from "../contracts";
-import type { ConnectionIdentity } from "./client";
 import {
   activateAssistantVersion,
   assistantVersionContentAddress,
@@ -10,12 +9,6 @@ import {
   type AssistantVersion,
 } from "./assistants";
 
-const connection: ConnectionIdentity = {
-  epoch: 1,
-  origin: "https://rusty.example",
-  apiKey: "key",
-  tenantFingerprint: "tenant",
-};
 let v1 = "";
 let v2 = "";
 const createdAt = "2026-08-11T00:00:00Z";
@@ -78,9 +71,9 @@ describe("assistant lifecycle API", () => {
       .mockImplementationOnce(() => response({ ...valid, versions: [valid.versions[1], valid.versions[0]] }))
       .mockImplementationOnce(() => response({ ...valid, versions: [valid.versions[0], { ...valid.versions[1], parent_version_id: `av-${"f".repeat(64)}` }] })));
 
-    await expect(listAssistantVersions(connection, "analyst")).resolves.toMatchObject({ active_version_id: v1 });
-    await expect(listAssistantVersions(connection, "analyst")).resolves.toMatchObject({ active_version_id: v1 });
-    await expect(listAssistantVersions(connection, "analyst")).rejects.toThrow("coherent immutable lineage");
+    await expect(listAssistantVersions("analyst")).resolves.toMatchObject({ active_version_id: v1 });
+    await expect(listAssistantVersions("analyst")).resolves.toMatchObject({ active_version_id: v1 });
+    await expect(listAssistantVersions("analyst")).rejects.toThrow("coherent immutable lineage");
   });
 
   it("fails closed before a legal Rust integer can be rounded in immutable evidence", async () => {
@@ -94,7 +87,7 @@ describe("assistant lifecycle API", () => {
     const raw = JSON.stringify(valid).replace('"config":{"studio_intent"', '"config":{"unsafe":18446744073709551615,"studio_intent"');
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(raw)));
 
-    await expect(listAssistantVersions(connection, "analyst")).rejects.toThrow("cannot preserve exactly");
+    await expect(listAssistantVersions("analyst")).rejects.toThrow("cannot preserve exactly");
   });
 
   it("rejects an active body that does not match the active content address", async () => {
@@ -105,7 +98,7 @@ describe("assistant lifecycle API", () => {
     };
     crossed.assistant.version_count = 1;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => response(crossed)));
-    await expect(listAssistantVersions(connection, "analyst")).rejects.toThrow("content address");
+    await expect(listAssistantVersions("analyst")).rejects.toThrow("content address");
   });
 
   it("binds a staged version to its base, exact fields, and HTTP status", async () => {
@@ -114,8 +107,8 @@ describe("assistant lifecycle API", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementationOnce(() => response(receipt, 201))
       .mockImplementationOnce(() => response({ ...receipt, version: { ...receipt.version, graph: "other" } }, 201)));
 
-    await expect(createAssistantVersion(connection, "analyst", v1, fields)).resolves.toMatchObject({ created: true });
-    await expect(createAssistantVersion(connection, "analyst", v1, fields)).rejects.toMatchObject({ mayHaveCommitted: true });
+    await expect(createAssistantVersion("analyst", v1, fields)).resolves.toMatchObject({ created: true });
+    await expect(createAssistantVersion("analyst", v1, fields)).rejects.toMatchObject({ mayHaveCommitted: true });
   });
 
   it("binds activation and lifecycle receipts to the exact reviewed snapshots", async () => {
@@ -127,8 +120,8 @@ describe("assistant lifecycle API", () => {
       .mockImplementationOnce(() => response({ assistant: archived, changed: true, lifecycle: "archived" }))
       .mockImplementationOnce(() => response({ assistant: { ...archived, graph: "other" }, changed: true, lifecycle: "archived" })));
 
-    await expect(activateAssistantVersion(connection, "analyst", target, v1, 2)).resolves.toMatchObject({ activated: true });
-    await expect(setAssistantLifecycle(connection, activated, "archive")).resolves.toMatchObject({ lifecycle: "archived" });
-    await expect(setAssistantLifecycle(connection, activated, "archive")).rejects.toMatchObject({ mayHaveCommitted: true });
+    await expect(activateAssistantVersion("analyst", target, v1, 2)).resolves.toMatchObject({ activated: true });
+    await expect(setAssistantLifecycle(activated, "archive")).resolves.toMatchObject({ lifecycle: "archived" });
+    await expect(setAssistantLifecycle(activated, "archive")).rejects.toMatchObject({ mayHaveCommitted: true });
   });
 });

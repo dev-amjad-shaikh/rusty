@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { StudioApiError, type ConnectionIdentity } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import {
   getInstanceCatalog,
   liveGenerationInError,
@@ -11,20 +11,16 @@ import { effectLabel, shortHash } from "./lifecycle";
 import styles from "./ConnectorsPage.module.css";
 
 export function CatalogView({
-  connection,
-  scope,
   instance,
 }: {
-  connection: ConnectionIdentity;
-  scope: string;
   instance: ConnectorInstance;
 }) {
   const [pin, setPin] = useState<number | null>(null);
   const [pinDraft, setPinDraft] = useState("");
 
   const catalog = useQuery({
-    queryKey: [scope, "connectors", "catalog", instance.instance_id, pin ?? "live"],
-    queryFn: () => getInstanceCatalog(connection, instance.instance_id, pin ?? undefined),
+    queryKey: ["connectors", "catalog", instance.instance_id, pin ?? "live"],
+    queryFn: () => getInstanceCatalog(instance.instance_id, pin ?? undefined),
   });
 
   const mismatch = catalog.error instanceof StudioApiError && catalog.error.status === 409

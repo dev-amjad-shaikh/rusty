@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StudioApiError, type ConnectionIdentity } from "./client";
+import { StudioApiError } from "./client";
 import { forgetMemory, getMemory, queryMemory, submitCorrection, writeMemory } from "./memory";
 
-const connection: ConnectionIdentity = { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "fp" };
 
 const idA = "a".repeat(64);
 const idB = "b".repeat(64);
@@ -23,7 +22,7 @@ function memoryRecord(over: Record<string, unknown> = {}) {
 
 function stubFetch(handler: (url: URL, init?: RequestInit) => Response) {
   vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url, "http://studio.local");
     return Promise.resolve(handler(url, init));
   }));
 }
@@ -35,12 +34,12 @@ afterEach(() => vi.unstubAllGlobals());
 describe("memory api receipts", () => {
   it("rejects a query result that crosses the declared filters", async () => {
     stubFetch(() => json({ records: [memoryRecord({ scope: { scope: "tenant", id: "acme" } })] }));
-    await expect(queryMemory(connection, { scope: { scope: "user", id: "user-7" } })).rejects.toThrow(/outside the exact filters/);
+    await expect(queryMemory({ scope: { scope: "user", id: "user-7" } })).rejects.toThrow(/outside the exact filters/);
   });
 
   it("rejects a write receipt whose record drifts from the reviewed write", async () => {
     stubFetch(() => json({ memory_id: idA, created: true, record: memoryRecord({ scope: { scope: "tenant", id: "acme" } }) }, 201));
-    const attempt = writeMemory(connection, {
+    const attempt = writeMemory({
       kind: "fact",
       scope: { scope: "user", id: "user-7" },
       content: { timezone: "Asia/Dubai" },
@@ -52,7 +51,7 @@ describe("memory api receipts", () => {
 
   it("accepts an idempotent re-write receipt (200, created: false)", async () => {
     stubFetch(() => json({ memory_id: idA, created: false, record: memoryRecord() }));
-    const receipt = await writeMemory(connection, {
+    const receipt = await writeMemory({
       kind: "fact",
       scope: { scope: "user", id: "user-7" },
       content: { timezone: "Asia/Dubai" },
@@ -64,7 +63,7 @@ describe("memory api receipts", () => {
 
   it("rejects a record read that crosses identity", async () => {
     stubFetch(() => json(memoryRecord({ memory_id: idB })));
-    await expect(getMemory(connection, idA)).rejects.toThrow(/different content address/);
+    await expect(getMemory(idA)).rejects.toThrow(/different content address/);
   });
 
   it("rejects a correction receipt that loses the attribution", async () => {
@@ -78,7 +77,7 @@ describe("memory api receipts", () => {
       superseded: idA,
       example_id: null,
     }, 201));
-    await expect(submitCorrection(connection, {
+    await expect(submitCorrection({
       correction_id: "corr-1",
       author: "maya",
       targetMemoryId: idA,
@@ -93,7 +92,7 @@ describe("memory api receipts", () => {
       invalidated: [],
       tombstone: { memory_id: idB, scope: { scope: "user", id: "user-7" }, reason: "retracted" },
     }));
-    const attempt = forgetMemory(connection, idA, "retracted");
+    const attempt = forgetMemory(idA, "retracted");
     await expect(attempt).rejects.toThrow(/different record/);
     await attempt.catch((caught) => expect((caught as StudioApiError).mayHaveCommitted).toBe(true));
   });

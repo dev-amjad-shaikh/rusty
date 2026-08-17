@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { isLosslessNumber, parse as parseLossless } from "lossless-json";
 import { assistantSchema, type Assistant } from "../contracts";
-import { jsonEquivalent, parseJson, requestText, StudioApiError, type ConnectionIdentity } from "./client";
+import { jsonEquivalent, parseJson, requestText, StudioApiError } from "./client";
 
 const VERSION_RESPONSE_LIMIT = 2 * 1024 * 1024;
 const versionId = z.string().regex(/^av-[0-9a-f]{64}$/);
@@ -164,23 +164,23 @@ async function verifyHistory(value: AssistantHistory, rawAssistant: unknown, ass
   return value;
 }
 
-export async function getAssistant(connection: ConnectionIdentity, assistantId: string) {
-  const { text } = await requestText(connection, `/assistants/${encodeURIComponent(assistantId)}`, {}, 512 * 1024);
+export async function getAssistant(assistantId: string) {
+  const { text } = await requestText(`/assistants/${encodeURIComponent(assistantId)}`, {}, 512 * 1024);
   const assistant = parseAssistantJson(text, assistantSchema, "Assistant");
   if (assistant.assistant_id !== assistantId) throw new StudioApiError("Assistant evidence did not match the requested agent.", 0);
   return assistant;
 }
 
-export async function listAssistantVersions(connection: ConnectionIdentity, assistantId: string) {
-  const { text } = await requestText(connection, `/assistants/${encodeURIComponent(assistantId)}/versions`, {}, VERSION_RESPONSE_LIMIT);
+export async function listAssistantVersions(assistantId: string) {
+  const { text } = await requestText(`/assistants/${encodeURIComponent(assistantId)}/versions`, {}, VERSION_RESPONSE_LIMIT);
   const raw = parseLossless(text) as { assistant?: unknown };
   return verifyHistory(parseAssistantJson(text, historySchema, "Assistant history"), raw.assistant, assistantId);
 }
 
-export async function getAssistantVersion(connection: ConnectionIdentity, assistantId: string, summary: AssistantVersionSummary, expectedActiveVersionId: string) {
+export async function getAssistantVersion(assistantId: string, summary: AssistantVersionSummary, expectedActiveVersionId: string) {
   const requestedVersionId = summary.version_id;
   exactVersionId(requestedVersionId, "Requested version");
-  const { text } = await requestText(connection, `/assistants/${encodeURIComponent(assistantId)}/versions/${encodeURIComponent(requestedVersionId)}`, {}, VERSION_RESPONSE_LIMIT);
+  const { text } = await requestText(`/assistants/${encodeURIComponent(assistantId)}/versions/${encodeURIComponent(requestedVersionId)}`, {}, VERSION_RESPONSE_LIMIT);
   const value = parseAssistantJson(text, exactVersionSchema, "Assistant version");
   const raw = parseLossless(text) as { version?: unknown };
   await verifyContentAddress(raw.version, requestedVersionId);
@@ -194,13 +194,12 @@ export async function getAssistantVersion(connection: ConnectionIdentity, assist
 }
 
 export async function createAssistantVersion(
-  connection: ConnectionIdentity,
   assistantId: string,
   baseVersionId: string,
   fields: AssistantVersionFields,
 ) {
   exactVersionId(baseVersionId, "Base version");
-  const { status, text } = await requestText(connection, `/assistants/${encodeURIComponent(assistantId)}/versions`, {
+  const { status, text } = await requestText(`/assistants/${encodeURIComponent(assistantId)}/versions`, {
     method: "POST",
     body: JSON.stringify({ base_version_id: baseVersionId, ...fields }),
   }, VERSION_RESPONSE_LIMIT);
@@ -222,7 +221,6 @@ export async function createAssistantVersion(
 }
 
 export async function activateAssistantVersion(
-  connection: ConnectionIdentity,
   assistantId: string,
   target: AssistantVersion,
   expectedActiveVersionId: string,
@@ -230,7 +228,7 @@ export async function activateAssistantVersion(
 ) {
   exactVersionId(target.version_id, "Target version");
   exactVersionId(expectedActiveVersionId, "Active version");
-  const { status, text } = await requestText(connection, `/assistants/${encodeURIComponent(assistantId)}/versions/${encodeURIComponent(target.version_id)}/activate`, {
+  const { status, text } = await requestText(`/assistants/${encodeURIComponent(assistantId)}/versions/${encodeURIComponent(target.version_id)}/activate`, {
     method: "POST",
     body: JSON.stringify({ expected_active_version_id: expectedActiveVersionId }),
   }, VERSION_RESPONSE_LIMIT);
@@ -246,12 +244,11 @@ export async function activateAssistantVersion(
 }
 
 export async function setAssistantLifecycle(
-  connection: ConnectionIdentity,
   snapshot: Assistant,
   action: "archive" | "restore",
 ) {
   exactVersionId(snapshot.active_version_id, "Active version");
-  const { status, text } = await requestText(connection, `/assistants/${encodeURIComponent(snapshot.assistant_id)}/${action}`, {
+  const { status, text } = await requestText(`/assistants/${encodeURIComponent(snapshot.assistant_id)}/${action}`, {
     method: "POST",
     body: JSON.stringify({ expected_active_version_id: snapshot.active_version_id }),
   }, VERSION_RESPONSE_LIMIT);

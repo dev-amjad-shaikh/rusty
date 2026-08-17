@@ -3,7 +3,6 @@ import { stringify as stringifyLossless } from "lossless-json";
 import type { Assistant, RunEvidence, RunReceipt, RunSnapshot, Thread } from "../lib/contracts";
 
 export interface EvaluationCase {
-  connectionKey: string;
   id: string;
   caseId: string;
   runId: string;
@@ -17,7 +16,6 @@ export interface EvaluationCase {
 }
 
 export interface ComparisonRun {
-  connectionKey: string;
   run: RunSnapshot;
   evidence: RunEvidence;
   agentName: string;
@@ -26,53 +24,45 @@ export interface ComparisonRun {
 }
 
 interface WorkState {
-  connectionKey: string | null;
   assistant: Assistant | null;
   objective: string;
   thread: Thread | null;
   receipt: RunReceipt | null;
   cases: EvaluationCase[];
   comparisons: ComparisonRun[];
-  uncertainByConnection: Record<string, string>;
-  prepare: (connectionKey: string, assistant: Assistant) => void;
-  expirePrepared: (connectionKey: string, assistantId: string, versionId: string) => void;
-  begin: (connectionKey: string, assistant: Assistant, objective: string, thread: Thread, receipt: RunReceipt) => void;
+  uncertain: string;
+  prepare: (assistant: Assistant) => void;
+  expirePrepared: (assistantId: string, versionId: string) => void;
+  begin: (assistant: Assistant, objective: string, thread: Thread, receipt: RunReceipt) => void;
   addCase: (value: Omit<EvaluationCase, "id" | "createdAt">) => void;
   rememberRun: (value: Omit<ComparisonRun, "capturedAt">) => void;
-  markUncertain: (connectionKey: string, message: string) => void;
-  clearUncertain: (connectionKey: string) => void;
+  markUncertain: (message: string) => void;
+  clearUncertain: () => void;
   clear: () => void;
 }
 
 export const useWorkStore = create<WorkState>((set) => ({
-  connectionKey: null,
   assistant: null,
   objective: "",
   thread: null,
   receipt: null,
   cases: [],
   comparisons: [],
-  uncertainByConnection: {},
-  prepare: (connectionKey, assistant) => set({ connectionKey, assistant, objective: "", thread: null, receipt: null }),
-  expirePrepared: (connectionKey, assistantId, versionId) => set((state) => state.connectionKey === connectionKey
-    && state.assistant?.assistant_id === assistantId && state.assistant.active_version_id === versionId
+  uncertain: "",
+  prepare: (assistant) => set({ assistant, objective: "", thread: null, receipt: null }),
+  expirePrepared: (assistantId, versionId) => set((state) => state.assistant?.assistant_id === assistantId
+    && state.assistant.active_version_id === versionId
     && !state.receipt ? { assistant: null, thread: null } : {}),
-  begin: (connectionKey, assistant, objective, thread, receipt) => set({ connectionKey, assistant, objective, thread, receipt }),
+  begin: (assistant, objective, thread, receipt) => set({ assistant, objective, thread, receipt }),
   addCase: (value) => set((state) => ({
     cases: [...state.cases, { ...value, id: crypto.randomUUID(), createdAt: new Date().toISOString() }],
   })),
   rememberRun: (value) => set((state) => ({
     comparisons: [...state.comparisons.filter((item) => item.run.run_id !== value.run.run_id), { ...value, capturedAt: new Date().toISOString() }].slice(-20),
   })),
-  markUncertain: (connectionKey, message) => set((state) => ({
-    uncertainByConnection: { ...state.uncertainByConnection, [connectionKey]: message },
-  })),
-  clearUncertain: (connectionKey) => set((state) => {
-    const next = { ...state.uncertainByConnection };
-    delete next[connectionKey];
-    return { uncertainByConnection: next };
-  }),
-  clear: () => set({ connectionKey: null, assistant: null, objective: "", thread: null, receipt: null, cases: [], comparisons: [] }),
+  markUncertain: (message) => set({ uncertain: message }),
+  clearUncertain: () => set({ uncertain: "" }),
+  clear: () => set({ assistant: null, objective: "", thread: null, receipt: null, cases: [], comparisons: [] }),
 }));
 
 export function evaluationDatasetJsonl(cases: EvaluationCase[]) {

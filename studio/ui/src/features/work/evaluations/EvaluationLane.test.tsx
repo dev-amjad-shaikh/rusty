@@ -2,13 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../../state/connection";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvaluationCase } from "../../../state/work";
 import { comparisonWindow, datasetIdentity, EvaluationLane, splitDataset } from "./EvaluationLane";
 
 const cases: EvaluationCase[] = [{
-  connectionKey: "1|https://rusty.example|tenant-a", id: "local-1", caseId: "refund",
+  id: "local-1", caseId: "refund",
   runId: "run-source", threadId: "thread-source", agentName: "Support", agentId: "assistant-support",
   objective: "Answer the refund question", pointer: "/answer", expected: "30 days", createdAt: "2026-08-12T00:00:00Z",
 }];
@@ -37,10 +36,6 @@ function renderLane() {
   return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
 }
 
-beforeEach(() => {
-  useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "tenant-a" } });
-});
-
 afterEach(() => vi.unstubAllGlobals());
 
 describe("evaluation lane", () => {
@@ -62,7 +57,7 @@ describe("evaluation lane", () => {
     let published = false;
     let experiment: typeof complete | null = null;
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/datasets" && init?.method === "POST") {
         const body = JSON.parse(String(init.body));
         expect(body.cases[0].source).toEqual({ run_id: "run-source", thread_id: "thread-source", agent_id: "assistant-support", captured_at: "2026-08-12T00:00:00Z" });
@@ -110,35 +105,11 @@ describe("evaluation lane", () => {
     expect(await screen.findByText("Gate production-quality saved with a block decision.")).toBeVisible();
   });
 
-  it("does not let a late publish completion update a newer tenant", async () => {
-    let settlePublish: ((response: Response) => void) | undefined;
-    const publishResponse = new Promise<Response>((resolve) => { settlePublish = resolve; });
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
-      if (path === "/datasets" && init?.method === "POST") return publishResponse;
-      if (path === "/datasets") return Promise.resolve(new Response(JSON.stringify({ datasets: [], truncated: false })));
-      if (path === "/experiments") return Promise.resolve(new Response(JSON.stringify({ experiments: [], truncated: false })));
-      if (path === "/learn/candidates") return Promise.resolve(new Response(JSON.stringify({ candidates: [] })));
-      if (path === "/gates") return Promise.resolve(new Response(JSON.stringify({ gates: [], truncated: false })));
-      throw new Error(`unexpected ${path}`);
-    }));
-    renderLane();
-
-    const publish = await screen.findByRole("button", { name: "Publish dataset" });
-    await userEvent.click(publish);
-    expect(screen.getByLabelText("Name")).toBeDisabled();
-    useConnectionStore.setState({ connection: { epoch: 2, origin: "https://rusty.example", apiKey: "other", tenantFingerprint: "tenant-b" } });
-    settlePublish!(new Response(JSON.stringify({ name: "agent-regression", version: "2026-08-12", created: true, case_count: 1, digest: "a".repeat(64) }), { status: 201 }));
-
-    await waitFor(() => expect(screen.getByLabelText("Name")).toBeEnabled());
-    expect(screen.queryByText("Dataset agent-regression@2026-08-12 is ready.")).not.toBeInTheDocument();
-  });
-
   it("binds source-run links to the selected experiment instead of the authoring dataset", async () => {
     const exact = { ...complete, experiment_id: "exp-a", dataset_name: "dataset-a", dataset_version: "v1", baseline_report: { ...complete.baseline_report, dataset_name: "dataset-a", dataset_version: "v1" }, candidate_report: { ...complete.candidate_report, dataset_name: "dataset-a", dataset_version: "v1" } };
     const { baseline_report: _baseline, candidate_report: _candidate, comparison: _comparison, ...summary } = exact;
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/datasets") return Promise.resolve(new Response(JSON.stringify({ datasets: [
         { name: "dataset-b", version: "v1", created_at: "2026-08-12T00:00:00Z", case_count: 1, digest: "b".repeat(64) },
         { name: "dataset-a", version: "v1", created_at: "2026-08-12T00:00:00Z", case_count: 1, digest: "a".repeat(64) },
@@ -159,7 +130,7 @@ describe("evaluation lane", () => {
   it("locks release acknowledgement when exact dataset sources are unavailable", async () => {
     const { baseline_report: _baseline, candidate_report: _candidate, comparison: _comparison, ...summary } = complete;
     const fetchMock = vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/datasets") return Promise.resolve(new Response(JSON.stringify({ datasets: [{ name: "agent-regression", version: "2026-08-12", created_at: "2026-08-12T00:00:00Z", case_count: 1, digest: "a".repeat(64) }], truncated: false })));
       if (path === "/experiments") return Promise.resolve(new Response(JSON.stringify({ experiments: [summary], truncated: false })));
       if (path === "/experiments/exp-fixed") return Promise.resolve(new Response(JSON.stringify(complete)));
@@ -174,8 +145,8 @@ describe("evaluation lane", () => {
     expect(await screen.findByText(/Release review stays locked/)).toBeVisible();
     expect(screen.getByRole("checkbox", { name: /I reviewed this policy/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save release gate" })).toBeDisabled();
-    const readsBeforeRetry = fetchMock.mock.calls.filter(([input]) => new URL(input).pathname.endsWith("/cases")).length;
+    const readsBeforeRetry = fetchMock.mock.calls.filter(([input]) => new URL(input, "http://studio.local").pathname.replace(/^\/api/, "").endsWith("/cases")).length;
     await userEvent.click(screen.getByRole("button", { name: "Retry source cases" }));
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => new URL(input).pathname.endsWith("/cases")).length).toBeGreaterThan(readsBeforeRetry));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => new URL(input, "http://studio.local").pathname.replace(/^\/api/, "").endsWith("/cases")).length).toBeGreaterThan(readsBeforeRetry));
   });
 });

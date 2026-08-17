@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { listRunArtifacts, type RunArtifact } from "../../../lib/api/artifacts";
-import { useConnectionStore } from "../../../state/connection";
 import { bytePreview } from "../../../lib/text";
 import styles from "./Artifacts.module.css";
 import { ArtifactInspector } from "./ArtifactInspector";
@@ -13,12 +12,11 @@ function formatBytes(bytes: number) {
 }
 
 export function ArtifactTray({ runId }: { runId: string }) {
-  const { connection } = useConnectionStore();
   const [selected, setSelected] = useState<RunArtifact | null>(null);
   const artifacts = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifacts", runId] : ["artifacts", "idle"],
-    queryFn: () => listRunArtifacts(connection!, { run_id: runId }),
-    enabled: Boolean(connection && runId),
+    queryKey: ["artifacts", runId],
+    queryFn: () => listRunArtifacts({ run_id: runId }),
+    enabled: Boolean(runId),
   });
 
   return (

@@ -4,10 +4,8 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../state/connection";
 import { evaluationDatasetJsonl, useWorkStore } from "../../state/work";
-import { durableConnectionScope, readRecentWork, rememberRecentWork } from "../../state/recentWork";
-import { mutationScope } from "../../lib/api/client";
+import { readRecentWork, rememberRecentWork } from "../../state/recentWork";
 import type { RunEvent } from "../../lib/contracts";
 import { traceEventTitle, traceGraphLayout, traceWindow, WorkPage } from "./WorkPage";
 
@@ -36,8 +34,7 @@ const events = [
 beforeEach(() => {
   sessionStorage.clear();
   vi.mocked(HTMLElement.prototype.scrollTo).mockClear();
-  useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" }, info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] }, dialogOpen: false });
-  useWorkStore.setState({ connectionKey: null, assistant: null, objective: "", thread: null, receipt: null, cases: [], comparisons: [], uncertainByConnection: {} });
+  useWorkStore.setState({ assistant: null, objective: "", thread: null, receipt: null, cases: [], comparisons: [], uncertain: "" });
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -57,7 +54,7 @@ describe("continuous Work journey", () => {
 
   it("keeps create, run, visual trace, and evaluation in one owned workspace", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/threads" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ thread_id: "thread-1", tenant: "default", graph: "research", metadata: { assistant_id: "agent-1" }, created_at: "2026-08-11T00:00:00Z" }), { status: 201 }));
       if (path === "/threads/thread-1/runs" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", thread_id: "thread-1", status: "running" }), { status: 202 }));
@@ -72,7 +69,7 @@ describe("continuous Work journey", () => {
     await userEvent.type(screen.getByLabelText("Goal"), "Verify the release claim");
     await userEvent.click(screen.getByRole("button", { name: "Start run" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/work/thread-1/runs/run-1"));
-    const launchRequest = fetchMock.mock.calls.find(([input, init]) => new URL(String(input)).pathname === "/threads/thread-1/runs" && init?.method === "POST");
+    const launchRequest = fetchMock.mock.calls.find(([input, init]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "") === "/threads/thread-1/runs" && init?.method === "POST");
     expect(JSON.parse(String(launchRequest?.[1]?.body))).toMatchObject({
       assistant_id: "agent-1",
       expected_active_version_id: "av-1",
@@ -100,18 +97,16 @@ describe("continuous Work journey", () => {
   });
 
   it("exports the page-memory dataset in Rust evaluation JSONL shape", () => {
-    const text = evaluationDatasetJsonl([{ connectionKey: "1|https://rusty.example|a", id: "local-1", caseId: "release", runId: "run-1", threadId: "thread-1", agentName: "Analyst", agentId: "assistant-analyst", objective: "Verify release", pointer: "/answer", expected: "verified", createdAt: "2026-08-11T00:00:00Z" }]);
+    const text = evaluationDatasetJsonl([{ id: "local-1", caseId: "release", runId: "run-1", threadId: "thread-1", agentName: "Analyst", agentId: "assistant-analyst", objective: "Verify release", pointer: "/answer", expected: "verified", createdAt: "2026-08-11T00:00:00Z" }]);
     const [header, item] = text.trim().split("\n").map((line: string) => JSON.parse(line));
     expect(header).toEqual({ kind: "header", format_version: 1, name: "rusty-studio-evaluations", version: "v1" });
     expect(item).toMatchObject({ kind: "case", id: "release", input: { objective: "Verify release" }, expect: { state: [{ pointer: "/answer", expected: "verified" }] } });
   });
 
-  it("offers bounded recent work from the exact current connection", async () => {
-    const connection = useConnectionStore.getState().connection!;
-    rememberRecentWork(durableConnectionScope(connection), { threadId: "thread-old", runId: "run-old" });
-    rememberRecentWork(durableConnectionScope({ ...connection, tenantFingerprint: "other" }), { threadId: "thread-other", runId: "run-other" });
+  it("offers bounded recent work from the local runtime", async () => {
+    rememberRecentWork({ threadId: "thread-old", runId: "run-old" });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/runs/run-old") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-old", thread_id: "thread-old", graph: "research", attempt: 1, status: "success" })));
       throw new Error(`unexpected ${path}`);
@@ -120,7 +115,6 @@ describe("continuous Work journey", () => {
     expect(await screen.findByRole("heading", { name: "Continue where you left off" })).toBeVisible();
     const recent = await screen.findByRole("link", { name: /research.*Work completed/i });
     expect(recent).toHaveAttribute("href", "/work/thread-old/runs/run-old");
-    expect(screen.queryByText("run-other")).not.toBeInTheDocument();
   });
 
   it("keeps every large-trace step reachable while bounding each DOM window", () => {
@@ -139,9 +133,9 @@ describe("continuous Work journey", () => {
   });
 
   it("never attributes an older routed run to the newer session", async () => {
-    useWorkStore.setState({ connectionKey: "1|https://rusty.example|a", assistant: { ...assistant, assistant_id: "agent-b", name: "Agent B" }, objective: "Objective B", thread: { thread_id: "thread-b", tenant: "default", graph: "research", metadata: { assistant_id: "agent-b" }, created_at: "2026-08-11T00:00:00Z" }, receipt: { run_id: "run-b", thread_id: "thread-b", status: "running" } });
+    useWorkStore.setState({ assistant: { ...assistant, assistant_id: "agent-b", name: "Agent B" }, objective: "Objective B", thread: { thread_id: "thread-b", tenant: "default", graph: "research", metadata: { assistant_id: "agent-b" }, created_at: "2026-08-11T00:00:00Z" }, receipt: { run_id: "run-b", thread_id: "thread-b", status: "running" } });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/runs/run-a") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-a", thread_id: "thread-a", graph: "research", attempt: 1, status: "success" })));
       if (path === "/runs/run-a/events") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-a", events: [], complete: true })));
@@ -156,7 +150,7 @@ describe("continuous Work journey", () => {
 
   it("resets every evaluation draft and acknowledgement when the exact run changes", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       const match = path.match(/^\/runs\/(run-[ab])(?:\/events)?$/);
       if (!match) throw new Error(`unexpected ${path}`);
@@ -183,13 +177,14 @@ describe("continuous Work journey", () => {
 
   it("locks retry when launch acceptance is uncertain", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/threads" && init?.method === "POST") return Promise.reject(new Error("connection lost"));
       throw new Error(`unexpected ${path}`);
     }));
     renderPage();
-    await userEvent.selectOptions(await screen.findByLabelText("Agent"), "agent-1");
+    await screen.findByRole("option", { name: "Research analyst" });
+    await userEvent.selectOptions(screen.getByLabelText("Agent"), "agent-1");
     await userEvent.type(screen.getByLabelText("Goal"), "Verify");
     await userEvent.click(screen.getByRole("button", { name: "Start run" }));
     expect(await screen.findByRole("heading", { name: "Check Rusty before starting again" })).toBeVisible();
@@ -198,9 +193,9 @@ describe("continuous Work journey", () => {
 
   it("expires a stale prepared version after a definite server conflict", async () => {
     const current = { ...assistant, active_version_id: "av-2", version_count: 2 };
-    useWorkStore.getState().prepare("1|https://rusty.example|a", assistant);
+    useWorkStore.getState().prepare(assistant);
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([current])));
       if (path === "/threads" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ thread_id: "thread-stale", tenant: "default", graph: "research", metadata: { assistant_id: "agent-1" }, created_at: "2026-08-11T00:00:00Z" }), { status: 201 }));
       if (path === "/threads/thread-stale/runs" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ error: "assistant version changed" }), { status: 409 }));
@@ -215,8 +210,8 @@ describe("continuous Work journey", () => {
     expect(screen.queryByRole("heading", { name: "Check Rusty before starting again" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Agent")).toHaveValue("");
     expect(useWorkStore.getState().assistant).toBeNull();
-    expect(useWorkStore.getState().uncertainByConnection).toEqual({});
-    const launchBody = JSON.parse(String(fetchMock.mock.calls.find(([input, init]) => new URL(String(input)).pathname.endsWith("/runs") && init?.method === "POST")?.[1]?.body));
+    expect(useWorkStore.getState().uncertain).toBe("");
+    const launchBody = JSON.parse(String(fetchMock.mock.calls.find(([input, init]) => new URL(String(input), "http://studio.local").pathname.replace(/^\/api/, "").endsWith("/runs") && init?.method === "POST")?.[1]?.body));
     expect(launchBody.expected_active_version_id).toBe("av-1");
   });
 
@@ -224,9 +219,9 @@ describe("continuous Work journey", () => {
     let finishRun!: (response: Response) => void;
     const pendingRun = new Promise<Response>((resolve) => { finishRun = resolve; });
     const agentB = { ...assistant, assistant_id: "agent-2", name: "Policy reviewer", active_version_id: "av-b" };
-    useWorkStore.getState().prepare("1|https://rusty.example|a", assistant);
+    useWorkStore.getState().prepare(assistant);
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant, agentB])));
       if (path === "/threads" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ thread_id: "thread-a", tenant: "default", graph: "research", metadata: { assistant_id: "agent-1" }, created_at: "2026-08-11T00:00:00Z" }), { status: 201 }));
       if (path === "/threads/thread-a/runs" && init?.method === "POST") return pendingRun;
@@ -236,21 +231,21 @@ describe("continuous Work journey", () => {
     await userEvent.type(await screen.findByLabelText("Goal"), "Verify A");
     await userEvent.click(screen.getByRole("button", { name: "Start run" }));
     view.unmount();
-    useWorkStore.getState().prepare("1|https://rusty.example|a", agentB);
+    useWorkStore.getState().prepare(agentB);
 
     finishRun(new Response(JSON.stringify({ run_id: "run-a", thread_id: "thread-a", status: "running" }), { status: 202 }));
     await waitFor(() => expect(useWorkStore.getState().assistant?.assistant_id).toBe("agent-2"));
     expect(useWorkStore.getState().receipt).toBeNull();
-    expect(readRecentWork('["https://rusty.example","a"]')).toEqual([expect.objectContaining({ runId: "run-a", threadId: "thread-a" })]);
+    expect(readRecentWork()).toEqual([expect.objectContaining({ runId: "run-a", threadId: "thread-a" })]);
   });
 
   it("does not let an unmounted stale-version rejection expire a newer handoff", async () => {
     let finishRun!: (response: Response) => void;
     const pendingRun = new Promise<Response>((resolve) => { finishRun = resolve; });
     const agentB = { ...assistant, assistant_id: "agent-2", name: "Policy reviewer", active_version_id: "av-b" };
-    useWorkStore.getState().prepare("1|https://rusty.example|a", assistant);
+    useWorkStore.getState().prepare(assistant);
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant, agentB])));
       if (path === "/threads" && init?.method === "POST") return Promise.resolve(new Response(JSON.stringify({ thread_id: "thread-a", tenant: "default", graph: "research", metadata: { assistant_id: "agent-1" }, created_at: "2026-08-11T00:00:00Z" }), { status: 201 }));
       if (path === "/threads/thread-a/runs" && init?.method === "POST") return pendingRun;
@@ -260,16 +255,16 @@ describe("continuous Work journey", () => {
     await userEvent.type(await screen.findByLabelText("Goal"), "Verify A");
     await userEvent.click(screen.getByRole("button", { name: "Start run" }));
     view.unmount();
-    useWorkStore.getState().prepare("1|https://rusty.example|a", agentB);
+    useWorkStore.getState().prepare(agentB);
 
     finishRun(new Response(JSON.stringify({ error: "assistant version changed" }), { status: 409 }));
     await waitFor(() => expect(useWorkStore.getState().assistant?.assistant_id).toBe("agent-2"));
-    expect(useWorkStore.getState().uncertainByConnection).toEqual({});
+    expect(useWorkStore.getState().uncertain).toBe("");
   });
 
   it("rejects a crossed run snapshot instead of rendering its journal", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/runs/run-1") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", thread_id: "thread-other", graph: "research", attempt: 1, status: "success" })));
       if (path === "/runs/run-1/events") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", events, complete: true })));
@@ -284,7 +279,7 @@ describe("continuous Work journey", () => {
 
   it("never exposes the fresh composer while a routed run is still loading", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path.startsWith("/runs/run-1")) return new Promise(() => {});
       throw new Error(`unexpected ${path}`);
@@ -296,10 +291,9 @@ describe("continuous Work journey", () => {
   });
 
   it("keeps an unrelated launch lock out of an exact existing run", async () => {
-    const connection = useConnectionStore.getState().connection!;
-    useWorkStore.setState({ uncertainByConnection: { [mutationScope(connection)]: "Unresolved newer launch" } });
+    useWorkStore.setState({ uncertain: "Unresolved newer launch" });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/runs/run-1") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", thread_id: "thread-1", graph: "research", attempt: 1, status: "success" })));
       if (path === "/runs/run-1/events") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", events, complete: true })));
@@ -313,7 +307,7 @@ describe("continuous Work journey", () => {
   it("hides retained trace data when a refresh can no longer prove it", async () => {
     let failRun = false;
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/assistants") return Promise.resolve(new Response(JSON.stringify([assistant])));
       if (path === "/runs/run-1") return failRun ? Promise.reject(new Error("offline")) : Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", thread_id: "thread-1", graph: "research", attempt: 1, status: "success" })));
       if (path === "/runs/run-1/events") return Promise.resolve(new Response(JSON.stringify({ run_id: "run-1", events, complete: true })));
@@ -322,7 +316,7 @@ describe("continuous Work journey", () => {
     const { client } = renderPage("/work/thread-1/runs/run-1/trace");
     expect(await screen.findByRole("button", { name: /research · model call/i })).toBeVisible();
     failRun = true;
-    await client.refetchQueries({ queryKey: [1, "https://rusty.example", "a", "run", "run-1"], exact: true });
+    await client.refetchQueries({ queryKey: ["run", "run-1"], exact: true });
     expect(await screen.findByRole("heading", { name: "This workspace could not prove the requested run" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /research · model call/i })).not.toBeInTheDocument();
   });

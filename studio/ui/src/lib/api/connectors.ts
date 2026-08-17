@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { toolCapabilitySchema } from "../contracts";
 import { parseJson, parseMutationJson, requestText, StudioApiError } from "./client";
-import type { ConnectionIdentity } from "./client";
 
 const sha256hex = z.string().regex(/^[0-9a-f]{64}$/);
 const dateTime = z.string().datetime({ offset: true });
@@ -143,13 +142,13 @@ const manifestReceiptSchema = z.object({
 
 export type ManifestReceipt = z.infer<typeof manifestReceiptSchema>["receipt"];
 
-export async function listConnectorManifests(connection: ConnectionIdentity): Promise<ConnectorManifest[]> {
-  const { text } = await requestText(connection, "/connectors/manifests");
+export async function listConnectorManifests(): Promise<ConnectorManifest[]> {
+  const { text } = await requestText("/connectors/manifests");
   return parseJson(text, manifestListSchema, "Connector manifests").manifests;
 }
 
-export async function registerConnectorManifest(connection: ConnectionIdentity, payload: ManifestPayload): Promise<ManifestReceipt> {
-  const { status, text } = await requestText(connection, "/connectors/manifests", {
+export async function registerConnectorManifest(payload: ManifestPayload): Promise<ManifestReceipt> {
+  const { status, text } = await requestText("/connectors/manifests", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -210,8 +209,8 @@ const healthResponseSchema = z.object({
 
 const sweepResponseSchema = z.object({ outcomes: z.array(sweepOutcomeSchema) }).strict();
 
-export async function listConnectorInstances(connection: ConnectionIdentity): Promise<ConnectorInstance[]> {
-  const { text } = await requestText(connection, "/connectors/instances");
+export async function listConnectorInstances(): Promise<ConnectorInstance[]> {
+  const { text } = await requestText("/connectors/instances");
   return parseJson(text, instanceListSchema, "Connector instances").instances;
 }
 
@@ -220,8 +219,8 @@ export interface CreateInstanceInput {
   credentials: Record<string, string>;
 }
 
-export async function createConnectorInstance(connection: ConnectionIdentity, input: CreateInstanceInput): Promise<ConnectorInstance> {
-  const { status, text } = await requestText(connection, "/connectors/instances", {
+export async function createConnectorInstance(input: CreateInstanceInput): Promise<ConnectorInstance> {
+  const { status, text } = await requestText("/connectors/instances", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -233,9 +232,8 @@ export async function createConnectorInstance(connection: ConnectionIdentity, in
   return instance;
 }
 
-async function instanceAction(connection: ConnectionIdentity, instanceId: string, action: string): Promise<ConnectorInstance> {
+async function instanceAction(instanceId: string, action: string): Promise<ConnectorInstance> {
   const { status, text } = await requestText(
-    connection,
     `/connectors/instances/${encodeURIComponent(instanceId)}/${action}`,
     { method: "POST", body: "{}" },
   );
@@ -246,21 +244,20 @@ async function instanceAction(connection: ConnectionIdentity, instanceId: string
   return instance;
 }
 
-export function connectConnectorInstance(connection: ConnectionIdentity, instanceId: string) {
-  return instanceAction(connection, instanceId, "connect");
+export function connectConnectorInstance(instanceId: string) {
+  return instanceAction(instanceId, "connect");
 }
 
-export function disableConnectorInstance(connection: ConnectionIdentity, instanceId: string) {
-  return instanceAction(connection, instanceId, "disable");
+export function disableConnectorInstance(instanceId: string) {
+  return instanceAction(instanceId, "disable");
 }
 
-export function enableConnectorInstance(connection: ConnectionIdentity, instanceId: string) {
-  return instanceAction(connection, instanceId, "enable");
+export function enableConnectorInstance(instanceId: string) {
+  return instanceAction(instanceId, "enable");
 }
 
-export async function checkConnectorInstanceHealth(connection: ConnectionIdentity, instanceId: string) {
+export async function checkConnectorInstanceHealth(instanceId: string) {
   const { status, text } = await requestText(
-    connection,
     `/connectors/instances/${encodeURIComponent(instanceId)}/health`,
     { method: "POST", body: "{}" },
   );
@@ -271,8 +268,8 @@ export async function checkConnectorInstanceHealth(connection: ConnectionIdentit
   return result;
 }
 
-export async function sweepConnectors(connection: ConnectionIdentity): Promise<SweepOutcome[]> {
-  const { status, text } = await requestText(connection, "/connectors/sweep", { method: "POST", body: "{}" });
+export async function sweepConnectors(): Promise<SweepOutcome[]> {
+  const { status, text } = await requestText("/connectors/sweep", { method: "POST", body: "{}" });
   return parseMutationJson(text, sweepResponseSchema, "Connector sweep receipt", status).outcomes;
 }
 
@@ -291,9 +288,9 @@ const catalogSchema = z.object({
 
 export type InstanceCatalog = z.infer<typeof catalogSchema>["catalog"];
 
-export async function getInstanceCatalog(connection: ConnectionIdentity, instanceId: string, generation?: number): Promise<InstanceCatalog> {
+export async function getInstanceCatalog(instanceId: string, generation?: number): Promise<InstanceCatalog> {
   const params = generation === undefined ? "" : `?generation=${encodeURIComponent(generation)}`;
-  const { text } = await requestText(connection, `/connectors/instances/${encodeURIComponent(instanceId)}/catalog${params}`);
+  const { text } = await requestText(`/connectors/instances/${encodeURIComponent(instanceId)}/catalog${params}`);
   const { catalog } = parseJson(text, catalogSchema, "Connector catalog");
   if (catalog.instance_id !== instanceId) {
     throw new StudioApiError("Connector catalog named a different instance.", 0);
@@ -335,8 +332,8 @@ export type VaultConnection = z.infer<typeof vaultConnectionSchema>;
 
 const vaultConnectionListSchema = z.object({ connections: z.array(vaultConnectionSchema) }).strict();
 
-export async function listVaultConnections(connection: ConnectionIdentity): Promise<VaultConnection[]> {
-  const { text } = await requestText(connection, "/connections");
+export async function listVaultConnections(): Promise<VaultConnection[]> {
+  const { text } = await requestText("/connections");
   return parseJson(text, vaultConnectionListSchema, "Vault connections").connections;
 }
 
@@ -360,8 +357,8 @@ const connectionReceiptSchema = z.object({ connection: vaultConnectionSchema }).
 /// server-side (the provider's refusal is the form's 422), and the grant
 /// inputs are sealed with the minted tokens so refresh re-mints without a
 /// human. The receipt carries the public record — never the material.
-export async function registerVaultConnection(connection: ConnectionIdentity, grant: PasswordGrant): Promise<VaultConnection> {
-  const { status, text } = await requestText(connection, "/connections", {
+export async function registerVaultConnection(grant: PasswordGrant): Promise<VaultConnection> {
+  const { status, text } = await requestText("/connections", {
     method: "POST",
     body: JSON.stringify({ provider: "oauth2_password", password_grant: grant }),
   });

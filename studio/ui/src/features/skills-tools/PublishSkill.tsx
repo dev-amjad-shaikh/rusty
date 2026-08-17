@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { connectionScope, StudioApiError, type ConnectionIdentity } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import { publishSkill, SkillScanDenied, type PublishReceipt, type ScanFinding } from "../../lib/api/skills";
 import { isUnicodeScalarString } from "../../lib/text";
 import { rememberPublishedMembers } from "./publishedMembers";
@@ -72,9 +72,7 @@ interface MemberRow {
 
 let rowId = 0;
 
-export function PublishSkill({ connection, scope, onCancel, onPublished }: {
-  connection: ConnectionIdentity;
-  scope: string;
+export function PublishSkill({ onCancel, onPublished }: {
   onCancel: () => void;
   onPublished: (name: string) => void;
 }) {
@@ -101,12 +99,11 @@ export function PublishSkill({ connection, scope, onCancel, onPublished }: {
         const target = member.kind === "reference" ? references : assets;
         target[member.path.trim()] = member.content;
       }
-      return publishSkill(connection, { skillMd, references, assets, author: authorClean }, parsed.name);
+      return publishSkill({ skillMd, references, assets, author: authorClean }, parsed.name);
     },
     onSuccess: async (receipt: PublishReceipt) => {
-      const current = connectionScope(connection);
-      rememberPublishedMembers(current, receipt.name, members.map((member) => `${member.kind === "reference" ? "references" : "assets"}/${member.path.trim()}`));
-      await queryClient.invalidateQueries({ queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "skills"] });
+      rememberPublishedMembers(receipt.name, members.map((member) => `${member.kind === "reference" ? "references" : "assets"}/${member.path.trim()}`));
+      await queryClient.invalidateQueries({ queryKey: ["skills"] });
       onPublished(receipt.name);
     },
     onError: (caught) => {

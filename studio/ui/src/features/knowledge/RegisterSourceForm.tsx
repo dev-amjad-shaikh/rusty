@@ -1,6 +1,5 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ConnectionIdentity } from "../../lib/api/client";
 import {
   KNOWLEDGE_MAX_ATTRIBUTION_BYTES,
   KNOWLEDGE_MAX_SOURCE_BYTES,
@@ -21,11 +20,9 @@ const kinds: Array<{ value: KnowledgeSourceKind; label: string; hint: string }> 
 ];
 
 export function RegisterSourceForm({
-  connection,
   onDone,
   onCancel,
 }: {
-  connection: ConnectionIdentity;
   onDone: (sourceId: string) => void;
   onCancel: () => void;
 }) {
@@ -50,7 +47,7 @@ export function RegisterSourceForm({
     && body.length > 0 && !overCap && !ttlInvalid;
 
   const register = useMutation({
-    mutationFn: () => registerKnowledgeSource(connection, {
+    mutationFn: () => registerKnowledgeSource({
       source_id: sourceId,
       kind,
       title: title.trim(),
@@ -63,7 +60,7 @@ export function RegisterSourceForm({
     }),
     onSuccess: (result) => {
       setReceipt(result);
-      queryClient.invalidateQueries({ queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "knowledge"] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge"] });
     },
   });
 

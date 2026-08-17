@@ -20,7 +20,6 @@ import {
   type ConnectorManifest,
   type VaultConnection,
 } from "../../lib/api/connectors";
-import { useConnectionStore } from "../../state/connection";
 import { ConnectorsPage } from "./ConnectorsPage";
 
 vi.mock("../../lib/api/connectors", async (importActual) => {
@@ -87,13 +86,6 @@ function renderPage() {
   return render(<QueryClientProvider client={client}><ConnectorsPage /></QueryClientProvider>);
 }
 
-function openWorkspace() {
-  useConnectionStore.setState({
-    connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
-    info: null,
-  });
-}
-
 async function rowFor(instanceId: string) {
   const marker = await screen.findByText(instanceId);
   const row = marker.closest("article");
@@ -102,7 +94,6 @@ async function rowFor(instanceId: string) {
 }
 
 beforeEach(() => {
-  useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", dialogOpen: false });
   vi.clearAllMocks();
   vi.mocked(listConnectorManifests).mockResolvedValue([]);
   vi.mocked(listConnectorInstances).mockResolvedValue([]);
@@ -110,16 +101,7 @@ beforeEach(() => {
 });
 
 describe("Connectors", () => {
-  it("gates the plane behind an open workspace", () => {
-    renderPage();
-    expect(screen.getByRole("heading", { name: "Connectors" })).toBeVisible();
-    expect(screen.getByText("Open a workspace to manage connectors.")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Open a workspace to work with connectors" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Choose workspace" })).toBeVisible();
-  });
-
   it("renders distinct empty states for the fleet and the gallery", async () => {
-    openWorkspace();
     renderPage();
     expect(await screen.findByRole("heading", { name: "No instances yet" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "No manifests registered" })).toBeVisible();
@@ -127,7 +109,6 @@ describe("Connectors", () => {
   });
 
   it("registers a manifest and admits the exact receipt", async () => {
-    openWorkspace();
     vi.mocked(registerConnectorManifest).mockResolvedValue({
       id: "brave-search", version: "1.0.0", manifest_hash: manifestHash, already_registered: false,
     });
@@ -145,14 +126,13 @@ describe("Connectors", () => {
     }));
     await userEvent.click(screen.getByRole("button", { name: "Register manifest" }));
     await waitFor(() => expect(registerConnectorManifest).toHaveBeenCalledTimes(1));
-    const payload = vi.mocked(registerConnectorManifest).mock.calls[0][1];
+    const payload = vi.mocked(registerConnectorManifest).mock.calls[0][0];
     expect(payload).toMatchObject({ id: "brave-search", provider: { kind: "http_search" } });
     expect(await screen.findByRole("status")).toHaveTextContent("Manifest registered.");
     expect(screen.getByRole("status")).toHaveTextContent(manifestHash.slice(0, 12));
   });
 
   it("renders manifest field errors and the server's 422 readably", async () => {
-    openWorkspace();
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "Register manifest" }));
 
@@ -191,7 +171,6 @@ describe("Connectors", () => {
   });
 
   it("instantiates through vault connection bindings and never accepts raw secrets", async () => {
-    openWorkspace();
     vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
     vi.mocked(listVaultConnections).mockResolvedValue([
       { connection_id: "conn-0123456789abcdef0123456789abcdef", provider: "api_key", scopes: ["search"], status: "active", health: { consecutive_failures: 0 }, created_at: "2026-08-11T00:00:00Z", updated_at: "2026-08-11T00:00:00Z" },
@@ -212,7 +191,7 @@ describe("Connectors", () => {
     await userEvent.click(within(panel).getByRole("button", { name: "Instantiate connector" }));
 
     await waitFor(() => expect(createConnectorInstance).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(createConnectorInstance).mock.calls[0][1]).toEqual({
+    expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
       manifest_hash: manifestHash,
       credentials: { api_key: "conn-0123456789abcdef0123456789abcdef" },
     });
@@ -220,7 +199,6 @@ describe("Connectors", () => {
   });
 
   it("registers an oauth2_password connection from the instantiate panel and binds it to the slots", async () => {
-    openWorkspace();
     vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
     const registered: VaultConnection = {
       connection_id: "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -265,7 +243,7 @@ describe("Connectors", () => {
     await userEvent.click(within(panel).getByRole("button", { name: "Register connection" }));
 
     await waitFor(() => expect(registerVaultConnection).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(registerVaultConnection).mock.calls[0][1]).toEqual({
+    expect(vi.mocked(registerVaultConnection).mock.calls[0][0]).toEqual({
       token_url: "https://dev394299.service-now.com/oauth_token.do",
       client_id: "client-id",
       client_secret: "client-secret",
@@ -284,14 +262,13 @@ describe("Connectors", () => {
     await waitFor(() => expect(select).toHaveValue("conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
     await userEvent.click(within(panel).getByRole("button", { name: "Instantiate connector" }));
     await waitFor(() => expect(createConnectorInstance).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(createConnectorInstance).mock.calls[0][1]).toEqual({
+    expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
       manifest_hash: manifestHash,
       credentials: { api_key: "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     });
   });
 
   it("reflects the server's missing-slot 422 inline on the named slot", async () => {
-    openWorkspace();
     vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
     vi.mocked(listVaultConnections).mockResolvedValue([
       { connection_id: "conn-0123456789abcdef0123456789abcdef", provider: "api_key", scopes: [], status: "active", health: { consecutive_failures: 0 }, created_at: "2026-08-11T00:00:00Z", updated_at: "2026-08-11T00:00:00Z" },
@@ -313,7 +290,6 @@ describe("Connectors", () => {
   });
 
   it("gates lifecycle actions by state and surfaces 409 guard answers", async () => {
-    openWorkspace();
     vi.mocked(listConnectorInstances).mockResolvedValue([
       instance({ instance_id: "inst-000001", state: "pending" }),
       instance({ instance_id: "inst-000002", state: "healthy", last_health_check_ms: 1_754_900_000_000, catalog_generation: 2, catalog_hash: "cd".repeat(32) }),
@@ -344,7 +320,6 @@ describe("Connectors", () => {
   });
 
   it("renders the generation-pinned catalog with effect badges", async () => {
-    openWorkspace();
     vi.mocked(listConnectorInstances).mockResolvedValue([
       instance({ state: "healthy", catalog_generation: 2, catalog_hash: "cd".repeat(32), last_health_check_ms: 1_754_900_000_000 }),
     ]);
@@ -359,15 +334,14 @@ describe("Connectors", () => {
     expect(screen.getByText("read-only")).toBeVisible();
     expect(screen.getByText("non-idempotent")).toBeVisible();
     expect(screen.getByText(/Generations bump only when the derived catalog bytes change/)).toBeVisible();
-    expect(getInstanceCatalog).toHaveBeenCalledWith(expect.anything(), "inst-000001", undefined);
+    expect(getInstanceCatalog).toHaveBeenCalledWith("inst-000001", undefined);
   });
 
   it("handles a catalog pin mismatch by offering the live generation", async () => {
-    openWorkspace();
     vi.mocked(listConnectorInstances).mockResolvedValue([
       instance({ state: "healthy", catalog_generation: 2, catalog_hash: "cd".repeat(32), last_health_check_ms: 1_754_900_000_000 }),
     ]);
-    vi.mocked(getInstanceCatalog).mockImplementation((_connection, _id, generation) => {
+    vi.mocked(getInstanceCatalog).mockImplementation((_id, generation) => {
       if (generation === 1) {
         return Promise.reject(new StudioApiError("catalog generation pin 1 does not match the live generation 2", 409));
       }
@@ -390,7 +364,6 @@ describe("Connectors", () => {
   });
 
   it("answers the pre-catalog 404 without pretending a catalog exists", async () => {
-    openWorkspace();
     vi.mocked(listConnectorInstances).mockResolvedValue([instance({ state: "pending" })]);
     vi.mocked(getInstanceCatalog).mockRejectedValue(
       new StudioApiError("connector instance `inst-000001` has served no catalog yet; connect it first", 404),
@@ -402,7 +375,6 @@ describe("Connectors", () => {
   });
 
   it("runs the tenant health sweep and renders per-instance outcomes", async () => {
-    openWorkspace();
     vi.mocked(listConnectorInstances).mockResolvedValue([
       instance({ state: "healthy", catalog_generation: 1, catalog_hash: "cd".repeat(32) }),
     ]);
@@ -425,7 +397,6 @@ describe("Connectors", () => {
   });
 
   it("names an empty sweep instead of implying failure", async () => {
-    openWorkspace();
     vi.mocked(sweepConnectors).mockResolvedValue([]);
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "Run health sweep" }));
@@ -434,7 +405,6 @@ describe("Connectors", () => {
   });
 
   it("keeps other lifecycle mutations honest", async () => {
-    openWorkspace();
     vi.mocked(listConnectorInstances).mockResolvedValue([
       instance({ state: "healthy", catalog_generation: 1, catalog_hash: "cd".repeat(32) }),
     ]);
@@ -448,8 +418,8 @@ describe("Connectors", () => {
 
     const row = await rowFor("inst-000001");
     await userEvent.click(row.getByRole("button", { name: "Health check" }));
-    await waitFor(() => expect(checkConnectorInstanceHealth).toHaveBeenCalledWith(expect.anything(), "inst-000001"));
+    await waitFor(() => expect(checkConnectorInstanceHealth).toHaveBeenCalledWith("inst-000001"));
     await userEvent.click(row.getByRole("button", { name: "Disable" }));
-    await waitFor(() => expect(disableConnectorInstance).toHaveBeenCalledWith(expect.anything(), "inst-000001"));
+    await waitFor(() => expect(disableConnectorInstance).toHaveBeenCalledWith("inst-000001"));
   });
 });

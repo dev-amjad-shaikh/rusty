@@ -1,8 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../../state/connection";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArtifactTray } from "./ArtifactTray";
 import { releaseOutcomeCopy } from "./ArtifactInspector";
 
@@ -22,9 +21,6 @@ const artifact = {
   created_at: "2026-08-11T00:00:00Z",
 };
 
-beforeEach(() => {
-  useConnectionStore.setState({ connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" } });
-});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtifactTray", () => {
@@ -39,7 +35,7 @@ describe("ArtifactTray", () => {
     let releaseCalls = 0;
     let previewCalls = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/artifacts") return Promise.resolve(new Response(JSON.stringify({ artifacts: [artifact] })));
       if (path === `/artifacts/${"a".repeat(64)}/preview`) { previewCalls += 1; return Promise.resolve(new Response(JSON.stringify({ artifact_id: "a".repeat(64), preview: { kind: "text", text: "hello world", truncated: false, source_bytes: 42 } }))); }
       if (path === `/artifacts/${"a".repeat(64)}/release`) return Promise.resolve(new Response(JSON.stringify({ artifact_id: "a".repeat(64), released: true, converged: releaseCalls > 0, pruned: releaseCalls++ === 0, journal_event_id: "run-1:4" })));
@@ -81,7 +77,7 @@ describe("ArtifactTray", () => {
 
   it("shows an empty state when the run produced no artifacts", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/artifacts") return Promise.resolve(new Response(JSON.stringify({ artifacts: [] })));
       throw new Error(`unexpected ${path}`);
     }));
@@ -91,7 +87,7 @@ describe("ArtifactTray", () => {
 
   it("shows an unavailable state when artifact loading fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
-      const path = new URL(input).pathname;
+      const path = new URL(input, "http://studio.local").pathname.replace(/^\/api/, "");
       if (path === "/artifacts") return Promise.resolve(new Response(JSON.stringify({ error: "offline" }), { status: 503 }));
       throw new Error(`unexpected ${path}`);
     }));

@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { connectionScope, StudioApiError } from "../../lib/api/client";
+import { StudioApiError } from "../../lib/api/client";
 import { getMemory, submitCorrection, type CorrectionReceipt, type MemoryRecord, type ScopeAddress } from "../../lib/api/memory";
-import { useConnectionStore } from "../../state/connection";
 import { contentPreview, contentValue, labelError, mintCorrectionId, parseContentJson, recordScopeText, recordTitle, shortAddress } from "./memoryModel";
 import styles from "./MemoryPage.module.css";
 
@@ -16,7 +15,6 @@ export function CorrectionPanel({
   onSubmitted: () => void;
   onInspect: (memoryId: string) => void;
 }) {
-  const { connection } = useConnectionStore();
   const [targetId, setTargetId] = useState(initialTargetId);
   const [target, setTarget] = useState<MemoryRecord | null>(null);
   const [targetError, setTargetError] = useState("");
@@ -33,20 +31,16 @@ export function CorrectionPanel({
   const [receipt, setReceipt] = useState<CorrectionReceipt | null>(null);
 
   async function loadTarget(id: string) {
-    if (!connection) return;
     const clean = id.trim();
     if (!/^[0-9a-f]{64}$/.test(clean)) {
       setTargetError("A memory id is the exact 64-character content address.");
       setTarget(null);
       return;
     }
-    const scopeAtStart = connectionScope(connection);
     setLoadingTarget(true);
     setTargetError("");
     try {
-      const record = await getMemory(connection, clean);
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
+      const record = await getMemory(clean);
       setTarget(record);
       setScopeType(record.scope.scope);
       setScopeId(record.scope.id);
@@ -55,13 +49,10 @@ export function CorrectionPanel({
       setReceipt(null);
       setCorrectionId(mintCorrectionId());
     } catch (caught) {
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
       setTarget(null);
       setTargetError(caught instanceof StudioApiError ? caught.message : "The target record could not be loaded.");
     } finally {
-      const current = useConnectionStore.getState().connection;
-      if (current && connectionScope(current) === scopeAtStart) setLoadingTarget(false);
+      setLoadingTarget(false);
     }
   }
 
@@ -73,7 +64,7 @@ export function CorrectionPanel({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!connection || !target || pending) return;
+    if (!target || pending) return;
     const next: Record<string, string> = {};
     const scopeIdError = labelError("The scope identity", scopeId, true);
     if (scopeIdError) next.scopeId = scopeIdError;
@@ -83,13 +74,11 @@ export function CorrectionPanel({
     if (parsed.error) next.corrected = parsed.error;
     setErrors(next);
     if (Object.keys(next).length) return;
-
-    const scopeAtStart = connectionScope(connection);
     setPending(true);
     setError("");
     setReceipt(null);
     try {
-      const result = await submitCorrection(connection, {
+      const result = await submitCorrection({
         correction_id: correctionId,
         author,
         targetMemoryId: target.memory_id,
@@ -97,17 +86,12 @@ export function CorrectionPanel({
         scope: { scope: scopeType as ScopeAddress["scope"], id: scopeId },
         ...(rationale.trim() ? { rationale: rationale.trim() } : {}),
       });
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
       setReceipt(result);
       onSubmitted();
     } catch (caught) {
-      const current = useConnectionStore.getState().connection;
-      if (!current || connectionScope(current) !== scopeAtStart) return;
       setError(caught instanceof StudioApiError ? caught.message : "The correction could not be submitted.");
     } finally {
-      const current = useConnectionStore.getState().connection;
-      if (current && connectionScope(current) === scopeAtStart) setPending(false);
+      setPending(false);
     }
   }
 

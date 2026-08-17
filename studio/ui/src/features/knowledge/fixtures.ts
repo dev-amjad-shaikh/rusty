@@ -1,4 +1,3 @@
-import type { ConnectionIdentity } from "../../lib/api/client";
 import type {
   KnowledgeChunkRecord,
   KnowledgeCitedChunk,
@@ -6,13 +5,6 @@ import type {
   KnowledgeSource,
   ListedKnowledgeSource,
 } from "../../lib/api/knowledge";
-
-export const testConnection: ConnectionIdentity = {
-  epoch: 1,
-  origin: "https://rusty.example",
-  apiKey: "key",
-  tenantFingerprint: "a",
-};
 
 export const HASH_A = "a".repeat(64);
 export const HASH_B = "b".repeat(64);

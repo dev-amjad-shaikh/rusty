@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ConnectionIdentity } from "../../lib/api/client";
 import {
   applyKnowledgeRetention,
   listKnowledgeSources,
@@ -11,7 +10,7 @@ import {
 import { formatBytes, formatInstant, hashPreview } from "./format";
 import styles from "./KnowledgePage.module.css";
 
-export function RetentionPanel({ connection }: { connection: ConnectionIdentity }) {
+export function RetentionPanel() {
   const queryClient = useQueryClient();
   const [asOf, setAsOf] = useState("");
   const [plan, setPlan] = useState<KnowledgeRetentionPlan | null>(null);
@@ -19,8 +18,8 @@ export function RetentionPanel({ connection }: { connection: ConnectionIdentity 
   const [receipt, setReceipt] = useState<KnowledgeRetentionReceipt | null>(null);
 
   const library = useQuery({
-    queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "knowledge", "sources"],
-    queryFn: () => listKnowledgeSources(connection),
+    queryKey: ["knowledge", "sources"],
+    queryFn: () => listKnowledgeSources(),
   });
   const tombstones = library.data?.tombstones ?? [];
 
@@ -28,7 +27,7 @@ export function RetentionPanel({ connection }: { connection: ConnectionIdentity 
   const asOfIso = sweepInstant && !Number.isNaN(sweepInstant.getTime()) ? sweepInstant.toISOString() : undefined;
 
   const planMutation = useMutation({
-    mutationFn: () => planKnowledgeRetention(connection, asOfIso),
+    mutationFn: () => planKnowledgeRetention(asOfIso),
     onSuccess: (result) => {
       setPlan(result);
       setConfirming(false);
@@ -36,12 +35,12 @@ export function RetentionPanel({ connection }: { connection: ConnectionIdentity 
     },
   });
   const applyMutation = useMutation({
-    mutationFn: () => applyKnowledgeRetention(connection, asOfIso),
+    mutationFn: () => applyKnowledgeRetention(asOfIso),
     onSuccess: (result) => {
       setReceipt(result);
       setPlan(null);
       setConfirming(false);
-      queryClient.invalidateQueries({ queryKey: [connection.epoch, connection.origin, connection.tenantFingerprint, "knowledge"] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge"] });
     },
   });
 

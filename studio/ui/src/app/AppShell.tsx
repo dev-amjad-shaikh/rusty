@@ -1,8 +1,7 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { ConnectionDialog } from "../features/connection/ConnectionDialog";
-import { WorkspaceBootstrap, workspaceDisplayName } from "../features/connection/WorkspaceBootstrap";
-import { useConnectionStore } from "../state/connection";
+import { RuntimeBootstrap } from "./RuntimeBootstrap";
+import { useRuntimeStore } from "../state/runtime";
 import { destinationForPath, lifecycleGroups, primaryDestinations } from "./navigation";
 import rustyMark from "../assets/rusty-mark.png";
 import styles from "./AppShell.module.css";
@@ -17,11 +16,11 @@ export function AppShell() {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
-  const { connection, info, workspaceStatus, openDialog } = useConnectionStore();
-  const workspaceName = connection ? workspaceDisplayName(connection.origin)
-    : workspaceStatus === "discovering" ? "Opening workspace" : "Workspace unavailable";
-  const workspaceDetail = connection && info ? `Rusty ${info.version}`
-    : workspaceStatus === "discovering" ? "Finding Rusty on this device" : "Choose or retry a workspace";
+  const { info, status, error, retry } = useRuntimeStore();
+  const workspaceName = status === "ready" ? "Local workspace"
+    : status === "starting" ? "Starting runtime" : "Runtime unavailable";
+  const workspaceDetail = status === "ready" && info ? `Rusty ${info.version}`
+    : status === "starting" ? "Starting the local runtime…" : "Rusty did not answer";
   const routeName = destinationForPath(pathname)?.label ?? "Studio";
   useEffect(() => {
     if (previousPath.current === pathname) return;
@@ -72,7 +71,7 @@ export function AppShell() {
   return (
     <div className={styles.shell}>
       <a className="skip-link" href="#studio-main">Skip to workspace</a>
-      <WorkspaceBootstrap />
+      <RuntimeBootstrap />
       <header className={styles.topbar}>
         <Link to="/" className={styles.mobileBrand} aria-label="Rusty Agent Platform Command Center">
           <img className={styles.mark} src={rustyMark} alt="" />
@@ -80,11 +79,10 @@ export function AppShell() {
         <div className={styles.context} aria-label="Current workspace location"><span>{workspaceName}</span><i aria-hidden="true">/</i><b>{routeName}</b></div>
         <button ref={commandButtonRef} className={styles.command} type="button" onClick={(event) => { commandOpenerRef.current = event.currentTarget; setCommandOpen(true); }}><span>Go to agents, work, prompts, or operations…</span><kbd>Ctrl/⌘ K</kbd></button>
         <button className={styles.menu} type="button" aria-expanded={navigationOpen} aria-controls="studio-navigation" onClick={() => setNavigationOpen((value) => !value)}><span aria-hidden="true">☰</span> Menu</button>
-        <button type="button" className={styles.connection} onClick={openDialog} aria-label={connection ? `Switch workspace, currently ${workspaceName}` : "Choose a Rusty workspace"}>
-          <span className={connection ? styles.connectionDotLive : styles.connectionDot} aria-hidden="true" />
+        <div className={styles.connection} role="status" aria-live="polite">
+          <span className={status === "ready" ? styles.connectionDotLive : styles.connectionDot} aria-hidden="true" />
           <span><b>{workspaceName}</b><small>{workspaceDetail}</small></span>
-          <i aria-hidden="true">↗</i>
-        </button>
+        </div>
       </header>
       <aside id="studio-navigation" className={styles.sidebar} data-open={navigationOpen}>
         <Link to="/" className={styles.brand} aria-label="Rusty Agent Platform Command Center">
@@ -106,16 +104,17 @@ export function AppShell() {
         <span className={styles.mechanicalRail} aria-hidden="true"><i /><i /><i /><i /></span>
       </aside>
       <main className={styles.main} id="studio-main" ref={mainRef} tabIndex={-1} aria-label={`${routeName} workspace`}>
-        {!connection && workspaceStatus === "discovering"
-          ? <div className={styles.workspaceOpening} role="status" aria-live="polite"><img className={styles.openingMark} src={rustyMark} alt="" /><div><span className="eyebrow">Rusty Studio</span><h1>Opening your workspace</h1><p>Finding Rusty on this device.</p></div></div>
-          : <Suspense fallback={<div className="route-loading" role="status">Opening workspace…</div>}><Outlet /></Suspense>}
+        {status === "starting"
+          ? <div className={styles.workspaceOpening} role="status" aria-live="polite"><img className={styles.openingMark} src={rustyMark} alt="" /><div><span className="eyebrow">Rusty Studio</span><h1>Starting the local runtime…</h1><p>Rusty boots alongside Studio; the first launch can take a minute while the server compiles.</p></div></div>
+          : status === "unavailable"
+            ? <div className={styles.workspaceOpening} role="alert"><img className={styles.openingMark} src={rustyMark} alt="" /><div><span className="eyebrow">Rusty Studio</span><h1>Rusty did not answer</h1><p>{error}</p><button type="button" className="primary-button" onClick={retry}>Retry</button></div></div>
+            : <Suspense fallback={<div className="route-loading" role="status">Opening workspace…</div>}><Outlet /></Suspense>}
       </main>
       <dialog ref={commandRef} className={styles.commandDialog} aria-labelledby="command-heading" onCancel={(event) => { event.preventDefault(); closeCommand(); }}>
         <header><div><span className="eyebrow">Navigate Rusty</span><h2 id="command-heading">Where do you want to go?</h2></div><button type="button" onClick={closeCommand} aria-label="Close navigation">×</button></header>
         <label><span className="sr-only">Find a Studio workspace</span><input value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} placeholder="Agents, work, prompts, operations…" /></label>
         <nav aria-label="Matching Studio workspaces">{commandResults.map((item) => <Link key={item.to} to={item.to} onClick={() => { commandOpenerRef.current = commandButtonRef.current; closeCommand(); }}><span className={styles.navGlyph} aria-hidden="true"><svg viewBox="0 0 24 24"><path d={item.icon} /></svg></span><span><b>{item.label}</b><small>{item.description}</small></span></Link>)}{!commandResults.length && <p>No matching workspace.</p>}</nav>
       </dialog>
-      <ConnectionDialog />
     </div>
   );
 }

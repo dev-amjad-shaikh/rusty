@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getExperiment } from "./evaluations";
 
-const connection = { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "tenant-a" };
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,7 +17,7 @@ describe("evaluation API contracts", () => {
     const body = JSON.stringify(record).replaceAll(`"${marker}"`, "18446744073709551615");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body)));
 
-    const parsed = await getExperiment(connection, "exp-1");
+    const parsed = await getExperiment("exp-1");
     expect(parsed.candidate_report?.summary.total_tokens).toBe("18446744073709551615");
     expect(parsed.candidate_report?.summary.latency_ms.p95).toBe("18446744073709551615");
     expect(parsed.candidate_report?.cases[0].runs[0].latency_ms).toBe("18446744073709551615");

@@ -16,24 +16,20 @@ import {
   type ExperimentRecord,
   type ExperimentSummary,
 } from "../../../lib/api/evaluations";
-import { connectionScope, jsonEquivalent, StudioApiError } from "../../../lib/api/client";
-import { useConnectionStore } from "../../../state/connection";
+import { jsonEquivalent, StudioApiError } from "../../../lib/api/client";
 import type { EvaluationCase } from "../../../state/work";
 import styles from "./EvaluationLane.module.css";
 
 const metric = "case_pass_rate";
-interface PublishOperation { scope: string; name: string; version: string; cases: EvalCase[]; }
-interface ExperimentOperation { scope: string; payload: Parameters<typeof createExperiment>[1]; }
+interface PublishOperation { name: string; version: string; cases: EvalCase[]; }
+interface ExperimentOperation { payload: Parameters<typeof createExperiment>[0]; }
 interface GateOperation {
-  scope: string;
-  payload: Parameters<typeof createGate>[1];
+  payload: Parameters<typeof createGate>[0];
   candidateReport: string;
   baselineReport: string | null;
 }
 
 export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
-  const { connection } = useConnectionStore();
-  const scope = connection ? connectionScope(connection) : "disconnected";
   const [datasetName, setDatasetName] = useState("agent-regression");
   const [datasetVersion, setDatasetVersion] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedDataset, setSelectedDataset] = useState("");
@@ -48,32 +44,23 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const experimentId = useRef(`exp-${crypto.randomUUID()}`);
-  const priorScope = useRef(scope);
-
-  useEffect(() => {
-    if (priorScope.current === scope) return;
-    priorScope.current = scope;
-    setSelectedDataset(""); setCandidateId(""); setSelectedExperiment("");
-    setGateName(""); setBlockedTarget(""); setAcknowledged(false); setAcknowledgedExperiment(""); setMessage(""); setError("");
-    experimentId.current = `exp-${crypto.randomUUID()}`;
-  }, [scope]);
 
   const datasets = useQuery({
-    queryKey: [scope, "evaluation-datasets"],
-    queryFn: () => listDatasets(connection!), enabled: Boolean(connection),
+    queryKey: ["evaluation-datasets"],
+    queryFn: () => listDatasets(),
   });
   const experiments = useQuery({
-    queryKey: [scope, "evaluation-experiments"],
-    queryFn: () => listExperiments(connection!), enabled: Boolean(connection),
+    queryKey: ["evaluation-experiments"],
+    queryFn: () => listExperiments(),
     refetchInterval: (query) => query.state.data?.experiments.some((item) => ["queued", "running"].includes(item.status.phase)) ? 1_000 : false,
   });
   const candidates = useQuery({
-    queryKey: [scope, "evaluation-candidates"],
-    queryFn: () => listEvaluationCandidates(connection!), enabled: Boolean(connection),
+    queryKey: ["evaluation-candidates"],
+    queryFn: () => listEvaluationCandidates(),
   });
   const gates = useQuery({
-    queryKey: [scope, "evaluation-gates"],
-    queryFn: () => listGates(connection!), enabled: Boolean(connection),
+    queryKey: ["evaluation-gates"],
+    queryFn: () => listGates(),
   });
   const experimentItems = experiments.data?.experiments;
   const activeSummary = experimentItems?.find((item) => item.experiment_id === selectedExperiment)
@@ -81,9 +68,9 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
     ?? experimentItems?.[0]
     ?? null;
   const experimentDetail = useQuery({
-    queryKey: [scope, "evaluation-experiment", activeSummary?.experiment_id],
-    queryFn: () => getExperiment(connection!, activeSummary!.experiment_id),
-    enabled: Boolean(connection && activeSummary),
+    queryKey: ["evaluation-experiment", activeSummary?.experiment_id],
+    queryFn: () => getExperiment(activeSummary!.experiment_id),
+    enabled: Boolean(activeSummary),
     refetchInterval: activeSummary && ["queued", "running"].includes(activeSummary.status.phase) ? 1_000 : false,
   });
   const activeExperiment = experimentDetail.data ?? null;
@@ -91,22 +78,18 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   const datasetKey = selectedDataset || (datasetItems[0] ? datasetIdentity(datasetItems[0].name, datasetItems[0].version) : "");
   const [selectedName, selectedVersion] = splitDataset(datasetKey);
   const durableCases = useQuery({
-    queryKey: [scope, "evaluation-cases", activeExperiment?.dataset_name, activeExperiment?.dataset_version],
-    queryFn: () => getDatasetCases(connection!, activeExperiment!.dataset_name, activeExperiment!.dataset_version),
-    enabled: Boolean(connection && activeExperiment?.dataset_name && activeExperiment?.dataset_version),
+    queryKey: ["evaluation-cases", activeExperiment?.dataset_name, activeExperiment?.dataset_version],
+    queryFn: () => getDatasetCases(activeExperiment!.dataset_name, activeExperiment!.dataset_version),
+    enabled: Boolean(activeExperiment?.dataset_name && activeExperiment?.dataset_version),
   });
 
   const publish = useMutation({
     mutationFn: async (operation: PublishOperation) => {
-      if (!connection) throw new Error("Open a workspace first.");
-      return createDataset(connection, { name: operation.name, version: operation.version, cases: operation.cases });
+      return createDataset({ name: operation.name, version: operation.version, cases: operation.cases });
     },
     onSuccess: async (record, operation) => {
-      if (currentScope() !== operation.scope) return;
       await datasets.refetch();
-      if (currentScope() !== operation.scope) return;
-      const exact = await getDatasetCases(connection!, record.name, record.version);
-      if (currentScope() !== operation.scope) return;
+      const exact = await getDatasetCases(record.name, record.version);
       if (!jsonEquivalent(exact.map(stripServerCapture), operation.cases.map(stripServerCapture))) {
         setError("Rusty returned a dataset version that did not match the reviewed cases.");
         setMessage("");
@@ -116,14 +99,11 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
       setMessage(`Dataset ${record.name}@${record.version} is ready.`); setError("");
     },
     onError: async (caught, operation) => {
-      if (currentScope() !== operation.scope) return;
       if (caught instanceof StudioApiError && caught.mayHaveCommitted) {
         const refreshed = await datasets.refetch();
-        if (currentScope() !== operation.scope) return;
         const match = refreshed.data?.datasets.find((item) => item.name === operation.name && item.version === operation.version);
         if (match && match.case_count === operation.cases.length) {
-          const exact = await getDatasetCases(connection!, match.name, match.version);
-          if (currentScope() !== operation.scope) return;
+          const exact = await getDatasetCases(match.name, match.version);
           if (jsonEquivalent(exact.map(stripServerCapture), operation.cases.map(stripServerCapture))) { setSelectedDataset(datasetIdentity(match.name, match.version)); setMessage("Rusty already has this exact dataset version."); setError(""); return; }
         }
       }
@@ -133,20 +113,15 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
 
   const start = useMutation({
     mutationFn: async (operation: ExperimentOperation) => {
-      if (!connection) throw new Error("Open a workspace first.");
-      return createExperiment(connection, operation.payload);
+      return createExperiment(operation.payload);
     },
     onSuccess: async (record, operation) => {
-      if (currentScope() !== operation.scope) return;
       setSelectedExperiment(record.experiment_id); await experiments.refetch();
-      if (currentScope() !== operation.scope) return;
       setMessage("Experiment started. Rusty will publish the paired result when every run settles."); setError("");
     },
     onError: async (caught, operation) => {
-      if (currentScope() !== operation.scope) return;
       if (caught instanceof StudioApiError && caught.mayHaveCommitted) {
         const refreshed = await experiments.refetch();
-        if (currentScope() !== operation.scope) return;
         const match = refreshed.data?.experiments.find((item) => item.experiment_id === operation.payload.experiment_id);
         if (match && experimentMatches(match, operation.payload)) { setSelectedExperiment(match.experiment_id); setMessage("Rusty confirmed the experiment after the response was lost."); setError(""); return; }
         setError("The start receipt was uncertain. Studio kept the same experiment identity; check its durable status before retrying."); return;
@@ -156,32 +131,27 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   });
 
   const stop = useMutation({
-    mutationFn: (_initiatingScope: string) => cancelExperiment(connection!, activeExperiment!.experiment_id),
-    onSuccess: async (_record, initiatingScope) => { if (currentScope() !== initiatingScope) return; await experiments.refetch(); if (currentScope() !== initiatingScope) return; setMessage("Cancellation requested."); setError(""); },
-    onError: (caught, initiatingScope) => { if (currentScope() === initiatingScope) setError(caught instanceof Error ? caught.message : "Cancellation could not be confirmed."); },
+    mutationFn: () => cancelExperiment(activeExperiment!.experiment_id),
+    onSuccess: async () => { await experiments.refetch(); setMessage("Cancellation requested."); setError(""); },
+    onError: (caught) => { setError(caught instanceof Error ? caught.message : "Cancellation could not be confirmed."); },
   });
 
   const gate = useMutation({
     mutationFn: async (operation: GateOperation) => {
-      if (!connection) throw new Error("Open a workspace first.");
-      return createGate(connection, operation.payload);
+      return createGate(operation.payload);
     },
     onSuccess: async (record, operation) => {
-      if (currentScope() !== operation.scope) return;
       if (!gateMatches(record, operation)) {
         setError("Rusty returned a gate that did not match the reviewed experiment and policy.");
         setMessage("");
         return;
       }
       await gates.refetch();
-      if (currentScope() !== operation.scope) return;
       setMessage(`Gate ${record.name} saved with a ${record.decision.outcome} decision.`); setError("");
     },
     onError: async (caught, operation) => {
-      if (currentScope() !== operation.scope) return;
       if (caught instanceof StudioApiError && caught.mayHaveCommitted) {
         const refreshed = await gates.refetch();
-        if (currentScope() !== operation.scope) return;
         const match = refreshed.data?.gates.find((item) => item.name === operation.payload.name);
         if (match && gateMatches(match, operation)) { setMessage(`Rusty confirmed gate ${match.name} after the response was lost.`); setError(""); return; }
       }
@@ -192,7 +162,6 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
   const step = activeExperiment?.status.phase === "complete" ? 3 : activeSummary ? 2 : datasetKey ? 1 : 0;
   const sourceByCase = useMemo(() => new Map((durableCases.data ?? []).map((item) => [item.id, item.source])), [durableCases.data]);
 
-  if (!connection) return null;
   return (
     <section className={styles.lab} aria-labelledby="evaluation-lab-heading">
       <header className={styles.labHeader}>
@@ -213,7 +182,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
         <div className={styles.inlineFields}>
           <label>Name<input value={datasetName} disabled={publish.isPending} onChange={(event) => setDatasetName(event.target.value)} /></label>
           <label>Version<input value={datasetVersion} disabled={publish.isPending} onChange={(event) => setDatasetVersion(event.target.value)} /></label>
-          <button className="primary-button" type="button" disabled={!cases.length || publish.isPending} onClick={() => publish.mutate({ scope, name: datasetName.trim(), version: datasetVersion.trim(), cases: publishCases(cases) })}>{publish.isPending ? "Publishing…" : "Publish dataset"}</button>
+          <button className="primary-button" type="button" disabled={!cases.length || publish.isPending} onClick={() => publish.mutate({ name: datasetName.trim(), version: datasetVersion.trim(), cases: publishCases(cases) })}>{publish.isPending ? "Publishing…" : "Publish dataset"}</button>
         </div>
       </section>
 
@@ -224,7 +193,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
           <label>Candidate<select value={candidateId} disabled={start.isPending || candidates.isLoading || candidates.isError} onChange={(event) => { setCandidateId(event.target.value); experimentId.current = `exp-${crypto.randomUUID()}`; }}><option value="">{candidates.isLoading ? "Loading candidates…" : candidates.isError ? "Candidate catalog unavailable" : candidates.data?.length ? "Choose a version" : "No candidates available"}</option>{candidates.data?.map((item) => <option key={item.candidate.candidate_id} value={item.candidate.candidate_id}>{candidateLabel(item.candidate.content)} · {shortId(item.candidate.candidate_id)}</option>)}</select></label>
           <label>Runs / case<input type="number" min="1" max="20" value={runsPerCase} disabled={start.isPending} onChange={(event) => { setRunsPerCase(Number(event.target.value)); experimentId.current = `exp-${crypto.randomUUID()}`; }} /></label>
           <label>Parallel runs<input type="number" min="1" max="16" value={maxConcurrency} disabled={start.isPending} onChange={(event) => { setMaxConcurrency(Number(event.target.value)); experimentId.current = `exp-${crypto.randomUUID()}`; }} /></label>
-          <button className="primary-button" type="button" disabled={!candidateId || !selectedName || !selectedVersion || start.isPending || activeSummary?.status.phase === "running"} onClick={() => start.mutate({ scope, payload: experimentPayload(experimentId.current, selectedName, selectedVersion, candidateId.trim(), runsPerCase, maxConcurrency) })}>{start.isPending ? "Starting…" : "Run experiment"}</button>
+          <button className="primary-button" type="button" disabled={!candidateId || !selectedName || !selectedVersion || start.isPending || activeSummary?.status.phase === "running"} onClick={() => start.mutate({ payload: experimentPayload(experimentId.current, selectedName, selectedVersion, candidateId.trim(), runsPerCase, maxConcurrency) })}>{start.isPending ? "Starting…" : "Run experiment"}</button>
         </div>
       </section> : null}
 
@@ -232,7 +201,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
 
       {activeSummary && experimentDetail.isLoading ? <div className={styles.loading} role="status">Loading exact experiment evidence…</div> : null}
       {experimentDetail.isError ? <div className={styles.queryError} role="alert"><span>The selected experiment evidence is unavailable.</span><button className="secondary-button" type="button" onClick={() => experimentDetail.refetch()}>Retry experiment</button></div> : null}
-      {activeExperiment && !experimentDetail.isError ? <ExperimentOutcome record={activeExperiment} sourceByCase={sourceByCase} onCancel={() => stop.mutate(scope)} cancelling={stop.isPending} /> : null}
+      {activeExperiment && !experimentDetail.isError ? <ExperimentOutcome record={activeExperiment} sourceByCase={sourceByCase} onCancel={() => stop.mutate()} cancelling={stop.isPending} /> : null}
 
       {activeExperiment?.comparison ? <section className={styles.gate} aria-labelledby="gate-step-heading">
         <header><div><span className="eyebrow">4 · Gate</span><h3 id="gate-step-heading">Protect a release target</h3></div><strong data-outcome={activeExperiment.comparison.regressed ? "block" : "allow"}>{activeExperiment.comparison.regressed ? "Regression found" : "Evidence clears"}</strong></header>
@@ -242,7 +211,7 @@ export function EvaluationLane({ cases }: { cases: EvaluationCase[] }) {
         </div>
         <details><summary>Review the complete policy</summary><pre>{JSON.stringify(gatePolicy(gateName.trim(), activeExperiment), null, 2)}</pre></details>
         <label className={styles.ack}><input type="checkbox" checked={acknowledged && acknowledgedExperiment === activeExperiment.experiment_id} disabled={gate.isPending || durableCases.isLoading || durableCases.isError} onChange={(event) => { setAcknowledged(event.target.checked); setAcknowledgedExperiment(event.target.checked ? activeExperiment.experiment_id : ""); }} />I reviewed this policy and the complete experiment evidence it binds.</label>
-        <button className="primary-button" type="button" disabled={!acknowledged || !gateName.trim() || !blockedTarget.trim() || acknowledgedExperiment !== activeExperiment.experiment_id || gate.isPending || durableCases.isLoading || durableCases.isError} onClick={() => gate.mutate({ scope, payload: { name: gateName.trim(), blocked_target: blockedTarget.trim(), experiment_id: activeExperiment.experiment_id, policy: gatePolicy(gateName.trim(), activeExperiment), acknowledged: true }, candidateReport: activeExperiment.candidate_report?.name ?? "", baselineReport: activeExperiment.baseline_report?.name ?? null })}>{gate.isPending ? "Saving…" : "Save release gate"}</button>
+        <button className="primary-button" type="button" disabled={!acknowledged || !gateName.trim() || !blockedTarget.trim() || acknowledgedExperiment !== activeExperiment.experiment_id || gate.isPending || durableCases.isLoading || durableCases.isError} onClick={() => gate.mutate({ payload: { name: gateName.trim(), blocked_target: blockedTarget.trim(), experiment_id: activeExperiment.experiment_id, policy: gatePolicy(gateName.trim(), activeExperiment), acknowledged: true }, candidateReport: activeExperiment.candidate_report?.name ?? "", baselineReport: activeExperiment.baseline_report?.name ?? null })}>{gate.isPending ? "Saving…" : "Save release gate"}</button>
       </section> : null}
     </section>
   );
@@ -280,7 +249,7 @@ export function splitDataset(value: string) { try { const parsed = JSON.parse(va
 function stripServerCapture(item: EvalCase) { return { ...item, source: { ...item.source, captured_at: "server" } }; }
 function publishCases(cases: EvaluationCase[]): EvalCase[] { return cases.map((item) => ({ id: item.caseId, input: { objective: item.objective }, expect: { state: [{ pointer: item.pointer, expected: item.expected }] }, tags: ["studio", item.agentName], source: { run_id: item.runId, thread_id: item.threadId, agent_id: item.agentId, captured_at: item.createdAt } })); }
 function experimentPayload(experimentId: string, datasetName: string, datasetVersion: string, candidateId: string, runsPerCase: number, maxConcurrency: number) { return { experiment_id: experimentId, candidate_id: candidateId, dataset_name: datasetName, dataset_version: datasetVersion, runs_per_case: runsPerCase, max_concurrency: maxConcurrency, target_metric: metric, thresholds: { max_pass_rate_drop: .05, max_latency_p95_ratio: 1.25 } }; }
-function experimentMatches(item: ExperimentSummary, payload: Parameters<typeof createExperiment>[1]) { return item.experiment_id === payload.experiment_id && item.dataset_name === payload.dataset_name && item.dataset_version === payload.dataset_version && item.candidate_id === payload.candidate_id && jsonEquivalent(item.config, { runs_per_case: payload.runs_per_case, max_concurrency: payload.max_concurrency, target_metric: payload.target_metric, thresholds: payload.thresholds }); }
+function experimentMatches(item: ExperimentSummary, payload: Parameters<typeof createExperiment>[0]) { return item.experiment_id === payload.experiment_id && item.dataset_name === payload.dataset_name && item.dataset_version === payload.dataset_version && item.candidate_id === payload.candidate_id && jsonEquivalent(item.config, { runs_per_case: payload.runs_per_case, max_concurrency: payload.max_concurrency, target_metric: payload.target_metric, thresholds: payload.thresholds }); }
 function gateMatches(item: Awaited<ReturnType<typeof createGate>>, operation: GateOperation) { return item.name === operation.payload.name && item.experiment_id === operation.payload.experiment_id && item.blocked_target === operation.payload.blocked_target && jsonEquivalent(item.policy, operation.payload.policy) && item.decision.policy === operation.payload.name && item.decision.candidate === operation.candidateReport && item.decision.baseline === operation.baselineReport; }
 function gatePolicy(name: string, experiment: ExperimentRecord) { return { format_version: 1, name, minimum_runs: experiment.config.runs_per_case, minimum_run_pass_rate: .95, minimum_case_pass_rate: .95, minimum_assertion_pass_rates: {}, minimum_tag_pass_rates: {}, maximum_total_cost_usd: null, maximum_cost_ratio: null, maximum_regressions: 0, forbid_removed_cases: true, comparison_thresholds: experiment.config.thresholds }; }
 function statusLabel(item: ExperimentSummary) { if (item.status.phase === "running") return `${item.status.completed_runs}/${item.status.total_runs}`; return item.status.phase; }
@@ -301,4 +270,3 @@ function rate(value: number | null) { return value === null ? "—" : percent(va
 function signed(value: number) { const points = value * 100; return `${points > 0 ? "+" : ""}${points.toFixed(1)} pts`; }
 function candidateLabel(content: Record<string, unknown>) { const subject = [content.name, content.tool, content.family].find((value) => typeof value === "string"); return `${String(content.kind).replaceAll("_", " ")}${subject ? ` · ${subject}` : ""}`; }
 function shortId(value: string) { return `${value.slice(0, 8)}…${value.slice(-4)}`; }
-function currentScope() { const current = useConnectionStore.getState().connection; return current ? connectionScope(current) : "disconnected"; }

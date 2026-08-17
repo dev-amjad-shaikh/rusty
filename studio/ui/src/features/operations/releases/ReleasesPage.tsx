@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { useConnectionStore } from "../../../state/connection";
-import { connectionScope } from "../../../lib/api/client";
 import {
   clearCanary,
   createRevision,
@@ -52,31 +50,30 @@ function ModeNav() {
 }
 
 function useReleaseQueries(enabled: boolean) {
-  const { connection } = useConnectionStore();
-  const baseKey = connection ? [connection.epoch, connection.origin, connection.tenantFingerprint] : ["releases", "disconnected"];
+  const baseKey = ["releases"];
   const health = useQuery({
     queryKey: [...baseKey, "deployment-health"],
-    queryFn: () => getDeploymentHealth(connection!),
-    enabled: Boolean(enabled && connection),
+    queryFn: () => getDeploymentHealth(),
+    enabled,
     refetchInterval: 15_000,
   });
   const revisions = useQuery({
     queryKey: [...baseKey, "revisions"],
-    queryFn: () => listRevisions(connection!),
-    enabled: Boolean(enabled && connection),
+    queryFn: () => listRevisions(),
+    enabled,
   });
   const journal = useQuery({
     queryKey: [...baseKey, "deployment-journal"],
-    queryFn: () => getDeploymentJournal(connection!),
-    enabled: Boolean(enabled && connection),
+    queryFn: () => getDeploymentJournal(),
+    enabled,
     refetchInterval: 15_000,
   });
   const environments = useQuery({
     queryKey: [...baseKey, "environments"],
-    queryFn: () => listEnvironments(connection!),
-    enabled: Boolean(enabled && connection),
+    queryFn: () => listEnvironments(),
+    enabled,
   });
-  return { health, revisions, journal, environments, connection };
+  return { health, revisions, journal, environments };
 }
 
 type ReleaseAction =
@@ -298,7 +295,6 @@ function eventSummary(event: DeploymentEvent): { title: string; detail: string }
 }
 
 function DeclareEnvironmentDialog({ open, onClose, onDeclare }: { open: boolean; onClose: () => void; onDeclare: (created: boolean) => void }) {
-  const { connection } = useConnectionStore();
   const [name, setName] = useState("");
   const [policy, setPolicy] = useState("");
   const [dataset, setDataset] = useState("");
@@ -306,7 +302,7 @@ function DeclareEnvironmentDialog({ open, onClose, onDeclare }: { open: boolean;
   const [authorId, setAuthorId] = useState("");
   const [error, setError] = useState("");
   const declare = useMutation({
-    mutationFn: () => declareEnvironment(connection!, {
+    mutationFn: () => declareEnvironment({
       name: name.trim(),
       gate: policy.trim() && dataset.trim() ? { policy: policy.trim(), dataset_version: dataset.trim() } : null,
       approval_required: approval,
@@ -349,14 +345,13 @@ function CreateRevisionDialog({
   environments: DeploymentEnvironment[] | undefined;
   onCreated: () => void;
 }) {
-  const { connection } = useConnectionStore();
   const [graph, setGraph] = useState("");
   const [sourceEnv, setSourceEnv] = useState("");
   const [surfaces, setSurfaces] = useState("");
   const [authorId, setAuthorId] = useState("");
   const [error, setError] = useState("");
   const create = useMutation({
-    mutationFn: () => createRevision(connection!, {
+    mutationFn: () => createRevision({
       graph: graph.trim(),
       source_environment: sourceEnv,
       surfaces: surfaces.split(",").map((s) => s.trim()).filter(Boolean),
@@ -393,11 +388,10 @@ function CreateRevisionDialog({
 }
 
 function SecretsPanel({ environment }: { environment?: string }) {
-  const { connection } = useConnectionStore();
   const secrets = useQuery({
-    queryKey: connection && environment ? [connection.epoch, connection.origin, connection.tenantFingerprint, "secrets", environment] : ["secrets", "idle"],
-    queryFn: () => listSecrets(connection!, environment),
-    enabled: Boolean(connection && environment),
+    queryKey: ["secrets", environment ?? "idle"],
+    queryFn: () => listSecrets(environment),
+    enabled: Boolean(environment),
   });
   if (!environment) return null;
   return (
@@ -419,11 +413,10 @@ function SecretsPanel({ environment }: { environment?: string }) {
 }
 
 export function ReleasesPage() {
-  const { connection, openDialog } = useConnectionStore();
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { environment?: string; revisionId?: string };
   const queryClient = useQueryClient();
-  const { health, revisions, journal, environments } = useReleaseQueries(Boolean(connection));
+  const { health, revisions, journal, environments } = useReleaseQueries(true);
   const [declareOpen, setDeclareOpen] = useState(false);
   const [createRevOpen, setCreateRevOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | undefined>();
@@ -432,9 +425,9 @@ export function ReleasesPage() {
   const env = environments.data?.find((item) => item.name === selectedEnv);
   const board = health.data?.environments.find((item) => item.environment === selectedEnv);
   const pointer = useQuery({
-    queryKey: connection && selectedEnv ? [connection.epoch, connection.origin, connection.tenantFingerprint, "pointer", selectedEnv] : ["pointer", "idle"],
-    queryFn: () => getEnvironmentPointer(connection!, selectedEnv!),
-    enabled: Boolean(connection && selectedEnv),
+    queryKey: ["pointer", selectedEnv ?? "idle"],
+    queryFn: () => getEnvironmentPointer(selectedEnv!),
+    enabled: Boolean(selectedEnv),
   });
   const selectedRevision = useMemo(() => {
     if (!params.revisionId) return null;
@@ -442,8 +435,7 @@ export function ReleasesPage() {
   }, [params.revisionId, revisions.data]);
 
   const invalidate = () => {
-    if (!connection) return;
-    const base = [connection.epoch, connection.origin, connection.tenantFingerprint];
+    const base = ["releases"];
     queryClient.invalidateQueries({ queryKey: [...base, "deployment-health"] });
     queryClient.invalidateQueries({ queryKey: [...base, "revisions"] });
     queryClient.invalidateQueries({ queryKey: [...base, "deployment-journal"] });
@@ -452,21 +444,21 @@ export function ReleasesPage() {
 
   const promote = useMutation({
     mutationFn: ({ revisionId, authorId }: { revisionId: string; authorId: string }) =>
-      promoteRevision(connection!, selectedEnv!, { revision_id: revisionId, author: author(authorId) }),
+      promoteRevision(selectedEnv!, { revision_id: revisionId, author: author(authorId) }),
     onSuccess: invalidate,
   });
   const canary = useMutation({
     mutationFn: ({ revisionId, authorId, fraction }: { revisionId: string; authorId: string; fraction: number }) =>
-      declareCanary(connection!, selectedEnv!, { revision_id: revisionId, fraction, author: author(authorId) }),
+      declareCanary(selectedEnv!, { revision_id: revisionId, fraction, author: author(authorId) }),
     onSuccess: invalidate,
   });
   const rollback = useMutation({
     mutationFn: ({ authorId, cause }: { authorId: string; cause: string }) =>
-      rollbackRevision(connection!, selectedEnv!, { author: author(authorId), cause }),
+      rollbackRevision(selectedEnv!, { author: author(authorId), cause }),
     onSuccess: invalidate,
   });
   const clear = useMutation({
-    mutationFn: ({ authorId }: { authorId: string }) => clearCanary(connection!, selectedEnv!, author(authorId)),
+    mutationFn: ({ authorId }: { authorId: string }) => clearCanary(selectedEnv!, author(authorId)),
     onSuccess: invalidate,
   });
 
@@ -502,21 +494,14 @@ export function ReleasesPage() {
     <section className="page" aria-labelledby="releases-heading">
       <header className="page-header">
         <div><span className="eyebrow">Operations</span><h1 id="releases-heading">Releases</h1><p>Move reviewed changes through environments with exact evidence.</p></div>
-        {!connection && <button type="button" className="primary-button" onClick={openDialog}>Connect Rusty</button>}
-        {connection && (
-          <div className={styles.actions}>
-            <button type="button" className="secondary-button" onClick={() => setDeclareOpen(true)}>Create environment</button>
-            <button type="button" className="secondary-button" onClick={() => setCreateRevOpen(true)}>Prepare revision</button>
-          </div>
-        )}
+        <div className={styles.actions}>
+          <button type="button" className="secondary-button" onClick={() => setDeclareOpen(true)}>Create environment</button>
+          <button type="button" className="secondary-button" onClick={() => setCreateRevOpen(true)}>Prepare revision</button>
+        </div>
       </header>
       <ModeNav />
 
-      {!connection ? (
-        <div className="empty-state"><span className="eyebrow">Releases</span><h2>Connect to manage releases</h2><p>Environments, revisions, gates, canaries, and rollback require a Rusty server.</p></div>
-      ) : (
-        <>
-          <div className={styles.workspace}>
+      <div className={styles.workspace}>
             <EnvironmentList environments={environments.data} selected={selectedEnv} onSelect={selectEnvironment} />
             {env && (
               <>
@@ -559,8 +544,6 @@ export function ReleasesPage() {
           )}
           <DeploymentTimeline events={journal.data?.events ?? []} selectedId={selectedEventId} onSelect={setSelectedEventId} />
           <SecretsPanel environment={selectedEnv} />
-        </>
-      )}
       <DeclareEnvironmentDialog open={declareOpen} onClose={() => setDeclareOpen(false)} onDeclare={() => { setDeclareOpen(false); invalidate(); }} />
       <CreateRevisionDialog open={createRevOpen} onClose={() => setCreateRevOpen(false)} environments={environments.data} onCreated={() => { setCreateRevOpen(false); invalidate(); }} />
     </section>

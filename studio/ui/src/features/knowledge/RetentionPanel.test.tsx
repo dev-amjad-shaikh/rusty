@@ -7,7 +7,7 @@ import {
   listKnowledgeSources,
   planKnowledgeRetention,
 } from "../../lib/api/knowledge";
-import { emptyLibrary, HASH_A, HASH_B, testConnection } from "./fixtures";
+import { emptyLibrary, HASH_A, HASH_B } from "./fixtures";
 import { RetentionPanel } from "./RetentionPanel";
 
 vi.mock("../../lib/api/knowledge", async (importOriginal) => {
@@ -27,7 +27,7 @@ vi.mock("../../lib/api/knowledge", async (importOriginal) => {
 
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><RetentionPanel connection={testConnection} /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><RetentionPanel /></QueryClientProvider>);
 }
 
 const plan = {
@@ -92,7 +92,7 @@ describe("Retention", () => {
     await userEvent.click(screen.getByRole("button", { name: "Confirm purge of 1 version" }));
     expect(await screen.findByText("Sweep applied")).toBeVisible();
     expect(screen.getByText(/1 tombstone written/)).toBeVisible();
-    expect(applyKnowledgeRetention).toHaveBeenCalledWith(testConnection, undefined);
+    expect(applyKnowledgeRetention).toHaveBeenCalledWith(undefined);
   });
 
   it("offers nothing to apply when the plan is empty", async () => {

@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useConnectionStore } from "../../state/connection";
+import { useRuntimeStore } from "../../state/runtime";
 import { useAgentMutationStore } from "../../state/agents";
 import { useWorkStore } from "../../state/work";
 import { AgentsPage } from "./AgentsPage";
@@ -42,7 +42,7 @@ async function reviewAndCreate() {
   await userEvent.click(screen.getByRole("button", { name: "Create version 1" }));
 }
 
-beforeEach(() => { clearAgentBuilderMemory(); useConnectionStore.setState({ connection: null, info: null, workspaceStatus: "unavailable", discoveryAttempt: 0, discoveryError: "", suggestedOrigin: "", dialogOpen: false }); useAgentMutationStore.setState({ uncertainByConnection: {} }); useWorkStore.getState().clear(); });
+beforeEach(() => { clearAgentBuilderMemory(); useRuntimeStore.setState({ status: "ready", info: null, error: "", attempt: 0 }); useAgentMutationStore.setState({ uncertain: "" }); useWorkStore.getState().clear(); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Agents", () => {
@@ -56,8 +56,8 @@ describe("Agents", () => {
   });
 
   it("uses structured v4 controls for goals, memory, and output", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
@@ -83,8 +83,8 @@ describe("Agents", () => {
   });
 
   it("preserves prefix-colliding custom goals and canonicalizes memory scope order", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
@@ -112,8 +112,8 @@ describe("Agents", () => {
   });
 
   it("renders real agent evidence as the compact portfolio table", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([
@@ -131,8 +131,8 @@ describe("Agents", () => {
   });
 
   it("never presents a zero agent count before catalog evidence settles", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [] },
     });
     let settle!: (response: Response) => void;
@@ -170,37 +170,9 @@ describe("Agents", () => {
     expect(outputSchemaRequirement("report.v1", "json_schema")).toBe("report.v1");
     expect(modelRequirement("api-speech-preview")).toBe("api-speech-preview");
   });
-  it("preserves an offline agent draft when its first workspace opens", async () => {
-    renderPage();
-    await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await userEvent.type(screen.getByLabelText("Name"), "Research analyst");
-    await userEvent.type(screen.getByLabelText("Responsibility"), "Investigate claims");
-    expect(screen.getByLabelText("Behavior")).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Choose workspace" }));
-    expect(useConnectionStore.getState().dialogOpen).toBe(true);
-    await useConnectionStore.getState().connect("https://rusty.example", "key", { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] });
-    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Research analyst"));
-    expect(screen.getByLabelText("Responsibility")).toHaveValue("Investigate claims");
-    expect(screen.getByLabelText("Behavior")).toBeEnabled();
-  });
-
-  it("keeps drafts private to their workspace and restores them when the user returns", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
-    renderPage();
-    await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await userEvent.type(screen.getByLabelText("Name"), "Private analyst");
-    await useConnectionStore.getState().connect("https://first.example", "first-key", { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] });
-    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Private analyst"));
-    await useConnectionStore.getState().connect("https://second.example", "second-key", { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] });
-    await waitFor(() => expect(screen.getByRole("heading", { name: "New agent" })).toBeVisible());
-    expect(screen.getByLabelText("Name")).toHaveValue("");
-    await useConnectionStore.getState().connect("https://first.example", "first-key", { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] });
-    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Private analyst"));
-  });
-
   it("creates a basic agent with deployment defaults and admits the exact receipt", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
@@ -245,8 +217,8 @@ describe("Agents", () => {
   });
 
   it("returns from final review to the owned draft with focus and values intact", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
@@ -261,61 +233,8 @@ describe("Agents", () => {
     expect(screen.getByLabelText("Responsibility")).toHaveValue("Investigate claims");
   });
 
-  it("closes a frozen review when another workspace takes ownership", async () => {
-    const info: NonNullable<ReturnType<typeof useConnectionStore.getState>["info"]> = { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] };
-    useConnectionStore.setState({ connection: { epoch: 1, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
-    renderPage();
-    await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await completeBuilder();
-    await userEvent.click(screen.getByRole("button", { name: "Review agent" }));
-    expect(await screen.findByRole("heading", { name: "Review version 1" })).toBeVisible();
-    useConnectionStore.setState({ connection: { epoch: 2, origin: "https://b.example", apiKey: "b", tenantFingerprint: "b" }, info });
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "Review version 1" })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled();
-  });
-
-  it("requires a fresh review after the same workspace reconnects", async () => {
-    const info: NonNullable<ReturnType<typeof useConnectionStore.getState>["info"]> = { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] };
-    useConnectionStore.setState({ connection: { epoch: 1, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
-    renderPage();
-    await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await completeBuilder();
-    await userEvent.click(screen.getByRole("button", { name: "Review agent" }));
-    useConnectionStore.setState({ connection: { epoch: 2, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    expect(await screen.findByRole("alert")).toHaveTextContent("Review this agent again");
-    expect(screen.queryByRole("heading", { name: "Review version 1" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Review agent" })).toBeEnabled();
-  });
-
-  it("keeps a definitive create failure visible in the workspace that owns it", async () => {
-    const info: NonNullable<ReturnType<typeof useConnectionStore.getState>["info"]> = { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] };
-    useConnectionStore.setState({ connection: { epoch: 1, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    let finishPost!: (response: Response) => void;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => init?.method === "POST" ? new Promise<Response>((resolve) => { finishPost = resolve; }) : json([])));
-    const { router } = renderPage();
-    await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await completeBuilder();
-    await reviewAndCreate();
-    useConnectionStore.setState({ connection: { epoch: 2, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    finishPost(new Response(JSON.stringify({ error: "Agent definition was rejected" }), { status: 400 }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/rejected|400/i);
-    useConnectionStore.setState({ connection: { epoch: 3, origin: "https://b.example", apiKey: "b", tenantFingerprint: "b" }, info });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled());
-    useConnectionStore.setState({ connection: { epoch: 4, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    expect(await screen.findByRole("alert")).toHaveTextContent(/rejected|400/i);
-    void router.navigate({ to: "/agents/prompts" });
-    await userEvent.click(await screen.findByRole("button", { name: /Discard/ }));
-    expect(await screen.findByText("Prompts")).toBeVisible();
-    await router.navigate({ to: "/agents/new" });
-    expect(await screen.findByRole("heading", { name: "New agent" })).toBeVisible();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("keeps an ambiguous create locked across a reconnect to the same tenant", async () => {
-    const identity = { origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "same" };
-    useConnectionStore.setState({ connection: { epoch: 1, ...identity }, info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] } });
+  it("keeps an ambiguous create locked until the operator checks the server", async () => {
+    useRuntimeStore.setState({ status: "ready", info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] }, error: "", attempt: 0 });
     vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => init?.method === "POST" ? Promise.reject(new Error("lost")) : json([])));
     renderPage();
     await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
@@ -327,13 +246,12 @@ describe("Agents", () => {
     for (const capability of ["Goals", "Knowledge", "Tools", "Output", "Guardrails"]) await userEvent.click(screen.getByRole("tab", { name: new RegExp(capability) }));
     await reviewAndCreate();
     expect(await screen.findByRole("button", { name: "Create locked" })).toBeDisabled();
-    useConnectionStore.setState({ connection: { epoch: 2, ...identity } });
-    expect(await screen.findByRole("button", { name: "Create locked" })).toBeDisabled();
+    expect(useAgentMutationStore.getState().uncertain).toBeTruthy();
   });
 
   it("protects a new-agent draft when leaving the builder", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
@@ -354,24 +272,9 @@ describe("Agents", () => {
     expect(await screen.findByText("Prompts")).toBeVisible();
   });
 
-  it("protects a draft parked in another workspace before leaving the builder", async () => {
-    const info: NonNullable<ReturnType<typeof useConnectionStore.getState>["info"]> = { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] };
-    useConnectionStore.setState({ connection: { epoch: 1, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
-    const { router } = renderPage();
-    await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await userEvent.type(screen.getByLabelText("Name"), "Workspace A draft");
-    useConnectionStore.setState({ connection: { epoch: 2, origin: "https://b.example", apiKey: "b", tenantFingerprint: "b" }, info });
-    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue(""));
-
-    void router.navigate({ to: "/agents/prompts" });
-    expect(await screen.findByRole("dialog", { name: "Discard 1 workspace drafts?" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Discard all drafts" })).toBeVisible();
-  });
-
   it("derives executable tools from the selected behavior instead of accepting invented names", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: {
         service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp",
         graphs: [{ name: "research", channels: [], tools: [
@@ -397,8 +300,8 @@ describe("Agents", () => {
   });
 
   it("keeps invalid metric targets editable and routes their error to Goals", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));
@@ -417,8 +320,8 @@ describe("Agents", () => {
   });
 
   it("freezes the submitted definition and blocks departure until creation settles", async () => {
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     let finish!: (response: Response) => void;
@@ -441,9 +344,8 @@ describe("Agents", () => {
     expect(await screen.findByRole("heading", { name: "Research analyst is ready for its first task" })).toBeVisible();
   });
 
-  it("keeps a late create failure inside the workspace that initiated it", async () => {
-    const info: NonNullable<ReturnType<typeof useConnectionStore.getState>["info"]> = { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] };
-    useConnectionStore.setState({ connection: { epoch: 1, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
+  it("locks creation and discloses the uncertainty when the create result is lost", async () => {
+    useRuntimeStore.setState({ status: "ready", info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] }, error: "", attempt: 0 });
     let rejectPost!: (reason: Error) => void;
     let postStarted = false;
     vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
@@ -455,42 +357,16 @@ describe("Agents", () => {
     await completeBuilder();
     await reviewAndCreate();
     expect(postStarted).toBe(true);
-    useConnectionStore.setState({ connection: { epoch: 2, origin: "https://b.example", apiKey: "b", tenantFingerprint: "b" }, info });
     rejectPost(new TypeError("connection lost"));
-    await waitFor(() => expect(Object.values(useAgentMutationStore.getState().uncertainByConnection).some(Boolean)).toBe(true));
-    expect(screen.queryByText(/create result is uncertain/i)).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled());
-  });
-
-  it("records a late exact create in its originating workspace without restoring a committed draft", async () => {
-    const info: NonNullable<ReturnType<typeof useConnectionStore.getState>["info"]> = { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] };
-    useConnectionStore.setState({ connection: { epoch: 1, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    let finishPost!: (response: Response) => void;
-    let submitted: Record<string, unknown> = {};
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
-      if (init?.method === "POST") {
-        submitted = JSON.parse(String(init.body));
-        return new Promise<Response>((resolve) => { finishPost = resolve; });
-      }
-      return json([]);
-    }));
-    renderPage();
-    await userEvent.click(await screen.findByRole("link", { name: "New agent" }));
-    await completeBuilder();
-    await reviewAndCreate();
-    await useConnectionStore.getState().connect("https://b.example", "b", info);
-    finishPost(new Response(JSON.stringify({ ...submitted, created_at: "2026-08-11T00:00:00Z", active_version_id: "av-1", version_count: 1 }), { status: 201 }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add name, behavior, and responsibility" })).toBeDisabled());
-    useConnectionStore.setState({ connection: { epoch: 3, origin: "https://a.example", apiKey: "a", tenantFingerprint: "a" }, info });
-    expect(await screen.findByRole("heading", { name: "Research analyst is ready for its first task" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Review agent" }));
-    expect(await screen.findByRole("heading", { name: "Agent workspace" })).toBeVisible();
+    await waitFor(() => expect(useAgentMutationStore.getState().uncertain).toBeTruthy());
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not prove the result/i);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create locked" })).toBeDisabled());
   });
 
   it("keeps each capability tab associated with the live panel at every viewport", async () => {
     renderPage();
-    useConnectionStore.setState({
-      connection: { epoch: 1, origin: "https://rusty.example", apiKey: "key", tenantFingerprint: "a" },
+    useRuntimeStore.setState({
+      status: "ready" as const, error: "", attempt: 0,
       info: { service: "rusty-server", version: "1", checkpointer: "json_file", server_store: "json_file", store_path: "/tmp", graphs: [{ name: "research", channels: [] }] },
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => json([])));

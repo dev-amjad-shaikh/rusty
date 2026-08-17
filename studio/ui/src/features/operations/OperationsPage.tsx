@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { getOperationsSnapshot, type OperationAttentionItem } from "../../lib/api/client";
-import { useConnectionStore } from "../../state/connection";
 import { evidencePreview } from "../../lib/text";
 import { ArtifactInspector } from "../work/artifacts/ArtifactInspector";
 import { getRunArtifact } from "../../lib/api/artifacts";
@@ -45,11 +44,10 @@ function ModeNav() {
 }
 
 function EvidencePanel({ item, close, headingRef }: { item: OperationAttentionItem; close: () => void; headingRef: RefObject<HTMLHeadingElement | null> }) {
-  const { connection } = useConnectionStore();
   const artifact = useQuery({
-    queryKey: connection && item.source === "artifact" && item.artifactId ? [connection.epoch, connection.origin, connection.tenantFingerprint, "artifact", item.artifactId] : ["artifact", "idle"],
-    queryFn: () => getRunArtifact(connection!, item.artifactId!),
-    enabled: Boolean(connection && item.source === "artifact" && item.artifactId),
+    queryKey: ["artifact", item.artifactId ?? "idle"],
+    queryFn: () => getRunArtifact(item.artifactId!),
+    enabled: Boolean(item.source === "artifact" && item.artifactId),
   });
   if (item.source === "artifact") {
     return <>
@@ -86,7 +84,6 @@ function EvidencePanel({ item, close, headingRef }: { item: OperationAttentionIt
 }
 
 export function OperationsPage() {
-  const { connection, openDialog } = useConnectionStore();
   const [selected, setSelected] = useState<OperationAttentionItem | null>(null);
   const evidenceHeadingRef = useRef<HTMLHeadingElement>(null);
   const reviewTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -102,7 +99,7 @@ export function OperationsPage() {
     document.addEventListener("focusin", rememberFocusOwner);
     return () => document.removeEventListener("focusin", rememberFocusOwner);
   }, []);
-  useEffect(() => { clearEvidenceToStableHeading(); }, [connection?.epoch, connection?.origin, connection?.tenantFingerprint]);
+  useEffect(() => { clearEvidenceToStableHeading(); }, []);
   useEffect(() => {
     if (selected) evidenceHeadingRef.current?.focus();
     else if (restoreStableFocusRef.current) {
@@ -123,9 +120,8 @@ export function OperationsPage() {
     setSelected(null);
   }
   const snapshot = useQuery({
-    queryKey: connection ? [connection.epoch, connection.origin, connection.tenantFingerprint, "operations"] : ["operations", "disconnected"],
-    queryFn: () => getOperationsSnapshot(connection!),
-    enabled: Boolean(connection),
+    queryKey: ["operations"],
+    queryFn: () => getOperationsSnapshot(),
     refetchInterval: 15_000,
   });
   const data = snapshot.data;
@@ -139,11 +135,10 @@ export function OperationsPage() {
   }, [data, selected]);
 
   return <section className={`page ${styles.operationsPage}`} aria-labelledby="operations-heading">
-    <PageHeader headingId="operations-heading" headingRef={pageHeadingRef} eyebrow="Operate" title="Operations" description="Review failed work first. Schedules and automations stay quiet until they need attention." actions={!connection ? <button className="primary-button" type="button" onClick={openDialog}>Choose workspace</button> : <button className="secondary-button" type="button" onClick={() => snapshot.refetch()} disabled={snapshot.isFetching}>{snapshot.isFetching ? "Refreshing…" : "Refresh"}</button>} />
+    <PageHeader headingId="operations-heading" headingRef={pageHeadingRef} eyebrow="Operate" title="Operations" description="Review failed work first. Schedules and automations stay quiet until they need attention." actions={<button className="secondary-button" type="button" onClick={() => snapshot.refetch()} disabled={snapshot.isFetching}>{snapshot.isFetching ? "Refreshing…" : "Refresh"}</button>} />
     <ModeNav />
 
-    {!connection ? <div className="empty-state"><span className="eyebrow">Attention queue</span><h2>Open a workspace to review operations</h2><p>Failures and routine systems will remain clearly separated.</p></div>
-      : snapshot.isLoading ? <div className={styles.loading}>Loading operational evidence…</div>
+    {snapshot.isLoading ? <div className={styles.loading}>Loading operational evidence…</div>
       : snapshot.isError ? <div className={styles.attention}><div><span className="eyebrow">Evidence unavailable</span><h2>Operations could not be loaded</h2><p>{snapshot.error instanceof Error ? snapshot.error.message : "Try again."}</p></div></div>
       : <>
         <section className={styles.attention} aria-labelledby="attention-heading">

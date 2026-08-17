@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isLosslessNumber, parse as parseLossless, stringify as stringifyLossless } from "lossless-json";
-import { jsonEquivalent, requestText, StudioApiError, type ConnectionIdentity } from "./client";
+import { jsonEquivalent, requestText, StudioApiError } from "./client";
 
 const timestamp = z.string().datetime({ offset: true });
 const exactId = z.string().min(1).max(256);
@@ -240,8 +240,8 @@ function parseEvaluationMutation<T>(text: string, schema: z.ZodType<T>, context:
   }
 }
 
-export async function createDataset(connection: ConnectionIdentity, payload: { name: string; version: string; cases: EvalCase[] }) {
-  const { text, status } = await requestText(connection, "/datasets", { method: "POST", body: stringifyLossless(payload) });
+export async function createDataset(payload: { name: string; version: string; cases: EvalCase[] }) {
+  const { text, status } = await requestText("/datasets", { method: "POST", body: stringifyLossless(payload) });
   const receipt = parseEvaluationMutation(text, datasetVersionSchema, "Publish dataset", status);
   if (![200, 201].includes(status) || receipt.name !== payload.name || receipt.version !== payload.version
     || receipt.case_count !== payload.cases.length || receipt.created !== (status === 201)) {
@@ -249,12 +249,12 @@ export async function createDataset(connection: ConnectionIdentity, payload: { n
   }
   return receipt;
 }
-export async function listDatasets(connection: ConnectionIdentity) {
-  const { text } = await requestText(connection, "/datasets");
+export async function listDatasets() {
+  const { text } = await requestText("/datasets");
   return parseEvaluationJson(text, z.object({ datasets: z.array(datasetVersionSchema), truncated: z.boolean() }).strict(), "Dataset catalog");
 }
-export async function getDatasetCases(connection: ConnectionIdentity, name: string, version: string) {
-  const { text } = await requestText(connection, `/datasets/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}/cases`);
+export async function getDatasetCases(name: string, version: string) {
+  const { text } = await requestText(`/datasets/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}/cases`);
   return parseEvaluationJson(text, z.object({ cases: z.array(evalCaseSchema) }), "Dataset cases").cases;
 }
 export interface CreateExperimentInput {
@@ -262,8 +262,8 @@ export interface CreateExperimentInput {
   runs_per_case: number; max_concurrency: number; target_metric: string;
   thresholds: { max_pass_rate_drop: number; max_latency_p95_ratio: number };
 }
-export async function createExperiment(connection: ConnectionIdentity, payload: CreateExperimentInput) {
-  const { text, status } = await requestText(connection, "/experiments", { method: "POST", body: JSON.stringify(payload) });
+export async function createExperiment(payload: CreateExperimentInput) {
+  const { text, status } = await requestText("/experiments", { method: "POST", body: JSON.stringify(payload) });
   const receipt = parseEvaluationMutation(text, experimentSummarySchema, "Start experiment", status);
   const expectedConfig = { runs_per_case: payload.runs_per_case, max_concurrency: payload.max_concurrency, target_metric: payload.target_metric, thresholds: payload.thresholds };
   if (![200, 201].includes(status) || receipt.experiment_id !== payload.experiment_id
@@ -273,25 +273,25 @@ export async function createExperiment(connection: ConnectionIdentity, payload: 
   }
   return receipt;
 }
-export async function listExperiments(connection: ConnectionIdentity) {
-  const { text } = await requestText(connection, "/experiments");
+export async function listExperiments() {
+  const { text } = await requestText("/experiments");
   return parseEvaluationJson(text, z.object({ experiments: z.array(experimentSummarySchema), truncated: z.boolean() }).strict(), "Experiment catalog");
 }
-export async function listEvaluationCandidates(connection: ConnectionIdentity) {
-  const { text } = await requestText(connection, "/learn/candidates");
+export async function listEvaluationCandidates() {
+  const { text } = await requestText("/learn/candidates");
   return parseEvaluationJson(text, z.object({ candidates: z.array(candidateRecordSchema) }), "Candidate catalog").candidates;
 }
-export async function getExperiment(connection: ConnectionIdentity, id: string) {
-  const { text } = await requestText(connection, `/experiments/${encodeURIComponent(id)}`);
+export async function getExperiment(id: string) {
+  const { text } = await requestText(`/experiments/${encodeURIComponent(id)}`);
   return parseEvaluationJson(text, experimentRecordSchema, "Experiment");
 }
-export async function cancelExperiment(connection: ConnectionIdentity, id: string) {
-  const { text, status } = await requestText(connection, `/experiments/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+export async function cancelExperiment(id: string) {
+  const { text, status } = await requestText(`/experiments/${encodeURIComponent(id)}/cancel`, { method: "POST" });
   if (status !== 200) throw new StudioApiError("Experiment cancellation returned an unproven receipt.", status, true);
   return parseEvaluationMutation(text, z.object({ experiment_id: z.literal(id), cancellation_requested: z.literal(true) }), "Cancel experiment", status);
 }
-export async function createGate(connection: ConnectionIdentity, payload: { name: string; blocked_target: string; experiment_id: string; policy: Record<string, unknown>; acknowledged: boolean }) {
-  const { text, status } = await requestText(connection, "/gates", { method: "POST", body: JSON.stringify(payload) });
+export async function createGate(payload: { name: string; blocked_target: string; experiment_id: string; policy: Record<string, unknown>; acknowledged: boolean }) {
+  const { text, status } = await requestText("/gates", { method: "POST", body: JSON.stringify(payload) });
   const receipt = parseEvaluationMutation(text, gateRecordSchema, "Save release gate", status);
   if (![200, 201].includes(status) || receipt.name !== payload.name || receipt.blocked_target !== payload.blocked_target
     || receipt.experiment_id !== payload.experiment_id || !jsonEquivalent(receipt.policy, payload.policy)
@@ -300,7 +300,7 @@ export async function createGate(connection: ConnectionIdentity, payload: { name
   }
   return receipt;
 }
-export async function listGates(connection: ConnectionIdentity) {
-  const { text } = await requestText(connection, "/gates");
+export async function listGates() {
+  const { text } = await requestText("/gates");
   return parseEvaluationJson(text, z.object({ gates: z.array(gateRecordSchema), truncated: z.boolean() }).strict(), "Release gates");
 }
