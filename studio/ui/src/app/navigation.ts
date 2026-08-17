@@ -1,4 +1,4 @@
-type PrimaryRoute = "/" | "/agents" | "/agents/new" | "/agents/prompts" | "/skills" | "/knowledge" | "/work" | "/memory" | "/operations";
+type PrimaryRoute = "/" | "/agents" | "/agents/new" | "/agents/prompts" | "/skills" | "/knowledge" | "/connectors" | "/work" | "/memory" | "/operations";
 
 export interface PrimaryDestination {
   to: PrimaryRoute;
@@ -29,6 +29,7 @@ export const lifecycleGroups: LifecycleGroup[] = [
       { to: "/agents/prompts", label: "Prompt Library", shortLabel: "Prompts", description: "Version and test prompts", icon: "M3.5 4.5h17v15h-17zM7 9h4M7 13h7", match: (path: string) => path === "/agents/prompts" },
       { to: "/skills", label: "Skills & Tools", shortLabel: "Skills", description: "Publish and review skill packages", icon: "M12 3 3 8l9 5 9-5zM3 13l9 5 9-5", match: (path: string) => path.startsWith("/skills") },
       { to: "/knowledge", label: "Knowledge", shortLabel: "Knowledge", description: "Governed sources and retrieval", icon: "M4 4.5h6a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 4.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h6z", match: (path: string) => path.startsWith("/knowledge") },
+      { to: "/connectors", label: "Connectors", shortLabel: "Connectors", description: "Schema-driven connector setup", icon: "M9 3.5v4M15 3.5v4M6 7.5h12v4a6 6 0 0 1-12 0zM12 17.5V21", match: (path: string) => path.startsWith("/connectors") },
     ],
   },
   {
