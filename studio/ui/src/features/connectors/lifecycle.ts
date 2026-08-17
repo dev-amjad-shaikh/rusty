@@ -65,6 +65,26 @@ export function providerKindLabel(kind: string) {
   return providerKindLabels[kind] ?? kind;
 }
 
+/// The base url an http-api instance will actually call, with the
+/// manifest's `{param}` placeholders substituted by the config values the
+/// operator is typing. Unfilled params keep a `<name>` marker so the
+/// preview reads as a template until every value is present. Returns null
+/// for literal base urls — nothing to preview.
+export function resolvedBaseUrlPreview(
+  manifest: ConnectorManifest,
+  values: Record<string, string>,
+): string | null {
+  if (manifest.provider.kind !== "http_api" || !manifest.provider.base_url.includes("{")) {
+    return null;
+  }
+  const names = new Set(manifest.config_params.map((param) => param.name));
+  return manifest.provider.base_url.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name: string) => {
+    if (!names.has(name)) return match;
+    const value = values[name]?.trim();
+    return value ? value : `<${name}>`;
+  });
+}
+
 export const connectionProviderLabels: Record<string, string> = {
   oauth2_authorization_code: "OAuth2 · authorization code",
   oauth2_client_credentials: "OAuth2 · client credentials",

@@ -54,6 +54,7 @@ const manifest: ConnectorManifest = {
   provider: { kind: "http_search", base_url: "https://api.search.example.com/search", auth: { header: "X-Api-Key", credential_slot: "api_key" } },
   capabilities: ["web search"],
   credential_slots: [{ name: "api_key", description: "Search API key issued to this tenant" }],
+  config_params: [],
   hash: manifestHash,
 };
 
@@ -62,10 +63,10 @@ const servicenowManifest: ConnectorManifest = {
   id: "servicenow",
   version: "1",
   display_name: "ServiceNow",
-  description: "ServiceNow Table API for the `example` instance: list, get, create, update, and delete records in any table.",
+  description: "ServiceNow Table API: list, get, create, update, and delete records in any table.",
   provider: {
     kind: "http_api",
-    base_url: "https://example.service-now.com",
+    base_url: "https://{instance}.service-now.com",
     auth: { style: "basic", username_slot: "username", password_slot: "password" },
     default_headers: [],
     health_check: null,
@@ -89,6 +90,9 @@ const servicenowManifest: ConnectorManifest = {
   credential_slots: [
     { name: "username", description: "ServiceNow user name for basic authentication." },
     { name: "password", description: "ServiceNow password for basic authentication." },
+  ],
+  config_params: [
+    { name: "instance", description: "ServiceNow instance subdomain (`<instance>.service-now.com`)." },
   ],
   hash: servicenowHash,
 };
@@ -118,6 +122,7 @@ function instance(overrides: Partial<ConnectorInstance>): ConnectorInstance {
     last_health_check_ms: null,
     catalog_generation: null,
     catalog_hash: null,
+    config: {},
     created_at: "2026-08-11T00:00:00Z",
     updated_at: "2026-08-11T00:00:00Z",
     ...overrides,
@@ -251,6 +256,7 @@ describe("Connectors", () => {
     expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
       manifest_hash: manifestHash,
       credentials: { api_key: "conn-0123456789abcdef0123456789abcdef" },
+      config: {},
     });
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
   });
@@ -281,11 +287,12 @@ describe("Connectors", () => {
     expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
       manifest_hash: manifestHash,
       credentials: { api_key: "conn-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      config: {},
     });
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
   });
 
-  it("serves the ServiceNow basic flow: username + password, sealed as a pair, slots auto-bound", async () => {
+  it("serves the ServiceNow basic flow: subdomain as config, username + password sealed as a pair, slots auto-bound", async () => {
     vi.mocked(listConnectorManifests).mockResolvedValue([servicenowManifest]);
     const pair = {
       username_connection: connection({ connection_id: "conn-cccccccccccccccccccccccccccccccc", provider: "basic", subject: "nexus.connector" }),
@@ -296,7 +303,13 @@ describe("Connectors", () => {
       .mockResolvedValue([pair.username_connection, pair.password_connection]);
     vi.mocked(registerBasicConnection).mockResolvedValue(pair);
     vi.mocked(createConnectorInstance).mockResolvedValue(
-      instance({ instance_id: "inst-000011", connector_id: "servicenow", manifest_hash: servicenowHash, credential_slots: ["username", "password"] }),
+      instance({
+        instance_id: "inst-000011",
+        connector_id: "servicenow",
+        manifest_hash: servicenowHash,
+        credential_slots: ["username", "password"],
+        config: { instance: "dev123" },
+      }),
     );
     renderPage();
 
@@ -305,6 +318,14 @@ describe("Connectors", () => {
     expect(await within(panel).findByRole("heading", { name: "Connect with instance credentials" })).toBeVisible();
     // A basic-auth manifest has no use for the OAuth grant: no disclosure.
     expect(within(panel).queryByText("Advanced: OAuth2 password grant")).not.toBeInTheDocument();
+
+    // The instance subdomain is config, not a credential — and the base url
+    // preview tracks the typing.
+    const instanceField = within(panel).getByLabelText("Instance");
+    expect(within(panel).getByText("https://<instance>.service-now.com")).toBeVisible();
+    await userEvent.click(instanceField);
+    await userEvent.paste("dev123");
+    expect(within(panel).getByText("https://dev123.service-now.com")).toBeVisible();
 
     await userEvent.click(within(panel).getByLabelText("Instance username"));
     await userEvent.paste("nexus.connector");
@@ -318,15 +339,63 @@ describe("Connectors", () => {
       password: "instance-password",
     });
     await waitFor(() => expect(createConnectorInstance).toHaveBeenCalledTimes(1));
-    // Each slot binds its own leg of the pair.
+    // Each slot binds its own leg of the pair; the subdomain rides as config.
     expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
       manifest_hash: servicenowHash,
       credentials: {
         username: "conn-cccccccccccccccccccccccccccccccc",
         password: "conn-dddddddddddddddddddddddddddddddd",
       },
+      config: { instance: "dev123" },
     });
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+  });
+
+  it("blocks the ServiceNow chain until every declared config param has a value", async () => {
+    vi.mocked(listConnectorManifests).mockResolvedValue([servicenowManifest]);
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Instantiate" }));
+    const panel = await screen.findByRole("complementary");
+    expect(await within(panel).findByRole("heading", { name: "Connect with instance credentials" })).toBeVisible();
+
+    await userEvent.click(within(panel).getByLabelText("Instance username"));
+    await userEvent.paste("nexus.connector");
+    await userEvent.click(within(panel).getByLabelText("Instance password"));
+    await userEvent.paste("instance-password");
+    await userEvent.click(within(panel).getByRole("button", { name: "Connect and instantiate" }));
+
+    // The credentials never cross the wire while a config param is empty.
+    const alert = await within(panel).findByRole("alert");
+    expect(alert).toHaveTextContent("config param `instance` requires a value");
+    expect(within(panel).getByLabelText("Instance")).toHaveAttribute("aria-invalid", "true");
+    expect(registerBasicConnection).not.toHaveBeenCalled();
+    expect(createConnectorInstance).not.toHaveBeenCalled();
+  });
+
+  it("pins the server's config 422 to the offending field", async () => {
+    vi.mocked(listConnectorManifests).mockResolvedValue([servicenowManifest]);
+    vi.mocked(listVaultConnections).mockResolvedValue([
+      connection({ connection_id: "conn-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", provider: "basic", subject: "nexus.connector" }),
+    ]);
+    vi.mocked(createConnectorInstance).mockRejectedValue(
+      new StudioApiError("config param `instance` requires a value", 422),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Instantiate" }));
+    const panel = await screen.findByRole("complementary");
+    await userEvent.click(within(panel).getByLabelText("Instance"));
+    await userEvent.paste("dev123");
+    const select = within(panel).getByLabelText(/username/);
+    await waitFor(() => expect(select).toBeEnabled());
+    await userEvent.selectOptions(select, "conn-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+    await userEvent.selectOptions(within(panel).getByLabelText(/password/), "conn-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+    await userEvent.click(within(panel).getByRole("button", { name: "Instantiate connector" }));
+
+    const alert = await within(panel).findByRole("alert");
+    expect(alert).toHaveTextContent("config param `instance` requires a value");
+    expect(within(panel).getByLabelText("Instance")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("drops into credential entry when every existing connection is unusable", async () => {
@@ -402,6 +471,7 @@ describe("Connectors", () => {
     expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
       manifest_hash: manifestHash,
       credentials: { api_key: "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      config: {},
     });
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
   });
@@ -455,6 +525,24 @@ describe("Connectors", () => {
     // A guard violation the gate could not foresee surfaces the 409 verbatim.
     await userEvent.click(pending.getByRole("button", { name: "Connect" }));
     expect(await pending.findByRole("alert")).toHaveTextContent("connector instance `inst-000001` is disabled");
+  });
+
+  it("shows an instance's non-secret config on its fleet row", async () => {
+    vi.mocked(listConnectorManifests).mockResolvedValue([servicenowManifest]);
+    vi.mocked(listConnectorInstances).mockResolvedValue([
+      instance({
+        instance_id: "inst-000020",
+        connector_id: "servicenow",
+        manifest_hash: servicenowHash,
+        credential_slots: ["username", "password"],
+        config: { instance: "dev123" },
+      }),
+    ]);
+    renderPage();
+
+    const row = await rowFor("inst-000020");
+    expect(row.getByText("ServiceNow")).toBeVisible();
+    expect(row.getByText("instance=dev123")).toBeVisible();
   });
 
   it("renders the generation-pinned catalog with effect badges", async () => {
