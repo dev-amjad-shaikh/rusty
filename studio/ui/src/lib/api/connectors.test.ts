@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { connectorManifestSchema, passwordGrantSchema, vaultConnectionSchema } from "./connectors";
+import {
+  apiKeyConnectionSchema,
+  basicConnectionSchema,
+  connectorManifestSchema,
+  passwordGrantSchema,
+  vaultConnectionSchema,
+} from "./connectors";
 
 // The connector plane's contract tests: the fixtures below are trimmed
 // copies of the exact JSON the runtime's service packs serialize (see
@@ -163,5 +169,21 @@ describe("oauth2_password vault connection contract", () => {
     };
     expect(vaultConnectionSchema.parse(record).provider).toBe("oauth2_password");
     expect(vaultConnectionSchema.safeParse({ ...record, provider: "saml" }).success).toBe(false);
+  });
+});
+
+describe("simple-flow connection inputs", () => {
+  it("admits an api_key and rejects an empty one", () => {
+    expect(apiKeyConnectionSchema.parse({ key: "xoxb-123" })).toEqual({ key: "xoxb-123" });
+    expect(apiKeyConnectionSchema.safeParse({ key: "" }).success).toBe(false);
+  });
+
+  it("admits a basic-auth pair and rejects either leg empty", () => {
+    expect(basicConnectionSchema.parse({ username: "nexus.connector", password: "p" })).toEqual({
+      username: "nexus.connector",
+      password: "p",
+    });
+    expect(basicConnectionSchema.safeParse({ username: "", password: "p" }).success).toBe(false);
+    expect(basicConnectionSchema.safeParse({ username: "u", password: "" }).success).toBe(false);
   });
 });

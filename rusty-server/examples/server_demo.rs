@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rusty_agent_runtime::connector::packs;
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::tool::builtins::{
     CalculatorTool, KnowledgeDocument, KnowledgeSearchTool, SandboxedDocumentReaderTool,
@@ -135,6 +136,59 @@ fn build_react_graph() -> Result<(Graph, StateSpec, ToolRegistry)> {
     Ok((graph, spec, tools))
 }
 
+/// Seed the ServiceNow service-pack manifest into the demo's connector
+/// plane, so Studio's Connectors page has a basic-auth connector to walk
+/// through on first boot. Registration is idempotent by content hash: a
+/// restart against a store that already holds the pack converges with
+/// `already_registered: true`, and nothing here blocks serving.
+///
+/// The pack pins the placeholder `example` instance
+/// (`https://example.service-now.com`); `RUSTY_DEMO_SERVICENOW_INSTANCE`
+/// names a real instance label for a demo pointed at a live tenant. To
+/// keep the pinned manifest and reach the same instance, register the
+/// pack's manifest for that label through `POST /connectors/manifests`
+/// (see `rusty-agent-runtime`'s `pack_manifests` example).
+async fn seed_servicenow_manifest(
+    addr: std::net::SocketAddr,
+    instance: &str,
+) -> std::result::Result<(), String> {
+    let manifest = packs::servicenow(instance).map_err(|e| e.to_string())?;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    // The listener comes up inside `serve`; poll `/ok` briefly rather than
+    // racing the bind. A demo that never comes up gives up with a warning
+    // instead of hanging the runtime on a stray task.
+    let mut ready = false;
+    for _ in 0..120 {
+        match client.get(format!("{base}/ok")).send().await {
+            Ok(response) if response.status().is_success() => {
+                ready = true;
+                break;
+            }
+            _ => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+        }
+    }
+    if !ready {
+        return Err("the demo server never answered /ok".to_owned());
+    }
+
+    let response = client
+        .post(format!("{base}/connectors/manifests"))
+        .json(&manifest)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "POST /connectors/manifests answered {status}: {body}"
+        ));
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
@@ -160,6 +214,21 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     .with_oauth_provider(Arc::new(
         rusty_agent_server::oauth::ReqwestOAuthProvider::new(),
     ));
+
+    // Seed the connector plane once the listener is up (see the function's
+    // docs): Studio's credential walkthrough needs the ServiceNow pack on a
+    // fresh store, and the POST is idempotent by content hash on an old one.
+    let seed_instance =
+        std::env::var("RUSTY_DEMO_SERVICENOW_INSTANCE").unwrap_or_else(|_| "example".to_string());
+    {
+        let seed_addr = config.bind_addr;
+        let seed_instance = seed_instance.clone();
+        tokio::spawn(async move {
+            if let Err(error) = seed_servicenow_manifest(seed_addr, &seed_instance).await {
+                tracing::warn!(error = %error, "ServiceNow demo manifest seeding skipped");
+            }
+        });
+    }
 
     // The menu below is printed with the *actual* address so the test-hook
     // override stays honest when a human runs the demo with it set.
@@ -193,6 +262,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("  curl -s -X POST {base}/runs/replay \\");
     println!("    -H 'content-type: application/json' -d '{{\"run_id\": \"'$RUN_ID'\"}}' | jq");
     println!("  curl -s '{base}/runs/diff?base='$RUN_ID'&branch='$FORK_RUN_ID'' | jq\n");
+    println!("  # connector plane: the ServiceNow Table API pack manifest is seeded");
+    println!("  # on boot, pinned to the placeholder `{seed_instance}` instance");
+    println!("  curl -s {base}/connectors/manifests | jq\n");
     println!("  # ReAct agent (deterministic local model; no network)");
     println!("  REACT=$(curl -s -X POST {base}/threads \\");
     println!("    -H 'content-type: application/json' \\");

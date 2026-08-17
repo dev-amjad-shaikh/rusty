@@ -13,6 +13,8 @@ import {
   listConnectorInstances,
   listConnectorManifests,
   listVaultConnections,
+  registerApiKeyConnection,
+  registerBasicConnection,
   registerConnectorManifest,
   registerVaultConnection,
   sweepConnectors,
@@ -38,6 +40,8 @@ vi.mock("../../lib/api/connectors", async (importActual) => {
     getInstanceCatalog: vi.fn(),
     listVaultConnections: vi.fn(),
     registerVaultConnection: vi.fn(),
+    registerApiKeyConnection: vi.fn(),
+    registerBasicConnection: vi.fn(),
   };
 });
 
@@ -52,6 +56,55 @@ const manifest: ConnectorManifest = {
   credential_slots: [{ name: "api_key", description: "Search API key issued to this tenant" }],
   hash: manifestHash,
 };
+
+const servicenowHash = "ef".repeat(32);
+const servicenowManifest: ConnectorManifest = {
+  id: "servicenow",
+  version: "1",
+  display_name: "ServiceNow",
+  description: "ServiceNow Table API for the `example` instance: list, get, create, update, and delete records in any table.",
+  provider: {
+    kind: "http_api",
+    base_url: "https://example.service-now.com",
+    auth: { style: "basic", username_slot: "username", password_slot: "password" },
+    default_headers: [],
+    health_check: null,
+    operations: [
+      {
+        name: "list-records",
+        description: "List records from a ServiceNow table, with sysparm filtering and pagination.",
+        method: "GET",
+        path: "/api/now/table/{table}",
+        params_schema: { type: "object" },
+        query_params: [],
+        body: { type: "none" },
+        effect: "read_only",
+        response: { projection: "/result", max_bytes: null },
+        timeout_ms: null,
+        idempotency_key_header: null,
+      },
+    ],
+  },
+  capabilities: ["servicenow table api"],
+  credential_slots: [
+    { name: "username", description: "ServiceNow user name for basic authentication." },
+    { name: "password", description: "ServiceNow password for basic authentication." },
+  ],
+  hash: servicenowHash,
+};
+
+function connection(overrides: Partial<VaultConnection>): VaultConnection {
+  return {
+    connection_id: "conn-0123456789abcdef0123456789abcdef",
+    provider: "api_key",
+    scopes: [],
+    status: "active",
+    health: { consecutive_failures: 0 },
+    created_at: "2026-08-11T00:00:00Z",
+    updated_at: "2026-08-11T00:00:00Z",
+    ...overrides,
+  };
+}
 
 function instance(overrides: Partial<ConnectorInstance>): ConnectorInstance {
   return {
@@ -170,10 +223,10 @@ describe("Connectors", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("must be kebab-case");
   });
 
-  it("instantiates through vault connection bindings and never accepts raw secrets", async () => {
+  it("instantiates through the existing-connection picker with plain labels, never raw ids first", async () => {
     vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
     vi.mocked(listVaultConnections).mockResolvedValue([
-      { connection_id: "conn-0123456789abcdef0123456789abcdef", provider: "api_key", scopes: ["search"], status: "active", health: { consecutive_failures: 0 }, created_at: "2026-08-11T00:00:00Z", updated_at: "2026-08-11T00:00:00Z" },
+      connection({ connection_id: "conn-0123456789abcdef0123456789abcdef", scopes: ["search"] }),
     ]);
     const created = instance({ instance_id: "inst-000002" });
     vi.mocked(createConnectorInstance).mockResolvedValue(created);
@@ -185,8 +238,12 @@ describe("Connectors", () => {
     expect(panel).toHaveTextContent("never secret material");
     expect(within(panel).queryByRole("textbox", { name: /secret|token|key/i })).not.toBeInTheDocument();
 
+    // The option leads with provider, account, and status — the minted id
+    // trails, truncated.
     const select = within(panel).getByLabelText(/api_key/);
     await waitFor(() => expect(select).toBeEnabled());
+    const option = within(select).getByRole("option", { name: /API key · service-level · active/ });
+    expect(option.textContent).toContain("conn-0123456789ab…");
     await userEvent.selectOptions(select, "conn-0123456789abcdef0123456789abcdef");
     await userEvent.click(within(panel).getByRole("button", { name: "Instantiate connector" }));
 
@@ -198,7 +255,95 @@ describe("Connectors", () => {
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
   });
 
-  it("registers an oauth2_password connection from the instantiate panel and binds it to the slots", async () => {
+  it("goes straight into credential entry on an empty vault and instantiates in one motion (api_key)", async () => {
+    vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
+    const registered = connection({ connection_id: "conn-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" });
+    vi.mocked(listVaultConnections).mockResolvedValueOnce([]).mockResolvedValue([registered]);
+    vi.mocked(registerApiKeyConnection).mockResolvedValue(registered);
+    vi.mocked(createConnectorInstance).mockResolvedValue(instance({ instance_id: "inst-000010" }));
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Instantiate" }));
+    const panel = await screen.findByRole("complementary");
+    // No detour through a connection id: the credential form is already there.
+    expect(await within(panel).findByRole("heading", { name: "Connect with an API key" })).toBeVisible();
+    expect(panel).toHaveTextContent("No usable connection in this workspace yet");
+    expect(within(panel).queryByRole("button", { name: "Register a connection" })).not.toBeInTheDocument();
+
+    await userEvent.click(within(panel).getByLabelText("API key"));
+    await userEvent.paste("brave-search-key");
+    await userEvent.click(within(panel).getByRole("button", { name: "Connect and instantiate" }));
+
+    await waitFor(() => expect(registerApiKeyConnection).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(registerApiKeyConnection).mock.calls[0][0]).toEqual({ key: "brave-search-key" });
+    // Registration chains straight into instantiation with the fresh binding.
+    await waitFor(() => expect(createConnectorInstance).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
+      manifest_hash: manifestHash,
+      credentials: { api_key: "conn-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+    });
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+  });
+
+  it("serves the ServiceNow basic flow: username + password, sealed as a pair, slots auto-bound", async () => {
+    vi.mocked(listConnectorManifests).mockResolvedValue([servicenowManifest]);
+    const pair = {
+      username_connection: connection({ connection_id: "conn-cccccccccccccccccccccccccccccccc", provider: "basic", subject: "nexus.connector" }),
+      password_connection: connection({ connection_id: "conn-dddddddddddddddddddddddddddddddd", provider: "basic", subject: "nexus.connector" }),
+    };
+    vi.mocked(listVaultConnections)
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([pair.username_connection, pair.password_connection]);
+    vi.mocked(registerBasicConnection).mockResolvedValue(pair);
+    vi.mocked(createConnectorInstance).mockResolvedValue(
+      instance({ instance_id: "inst-000011", connector_id: "servicenow", manifest_hash: servicenowHash, credential_slots: ["username", "password"] }),
+    );
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Instantiate" }));
+    const panel = await screen.findByRole("complementary");
+    expect(await within(panel).findByRole("heading", { name: "Connect with instance credentials" })).toBeVisible();
+    // A basic-auth manifest has no use for the OAuth grant: no disclosure.
+    expect(within(panel).queryByText("Advanced: OAuth2 password grant")).not.toBeInTheDocument();
+
+    await userEvent.click(within(panel).getByLabelText("Instance username"));
+    await userEvent.paste("nexus.connector");
+    await userEvent.click(within(panel).getByLabelText("Instance password"));
+    await userEvent.paste("instance-password");
+    await userEvent.click(within(panel).getByRole("button", { name: "Connect and instantiate" }));
+
+    await waitFor(() => expect(registerBasicConnection).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(registerBasicConnection).mock.calls[0][0]).toEqual({
+      username: "nexus.connector",
+      password: "instance-password",
+    });
+    await waitFor(() => expect(createConnectorInstance).toHaveBeenCalledTimes(1));
+    // Each slot binds its own leg of the pair.
+    expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
+      manifest_hash: servicenowHash,
+      credentials: {
+        username: "conn-cccccccccccccccccccccccccccccccc",
+        password: "conn-dddddddddddddddddddddddddddddddd",
+      },
+    });
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+  });
+
+  it("drops into credential entry when every existing connection is unusable", async () => {
+    vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
+    vi.mocked(listVaultConnections).mockResolvedValue([
+      connection({ status: "revoked" }),
+      connection({ connection_id: "conn-99999999999999999999999999999999", status: "needs_reauth" }),
+    ]);
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Instantiate" }));
+    const panel = await screen.findByRole("complementary");
+    expect(await within(panel).findByRole("heading", { name: "Connect with an API key" })).toBeVisible();
+    expect(within(panel).queryByRole("combobox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the OAuth2 password grant behind the advanced disclosure and chains instantiation", async () => {
     vi.mocked(listConnectorManifests).mockResolvedValue([manifest]);
     const registered: VaultConnection = {
       connection_id: "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -218,9 +363,10 @@ describe("Connectors", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Instantiate" }));
     const panel = await screen.findByRole("complementary");
-    expect(panel).toHaveTextContent("No vault connections in this workspace");
-    await userEvent.click(within(panel).getAllByRole("button", { name: "Register a connection" })[0]);
-    expect(await within(panel).findByRole("heading", { name: "Register a vault connection" })).toBeVisible();
+    // The simple flow is primary; the grant is collapsed behind the disclosure.
+    expect(await within(panel).findByRole("heading", { name: "Connect with an API key" })).toBeVisible();
+    expect(within(panel).queryByLabelText("Token endpoint URL")).not.toBeVisible();
+    await userEvent.click(within(panel).getByText("Advanced: OAuth2 password grant"));
 
     // Client-side validation: a plain-http token endpoint never leaves the form.
     await userEvent.click(within(panel).getByLabelText("Token endpoint URL"));
@@ -233,14 +379,14 @@ describe("Connectors", () => {
     await userEvent.paste("nexus.connector");
     await userEvent.click(within(panel).getByLabelText("Password"));
     await userEvent.paste("account-password");
-    await userEvent.click(within(panel).getByRole("button", { name: "Register connection" }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Exchange and instantiate" }));
     expect(await within(panel).findByRole("alert")).toHaveTextContent("https://");
     expect(registerVaultConnection).not.toHaveBeenCalled();
 
     await userEvent.clear(within(panel).getByLabelText("Token endpoint URL"));
     await userEvent.click(within(panel).getByLabelText("Token endpoint URL"));
     await userEvent.paste("https://dev394299.service-now.com/oauth_token.do");
-    await userEvent.click(within(panel).getByRole("button", { name: "Register connection" }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Exchange and instantiate" }));
 
     await waitFor(() => expect(registerVaultConnection).toHaveBeenCalledTimes(1));
     expect(vi.mocked(registerVaultConnection).mock.calls[0][0]).toEqual({
@@ -251,21 +397,13 @@ describe("Connectors", () => {
       password: "account-password",
     });
 
-    // The receipt stays visible until the operator binds it into the slots.
-    const receipt = await within(panel).findByRole("status");
-    expect(receipt).toHaveTextContent("Connection registered.");
-    expect(receipt).toHaveTextContent("conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    await userEvent.click(within(receipt).getByRole("button", { name: "Bind and continue" }));
-
-    // Every still-empty slot is bound to the new connection id.
-    const select = within(panel).getByLabelText(/api_key/);
-    await waitFor(() => expect(select).toHaveValue("conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
-    await userEvent.click(within(panel).getByRole("button", { name: "Instantiate connector" }));
+    // One motion: the grant's minted token binds the slot and instantiates.
     await waitFor(() => expect(createConnectorInstance).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createConnectorInstance).mock.calls[0][0]).toEqual({
       manifest_hash: manifestHash,
       credentials: { api_key: "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     });
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
   });
 
   it("reflects the server's missing-slot 422 inline on the named slot", async () => {

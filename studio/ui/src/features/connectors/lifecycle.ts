@@ -1,4 +1,9 @@
-import type { LifecycleState } from "../../lib/api/connectors";
+import type {
+  ConnectorManifest,
+  CredentialSlot,
+  LifecycleState,
+  VaultConnection,
+} from "../../lib/api/connectors";
 
 export interface StatePresentation {
   label: string;
@@ -58,4 +63,68 @@ export const providerKindLabels: Record<string, string> = {
 
 export function providerKindLabel(kind: string) {
   return providerKindLabels[kind] ?? kind;
+}
+
+export const connectionProviderLabels: Record<string, string> = {
+  oauth2_authorization_code: "OAuth2 · authorization code",
+  oauth2_client_credentials: "OAuth2 · client credentials",
+  oauth2_password: "OAuth2 · password grant",
+  api_key: "API key",
+  basic: "Basic auth",
+};
+
+export function connectionProviderLabel(provider: string) {
+  return connectionProviderLabels[provider] ?? provider;
+}
+
+/// The picker label for one vault connection: provider, account, and
+/// status lead; the minted id trails, truncated — a connection is chosen
+/// by what it is, not by its hex.
+export function connectionLabel(record: VaultConnection) {
+  const subject = record.subject ?? "service-level";
+  return `${connectionProviderLabel(record.provider)} · ${subject} · ${record.status} · ${record.connection_id.slice(0, 17)}…`;
+}
+
+/// The credential-entry flow a manifest's auth declaration asks for.
+///
+/// `basic` is the http-api two-slot style (username + password legs);
+/// `key` is any single-slot manifest, where one static secret fills the
+/// slot (a bearer token, a header key, a query key — the wire style is the
+/// manifest's business, the vault material is identical). `picker` covers
+/// everything else: no tailored form exists, and the panel binds slots
+/// from existing connections only.
+export type CredentialFlow =
+  | { kind: "basic"; usernameSlot: CredentialSlot; passwordSlot: CredentialSlot }
+  | { kind: "key"; slot: CredentialSlot }
+  | { kind: "picker" };
+
+export function credentialFlow(manifest: ConnectorManifest): CredentialFlow {
+  if (manifest.provider.kind === "http_api" && manifest.provider.auth?.style === "basic") {
+    const { username_slot, password_slot } = manifest.provider.auth;
+    const usernameSlot = manifest.credential_slots.find((slot) => slot.name === username_slot);
+    const passwordSlot = manifest.credential_slots.find((slot) => slot.name === password_slot);
+    if (usernameSlot && passwordSlot) return { kind: "basic", usernameSlot, passwordSlot };
+  }
+  if (manifest.credential_slots.length === 1) {
+    return { kind: "key", slot: manifest.credential_slots[0] };
+  }
+  return { kind: "picker" };
+}
+
+/// Which existing connections a manifest's flow can consume. A `basic`
+/// manifest needs basic-auth connections (each leg's value lives in the
+/// connection's sealed access token); a single-slot manifest takes any
+/// non-basic active connection; anything else accepts any active record.
+/// Only `active` connections issue — `needs_reauth` and `revoked` fail at
+/// the vault, so the picker never offers them.
+export function usableConnections(
+  manifest: ConnectorManifest,
+  connections: VaultConnection[],
+): VaultConnection[] {
+  const flow = credentialFlow(manifest);
+  return connections.filter(
+    (connection) =>
+      connection.status === "active" &&
+      (flow.kind === "basic" ? connection.provider === "basic" : connection.provider !== "basic"),
+  );
 }
