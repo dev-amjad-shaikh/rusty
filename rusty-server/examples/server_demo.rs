@@ -18,6 +18,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rusty_agent_runtime::connector::{
+    ConnectorManifest, ConnectorOperation, HttpMethod, OperationAuth, OperationEffect,
+};
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::tool::builtins::{
     CalculatorTool, KnowledgeDocument, KnowledgeSearchTool, SandboxedDocumentReaderTool,
@@ -135,6 +138,200 @@ fn build_react_graph() -> Result<(Graph, StateSpec, ToolRegistry)> {
     Ok((graph, spec, tools))
 }
 
+/// The ServiceNow demo pack, instance-agnostic per
+/// `docs/connector-surface-design.md`: the manifest pins
+/// `https://{instance}.service-now.com` and a draft-07
+/// `connection_specification` — `instance` (pattern-constrained
+/// subdomain) plus a `credentials` oneOf (basic: username + password,
+/// both `rusty_secret`; or an OAuth token) — with Table API operations
+/// (get-record, list-records, create-incident) and a parameterless
+/// read-only check (`GET /api/now/table/sys_user?sysparm_limit=1`).
+/// The operator's instance and credentials arrive with the config at
+/// instantiation, never in the content-pinned manifest.
+fn servicenow_pack() -> ConnectorManifest {
+    let spec = json!({
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "ServiceNow Connection Spec",
+        "type": "object",
+        "required": ["instance", "credentials"],
+        "additionalProperties": false,
+        "properties": {
+            "instance": {
+                "type": "string",
+                "title": "Instance",
+                "pattern": "^[a-z0-9-]+$",
+                "rusty_pattern_descriptor": "your-instance.service-now.com",
+                "rusty_order": 0
+            },
+            "credentials": {
+                "type": "object",
+                "title": "Authentication",
+                "rusty_order": 1,
+                "rusty_group": "auth",
+                "oneOf": [
+                    {
+                        "title": "Basic",
+                        "type": "object",
+                        "required": ["auth", "username", "password"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "auth": {"type": "string", "const": "basic"},
+                            "username": {"type": "string", "title": "Username", "rusty_secret": true},
+                            "password": {"type": "string", "title": "Password", "rusty_secret": true}
+                        }
+                    },
+                    {
+                        "title": "OAuth token",
+                        "type": "object",
+                        "required": ["auth", "token"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "auth": {"type": "string", "const": "oauth"},
+                            "token": {"type": "string", "title": "Access token", "rusty_secret": true}
+                        }
+                    }
+                ]
+            }
+        }
+    });
+    let auth = vec![
+        OperationAuth::Basic {
+            username: "{credentials.username}".to_owned(),
+            password: "{credentials.password}".to_owned(),
+        },
+        OperationAuth::Bearer {
+            token: "{credentials.token}".to_owned(),
+        },
+    ];
+    let op = |name: &str, method: HttpMethod, path: &str, effect: OperationEffect, params: Value, description: &str| {
+        ConnectorOperation {
+            name: name.to_owned(),
+            description: description.to_owned(),
+            method,
+            path: path.to_owned(),
+            effect,
+            params_schema: params,
+            headers: Vec::new(),
+            auth: auth.clone(),
+            max_response_bytes: None,
+        }
+    };
+    ConnectorManifest::new(
+        "servicenow",
+        "1",
+        "ServiceNow",
+        "ServiceNow Table API: get and list records in any table, and create incidents.",
+        "https://www.servicenow.com/docs/",
+        "https://{instance}.service-now.com",
+        spec,
+        vec![
+            op(
+                "get-record",
+                HttpMethod::Get,
+                "/api/now/table/{table}/{sys_id}",
+                OperationEffect::ReadOnly,
+                json!({
+                    "type": "object",
+                    "required": ["table", "sys_id"],
+                    "properties": {"table": {"type": "string"}, "sys_id": {"type": "string"}}
+                }),
+                "Get one record from a ServiceNow table by sys_id.",
+            ),
+            op(
+                "list-records",
+                HttpMethod::Get,
+                "/api/now/table/{table}",
+                OperationEffect::ReadOnly,
+                json!({
+                    "type": "object",
+                    "required": ["table"],
+                    "properties": {
+                        "table": {"type": "string"},
+                        "sysparm_query": {"type": "string"},
+                        "sysparm_fields": {"type": "string"},
+                        "sysparm_limit": {"type": "integer"},
+                        "sysparm_offset": {"type": "integer"}
+                    }
+                }),
+                "List records from a ServiceNow table, with sysparm filtering and pagination.",
+            ),
+            op(
+                "create-incident",
+                HttpMethod::Post,
+                "/api/now/table/incident",
+                OperationEffect::Compensatable,
+                json!({
+                    "type": "object",
+                    "required": ["short_description"],
+                    "properties": {
+                        "short_description": {"type": "string"},
+                        "description": {"type": "string"},
+                        "urgency": {"type": "string"},
+                        "impact": {"type": "string"}
+                    }
+                }),
+                "Create an incident in ServiceNow.",
+            ),
+            op(
+                "check-connection",
+                HttpMethod::Get,
+                "/api/now/table/sys_user?sysparm_limit=1",
+                OperationEffect::ReadOnly,
+                json!({"type": "object"}),
+                "Verify connectivity and credentials by reading one sys_user row.",
+            ),
+        ],
+        "check-connection",
+    )
+    .expect("the ServiceNow demo pack validates")
+}
+
+/// Seed the ServiceNow pack into the demo's connector surface, so
+/// Studio's Connectors page has a schema-driven connector to walk
+/// through on first boot. Registration is idempotent by content hash: a
+/// restart against a store that already holds the pack converges with
+/// `registered: false`, and nothing here blocks serving.
+///
+/// Instantiate it with `POST /connectors/instances` —
+/// `config: {"instance": "<subdomain>", "credentials": {"auth": "basic",
+/// "username": …, "password": …}}`; the secrets seal through the
+/// broker before anything persists.
+async fn seed_servicenow_pack(addr: std::net::SocketAddr) -> std::result::Result<(), String> {
+    let manifest = servicenow_pack();
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    // The listener comes up inside `serve`; poll `/ok` briefly rather
+    // than racing the bind. A demo that never comes up gives up with a
+    // warning instead of hanging the runtime on a stray task.
+    let mut ready = false;
+    for _ in 0..120 {
+        match client.get(format!("{base}/ok")).send().await {
+            Ok(response) if response.status().is_success() => {
+                ready = true;
+                break;
+            }
+            _ => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+        }
+    }
+    if !ready {
+        return Err("the demo server never answered /ok".to_owned());
+    }
+
+    let response = client
+        .post(format!("{base}/connectors"))
+        .json(&manifest)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("POST /connectors answered {status}: {body}"));
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
@@ -160,6 +357,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     .with_oauth_provider(Arc::new(
         rusty_agent_server::oauth::ReqwestOAuthProvider::new(),
     ));
+
+    // Seed the connector surface once the listener is up (see the
+    // function's contract): the ServiceNow pack registers by content
+    // hash, idempotently.
+    {
+        let seed_addr = config.bind_addr;
+        tokio::spawn(async move {
+            if let Err(error) = seed_servicenow_pack(seed_addr).await {
+                tracing::warn!(error = %error, "ServiceNow demo pack seeding skipped");
+            }
+        });
+    }
 
     // The menu below is printed with the *actual* address so the test-hook
     // override stays honest when a human runs the demo with it set.
@@ -202,6 +411,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!(
         "    -d '{{\"input\": {{\"messages\": [{{\"role\": \"user\", \"content\": \"say pong\"}}]}}}}' | jq\n"
     );
+    println!("  # connector surface: the ServiceNow Table API pack is seeded");
+    println!("  # (instance-agnostic: config supplies the subdomain + credentials)");
+    println!("  curl -s {base}/connectors | jq '.manifests[].id'\n");
 
     serve(registry, config).await?;
     Ok(())

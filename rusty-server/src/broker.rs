@@ -197,7 +197,23 @@ fn seal_new(
     material: &TokenMaterial,
 ) -> StoreResult<SealedCredential> {
     let data_key = draw_random::<32>();
-    seal_with_data_key(master_id, master, connection_id, &data_key, None, material)
+    let plaintext =
+        serde_json::to_vec(material).map_err(|e| format!("serialize token material: {e}"))?;
+    seal_bytes_with_data_key(master_id, master, connection_id, &data_key, None, &plaintext)
+}
+
+/// Seal arbitrary plaintext under a freshly minted data key — the
+/// connector surface's secret fields (docs/connector-surface-design.md).
+/// Same envelope, same AAD discipline: `owner` (the tenant-scoped
+/// instance id) authenticates both seals.
+fn seal_bytes_new(
+    master_id: &str,
+    master: &[u8; 32],
+    owner: &str,
+    plaintext: &[u8],
+) -> StoreResult<SealedCredential> {
+    let data_key = draw_random::<32>();
+    seal_bytes_with_data_key(master_id, master, owner, &data_key, None, plaintext)
 }
 
 /// Re-seal under the *existing* envelope's data key — the consent path:
@@ -230,6 +246,26 @@ fn seal_with_data_key(
     existing: Option<&SealedCredential>,
     material: &TokenMaterial,
 ) -> StoreResult<SealedCredential> {
+    let plaintext =
+        serde_json::to_vec(material).map_err(|e| format!("serialize token material: {e}"))?;
+    seal_bytes_with_data_key(
+        master_id,
+        master,
+        connection_id,
+        data_key,
+        existing,
+        &plaintext,
+    )
+}
+
+fn seal_bytes_with_data_key(
+    master_id: &str,
+    master: &[u8; 32],
+    connection_id: &str,
+    data_key: &[u8; 32],
+    existing: Option<&SealedCredential>,
+    plaintext: &[u8],
+) -> StoreResult<SealedCredential> {
     let aad = connection_id.as_bytes();
     let (wrapped_data_key, wrap_nonce) = match existing {
         Some(envelope) => (
@@ -247,14 +283,12 @@ fn seal_with_data_key(
             (hex_encode(&wrapped), hex_encode(&wrap_nonce_bytes))
         }
     };
-    let plaintext =
-        serde_json::to_vec(material).map_err(|e| format!("serialize token material: {e}"))?;
     let nonce_bytes = draw_random::<24>();
     let ciphertext = XChaCha20Poly1305::new(data_key.into())
         .encrypt(
             chacha20poly1305::XNonce::from_slice(&nonce_bytes),
             chacha20poly1305::aead::Payload {
-                msg: &plaintext,
+                msg: plaintext,
                 aad,
             },
         )
@@ -304,6 +338,18 @@ fn open(
     connection_id: &str,
     envelope: &SealedCredential,
 ) -> StoreResult<TokenMaterial> {
+    let plaintext = open_bytes(master, connection_id, envelope)?;
+    serde_json::from_slice(&plaintext).map_err(|e| format!("corrupt token material: {e}"))
+}
+
+/// The byte-level half of [`open`]: decrypt and return the plaintext
+/// unparsed — the connector surface's secret fields are config-shaped
+/// values, not `TokenMaterial`.
+fn open_bytes(
+    master: &[u8; 32],
+    connection_id: &str,
+    envelope: &SealedCredential,
+) -> StoreResult<Vec<u8>> {
     if envelope.format_version != SEALED_FORMAT_VERSION {
         return Err(format!(
             "envelope format version {} is not {SEALED_FORMAT_VERSION}",
@@ -318,7 +364,7 @@ fn open(
     if nonce.len() != 24 {
         return Err("corrupt envelope: nonce is not 24 bytes".to_string());
     }
-    let plaintext = XChaCha20Poly1305::new((&data_key).into())
+    XChaCha20Poly1305::new((&data_key).into())
         .decrypt(
             chacha20poly1305::XNonce::from_slice(&nonce),
             chacha20poly1305::aead::Payload {
@@ -326,8 +372,7 @@ fn open(
                 aad: connection_id.as_bytes(),
             },
         )
-        .map_err(|_| "the sealed credential failed its authentication tag".to_string())?;
-    serde_json::from_slice(&plaintext).map_err(|e| format!("corrupt token material: {e}"))
+        .map_err(|_| "the sealed credential failed its authentication tag".to_string())
 }
 
 // --------------------------------------------------------------------- //
@@ -623,6 +668,32 @@ impl Broker {
             .find(|(id, _)| id == key_id)
             .map(|(_, key)| key)
             .ok_or_else(|| format!("master key `{key_id}` is not held by this host"))
+    }
+
+    /// Seal one connector config secret (the schema-driven connector
+    /// surface, docs/connector-surface-design.md): the same envelope
+    /// encryption as connection material, with the tenant-scoped
+    /// instance id as associated data. The sealed envelope is what the
+    /// instance record persists — ciphertext only, on either backend.
+    pub(crate) async fn seal_connector_secret(
+        &self,
+        owner: &str,
+        plaintext: &[u8],
+    ) -> StoreResult<SealedCredential> {
+        let (master_id, master) = self.active_master().await?;
+        seal_bytes_new(&master_id, &master, owner, plaintext)
+    }
+
+    /// Open one connector config secret, host-side at call time only.
+    /// The plaintext goes into the outbound request's auth material and
+    /// nowhere else.
+    pub(crate) async fn open_connector_secret(
+        &self,
+        owner: &str,
+        envelope: &SealedCredential,
+    ) -> StoreResult<Vec<u8>> {
+        let master = self.master_for(&envelope.key_id).await?;
+        open_bytes(&master, owner, envelope)
     }
 
     /// Append one event to the deployment's broker journal, persisting
