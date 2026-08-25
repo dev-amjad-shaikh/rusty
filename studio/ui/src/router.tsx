@@ -3,9 +3,9 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
-  redirect,
 } from "@tanstack/react-router";
 import { AppShell } from "./app/AppShell";
+import { CommandCenter } from "./features/command-center/CommandCenter";
 import { AgentsPage } from "./features/agents/AgentsPage";
 import { AgentBuilderPage } from "./features/agents/AgentBuilderPage";
 import { AgentWorkspace } from "./features/agents/AgentWorkspace";
@@ -31,7 +31,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  beforeLoad: () => { throw redirect({ to: "/work" }); },
+  component: CommandCenter,
 });
 
 const agentsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/agents", component: AgentsPage });
