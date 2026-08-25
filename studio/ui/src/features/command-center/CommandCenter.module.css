@@ -114,11 +114,11 @@
   background: var(--lane-color, var(--text-faint));
   transition: width 240ms cubic-bezier(.22, .61, .36, 1);
 }
-.lane[data-lane="queued"] { --lane-color: #8b837b; }
-.lane[data-lane="working"] { --lane-color: #c9a98f; }
-.lane[data-lane="needs"] { --lane-color: #e06a4a; }
-.lane[data-lane="stuck"] { --lane-color: #f0862b; }
-.lane[data-lane="done"] { --lane-color: #ece0d5; }
+.lane[data-lane="queued"] { --lane-color: var(--lane-queued); }
+.lane[data-lane="working"] { --lane-color: var(--lane-working); }
+.lane[data-lane="needs"] { --lane-color: var(--lane-needs); }
+.lane[data-lane="stuck"] { --lane-color: var(--lane-stuck); }
+.lane[data-lane="done"] { --lane-color: var(--lane-done); }
 .lane > header {
   min-height: 20px;
   display: grid;
@@ -166,11 +166,19 @@
   background: var(--lane-color, var(--rust));
   box-shadow: 0 0 10px var(--lane-color, rgb(232 116 42 / .72));
 }
+.riskSignal::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  animation: pulseRing 2.6s cubic-bezier(.2, .6, .3, 1) infinite;
+  content: "";
+}
 .workCard h3 {
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
-  padding-right: 14px;
+  padding-right: 16px;
   color: #f7ece4;
   font-size: 14px;
   font-weight: 300;
@@ -216,6 +224,8 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
+.workCard[data-lane="needs"] .cardStatus,
+.workCard[data-lane="stuck"] .cardStatus { color: var(--text); }
 .activityBar {
   height: 3px;
   display: block;
@@ -253,15 +263,16 @@
 }
 .workCard small span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workCard small span:last-child { flex: 0 0 auto; color: var(--text-muted); }
+.workCard[data-lane="needs"] small > span:first-child { color: var(--lane-needs); }
+.workCard[data-lane="stuck"] small > span:first-child { color: var(--lane-stuck); }
 .emptyLane {
-  min-height: 54px;
   margin: 0;
   padding: 14px 12px;
-  border-block: 1px solid rgb(236 150 96 / .09);
-  background: linear-gradient(135deg, rgb(255 238 222 / .018), transparent 74%);
+  border: 1px dashed rgb(236 150 96 / .14);
+  border-radius: 18px;
   color: var(--text-faint);
-  font: 400 10.5px/1.5 var(--mono);
-  text-align: left;
+  font: 400 11px/1.5 var(--mono);
+  text-align: center;
 }
 .moreAttention {
   display: block;
@@ -281,6 +292,7 @@
 
 @keyframes livePulse { 50% { opacity: .45; transform: scale(.82); } }
 @keyframes activitySweep { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
+@keyframes pulseRing { from { opacity: .8; transform: scale(1); } to { opacity: 0; transform: scale(3.4); } }
 
 @media (max-width: 1100px) {
   .lanes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -304,7 +316,7 @@
   .workCard { padding: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .liveSummary i, .activityBar i::after { animation: none; }
+  .liveSummary i, .activityBar i::after, .riskSignal::after { animation: none; }
   .laneMeter span { transition: none; }
 }
 @media (forced-colors: active) {

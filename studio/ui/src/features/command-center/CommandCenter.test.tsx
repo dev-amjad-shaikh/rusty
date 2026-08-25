@@ -66,6 +66,8 @@ describe("v4 Command Center", () => {
     expect(screen.queryByText(/Retry 1/)).not.toBeInTheDocument();
     expect(screen.getByText("Session runs and current operational exceptions.")).toBeVisible();
     expect(screen.getByRole("link", { name: /running customer request/ }).closest('[data-rusty-card="forged"]')).toHaveAttribute("data-tone", "working");
+    expect(screen.getByRole("link", { name: /running customer request/ })).toHaveAttribute("data-lane", "working");
+    expect(screen.getByRole("link", { name: /error customer request/ })).toHaveAttribute("data-lane", "stuck");
     await user.click(screen.getByRole("button", { name: "Active" }));
     expect(screen.getByRole("button", { name: "Active" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("link", { name: /running customer request/ })).toBeVisible();
@@ -107,10 +109,11 @@ describe("v4 Command Center", () => {
   });
 
   it("keeps the Needs you lane bounded and hands off every additional exception", async () => {
+    const observedAt = new Date(Date.now() - (3 * 3600 + 2 * 60) * 1000).toISOString();
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       const url = new URL(input, "http://studio.local");
       if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([]);
-      if (url.pathname.replace(/^\/api/, "") === "/tasks" && url.search === "?status=dead") return response(Array.from({ length: 8 }, (_, index) => ({ task_id: `task-${index}`, kind: `job_${index}`, pool: "default", status: "dead", last_error: "Stopped.", next_attempt_at: null, run_id: null, thread_id: null, updated_at: "2026-08-11T00:00:00Z" })));
+      if (url.pathname.replace(/^\/api/, "") === "/tasks" && url.search === "?status=dead") return response(Array.from({ length: 8 }, (_, index) => ({ task_id: `task-${index}`, kind: `job_${index}`, pool: "default", status: "dead", last_error: "Stopped.", next_attempt_at: null, run_id: null, thread_id: null, updated_at: observedAt })));
       if (url.pathname.replace(/^\/api/, "") === "/tasks") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
@@ -121,6 +124,8 @@ describe("v4 Command Center", () => {
     expect(await within(lane).findAllByRole("link", { name: /Review job_/ })).toHaveLength(6);
     expect(within(lane).getByRole("link", { name: "Review 2 more in Operations" })).toHaveAttribute("href", "/operations");
     expect(screen.getByText("0 running · 8 need you · 0 stuck")).toBeVisible();
+    expect(screen.getByText("Now: 8 blocked · oldest 3h 2m")).toBeVisible();
+    expect(within(lane).getAllByText("3h 2m waiting")).toHaveLength(6);
   });
 
   it("turns a verified empty board into a next action instead of five captions", async () => {

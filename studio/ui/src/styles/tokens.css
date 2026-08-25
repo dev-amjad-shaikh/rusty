@@ -31,6 +31,11 @@
   --danger: #ff786d;
   --danger-soft: #311411;
   --warning: #efb15f;
+  --lane-queued: #8b837b;
+  --lane-working: #c9a98f;
+  --lane-needs: #e06a4a;
+  --lane-stuck: #f0862b;
+  --lane-done: #ece0d5;
   --mono: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
   --sans: "Outfit", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --display: "Outfit", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
