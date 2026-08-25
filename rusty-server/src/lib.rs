@@ -43,6 +43,7 @@
 //! | `GET /runs/diff?base=&branch=` | Flight Recorder: structural diff of two runs' journals (core's `BranchDiff` shape: `first_divergent_seq`, `added`/`removed` events, per-step channel diffs, token/cost totals) |
 //! | `DELETE /threads/{id}/runs/{run_id}` | rollback: delete a finished run's checkpoints (JSON-file checkpointer only; `409` on Postgres) |
 //! | `GET /runs/{run_id}` | run status polling (plus `output`/`error`/`interrupt` once terminal) |
+//! | `GET /runs?limit=` | bounded recall of the tenant's recent runs, newest first (default 25, max 100): the process's live/retained runs merged with persisted journals, so work started by any client stays listable after eviction or restart; per-run `{run_id, thread_id, graph, status}` plus `assistant_id`, `created_at`, and a bounded `metadata.studio.objective` excerpt when evidence holds them |
 //! | `POST /assistants` | create a named graph alias with config metadata |
 //! | `GET /assistants` / `GET /assistants/{id}` | list / fetch assistants |
 //! | `POST /assistants/{id}/archive` / `POST /assistants/{id}/restore` | reversibly retire or return an assistant using an expected-active-version guard; archived assistants retain their immutable lineage and history but reject new runs |

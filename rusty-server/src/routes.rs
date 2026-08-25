@@ -46,7 +46,7 @@ use rusty_agent_runtime::memory::{
 };
 use rusty_agent_runtime::record::{
     derive_policy_version, sha256_hex, CapsuleVersion, DecisionEvent, Effect, EffectReceipt,
-    ExecutorPolicy, JournalRef, PayloadRef, PolicyVersion, RunEventKind,
+    EventStatus, ExecutorPolicy, JournalRef, PayloadRef, PolicyVersion, RunEvent, RunEventKind,
 };
 use rusty_agent_runtime::registry::{diff_candidates, ArtifactRecord, RegistryError};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
@@ -367,6 +367,7 @@ pub(crate) fn build_router(
             "/threads/{thread_id}/runs/{run_id}",
             delete(delete_run_checkpoints),
         )
+        .route("/runs", get(list_runs))
         .route("/runs/{run_id}", get(get_run))
         .route("/runs/{run_id}/cancel", post(cancel_run))
         .route("/runs/{run_id}/stream", get(get_run_stream))
@@ -1817,6 +1818,255 @@ async fn get_run(
         }
     }
     Ok(Json(body))
+}
+
+/// Cap on the `metadata.studio.objective` excerpt a recalled run carries:
+/// the list is a board, not the record — the full metadata stays on
+/// `GET /runs/{id}`.
+const RECALLED_OBJECTIVE_CHARS: usize = 500;
+
+#[derive(Debug, Deserialize)]
+struct ListRunsQuery {
+    /// Cap on returned runs (default 25, max 100).
+    limit: Option<usize>,
+}
+
+/// One recalled run, pre-serialization: the sort key rides alongside the
+/// wire fields so entries without evidence of a start time sort last
+/// instead of borrowing one.
+struct RecalledRun {
+    run_id: String,
+    wire_thread_id: String,
+    graph: String,
+    assistant_id: Option<String>,
+    objective: Option<String>,
+    status: &'static str,
+    created_at: Option<DateTime<Utc>>,
+}
+
+impl RecalledRun {
+    fn into_wire(self) -> Value {
+        let mut body = json!({
+            "run_id": self.run_id,
+            "thread_id": self.wire_thread_id,
+            "graph": self.graph,
+            "status": self.status,
+        });
+        if let Some(body) = body.as_object_mut() {
+            if let Some(assistant_id) = self.assistant_id {
+                body.insert("assistant_id".to_string(), json!(assistant_id));
+            }
+            if let Some(created_at) = self.created_at {
+                body.insert("created_at".to_string(), json!(created_at));
+            }
+            if let Some(objective) = self.objective {
+                body.insert(
+                    "metadata".to_string(),
+                    json!({ "studio": { "objective": objective } }),
+                );
+            }
+        }
+        body
+    }
+}
+
+/// `GET /runs?limit=` — bounded recall of the tenant's recent runs, newest
+/// first: every run this process still holds (live and retained terminal),
+/// plus every run readable only through its persisted journal — so work
+/// started by any client (curl, an SDK, a cron, another browser) stays
+/// visible after the live record is evicted or the process restarts. One
+/// entry per run id: the live record wins the dedupe, being both fresher
+/// and richer (it still has the accepted payload).
+///
+/// A journal joins the list only through an ownership proof: its wire
+/// thread id, scoped to the caller's tenant, must resolve to a thread
+/// record — which also names the graph the run executed. Because journals
+/// record the *wire* thread id and wire ids collide across tenants by
+/// design, the thread record alone only proves a same-named thread exists;
+/// so a journal that journaled checkpoints must also name one the caller's
+/// namespace actually holds ([`journal_owned`]) — checkpoint ids are
+/// server-minted, never shared across tenants. Journals written before
+/// their run's first checkpoint boundary carry no checkpoint to verify and
+/// stand on the thread proof alone. Non-run journals (the deployment
+/// chain, the broker's, shadow runs) and other tenants' runs fail the
+/// proof and are skipped, as is a journal that fails its integrity check —
+/// unchecked evidence is absent, never served (the health board's rule).
+/// An empty journal carries no evidence at all and is skipped too.
+///
+/// Item shape: `{run_id, thread_id, graph, status}` always; `assistant_id`
+/// and `metadata.studio.objective` (excerpt, bounded by
+/// [`RECALLED_OBJECTIVE_CHARS`]) when the accepted payload is still held —
+/// persisted journals record neither, so recalled-after-restart entries
+/// omit them rather than reconstruct them; `created_at` when real evidence
+/// exists — the live record's acceptance time, else the journal's earliest
+/// `recorded_at`. A field with no evidence is omitted, never fabricated.
+///
+/// A persisted run's `status` is what its journal proves
+/// ([`journal_status`]): the journal is the run's final write on every
+/// completed outcome, so the one dishonest case is a process kill between
+/// checkpoint boundaries, whose truncated journal reads as `success`.
+async fn list_runs(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<ListRunsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let limit = query.limit.unwrap_or(25).min(100);
+    let mut recalled: Vec<RecalledRun> = Vec::new();
+    let mut held: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (run_id, info) in state.run_deps.manager.list().await {
+        // Cross-tenant runs are invisible (the `GET /runs/{id}` rule).
+        if !tenant.owns(&info.thread_id) {
+            continue;
+        }
+        held.insert(run_id.clone());
+        recalled.push(RecalledRun {
+            run_id,
+            wire_thread_id: info.wire_thread_id,
+            graph: info.graph,
+            assistant_id: info.assistant_id,
+            objective: info.metadata.as_ref().and_then(studio_objective),
+            status: info.status.as_str(),
+            created_at: Some(info.created_at),
+        });
+    }
+    let journals = state
+        .server_store
+        .list_journals()
+        .await
+        .map_err(internal_err)?;
+    for snapshot in journals {
+        if held.contains(&snapshot.run_id) {
+            continue;
+        }
+        let internal_thread_id = tenant.scope(&snapshot.thread_id);
+        let Some(thread) = state
+            .server_store
+            .get_thread(&internal_thread_id)
+            .await
+            .map_err(internal_err)?
+        else {
+            continue;
+        };
+        let run_id = snapshot.run_id.clone();
+        let wire_thread_id = snapshot.thread_id.clone();
+        // Integrity check (the health board's rule): a journal that fails
+        // verification is skipped, never served as fact.
+        if Journal::from_snapshot(snapshot.clone(), Clock::System).is_err() {
+            continue;
+        }
+        if snapshot.events.is_empty() {
+            continue;
+        }
+        if !journal_owned(&state, &internal_thread_id, &snapshot)
+            .await
+            .map_err(internal_err)?
+        {
+            continue;
+        }
+        recalled.push(RecalledRun {
+            run_id,
+            wire_thread_id,
+            graph: thread.graph,
+            assistant_id: None,
+            objective: None,
+            status: journal_status(&snapshot.events),
+            created_at: snapshot.events.iter().map(|event| event.recorded_at).min(),
+        });
+    }
+    // Newest first; runs without evidence of a start time sort last, then
+    // by run id for a stable listing.
+    recalled.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.run_id.cmp(&b.run_id))
+    });
+    recalled.truncate(limit);
+    Ok(Json(json!(recalled
+        .into_iter()
+        .map(RecalledRun::into_wire)
+        .collect::<Vec<_>>())))
+}
+
+/// The `RunStatus` a persisted journal proves, in the same wire vocabulary
+/// the live registry reports. The terminal markers are unambiguous because
+/// each one ends the run it is recorded in: a `run_cancelled` event means
+/// cancelled, an `interrupt` event means suspended (a resume is a new run),
+/// and a run whose *last* recorded event ended in `error` unwound with that
+/// failure — mid-run failures a retry absorbed are always followed by the
+/// events of the step that continued. Anything else reached its final
+/// journal write without a failure marker: `success`.
+fn journal_status(events: &[RunEvent]) -> &'static str {
+    if events
+        .iter()
+        .any(|event| event.kind == RunEventKind::RunCancelled)
+    {
+        return RunStatus::Cancelled.as_str();
+    }
+    if events.iter().any(|event| {
+        event.kind == RunEventKind::Interrupt && event.status == EventStatus::Interrupted
+    }) {
+        return RunStatus::Interrupted.as_str();
+    }
+    if events
+        .iter()
+        .max_by_key(|event| event.seq)
+        .is_some_and(|event| event.status == EventStatus::Error)
+    {
+        return RunStatus::Error.as_str();
+    }
+    RunStatus::Success.as_str()
+}
+
+/// The checkpoint half of a persisted journal's ownership proof
+/// (`GET /runs`): the journal must name a checkpoint the caller's tenant
+/// namespace actually holds. Checkpoint ids are server-minted UUIDs keyed
+/// under the internal (tenant-scoped) thread id, so another tenant's
+/// same-named thread cannot satisfy this — the wire thread id recorded in
+/// the journal is not itself proof of ownership. A journal with no
+/// checkpoint events (its run ended before the first boundary) has nothing
+/// to verify against and answers `true`, standing on the caller's
+/// thread-record lookup alone.
+async fn journal_owned(
+    state: &AppState,
+    internal_thread_id: &str,
+    snapshot: &JournalSnapshot,
+) -> rusty_agent_runtime::error::Result<bool> {
+    let checkpoint_ids: Vec<String> = snapshot
+        .events
+        .iter()
+        .filter(|event| event.kind == RunEventKind::CheckpointWritten)
+        .filter_map(|event| crate::replay::resolve(snapshot, event.output.as_ref()))
+        .filter_map(|output| output.get("checkpoint_id")?.as_str().map(str::to_owned))
+        .collect();
+    // No journaled checkpoint: the run ended before its first boundary, so
+    // there is nothing to verify against — the caller's thread-record
+    // lookup stands alone.
+    if checkpoint_ids.is_empty() {
+        return Ok(true);
+    }
+    for checkpoint_id in checkpoint_ids {
+        if state
+            .checkpointer
+            .get_by_id(internal_thread_id, &checkpoint_id)
+            .await?
+            .is_some()
+        {
+            return Ok(true);
+        }
+    }
+    // Journaled but unresolvable here: the run's state is not in this
+    // tenant's namespace — not this tenant's run. (A run whose checkpoints
+    // were rolled back after completion also reads as unowned: rolled-back
+    // work asked to be forgotten.)
+    Ok(false)
+}
+
+/// Studio's declared objective out of an accepted run payload's metadata,
+/// excerpted to [`RECALLED_OBJECTIVE_CHARS`] — the board shows the start of
+/// the objective; the run view shows the whole.
+fn studio_objective(metadata: &Value) -> Option<String> {
+    let objective = metadata.get("studio")?.get("objective")?.as_str()?;
+    Some(objective.chars().take(RECALLED_OBJECTIVE_CHARS).collect())
 }
 
 /// `POST /runs/{run_id}/cancel` — propagate cancellation into the run's
