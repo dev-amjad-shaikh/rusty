@@ -416,6 +416,31 @@ pub(crate) struct RunInfo {
     pub checkpoint_ids: Arc<StdMutex<Vec<String>>>,
 }
 
+/// Build the read-only view of one handle (the [`RunManager::info`] /
+/// [`RunManager::list`] mapping).
+fn run_info_of(h: &RunHandle) -> RunInfo {
+    RunInfo {
+        thread_id: h.thread_id.clone(),
+        wire_thread_id: h.wire_thread_id.clone(),
+        graph: h.graph.clone(),
+        assistant_id: h.payload.assistant_id.clone(),
+        metadata: h.payload.metadata.clone(),
+        input: h.payload.input.clone(),
+        capability_tools: h.payload.config.as_ref().and_then(|config| {
+            config
+                .capability_set
+                .as_ref()
+                .map(|set| set.tools.clone())
+                .or_else(|| config.tool_allowlist.clone())
+        }),
+        created_at: h.created_at,
+        attempt: h.attempt,
+        status: h.status,
+        terminal: h.terminal.borrow().clone(),
+        checkpoint_ids: Arc::clone(&h.checkpoint_ids),
+    }
+}
+
 /// Handle for one scheduled run, owned by the [`RunManager`]. Crate-private
 /// surface: external users interact with runs over HTTP, not this type.
 pub struct RunHandle {
@@ -611,26 +636,20 @@ impl RunManager {
     /// Read-only run info for API endpoints.
     pub(crate) async fn info(&self, run_id: &str) -> Option<RunInfo> {
         let inner = self.inner.lock().await;
-        inner.runs.get(run_id).map(|h| RunInfo {
-            thread_id: h.thread_id.clone(),
-            wire_thread_id: h.wire_thread_id.clone(),
-            graph: h.graph.clone(),
-            assistant_id: h.payload.assistant_id.clone(),
-            metadata: h.payload.metadata.clone(),
-            input: h.payload.input.clone(),
-            capability_tools: h.payload.config.as_ref().and_then(|config| {
-                config
-                    .capability_set
-                    .as_ref()
-                    .map(|set| set.tools.clone())
-                    .or_else(|| config.tool_allowlist.clone())
-            }),
-            created_at: h.created_at,
-            attempt: h.attempt,
-            status: h.status,
-            terminal: h.terminal.borrow().clone(),
-            checkpoint_ids: Arc::clone(&h.checkpoint_ids),
-        })
+        inner.runs.get(run_id).map(run_info_of)
+    }
+
+    /// Read-only infos for every run this process holds — active, queued,
+    /// and retained terminal — paired with their run ids (the registry's
+    /// keys, which `RunInfo` itself does not carry). Feeds the `GET /runs`
+    /// recall list; iteration order is unspecified, the handler sorts.
+    pub(crate) async fn list(&self) -> Vec<(String, RunInfo)> {
+        let inner = self.inner.lock().await;
+        inner
+            .runs
+            .iter()
+            .map(|(run_id, h)| (run_id.clone(), run_info_of(h)))
+            .collect()
     }
 
     /// Replay log + live subscription + internal thread id for the
