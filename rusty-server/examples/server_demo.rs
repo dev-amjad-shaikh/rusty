@@ -1,5 +1,6 @@
-//! Demo server: a two-node pipeline graph plus a ReAct agent (deterministic
-//! local `ChatModel` — no network), served on `127.0.0.1:8100`.
+//! Demo server: a two-node pipeline graph, a ReAct agent (deterministic
+//! local `ChatModel` — no network), and a long-running `deep-dive` graph
+//! that parks in `interrupted` until resumed, served on `127.0.0.1:8100`.
 //!
 //! Every run is journaled by the Flight Recorder: the server attaches a
 //! journal to the executor at run start and persists its snapshot at every
@@ -13,7 +14,8 @@
 //! `RUSTY_DEMO_STORE` the JSON-file store directory. The crash-recovery
 //! release proof (`rusty-server/tests/crash_recovery.rs`) uses both to run
 //! this binary as a real process it can SIGKILL mid-effect and restart from
-//! the same store.
+//! the same store. `RUSTY_DEMO_STAGE_DELAY_MS` overrides the `deep-dive`
+//! stage delay (default 75 000 ms) so automated proofs don't wait minutes.
 
 use std::sync::Arc;
 
@@ -109,6 +111,62 @@ fn build_pipeline_graph() -> Result<(Graph, StateSpec)> {
     builder.set_entry_point("first");
     builder.add_edge("first", "second");
     Ok((builder.compile()?, spec))
+}
+
+/// `gather -> analyze -> report`: a long-running three-stage graph over a
+/// `log` channel, built so Studio's Command Center has real Working and
+/// Needs-you evidence. `gather` and `analyze` each sleep (async, so the
+/// executor stays responsive) between a start and a done marker; `report`
+/// raises an interrupt and parks the run in `interrupted` until it is
+/// resumed with `command.resume`, then appends the published marker. Every
+/// stage boundary is a super-step barrier, so the store checkpoints between
+/// stages and a crash/restart resumes from the last completed stage.
+fn build_deep_dive_graph() -> Result<(Graph, StateSpec)> {
+    let spec = StateSpec::new().channel("log", Reducer::Append);
+    let mut builder = GraphBuilder::new();
+
+    // One output per node: updates merge at the super-step barrier, and an
+    // array update extends an `Append` channel in order, so the start
+    // marker lands ahead of the done marker in the log.
+    builder.add_node("gather", |_ctx: NodeContext| async {
+        tokio::time::sleep(stage_delay()).await;
+        Ok(NodeOutput::update(
+            "log",
+            json!(["gather: started", "gather: done"]),
+        ))
+    });
+    builder.add_node("analyze", |_ctx: NodeContext| async {
+        tokio::time::sleep(stage_delay()).await;
+        Ok(NodeOutput::update(
+            "log",
+            json!(["analyze: started", "analyze: done"]),
+        ))
+    });
+    builder.add_node("report", |ctx: NodeContext| async move {
+        if ctx.resume_value().is_none() {
+            return Err(ctx.interrupt(json!({
+                "question": "Publish the deep-dive findings?",
+                "stage": "report"
+            })));
+        }
+        Ok(NodeOutput::update("log", json!("report: published")))
+    });
+
+    builder.set_entry_point("gather");
+    builder.add_edge("gather", "analyze");
+    builder.add_edge("analyze", "report");
+    Ok((builder.compile()?, spec))
+}
+
+/// The `deep-dive` stage delay: 75 seconds by default so runs read as
+/// genuinely long-running on the board; `RUSTY_DEMO_STAGE_DELAY_MS`
+/// shortens it for automated proofs.
+fn stage_delay() -> std::time::Duration {
+    std::env::var("RUSTY_DEMO_STAGE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or_else(|| std::time::Duration::from_secs(75))
 }
 
 /// ReAct agent over a deterministic local model and a safe capability pack.
@@ -338,10 +396,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let (pipeline, pipeline_spec) = build_pipeline_graph()?;
     let (react, react_spec, react_tools) = build_react_graph()?;
+    let (deep_dive, deep_dive_spec) = build_deep_dive_graph()?;
 
     let mut registry = GraphRegistry::new();
     registry.register("pipeline", pipeline, pipeline_spec);
     registry.register_with_tools("react_agent", react, react_spec, &react_tools)?;
+    registry.register("deep-dive", deep_dive, deep_dive_spec);
 
     let config = ServerConfig::new(
         std::env::var("RUSTY_DEMO_ADDR")
@@ -414,6 +474,17 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("  # connector surface: the ServiceNow Table API pack is seeded");
     println!("  # (instance-agnostic: config supplies the subdomain + credentials)");
     println!("  curl -s {base}/connectors | jq '.manifests[].id'\n");
+    println!("  # deep-dive: long-running stages, then parks in `interrupted` at the");
+    println!("  # report stage until resumed (Working / Needs-you evidence)");
+    println!("  DEEP=$(curl -s -X POST {base}/threads \\");
+    println!("    -H 'content-type: application/json' \\");
+    println!("    -d '{{\"graph\": \"deep-dive\"}}' | jq -r .thread_id)");
+    println!("  RUN=$(curl -s -X POST {base}/threads/$DEEP/runs \\");
+    println!("    -H 'content-type: application/json' -d '{{}}' | jq -r .run_id)");
+    println!("  curl -s {base}/runs/$RUN | jq .status   # running, then interrupted");
+    println!("  curl -s -X POST {base}/threads/$DEEP/runs/wait \\");
+    println!("    -H 'content-type: application/json' \\");
+    println!("    -d '{{\"command\": {{\"resume\": {{\"publish\": true}}}}}}' | jq .status\n");
 
     serve(registry, config).await?;
     Ok(())
