@@ -76,9 +76,13 @@ export function CommandCenter() {
   const blockedCount = needsCount + stuckCount;
   const boardEmpty = Object.values(grouped).every((items) => items.length === 0) && attention.length === 0;
   const verifiedEmpty = boardEmpty && !loadingRuns && !operations.isLoading && !evidencePartial;
-  const maxLaneCount = Math.max(1, ...lanes.map(({ key }) => key === "needs" ? visibleRuns.needs.length + visibleAttention.length : visibleRuns[key].length));
-  const visibleBoardEmpty = Object.values(visibleRuns).every((items) => items.length === 0) && visibleAttention.length === 0;
+  const laneCount = (key: RunLane) => key === "needs" ? visibleRuns.needs.length + visibleAttention.length : visibleRuns[key].length;
+  const totalVisible = lanes.reduce((sum, lane) => sum + laneCount(lane.key), 0);
+  const visibleBoardEmpty = totalVisible === 0;
   const verifiedFilterEmpty = boardFilter !== "all" && visibleBoardEmpty && !loadingRuns && !operations.isLoading && !evidencePartial;
+  const blockedRuns = grouped.needs.length + grouped.stuck.length;
+  const oldestAttention = attention.reduce((min, item) => { const at = Date.parse(item.observedAt); return Number.isNaN(at) ? min : Math.min(min, at); }, Number.POSITIVE_INFINITY);
+  const oldestWait = blockedCount > 0 && blockedRuns === 0 && Number.isFinite(oldestAttention) ? ageLabel(new Date(oldestAttention).toISOString()) : "";
 
   function beginFirstWork() {
     if (!starterAgent) return;
@@ -92,7 +96,7 @@ export function CommandCenter() {
       eyebrow="Command center"
       title="Work board"
       variant="board"
-      detail={<><span className={styles.liveSummary}><i aria-hidden="true" />{loadingRuns || operations.isLoading ? "Checking work…" : runEvidencePartial ? "Work status incomplete" : attentionEvidencePartial ? `${runningCount} running · attention status incomplete` : `${runningCount} running · ${needsCount} need you · ${stuckCount} stuck`}</span>{!evidencePartial && blockedCount > 0 && <span className={styles.nowBadge}>Now: {blockedCount} blocked</span>}</>}
+      detail={<><span className={styles.liveSummary}><i aria-hidden="true" />{loadingRuns || operations.isLoading ? "Checking work…" : runEvidencePartial ? "Work status incomplete" : attentionEvidencePartial ? `${runningCount} running · attention status incomplete` : `${runningCount} running · ${needsCount} need you · ${stuckCount} stuck`}</span>{!evidencePartial && blockedCount > 0 && <span className={styles.nowBadge}>Now: {blockedCount} blocked{oldestWait ? ` · oldest ${oldestWait}` : ""}</span>}</>}
       description="Session runs and current operational exceptions."
       actions={<div className={styles.boardFilters} role="group" aria-label="Filter work board">{([ ["all", "All work"], ["active", "Active"], ["attention", "Needs attention"] ] as Array<[BoardFilter, string]>).map(([key, label]) => <button ref={key === "all" ? allWorkFilterRef : undefined} key={key} type="button" aria-pressed={boardFilter === key} onClick={() => setBoardFilter(key)}>{label}</button>)}</div>}
     />
@@ -112,15 +116,15 @@ export function CommandCenter() {
       </div>}
       {!verifiedEmpty && !verifiedFilterEmpty && <div className={styles.lanes}>
         {lanes.map((lane) => {
-          const laneCount = lane.key === "needs" ? visibleRuns.needs.length + visibleAttention.length : visibleRuns[lane.key].length;
+          const count = laneCount(lane.key);
           return <section className={styles.lane} data-lane={lane.key} key={lane.key} aria-labelledby={`lane-${lane.key}`}>
-          <div className={styles.laneMeter} aria-hidden="true"><span style={{ width: laneCount === 0 ? "0%" : `${Math.max(8, Math.round(laneCount / maxLaneCount * 100))}%` }} /></div>
-          <header><span className={styles.laneSignal} data-tone={lane.key} aria-hidden="true" /><h2 id={`lane-${lane.key}`}>{lane.label}</h2><b>{laneCount}</b></header>
+          <div className={styles.laneMeter} aria-hidden="true"><span style={{ width: count === 0 ? "0%" : `${Math.max(8, Math.round(count / Math.max(1, totalVisible) * 100))}%` }} /></div>
+          <header><span className={styles.laneSignal} data-tone={lane.key} aria-hidden="true" /><h2 id={`lane-${lane.key}`}>{lane.label}</h2><b>{count}</b></header>
           <div className={styles.cards}>
             {visibleRuns[lane.key].map((item) => <RunCard key={item.run.run_id} item={item} lane={lane.key} agent={item.run.assistant_id ? agentById.get(item.run.assistant_id) : undefined} />)}
             {lane.key === "needs" && visibleAttention.slice(0, 6).map((item) => <ExceptionCard key={`${item.source}-${item.id}`} item={item} />)}
             {lane.key === "needs" && visibleAttention.length > 6 && <Link className={styles.moreAttention} to="/operations">Review {visibleAttention.length - 6} more in Operations</Link>}
-            {laneCount === 0 && <p className={styles.emptyLane}>{loadingRuns || operations.isLoading ? "Checking evidence…" : emptyLaneCopy(lane.key)}</p>}
+            {count === 0 && <p className={styles.emptyLane}>{loadingRuns || operations.isLoading ? "Checking evidence…" : emptyLaneCopy(lane.key)}</p>}
           </div>
         </section>;})}
       </div>}
@@ -133,7 +137,7 @@ function RunCard({ item, agent, lane }: { item: ExactRecentRun; agent?: Assistan
   const objective = runObjective(item.run);
   const label = objective || agent?.name || item.run.graph;
   const agentName = agent ? evidencePreview(agent.name, 100) : evidencePreview(item.run.graph, 100);
-  return <RustyCardFrame tone={lane}><Link className={styles.workCard} to="/work/$threadId/runs/$runId" params={{ threadId: item.identity.threadId, runId: item.identity.runId }} aria-label={`Open ${evidencePreview(label, 180)}, status ${item.run.status}`}>
+  return <RustyCardFrame tone={lane}><Link className={styles.workCard} data-lane={lane} to="/work/$threadId/runs/$runId" params={{ threadId: item.identity.threadId, runId: item.identity.runId }} aria-label={`Open ${evidencePreview(label, 180)}, status ${item.run.status}`}>
     {(lane === "working" || lane === "needs" || lane === "stuck") && <span className={styles.riskSignal} aria-hidden="true" />}
     <h3>{evidencePreview(label, 220)}</h3>
     <span className={styles.agentRow}><span>{initials(agentName)}</span><b>{agentName}</b></span>
@@ -147,10 +151,10 @@ function ExceptionCard({ item }: { item: OperationAttentionItem }) {
   const destination = item.runId && item.threadId
     ? { to: "/work/$threadId/runs/$runId/trace" as const, params: { threadId: item.threadId, runId: item.runId } }
     : null;
-  const content = <><span className={styles.riskSignal} aria-hidden="true" /><h3>{item.title}</h3><span className={styles.agentRow}><span>{item.source === "artifact" ? "AR" : "OP"}</span><b>{item.source === "artifact" ? "Artifact" : "Operation"}</b></span><p className={styles.cardStatus}>{evidencePreview(item.detail, 220)}</p><small><span>{observedTime(item.observedAt)}</span><span>Review</span></small></>;
+  const content = <><span className={styles.riskSignal} aria-hidden="true" /><h3>{item.title}</h3><span className={styles.agentRow}><span>{item.source === "artifact" ? "AR" : "OP"}</span><b>{item.source === "artifact" ? "Artifact" : "Operation"}</b></span><p className={styles.cardStatus}>{evidencePreview(item.detail, 220)}</p><small><span>{waitingTime(item.observedAt)}</span><span>Review</span></small></>;
   return destination
-    ? <RustyCardFrame tone="needs"><Link className={styles.workCard} to={destination.to} params={destination.params} aria-label={`Inspect ${item.title}`}>{content}</Link></RustyCardFrame>
-    : <RustyCardFrame tone="needs"><Link className={styles.workCard} to="/operations" aria-label={`Review ${item.title} in Operations`}>{content}</Link></RustyCardFrame>;
+    ? <RustyCardFrame tone="needs"><Link className={styles.workCard} data-lane="needs" to={destination.to} params={destination.params} aria-label={`Inspect ${item.title}`}>{content}</Link></RustyCardFrame>
+    : <RustyCardFrame tone="needs"><Link className={styles.workCard} data-lane="needs" to="/operations" aria-label={`Review ${item.title} in Operations`}>{content}</Link></RustyCardFrame>;
 }
 
 function groupRuns(items: ExactRecentRun[]): Record<RunLane, ExactRecentRun[]> {
@@ -199,5 +203,14 @@ function emptyLaneCopy(lane: RunLane) {
 }
 
 function initials(value: string) { return value.split(/\s+/u).filter(Boolean).slice(0, 2).map((part) => Array.from(part)[0]?.toUpperCase() ?? "").join("") || "AG"; }
-function observedTime(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Time unavailable" : date.toLocaleString(); }
+function ageLabel(iso: string) {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  return `${Math.floor(seconds / 86_400)}d`;
+}
+function waitingTime(value: string) { const age = ageLabel(value); return age ? `${age} waiting` : "Time unavailable"; }
 function openedContext(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Opened this session" : `Opened ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`; }
