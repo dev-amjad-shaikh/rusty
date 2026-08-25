@@ -3,12 +3,14 @@ import { z } from "zod";
 import {
   assistantCatalogSchema,
   assistantSchema,
+  recalledRunsSchema,
   runEvidenceSchema,
   runReceiptSchema,
   runSnapshotSchema,
   serverInfoSchema,
   threadSchema,
   type Assistant,
+  type RecalledRun,
   type RunEvidence,
   type RunEvent,
   type RunReceipt,
@@ -203,6 +205,14 @@ export async function startRun(
 export async function getRun(runId: string): Promise<RunSnapshot> {
   const { text } = await requestText(`/runs/${encodeURIComponent(runId)}`);
   return parseJson(text, runSnapshotSchema, "Run status");
+}
+
+// Server-side recall: the tenant's recent runs regardless of which client
+// started them. Entries from this list are server-verified by definition —
+// no per-run refetch, so a recalled run has no "unavailable" failure mode.
+export async function listRuns(limit = 25): Promise<RecalledRun[]> {
+  const { text } = await requestText(`/runs?limit=${limit}`);
+  return parseJson(text, recalledRunsSchema, "Run recall");
 }
 
 function rawNumber(value: unknown): string | null {

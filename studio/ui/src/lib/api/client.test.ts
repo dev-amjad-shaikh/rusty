@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAssistant, createThread, getOperationsSnapshot, getRunEvidence, getServerInfo, savePromptVersion, StudioApiError } from "./client";
+import { createAssistant, createThread, getOperationsSnapshot, getRunEvidence, getServerInfo, listRuns, savePromptVersion, StudioApiError } from "./client";
 
 
 function response(value: unknown, status = 200) {
@@ -99,6 +99,28 @@ describe("Studio API boundary", () => {
     expect(snapshot.attention).toEqual([]);
     expect(snapshot.systems.tasks).toBeNull();
     expect(snapshot.unavailable).toContain("task queue");
+  });
+
+  it("validates the run recall contract against the exact wire shape", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response([
+      { run_id: "run-1", thread_id: "thread-1", graph: "agent", status: "running", assistant_id: "agent-1", created_at: "2026-08-11T00:00:00Z", metadata: { studio: { objective: "Reconcile the ledger" } } },
+      { run_id: "run-2", thread_id: "thread-2", graph: "agent", status: "success" },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listRuns()).resolves.toEqual([
+      { run_id: "run-1", thread_id: "thread-1", graph: "agent", status: "running", assistant_id: "agent-1", created_at: "2026-08-11T00:00:00Z", metadata: { studio: { objective: "Reconcile the ledger" } } },
+      { run_id: "run-2", thread_id: "thread-2", graph: "agent", status: "success" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs?limit=25", expect.anything());
+  });
+
+  it("fails closed on recalled runs with foreign statuses, extra keys, or an unbounded list", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response([{ run_id: "run-1", thread_id: "thread-1", graph: "agent", status: "vanished" }])));
+    await expect(listRuns()).rejects.toThrow("did not match the Rusty contract");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response([{ run_id: "run-1", thread_id: "thread-1", graph: "agent", status: "success", output: {} }])));
+    await expect(listRuns()).rejects.toThrow("did not match the Rusty contract");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(Array.from({ length: 101 }, (_, index) => ({ run_id: `run-${index}`, thread_id: "thread-1", graph: "agent", status: "success" })))));
+    await expect(listRuns()).rejects.toThrow("did not match the Rusty contract");
   });
 
   it("creates a prompt version under Rust's exact content address and commits it", async () => {

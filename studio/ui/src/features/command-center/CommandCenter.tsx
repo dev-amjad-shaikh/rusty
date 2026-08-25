@@ -2,7 +2,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import type { Assistant, RunSnapshot } from "../../lib/contracts";
-import { getOperationsSnapshot, getRun, listAssistants, type OperationAttentionItem } from "../../lib/api/client";
+import { getOperationsSnapshot, getRun, listAssistants, listRuns, type OperationAttentionItem } from "../../lib/api/client";
 import { evidencePreview } from "../../lib/text";
 import { readRecentWork, type RecentWorkIdentity } from "../../state/recentWork";
 import { useRuntimeStore } from "../../state/runtime";
@@ -17,6 +17,24 @@ type BoardFilter = "all" | "active" | "attention";
 interface ExactRecentRun {
   identity: RecentWorkIdentity;
   run: RunSnapshot;
+}
+
+// One card on the board. Session items carry the exact-fetch detail
+// (message/error, attempt) and the "Opened …" context; recalled items are
+// server-verified by definition (they came from `GET /runs`) and show
+// status-appropriate context instead.
+interface BoardRun {
+  runId: string;
+  threadId: string;
+  status: RunSnapshot["status"];
+  graph: string;
+  assistantId?: string | null;
+  objective: string;
+  detail?: string;
+  attempt: number;
+  openedAt?: string;
+  startedAt?: string;
+  recalled: boolean;
 }
 
 const lanes: Array<{ key: RunLane; label: string }> = [
@@ -43,6 +61,11 @@ export function CommandCenter() {
     queryFn: () => getOperationsSnapshot(),
     refetchInterval: 15_000,
   });
+  const recalled = useQuery({
+    queryKey: ["runs", "recall"],
+    queryFn: () => listRuns(),
+    refetchInterval: 15_000,
+  });
   const recentQueries = useQueries({
     queries: recentIdentities.map((identity) => ({
       queryKey: ["run", identity.runId],
@@ -55,21 +78,55 @@ export function CommandCenter() {
     const identity = recentIdentities[index];
     return run && identity && run.run_id === identity.runId && run.thread_id === identity.threadId ? [{ identity, run }] : [];
   });
+  const recalledIds = new Set((recalled.data ?? []).map((item) => item.run_id));
   const mismatchedRuns = recentQueries.filter((query, index) => Boolean(query.data) && (query.data!.run_id !== recentIdentities[index]?.runId || query.data!.thread_id !== recentIdentities[index]?.threadId)).length;
   const agentById = new Map((assistants.data ?? []).map((agent) => [agent.assistant_id, agent]));
   const availableGraphs = new Set(info?.graphs.map((graph) => graph.name) ?? []);
   const availableAgents = (assistants.data ?? []).filter((agent) => !agent.archived_at && availableGraphs.has(agent.graph));
   const starterAgent = availableAgents.length === 1 ? availableAgents[0] : null;
-  const grouped = groupRuns(exactRuns);
+  // Merge, deduped by run id: the session's exact fetch wins (it is
+  // identity-verified and carries the richer detail); the server list
+  // contributes everything this browser never saw — work started by curl,
+  // an SDK, a cron, or another session.
+  const verifiedSessionIds = new Set(exactRuns.map(({ identity }) => identity.runId));
+  const boardRuns: BoardRun[] = [
+    ...exactRuns.map(({ identity, run }): BoardRun => ({
+      runId: run.run_id,
+      threadId: run.thread_id,
+      status: run.status,
+      graph: run.graph,
+      assistantId: run.assistant_id,
+      objective: runObjective(run.metadata),
+      detail: runDetail(run),
+      attempt: run.attempt,
+      openedAt: identity.savedAt,
+      recalled: false,
+    })),
+    ...(recalled.data ?? []).filter((item) => !verifiedSessionIds.has(item.run_id)).map((item): BoardRun => ({
+      runId: item.run_id,
+      threadId: item.thread_id,
+      status: item.status,
+      graph: item.graph,
+      assistantId: item.assistant_id,
+      objective: runObjective(item.metadata),
+      attempt: 1,
+      startedAt: item.created_at,
+      recalled: true,
+    })),
+  ];
+  const grouped = groupRuns(boardRuns);
   const attention = operations.data?.attention ?? [];
   const visibleRuns = filterRuns(grouped, boardFilter);
   const visibleAttention = boardFilter === "active" ? [] : attention;
   const evidenceUnavailable = operations.data?.unavailable ?? [];
-  const loadingRuns = recentQueries.some((query) => query.isLoading);
-  const unavailableRuns = recentQueries.filter((query) => query.isError).length;
+  const loadingRuns = recentQueries.some((query) => query.isLoading) || recalled.isLoading;
+  // A session fetch that fails for a run the server itself recalled is not
+  // an anomaly — the server list already proved the run; the card below
+  // renders from that proof. Crossed identities stay anomalies regardless.
+  const unavailableRuns = recentQueries.filter((query, index) => query.isError && !recalledIds.has(recentIdentities[index]?.runId ?? "")).length;
   const runEvidencePartial = unavailableRuns > 0 || mismatchedRuns > 0;
   const attentionEvidencePartial = operations.isError || evidenceUnavailable.length > 0;
-  const evidencePartial = runEvidencePartial || attentionEvidencePartial;
+  const evidencePartial = runEvidencePartial || attentionEvidencePartial || recalled.isError;
   const runningCount = grouped.working.length;
   const needsCount = grouped.needs.length + attention.length;
   const stuckCount = grouped.stuck.length;
@@ -97,12 +154,12 @@ export function CommandCenter() {
       title="Work board"
       variant="board"
       detail={<><span className={styles.liveSummary}><i aria-hidden="true" />{loadingRuns || operations.isLoading ? "Checking work…" : runEvidencePartial ? "Work status incomplete" : attentionEvidencePartial ? `${runningCount} running · attention status incomplete` : `${runningCount} running · ${needsCount} need you · ${stuckCount} stuck`}</span>{!evidencePartial && blockedCount > 0 && <span className={styles.nowBadge}>Now: {blockedCount} blocked{oldestWait ? ` · oldest ${oldestWait}` : ""}</span>}</>}
-      description="Session runs and current operational exceptions."
+      description="Recent runs from every client, and current operational exceptions."
       actions={<div className={styles.boardFilters} role="group" aria-label="Filter work board">{([ ["all", "All work"], ["active", "Active"], ["attention", "Needs attention"] ] as Array<[BoardFilter, string]>).map(([key, label]) => <button ref={key === "all" ? allWorkFilterRef : undefined} key={key} type="button" aria-pressed={boardFilter === key} onClick={() => setBoardFilter(key)}>{label}</button>)}</div>}
     />
 
-    {(evidenceUnavailable.length > 0 || operations.isError || unavailableRuns > 0 || mismatchedRuns > 0) && <div className={styles.evidenceWarning} role="status">
-      <span aria-hidden="true">!</span><p><b>Some evidence is unavailable.</b> {[...evidenceUnavailable, ...(operations.isError ? ["operations"] : []), ...(unavailableRuns ? [`${unavailableRuns} recent run${unavailableRuns === 1 ? "" : "s"}`] : []), ...(mismatchedRuns ? [`${mismatchedRuns} crossed run ${mismatchedRuns === 1 ? "identity" : "identities"}`] : [])].join(", ")} could not be verified.</p>
+    {(evidenceUnavailable.length > 0 || operations.isError || unavailableRuns > 0 || mismatchedRuns > 0 || recalled.isError) && <div className={styles.evidenceWarning} role="status">
+      <span aria-hidden="true">!</span><p><b>Some evidence is unavailable.</b> {[...evidenceUnavailable, ...(operations.isError ? ["operations"] : []), ...(recalled.isError ? ["server run recall"] : []), ...(unavailableRuns ? [`${unavailableRuns} recent run${unavailableRuns === 1 ? "" : "s"}`] : []), ...(mismatchedRuns ? [`${mismatchedRuns} crossed run ${mismatchedRuns === 1 ? "identity" : "identities"}`] : [])].join(", ")} could not be verified.</p>
     </div>}
 
     <section className={styles.board} aria-label="Current work">
@@ -121,7 +178,7 @@ export function CommandCenter() {
           <div className={styles.laneMeter} aria-hidden="true"><span style={{ width: count === 0 ? "0%" : `${Math.max(8, Math.round(count / Math.max(1, totalVisible) * 100))}%` }} /></div>
           <header><span className={styles.laneSignal} data-tone={lane.key} aria-hidden="true" /><h2 id={`lane-${lane.key}`}>{lane.label}</h2><b>{count}</b></header>
           <div className={styles.cards}>
-            {visibleRuns[lane.key].map((item) => <RunCard key={item.run.run_id} item={item} lane={lane.key} agent={item.run.assistant_id ? agentById.get(item.run.assistant_id) : undefined} />)}
+            {visibleRuns[lane.key].map((item) => <RunCard key={item.runId} item={item} lane={lane.key} agent={item.assistantId ? agentById.get(item.assistantId) : undefined} />)}
             {lane.key === "needs" && visibleAttention.slice(0, 6).map((item) => <ExceptionCard key={`${item.source}-${item.id}`} item={item} />)}
             {lane.key === "needs" && visibleAttention.length > 6 && <Link className={styles.moreAttention} to="/operations">Review {visibleAttention.length - 6} more in Operations</Link>}
             {count === 0 && <p className={styles.emptyLane}>{loadingRuns || operations.isLoading ? "Checking evidence…" : emptyLaneCopy(lane.key)}</p>}
@@ -133,17 +190,16 @@ export function CommandCenter() {
   </section>;
 }
 
-function RunCard({ item, agent, lane }: { item: ExactRecentRun; agent?: Assistant; lane: RunLane }) {
-  const objective = runObjective(item.run);
-  const label = objective || agent?.name || item.run.graph;
-  const agentName = agent ? evidencePreview(agent.name, 100) : evidencePreview(item.run.graph, 100);
-  return <RustyCardFrame tone={lane}><Link className={styles.workCard} data-lane={lane} to="/work/$threadId/runs/$runId" params={{ threadId: item.identity.threadId, runId: item.identity.runId }} aria-label={`Open ${evidencePreview(label, 180)}, status ${item.run.status}`}>
+function RunCard({ item, agent, lane }: { item: BoardRun; agent?: Assistant; lane: RunLane }) {
+  const label = item.objective || agent?.name || item.graph;
+  const agentName = agent ? evidencePreview(agent.name, 100) : evidencePreview(item.graph, 100);
+  return <RustyCardFrame tone={lane}><Link className={styles.workCard} data-lane={lane} to="/work/$threadId/runs/$runId" params={{ threadId: item.threadId, runId: item.runId }} aria-label={`Open ${evidencePreview(label, 180)}, status ${item.status}`}>
     {(lane === "working" || lane === "needs" || lane === "stuck") && <span className={styles.riskSignal} aria-hidden="true" />}
     <h3>{evidencePreview(label, 220)}</h3>
     <span className={styles.agentRow}><span>{initials(agentName)}</span><b>{agentName}</b></span>
-    <p className={styles.cardStatus}>{runState(item.run)}</p>
+    <p className={styles.cardStatus}>{item.detail ? evidencePreview(item.detail, 220) : statusLabel(item.status)}</p>
     {lane === "working" && <span className={styles.activityBar} aria-hidden="true"><i /></span>}
-    <small><span>{openedContext(item.identity.savedAt)}</span>{item.run.attempt > 1 && <span>Retry {item.run.attempt - 1}</span>}</small>
+    <small><span>{item.recalled ? recalledContext(item.status, item.startedAt) : openedContext(item.openedAt ?? "")}</span>{!item.recalled && item.attempt > 1 && <span>Retry {item.attempt - 1}</span>}</small>
   </Link></RustyCardFrame>;
 }
 
@@ -157,13 +213,13 @@ function ExceptionCard({ item }: { item: OperationAttentionItem }) {
     : <RustyCardFrame tone="needs"><Link className={styles.workCard} data-lane="needs" to="/operations" aria-label={`Review ${item.title} in Operations`}>{content}</Link></RustyCardFrame>;
 }
 
-function groupRuns(items: ExactRecentRun[]): Record<RunLane, ExactRecentRun[]> {
-  const grouped: Record<RunLane, ExactRecentRun[]> = { queued: [], working: [], needs: [], stuck: [], done: [] };
-  for (const item of items) grouped[runLane(item.run.status)].push(item);
+function groupRuns(items: BoardRun[]): Record<RunLane, BoardRun[]> {
+  const grouped: Record<RunLane, BoardRun[]> = { queued: [], working: [], needs: [], stuck: [], done: [] };
+  for (const item of items) grouped[runLane(item.status)].push(item);
   return grouped;
 }
 
-function filterRuns(grouped: Record<RunLane, ExactRecentRun[]>, filter: BoardFilter): Record<RunLane, ExactRecentRun[]> {
+function filterRuns(grouped: Record<RunLane, BoardRun[]>, filter: BoardFilter): Record<RunLane, BoardRun[]> {
   if (filter === "all") return grouped;
   if (filter === "active") return { queued: grouped.queued, working: grouped.working, needs: [], stuck: [], done: [] };
   return { queued: [], working: [], needs: grouped.needs, stuck: grouped.stuck, done: [] };
@@ -181,14 +237,13 @@ function statusLabel(status: RunSnapshot["status"]) {
   return ({ pending: "Queued", running: "Running", success: "Completed", interrupted: "Waiting for your input", error: "Failed", cancelled: "Stopped safely" } as const)[status];
 }
 
-function runState(run: RunSnapshot) {
-  const detail = [run.message, run.error].find((value) => typeof value === "string" && value.trim());
-  return detail ? evidencePreview(detail, 220) : statusLabel(run.status);
+function runDetail(run: RunSnapshot) {
+  return [run.message, run.error].find((value) => typeof value === "string" && value.trim());
 }
 
-function runObjective(run: RunSnapshot) {
-  if (!run.metadata || typeof run.metadata !== "object") return "";
-  const studio = (run.metadata as Record<string, unknown>).studio;
+function runObjective(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object") return "";
+  const studio = (metadata as Record<string, unknown>).studio;
   if (!studio || typeof studio !== "object") return "";
   const objective = (studio as Record<string, unknown>).objective;
   return typeof objective === "string" ? objective : "";
@@ -214,3 +269,11 @@ function ageLabel(iso: string) {
 }
 function waitingTime(value: string) { const age = ageLabel(value); return age ? `${age} waiting` : "Time unavailable"; }
 function openedContext(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Opened this session" : `Opened ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`; }
+// Recalled runs have no "Opened" moment in this browser — their context is
+// their status and, when the server's evidence carries it, their start time.
+function recalledContext(status: RunSnapshot["status"], startedAt?: string) {
+  const age = startedAt ? ageLabel(startedAt) : "";
+  if (status === "running") return age ? `Running for ${age}` : "Running";
+  if (status === "pending") return age ? `Queued ${age} ago` : "Queued";
+  return age ? `Started ${age} ago` : "Recalled from server evidence";
+}

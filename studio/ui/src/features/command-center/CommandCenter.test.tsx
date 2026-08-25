@@ -47,6 +47,7 @@ describe("v4 Command Center", () => {
       if (url.pathname.replace(/^\/api/, "") === "/tasks") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/crons") return response([{ cron_id: "daily" }]);
       if (url.pathname.replace(/^\/api/, "") === "/triggers") return response([{ trigger_id: "webhook", enabled: true }]);
+      if (url.pathname.replace(/^\/api/, "") === "/runs") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
@@ -64,7 +65,7 @@ describe("v4 Command Center", () => {
     expect(await within(screen.getByRole("region", { name: "Done" })).findByRole("link", { name: /success customer request/ })).toBeVisible();
     expect(await within(screen.getByRole("region", { name: "Done" })).findByRole("link", { name: /cancelled customer request/ })).toBeVisible();
     expect(screen.queryByText(/Retry 1/)).not.toBeInTheDocument();
-    expect(screen.getByText("Session runs and current operational exceptions.")).toBeVisible();
+    expect(screen.getByText("Recent runs from every client, and current operational exceptions.")).toBeVisible();
     expect(screen.getByRole("link", { name: /running customer request/ }).closest('[data-rusty-card="forged"]')).toHaveAttribute("data-tone", "working");
     expect(screen.getByRole("link", { name: /running customer request/ })).toHaveAttribute("data-lane", "working");
     expect(screen.getByRole("link", { name: /error customer request/ })).toHaveAttribute("data-lane", "stuck");
@@ -84,6 +85,7 @@ describe("v4 Command Center", () => {
       const url = new URL(input, "http://studio.local");
       if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/runs/run-a") return response(run("run-crossed", "thread-a", "success"));
+      if (url.pathname.replace(/^\/api/, "") === "/runs") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       return response([]);
     }));
@@ -99,6 +101,7 @@ describe("v4 Command Center", () => {
       const url = new URL(input, "http://studio.local");
       if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/tasks") return Promise.reject(new Error("offline"));
+      if (url.pathname.replace(/^\/api/, "") === "/runs") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       return response([]);
     }));
@@ -116,6 +119,7 @@ describe("v4 Command Center", () => {
       if (url.pathname.replace(/^\/api/, "") === "/tasks" && url.search === "?status=dead") return response(Array.from({ length: 8 }, (_, index) => ({ task_id: `task-${index}`, kind: `job_${index}`, pool: "default", status: "dead", last_error: "Stopped.", next_attempt_at: null, run_id: null, thread_id: null, updated_at: observedAt })));
       if (url.pathname.replace(/^\/api/, "") === "/tasks") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/runs") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
@@ -132,6 +136,7 @@ describe("v4 Command Center", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
       const url = new URL(input, "http://studio.local");
       if (url.pathname.replace(/^\/api/, "") === "/assistants" || url.pathname.replace(/^\/api/, "") === "/tasks" || url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/runs") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
@@ -149,6 +154,7 @@ describe("v4 Command Center", () => {
       const url = new URL(input, "http://studio.local");
       if (url.pathname.replace(/^\/api/, "") === "/assistants") return response([agent]);
       if (url.pathname.replace(/^\/api/, "") === "/tasks" || url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
+      if (url.pathname.replace(/^\/api/, "") === "/runs") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
@@ -166,6 +172,7 @@ describe("v4 Command Center", () => {
       const url = new URL(input, "http://studio.local");
       if (url.pathname.replace(/^\/api/, "") === "/assistants" || url.pathname.replace(/^\/api/, "") === "/tasks" || url.pathname.replace(/^\/api/, "") === "/crons" || url.pathname.replace(/^\/api/, "") === "/triggers") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/runs/run-running") return response(run("run-running", "thread-running", "running"));
+      if (url.pathname.replace(/^\/api/, "") === "/runs") return response([]);
       if (url.pathname.replace(/^\/api/, "") === "/artifacts/journal") return response(emptyJournal);
       throw new Error(`unexpected ${url}`);
     }));
@@ -176,5 +183,84 @@ describe("v4 Command Center", () => {
     await user.click(screen.getByRole("button", { name: "Show all work" }));
     expect(screen.getByRole("link", { name: /running customer request/ })).toBeVisible();
     await waitFor(() => expect(screen.getByRole("button", { name: "All work" })).toHaveFocus());
+  });
+
+  it("recalls runs this session never opened and dedupes by run id, session detail winning", async () => {
+    rememberRecentWork({ threadId: "thread-running", runId: "run-running" });
+    const startedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const recalledCron = { run_id: "run-cron", thread_id: "thread-cron", graph: "react_agent", status: "success", created_at: startedAt, metadata: { studio: { objective: "Nightly ledger reconciliation" } } };
+    const recalledInterrupted = { run_id: "run-approval", thread_id: "thread-approval", graph: "react_agent", status: "interrupted", created_at: startedAt };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      const url = new URL(input, "http://studio.local");
+      const path = url.pathname.replace(/^\/api/, "");
+      if (path === "/assistants") return response([{ assistant_id: "agent-1", name: "Research agent", graph: "react_agent", config: {}, metadata: {}, created_at: "2026-08-11T00:00:00Z", active_version_id: "version-1", version_count: 1 }]);
+      // The server recalls the session's running run (attempt 1 view) plus
+      // two runs this browser never started.
+      if (path === "/runs") return response([
+        { run_id: "run-running", thread_id: "thread-running", graph: "react_agent", assistant_id: "agent-1", status: "running", created_at: startedAt, metadata: { studio: { objective: "stale recalled objective" } } },
+        recalledCron,
+        recalledInterrupted,
+      ]);
+      if (path === "/runs/run-running") return response({ ...run("run-running", "thread-running", "running", 2), metadata: { studio: { objective: "running customer request" } } });
+      if (path === "/artifacts/journal") return response(emptyJournal);
+      return response([]);
+    }));
+    renderCenter();
+    expect(await screen.findByRole("heading", { name: "Work board" })).toBeVisible();
+    // Recalled runs land in their status lanes with server context, not
+    // "Opened …" — that line belongs to session items only.
+    const done = screen.getByRole("region", { name: "Done" });
+    expect(await within(done).findByRole("link", { name: /Nightly ledger reconciliation/ })).toBeVisible();
+    expect(within(done).getByText("Started 5m ago")).toBeVisible();
+    expect(within(done).queryByText(/Opened/)).not.toBeInTheDocument();
+    const needs = screen.getByRole("region", { name: "Needs you" });
+    expect(await within(needs).findByRole("link", { name: /react_agent, status interrupted/ })).toBeVisible();
+    expect(within(needs).getByText("Waiting for your input")).toBeVisible();
+    // Dedupe: the overlapping run renders once, from the session's exact
+    // fetch (its attempt and objective win over the recalled row's).
+    const working = screen.getByRole("region", { name: "Working" });
+    expect(await within(working).findAllByRole("link", { name: /status running/ })).toHaveLength(1);
+    expect(within(working).getByText("running customer request")).toBeVisible();
+    expect(within(working).getByText("Retry 1")).toBeVisible();
+    expect(within(working).getByText(/^Opened/)).toBeVisible();
+    expect(screen.queryByText(/stale recalled objective/)).not.toBeInTheDocument();
+  });
+
+  it("treats a session fetch failure the server recall proves as verified, not an anomaly", async () => {
+    rememberRecentWork({ threadId: "thread-x", runId: "run-x" });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      const url = new URL(input, "http://studio.local");
+      const path = url.pathname.replace(/^\/api/, "");
+      if (path === "/assistants") return response([]);
+      if (path === "/runs") return response([{ run_id: "run-x", thread_id: "thread-x", graph: "react_agent", status: "running", created_at: new Date(Date.now() - 42 * 1000).toISOString() }]);
+      // The exact fetch for the session identity fails (evicted mid-poll,
+      // say) — but the server list already proved this run, so the board
+      // renders it from recall without an "unavailable" anomaly.
+      if (path === "/runs/run-x") return Promise.resolve(new Response("gone", { status: 404 }));
+      if (path === "/artifacts/journal") return response(emptyJournal);
+      return response([]);
+    }));
+    renderCenter();
+    expect(await screen.findByRole("heading", { name: "Work board" })).toBeVisible();
+    const working = screen.getByRole("region", { name: "Working" });
+    expect(await within(working).findByRole("link", { name: /status running/ })).toBeVisible();
+    expect(within(working).getByText("Running for 42s")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("1 running · 0 need you · 0 stuck")).toBeVisible());
+    expect(screen.queryByText(/could not be verified/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Work status incomplete")).not.toBeInTheDocument();
+  });
+
+  it("discloses when server recall itself is unavailable instead of claiming an empty board", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => {
+      const url = new URL(input, "http://studio.local");
+      const path = url.pathname.replace(/^\/api/, "");
+      if (path === "/runs") return Promise.reject(new Error("offline"));
+      if (path === "/artifacts/journal") return response(emptyJournal);
+      return response([]);
+    }));
+    renderCenter();
+    expect(await screen.findByText(/server run recall could not be verified/)).toBeVisible();
+    // No evidence, no all-clear: the verified-empty board must not appear.
+    expect(screen.queryByRole("heading", { name: "Build your first agent" })).not.toBeInTheDocument();
   });
 });

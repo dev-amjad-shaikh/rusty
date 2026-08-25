@@ -79,6 +79,20 @@ export const runSnapshotSchema = z.object({
   interrupt: jsonValue.optional(),
 }).strict();
 
+// `GET /runs` recall: one entry per recent run, fields present only when
+// the server's evidence holds them (omitted, never fabricated).
+export const recalledRunSchema = z.object({
+  run_id: id,
+  thread_id: id,
+  graph: id,
+  assistant_id: id.optional(),
+  status: runStatusSchema,
+  created_at: instant.optional(),
+  metadata: jsonValue.optional(),
+}).strict();
+
+export const recalledRunsSchema = z.array(recalledRunSchema).max(100);
+
 export const eventKindSchema = z.enum([
   "super_step_start", "super_step_end", "node_input", "node_output",
   "model_call", "tool_call", "remote_call", "wasm_call", "interrupt",
@@ -143,5 +157,6 @@ export type Assistant = z.infer<typeof assistantSchema>;
 export type Thread = z.infer<typeof threadSchema>;
 export type RunReceipt = z.infer<typeof runReceiptSchema>;
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
+export type RecalledRun = z.infer<typeof recalledRunSchema>;
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type RunEvidence = z.infer<typeof runEvidenceSchema>;
