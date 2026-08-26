@@ -25,6 +25,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::journal::{Clock, Journal};
 use rusty_agent_runtime::llm::ToolCall;
 use rusty_agent_runtime::middleware::{MiddlewareChain, ToolCallBlocklist};
@@ -32,12 +33,12 @@ use rusty_agent_runtime::record::{Effect, EventStatus, PayloadRef, RunEventKind}
 use rusty_agent_runtime::replay::RecordingTool;
 use rusty_agent_runtime::tool::{Tool, ToolExecutor, ToolRegistry};
 use rusty_agent_runtime::tool_select::{
-    argument_validation_refusal, manifests_for_registry, parse_argument_validation_refusal,
-    select, shortlist, ArgumentViolation, CostClass, SelectionFeatures, ToolManifest,
-    ToolOutcomeStats, ToolSelectionOverlay, ToolSelectionPolicy, ValidatingTool,
+    apply_spec, argument_validation_refusal, filtered, manifests_for_registry,
+    parse_argument_validation_refusal, prefixed, select, shortlist, ArgumentViolation, CostClass,
+    PrefixedTool, SelectionFeatures, ToolManifest, ToolOutcomeStats, ToolPredicate,
+    ToolSelectionOverlay, ToolSelectionPolicy, ToolsetSpec, ValidatingTool,
     ARGUMENT_VALIDATION_KIND,
 };
-use rusty_agent_runtime::error::Result;
 
 // ---------- golden-file machinery (the tests/learn.rs discipline) ----------
 
@@ -215,19 +216,13 @@ fn features() -> SelectionFeatures {
 
 #[test]
 fn golden_tool_selection_overlay_shape() {
-    assert_golden(
-        "tool_selection_overlay.json",
-        &overlays()["web.search"],
-    );
+    assert_golden("tool_selection_overlay.json", &overlays()["web.search"]);
 }
 
 #[test]
 fn golden_tool_manifest_shape() {
     let manifests = manifests_for_registry(&registry(), &overlays()).unwrap();
-    let manifest = manifests
-        .iter()
-        .find(|m| m.name == "web.search")
-        .unwrap();
+    let manifest = manifests.iter().find(|m| m.name == "web.search").unwrap();
     assert_golden("tool_manifest.json", manifest);
 }
 
@@ -327,11 +322,7 @@ fn shortlist_ranks_and_excludes_by_ceiling() {
     assert_eq!(outcome.excluded.len(), 1);
     assert_eq!(outcome.excluded[0].name, "email.send");
     // web.search outranks http.get on tag overlap + outcome stats.
-    let order: Vec<&str> = outcome
-        .ranking
-        .iter()
-        .map(|r| r.name.as_str())
-        .collect();
+    let order: Vec<&str> = outcome.ranking.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(order, ["web.search", "http.get"]);
 }
 
@@ -429,14 +420,13 @@ async fn recipe_narrow_validate_and_dispatch() {
             ..Default::default()
         },
     );
-    let names: Vec<String> = shortlist
-        .selected
-        .iter()
-        .map(|r| r.name.clone())
-        .collect();
+    let names: Vec<String> = shortlist.selected.iter().map(|r| r.name.clone()).collect();
     let narrowed = registry().restricted_to(&names).unwrap();
     assert!(narrowed.contains("web.search"));
-    assert!(!narrowed.contains("email.send"), "ceiling-excluded at admission");
+    assert!(
+        !narrowed.contains("email.send"),
+        "ceiling-excluded at admission"
+    );
 
     // 2. Wrap the narrowed registry in validation (register_shared shape).
     let validated = ValidatingTool::wrap_registry(&narrowed);
@@ -476,4 +466,145 @@ async fn recipe_narrow_validate_and_dispatch() {
         .as_deref()
         .unwrap()
         .contains("unknown tool"));
+}
+
+// ---------- toolset combinator algebra ----------
+
+struct Lookup;
+
+#[async_trait]
+impl Tool for Lookup {
+    fn name(&self) -> &str {
+        "lookup"
+    }
+    fn description(&self) -> &str {
+        "Looks up a record."
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]})
+    }
+    fn effect(&self) -> Effect {
+        Effect::ReadOnly
+    }
+    async fn call(&self, args: Value) -> Result<Value> {
+        Ok(json!({"id": args.get("id").cloned().unwrap_or(Value::Null)}))
+    }
+}
+
+fn combinator_registry() -> ToolRegistry {
+    let mut registry = ToolRegistry::new();
+    registry.register(Search);
+    registry.register(Fetch);
+    registry.register(Lookup);
+    registry
+}
+
+#[tokio::test]
+async fn prefixed_name_dispatches_to_inner_tool() {
+    let registry = combinator_registry();
+    let prefixed = prefixed("crm_", &registry);
+
+    // The prefixed registry exposes the new names.
+    assert!(prefixed.contains("crm_lookup"));
+    assert!(!prefixed.contains("lookup"));
+
+    // Dispatch by the prefixed name reaches the inner tool.
+    let tool = prefixed.get("crm_lookup").unwrap();
+    let result = tool.call(json!({"id": "42"})).await.unwrap();
+    assert_eq!(result["id"], json!("42"));
+
+    // The wrapper records the prefixed name as its effect kind.
+    assert_eq!(tool.effect_kind(), "crm_lookup");
+}
+
+#[test]
+fn filtered_registry_contains_only_matching_tools() {
+    let registry = combinator_registry();
+    let predicate = ToolPredicate::ByName {
+        names: vec!["web.search".into(), "lookup".into()],
+    };
+    let filtered = filtered(predicate, &registry);
+
+    assert_eq!(filtered.len(), 2);
+    assert!(filtered.contains("web.search"));
+    assert!(filtered.contains("lookup"));
+    assert!(!filtered.contains("http.get"));
+}
+
+#[tokio::test]
+async fn nested_filtered_then_prefixed() {
+    let registry = combinator_registry();
+    let predicate = ToolPredicate::ByName {
+        names: vec!["web.search".into(), "lookup".into()],
+    };
+    // First filter, then prefix: only the filtered tools get prefixed.
+    let nested = prefixed("crm_", &filtered(predicate, &registry));
+
+    assert_eq!(nested.len(), 2);
+    assert!(nested.contains("crm_web.search"));
+    assert!(nested.contains("crm_lookup"));
+    assert!(!nested.contains("crm_http.get"));
+
+    // Dispatch still works through both layers.
+    let tool = nested.get("crm_lookup").unwrap();
+    let result = tool.call(json!({"id": "99"})).await.unwrap();
+    assert_eq!(result["id"], json!("99"));
+}
+
+#[test]
+fn toolset_spec_round_trips() {
+    let spec = ToolsetSpec::Prefixed {
+        prefix: "crm_".into(),
+        inner: Box::new(ToolsetSpec::Filtered {
+            predicate: ToolPredicate::ByName {
+                names: vec!["lookup".into()],
+            },
+            inner: Box::new(ToolsetSpec::Base),
+        }),
+    };
+
+    let wire = serde_json::to_string(&spec).unwrap();
+    let parsed: ToolsetSpec = serde_json::from_str(&wire).unwrap();
+    assert_eq!(parsed, spec);
+}
+
+#[test]
+fn apply_spec_resolves_nested_stack() {
+    let base = combinator_registry();
+    let spec = ToolsetSpec::Prefixed {
+        prefix: "crm_".into(),
+        inner: Box::new(ToolsetSpec::Filtered {
+            predicate: ToolPredicate::ByName {
+                names: vec!["lookup".into(), "http.get".into()],
+            },
+            inner: Box::new(ToolsetSpec::Base),
+        }),
+    };
+
+    let resolved = apply_spec(&base, &spec).unwrap();
+    assert_eq!(resolved.len(), 2);
+    assert!(resolved.contains("crm_lookup"));
+    assert!(resolved.contains("crm_http.get"));
+    assert!(!resolved.contains("crm_web.search"));
+}
+
+#[tokio::test]
+async fn wrapper_preserves_effect_and_schema() {
+    let registry = combinator_registry();
+    let original = registry.get("lookup").unwrap();
+
+    // Prefixed wrapper preserves effect class and schema.
+    let prefixed_tool = Arc::new(PrefixedTool::new(original.clone(), "crm_"));
+    assert_eq!(prefixed_tool.effect(), Effect::ReadOnly);
+    assert_eq!(
+        prefixed_tool.parameters_schema(),
+        original.parameters_schema()
+    );
+
+    // Effect request delegates to inner (same hash, same idempotency).
+    let call = ToolCall::new("c1", "crm_lookup", json!({"id": "x"}));
+    assert_eq!(
+        prefixed_tool.effect_request(&call),
+        original.effect_request(&call)
+    );
 }

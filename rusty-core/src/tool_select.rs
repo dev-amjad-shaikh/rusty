@@ -698,7 +698,9 @@ fn json_type_name(value: &Value) -> &'static str {
 fn type_matches(expected: &str, value: &Value) -> bool {
     match expected {
         // JSON Schema: an integer is a number with zero fractional part.
-        "integer" => matches!(value, Value::Number(n) if n.is_i64() || n.is_u64() || n.as_f64().is_some_and(|f| f.fract() == 0.0)),
+        "integer" => {
+            matches!(value, Value::Number(n) if n.is_i64() || n.is_u64() || n.as_f64().is_some_and(|f| f.fract() == 0.0))
+        }
         "number" => value.is_number(),
         other => json_type_name(value) == other,
     }
@@ -718,10 +720,7 @@ fn validate_value(schema: &Value, value: &Value, path: &str, out: &mut Vec<Argum
             out.push(violation(
                 path,
                 "type",
-                format!(
-                    "expected {expected}, found {}",
-                    json_type_name(value)
-                ),
+                format!("expected {expected}, found {}", json_type_name(value)),
             ));
             // Further keyword checks are meaningless against a wrong type.
             return;
@@ -784,7 +783,10 @@ fn validate_value(schema: &Value, value: &Value, path: &str, out: &mut Vec<Argum
                     out.push(violation(
                         path,
                         "min_items",
-                        format!("array has {} items, fewer than the minimum {min}", items.len()),
+                        format!(
+                            "array has {} items, fewer than the minimum {min}",
+                            items.len()
+                        ),
                     ));
                 }
             }
@@ -793,7 +795,10 @@ fn validate_value(schema: &Value, value: &Value, path: &str, out: &mut Vec<Argum
                     out.push(violation(
                         path,
                         "max_items",
-                        format!("array has {} items, more than the maximum {max}", items.len()),
+                        format!(
+                            "array has {} items, more than the maximum {max}",
+                            items.len()
+                        ),
                     ));
                 }
             }
@@ -936,6 +941,161 @@ impl Tool for ValidatingTool {
             return Ok(Value::String(argument_validation_refusal(&violations)));
         }
         self.inner.call(args).await
+    }
+}
+
+/// A [`Tool`] wrapper that prefixes the tool's name. Delegates everything
+/// except [`Tool::name`] and [`Tool::effect_kind`] (which defaults to the
+/// prefixed name so receipts and effect requests record the qualified name
+/// for correct rebinding across pause/resume).
+pub struct PrefixedTool {
+    inner: Arc<dyn Tool>,
+    prefixed_name: String,
+}
+
+impl PrefixedTool {
+    /// Wrap `inner` with `prefix` prepended to its name.
+    pub fn new(inner: Arc<dyn Tool>, prefix: impl Into<String>) -> Self {
+        let prefix = prefix.into();
+        let prefixed_name = format!("{prefix}{}", inner.name());
+        Self {
+            inner,
+            prefixed_name,
+        }
+    }
+
+    /// The wrapped tool.
+    pub fn inner(&self) -> &Arc<dyn Tool> {
+        &self.inner
+    }
+
+    /// The prefix applied to the inner tool's name.
+    pub fn prefix(&self) -> &str {
+        &self.prefixed_name[..self.prefixed_name.len() - self.inner.name().len()]
+    }
+}
+
+#[async_trait]
+impl Tool for PrefixedTool {
+    fn name(&self) -> &str {
+        &self.prefixed_name
+    }
+
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+
+    fn parameters_schema(&self) -> Value {
+        self.inner.parameters_schema()
+    }
+
+    fn effect(&self) -> Effect {
+        self.inner.effect()
+    }
+
+    fn effect_kind(&self) -> &str {
+        // Receipts and effect requests must use the prefixed name so that
+        // pause/resume rebinding finds the same qualified identity.
+        &self.prefixed_name
+    }
+
+    fn idempotency_key(&self, args: &Value) -> Option<String> {
+        self.inner.idempotency_key(args)
+    }
+
+    fn effect_request(&self, call: &ToolCall) -> EffectRequest {
+        self.inner.effect_request(call)
+    }
+
+    async fn call(&self, args: Value) -> Result<Value> {
+        self.inner.call(args).await
+    }
+}
+
+/// Predicate for filtering tools in a registry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ToolPredicate {
+    /// Include only tools whose names are in the given list.
+    ByName { names: Vec<String> },
+}
+
+impl ToolPredicate {
+    /// Check whether `tool_name` matches this predicate.
+    pub fn matches(&self, tool_name: &str) -> bool {
+        match self {
+            ToolPredicate::ByName { names } => names.iter().any(|n| n == tool_name),
+        }
+    }
+}
+
+/// A serializable description of a toolset transformation. Nested specs
+/// compose: `Prefixed { prefix: "crm_", inner: Box::new(Base) }` describes
+/// a base registry with every tool prefixed by `crm_`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ToolsetSpec {
+    /// The unwrapped base registry.
+    Base,
+    /// Only tools matching `predicate` are visible and dispatchable.
+    Filtered {
+        predicate: ToolPredicate,
+        #[serde(rename = "inner")]
+        inner: Box<ToolsetSpec>,
+    },
+    /// Every tool's name is prefixed.
+    Prefixed {
+        prefix: String,
+        #[serde(rename = "inner")]
+        inner: Box<ToolsetSpec>,
+    },
+}
+
+/// Return a new registry containing only tools whose names match `predicate`.
+///
+/// A call to a filtered-out tool resolves as an unknown-tool error at
+/// dispatch time (the executor's standard behaviour).
+pub fn filtered(predicate: ToolPredicate, registry: &ToolRegistry) -> ToolRegistry {
+    let mut out = ToolRegistry::new();
+    let mut names: Vec<&str> = registry.names().collect();
+    names.sort_unstable();
+    for name in names {
+        if predicate.matches(name) {
+            out.register_shared(registry.get(name).expect("name came from the registry"));
+        }
+    }
+    out
+}
+
+/// Return a new registry with every tool wrapped in [`PrefixedTool`].
+pub fn prefixed(prefix: impl Into<String>, registry: &ToolRegistry) -> ToolRegistry {
+    let prefix = prefix.into();
+    let mut out = ToolRegistry::new();
+    let mut names: Vec<&str> = registry.names().collect();
+    names.sort_unstable();
+    for name in names {
+        let tool = registry.get(name).expect("name came from the registry");
+        out.register_shared(Arc::new(PrefixedTool::new(tool, prefix.clone())));
+    }
+    out
+}
+
+/// Resolve `spec` against `base`, producing the wrapped registry the spec
+/// describes.
+///
+/// Returns an error if the spec references tools that do not exist in the
+/// resolved inner registry (fail-closed, like [`ToolRegistry::restricted_to`]).
+pub fn apply_spec(base: &ToolRegistry, spec: &ToolsetSpec) -> Result<ToolRegistry> {
+    match spec {
+        ToolsetSpec::Base => Ok(base.clone()),
+        ToolsetSpec::Filtered { predicate, inner } => {
+            let resolved = apply_spec(base, inner)?;
+            Ok(filtered(predicate.clone(), &resolved))
+        }
+        ToolsetSpec::Prefixed { prefix, inner } => {
+            let resolved = apply_spec(base, inner)?;
+            Ok(prefixed(prefix.clone(), &resolved))
+        }
     }
 }
 
@@ -1091,10 +1251,8 @@ mod tests {
             },
             "required": ["items"]
         });
-        let violations = validate_arguments(
-            &schema,
-            &json!({"items": [{"sku": "a"}, {"nope": 1}]}),
-        );
+        let violations =
+            validate_arguments(&schema, &json!({"items": [{"sku": "a"}, {"nope": 1}]}));
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].path, "/items/1");
         assert_eq!(violations[0].rule, "required");
@@ -1128,12 +1286,12 @@ mod tests {
             manifest("alpha", Effect::ReadOnly, &["web", "news"], &[]),
             manifest("mid", Effect::ReadOnly, &["news"], &[]),
         ];
-        let outcome = select(&features(&["web", "news"], Effect::NonIdempotent), &manifests, 3);
-        let order: Vec<&str> = outcome
-            .ranking
-            .iter()
-            .map(|r| r.name.as_str())
-            .collect();
+        let outcome = select(
+            &features(&["web", "news"], Effect::NonIdempotent),
+            &manifests,
+            3,
+        );
+        let order: Vec<&str> = outcome.ranking.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(order, ["alpha", "mid", "zeta"]);
         assert_eq!(outcome.ranking[0].matched_tags, ["news", "web"]);
         assert!(outcome.excluded.is_empty());
@@ -1220,7 +1378,12 @@ mod tests {
 
     #[test]
     fn missing_prerequisite_excludes() {
-        let manifests = vec![manifest("summarize", Effect::ReadOnly, &["web"], &["ghost"])];
+        let manifests = vec![manifest(
+            "summarize",
+            Effect::ReadOnly,
+            &["web"],
+            &["ghost"],
+        )];
         let outcome = select(&features(&["web"], Effect::NonIdempotent), &manifests, 5);
         assert!(outcome.selected.is_empty());
         assert_eq!(
@@ -1261,10 +1424,7 @@ mod tests {
     #[tokio::test]
     async fn validating_tool_refusal_is_byte_exact() {
         let tool = ValidatingTool::new(Arc::new(Search));
-        let result = tool
-            .call(json!({"limit": "5"}))
-            .await
-            .unwrap();
+        let result = tool.call(json!({"limit": "5"})).await.unwrap();
         let Value::String(content) = result else {
             panic!("refusal is a string payload");
         };
@@ -1280,10 +1440,10 @@ mod tests {
         assert_eq!(violations[0].rule, "required");
         // Opaque error strings stay opaque.
         assert!(parse_argument_validation_refusal("ERROR: boom").is_none());
-        assert!(parse_argument_validation_refusal(
-            "ERROR: {\"kind\":\"other\",\"violations\":[]}"
-        )
-        .is_none());
+        assert!(
+            parse_argument_validation_refusal("ERROR: {\"kind\":\"other\",\"violations\":[]}")
+                .is_none()
+        );
     }
 
     struct Keyed;
