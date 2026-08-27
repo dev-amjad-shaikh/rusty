@@ -8,12 +8,12 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 66%** weighted complete (83 ✅ landed · 71 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 65%** weighted complete (84 ✅ landed · 70 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 8 | 3 | 0 | ██████████░░ 86% |
-| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 7 | 4 | 0 | ██████████░░ 82% |
+| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 8 | 3 | 0 | ██████████░░ 86% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 8 | 3 | 1 | █████████░░░ 79% |
@@ -48,11 +48,11 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-02 — Execution Kernel and ABI
 
-██████████░░ 82% · 7 landed · 4 partial · 0 not started · milestone M0–M1
+██████████░░ 86% · 8 landed · 3 partial · 0 not started · milestone M0–M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-02-S01 | `rusty-api`: the dependency-light trait ABI | P0 | ◐ | standalone `rusty-api` crate split out (`532cfbd` on `feat/rusty-api`): Effect taxonomy, chat types, `ModelProvider`/`Channel`/`Tool`/`Memory`/`Observer`/`RuntimeAdapter` traits, `RustyApiError`; 3 abi_discipline tests (object-safety, dependency-allowlist, inward-only rule with known-violation ledger); public-API snapshot + schemars schema diff (AC 5) and no-global-registration compile test (AC 6) open |
+| EP-02-S01 | `rusty-api`: the dependency-light trait ABI | P0 | ✅ | `schemars` derive on every public type, `cargo metadata` dependency-allowlist test, inward-only rule with 5 known violations ledger, 16 JSON-schema golden snapshots, public-API snapshot (`cargo-public-api`), no-global-registration compile test; 22 tests in `abi_discipline.rs`; `66c1d10` on `feat/ep-02-s01` |
 | EP-02-S02 | `ProcessedResponse`: parse the model response exactly once | P0 | ✅ | single-parse response path (`llm.rs`/`provider_genai.rs`) |
 | EP-02-S03 | `NextStep`: the closed step-resolution sum type | P0 | ✅ | closed `NextStep` sum type (`executor.rs`) |
 | EP-02-S04 | Phase-module loop decomposition | P0 | ✅ | phase-module loop decomposition (`executor.rs`) |
