@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 64%** weighted complete (81 ✅ landed · 73 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 65%** weighted complete (82 ✅ landed · 72 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -16,7 +16,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 6 | 5 | 0 | █████████░░░ 77% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
-| EP-05 Tool System and Sandboxing | M0–M2 | 12 | 7 | 4 | 1 | █████████░░░ 75% |
+| EP-05 Tool System and Sandboxing | M0–M2 | 12 | 8 | 3 | 1 | █████████░░░ 79% |
 | EP-06 Memory | M1–M2 | 12 | 7 | 3 | 2 | ████████░░░░ 71% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
@@ -103,16 +103,16 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-05 — Tool System and Sandboxing
 
-█████████░░░ 75% · 7 landed · 4 partial · 1 not started · milestone M0–M2
+██████████░░ 79% · 8 landed · 3 partial · 1 not started · milestone M0–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
 | EP-05-S01 | The Tool trait with dual-representation output | P0 | ✅ | `tool.rs` Tool trait, dual-representation output |
 | EP-05-S02 | The five-stage guard pipeline | P0 | ✅ | five-stage guard pipeline (`tool/`) |
 | EP-05-S03 | Validation failure as conversational repair | P0 | ✅ | validation failure as conversational repair |
-| EP-05-S04 | Toolset combinator algebra | P1 | ◐ | toolset combinators (`tool_select.rs`); full algebra partial |
+| EP-05-S04 | Toolset combinator algebra | P1 | ◐ | `tool_select.rs` (`061b23c`): `filtered`, `prefixed`, `ToolsetSpec` serde + `apply_spec` resolver landed with 6 new combinator tests (nested filter→prefix, round-trip, effect/schema preservation); `prepared`, `approval_required`, `defer_loading` blocked on missing infra |
 | EP-05-S05 | The sandbox executor seam and the local process backend | P0 | ✅ | sandbox executor seam + local process backend |
-| EP-05-S06 | Per-effect-class execution placement | P0 | ◐ | `effects.rs` effect classes; per-class placement routing partial |
+| EP-05-S06 | Per-effect-class execution placement | P0 | ✅ | `tool.rs` (`f2a7386`): `EffectClass`/`SandboxRequirement`/`Placement`/`PlacementError` enums + `resolve_placement()`, `Tool::effect_class()`/`sandbox_requirement()` defaults (`Read`/`None`), registration panics on `InvalidDeclaration` (AC 2), dispatch rejects `NoBackendAvailable` (AC 5); 4 placement tests (read-none registers, execute-none panics, egress-none panics, read-required fails dispatch); full runtime suite 465 tests green; backend identity recording (AC 3) + egress policy (AC 4) deferred to EP-11/L7 policy |
 | EP-05-S07 | Code mode: one interpreter, guarded sub-dispatch, iteration refunds | P1 | ✅ | code mode: one interpreter, guarded sub-dispatch |
 | EP-05-S08 | MCP client for external servers | P1 | ✅ | `mcp.rs` MCP client |
 | EP-05-S09 | In-process tools presented as MCP servers | P1 | ◐ | in-process tools as MCP servers partial |
