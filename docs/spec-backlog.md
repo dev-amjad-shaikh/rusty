@@ -8,11 +8,11 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 66%** weighted complete (85 ✅ landed · 69 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 67%** weighted complete (86 ✅ landed · 68 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
-| EP-01 Event Log and State Substrate | M0–M1 | 11 | 9 | 2 | 0 | ██████████░░ 91% |
+| EP-01 Event Log and State Substrate | M0–M1 | 11 | 10 | 1 | 0 | ██████████░ 100% |
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 8 | 3 | 0 | ██████████░░ 86% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
@@ -30,7 +30,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-01 — Event Log and State Substrate
 
-██████████░░ 91% · 9 landed · 2 partial · 0 not started · milestone M0–M1
+██████████░ 100% · 10 landed · 1 partial · 0 not started · milestone M0–M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -41,14 +41,14 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-01-S05 | The model-visible-means-logged invariant checker | P0 | ✅ | `invariant.rs` checker on the `ChatModel` seam: journal-anchored recomputation, byte-for-byte compare, typed `UnloggedContent` + assertion registration point; wired into ReAct dispatch; 7 tests (d4e9ad2) |
 | EP-01-S06 | Crash repair: closing orphaned turns with synthetic interrupted markers | P0 | ✅ | journal crash-repair closes orphaned turns (recovery tests) |
 | EP-01-S07 | Projection determinism: same log prefix, byte-identical model input | P0 | ✅ | projection goldens in `rusty-core/tests/golden` |
-| EP-01-S08 | Event-schema conformance suite and closed-enum versioning | P0 | ◐ | `event_schema_conformance.rs` (29 tests, 9 golden files + 8 variant-golden files) on `feat/ep-01-s08` (`2adb50b`): exhaustive round-trip for all `RunEventKind` variants, unknown-tag rejection, golden-file schema-drift detection, closed-enum invariants on empty + executed journals, SurfaceOp boundary validation, schemars-generated JSON Schema snapshots for 8 closed enums + `RunEvent`/`PayloadRef`/`ArtifactRef`/`Usage`; `EventBody`/`EventRecord` schema snapshots (AC 3 full scope) open — types map to `RunEvent`/`RunEventKind` in this codebase |
+| EP-01-S08 | Event-schema conformance suite and closed-enum versioning | P0 | ✅ | `event_schema_conformance.rs` (29 tests, 9 schema golden files + 8 variant-golden files) on `feat/ep-01-s08` (`2adb50b`): exhaustive round-trip for all `RunEventKind` variants, unknown-tag rejection, golden-file schema-drift detection, closed-enum invariants on empty + executed journals, SurfaceOp boundary validation, schemars-generated JSON Schema snapshots for 8 closed enums + `RunEvent`/`PayloadRef`/`ArtifactRef`/`Usage`; all ACs pass, clippy/doc clean |
 | EP-01-S09 | Compaction as non-destructive surface operations | P1 | ✅ | `surface.rs` non-destructive compaction |
 | EP-01-S10 | Session fork seeded from a log prefix | P1 | ✅ | `ThreadRecord` gains `forked_from: Option<String>` and `seed_length: Option<usize>`; `POST /threads/{id}/fork` populates both fields and returns `seed_length` in the response; `GET /threads/{id}` added to retrieve lineage; `time_travel.rs` tests verify lineage round-trip and seed_length matches checkpoints_copied; `e0b0247` on `feat/ep-01-s10` |
 | EP-01-S11 | Streaming chunk fidelity and partial-turn reconstruction | P1 | ◐ | streaming landed (`/runs/{id}/stream`); partial-turn reconstruction partial |
 
 ## EP-02 — Execution Kernel and ABI
 
-██████████░░ 91% · 9 landed · 2 partial · 0 not started · milestone M0–M1
+██████████░ 100% · 10 landed · 1 partial · 0 not started · milestone M0–M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
