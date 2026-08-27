@@ -8,12 +8,12 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 65%** weighted complete (82 ✅ landed · 72 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 66%** weighted complete (83 ✅ landed · 71 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 8 | 3 | 0 | ██████████░░ 86% |
-| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 6 | 5 | 0 | █████████░░░ 77% |
+| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 7 | 4 | 0 | ██████████░░ 82% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 8 | 3 | 1 | █████████░░░ 79% |
@@ -41,18 +41,18 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-01-S05 | The model-visible-means-logged invariant checker | P0 | ✅ | `invariant.rs` checker on the `ChatModel` seam: journal-anchored recomputation, byte-for-byte compare, typed `UnloggedContent` + assertion registration point; wired into ReAct dispatch; 7 tests (d4e9ad2) |
 | EP-01-S06 | Crash repair: closing orphaned turns with synthetic interrupted markers | P0 | ✅ | journal crash-repair closes orphaned turns (recovery tests) |
 | EP-01-S07 | Projection determinism: same log prefix, byte-identical model input | P0 | ✅ | projection goldens in `rusty-core/tests/golden` |
-| EP-01-S08 | Event-schema conformance suite and closed-enum versioning | P0 | ◐ | `event_schema_conformance.rs` (20 tests, 8 golden files) on `feat/event-schema-conformance` (`6f209c3`): exhaustive round-trip for all 62 `RunEventKind` variants, unknown-tag rejection, golden-file schema-drift detection, closed-enum invariants on empty + executed journals, SurfaceOp boundary validation (AC 4: span range, provenance honesty, citation integrity); `schemars` integration blocked by missing dependency |
+| EP-01-S08 | Event-schema conformance suite and closed-enum versioning | P0 | ◐ | `event_schema_conformance.rs` (29 tests, 9 golden files + 8 variant-golden files) on `feat/ep-01-s08` (`2adb50b`): exhaustive round-trip for all `RunEventKind` variants, unknown-tag rejection, golden-file schema-drift detection, closed-enum invariants on empty + executed journals, SurfaceOp boundary validation, schemars-generated JSON Schema snapshots for 8 closed enums + `RunEvent`/`PayloadRef`/`ArtifactRef`/`Usage`; `EventBody`/`EventRecord` schema snapshots (AC 3 full scope) open — types map to `RunEvent`/`RunEventKind` in this codebase |
 | EP-01-S09 | Compaction as non-destructive surface operations | P1 | ✅ | `surface.rs` non-destructive compaction |
 | EP-01-S10 | Session fork seeded from a log prefix | P1 | ◐ | `/threads/{id}/fork` route landed; prefix-seeded replay semantics partial |
 | EP-01-S11 | Streaming chunk fidelity and partial-turn reconstruction | P1 | ◐ | streaming landed (`/runs/{id}/stream`); partial-turn reconstruction partial |
 
 ## EP-02 — Execution Kernel and ABI
 
-█████████░░░ 77% · 6 landed · 5 partial · 0 not started · milestone M0–M1
+██████████░░ 82% · 7 landed · 4 partial · 0 not started · milestone M0–M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-02-S01 | `rusty-api`: the dependency-light trait ABI | P0 | ◐ | trait ABI lives in `rusty-core`; standalone `rusty-api` crate not split out |
+| EP-02-S01 | `rusty-api`: the dependency-light trait ABI | P0 | ◐ | standalone `rusty-api` crate split out (`532cfbd` on `feat/rusty-api`): Effect taxonomy, chat types, `ModelProvider`/`Channel`/`Tool`/`Memory`/`Observer`/`RuntimeAdapter` traits, `RustyApiError`; 3 abi_discipline tests (object-safety, dependency-allowlist, inward-only rule with known-violation ledger); public-API snapshot + schemars schema diff (AC 5) and no-global-registration compile test (AC 6) open |
 | EP-02-S02 | `ProcessedResponse`: parse the model response exactly once | P0 | ✅ | single-parse response path (`llm.rs`/`provider_genai.rs`) |
 | EP-02-S03 | `NextStep`: the closed step-resolution sum type | P0 | ✅ | closed `NextStep` sum type (`executor.rs`) |
 | EP-02-S04 | Phase-module loop decomposition | P0 | ✅ | phase-module loop decomposition (`executor.rs`) |
@@ -60,7 +60,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-02-S06 | Seam dispatch-mode conformance and the generated seam catalog | P1 | ◐ | seam dispatch conformance + generated catalog partial |
 | EP-02-S07 | Per-agent scoped registration with teardown | P1 | ✅ | `plugin.rs` per-agent scoped registration with teardown |
 | EP-02-S08 | Iteration and token budgets enforced at the loop | P0 | ✅ | iteration/token budgets enforced at the loop |
-| EP-02-S09 | Frozen three-tier prompt assembly with violation detection | P0 | ◐ | prompt tiering in `composer.rs`; frozen-tier violation detection partial |
+| EP-02-S09 | Frozen three-tier prompt assembly with violation detection | P0 | ✅ | `context.rs`: `DirectiveTiers`, `FrozenPrefix`, `FrozenPrefixRecord`, `TierRecord`, `ContextPipeline::assemble_frozen_prefix`, `AssemblingChatModel::with_frozen_prefix`, pre-dispatch `FrozenPrefix::verify`; `rusty-core/tests/frozen_tiers.rs` 6 tests (session lifetime, tier mutation, dispatch refusal, mid-session suffix, cross-process resume, deterministic rendering); `2cf4853` on `feat/ep-02-s09` |
 | EP-02-S10 | The provider seam: two methods, prefix routing, provenance stamps | P0 | ◐ | provider seam + prefix routing landed; provenance stamps open |
 | EP-02-S11 | Retry and overflow recovery as `request_error` seam extensions | P1 | ◐ | retry/overflow recovery at the seam; `request_error` extensions partial |
 
