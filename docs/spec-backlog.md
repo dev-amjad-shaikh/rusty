@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 67%** weighted complete (86 ✅ landed · 68 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 67%** weighted complete (87 ✅ landed · 67 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -24,7 +24,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 3 | 5 | 4 | ██████░░░░░░ 46% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 2 | 6 | 4 | █████░░░░░░░ 42% |
 | EP-12 Evals Framework | M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
-| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 62% |
+| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 7 | 2 | 3 | █████████░░░ 67% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 1 | 6 | 5 | ████░░░░░░░░ 33% |
 
@@ -254,7 +254,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-13 — Observability, Storage, and Operations
 
-████████░░░░ 62% · 6 landed · 3 partial · 3 not started · milestone M0–M4
+█████████░░░ 67% · 7 landed · 2 partial · 3 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -264,7 +264,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-13-S04 | The object-store blob backend | P1 | ○ | object-store blob backend not started |
 | EP-13-S05 | Migrations discipline: versioned, append-only schema evolution | P0 | ✅ | versioned, append-only migrations |
 | EP-13-S06 | The rustyness binary and single-node deployment | P0 | ✅ | `deploy.rs` single-node deployment |
-| EP-13-S07 | The standing fault-injection and load harness | P0 | ◐ | load envelope landed; standing fault-injection harness partial |
+| EP-13-S07 | The standing fault-injection and load harness | P0 | ✅ | `rusty-server/tests/fault_injection.rs`: `KillSchedule` enum (`MidEffect`, `AfterEnqueue`), 4 tests covering kill-mid-effect, kill-after-enqueue, jitter-mode seeded reproducibility, seeded-defect fsync skip; `b605cb7` on `feat/ep-13-s07` |
 | EP-13-S08 | Observability derived from the log: traces, metrics, structured logs | P0 | ✅ | `rusty-otel` + `telemetry.rs`: traces, metrics, structured logs |
 | EP-13-S09 | Cost metering, budgets, and operator alerts | P0 | ✅ | `meter.rs` cost metering + budgets |
 | EP-13-S10 | Backup, restore, and disaster recovery | P1 | ○ | backup/restore/DR not started |
