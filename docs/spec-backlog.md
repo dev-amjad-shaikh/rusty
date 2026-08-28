@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 67%** weighted complete (91 ✅ landed · 63 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 68%** weighted complete (92 ✅ landed · 62 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -18,7 +18,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 8 | 3 | 1 | █████████░░░ 79% |
-| EP-06 Memory | M1–M2 | 12 | 7 | 3 | 2 | ████████░░░░ 71% |
+| EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
@@ -123,7 +123,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-06 — Memory
 
-████████░░░░ 71% · 7 landed · 3 partial · 2 not started · milestone M1–M2
+████████░░░░ 75% · 8 landed · 2 partial · 2 not started · milestone M1–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -135,7 +135,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-06-S06 | Session-lineage-aware full-text search | P1 | ✅ | session-lineage-aware search (`session_query.rs`) |
 | EP-06-S07 | The deterministic promotion gate and structural exclusion of untrusted origins | P0 | ✅ | promotion gate + structural exclusion of untrusted origins |
 | EP-06-S08 | Sleeptime consolidation: scheduled, gated, high-water-marked | P0 | ◐ | `/memory/consolidate` landed; sleeptime scheduling/high-water marks partial |
-| EP-06-S09 | Loss-bounded, hash-checked curated rewrites | P0 | ◐ | `/memory/corrections` landed; hash-checked loss bounds partial |
+| EP-06-S09 | Loss-bounded, hash-checked curated rewrites | P0 | ✅ | `e8b905f` on `feat/ep-06-s09`: `RewriteProposal`, `RewriteValidation`, `RewriteAudit` structs + `validate_rewrite()` in `rusty-core/src/memory.rs`; hash-match check (optimistic concurrency), loss-bound check (default 20% with justification override), shape-aware fact counting (arrays, single-array objects, general objects, string lines, scalars); `rusty-core/tests/rewrite_validation.rs` 15 tests (hash match/mismatch, loss within/exceeds bound, justifications pass/fail, fact-counting shapes, diff/audit shape, edge cases); clippy/doc clean |
 | EP-06-S10 | The compaction engine: triggers, fallback chain, cheap summarizer, surface landing | P0 | ✅ | compaction engine (`context.rs`/`surface.rs`/`memory_tiers.rs`) |
 | EP-06-S11 | Pre-compaction memory flush | P0 | ○ | pre-compaction memory flush not started |
 | EP-06-S12 | The hierarchical summary index, with vector search as an optional backend | P1 | ◐ | `memory_tiers.rs` hierarchical index; vector backend open |
