@@ -8,12 +8,12 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 67%** weighted complete (88 ✅ landed · 66 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 67%** weighted complete (89 ✅ landed · 65 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 10 | 1 | 0 | ██████████░ 100% |
-| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 9 | 2 | 0 | █████████░░░ 91% |
+| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 10 | 1 | 0 | ███████████ 100% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
@@ -49,9 +49,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-02 — Execution Kernel and ABI
 
-██████████░░ 91% · 9 landed · 2 partial · 0 not started · milestone M0–M1
-
-██████████░ 100% · 10 landed · 1 partial · 0 not started · milestone M0–M1
+███████████░ 100% · 10 landed · 1 partial · 0 not started · milestone M0–M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -60,7 +58,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-02-S03 | `NextStep`: the closed step-resolution sum type | P0 | ✅ | closed `NextStep` sum type (`executor.rs`) |
 | EP-02-S04 | Phase-module loop decomposition | P0 | ✅ | phase-module loop decomposition (`executor.rs`) |
 | EP-02-S05 | Named typed seams with dispatch mode in the contract | P0 | ✅ | `middleware.rs` named typed seams with dispatch mode |
-| EP-02-S06 | Seam dispatch-mode conformance and the generated seam catalog | P1 | ◐ | seam dispatch conformance + generated catalog partial |
+| EP-02-S06 | Seam dispatch-mode conformance and the generated seam catalog | P1 | ✅ | `seam_catalog.rs` with `DispatchMode`/`DecisionVariant`/`SeamEntry`/`SeamCatalog`, `generate_catalog()` emits machine-readable catalog from type definitions, `schemars` JSON Schema for all 3 payload/return types, golden snapshot `tests/schemas/seam-catalog.json` diff-guarded, 13 conformance tests (catalog structure, snapshot diff, mode semantics, waterfall short-circuit, around-wrap count, ordering determinism across 100 dispatches, teardown efficacy, schema round-trip, dispatch-site closed-list scan); `0fde5fb` on `feat/ep-02-s06` |
 | EP-02-S07 | Per-agent scoped registration with teardown | P1 | ✅ | `plugin.rs` per-agent scoped registration with teardown |
 | EP-02-S08 | Iteration and token budgets enforced at the loop | P0 | ✅ | iteration/token budgets enforced at the loop |
 | EP-02-S09 | Frozen three-tier prompt assembly with violation detection | P0 | ✅ | `context.rs`: `DirectiveTiers`, `FrozenPrefix`, `FrozenPrefixRecord`, `TierRecord`, `ContextPipeline::assemble_frozen_prefix`, `AssemblingChatModel::with_frozen_prefix`, pre-dispatch `FrozenPrefix::verify`; `rusty-core/tests/frozen_tiers.rs` 6 tests (session lifetime, tier mutation, dispatch refusal, mid-session suffix, cross-process resume, deterministic rendering); `2cf4853` on `feat/ep-02-s09` |
