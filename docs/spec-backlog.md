@@ -8,11 +8,11 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 67%** weighted complete (90 ✅ landed · 64 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 67%** weighted complete (91 ✅ landed · 63 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
-| EP-01 Event Log and State Substrate | M0–M1 | 11 | 10 | 1 | 0 | ██████████░ 100% |
+| EP-01 Event Log and State Substrate | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
@@ -31,7 +31,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-01 — Event Log and State Substrate
 
-██████████░ 100% · 10 landed · 1 partial · 0 not started · milestone M0–M1
+███████████ 100% · 11 landed · 0 partial · 0 not started · milestone M0–M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -45,7 +45,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-01-S08 | Event-schema conformance suite and closed-enum versioning | P0 | ✅ | `event_schema_conformance.rs` (29 tests, 9 schema golden files + 8 variant-golden files) on `feat/ep-01-s08` (`2adb50b`): exhaustive round-trip for all `RunEventKind` variants, unknown-tag rejection, golden-file schema-drift detection, closed-enum invariants on empty + executed journals, SurfaceOp boundary validation, schemars-generated JSON Schema snapshots for 8 closed enums + `RunEvent`/`PayloadRef`/`ArtifactRef`/`Usage`; all ACs pass, clippy/doc clean |
 | EP-01-S09 | Compaction as non-destructive surface operations | P1 | ✅ | `surface.rs` non-destructive compaction |
 | EP-01-S10 | Session fork seeded from a log prefix | P1 | ✅ | `ThreadRecord` gains `forked_from: Option<String>` and `seed_length: Option<usize>`; `POST /threads/{id}/fork` populates both fields and returns `seed_length` in the response; `GET /threads/{id}` added to retrieve lineage; `time_travel.rs` tests verify lineage round-trip and seed_length matches checkpoints_copied; `e0b0247` on `feat/ep-01-s10` |
-| EP-01-S11 | Streaming chunk fidelity and partial-turn reconstruction | P1 | ◐ | streaming landed (`/runs/{id}/stream`); partial-turn reconstruction partial |
+| EP-01-S11 | Streaming chunk fidelity and partial-turn reconstruction | P1 | ✅ | `ab3314b` on `feat/ep-01-s11`: `AssistantChunk` struct + `RunEventKind::AssistantChunk`, `ChunkAssemblyMismatch` error, `RecordingChatModel::chat_stream` journals each chunk separately with monotonic `stream_index`, verifies concatenation equals full response, typed mismatch error on corruption; `rusty-core/tests/stream_fidelity.rs` 4 tests (chunk journaling, assembly match, mismatch error, replay reconstruction); clippy/doc clean |
 
 ## EP-02 — Execution Kernel and ABI
 
