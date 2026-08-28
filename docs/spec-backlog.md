@@ -8,12 +8,13 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 67%** weighted complete (87 ✅ landed · 67 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 67%** weighted complete (88 ✅ landed · 66 ◐ partial · 28 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 10 | 1 | 0 | ██████████░ 100% |
-| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 8 | 3 | 0 | ██████████░░ 86% |
+| EP-02 Execution Kernel and ABI | M0–M1 | 11 | 9 | 2 | 0 | █████████░░░ 91% |
+| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 8 | 3 | 1 | █████████░░░ 79% |
@@ -48,6 +49,8 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-02 — Execution Kernel and ABI
 
+██████████░░ 91% · 9 landed · 2 partial · 0 not started · milestone M0–M1
+
 ██████████░ 100% · 10 landed · 1 partial · 0 not started · milestone M0–M1
 
 | Story | Title | P | Status | Evidence / what's open |
@@ -61,7 +64,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-02-S07 | Per-agent scoped registration with teardown | P1 | ✅ | `plugin.rs` per-agent scoped registration with teardown |
 | EP-02-S08 | Iteration and token budgets enforced at the loop | P0 | ✅ | iteration/token budgets enforced at the loop |
 | EP-02-S09 | Frozen three-tier prompt assembly with violation detection | P0 | ✅ | `context.rs`: `DirectiveTiers`, `FrozenPrefix`, `FrozenPrefixRecord`, `TierRecord`, `ContextPipeline::assemble_frozen_prefix`, `AssemblingChatModel::with_frozen_prefix`, pre-dispatch `FrozenPrefix::verify`; `rusty-core/tests/frozen_tiers.rs` 6 tests (session lifetime, tier mutation, dispatch refusal, mid-session suffix, cross-process resume, deterministic rendering); `2cf4853` on `feat/ep-02-s09` |
-| EP-02-S10 | The provider seam: two methods, prefix routing, provenance stamps | P0 | ◐ | provider seam + prefix routing landed; provenance stamps open |
+| EP-02-S10 | The provider seam: two methods, prefix routing, provenance stamps | P0 | ✅ | `ChatModel::chat_stamped` default method, `ProviderRegistry` with prefix routing (`openai/gpt-4` → provider + model), `StampedChatModel` dispatch wrapper; `rusty-core/tests/provider_seam.rs` 5 tests (routing, unregistered rejection, stamp capture across start/continuation/end, main/side traffic distinction, cargo metadata kernel-dep check); `43e618a` on `feat/ep-02-s10` |
 | EP-02-S11 | Retry and overflow recovery as `request_error` seam extensions | P1 | ◐ | retry/overflow recovery at the seam; `request_error` extensions partial |
 
 ## EP-03 — Durability, Checkpoints and Pause
