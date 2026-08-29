@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 68%** weighted complete (92 ✅ landed · 62 ◐ partial · 28 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 68%** weighted complete (94 ✅ landed · 61 ◐ partial · 27 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -23,7 +23,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 3 | 5 | 4 | ██████░░░░░░ 46% |
-| EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 2 | 6 | 4 | █████░░░░░░░ 42% |
+| EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 4 | 5 | 3 | ██████░░░░░░ 50% |
 | EP-12 Evals Framework | M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 7 | 2 | 3 | █████████░░░ 67% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
@@ -137,7 +137,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-06-S08 | Sleeptime consolidation: scheduled, gated, high-water-marked | P0 | ◐ | `/memory/consolidate` landed; `a30967a` on `feat/ep-06-s08`: `ConsolidationCadence`, `ConsolidationState`, `frequency_gate()`, `exclude_recall_injected()`, high-water mark persistence (`load_consolidation_state`/`persist_consolidation_state`) in `rusty-core/src/memory.rs`; `rusty-core/tests/consolidation_gating.rs` 19 tests (gating pass/block matrix, interval checks, reason messages, high-water advance, state round-trip through store, missing state freshness, well-known key, recall-loop exclusion by run id and by tag, mixed slice, edge cases); clippy/doc clean; scheduler integration (cron wiring from blueprint `consolidation_cadence`) and side-session worker execution remain open |
 | EP-06-S09 | Loss-bounded, hash-checked curated rewrites | P0 | ✅ | `e8b905f` on `feat/ep-06-s09`: `RewriteProposal`, `RewriteValidation`, `RewriteAudit` structs + `validate_rewrite()` in `rusty-core/src/memory.rs`; hash-match check (optimistic concurrency), loss-bound check (default 20% with justification override), shape-aware fact counting (arrays, single-array objects, general objects, string lines, scalars); `rusty-core/tests/rewrite_validation.rs` 15 tests (hash match/mismatch, loss within/exceeds bound, justifications pass/fail, fact-counting shapes, diff/audit shape, edge cases); clippy/doc clean |
 | EP-06-S10 | The compaction engine: triggers, fallback chain, cheap summarizer, surface landing | P0 | ✅ | compaction engine (`context.rs`/`surface.rs`/`memory_tiers.rs`) |
-| EP-06-S11 | Pre-compaction memory flush | P0 | ○ | pre-compaction memory flush not started |
+| EP-06-S11 | Pre-compaction memory flush | P0 | ○ | blocked: requires EP-06-S10 compaction engine surface to be stable before flush timing can be defined |
 | EP-06-S12 | The hierarchical summary index, with vector search as an optional backend | P1 | ◐ | `memory_tiers.rs` hierarchical index; vector backend open |
 
 ## EP-07 — Skills and Self-Learning
@@ -217,12 +217,12 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-11 — Security, Governance, and Multi-Tenancy
 
-█████░░░░░░░ 42% · 2 landed · 6 partial · 4 not started · milestone M0–M4
+██████░░░░░░ 50% · 4 landed · 5 partial · 3 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-11-S01 | The `SecretRef` type and the egress-only resolver | P0 | ◐ | `SecretRef` type (`broker.rs`); egress-only resolver partial |
-| EP-11-S02 | Wire-probe-verified attachment: no probe, no tool | P0 | ○ | wire-probe-verified attachment not started |
+| EP-11-S01 | The `SecretRef` type and the egress-only resolver | P0 | ✅ | `SecretRef` type + grammar validation, `Display`/`Debug` redaction, serde round-trip, `TryFrom<String>` (`ceaa8f1`); `SecretResolver` trait + `ScriptedSecretResolver` test double with 3 resolver tests in `rusty-core/tests/broker.rs`, exported in `rusty-core/src/lib.rs` (`8a93cf2`); 16 total broker tests |
+| EP-11-S02 | Wire-probe-verified attachment: no probe, no tool | P0 | ✅ | `WireProbeOutcome` enum (`Rewritten`/`NotRewritten`/`Unreachable`), `WireProbeRecord` struct with `evidence_hash`, `ProbeLedger` trait + `ScriptedProbeLedger` test double, 8 new tests in `rusty-core/tests/broker.rs` (golden shape, newest-wins, append-only, liveness matrix, missing-probe, re-probe precedence), exported in `lib.rs`; `c8a99de` on `feat/ep-11-s02`; 38 total broker tests green, clippy/doc clean |
 | EP-11-S03 | L7 egress policy: destination × method × path × originating component | P0 | ○ | L7 egress policy not started |
 | EP-11-S04 | SSRF and DNS discipline: preflight, pins, and canonicalization | P1 | ○ | SSRF/DNS discipline not started |
 | EP-11-S05 | Layered execution security: modes, policy, autonomy — orthogonal and non-widening | P0 | ✅ | `capsule.rs` layered execution security: modes × policy × autonomy |
