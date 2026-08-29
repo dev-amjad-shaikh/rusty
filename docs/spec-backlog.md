@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 69%** weighted complete (96 ✅ landed · 61 ◐ partial · 25 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 70%** weighted complete (97 ✅ landed · 60 ◐ partial · 25 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -22,7 +22,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
-| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 4 | 4 | 4 | ██████░░░░░░ 50% |
+| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 4 | 7 | 1 | ███████░░░░░ 63% |
 | EP-12 Evals Framework | M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 7 | 2 | 3 | █████████░░░ 67% |
@@ -211,7 +211,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-10-S07 | Dependency fingerprints on skills and playbooks | — | ○ | dependency fingerprints not started |
 | EP-10-S08 | Event-driven invalidation and the revalidation cycle | — | ○ | event-driven invalidation not started |
 | EP-10-S09 | Knowledge-level repair: failures file the cause | — | ◐ | knowledge-level repair via gap filing (W2 in flight) |
-| EP-10-S10 | The component health model: liveness, readiness, honest degradation | — | ◐ | `HealthStatus`/`ComponentHealth`/`HealthReport` types + aggregation logic; `GET /health` handler pings `store` (list_assistants), `broker` (list), `connectors` (list_manifests), `deployment` (list_environments), `knowledge` (all_sources); structural Up for `checkpointer`, `receipt_keyring`, `artifact_retention`, `evaluation_state`; 1 integration test (`health_returns_200_with_components`); clippy/doc clean; `cea6772` on `feat/ep-10-s10` |
+| EP-10-S10 | The component health model: liveness, readiness, honest degradation | — | ✅ | `HealthStatus`/`ComponentHealth`/`HealthReport` types + aggregation logic; `GET /health` handler with async probes for `store` (list_assistants), `checkpointer` (list dummy thread), `broker` (list), `connectors` (list_manifests), `deployment` (list_environments), `knowledge` (all_sources), `receipt_keyring` (list_receipt_keys), `artifact_retention` (list_run_artifacts); structural Up for `skills` (boot-loaded) and `evaluation_state` (in-memory runtime); 1 integration test (`health_returns_200_with_components`); clippy/doc clean; `cea6772` + `92d4692` on `feat/ep-10-s10` |
 | EP-10-S11 | Circuit breakers on flapping tools and connectors | — | ○ | circuit breakers not started |
 | EP-10-S12 | Self-healing conformance: the fault matrix | — | ○ | fault-matrix conformance not started |
 
