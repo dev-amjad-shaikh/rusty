@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 68%** weighted complete (94 ✅ landed · 61 ◐ partial · 27 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 68%** weighted complete (94 ✅ landed · 62 ◐ partial · 26 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -23,7 +23,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 3 | 5 | 4 | ██████░░░░░░ 46% |
-| EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 4 | 5 | 3 | ██████░░░░░░ 50% |
+| EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 4 | 6 | 2 | ███████░░░░░ 58% |
 | EP-12 Evals Framework | M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 7 | 2 | 3 | █████████░░░ 67% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
@@ -223,7 +223,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 |---|---|---|---|---|
 | EP-11-S01 | The `SecretRef` type and the egress-only resolver | P0 | ✅ | `SecretRef` type + grammar validation, `Display`/`Debug` redaction, serde round-trip, `TryFrom<String>` (`ceaa8f1`); `SecretResolver` trait + `ScriptedSecretResolver` test double with 3 resolver tests in `rusty-core/tests/broker.rs`, exported in `rusty-core/src/lib.rs` (`8a93cf2`); 16 total broker tests |
 | EP-11-S02 | Wire-probe-verified attachment: no probe, no tool | P0 | ✅ | `WireProbeOutcome` enum (`Rewritten`/`NotRewritten`/`Unreachable`), `WireProbeRecord` struct with `evidence_hash`, `ProbeLedger` trait + `ScriptedProbeLedger` test double, 8 new tests in `rusty-core/tests/broker.rs` (golden shape, newest-wins, append-only, liveness matrix, missing-probe, re-probe precedence), exported in `lib.rs`; `c8a99de` on `feat/ep-11-s02`; 38 total broker tests green, clippy/doc clean |
-| EP-11-S03 | L7 egress policy: destination × method × path × originating component | P0 | ○ | L7 egress policy not started |
+| EP-11-S03 | L7 egress policy: destination × method × path × originating component | P0 | ◐ | `EgressPolicy`, `EgressEndpointPolicy`, `EgressRule`, `EgressEndpoint`, `EgressDecision`, `EgressDenialReason`, `evaluate_egress()`, `path_matches()` glob matcher, `EgressPolicy::validate()` with failing-path return; 4 unit tests + 16 integration tests (deny-by-default, method/path matrix, audit mode, cross-component refusal, MCP tool-name matcher, validation corpus); clippy/doc clean; `37152f9` on `feat/ep-11-s03`; open: JSON Schema generation from Rust types (schemars not in crate deps), server-side HTTP enforcement point, NFR-12 probe suite parameterized over sandbox backends
 | EP-11-S04 | SSRF and DNS discipline: preflight, pins, and canonicalization | P1 | ○ | SSRF/DNS discipline not started |
 | EP-11-S05 | Layered execution security: modes, policy, autonomy — orthogonal and non-widening | P0 | ✅ | `capsule.rs` layered execution security: modes × policy × autonomy |
 | EP-11-S06 | Receipts and attributed decisions: hallucinated actions are detectable, fail-closed is never "the user said no" | P0 | ✅ | `receipt.rs` + `/receipts/verify`, attributed decisions |

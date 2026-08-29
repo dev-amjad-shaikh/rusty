@@ -18,3 +18,4 @@ Register before editing code. Update status when done. Another stream's claimed 
 | Tool effect admission | codex | main | `rusty-core/src/{effects,tool,replay,node,executor,react}.rs`, `rusty-core/tests/tool_effect_admission.rs` | DONE — squash-merged and pushed `75c73a9`; branch + worktree removed |
 | Human feedback operations | codex | main | `rusty-eval/src/{feedback,lib,error}.rs`, `rusty-eval/tests/feedback.rs` | DONE — squash-merged and pushed `4f1eeed`; branch + worktree removed |
 | Wire-probe-verified attachment (EP-11-S02) | kimi | `feat/ep-11-s02` (worktree `.worktrees/ep-11-s02`) | `rusty-core/src/broker.rs`, `rusty-core/tests/broker.rs`, `rusty-core/src/lib.rs` | DONE — pushed `c8a99de` |
+| L7 egress policy (EP-11-S03) | kimi | `feat/ep-11-s03` (worktree `.worktrees/ep-11-s03`) | `rusty-core/src/egress.rs`, `rusty-core/tests/egress.rs`, `rusty-core/src/lib.rs` | DONE — pushed `37152f9` |
