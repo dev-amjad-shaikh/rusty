@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 70%** weighted complete (98 ✅ landed · 60 ◐ partial · 24 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 70%** weighted complete (99 ✅ landed · 59 ◐ partial · 24 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -24,7 +24,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 4 | 7 | 1 | ███████░░░░░ 63% |
-| EP-12 Evals Framework | M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
+| EP-12 Evals Framework | M2 | 12 | 9 | 1 | 2 | █████████░░░ 75% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 7 | 2 | 3 | █████████░░░ 67% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 1 | 6 | 5 | ████░░░░░░░░ 33% |
@@ -209,7 +209,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-10-S05 | Heartbeat watchdog and the orphan sweep | — | ✅ | heartbeat watchdog + orphan sweep (`/tasks/heartbeat`) |
 | EP-10-S06 | Stuck-turn detection: shielded grace, then escalation | — | ◐ | **BLOCKED**: phase-based cancellation handles not present in executor; `ToolBudget.timeout_ms` does not exist; turn lease release mechanism (EP-04-S05) not wired to kernel; shielded grace window infrastructure absent. Cannot implement AC 1–5 without EP-02/EP-04/EP-05 dependency infrastructure. |
 | EP-10-S07 | Dependency fingerprints on skills and playbooks | — | ✅ | `rusty-core/src/skill.rs`: `DependencyDecl` + frontmatter parsing; `rusty-core/src/skills.rs`: `DependencyIndex`, `FingerprintStatus`, hygiene checks; `rusty-core/tests/dependency_fingerprints.rs`: 24 tests (declare, missing, malformed, circular, satisfied, changed, expired, orphaned, transitive, co-occurrence, lock, lock drift, stale lock, revalidation, revalidation failure, lock creation, lock round-trip, lock corruption, lock migration, hygiene pass/fail, hygiene mixed, hygiene error, index rebuild, concurrent modification); clippy/doc clean; `bcb8bf1` on `feat/ep-10-s07` |
-| EP-10-S08 | Event-driven invalidation and the revalidation cycle | — | ○ | event-driven invalidation not started |
+| EP-10-S08 | Event-driven invalidation and the revalidation cycle | — | ○ | **BLOCKED**: depends on EP-07-S09 (runtime gap filing) and EP-07-S10 (hunting loop) which are on unmerged `feat/gap-ledger` branch; gap-ledger types and infrastructure not present on main. Cannot implement AC 1–5 without gap-ledger dependency. |
 | EP-10-S09 | Knowledge-level repair: failures file the cause | — | ◐ | knowledge-level repair via gap filing (W2 in flight) |
 | EP-10-S10 | The component health model: liveness, readiness, honest degradation | — | ✅ | `HealthStatus`/`ComponentHealth`/`HealthReport` types + aggregation logic; `GET /health` handler with async probes for `store` (list_assistants), `checkpointer` (list dummy thread), `broker` (list), `connectors` (list_manifests), `deployment` (list_environments), `knowledge` (all_sources), `receipt_keyring` (list_receipt_keys), `artifact_retention` (list_run_artifacts); structural Up for `skills` (boot-loaded) and `evaluation_state` (in-memory runtime); 1 integration test (`health_returns_200_with_components`); clippy/doc clean; `cea6772` + `92d4692` on `feat/ep-10-s10` |
 | EP-10-S11 | Circuit breakers on flapping tools and connectors | — | ○ | **BLOCKED**: `Middleware::after_tool` is success-path only; no outcome hook runs on tool errors. A circuit breaker cannot observe failures through the middleware layer. Needs either an `on_tool_error` middleware hook or a different integration point (e.g., `ToolExecutor` level).
@@ -236,7 +236,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-12 — Evals Framework
 
-████████░░░░ 75% · 8 landed · 2 partial · 2 not started · milestone M2
+█████████░░░ 75% · 9 landed · 1 partial · 2 not started · milestone M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -247,7 +247,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-12-S05 | The scorer pipeline: preprocess → analyze → score → reason | P0 | ✅ | scorer pipeline (`judge.rs`, `statistics.rs`) |
 | EP-12-S06 | Scorers as async production hooks on sampled live traffic | P1 | ○ | live-traffic async scorers not started |
 | EP-12-S07 | Simulated users for multi-turn scenarios | P1 | ○ | simulated users not started |
-| EP-12-S08 | Promotion gates: suites wired to skill promotion and blueprint publishing | P0 | ◐ | `gate.rs` promotion gates; wiring to skill/blueprint promotion partial |
+| EP-12-S08 | Promotion gates: suites wired to skill promotion and blueprint publishing | P0 | ✅ | `rusty-core/src/skill.rs` `eval_gate` frontmatter field + `SkillPromotion`/`SkillPromotionStatus` types; `rusty-core/tests/skill_promotion.rs` 7 tests (gate parsing, hash inclusion, optional/reject-empty, serde round-trip); `rusty-server/src/skills.rs` `SkillGateEvaluator` trait + `PromotionError` + `promote()` with AC 5 stale-hash reuse + file-backed promotion persistence under `skill-promotions/`; `rusty-server/src/routes.rs` `POST /skills/{name}/promote` handler; 9 server tests pass (missing-gate refusal, failing-gate block, passing-gate success, stale-hash reuse, changed-hash demands new eval); clippy/doc clean; `ee6f84c` on `feat/ep-12-s08` |
 | EP-12-S09 | Conformance suites as a first-class eval type | P1 | ◐ | conformance suites as eval type partial |
 | EP-12-S10 | The benchmark harness: latency, cost, and quality regression | P1 | ✅ | benchmark harness (benches + `compare.rs`) |
 | EP-12-S11 | Results with lineage; A/B comparison across versions | P1 | ✅ | results lineage + A/B (`/experiments/compare`) |
