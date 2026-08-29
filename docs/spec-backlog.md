@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 70%** weighted complete (97 ✅ landed · 60 ◐ partial · 25 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 70%** weighted complete (98 ✅ landed · 60 ◐ partial · 24 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -198,7 +198,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-10 — Self-Healing and Resilience
 
-██████░░░░░░ 50% · 4 landed · 4 partial · 4 not started · milestone M1–M3
+███████░░░░░ 54% · 5 landed · 3 partial · 4 not started · milestone M1–M3
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -208,11 +208,11 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-10-S04 | Attempt-level repair: failure-reason classification and fresh-session escalation | — | ◐ | **BLOCKED**: `FailureReason`/`RetryRule` types from `contracts:task-attempt` do not exist in workspace; no `resume_safe` field on attempt rows; fresh-session escalation logic absent. Cannot implement AC 1–6 without task-attempt contract infrastructure. |
 | EP-10-S05 | Heartbeat watchdog and the orphan sweep | — | ✅ | heartbeat watchdog + orphan sweep (`/tasks/heartbeat`) |
 | EP-10-S06 | Stuck-turn detection: shielded grace, then escalation | — | ◐ | **BLOCKED**: phase-based cancellation handles not present in executor; `ToolBudget.timeout_ms` does not exist; turn lease release mechanism (EP-04-S05) not wired to kernel; shielded grace window infrastructure absent. Cannot implement AC 1–5 without EP-02/EP-04/EP-05 dependency infrastructure. |
-| EP-10-S07 | Dependency fingerprints on skills and playbooks | — | ○ | dependency fingerprints not started |
+| EP-10-S07 | Dependency fingerprints on skills and playbooks | — | ✅ | `rusty-core/src/skill.rs`: `DependencyDecl` + frontmatter parsing; `rusty-core/src/skills.rs`: `DependencyIndex`, `FingerprintStatus`, hygiene checks; `rusty-core/tests/dependency_fingerprints.rs`: 24 tests (declare, missing, malformed, circular, satisfied, changed, expired, orphaned, transitive, co-occurrence, lock, lock drift, stale lock, revalidation, revalidation failure, lock creation, lock round-trip, lock corruption, lock migration, hygiene pass/fail, hygiene mixed, hygiene error, index rebuild, concurrent modification); clippy/doc clean; `bcb8bf1` on `feat/ep-10-s07` |
 | EP-10-S08 | Event-driven invalidation and the revalidation cycle | — | ○ | event-driven invalidation not started |
 | EP-10-S09 | Knowledge-level repair: failures file the cause | — | ◐ | knowledge-level repair via gap filing (W2 in flight) |
 | EP-10-S10 | The component health model: liveness, readiness, honest degradation | — | ✅ | `HealthStatus`/`ComponentHealth`/`HealthReport` types + aggregation logic; `GET /health` handler with async probes for `store` (list_assistants), `checkpointer` (list dummy thread), `broker` (list), `connectors` (list_manifests), `deployment` (list_environments), `knowledge` (all_sources), `receipt_keyring` (list_receipt_keys), `artifact_retention` (list_run_artifacts); structural Up for `skills` (boot-loaded) and `evaluation_state` (in-memory runtime); 1 integration test (`health_returns_200_with_components`); clippy/doc clean; `cea6772` + `92d4692` on `feat/ep-10-s10` |
-| EP-10-S11 | Circuit breakers on flapping tools and connectors | — | ○ | circuit breakers not started |
+| EP-10-S11 | Circuit breakers on flapping tools and connectors | — | ○ | **BLOCKED**: `Middleware::after_tool` is success-path only; no outcome hook runs on tool errors. A circuit breaker cannot observe failures through the middleware layer. Needs either an `on_tool_error` middleware hook or a different integration point (e.g., `ToolExecutor` level).
 | EP-10-S12 | Self-healing conformance: the fault matrix | — | ○ | fault-matrix conformance not started |
 
 ## EP-11 — Security, Governance, and Multi-Tenancy
