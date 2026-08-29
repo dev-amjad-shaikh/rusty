@@ -8,21 +8,21 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 68%** weighted complete (94 ✅ landed · 63 ◐ partial · 25 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 69%** weighted complete (96 ✅ landed · 61 ◐ partial · 25 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
-| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
-| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 8 | 2 | 1 | ██████████░░ 82% |
+| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 1 | 1 | ██████████░░ 91% |
+| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 1 | 1 | ██████████░░ 91% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 8 | 3 | 1 | █████████░░░ 79% |
 | EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
-| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 3 | 5 | 4 | ██████░░░░░░ 46% |
+| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 4 | 4 | 4 | ██████░░░░░░ 50% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 4 | 7 | 1 | ███████░░░░░ 63% |
 | EP-12 Evals Framework | M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 7 | 2 | 3 | █████████░░░ 67% |
@@ -67,7 +67,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-03 — Durability, Checkpoints and Pause
 
-██████████░░ 82% · 8 landed · 2 partial · 1 not started · milestone M1
+██████████░░ 91% · 9 landed · 1 partial · 1 not started · milestone M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -76,10 +76,10 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-03-S03 | The durability knob: sync, async, exit | — | ✅ | durability knob in checkpoint config |
 | EP-03-S04 | Checkpoints are projections: fold, verify, discard | — | ✅ | `checkpoint.rs` fold / verify / discard |
 | EP-03-S05 | Pause-as-data: run exit with typed obligations | — | ✅ | pause-as-data with typed obligations (`durable.rs`) |
-| EP-03-S06 | The pause envelope: versioned snapshot with tool-identity rebinding | — | ◐ | versioned snapshot landed; tool-identity rebinding partial |
+| EP-03-S06 | The pause envelope: versioned snapshot with tool-identity rebinding | — | ✅ | `PauseEnvelope`, `PauseSchemaVersion`, `ToolIdentityKey`, `RunObligation`, `ObligationKind`, `ObligationStatus`, `StickyApproval`, `ToolRebindingResult` in `rusty-core/src/record.rs`; semver floor check fails loudly; tool-identity rebinding by exact qualified-tool-name match; sticky approval round-trip; sparse wire shape; 13 tests in `rusty-core/tests/pause_envelope.rs`; clippy/doc clean; `d1d2e5f` on `feat/ep-03-s06` |
 | EP-03-S07 | Resume as an ordinary invocation | — | ✅ | resume as an ordinary invocation |
 | EP-03-S08 | Interrupt as a resumable exception with ordinal matching | — | ✅ | interrupts as resumable exceptions, ordinal matching |
-| EP-03-S09 | Message-granular checkpoints: continue, fork, regenerate, time-travel | — | ◐ | message-granular checkpoints landed; fork/regenerate/time-travel partial |
+| EP-03-S09 | Message-granular checkpoints: continue, fork, regenerate, time-travel | — | ◐ | `ThreadRecord` gains `parent`/`seed_length`; `POST /threads/{id}/fork` populates lineage; `GET /threads/{id}` retrieves lineage; `POST /threads/{id}/regenerate` forks + schedules run; `POST /threads/{id}/continue` shadows original; `rusty-server/tests/message_granular.rs` 3 tests (fork_lineage, regenerate_is_fork, continue_shadows_never_deletes) pass; `rusty-server/tests/time_travel.rs` 5/5 pass; clippy/doc clean; `6de69af` on `feat/ep-03-s09`; open: `paused_fork_isolation` AC (pause/obligation infra not fully wired in test harness) |
 | EP-03-S10 | Crash-resume conformance: kill anywhere, recompute the frontier | — | ✅ | crash-resume recovery proofs (kill-anywhere tests) |
 | EP-03-S11 | Pause longevity and expiry governance | — | ○ | pause expiry governance not started |
 
@@ -89,7 +89,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-04-S01 | The schema-defined protocol: frames, snapshot, sequencing | — | ◐ | WS protocol frames landed; schema-defined sequencing/snapshot partial |
+| EP-04-S01 | The schema-defined protocol: frames, snapshot, sequencing | — | ◐ | WS protocol frames landed; schema-defined sequencing/snapshot partial; **blocked**: EP-13 schema-generation pipeline (`schemars → JSON Schema → TS types`) not present in workspace — `schemars` not in crate deps, no TS client generation CI job
 | EP-04-S02 | Mandatory idempotency keys and the dedupe cache | — | ✅ | mandatory idempotency keys + dedupe |
 | EP-04-S03 | Device pairing with challenge-nonce signing | — | ○ | device pairing not started |
 | EP-04-S04 | Session resolution and lineage | — | ✅ | session resolution + lineage (`/threads`, `session_query.rs`) |
@@ -137,7 +137,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-06-S08 | Sleeptime consolidation: scheduled, gated, high-water-marked | P0 | ◐ | `/memory/consolidate` landed; `a30967a` on `feat/ep-06-s08`: `ConsolidationCadence`, `ConsolidationState`, `frequency_gate()`, `exclude_recall_injected()`, high-water mark persistence (`load_consolidation_state`/`persist_consolidation_state`) in `rusty-core/src/memory.rs`; `rusty-core/tests/consolidation_gating.rs` 19 tests (gating pass/block matrix, interval checks, reason messages, high-water advance, state round-trip through store, missing state freshness, well-known key, recall-loop exclusion by run id and by tag, mixed slice, edge cases); clippy/doc clean; scheduler integration (cron wiring from blueprint `consolidation_cadence`) and side-session worker execution remain open |
 | EP-06-S09 | Loss-bounded, hash-checked curated rewrites | P0 | ✅ | `e8b905f` on `feat/ep-06-s09`: `RewriteProposal`, `RewriteValidation`, `RewriteAudit` structs + `validate_rewrite()` in `rusty-core/src/memory.rs`; hash-match check (optimistic concurrency), loss-bound check (default 20% with justification override), shape-aware fact counting (arrays, single-array objects, general objects, string lines, scalars); `rusty-core/tests/rewrite_validation.rs` 15 tests (hash match/mismatch, loss within/exceeds bound, justifications pass/fail, fact-counting shapes, diff/audit shape, edge cases); clippy/doc clean |
 | EP-06-S10 | The compaction engine: triggers, fallback chain, cheap summarizer, surface landing | P0 | ✅ | compaction engine (`context.rs`/`surface.rs`/`memory_tiers.rs`) |
-| EP-06-S11 | Pre-compaction memory flush | P0 | ○ | blocked: requires EP-06-S10 compaction engine surface to be stable before flush timing can be defined |
+| EP-06-S11 | Pre-compaction memory flush | P0 | ○ | **BLOCKED**: spec assumes `MemoryEntry`/`MemoryBlock`/`RecallInjection` model (EP-06-S01–S03) that does not exist in workspace; actual code has `MemoryRecord` with different provenance/scope model; flush step requires memory-entry-append tool and side-session worker execution that have no infrastructure
 | EP-06-S12 | The hierarchical summary index, with vector search as an optional backend | P1 | ◐ | `memory_tiers.rs` hierarchical index; vector backend open |
 
 ## EP-07 — Skills and Self-Learning
@@ -198,20 +198,20 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-10 — Self-Healing and Resilience
 
-██████░░░░░░ 46% · 3 landed · 5 partial · 4 not started · milestone M1–M3
+██████░░░░░░ 50% · 4 landed · 4 partial · 4 not started · milestone M1–M3
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-10-S01 | Typed repair records: no silent healing | — | ◐ | repairs logged; full typed repair-record surface partial |
+| EP-10-S01 | Typed repair records: no silent healing | — | ✅ | `rusty-core/src/repair.rs`: `RepairRecord`, `RepairTrigger`, `RepairAction`, `RepairOutcome`, `RepairRung`, `BreakerState`, `RepairQuery`, `RepairLedger` trait, `InMemoryRepairLedger`, `BufferedRepairSink` with `RepairSinkMetrics`, `RepairRecordBuilder`; `FileRepairLedger` (file-backed, append-only, JSON-per-record under `{root}/repairs/`) with `RepairLedger` trait impl; 13 tests in `rusty-core/tests/repair_records.rs` (record shape, attempt-count aggregation, query by component/trigger/outcome/time-range/session/attempt, sink failure/buffer-exhaustion/drop-metric/flush-recovery, serde round-trip, closed enum); 4 tests in `rusty-core/tests/repair_persistence.rs` (persists_and_queries, query_by_component, survives_reopen, object_safe); axum handlers `GET /repairs` and `GET /repairs/{record_id}` with query-param filtering in `rusty-server/src/repair.rs`; clippy/doc clean; `d271059` + `7fa19c2` on `feat/ep-10-s01` |
 | EP-10-S02 | The repair ladder: cheapest rung first, escalation explicit | — | ✅ | repair ladder, cheapest rung first (`self_improve.rs`) |
 | EP-10-S03 | Provider-error classification and backoff at the request seam | — | ✅ | provider-error classification + backoff at the seam |
-| EP-10-S04 | Attempt-level repair: failure-reason classification and fresh-session escalation | — | ◐ | attempt-level classification landed; fresh-session escalation partial |
+| EP-10-S04 | Attempt-level repair: failure-reason classification and fresh-session escalation | — | ◐ | **BLOCKED**: `FailureReason`/`RetryRule` types from `contracts:task-attempt` do not exist in workspace; no `resume_safe` field on attempt rows; fresh-session escalation logic absent. Cannot implement AC 1–6 without task-attempt contract infrastructure. |
 | EP-10-S05 | Heartbeat watchdog and the orphan sweep | — | ✅ | heartbeat watchdog + orphan sweep (`/tasks/heartbeat`) |
-| EP-10-S06 | Stuck-turn detection: shielded grace, then escalation | — | ◐ | stuck-turn detection partial |
+| EP-10-S06 | Stuck-turn detection: shielded grace, then escalation | — | ◐ | **BLOCKED**: phase-based cancellation handles not present in executor; `ToolBudget.timeout_ms` does not exist; turn lease release mechanism (EP-04-S05) not wired to kernel; shielded grace window infrastructure absent. Cannot implement AC 1–5 without EP-02/EP-04/EP-05 dependency infrastructure. |
 | EP-10-S07 | Dependency fingerprints on skills and playbooks | — | ○ | dependency fingerprints not started |
 | EP-10-S08 | Event-driven invalidation and the revalidation cycle | — | ○ | event-driven invalidation not started |
 | EP-10-S09 | Knowledge-level repair: failures file the cause | — | ◐ | knowledge-level repair via gap filing (W2 in flight) |
-| EP-10-S10 | The component health model: liveness, readiness, honest degradation | — | ◐ | `/ok`, `/connections/health`; honest degradation partial |
+| EP-10-S10 | The component health model: liveness, readiness, honest degradation | — | ◐ | `HealthStatus`/`ComponentHealth`/`HealthReport` types + aggregation logic; `GET /health` handler pings `store` (list_assistants), `broker` (list), `connectors` (list_manifests), `deployment` (list_environments), `knowledge` (all_sources); structural Up for `checkpointer`, `receipt_keyring`, `artifact_retention`, `evaluation_state`; 1 integration test (`health_returns_200_with_components`); clippy/doc clean; `cea6772` on `feat/ep-10-s10` |
 | EP-10-S11 | Circuit breakers on flapping tools and connectors | — | ○ | circuit breakers not started |
 | EP-10-S12 | Self-healing conformance: the fault matrix | — | ○ | fault-matrix conformance not started |
 
