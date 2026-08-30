@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 71%** weighted complete (101 ✅ landed · 57 ◐ partial · 24 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 71%** weighted complete (102 ✅ landed · 56 ◐ partial · 24 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -25,7 +25,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
 | EP-12 Evals Framework | M2 | 12 | 9 | 1 | 2 | █████████░░░ 75% |
-| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 7 | 2 | 3 | █████████░░░ 67% |
+| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 1 | 3 | ██████████░░ 71% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 1 | 6 | 5 | ████░░░░░░░░ 33% |
 
@@ -255,13 +255,13 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-13 — Observability, Storage, and Operations
 
-█████████░░░ 67% · 7 landed · 2 partial · 3 not started · milestone M0–M4
+██████████░░ 71% · 8 landed · 1 partial · 3 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
 | EP-13-S01 | The composite store: typed domains, one container, per-domain routing | P0 | ✅ | composite dual-backend store (`server_store.rs`) |
 | EP-13-S02 | The PostgreSQL reference implementation | — | ✅ | PostgreSQL reference implementation |
-| EP-13-S03 | Published conformance suites for every store trait | P0 | ◐ | store conformance suites partial |
+| EP-13-S03 | Published conformance suites for every store trait | P0 | ✅ | `rusty-store/src/lib.rs`: `ArtifactStore` trait (save, load, list, delete, exists); `rusty-store-conformance/src/lib.rs`: `ConformanceReport`, `ConformanceCase`, `ConformanceSeverity`, `StoreConformance` async trait; `rusty-store-conformance/src/artifact.rs`: `ArtifactStoreConformance` with 11 assertions (round-trip, list, delete, not-found, overwrite, concurrency-safe list, empty-list, case-sensitivity, list-after-delete, exists-after-delete, content-isolation); `rusty-store-conformance/tests/artifact_conformance.rs`: 1 integration test (`file_artifact_store_conformance`) passing against `FileArtifactStore`; clippy/doc clean; `b0ee14a` on `feat/ep-13-s03` |
 | EP-13-S04 | The object-store blob backend | P1 | ○ | object-store blob backend not started |
 | EP-13-S05 | Migrations discipline: versioned, append-only schema evolution | P0 | ✅ | versioned, append-only migrations |
 | EP-13-S06 | The rustyness binary and single-node deployment | P0 | ✅ | `deploy.rs` single-node deployment |
