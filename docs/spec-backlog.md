@@ -104,7 +104,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-05 — Tool System and Sandboxing
 
-████████████░░ 88% · 9 landed · 3 partial · 0 not started · milestone M0–M2
+█████████████░ 92% · 10 landed · 2 partial · 0 not started · milestone M0–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -116,7 +116,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-05-S06 | Per-effect-class execution placement | P0 | ✅ | `tool.rs` (`f2a7386`): `EffectClass`/`SandboxRequirement`/`Placement`/`PlacementError` enums + `resolve_placement()`, `Tool::effect_class()`/`sandbox_requirement()` defaults (`Read`/`None`), registration panics on `InvalidDeclaration` (AC 2), dispatch rejects `NoBackendAvailable` (AC 5); 4 placement tests (read-none registers, execute-none panics, egress-none panics, read-required fails dispatch); full runtime suite 465 tests green; backend identity recording (AC 3) + egress policy (AC 4) deferred to EP-11/L7 policy |
 | EP-05-S07 | Code mode: one interpreter, guarded sub-dispatch, iteration refunds | P1 | ✅ | code mode: one interpreter, guarded sub-dispatch |
 | EP-05-S08 | MCP client for external servers | P1 | ✅ | `mcp.rs` MCP client |
-| EP-05-S09 | In-process tools presented as MCP servers | P1 | ◐ | in-process tools as MCP servers partial |
+| EP-05-S09 | In-process tools presented as MCP servers | P1 | ✅ | `mcp.rs` (`4c1f158`): `InProcessMcpBridge` serves native tools over `tokio::io::duplex` in-memory transport; handles `initialize`, `tools/list`, `tools/call` with same JSON-RPC framing as external MCP; `McpClient::into_tools()` produces `McpToolAdapter` wrappers; mount-time `InProcessMountError` for disallowed effect classes (default `[Pure, ReadOnly]`, overridable via `with_allowed_effects`); 10 bridge tests (discovery parity, dispatch parity, mount refusal, error handling, multi-client, into_tools) |
 | EP-05-S10 | Approval-gated execution: pause, decide, resume | P0 | ✅ | approval-gated execution: pause / decide / resume |
 | EP-05-S11 | The bounded exec-reviewer for the gray zone | P1 | ✅ | `reviewer.rs` (`0605ce3`): `ExecReviewer` middleware with bounded model call (360 tokens, 30s timeout), strict schema `{decision, risk, rationale}`, fail-closed on all errors (timeout/malformed JSON/schema violation); `ToolInvocation.effect` field wired in `tool.rs`; 11 reviewer tests (allow/ask/passthrough paths + fault injection); clippy/doc clean |
 | EP-05-S12 | Container and remote sandbox backends | P1 | ◐ | `remote.rs`; container/remote backends partial |
