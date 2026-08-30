@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 71%** weighted complete (102 ✅ landed · 56 ◐ partial · 24 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 72%** weighted complete (103 ✅ landed · 56 ◐ partial · 23 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -255,14 +255,14 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-13 — Observability, Storage, and Operations
 
-██████████░░ 71% · 8 landed · 1 partial · 3 not started · milestone M0–M4
+███████████░ 75% · 9 landed · 1 partial · 2 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
 | EP-13-S01 | The composite store: typed domains, one container, per-domain routing | P0 | ✅ | composite dual-backend store (`server_store.rs`) |
 | EP-13-S02 | The PostgreSQL reference implementation | — | ✅ | PostgreSQL reference implementation |
 | EP-13-S03 | Published conformance suites for every store trait | P0 | ✅ | `rusty-store/src/lib.rs`: `ArtifactStore` trait (save, load, list, delete, exists); `rusty-store-conformance/src/lib.rs`: `ConformanceReport`, `ConformanceCase`, `ConformanceSeverity`, `StoreConformance` async trait; `rusty-store-conformance/src/artifact.rs`: `ArtifactStoreConformance` with 11 assertions (round-trip, list, delete, not-found, overwrite, concurrency-safe list, empty-list, case-sensitivity, list-after-delete, exists-after-delete, content-isolation); `rusty-store-conformance/tests/artifact_conformance.rs`: 1 integration test (`file_artifact_store_conformance`) passing against `FileArtifactStore`; clippy/doc clean; `b0ee14a` on `feat/ep-13-s03` |
-| EP-13-S04 | The object-store blob backend | P1 | ○ | object-store blob backend not started |
+| EP-13-S04 | The object-store blob backend | P1 | ✅ | `rusty-store/src/blob.rs`: `BlobStore` trait (`put`/`get`/`delete`/`exists`), `BlobLocator` (tenant prefix + sha256 + bytes), `BlobError` enum (`NotFound`/`Integrity`/`Io`/`Unavailable`); `LocalBlobStore` backed by `object_store::local::LocalFileSystem` with tenant-scoped paths and sha256 content verification on read; `rusty-store-conformance/src/blob.rs`: `BlobStoreConformance` suite with 13 assertions (round-trip, hash verification, tenant isolation, not-found, idempotent put/dedup, delete, exists); `rusty-store-conformance/tests/blob_conformance.rs`: 1 integration test passing against `LocalBlobStore` + `tempfile`; 7 unit tests in `rusty-store/src/blob.rs` (round-trip, integrity check, not-found, dedup, tenant isolation, delete idempotent); clippy/doc clean; `833e0d8` on `feat/ep-13-s04` |
 | EP-13-S05 | Migrations discipline: versioned, append-only schema evolution | P0 | ✅ | versioned, append-only migrations |
 | EP-13-S06 | The rustyness binary and single-node deployment | P0 | ✅ | `deploy.rs` single-node deployment |
 | EP-13-S07 | The standing fault-injection and load harness | P0 | ✅ | `rusty-server/tests/fault_injection.rs`: `KillSchedule` enum (`MidEffect`, `AfterEnqueue`), 4 tests covering kill-mid-effect, kill-after-enqueue, jitter-mode seeded reproducibility, seeded-defect fsync skip; `b605cb7` on `feat/ep-13-s07` |
