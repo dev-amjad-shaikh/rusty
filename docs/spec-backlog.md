@@ -104,7 +104,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-05 — Tool System and Sandboxing
 
-██████████░░ 79% · 8 landed · 3 partial · 1 not started · milestone M0–M2
+████████████░░ 88% · 9 landed · 3 partial · 0 not started · milestone M0–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -118,7 +118,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-05-S08 | MCP client for external servers | P1 | ✅ | `mcp.rs` MCP client |
 | EP-05-S09 | In-process tools presented as MCP servers | P1 | ◐ | in-process tools as MCP servers partial |
 | EP-05-S10 | Approval-gated execution: pause, decide, resume | P0 | ✅ | approval-gated execution: pause / decide / resume |
-| EP-05-S11 | The bounded exec-reviewer for the gray zone | P1 | ○ | bounded exec-reviewer not started |
+| EP-05-S11 | The bounded exec-reviewer for the gray zone | P1 | ✅ | `reviewer.rs` (`0605ce3`): `ExecReviewer` middleware with bounded model call (360 tokens, 30s timeout), strict schema `{decision, risk, rationale}`, fail-closed on all errors (timeout/malformed JSON/schema violation); `ToolInvocation.effect` field wired in `tool.rs`; 11 reviewer tests (allow/ask/passthrough paths + fault injection); clippy/doc clean |
 | EP-05-S12 | Container and remote sandbox backends | P1 | ◐ | `remote.rs`; container/remote backends partial |
 
 ## EP-06 — Memory
