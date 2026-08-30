@@ -91,14 +91,14 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 |---|---|---|---|---|
 | EP-04-S01 | The schema-defined protocol: frames, snapshot, sequencing | — | ◐ | WS protocol frames landed; schema-defined sequencing/snapshot partial; **blocked**: EP-13 schema-generation pipeline (`schemars → JSON Schema → TS types`) not present in workspace — `schemars` not in crate deps, no TS client generation CI job
 | EP-04-S02 | Mandatory idempotency keys and the dedupe cache | — | ✅ | mandatory idempotency keys + dedupe |
-| EP-04-S03 | Device pairing with challenge-nonce signing | — | ○ | device pairing not started |
+| EP-04-S03 | Device pairing with challenge-nonce signing | — | ○ | **BLOCKED**: depends on EP-04-S01 (◐) blocked on schema-generation pipeline; no device-pairing protocol types or registration surface in workspace |
 | EP-04-S04 | Session resolution and lineage | — | ✅ | session resolution + lineage (`/threads`, `session_query.rs`) |
 | EP-04-S05 | The turn lease on the resolved session | — | ✅ | turn lease (`/tasks/claim`, heartbeat) |
 | EP-04-S06 | The steering inbox: followup, steer, inject | — | ✅ | `inbox.rs` steering: followup / steer / inject |
-| EP-04-S07 | The channel adapter trait: capabilities, authentication, scopes | — | ○ | channel adapter trait not started |
+| EP-04-S07 | The channel adapter trait: capabilities, authentication, scopes | — | ○ | **BLOCKED**: depends on EP-04-S01 (◐) which is blocked on EP-13 schema-generation pipeline; no `rusty-api` channel trait or gateway adapter registration infrastructure exists in workspace — `rusty-api` crate is empty, server uses SSE not WS protocol, no adapter mount/dispatch surface |
 | EP-04-S08 | Built-in adapter: web chat over WebSocket | — | ◐ | web chat over WS (`/threads/{id}/runs/stream`); full adapter surface partial |
-| EP-04-S09 | Built-in adapter: Slack | — | ○ | Slack adapter not started |
-| EP-04-S10 | Multi-device and cross-surface session continuity | — | ○ | multi-device continuity not started |
+| EP-04-S09 | Built-in adapter: Slack | — | ○ | **BLOCKED**: depends on EP-04-S07 channel adapter trait which has no infrastructure in workspace |
+| EP-04-S10 | Multi-device and cross-surface session continuity | — | ○ | **BLOCKED**: depends on EP-04-S08 (◐) and EP-04-S09 (○), both blocked on EP-04-S07 channel adapter trait which has no infrastructure |
 | EP-04-S11 | Gateway-owned scheduling: cron, heartbeat, idleness | — | ✅ | gateway-owned scheduling (`/crons`, `triggers.rs`) |
 | EP-04-S12 | Approval custody and routing across surfaces | — | ◐ | approvals landed; cross-surface custody routing partial |
 
@@ -131,7 +131,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-06-S02 | Provenance-columned episodic entries | P0 | ✅ | provenance-columned episodic entries |
 | EP-06-S03 | The agent's memory tool surface | P0 | ✅ | agent memory tool surface |
 | EP-06-S04 | Lane-one recall: zero-model-call ranked and trigger injection | P0 | ✅ | lane-one recall, zero model calls (`/memory/query`) |
-| EP-06-S05 | Lane-two recall: the escalation search sub-agent | P1 | ○ | lane-two escalation sub-agent not started |
+| EP-06-S05 | Lane-two recall: the escalation search sub-agent | P1 | ○ | **BLOCKED**: spec assumes `MemoryBlock`/`MemoryEntry`/`RecallInjection` model (EP-06-S01–S04) that does not exist in workspace; actual code has `MemoryRecord` with different provenance/scope model; no lane-one miss signal, no recall-injection event type, no sub-agent spawning infrastructure. Cannot implement AC 1–5 without memory-model alignment. |
 | EP-06-S06 | Session-lineage-aware full-text search | P1 | ✅ | session-lineage-aware search (`session_query.rs`) |
 | EP-06-S07 | The deterministic promotion gate and structural exclusion of untrusted origins | P0 | ✅ | promotion gate + structural exclusion of untrusted origins |
 | EP-06-S08 | Sleeptime consolidation: scheduled, gated, high-water-marked | P0 | ◐ **BLOCKED** | `/memory/consolidate` landed; `a30967a` on `feat/ep-06-s08`: `ConsolidationCadence`, `ConsolidationState`, `frequency_gate()`, `exclude_recall_injected()`, high-water mark persistence (`load_consolidation_state`/`persist_consolidation_state`) in `rusty-core/src/memory.rs`; `rusty-core/tests/consolidation_gating.rs` 19 tests (gating pass/block matrix, interval checks, reason messages, high-water advance, state round-trip through store, missing state freshness, well-known key, recall-loop exclusion by run id and by tag, mixed slice, edge cases); clippy/doc clean; **BLOCKED on missing infrastructure**: `traffic: side` session stamping has no types/wiring; `learning_policy.consolidation_cadence` absent from blueprints/`CapabilityManifest`; task-based consolidation exists but spec expects automatic scheduler-fired "consolidation session" with candidate selection, promotion gate execution, and maintenance toolset assembly — none of which exist. Scheduler integration and side-session worker execution cannot proceed. |
