@@ -38,3 +38,4 @@ Register before editing code. Update status when done. Another stream's claimed 
 | Toolset combinator algebra (EP-05-S04) | kimi | `feat/ep-05-s04` (worktree `.worktrees/ep-05-s04`) | `rusty-core/src/tool_select.rs`, `rusty-core/tests/tool_select.rs` | DONE — pushed `b1d9c41` |
 | Per-effect-class execution placement (EP-05-S06) | kimi | `feat/effect-placement` (worktree `.worktrees/effect-placement`) | `rusty-core/src/tool.rs` | DONE — pushed `f397b6c` (rebased) |
 | Sandbox executor seam + backends (EP-05-S05/S12) | kimi | `feat/sandbox-backends` (worktree `.worktrees/sandbox-backends`) | `rusty-core/src/sandbox.rs`, `rusty-core/src/tool.rs`, `rusty-core/tests/sandbox.rs` | DONE — pushed `3326ad5` |
+| Studio i18n scaffolding (EP-14-S03) | kimi | `feat/studio-i18n` (worktree `.worktrees/studio-i18n`) | `studio/ui/src/i18n/`, `studio/ui/package.json`, `studio/ui/src/app/AppShell.tsx`, `studio/ui/src/app/main.tsx` | DONE — pushed `543d97a` |

@@ -279,7 +279,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 |---|---|---|---|---|
 | EP-14-S01 | Generated types and the shared client platform | — | ◐ | Python/TS SDKs (`sdks/`); generated shared types partial |
 | EP-14-S02 | Scope-driven rendering: capabilities hidden, not disabled | — | ◐ | scope-driven rendering partial |
-| EP-14-S03 | Accessibility, responsive layout, i18n scaffolding, and specified empty/error states | — | ◐ | accessibility tests landed; i18n scaffolding open |
+| EP-14-S03 | Accessibility, responsive layout, i18n scaffolding, and specified empty/error states | — | ◐ | accessibility tests landed; i18n scaffolding landed on `feat/studio-i18n` (`543d97a`): `I18nProvider` with ICU MessageFormat, English catalog (`en.json`), `useI18n`/`useT` hooks with `formatCost`, AppShell.tsx fully translated, hardcoded-string guard test (`hardcodedStrings.test.ts`) with MUST_BE_CLEAN/PENDING_MIGRATION lists; 249 studio tests pass; responsive layout + specified empty/error states open |
 | EP-14-S04 | Chat: streaming conversation with live task visibility and files | — | ✅ | Studio chat: streaming + live task visibility |
 | EP-14-S05 | Chat: steering and interruption mid-run | — | ✅ | Studio chat: steering + interruption mid-run |
 | EP-14-S06 | Chat: inline end-user confirmation | — | ✅ | Studio chat: inline end-user confirmation |
