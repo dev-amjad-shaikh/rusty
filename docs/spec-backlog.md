@@ -15,9 +15,8 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 1 | 1 | ██████████░░ 91% |
-| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 1 | 1 | ██████████░░ 91% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
-| EP-05 Tool System and Sandboxing | M0–M2 | 12 | 8 | 3 | 1 | █████████░░░ 79% |
+| EP-05 Tool System and Sandboxing | M0–M2 | 12 | 10 | 1 | 1 | █████████░░░ 88% |
 | EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
@@ -104,7 +103,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-05 — Tool System and Sandboxing
 
-█████████████░ 92% · 10 landed · 2 partial · 0 not started · milestone M0–M2
+██████████░░ 88% · 10 landed · 1 partial · 1 not started · milestone M0–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -119,7 +118,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-05-S09 | In-process tools presented as MCP servers | P1 | ✅ | `mcp.rs` (`4c1f158`): `InProcessMcpBridge` serves native tools over `tokio::io::duplex` in-memory transport; handles `initialize`, `tools/list`, `tools/call` with same JSON-RPC framing as external MCP; `McpClient::into_tools()` produces `McpToolAdapter` wrappers; mount-time `InProcessMountError` for disallowed effect classes (default `[Pure, ReadOnly]`, overridable via `with_allowed_effects`); 10 bridge tests (discovery parity, dispatch parity, mount refusal, error handling, multi-client, into_tools) |
 | EP-05-S10 | Approval-gated execution: pause, decide, resume | P0 | ✅ | approval-gated execution: pause / decide / resume |
 | EP-05-S11 | The bounded exec-reviewer for the gray zone | P1 | ✅ | `reviewer.rs` (`0605ce3`): `ExecReviewer` middleware with bounded model call (360 tokens, 30s timeout), strict schema `{decision, risk, rationale}`, fail-closed on all errors (timeout/malformed JSON/schema violation); `ToolInvocation.effect` field wired in `tool.rs`; 11 reviewer tests (allow/ask/passthrough paths + fault injection); clippy/doc clean |
-| EP-05-S12 | Container and remote sandbox backends | P1 | ◐ | `remote.rs`; container/remote backends partial |
+| EP-05-S12 | Container and remote sandbox backends | P1 | ○ | No sandbox backend code exists in workspace. `rusty-core/src/remote.rs` implements worker node distribution (`RemoteNode`), not sandbox execution. No `SandboxExecutor` trait, no `ContainerBackend`, no remote executor endpoint. Requires EP-05-S05 seam trait first. |
 
 ## EP-06 — Memory
 
