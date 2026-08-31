@@ -37,3 +37,4 @@ Register before editing code. Update status when done. Another stream's claimed 
 | Bounded exec-reviewer (EP-05-S11) | kimi | `feat/ep-05-s11` (worktree `.worktrees/ep-05-s11`) | `rusty-core/src/reviewer.rs`, `rusty-core/tests/reviewer.rs`, tool pipeline integration | DONE — pushed `0605ce3` |
 | Toolset combinator algebra (EP-05-S04) | kimi | `feat/ep-05-s04` (worktree `.worktrees/ep-05-s04`) | `rusty-core/src/tool_select.rs`, `rusty-core/tests/tool_select.rs` | DONE — pushed `b1d9c41` |
 | Per-effect-class execution placement (EP-05-S06) | kimi | `feat/effect-placement` (worktree `.worktrees/effect-placement`) | `rusty-core/src/tool.rs` | DONE — pushed `f397b6c` (rebased) |
+| Sandbox executor seam + backends (EP-05-S05/S12) | kimi | `feat/sandbox-backends` (worktree `.worktrees/sandbox-backends`) | `rusty-core/src/sandbox.rs`, `rusty-core/src/tool.rs`, `rusty-core/tests/sandbox.rs` | DONE — pushed `3326ad5` |
