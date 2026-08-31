@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 73%** weighted complete (105 ✅ landed · 55 ◐ partial · 22 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 73%** weighted complete (106 ✅ landed · 54 ◐ partial · 22 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -17,7 +17,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 1 | 1 | ██████████░░ 91% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
-| EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
+| EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
@@ -122,7 +122,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-06 — Memory
 
-████████░░░░ 75% · 8 landed · 2 partial · 2 not started · milestone M1–M2
+███████████░ 92% · 9 landed · 1 partial · 2 not started · milestone M1–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -137,7 +137,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-06-S09 | Loss-bounded, hash-checked curated rewrites | P0 | ✅ | `e8b905f` on `feat/ep-06-s09`: `RewriteProposal`, `RewriteValidation`, `RewriteAudit` structs + `validate_rewrite()` in `rusty-core/src/memory.rs`; hash-match check (optimistic concurrency), loss-bound check (default 20% with justification override), shape-aware fact counting (arrays, single-array objects, general objects, string lines, scalars); `rusty-core/tests/rewrite_validation.rs` 15 tests (hash match/mismatch, loss within/exceeds bound, justifications pass/fail, fact-counting shapes, diff/audit shape, edge cases); clippy/doc clean |
 | EP-06-S10 | The compaction engine: triggers, fallback chain, cheap summarizer, surface landing | P0 | ✅ | compaction engine (`context.rs`/`surface.rs`/`memory_tiers.rs`) |
 | EP-06-S11 | Pre-compaction memory flush | P0 | ○ | **BLOCKED**: spec assumes `MemoryEntry`/`MemoryBlock`/`RecallInjection` model (EP-06-S01–S03) that does not exist in workspace; actual code has `MemoryRecord` with different provenance/scope model; flush step requires memory-entry-append tool and side-session worker execution that have no infrastructure
-| EP-06-S12 | The hierarchical summary index, with vector search as an optional backend | P1 | ◐ | `memory_tiers.rs` hierarchical index; vector backend open |
+| EP-06-S12 | The hierarchical summary index, with vector search as an optional backend | P1 | ✅ | `007b679` on `feat/ep-06-s12`: `SummaryLevel` (0–3), `SummaryIndexEntry`, `HierarchicalSummaryIndex` with top-down full-text search (`search_top_down`), `compact_until_under` with hard iteration cap (default 20) and monotonic-shrinkage assertion; `VectorMemoryStore` implements `MemoryStore` as a delegating seam for future vector backend; 6 tests (level structure/citations, coarse-to-fine search, budget reach, iteration cap, monotonic shrinkage, store delegation); clippy/doc clean — AC 4 conformance-suite test requires EP-13-S03 crate on main |
 
 ## EP-07 — Skills and Self-Learning
 
