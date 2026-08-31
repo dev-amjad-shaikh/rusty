@@ -35,3 +35,4 @@ Register before editing code. Update status when done. Another stream's claimed 
 | Store conformance suites (EP-13-S03) | kimi | `feat/ep-13-s03` (worktree `.worktrees/ep-13-s03`) | `rusty-store/`, `rusty-store-conformance/`, root `Cargo.toml` members | DONE — pushed `b0ee14a` |
 | Object-store blob backend (EP-13-S04) | kimi | `feat/ep-13-s04` (worktree `.worktrees/ep-13-s04`) | `rusty-store/src/blob.rs`, `rusty-store-conformance/src/blob.rs`, `rusty-store-conformance/tests/blob_conformance.rs`, root `Cargo.toml` deps | DONE — pushed `833e0d8` |
 | Bounded exec-reviewer (EP-05-S11) | kimi | `feat/ep-05-s11` (worktree `.worktrees/ep-05-s11`) | `rusty-core/src/reviewer.rs`, `rusty-core/tests/reviewer.rs`, tool pipeline integration | DONE — pushed `0605ce3` |
+| Toolset combinator algebra (EP-05-S04) | kimi | `feat/ep-05-s04` (worktree `.worktrees/ep-05-s04`) | `rusty-core/src/tool_select.rs`, `rusty-core/tests/tool_select.rs` | DONE — pushed `b1d9c41` |
