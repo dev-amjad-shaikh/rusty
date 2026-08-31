@@ -80,7 +80,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-03-S08 | Interrupt as a resumable exception with ordinal matching | — | ✅ | interrupts as resumable exceptions, ordinal matching |
 | EP-03-S09 | Message-granular checkpoints: continue, fork, regenerate, time-travel | — | ◐ | `ThreadRecord` gains `parent`/`seed_length`; `POST /threads/{id}/fork` populates lineage; `GET /threads/{id}` retrieves lineage; `POST /threads/{id}/regenerate` forks + schedules run; `POST /threads/{id}/continue` shadows original; `rusty-server/tests/message_granular.rs` 3 tests (fork_lineage, regenerate_is_fork, continue_shadows_never_deletes) pass; `rusty-server/tests/time_travel.rs` 5/5 pass; clippy/doc clean; `6de69af` on `feat/ep-03-s09`; open: `paused_fork_isolation` AC (pause/obligation infra not fully wired in test harness) |
 | EP-03-S10 | Crash-resume conformance: kill anywhere, recompute the frontier | — | ✅ | crash-resume recovery proofs (kill-anywhere tests) |
-| EP-03-S11 | Pause longevity and expiry governance | — | ○ | pause expiry governance not started |
+| EP-03-S11 | Pause longevity and expiry governance | — | ○ | **BLOCKED**: depends on EP-03-S06 (`PauseEnvelope`, `RunObligation`, `ObligationKind`, `ObligationStatus`, `StickyApproval` types) which are on unmerged branch `feat/ep-03-s06` (`d1d2e5f`); these types do not exist on `main` in `rusty-core/src/record.rs`. Cannot implement AC 1–5 (90-day resume, default TTL, cancellation, expiry sweep, approval query) without the pause-obligation contract infrastructure on main. |
 
 ## EP-04 — Gateway, Sessions and Channels
 
