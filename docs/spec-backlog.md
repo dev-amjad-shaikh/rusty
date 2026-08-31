@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 72%** weighted complete (104 ✅ landed · 55 ◐ partial · 23 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 72%** weighted complete (103 ✅ landed · 56 ◐ partial · 23 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -16,7 +16,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 1 | 1 | ██████████░░ 91% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
-| EP-05 Tool System and Sandboxing | M0–M2 | 12 | 10 | 1 | 1 | █████████░░░ 88% |
+| EP-05 Tool System and Sandboxing | M0–M2 | 12 | 9 | 2 | 1 | █████████░░░ 83% |
 | EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
@@ -103,7 +103,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-05 — Tool System and Sandboxing
 
-██████████░░ 88% · 10 landed · 1 partial · 1 not started · milestone M0–M2
+██████████░░ 83% · 9 landed · 2 partial · 1 not started · milestone M0–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -111,7 +111,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-05-S02 | The five-stage guard pipeline | P0 | ✅ | five-stage guard pipeline (`tool/`) |
 | EP-05-S03 | Validation failure as conversational repair | P0 | ✅ | validation failure as conversational repair |
 | EP-05-S04 | Toolset combinator algebra | P1 | ◐ | `tool_select.rs` (`b1d9c41` on `feat/ep-05-s04`): `filtered`, `prefixed`, `prepared`, `defer_loading`, `ToolsetSpec` serde + `apply_spec` resolver landed with 25 combinator tests (nested filter→prefix, round-trip, prepared spec, defer loading reveal/exhaust, effect/schema preservation); `approval_required` blocked on missing `Ask` pipeline infrastructure (no five-stage guard `pre_execute` pause-and-resume) |
-| EP-05-S05 | The sandbox executor seam and the local process backend | P0 | ✅ | sandbox executor seam + local process backend |
+| EP-05-S05 | The sandbox executor seam and the local process backend | P0 | ◐ | `CliTool` in `tool/builtins/cli.rs` implements local process containment (jail, scrubbed env, timeout, output cap) but there is no `SandboxExecutor` trait seam — `CliTool` is a direct `Tool` impl, not a backend behind a trait. No `EnforcementLevel`, no conformance suite, no `SandboxRequirement::Required` refusing `partial` backend. |
 | EP-05-S06 | Per-effect-class execution placement | P0 | ✅ | `tool.rs` (`f397b6c` on `feat/effect-placement`): `EffectClass`/`SandboxRequirement`/`Placement`/`PlacementError` enums + `resolve_placement()`, `Tool::effect_class()`/`sandbox_requirement()` defaults (`Read`/`None`), registration panics on `InvalidDeclaration` (AC 2), dispatch rejects `NoBackendAvailable` (AC 5); 4 placement tests (read-none registers, execute-none panics, egress-none panics, read-required fails dispatch); full runtime suite 465 tests green; backend identity recording (AC 3) + egress policy (AC 4) deferred to EP-11/L7 policy |
 | EP-05-S07 | Code mode: one interpreter, guarded sub-dispatch, iteration refunds | P1 | ✅ | code mode: one interpreter, guarded sub-dispatch |
 | EP-05-S08 | MCP client for external servers | P1 | ✅ | `mcp.rs` MCP client |
