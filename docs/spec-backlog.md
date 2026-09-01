@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 74%** weighted complete (107 ✅ landed · 54 ◐ partial · 21 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 75%** weighted complete (108 ✅ landed · 54 ◐ partial · 20 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -23,7 +23,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
-| EP-12 Evals Framework | M2 | 12 | 11 | 0 | 1 | ███████████░ 92% |
+| EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 1 | 3 | ██████████░░ 71% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 1 | 6 | 5 | ████░░░░░░░░ 33% |
@@ -235,7 +235,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-12 — Evals Framework
 
-███████████░ 92% · 11 landed · 0 partial · 1 not started · milestone M2
+████████████ 100% · 12 landed · 0 partial · 0 not started · milestone M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -244,7 +244,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-12-S03 | The runner: inference separated from scoring | P0 | ✅ | runner: inference separated from scoring (`experiment.rs`) |
 | EP-12-S04 | Span-tree structural assertions | P0 | ✅ | span-query language: `rusty-eval` `trace.rs` + `span_query.rs` (journal→SpanTree distillation, serializable queries, versioned vocabulary, diagnosable failures; 15 tests, 2 goldens; b1524c0) |
 | EP-12-S05 | The scorer pipeline: preprocess → analyze → score → reason | P0 | ✅ | scorer pipeline (`judge.rs`, `statistics.rs`) |
-| EP-12-S06 | Scorers as async production hooks on sampled live traffic | P1 | ○ | live-traffic async scorers not started |
+| EP-12-S06 | Scorers as async production hooks on sampled live traffic | P1 | ✅ | `rusty-eval/src/online_scoring.rs` (`12a1061` on `feat/ep-12-s06`): `OnlineScoringPolicy`, `SamplingDecision`, `ScorerBinding`, `ScoringTask`, `OutcomeAnnotation`, `ScorerOutcome`, `OnlineScoringRunner`, `BudgetTracker` trait + `InMemoryBudgetTracker`; deterministic FNV-1a sampling by `(tenant, blueprint, turn_id)`; budget exhaustion degrades to code-only scorers with `degraded` flag; reuses `JudgeModel` seam from offline evals; `traffic: side` on all annotations; 8 unit tests (policy validation, deterministic sampling, zero/full rate edges, binding validation, annotation serde round-trip, missing-scorer failure outcome, budget-exhaustion skip); clippy/doc clean |
 | EP-12-S07 | Simulated users for multi-turn scenarios | P1 | ✅ | `rusty-eval/src/simulator.rs` (`1267365` on `feat/ep-12-s07`): `SimulationScenario`, `BehaviorRule`, `Trigger`, `UserAction`, `SteeringTool`, `TerminationCriteria`, `TerminationCause`, `SimulationResult`; deterministic scripted user simulation via `run_simulation()`; inbox steering delivery + journal drain; eval-compatible artifact production; 7 tests in `rusty-eval/tests/simulator.rs` (scenario schema round-trip, invalid JSON rejection, deterministic repetition, max-turns early termination, real kernel execution with log, steering via inbox, eval artifact compatibility); `9396560` wires `pub mod simulator` + `pub use simulator::{}` into `lib.rs`; clippy/doc clean |
 | EP-12-S08 | Promotion gates: suites wired to skill promotion and blueprint publishing | P0 | ✅ | `rusty-core/src/skill.rs` `eval_gate` frontmatter field + `SkillPromotion`/`SkillPromotionStatus` types; `rusty-core/tests/skill_promotion.rs` 7 tests (gate parsing, hash inclusion, optional/reject-empty, serde round-trip); `rusty-server/src/skills.rs` `SkillGateEvaluator` trait + `PromotionError` + `promote()` with AC 5 stale-hash reuse + file-backed promotion persistence under `skill-promotions/`; `rusty-server/src/routes.rs` `POST /skills/{name}/promote` handler; 9 server tests pass (missing-gate refusal, failing-gate block, passing-gate success, stale-hash reuse, changed-hash demands new eval); clippy/doc clean; `ee6f84c` on `feat/ep-12-s08` |
 | EP-12-S09 | Conformance suites as a first-class eval type | P1 | ✅ | `rusty-eval/src/conformance.rs`: `ConformanceSuite`, `ConformanceCase`, `ConformanceSeverity`, `ConformanceCheck` async trait, `ConformanceRunner`, `ConformanceReport`, `ConformanceVerdict`, `to_experiment_report()` for gate compatibility; `rusty-eval/src/lib.rs` module + re-exports; 10 unit tests in `rusty-eval/tests/conformance.rs`; server-side: `rusty-server/src/evaluations.rs` persistence (`ConformanceSuiteRecord`, `ConformanceRunRecord`, `ConformanceRegistry`, `target_has_passing_conformance_run`), `rusty-server/src/routes.rs` routes (`POST /conformance-suites`, `GET /conformance-suites`, `GET /conformance-suites/{name}/versions/{version}`, `POST /conformance-runs`, `GET /conformance-runs`, `GET /conformance-runs/{run_id}`, `GET /conformance-checks`); `rusty-server/tests/conformance_server.rs` 5 integration tests (AC 2 registration blocked/allowed, AC 3 headless run, AC 4 version bump invalidation, AC 5 lineage fields); clippy/doc clean; `5fc0b8d` + `2f57aad` on `feat/ep-12-s09` / `feat/ep-12-s09-server` |
