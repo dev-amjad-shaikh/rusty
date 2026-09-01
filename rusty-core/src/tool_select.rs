@@ -698,7 +698,9 @@ fn json_type_name(value: &Value) -> &'static str {
 fn type_matches(expected: &str, value: &Value) -> bool {
     match expected {
         // JSON Schema: an integer is a number with zero fractional part.
-        "integer" => matches!(value, Value::Number(n) if n.is_i64() || n.is_u64() || n.as_f64().is_some_and(|f| f.fract() == 0.0)),
+        "integer" => {
+            matches!(value, Value::Number(n) if n.is_i64() || n.is_u64() || n.as_f64().is_some_and(|f| f.fract() == 0.0))
+        }
         "number" => value.is_number(),
         other => json_type_name(value) == other,
     }
@@ -718,10 +720,7 @@ fn validate_value(schema: &Value, value: &Value, path: &str, out: &mut Vec<Argum
             out.push(violation(
                 path,
                 "type",
-                format!(
-                    "expected {expected}, found {}",
-                    json_type_name(value)
-                ),
+                format!("expected {expected}, found {}", json_type_name(value)),
             ));
             // Further keyword checks are meaningless against a wrong type.
             return;
@@ -784,7 +783,10 @@ fn validate_value(schema: &Value, value: &Value, path: &str, out: &mut Vec<Argum
                     out.push(violation(
                         path,
                         "min_items",
-                        format!("array has {} items, fewer than the minimum {min}", items.len()),
+                        format!(
+                            "array has {} items, fewer than the minimum {min}",
+                            items.len()
+                        ),
                     ));
                 }
             }
@@ -793,7 +795,10 @@ fn validate_value(schema: &Value, value: &Value, path: &str, out: &mut Vec<Argum
                     out.push(violation(
                         path,
                         "max_items",
-                        format!("array has {} items, more than the maximum {max}", items.len()),
+                        format!(
+                            "array has {} items, more than the maximum {max}",
+                            items.len()
+                        ),
                     ));
                 }
             }
@@ -1091,10 +1096,8 @@ mod tests {
             },
             "required": ["items"]
         });
-        let violations = validate_arguments(
-            &schema,
-            &json!({"items": [{"sku": "a"}, {"nope": 1}]}),
-        );
+        let violations =
+            validate_arguments(&schema, &json!({"items": [{"sku": "a"}, {"nope": 1}]}));
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].path, "/items/1");
         assert_eq!(violations[0].rule, "required");
@@ -1128,12 +1131,12 @@ mod tests {
             manifest("alpha", Effect::ReadOnly, &["web", "news"], &[]),
             manifest("mid", Effect::ReadOnly, &["news"], &[]),
         ];
-        let outcome = select(&features(&["web", "news"], Effect::NonIdempotent), &manifests, 3);
-        let order: Vec<&str> = outcome
-            .ranking
-            .iter()
-            .map(|r| r.name.as_str())
-            .collect();
+        let outcome = select(
+            &features(&["web", "news"], Effect::NonIdempotent),
+            &manifests,
+            3,
+        );
+        let order: Vec<&str> = outcome.ranking.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(order, ["alpha", "mid", "zeta"]);
         assert_eq!(outcome.ranking[0].matched_tags, ["news", "web"]);
         assert!(outcome.excluded.is_empty());
@@ -1220,7 +1223,12 @@ mod tests {
 
     #[test]
     fn missing_prerequisite_excludes() {
-        let manifests = vec![manifest("summarize", Effect::ReadOnly, &["web"], &["ghost"])];
+        let manifests = vec![manifest(
+            "summarize",
+            Effect::ReadOnly,
+            &["web"],
+            &["ghost"],
+        )];
         let outcome = select(&features(&["web"], Effect::NonIdempotent), &manifests, 5);
         assert!(outcome.selected.is_empty());
         assert_eq!(
@@ -1261,10 +1269,7 @@ mod tests {
     #[tokio::test]
     async fn validating_tool_refusal_is_byte_exact() {
         let tool = ValidatingTool::new(Arc::new(Search));
-        let result = tool
-            .call(json!({"limit": "5"}))
-            .await
-            .unwrap();
+        let result = tool.call(json!({"limit": "5"})).await.unwrap();
         let Value::String(content) = result else {
             panic!("refusal is a string payload");
         };
@@ -1280,10 +1285,10 @@ mod tests {
         assert_eq!(violations[0].rule, "required");
         // Opaque error strings stay opaque.
         assert!(parse_argument_validation_refusal("ERROR: boom").is_none());
-        assert!(parse_argument_validation_refusal(
-            "ERROR: {\"kind\":\"other\",\"violations\":[]}"
-        )
-        .is_none());
+        assert!(
+            parse_argument_validation_refusal("ERROR: {\"kind\":\"other\",\"violations\":[]}")
+                .is_none()
+        );
     }
 
     struct Keyed;

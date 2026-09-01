@@ -674,6 +674,8 @@ struct ManifestContent<'a> {
     dependencies: &'a [DependencyRange],
     capabilities: &'a CapabilityDecl,
     #[serde(skip_serializing_if = "Option::is_none")]
+    doctor: Option<&'a crate::doctor::DoctorBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<&'a PackageSignature>,
 }
 
@@ -693,6 +695,7 @@ pub struct PackageManifest {
     pub files: Vec<FileEntry>,
     pub dependencies: Vec<DependencyRange>,
     pub capabilities: CapabilityDecl,
+    pub doctor: Option<crate::doctor::DoctorBlock>,
     pub signature: Option<PackageSignature>,
     /// SHA-256 of the canonical JSON of every field above.
     pub hash: String,
@@ -710,6 +713,7 @@ impl PackageManifest {
         mut files: Vec<FileEntry>,
         dependencies: Vec<DependencyRange>,
         capabilities: CapabilityDecl,
+        doctor: Option<crate::doctor::DoctorBlock>,
         signature: Option<PackageSignature>,
     ) -> Result<Self> {
         let name = name.into();
@@ -738,6 +742,9 @@ impl PackageManifest {
         }
 
         capabilities.validate()?;
+        if let Some(ref d) = doctor {
+            d.validate()?;
+        }
 
         let mut manifest = Self {
             id,
@@ -748,6 +755,7 @@ impl PackageManifest {
             files,
             dependencies,
             capabilities,
+            doctor,
             signature,
             hash: String::new(),
         };
@@ -765,6 +773,7 @@ impl PackageManifest {
             files: &self.files,
             dependencies: &self.dependencies,
             capabilities: &self.capabilities,
+            doctor: self.doctor.as_ref(),
             signature: self.signature.as_ref(),
         };
         let value =
@@ -882,6 +891,7 @@ mod tests {
             vec![],
             CapabilityDecl::default(),
             None,
+            None,
         )
         .unwrap()
     }
@@ -933,6 +943,7 @@ mod tests {
             ],
             vec![],
             CapabilityDecl::default(),
+            None,
             None,
         )
         .unwrap();

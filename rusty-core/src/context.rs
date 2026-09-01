@@ -977,10 +977,8 @@ impl ContextPipeline {
                 // message fits. The estimate's byte rule is the starting
                 // point; the loop keeps the rule honest for any counter.
                 // Deterministic: pure function of text, budget, counter.
-                let mut bytes = byte_budget_for_tokens(
-                    budget_tokens,
-                    self.policy.budget.margin_percent,
-                );
+                let mut bytes =
+                    byte_budget_for_tokens(budget_tokens, self.policy.budget.margin_percent);
                 let mut fitted = truncate_to_byte_budget(text, bytes);
                 for _ in 0..32 {
                     let message = ChatMessage::system(fitted.clone());
@@ -1044,8 +1042,7 @@ impl ContextPipeline {
         // the estimate's byte rule, then verify and halve until the rendered
         // summary message (marker included) fits. Deterministic: a pure
         // function of the summary text, the bound, and the counter.
-        if self.count_item(&summary_message(watermark, &summary)) > compaction.summary_max_tokens
-        {
+        if self.count_item(&summary_message(watermark, &summary)) > compaction.summary_max_tokens {
             truncated = true;
             let mut bytes = byte_budget_for_tokens(
                 compaction.summary_max_tokens,
@@ -1193,16 +1190,15 @@ impl ContextPipeline {
         // ---- history: compaction decision (pure) + summarization (journaled
         // through the slot) ----
         let (history_items, compaction_report) = match (&policy.history, &policy.compaction) {
-            (Some(_), Some(compaction)) => self.compact_history(&inputs.history, compaction).await?,
+            (Some(_), Some(compaction)) => {
+                self.compact_history(&inputs.history, compaction).await?
+            }
             (Some(_), None) => (inputs.history.clone(), None),
             (None, _) => (Vec::new(), None),
         };
 
         // ---- pack sections; the manifest comes off the top of the total ----
-        let mut history_budget = policy
-            .history
-            .as_ref()
-            .map_or(0, |s| s.budget_tokens);
+        let mut history_budget = policy.history.as_ref().map_or(0, |s| s.budget_tokens);
         let mut memory_budget = policy.memory.as_ref().map_or(0, |s| s.budget_tokens);
 
         // Total-budget absorption: shrink the truncatable sections (history
@@ -1217,8 +1213,7 @@ impl ContextPipeline {
                 history_budget,
                 memory_budget,
             )?;
-            let (manifest, manifest_message) =
-                self.render_manifest(&packed, &compaction_report)?;
+            let (manifest, manifest_message) = self.render_manifest(&packed, &compaction_report)?;
             let used_total: u32 = manifest
                 .manifest_tokens
                 .saturating_add(manifest.sections.iter().map(|s| s.used_tokens).sum());
@@ -1392,8 +1387,7 @@ impl ContextPipeline {
                                 break;
                             }
                             BudgetOverflow::Fail => {
-                                let name =
-                                    tool_name(schema).unwrap_or_else(|_| "<unnamed>".into());
+                                let name = tool_name(schema).unwrap_or_else(|_| "<unnamed>".into());
                                 return Err(invalid(format!(
                                     "the tools section does not fit its budget: schema `{name}` \
                                      costs an estimated {cost} tokens with {used} of {} already \
@@ -1411,8 +1405,7 @@ impl ContextPipeline {
                     ids.push(tool_name(schema)?);
                 }
                 packed.tools = Some(
-                    PackedSection::new(kept, used, truncated, section.budget_tokens)
-                        .with_ids(ids),
+                    PackedSection::new(kept, used, truncated, section.budget_tokens).with_ids(ids),
                 );
             }
         }
@@ -1504,11 +1497,10 @@ impl ContextPipeline {
                 manifest_tokens,
                 sections: packed.section_reports(compaction),
             };
-            let mut message =
-                ChatMessage::system(format!(
-                    "{MANIFEST_FORMAT_VERSION}\n{}",
-                    serde_json::to_string(&manifest)?
-                ));
+            let mut message = ChatMessage::system(format!(
+                "{MANIFEST_FORMAT_VERSION}\n{}",
+                serde_json::to_string(&manifest)?
+            ));
             message.name = Some(MANIFEST_MESSAGE_NAME.to_owned());
             let cost = self.count_item(&message);
             if cost == manifest_tokens {
@@ -1769,11 +1761,7 @@ impl AssemblingChatModel {
         &self.pipeline
     }
 
-    async fn assemble(
-        &self,
-        messages: &[ChatMessage],
-        tools: &[Value],
-    ) -> Result<ContextAssembly> {
+    async fn assemble(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ContextAssembly> {
         // When manifests are set the pipeline shortlists itself; the
         // per-call `tools` argument is superseded (documented on
         // `with_tool_manifests`). Otherwise the per-call schemas are the

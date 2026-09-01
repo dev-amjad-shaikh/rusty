@@ -480,9 +480,12 @@ pub fn scan_placeholders(template: &str) -> Result<Vec<String>> {
             .ok_or_else(|| conn_err(format!("template `{template}` has an unbalanced `{{`")))?;
         let field = &template[rest + 1..close];
         let legal = !field.is_empty()
-            && field
-                .split('.')
-                .all(|segment| !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+            && field.split('.').all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            });
         if !legal {
             return Err(conn_err(format!(
                 "template `{template}` carries illegal placeholder `{{{field}}}` — field paths are \
@@ -513,7 +516,10 @@ pub fn render_template(template: &str, config: &Value) -> Result<String> {
     while rest < bytes.len() {
         if bytes[rest] != b'{' {
             // Copy the literal run up to the next placeholder.
-            let next = template[rest..].find('{').map(|o| rest + o).unwrap_or(bytes.len());
+            let next = template[rest..]
+                .find('{')
+                .map(|o| rest + o)
+                .unwrap_or(bytes.len());
             rendered.push_str(&template[rest..next]);
             rest = next;
             continue;
@@ -526,7 +532,9 @@ pub fn render_template(template: &str, config: &Value) -> Result<String> {
         let mut value = config;
         for segment in field.split('.') {
             value = value.get(segment).ok_or_else(|| {
-                conn_err(format!("placeholder `{{{field}}}` does not resolve against this config"))
+                conn_err(format!(
+                    "placeholder `{{{field}}}` does not resolve against this config"
+                ))
             })?;
         }
         match value {
@@ -549,9 +557,13 @@ pub fn render_template(template: &str, config: &Value) -> Result<String> {
 /// declared when at least one variant declares it — the variant picker
 /// decides at config time which branch exists). Errors when the schema
 /// is not an object at the root or exceeds the serialized cap.
-fn declared_config_paths(spec: &Value) -> std::result::Result<std::collections::BTreeSet<String>, String> {
+fn declared_config_paths(
+    spec: &Value,
+) -> std::result::Result<std::collections::BTreeSet<String>, String> {
     if !spec.is_object() {
-        return Err("connection_specification must be a JSON object (a draft-07 schema)".to_owned());
+        return Err(
+            "connection_specification must be a JSON object (a draft-07 schema)".to_owned(),
+        );
     }
     let bytes = serde_json::to_vec(spec)
         .map_err(|e| format!("connection_specification did not serialize: {e}"))?;
@@ -571,7 +583,11 @@ fn declared_config_paths(spec: &Value) -> std::result::Result<std::collections::
 
 /// Walk one schema's `properties` (and each `oneOf` variant's),
 /// recording dot-joined property paths.
-fn collect_property_paths(schema: &Value, prefix: &str, paths: &mut std::collections::BTreeSet<String>) {
+fn collect_property_paths(
+    schema: &Value,
+    prefix: &str,
+    paths: &mut std::collections::BTreeSet<String>,
+) {
     let walk = |schema: &Value, paths: &mut std::collections::BTreeSet<String>| {
         if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
             for (name, subschema) in properties {
@@ -689,13 +705,7 @@ fn validate_operation(
         .and_then(Value::as_object)
         .map(|properties| properties.keys().cloned().collect())
         .unwrap_or_default();
-    check_template_placeholders(
-        "path",
-        &operation.path,
-        declared,
-        &params,
-        manifest_id,
-    )?;
+    check_template_placeholders("path", &operation.path, declared, &params, manifest_id)?;
     if operation.headers.len() > MAX_HEADERS {
         return Err(conn_err(format!(
             "manifest `{manifest_id}` operation `{}` declares {} headers, above the {MAX_HEADERS} \
@@ -707,9 +717,9 @@ fn validate_operation(
     for (name, value) in &operation.headers {
         let legal_name = !name.is_empty()
             && name.len() <= 128
-            && name.bytes().all(|b| {
-                b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
-            });
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
         if !legal_name {
             return Err(conn_err(format!(
                 "manifest `{manifest_id}` operation `{}` declares illegal header name `{name}`",
@@ -752,7 +762,9 @@ fn validate_operation(
 fn validate_connector_id(id: &str) -> Result<()> {
     let legal = !id.is_empty()
         && id.len() <= MAX_CONNECTOR_ID_LEN
-        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         && !id.starts_with('-')
         && !id.ends_with('-')
         && !id.contains("--");
@@ -784,9 +796,7 @@ fn validate_operation_name(name: &str, manifest_id: &str) -> Result<()> {
 /// fails at declaration, before any config exists to render it.
 fn validate_https_url(what: &str, value: &str, max_len: usize) -> Result<()> {
     if value.len() > max_len {
-        return Err(conn_err(format!(
-            "{what} exceeds {max_len} bytes"
-        )));
+        return Err(conn_err(format!("{what} exceeds {max_len} bytes")));
     }
     if !value.starts_with("https://") {
         return Err(conn_err(format!(

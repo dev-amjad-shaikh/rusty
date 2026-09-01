@@ -44,17 +44,17 @@ pub mod instance;
 pub mod manifest;
 
 pub use check::{
-    CHECK_ERROR_BODY_BYTES, CheckOutcome, CheckRequest, CheckResponse, CheckStatus,
-    ConnectorTransport, DEFAULT_CHECK_TIMEOUT, execute_check, render_operation_request,
+    execute_check, render_operation_request, CheckOutcome, CheckRequest, CheckResponse,
+    CheckStatus, ConnectorTransport, CHECK_ERROR_BODY_BYTES, DEFAULT_CHECK_TIMEOUT,
 };
 pub use config::{
-    SECRET_FLAG, compile_spec, extract_secrets, insert_masked_secrets, insert_opened_secrets,
-    validate_config, without_secrets,
+    compile_spec, extract_secrets, insert_masked_secrets, insert_opened_secrets, validate_config,
+    without_secrets, SECRET_FLAG,
 };
 pub use instance::{ConnectorInstance, INSTANCE_ID_PREFIX, MAX_INSTANCE_ID_LEN};
 pub use manifest::{
-    ConnectorManifest, ConnectorOperation, HttpMethod, OperationAuth, OperationEffect,
-    render_template, scan_placeholders,
+    render_template, scan_placeholders, ConnectorManifest, ConnectorOperation, HttpMethod,
+    OperationAuth, OperationEffect,
 };
 
 /// Build a [`RustyError::Tool`] with a `connector:` context prefix, the
