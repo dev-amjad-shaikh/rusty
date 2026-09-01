@@ -227,7 +227,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-11-S05 | Layered execution security: modes, policy, autonomy — orthogonal and non-widening | P0 | ✅ | `capsule.rs` layered execution security: modes × policy × autonomy |
 | EP-11-S06 | Receipts and attributed decisions: hallucinated actions are detectable, fail-closed is never "the user said no" | P0 | ✅ | `receipt.rs` + `/receipts/verify`, attributed decisions |
 | EP-11-S07 | Signed extension manifests with capability declarations | P1 | ◐ | extension manifests with capabilities; signing partial |
-| EP-11-S08 | Hard tenant isolation: RLS, prefixes, and the adversarial suite | P0 | ◐ | multi-tenant auth + isolation (v0.5); RLS adversarial suite partial |
+| EP-11-S08 | Hard tenant isolation: RLS, prefixes, and the adversarial suite | P0 | ◐ | adversarial suite shipped (`ba72557` on `feat/ep-11-s08`): `run_scoped_endpoints_are_isolated_between_tenants` and `run_receipts_are_isolated_between_tenants` in `rusty-server/tests/multi_tenant.rs`; 11 tests pass, clippy/doc clean. **BLOCKED on RLS ACs**: `Checkpointer` trait in `rusty-core` is tenant-agnostic (`put(Checkpoint)`, `get_latest(&str)`, `list(&str)`); `server_store` tables use scoped IDs as PKs with no `tenant_id` column. Adding RLS requires either changing `Checkpointer` (affects all backends) or parsing tenant from thread_id in SQL (fragile, leaks scoping into a second place). Needs design decision before RLS ACs can proceed. |
 | EP-11-S09 | SSO (OIDC and SAML) and SCIM provisioning | P0 | ○ | SSO/SCIM not started |
 | EP-11-S10 | RBAC on the wildcard scope grammar; interfaces as security principals | P0 | ◐ | RBAC scope grammar landed; interfaces-as-principals partial |
 | EP-11-S11 | Org-level approval policies: blocking `required`, non-blocking `audit` | P1 | ◐ | org-level approval policies partial |
@@ -304,7 +304,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 |---|---|---|---|---|
 | EP-15-S01 | The plugin packaging format | P0 | ✅ | `package.rs` with `PackageManifest`, `PackageId`, `Version`, `DependencyRange`, `CapabilityDecl`, `PackageSignature`, `resolve_dependencies`; 15 tests |
 | EP-15-S02 | The doctor contract: config repair and state migrations | P0 | ○ | doctor contract not started |
-| EP-15-S03 | The registry index and install, update, rollback flows | P0 | ◐ | registry index + install/update/rollback partial |
+| EP-15-S03 | The registry index and install, update, rollback flows | P0 | ◐ | registry index + install/update/rollback partial; **BLOCKED**: depends on EP-15-S02 (doctor contract) which is ○ not started — install/update/rollback ACs require doctor config repair and state migration chain |
 | EP-15-S04 | Org-level allowlists: Iris controls what may be installed | P0 | ○ | org-level allowlists not started |
 | EP-15-S05 | The connector pack: named enterprise connectors, MCP-first | P0 | ◐ | connector surface (`connector.rs`, `/connectors/check`); named packs in flight |
 | EP-15-S06 | The generic REST connector and webhook ingress | P0 | ◐ | webhook ingress (`/triggers/{id}/webhook`) landed; generic REST connector partial |
