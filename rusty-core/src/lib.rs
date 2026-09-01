@@ -270,6 +270,7 @@ pub mod memory_tiers;
 pub mod meter;
 pub mod middleware;
 pub mod node;
+pub mod package;
 pub mod plugin;
 #[cfg(feature = "genai")]
 pub mod provider_genai;
