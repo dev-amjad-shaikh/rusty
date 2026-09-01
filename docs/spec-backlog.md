@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 75%** weighted complete (110 ✅ landed · 52 ◐ partial · 20 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 75%** weighted complete (111 ✅ landed · 51 ◐ partial · 20 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -26,7 +26,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 1 | 3 | ██████████░░ 71% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
-| EP-15 Out-of-the-Box Catalog | M4 | 12 | 1 | 6 | 5 | ████░░░░░░░░ 33% |
+| EP-15 Out-of-the-Box Catalog | M4 | 12 | 2 | 5 | 5 | ████░░░░░░░░ 17% |
 
 ## EP-01 — Event Log and State Substrate
 
@@ -298,11 +298,11 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-15 — Out-of-the-Box Catalog
 
-████░░░░░░░░ 33% · 1 landed · 6 partial · 5 not started · milestone M4
+████░░░░░░░░ 17% · 2 landed · 5 partial · 5 not started · milestone M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-15-S01 | The plugin packaging format | P0 | ◐ | `plugin.rs` packaging format partial |
+| EP-15-S01 | The plugin packaging format | P0 | ✅ | `package.rs` with `PackageManifest`, `PackageId`, `Version`, `DependencyRange`, `CapabilityDecl`, `PackageSignature`, `resolve_dependencies`; 15 tests |
 | EP-15-S02 | The doctor contract: config repair and state migrations | P0 | ○ | doctor contract not started |
 | EP-15-S03 | The registry index and install, update, rollback flows | P0 | ◐ | registry index + install/update/rollback partial |
 | EP-15-S04 | Org-level allowlists: Iris controls what may be installed | P0 | ○ | org-level allowlists not started |
