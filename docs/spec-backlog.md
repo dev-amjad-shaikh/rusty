@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 75%** weighted complete (111 ✅ landed · 51 ◐ partial · 20 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 75%** weighted complete (112 ✅ landed · 50 ◐ partial · 20 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -298,13 +298,13 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-15 — Out-of-the-Box Catalog
 
-████░░░░░░░░ 17% · 2 landed · 5 partial · 5 not started · milestone M4
+████░░░░░░░░ 25% · 3 landed · 4 partial · 5 not started · milestone M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
 | EP-15-S01 | The plugin packaging format | P0 | ✅ | `package.rs` with `PackageManifest`, `PackageId`, `Version`, `DependencyRange`, `CapabilityDecl`, `PackageSignature`, `resolve_dependencies`; 15 tests |
-| EP-15-S02 | The doctor contract: config repair and state migrations | P0 | ○ | doctor contract not started |
-| EP-15-S03 | The registry index and install, update, rollback flows | P0 | ◐ | registry index + install/update/rollback partial; **BLOCKED**: depends on EP-15-S02 (doctor contract) which is ○ not started — install/update/rollback ACs require doctor config repair and state migration chain |
+| EP-15-S02 | The doctor contract: config repair and state migrations | P0 | ✅ | `rusty-core/src/doctor.rs`: `DoctorBlock`, `ConfigRepair`, `StateMigration`, `DoctorChain::compute()` (multi-hop + gap detection), `Doctor::diagnose()` pure diagnosis, `Doctor::fix()` with halt-on-failure and audit trail, advisory-lock race protection, revocation flagging; `rusty-core/tests/doctor.rs`: 16 tests (chain empty, single step, multi-hop, gap error, no-path error, pure diagnosis, fix applies repair, fix halts on failure, race test, revocation flag, block validation, rename/split/default repairs); clippy/doc clean; `d3f2980` on `feat/ep-15-s02` |
+| EP-15-S03 | The registry index and install, update, rollback flows | P0 | ◐ | registry index + install/update/rollback partial; **BLOCKED**: depends on EP-15-S02 (doctor contract) which is ✅ landed — install/update/rollback ACs now have the doctor config repair and state migration chain available |
 | EP-15-S04 | Org-level allowlists: Iris controls what may be installed | P0 | ○ | org-level allowlists not started |
 | EP-15-S05 | The connector pack: named enterprise connectors, MCP-first | P0 | ◐ | connector surface (`connector.rs`, `/connectors/check`); named packs in flight |
 | EP-15-S06 | The generic REST connector and webhook ingress | P0 | ◐ | webhook ingress (`/triggers/{id}/webhook`) landed; generic REST connector partial |
