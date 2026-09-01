@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**████████████████████░░░░░░░░░░ 75%** weighted complete (108 ✅ landed · 54 ◐ partial · 20 ○ not started, of 182 stories)
+**████████████████████░░░░░░░░░░ 75%** weighted complete (110 ✅ landed · 52 ◐ partial · 20 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -20,7 +20,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
-| EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 3 | 9 | 0 | ████████░░░░ 62% |
+| EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
@@ -178,18 +178,18 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-09 — Multi-Agent Collaboration and Task Management
 
-████████░░░░ 62% · 3 landed · 9 partial · 0 not started · milestone M3
+████████░░░░ 67% · 5 landed · 7 partial · 0 not started · milestone M3
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
 | EP-09-S01 | Durable tasks: intent the machinery never touches | — | ✅ | durable tasks (`durable.rs`, `/tasks`) |
 | EP-09-S02 | Attempts: cheap immutable execution records with lease, heartbeat, and retry chains | — | ✅ | attempts: lease, heartbeat, retry chains |
-| EP-09-S03 | Assignment as trigger, closed admission reasons, comment coalescing | — | ◐ | assignment triggers landed; closed admission reasons partial |
-| EP-09-S04 | The attribution waterfall: one accountable human per run | — | ◐ | attribution waterfall partial |
-| EP-09-S05 | Stage barriers: ordered sibling groups that wake the parent's agent | — | ◐ | `/coordination/*` landed; parent-wake stage barriers partial |
+| EP-09-S03 | Assignment as trigger, closed admission reasons, comment coalescing | — | ◐ | assignment triggers landed; closed admission reasons partial; **BLOCKED**: circular dependency with EP-09-S04 — S03 depends on S04 (attribution resolved before admission) and S04 depends on S03 (task-attempt contract); neither can be completed without the other being done first
+| EP-09-S04 | The attribution waterfall: one accountable human per run | — | ◐ | attribution waterfall partial; **BLOCKED**: circular dependency with EP-09-S03 — S04 depends on S03 (task-attempt contract) and S03 depends on S04 (attribution resolved before admission); neither can be completed without the other being done first
+| EP-09-S05 | Stage barriers: ordered sibling groups that wake the parent's agent | — | ✅ | `feat/ep-09-s05` (`e89ee67`) — 10 `stage_barriers` integration tests + 119 lib tests pass, clippy/doc clean |
 | EP-09-S06 | Pull-based batch claim for worker runtimes | — | ✅ | pull-based batch claim (`/tasks/claim`) |
 | EP-09-S07 | Handoffs as tools with input-rewrite filters | — | ◐ | handoffs as tools (`a2a.rs`); input-rewrite filters partial |
-| EP-09-S08 | Subagent safety: capability descriptors, fail-loud dispatch, blocklists, scoped teardown | — | ◐ | `capability.rs` descriptors; blocklists/scoped teardown partial |
+| EP-09-S08 | Subagent safety: capability descriptors, fail-loud dispatch, blocklists, scoped teardown | — | ✅ | `rusty-core/src/subagent.rs` (`03ec5a6` on `feat/ep-09-s08`): `SubagentProviderDescriptor`, `SubagentRegistry` with scope-keyed LIFO teardown, `SubagentDispatchError` typed fail-loud errors, `SubagentBlocklistGuard`/`DelegateDepthGuard` (`ToolGuard` impls), `confined_toolset()` helper, `TrafficKind` side-stamp type; 12 unit tests (descriptor supports, registry CRUD, shadow refusal, dispatch fail-loud, depth check, blocklist guard deny, delegate depth guard deny, scope teardown LIFO + residue assertion, callback invocation, scope key validation, traffic default); 473 total lib tests pass, clippy/doc clean |
 | EP-09-S09 | The hub: participant registry, write-ahead log, typed channels | — | ◐ | hub coordination + `team_trace.rs`; typed channels partial |
 | EP-09-S10 | Squads: leader-routed teams under an enforceable operating protocol | — | ◐ | squads via coordination contracts; enforceable protocol partial |
 | EP-09-S11 | Human visibility: board, timeline, cost, and the three-severity inbox | — | ◐ | Studio command center; three-severity inbox partial |
