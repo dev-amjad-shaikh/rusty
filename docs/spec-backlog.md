@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**███████████████████░░░░░░░░░░░ 77%** weighted complete (117 ✅ landed · 45 ◐ partial · 20 ○ not started, of 182 stories)
+**███████████████████░░░░░░░░░░░ 77%** weighted complete (118 ✅ landed · 44 ◐ partial · 20 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -26,7 +26,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 1 | 3 | ██████████░░ 71% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
-| EP-15 Out-of-the-Box Catalog | M4 | 12 | 7 | 2 | 3 | ████████░░░░ 67% |
+| EP-15 Out-of-the-Box Catalog | M4 | 12 | 8 | 1 | 3 | █████████░░░ 71% |
 
 ## EP-01 — Event Log and State Substrate
 
@@ -229,7 +229,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-11-S07 | Signed extension manifests with capability declarations | P1 | ◐ | extension manifests with capabilities; signing partial |
 | EP-11-S08 | Hard tenant isolation: RLS, prefixes, and the adversarial suite | P0 | ◐ | adversarial suite shipped (`ba72557` on `feat/ep-11-s08`): `run_scoped_endpoints_are_isolated_between_tenants` and `run_receipts_are_isolated_between_tenants` in `rusty-server/tests/multi_tenant.rs`; 11 tests pass, clippy/doc clean. **BLOCKED on RLS ACs**: `Checkpointer` trait in `rusty-core` is tenant-agnostic (`put(Checkpoint)`, `get_latest(&str)`, `list(&str)`); `server_store` tables use scoped IDs as PKs with no `tenant_id` column. Adding RLS requires either changing `Checkpointer` (affects all backends) or parsing tenant from thread_id in SQL (fragile, leaks scoping into a second place). Needs design decision before RLS ACs can proceed. |
 | EP-11-S09 | SSO (OIDC and SAML) and SCIM provisioning | P0 | ○ | SSO/SCIM not started |
-| EP-11-S10 | RBAC on the wildcard scope grammar; interfaces as security principals | P0 | ◐ | RBAC scope grammar landed; interfaces-as-principals partial |
+| EP-11-S10 | RBAC on the wildcard scope grammar; interfaces as security principals | P0 | ◐ | `rusty-core/src/scope.rs`: `Scope` type + `scope_matches()`/`scope_authorizes()`/`parse_scope_set()` (AC 1, `dd2de7d`); `ScopeTable` with `RoutePattern`, `AdapterScopeDecl`, `declare()`, `mount_adapter()`, `required_scope()`, `census()` + census completeness test asserting no mounted route lacks a scope (AC 2, `8c10975`); 43 scope tests pass, full crate 495/0, clippy/doc clean. **ACs 3–6 pending**: unauthorized-call handling (`AdmissionReason::Unauthorized`), adapter scope declarations merged at mount time, service accounts, JWT cross-tenant validation — all require `rusty-server` infrastructure that does not exist on main |
 | EP-11-S11 | Org-level approval policies: blocking `required`, non-blocking `audit` | P1 | ◐ | org-level approval policies partial |
 | EP-11-S12 | The audit trail: append-only, tamper-evident, retained, and holdable | P0 | ◐ | `/broker/journal`, `/receipt_keys/journal`; retention/holds partial |
 
@@ -298,7 +298,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-15 — Out-of-the-Box Catalog
 
-████████░░░░ 67% · 7 landed · 2 partial · 3 not started · milestone M4
+█████████░░░ 71% · 8 landed · 1 partial · 3 not started · milestone M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -309,7 +309,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-15-S05 | The connector pack: named enterprise connectors, MCP-first | P0 | ✅ | `catalog/github-connector/manifest.json`: reference connector manifest with 5 operations (list-repos, get-issue, create-issue, list-pull-requests, check) using Bearer auth; `rusty-core/src/connector/manifest.rs`: `derive_catalog()` skips the check operation from user-facing tool catalog; `rusty-core/tests/catalog_connectors.rs`: 3 tests (manifest validation, catalog derivation excludes check, parameterless check); clippy/doc clean; `0588f54` on `feat/ep-15-s05` |
 | EP-15-S06 | The generic REST connector and webhook ingress | P0 | ✅ | `rusty-core/src/connector/manifest.rs`: `OperationAuth` extended with `Header`, `Query`, `OAuth2ClientCredentials` variants; `rusty-core/src/connector/check.rs`: `render_auth()` handles all auth variants including OAuth2 client-credentials token exchange (reqwest-based, synchronous via thread+tokio block_on); `rusty-core/src/connector/openapi.rs`: OpenAPI 3.x importer (`import_openapi`) mapping paths/operations to `ConnectorOperation` structs, operationId → kebab-case name, summary/description extraction, method→effect defaults (GET→ReadOnly, DELETE→Irreversible, else→Idempotent), parameter schema conversion (path/query params → `params_schema` properties, header params as config templates), request body schema merge into params_schema, import report with unmapped operations (missing operationId, unsupported methods); schema drift detection (`diff_imports`) with `OperationDiff` enum (Added, Removed, Changed); `rusty-core/src/connector/curation.rs`: curation rules (`CurationRule`) for operation subset selection, effect-class overrides validated stricter-only (`is_stricter_or_equal`), `curate()` producing `CuratedConnector` with mapped/excluded/unmapped visibility; webhook ingress (`/triggers/{id}/webhook`) landed in `rusty-server/src/triggers.rs`; `rusty-core/tests/connectors.rs`: auth render tests (Bearer, Header, Query, OAuth2); `rusty-core/src/connector/openapi.rs` unit tests: added/removed/changed drift detection, identical imports yield empty diff; clippy/doc clean; `97d9752` on `feat/ep-15-s06` |
 | EP-15-S07 | The tool pack: filesystem, shell, browser, code interpreter, documents, search | P0 | ✅ | built-in tool pack (`tool/`): filesystem, shell, code, search, documents |
-| EP-15-S08 | The skill packs: five shipped skills with evals and declared dependencies | — | ◐ | shipped skills with evals partial |
+| EP-15-S08 | The skill packs: five shipped skills with evals and declared dependencies | — | ✅ | `rusty-core/src/skill_pack.rs` + `catalog/skills/` (`0adbb52`, `71a9438` on `feat/ep-15-s08`): five packs (research-and-summarize, triage-and-route, scheduled-digest, kb-answer-with-citations, form-filling), each a content-addressed `PackageKind::SkillPack` manifest with declared tool/connector/gateway deps and embedded reference docs (AC 1); `install_skill_pack` registers as `Trial`, runs the bundled eval suite (dataset + `GatePolicy` + recorded fixtures, via the `SkillGateRunner` seam), promotes only on pass, failing suites leave `Trial` with cases named (AC 2); `apply_dependency_change` flags revalidation-pending and demotes on failure with the trigger named — connector major bump, tool removal, reference supersession tested (AC 3); `record_local_patch` + `apply_pack_update` surface three-way (shipped-old/shipped-new/local), never silent overwrite (AC 4); five behavior-contract suites pass against recorded fixtures, five mutation tests prove each fails when its defining property breaks (AC 5); `SkillSource::Package` provenance cites package id/publisher/version (AC 6); 17 tests in `rusty-core/tests/skill_packs.rs`; full crate 1121 passed; clippy/doc clean |
 | EP-15-S09 | Blueprint templates: five stock Rustyprints wired for their domains | — | ◐ | stock Rustyprints partial |
 | EP-15-S10 | The quality bar: no item ships without evals, docs, and conformance | P1 | ○ | catalog quality bar not started |
 | EP-15-S11 | The community submission path: signing, review, revocation | P2 | ○ | community submission path not started |
