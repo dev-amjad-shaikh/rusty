@@ -558,3 +558,404 @@ impl Doctor {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::package::{PackageId, PublisherId, Version};
+
+    fn v(major: u64, minor: u64, patch: u64) -> Version {
+        Version::new(major, minor, patch)
+    }
+
+    fn pkg_id(name: &str) -> PackageId {
+        PackageId::new(name).unwrap()
+    }
+
+    // -----------------------------------------------------------------------
+    // Chain computation (AC 1, 2)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn chain_computes_multi_hop() {
+        let block = DoctorBlock {
+            config_repairs: {
+                let mut m = HashMap::new();
+                m.insert(v(1, 1, 0), vec![ConfigRepair::RenameKey {
+                    from: "old_key".to_string(),
+                    to: "new_key".to_string(),
+                }]);
+                m.insert(v(1, 2, 0), vec![ConfigRepair::SupplyDefault {
+                    path: "setting".to_string(),
+                    value: serde_json::json!("default"),
+                }]);
+                m
+            },
+            state_migrations: vec![
+                StateMigration {
+                    version: v(1, 1, 0),
+                    order: 0,
+                    description: "init".to_string(),
+                },
+                StateMigration {
+                    version: v(1, 2, 0),
+                    order: 0,
+                    description: "add table".to_string(),
+                },
+            ],
+        };
+
+        let chain = DoctorChain::compute(pkg_id("test"), &v(1, 0, 0), &v(1, 2, 0), &block).unwrap();
+        assert_eq!(chain.steps.len(), 2);
+        assert_eq!(chain.steps[0].from, v(1, 0, 0));
+        assert_eq!(chain.steps[0].to, v(1, 1, 0));
+        assert_eq!(chain.steps[1].from, v(1, 1, 0));
+        assert_eq!(chain.steps[1].to, v(1, 2, 0));
+    }
+
+    #[test]
+    fn chain_same_version_is_empty() {
+        let block = DoctorBlock::default();
+        let chain = DoctorChain::compute(pkg_id("test"), &v(1, 0, 0), &v(1, 0, 0), &block).unwrap();
+        assert!(chain.steps.is_empty());
+    }
+
+    #[test]
+    fn chain_gap_returns_error() {
+        let block = DoctorBlock {
+            config_repairs: HashMap::new(),
+            state_migrations: vec![StateMigration {
+                version: v(1, 1, 0),
+                order: 0,
+                description: "init".to_string(),
+            }],
+        };
+        let err = DoctorChain::compute(pkg_id("test"), &v(1, 0, 0), &v(1, 2, 0), &block).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("gap"), "expected gap error, got: {}", msg);
+    }
+
+    #[test]
+    fn chain_no_path_returns_error() {
+        let block = DoctorBlock::default();
+        let err = DoctorChain::compute(pkg_id("test"), &v(1, 0, 0), &v(2, 0, 0), &block).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("no declared path"), "expected path error, got: {}", msg);
+    }
+
+    // -----------------------------------------------------------------------
+    // Config repair application (AC 1)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn repair_rename_key() {
+        let mut config = serde_json::json!({"old_key": 42});
+        let repair = ConfigRepair::RenameKey {
+            from: "old_key".to_string(),
+            to: "new_key".to_string(),
+        };
+        Doctor::apply_repair(&mut config, &repair).unwrap();
+        assert_eq!(config, serde_json::json!({"new_key": 42}));
+    }
+
+    #[test]
+    fn repair_rename_key_missing_is_no_op() {
+        let mut config = serde_json::json!({"other": 42});
+        let repair = ConfigRepair::RenameKey {
+            from: "old_key".to_string(),
+            to: "new_key".to_string(),
+        };
+        Doctor::apply_repair(&mut config, &repair).unwrap();
+        assert_eq!(config, serde_json::json!({"other": 42}));
+    }
+
+    #[test]
+    fn repair_split_value() {
+        let mut config = serde_json::json!({"tags": "a,b,c"});
+        let repair = ConfigRepair::SplitValue {
+            path: "tags".to_string(),
+            delimiter: ",".to_string(),
+        };
+        Doctor::apply_repair(&mut config, &repair).unwrap();
+        assert_eq!(config, serde_json::json!({"tags": ["a", "b", "c"]}));
+    }
+
+    #[test]
+    fn repair_supply_default_on_null() {
+        let mut config = serde_json::json!({"setting": null});
+        let repair = ConfigRepair::SupplyDefault {
+            path: "setting".to_string(),
+            value: serde_json::json!("default"),
+        };
+        Doctor::apply_repair(&mut config, &repair).unwrap();
+        assert_eq!(config, serde_json::json!({"setting": "default"}));
+    }
+
+    #[test]
+    fn repair_supply_default_on_existing_preserves() {
+        let mut config = serde_json::json!({"setting": "existing"});
+        let repair = ConfigRepair::SupplyDefault {
+            path: "setting".to_string(),
+            value: serde_json::json!("default"),
+        };
+        Doctor::apply_repair(&mut config, &repair).unwrap();
+        assert_eq!(config, serde_json::json!({"setting": "existing"}));
+    }
+
+    #[test]
+    fn set_at_path_missing_segment_errors() {
+        let mut config = serde_json::json!({"a": {"b": 1}});
+        let err = Doctor::set_at_path(&mut config, &["a", "x"], |v| *v = serde_json::json!(2)).unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Mocks
+    // -----------------------------------------------------------------------
+
+    struct MockStore {
+        installed: Vec<InstalledPackage>,
+    }
+
+    #[async_trait::async_trait]
+    impl PackageStore for MockStore {
+        async fn list_installed(&self) -> Result<Vec<InstalledPackage>> {
+            Ok(self.installed.clone())
+        }
+        async fn write_config(&self, _package_id: &PackageId, _config: serde_json::Value) -> Result<()> {
+            Ok(())
+        }
+        async fn write_state_version(&self, _package_id: &PackageId, _version: Version) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    struct MockAudit {
+        records: std::sync::Mutex<Vec<AuditRecord>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AuditLedger for MockAudit {
+        async fn append(&self, record: AuditRecord) -> Result<()> {
+            self.records.lock().unwrap().push(record);
+            Ok(())
+        }
+    }
+
+    struct MockLock {
+        acquired: std::sync::Mutex<bool>,
+    }
+
+    #[async_trait::async_trait]
+    impl AdvisoryLock for MockLock {
+        async fn try_acquire(&self, _key: &str) -> Result<bool> {
+            let mut acquired = self.acquired.lock().unwrap();
+            if *acquired {
+                Ok(false)
+            } else {
+                *acquired = true;
+                Ok(true)
+            }
+        }
+        async fn release(&self, _key: &str) -> Result<()> {
+            *self.acquired.lock().unwrap() = false;
+            Ok(())
+        }
+    }
+
+    fn make_manifest(id: &str, version: Version, doctor: Option<DoctorBlock>) -> crate::package::PackageManifest {
+        crate::package::PackageManifest::new(
+            pkg_id(id),
+            "Test",
+            crate::package::PackageKind::ToolPack,
+            version,
+            PublisherId::new("rusty-labs").unwrap(),
+            vec![],
+            vec![],
+            crate::package::CapabilityDecl::default(),
+            doctor,
+            None,
+        )
+        .unwrap()
+    }
+
+    // -----------------------------------------------------------------------
+    // Diagnosis (AC 3, 6)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn diagnose_reports_revocation_flag() {
+        let manifest = make_manifest("revoked-pkg", v(1, 0, 0), None);
+        let store = MockStore {
+            installed: vec![InstalledPackage {
+                manifest,
+                installed_version: v(1, 0, 0),
+                config: serde_json::json!({}),
+                state_version: v(1, 0, 0),
+            }],
+        };
+
+        let mut revocations = HashMap::new();
+        revocations.insert((pkg_id("revoked-pkg"), v(1, 0, 0)), "security advisory".to_string());
+
+        let doctor = Doctor::new(HashMap::new()).with_revocations(revocations);
+        let report = doctor.diagnose(&store).await.unwrap();
+        assert_eq!(report.packages.len(), 1);
+        assert_eq!(report.packages[0].revocation_flag, Some("security advisory".to_string()));
+    }
+
+    #[tokio::test]
+    async fn diagnose_reports_pending_repairs_and_migrations() {
+        let block = DoctorBlock {
+            config_repairs: {
+                let mut m = HashMap::new();
+                m.insert(v(1, 1, 0), vec![ConfigRepair::RenameKey {
+                    from: "a".to_string(),
+                    to: "b".to_string(),
+                }]);
+                m
+            },
+            state_migrations: vec![StateMigration {
+                version: v(1, 1, 0),
+                order: 0,
+                description: "init".to_string(),
+            }],
+        };
+        let manifest = make_manifest("pkg", v(1, 1, 0), Some(block));
+
+        let mut registry = HashMap::new();
+        registry.insert(pkg_id("pkg"), v(1, 1, 0));
+
+        let store = MockStore {
+            installed: vec![InstalledPackage {
+                manifest,
+                installed_version: v(1, 0, 0),
+                config: serde_json::json!({}),
+                state_version: v(1, 0, 0),
+            }],
+        };
+
+        let doctor = Doctor::new(registry);
+        let report = doctor.diagnose(&store).await.unwrap();
+        assert_eq!(report.packages[0].pending_repairs, 1);
+        assert_eq!(report.packages[0].pending_migrations, 1);
+    }
+
+    #[tokio::test]
+    async fn diagnose_is_pure_no_side_effects() {
+        let manifest = make_manifest("pkg", v(1, 0, 0), None);
+        let store = MockStore {
+            installed: vec![InstalledPackage {
+                manifest,
+                installed_version: v(1, 0, 0),
+                config: serde_json::json!({"a": 1}),
+                state_version: v(1, 0, 0),
+            }],
+        };
+        let doctor = Doctor::new(HashMap::new());
+        let r1 = doctor.diagnose(&store).await.unwrap();
+        let r2 = doctor.diagnose(&store).await.unwrap();
+        assert_eq!(r1.packages[0].installed_version, r2.packages[0].installed_version);
+    }
+
+    // -----------------------------------------------------------------------
+    // Fix with advisory lock (AC 4, 5)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn fix_applies_repairs_and_migrations() {
+        let block = DoctorBlock {
+            config_repairs: {
+                let mut m = HashMap::new();
+                m.insert(v(1, 1, 0), vec![ConfigRepair::RenameKey {
+                    from: "old".to_string(),
+                    to: "new".to_string(),
+                }]);
+                m
+            },
+            state_migrations: vec![StateMigration {
+                version: v(1, 1, 0),
+                order: 0,
+                description: "init".to_string(),
+            }],
+        };
+        let manifest = make_manifest("pkg", v(1, 1, 0), Some(block));
+
+        let mut registry = HashMap::new();
+        registry.insert(pkg_id("pkg"), v(1, 1, 0));
+
+        let store = MockStore {
+            installed: vec![InstalledPackage {
+                manifest,
+                installed_version: v(1, 0, 0),
+                config: serde_json::json!({"old": 42}),
+                state_version: v(1, 0, 0),
+            }],
+        };
+        let audit = MockAudit { records: std::sync::Mutex::new(Vec::new()) };
+        let lock = MockLock { acquired: std::sync::Mutex::new(false) };
+
+        let doctor = Doctor::new(registry);
+        let result = doctor.fix(&store, &audit, &lock).await.unwrap();
+        assert!(result.halted.is_none());
+        assert_eq!(result.package_results.len(), 1);
+        assert_eq!(result.package_results[0].outcomes.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fix_honors_advisory_lock() {
+        let manifest = make_manifest("pkg", v(1, 0, 0), None);
+        let store = MockStore {
+            installed: vec![InstalledPackage {
+                manifest,
+                installed_version: v(1, 0, 0),
+                config: serde_json::json!({}),
+                state_version: v(1, 0, 0),
+            }],
+        };
+        let audit = MockAudit { records: std::sync::Mutex::new(Vec::new()) };
+        let lock = MockLock { acquired: std::sync::Mutex::new(true) };
+
+        let doctor = Doctor::new(HashMap::new());
+        let err = doctor.fix(&store, &audit, &lock).await.unwrap_err();
+        assert!(err.to_string().contains("already in progress"));
+    }
+
+    #[tokio::test]
+    async fn fix_halts_on_failed_repair_and_audits() {
+        let block = DoctorBlock {
+            config_repairs: {
+                let mut m = HashMap::new();
+                m.insert(v(1, 1, 0), vec![ConfigRepair::SplitValue {
+                    path: "missing.path".to_string(),
+                    delimiter: ",".to_string(),
+                }]);
+                m
+            },
+            state_migrations: Vec::new(),
+        };
+        let manifest = make_manifest("pkg", v(1, 1, 0), Some(block));
+
+        let mut registry = HashMap::new();
+        registry.insert(pkg_id("pkg"), v(1, 1, 0));
+
+        let store = MockStore {
+            installed: vec![InstalledPackage {
+                manifest,
+                installed_version: v(1, 0, 0),
+                config: serde_json::json!({}),
+                state_version: v(1, 0, 0),
+            }],
+        };
+        let audit = MockAudit { records: std::sync::Mutex::new(Vec::new()) };
+        let lock = MockLock { acquired: std::sync::Mutex::new(false) };
+
+        let doctor = Doctor::new(registry);
+        let result = doctor.fix(&store, &audit, &lock).await.unwrap();
+        assert!(result.halted.is_some());
+        let records = audit.records.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action, "fix_halted");
+    }
+}
