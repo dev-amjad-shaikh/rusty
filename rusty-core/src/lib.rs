@@ -291,6 +291,7 @@ pub mod registry;
 pub mod registry_index;
 pub mod remote;
 pub mod render_intent;
+pub mod repair;
 pub mod replay;
 pub mod reviewer;
 pub mod sandbox;

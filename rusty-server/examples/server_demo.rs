@@ -28,8 +28,8 @@ use rusty_agent_runtime::tool::builtins::{
     CalculatorTool, KnowledgeDocument, KnowledgeSearchTool, SandboxedDocumentReaderTool,
     TextInspectorTool,
 };
-use rusty_agent_server::{GraphRegistry, ServerConfig, serve};
-use serde_json::{Value, json};
+use rusty_agent_server::{serve, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 
 /// A deterministic local model that exercises the complete tool pipeline on
 /// every new thread. It keeps the demo credential-free while producing real
@@ -261,7 +261,12 @@ fn servicenow_pack() -> ConnectorManifest {
             token: "{credentials.token}".to_owned(),
         },
     ];
-    let op = |name: &str, method: HttpMethod, path: &str, effect: OperationEffect, params: Value, description: &str| {
+    let op = |name: &str,
+              method: HttpMethod,
+              path: &str,
+              effect: OperationEffect,
+              params: Value,
+              description: &str| {
         ConnectorOperation {
             name: name.to_owned(),
             description: description.to_owned(),

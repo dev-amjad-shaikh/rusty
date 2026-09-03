@@ -201,6 +201,7 @@ mod pending_runs;
 mod policy;
 mod receipts;
 mod registry;
+mod repair;
 mod replay;
 mod routes;
 mod runs;

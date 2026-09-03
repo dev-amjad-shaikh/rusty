@@ -45,12 +45,12 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use rusty_agent_runtime::connector::{
-    CheckRequest, CheckResponse, ConnectorInstance, ConnectorManifest, ConnectorTransport,
-    INSTANCE_ID_PREFIX, execute_check, extract_secrets, insert_masked_secrets,
-    insert_opened_secrets, validate_config, without_secrets,
+    execute_check, extract_secrets, insert_masked_secrets, insert_opened_secrets, validate_config,
+    without_secrets, CheckRequest, CheckResponse, ConnectorInstance, ConnectorManifest,
+    ConnectorTransport, INSTANCE_ID_PREFIX,
 };
 
 use crate::auth::TenantContext;
@@ -455,7 +455,9 @@ pub(crate) async fn check(
         }
     };
     let outcome = execute_check(&manifest, &config, &transport()).await;
-    Ok(Json(serde_json::to_value(outcome).expect("outcome serializes")))
+    Ok(Json(
+        serde_json::to_value(outcome).expect("outcome serializes"),
+    ))
 }
 
 /// `GET /connectors/instances/{id}/catalog` — the instance's derived
@@ -471,7 +473,9 @@ pub(crate) async fn instance_catalog(
         .get_instance(tenant.tenant(), &instance_id)
         .await
         .map_err(store_err)?
-        .ok_or_else(|| ApiError::not_found(format!("unknown connector instance `{instance_id}`")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
     let manifest = manifest_for(&state, &tenant, &instance.manifest_hash).await?;
     let tools = manifest
         .derive_catalog()

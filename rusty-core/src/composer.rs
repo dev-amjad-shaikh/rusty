@@ -1007,6 +1007,9 @@ fn revision_notes_for_error(error: &SkillError) -> Vec<String> {
         SkillError::ScanDenied { .. } => {
             return vec!["remove the content the security scan denied".to_owned()]
         }
+        SkillError::InvalidDependency { .. } => {
+            return vec!["fix the dependency declarations: each must be `kind:name` where kind is `tool`, `connector`, or `setting`".to_owned()]
+        }
     };
     vec![note.to_owned()]
 }

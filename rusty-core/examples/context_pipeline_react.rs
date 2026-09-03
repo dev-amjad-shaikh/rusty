@@ -229,8 +229,10 @@ async fn main() -> Result<()> {
     let summarizer: Arc<dyn ChatModel> = Arc::new(RecordingChatModel::new(
         Arc::new(ScriptedModel {
             responses: Mutex::new(
-                vec![ChatMessage::assistant("The user asked about the context pipeline.")]
-                    .into(),
+                vec![ChatMessage::assistant(
+                    "The user asked about the context pipeline.",
+                )]
+                .into(),
             ),
         }),
         journal.clone(),
@@ -332,9 +334,10 @@ async fn main() -> Result<()> {
         let Some(messages) = request.get("messages").and_then(Value::as_array) else {
             continue;
         };
-        let Some(manifest_message) = messages.iter().find(|m| {
-            m.get("name").and_then(Value::as_str) == Some(MANIFEST_MESSAGE_NAME)
-        }) else {
+        let Some(manifest_message) = messages
+            .iter()
+            .find(|m| m.get("name").and_then(Value::as_str) == Some(MANIFEST_MESSAGE_NAME))
+        else {
             continue;
         };
         let content = manifest_message
@@ -351,7 +354,11 @@ async fn main() -> Result<()> {
                 section.used_tokens,
                 section.budget_tokens,
                 section.ids,
-                if section.truncated { " [truncated]" } else { "" },
+                if section.truncated {
+                    " [truncated]"
+                } else {
+                    ""
+                },
                 section
                     .compaction
                     .as_ref()

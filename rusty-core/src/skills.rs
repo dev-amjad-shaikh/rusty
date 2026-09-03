@@ -900,6 +900,194 @@ impl Tool for SkillGateTool {
     }
 }
 
+// --------------------------------------------------------------------- //
+// Dependency fingerprints and invalidation
+// --------------------------------------------------------------------- //
+
+/// The status of a recorded dependency fingerprint: current means the
+/// canonical shape still hashes to the stored digest; stale means the
+/// dependency changed underneath the skill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FingerprintStatus {
+    /// The dependency's canonical shape hashes to the stored digest.
+    Current,
+    /// The dependency changed; the stored digest no longer matches.
+    Stale,
+}
+
+/// One recorded fingerprint: the dependency id and its SHA-256 digest over
+/// the canonical shape the caller supplied at indexing time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyFingerprint {
+    /// The dependency id (`tool:{name}`, `connector:{id}`, `setting:{path}`).
+    pub dependency_id: String,
+    /// The SHA-256 hex digest of the canonical shape at indexing time.
+    pub fingerprint: String,
+    /// Current or stale.
+    pub status: FingerprintStatus,
+}
+
+/// A hygiene finding from dependency analysis: a tool the skill's body
+/// mentions but does not declare, or a declared dependency that is unused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum DependencyHygiene {
+    /// A tool name found in the body that is not in the declared dependencies.
+    UndeclaredTool {
+        /// The tool name observed.
+        tool: String,
+    },
+    /// A declared tool dependency whose name does not appear in the body.
+    UnusedDeclaration {
+        /// The declared dependency.
+        decl: crate::skill::DependencyDecl,
+    },
+}
+
+/// The indexed dependency state for a skill: the fingerprints of every
+/// declared dependency, plus any hygiene findings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillDependencyState {
+    /// The recorded fingerprints, in declaration order.
+    pub fingerprints: Vec<DependencyFingerprint>,
+    /// Hygiene findings from the last analysis pass.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hygiene: Vec<DependencyHygiene>,
+}
+
+/// The dependency index: forward map (skill → dependency state) and reverse
+/// map (dependency id → skills that declare it). Both maps are name-sorted
+/// for determinism.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DependencyIndex {
+    forward: std::collections::BTreeMap<String, SkillDependencyState>,
+    reverse: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+}
+
+impl DependencyIndex {
+    /// An empty index.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Index one skill's declared dependencies: the caller supplies the
+    /// canonical shape for each dependency, and the index records the
+    /// SHA-256 fingerprint. Any previous entry for this skill is replaced.
+    pub fn index_skill(
+        &mut self,
+        skill_name: &str,
+        declared: &[crate::skill::DependencyDecl],
+        shapes: &dyn Fn(&crate::skill::DependencyDecl) -> Option<Vec<u8>>,
+    ) -> SkillDependencyState {
+        // Remove old reverse entries first.
+        if let Some(old) = self.forward.remove(skill_name) {
+            for fp in &old.fingerprints {
+                if let Some(set) = self.reverse.get_mut(&fp.dependency_id) {
+                    set.remove(skill_name);
+                    if set.is_empty() {
+                        self.reverse.remove(&fp.dependency_id);
+                    }
+                }
+            }
+        }
+
+        let mut fingerprints = Vec::new();
+        for decl in declared {
+            let dependency_id = decl.dependency_id();
+            let fingerprint = match shapes(decl) {
+                Some(bytes) => crate::record::sha256_hex(&bytes),
+                None => String::new(),
+            };
+            fingerprints.push(DependencyFingerprint {
+                dependency_id: dependency_id.clone(),
+                fingerprint,
+                status: FingerprintStatus::Current,
+            });
+            self.reverse
+                .entry(dependency_id)
+                .or_default()
+                .insert(skill_name.to_owned());
+        }
+
+        let state = SkillDependencyState {
+            fingerprints,
+            hygiene: Vec::new(),
+        };
+        self.forward.insert(skill_name.to_owned(), state.clone());
+        state
+    }
+
+    /// Mark every skill that declares `dependency_id` as stale.
+    pub fn invalidate(&mut self, dependency_id: &str) {
+        if let Some(skills) = self.reverse.get(dependency_id) {
+            for skill in skills.clone() {
+                if let Some(state) = self.forward.get_mut(&skill) {
+                    for fp in &mut state.fingerprints {
+                        if fp.dependency_id == dependency_id {
+                            fp.status = FingerprintStatus::Stale;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The dependency state for one skill, if indexed.
+    pub fn get(&self, skill_name: &str) -> Option<&SkillDependencyState> {
+        self.forward.get(skill_name)
+    }
+
+    /// The set of skills that declare `dependency_id`, if any.
+    pub fn skills_for(&self, dependency_id: &str) -> Option<&std::collections::BTreeSet<String>> {
+        self.reverse.get(dependency_id)
+    }
+
+    /// All stale fingerprints across every indexed skill.
+    pub fn stale(&self) -> Vec<(String, DependencyFingerprint)> {
+        let mut out = Vec::new();
+        for (skill, state) in &self.forward {
+            for fp in &state.fingerprints {
+                if fp.status == FingerprintStatus::Stale {
+                    out.push((skill.clone(), fp.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Run a hygiene pass: flag undeclared tool usage and unused
+    /// declarations. `mentioned_tools` is the set of tool names the body
+    /// actually references; `declared` is the skill's `dependencies`.
+    pub fn hygiene(
+        &self,
+        _skill_name: &str,
+        mentioned_tools: &std::collections::BTreeSet<String>,
+        declared: &[crate::skill::DependencyDecl],
+    ) -> Vec<DependencyHygiene> {
+        let mut findings = Vec::new();
+        let declared_tools: std::collections::BTreeSet<String> = declared
+            .iter()
+            .filter_map(|d| match d {
+                crate::skill::DependencyDecl::Tool { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        for tool in mentioned_tools {
+            if !declared_tools.contains(tool) {
+                findings.push(DependencyHygiene::UndeclaredTool { tool: tool.clone() });
+            }
+        }
+        for decl in declared {
+            if let crate::skill::DependencyDecl::Tool { name } = decl {
+                if !mentioned_tools.contains(name) {
+                    findings.push(DependencyHygiene::UnusedDeclaration { decl: decl.clone() });
+                }
+            }
+        }
+        findings
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

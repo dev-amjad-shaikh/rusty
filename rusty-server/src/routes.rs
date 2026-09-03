@@ -199,6 +199,9 @@ pub(crate) struct AppState {
     /// boot. File-backed on every deployment in this slice; secrets seal
     /// through [`crate::broker::Broker`] and persist as envelopes only.
     pub connectors: Arc<crate::server_store::ConnectorPlane>,
+    /// The repair-record audit ledger (EP-10-S01): file-backed under
+    /// `{store_path}/repairs/`.
+    pub repair_ledger: Arc<rusty_agent_runtime::repair::FileRepairLedger>,
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -319,6 +322,7 @@ pub(crate) fn build_router(
         connectors: Arc::new(crate::server_store::ConnectorPlane::load(
             &config.store_path,
         )),
+        repair_ledger: crate::repair::init_ledger(&config.store_path),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // The durable pending-run queue's boot half: replay persisted queue
@@ -609,6 +613,10 @@ pub(crate) fn build_router(
             "/connectors/instances/{instance_id}/catalog",
             get(crate::connectors::instance_catalog),
         )
+        // Repair-record audit stream (EP-10-S01): query by component,
+        // trigger class, outcome, time range, session, or attempt.
+        .route("/repairs", get(crate::repair::list_repairs))
+        .route("/repairs/{record_id}", get(crate::repair::get_repair))
         // The learning-candidate lifecycle (R0.8 wave 3): creation plus
         // the three journaled transitions, and the version-pointer
         // listing. Every transition requires `run_id` — the journal is

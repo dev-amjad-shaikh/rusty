@@ -12,14 +12,14 @@
 
 use std::path::PathBuf;
 
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use rusty_agent_runtime::connector::{
     ConnectorManifest, ConnectorOperation, HttpMethod, OperationAuth, OperationEffect,
 };
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 // --------------------------------------------------------------------- //
@@ -79,7 +79,11 @@ async fn call_as(
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes: Bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value = if bytes.is_empty() {
@@ -145,19 +149,20 @@ fn demo_manifest() -> ConnectorManifest {
             token: "{credentials.token}".to_owned(),
         },
     ];
-    let op = |name: &str, method: HttpMethod, path: &str, effect: OperationEffect, params: Value| {
-        ConnectorOperation {
-            name: name.to_owned(),
-            description: format!("The {name} operation."),
-            method,
-            path: path.to_owned(),
-            effect,
-            params_schema: params,
-            headers: Vec::new(),
-            auth: auth.clone(),
-            max_response_bytes: None,
-        }
-    };
+    let op =
+        |name: &str, method: HttpMethod, path: &str, effect: OperationEffect, params: Value| {
+            ConnectorOperation {
+                name: name.to_owned(),
+                description: format!("The {name} operation."),
+                method,
+                path: path.to_owned(),
+                effect,
+                params_schema: params,
+                headers: Vec::new(),
+                auth: auth.clone(),
+                max_response_bytes: None,
+            }
+        };
     ConnectorManifest::new(
         "servicenow",
         "1",
@@ -398,7 +403,10 @@ async fn instantiate_seals_secrets_and_serves_them_masked() {
     scan(&store.join("connectors"), &mut scanned);
     for bytes in &scanned {
         let text = String::from_utf8_lossy(bytes);
-        assert!(!text.contains("s3cret-marker"), "plaintext secret persisted");
+        assert!(
+            !text.contains("s3cret-marker"),
+            "plaintext secret persisted"
+        );
         assert!(!text.contains("\"admin\""), "plaintext secret persisted");
     }
 
@@ -474,7 +482,9 @@ async fn check_gate_pre_save_and_live_instance() {
         &app,
         "POST",
         "/connectors/check",
-        Some(json!({"instance_id": instance_id, "manifest_hash": hash, "config": basic_config("x")})),
+        Some(
+            json!({"instance_id": instance_id, "manifest_hash": hash, "config": basic_config("x")}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -610,8 +620,14 @@ async fn tenant_isolation_404_never_403() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    let (status, list) =
-        call_as(&app, Some("globex-secret"), "GET", "/connectors/instances", None).await;
+    let (status, list) = call_as(
+        &app,
+        Some("globex-secret"),
+        "GET",
+        "/connectors/instances",
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["instances"].as_array().unwrap().len(), 0);
 

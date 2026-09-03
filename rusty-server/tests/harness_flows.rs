@@ -411,7 +411,6 @@ async fn harness_flows_end_to_end() {
         "citations carry the chunk's content address"
     );
 
-
     // -- Journey 4: the composer drafts, publishes under its pre-minted
     //    approval, and lists the skills directory read-only; a disallowed
     //    command is refused by the CLI policy. The run rides an assistant

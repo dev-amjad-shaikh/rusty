@@ -35,9 +35,7 @@ use rusty_agent_runtime::memory::{
     ProvenanceAuthor, ScopeAddress, ValidityWindow, DEFAULT_TOKEN_MARGIN_PERCENT,
 };
 use rusty_agent_runtime::record::{Effect, PayloadRef, RunEvent, RunEventKind};
-use rusty_agent_runtime::replay::{
-    ExactReplay, RecordingChatModel, ReplayingChatModel,
-};
+use rusty_agent_runtime::replay::{ExactReplay, RecordingChatModel, ReplayingChatModel};
 use rusty_agent_runtime::tool::{Tool, ToolRegistry};
 use rusty_agent_runtime::tool_select::{
     manifests_for_registry, ExclusionReason, ToolSelectionOverlay, ToolSelectionPolicy,
@@ -204,15 +202,19 @@ async fn assemble_with_store(
 
 #[tokio::test]
 async fn golden_context_assembly_shape() {
-    let pipeline = ContextPipeline::new(policy())
-        .unwrap()
-        .with_policy_pin("test-policy", None, None);
+    let pipeline =
+        ContextPipeline::new(policy())
+            .unwrap()
+            .with_policy_pin("test-policy", None, None);
     let assembly = assemble_with_store(&pipeline, &golden_inputs()).await;
 
     // The manifest is the reserved, model-visible metadata message riding
     // directly behind identity.
     let manifest_message = &assembly.messages[1];
-    assert_eq!(manifest_message.name.as_deref(), Some(MANIFEST_MESSAGE_NAME));
+    assert_eq!(
+        manifest_message.name.as_deref(),
+        Some(MANIFEST_MESSAGE_NAME)
+    );
     assert!(manifest_message
         .content
         .as_deref()
@@ -317,8 +319,8 @@ async fn the_manifest_message_is_budgeted_off_the_top() {
     let manifest = &assembly.manifest;
 
     assert!(manifest.manifest_tokens > 0);
-    let total: u32 = manifest.manifest_tokens
-        + manifest.sections.iter().map(|s| s.used_tokens).sum::<u32>();
+    let total: u32 =
+        manifest.manifest_tokens + manifest.sections.iter().map(|s| s.used_tokens).sum::<u32>();
     assert!(
         total <= manifest.budget_tokens,
         "manifest plus sections ({total}) must fit the total budget ({})",
@@ -462,11 +464,7 @@ async fn a_forty_tool_registry_shortlists_to_a_pinned_top_k() {
         .shortlist
         .as_ref()
         .expect("the governed shortlist is recorded");
-    let selected_names: Vec<&str> = shortlist
-        .selected
-        .iter()
-        .map(|r| r.name.as_str())
-        .collect();
+    let selected_names: Vec<&str> = shortlist.selected.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(
         selected_names,
         expected.iter().map(String::as_str).collect::<Vec<_>>()
@@ -563,7 +561,8 @@ fn compacting_policy() -> ContextPolicy {
 
 #[tokio::test]
 async fn compaction_fires_at_the_trigger_and_marks_the_summary() {
-    let summarizer: Arc<dyn ChatModel> = Arc::new(ScriptedModel::new(vec!["earlier turns, summarized"]));
+    let summarizer: Arc<dyn ChatModel> =
+        Arc::new(ScriptedModel::new(vec!["earlier turns, summarized"]));
     let pipeline = ContextPipeline::new(compacting_policy())
         .unwrap()
         .with_summarizer(summarizer);
@@ -602,7 +601,11 @@ async fn compaction_fires_at_the_trigger_and_marks_the_summary() {
         tail[1].content.as_deref(),
         Some("user turn 6 with some content")
     );
-    assert_eq!(inputs.history.len(), 6, "compaction never mutates the channel");
+    assert_eq!(
+        inputs.history.len(),
+        6,
+        "compaction never mutates the channel"
+    );
     assert_eq!(
         inputs.history[0].content.as_deref(),
         Some("user turn 1 with some content")
@@ -826,7 +829,8 @@ async fn exact_replay_of_a_compacted_run_serves_every_call() {
         model_calls[1].parent.as_deref(),
         Some(CONTEXT_PIPELINE_PARENT)
     );
-    let recorded_manifest = manifest_of(&resolve(&snapshot, model_calls[2].input.as_ref().unwrap()));
+    let recorded_manifest =
+        manifest_of(&resolve(&snapshot, model_calls[2].input.as_ref().unwrap()));
     let recorded_compaction = recorded_manifest
         .sections
         .iter()
@@ -876,7 +880,11 @@ async fn exact_replay_of_a_compacted_run_serves_every_call() {
     // Zero outbound calls, both cursors exhausted.
     assert_eq!(summarizer_calls.load(Ordering::SeqCst), 0);
     assert_eq!(main_calls.load(Ordering::SeqCst), 0);
-    assert!(source.is_exhausted(), "unserved effects: {:?}", source.remaining());
+    assert!(
+        source.is_exhausted(),
+        "unserved effects: {:?}",
+        source.remaining()
+    );
     assert!(memory_source.is_exhausted());
 
     // The replayed journal reproduces the recorded evidence byte-for-byte —
@@ -888,8 +896,10 @@ async fn exact_replay_of_a_compacted_run_serves_every_call() {
     assert_eq!(snapshot.head_hash, replayed.head_hash);
 
     let replayed_calls = events_of_kind(&replayed, RunEventKind::ModelCall);
-    let replayed_manifest =
-        manifest_of(&resolve(&replayed, replayed_calls[2].input.as_ref().unwrap()));
+    let replayed_manifest = manifest_of(&resolve(
+        &replayed,
+        replayed_calls[2].input.as_ref().unwrap(),
+    ));
     assert_eq!(
         replayed_manifest
             .sections
@@ -899,4 +909,3 @@ async fn exact_replay_of_a_compacted_run_serves_every_call() {
         Some(recorded_compaction)
     );
 }
-

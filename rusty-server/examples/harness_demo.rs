@@ -26,25 +26,25 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::DateTime;
 use rusty_agent_runtime::composer::{
-    ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession, PublishComposedSkillTool,
-    publish_effect_id,
+    publish_effect_id, ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession,
+    PublishComposedSkillTool,
 };
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::learn::Candidate;
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::self_improve::{
     BacklogEntry, BacklogProvenance, BacklogStatus, BacklogStore, BuildGapSkillTool,
-    CapabilityInspection, FEATURE_CAPABILITY_SETS, HARNESS_PROVENANCE, InspectCapabilitiesTool,
-    Plane, ProposeBacklogTool,
+    CapabilityInspection, InspectCapabilitiesTool, Plane, ProposeBacklogTool,
+    FEATURE_CAPABILITY_SETS, HARNESS_PROVENANCE,
 };
 use rusty_agent_runtime::skill::{SkillPackage, SkillRegistry};
 use rusty_agent_runtime::tool::builtins::cli::{CliPolicy, CliTool};
 use rusty_agent_server::{
-    ExperimentOutcome, GraphRegistry, ServerConfig, StudioExperimentConfig,
-    StudioExperimentEvaluator, serve,
+    serve, ExperimentOutcome, GraphRegistry, ServerConfig, StudioExperimentConfig,
+    StudioExperimentEvaluator,
 };
 use rusty_eval::{Dataset, ExperimentReport};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// The fixture day the self-improver's logical clock and seeded backlog
 /// pin their timestamps to. Fixed so journaled evidence stays a
@@ -99,8 +99,7 @@ struct ComposerModel {
 /// The skill the composer drafts. Fixed so the publish approval can be
 /// minted before any run starts.
 const COMPOSED_NAME: &str = "daily-standup-brief";
-const COMPOSED_DESCRIPTION: &str =
-    "Turn a morning's inbox notes into a standup brief.";
+const COMPOSED_DESCRIPTION: &str = "Turn a morning's inbox notes into a standup brief.";
 const COMPOSED_BODY: &str =
     "# Standup Brief\n\nList yesterday, today, and blockers, one line each.\n";
 
@@ -209,7 +208,8 @@ const RUNBOOK_BODY: &str = "# Incident Review\n\n1. List the open priority-1 inc
 /// rationale are the entry's identity — keep them byte-stable so restarts
 /// converge on the same content-derived id).
 const RUNBOOK_ENTRY_TITLE: &str = "Ship the incident-review runbook skill";
-const RUNBOOK_ENTRY_RATIONALE: &str = "operator-runbooks is Absent: no `runbook-*` skill is registered, and the incident-review \
+const RUNBOOK_ENTRY_RATIONALE: &str =
+    "operator-runbooks is Absent: no `runbook-*` skill is registered, and the incident-review \
      workflow recurs across sessions — it belongs in a governed, scanned package.";
 
 /// The self-improver: introspect the demo's own registries, record backlog

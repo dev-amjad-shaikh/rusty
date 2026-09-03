@@ -199,7 +199,14 @@ fn seal_new(
     let data_key = draw_random::<32>();
     let plaintext =
         serde_json::to_vec(material).map_err(|e| format!("serialize token material: {e}"))?;
-    seal_bytes_with_data_key(master_id, master, connection_id, &data_key, None, &plaintext)
+    seal_bytes_with_data_key(
+        master_id,
+        master,
+        connection_id,
+        &data_key,
+        None,
+        &plaintext,
+    )
 }
 
 /// Seal arbitrary plaintext under a freshly minted data key — the

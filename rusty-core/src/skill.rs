@@ -100,6 +100,9 @@ pub const MAX_FRONTMATTER_VALUE_BYTES: usize = 256;
 /// The most `allowed-tools` entries a frontmatter may declare.
 pub const MAX_ALLOWED_TOOLS: usize = 32;
 
+/// The most `dependencies` entries a frontmatter may declare.
+pub const MAX_DEPENDENCIES: usize = 32;
+
 /// The longest an author string may run, in bytes.
 pub const MAX_SKILL_AUTHOR_LEN: usize = 128;
 
@@ -234,6 +237,47 @@ pub enum SkillError {
         /// The denials that refused the package.
         denials: Vec<ScanFinding>,
     },
+
+    /// A dependency declaration is malformed.
+    #[error("invalid dependency declaration: {reason}")]
+    InvalidDependency {
+        /// The rule it broke.
+        reason: &'static str,
+    },
+}
+
+/// One declared dependency of a skill: a tool, connector, or setting the
+/// skill's instructions assume access to.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DependencyDecl {
+    /// A tool the skill's instructions assume access to.
+    Tool {
+        /// The tool name.
+        name: String,
+    },
+    /// A connector the skill's instructions assume access to.
+    Connector {
+        /// The connector id.
+        id: String,
+    },
+    /// A setting path the skill's instructions read.
+    Setting {
+        /// The dotted setting path.
+        path: String,
+    },
+}
+
+impl DependencyDecl {
+    /// The canonical string id for indexing: `tool:{name}`, `connector:{id}`,
+    /// `setting:{path}`.
+    pub fn dependency_id(&self) -> String {
+        match self {
+            DependencyDecl::Tool { name } => format!("tool:{name}"),
+            DependencyDecl::Connector { id } => format!("connector:{id}"),
+            DependencyDecl::Setting { path } => format!("setting:{path}"),
+        }
+    }
 }
 
 /// `true` when `name` is kebab-case within the Agent Skills bound: lowercase
@@ -277,6 +321,10 @@ pub struct SkillFrontmatter {
     /// The eval-suite gate this skill must pass before promotion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval_gate: Option<String>,
+    /// Declared dependencies: tools, connectors, and settings the skill's
+    /// instructions assume access to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<DependencyDecl>,
 }
 
 /// Strip one pair of matching surrounding quotes from a frontmatter scalar,
@@ -364,6 +412,8 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
     let mut eval_gate = None;
     let mut allowed_tools = Vec::new();
     let mut allowed_tools_seen = false;
+    let mut dependencies = Vec::new();
+    let mut dependencies_seen = false;
 
     for raw_line in block.split('\n') {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
@@ -431,6 +481,63 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
                     });
                 }
             }
+            "dependencies" => {
+                if dependencies_seen {
+                    return Err(SkillError::MalformedFrontmatter {
+                        reason: "duplicate key `dependencies`".to_owned(),
+                    });
+                }
+                dependencies_seen = true;
+                for entry in value.split(',') {
+                    let entry = entry.trim();
+                    if entry.is_empty() {
+                        return Err(SkillError::InvalidDependency {
+                            reason: "entries must be non-empty",
+                        });
+                    }
+                    let Some((kind, name)) = entry.split_once(':') else {
+                        return Err(SkillError::InvalidDependency {
+                            reason: "each entry must be `kind:name`",
+                        });
+                    };
+                    let name = name.trim();
+                    if name.is_empty() {
+                        return Err(SkillError::InvalidDependency {
+                            reason: "name must be non-empty",
+                        });
+                    }
+                    if name.len() > MAX_FRONTMATTER_VALUE_BYTES {
+                        return Err(SkillError::InvalidDependency {
+                            reason: "name exceeds the frontmatter value ceiling",
+                        });
+                    }
+                    let decl = match kind.trim() {
+                        "tool" => DependencyDecl::Tool {
+                            name: name.to_owned(),
+                        },
+                        "connector" => DependencyDecl::Connector {
+                            id: name.to_owned(),
+                        },
+                        "setting" => DependencyDecl::Setting {
+                            path: name.to_owned(),
+                        },
+                        other => {
+                            return Err(SkillError::InvalidDependency {
+                                reason: match other {
+                                    "" => "kind must not be empty",
+                                    _ => "kind must be `tool`, `connector`, or `setting`",
+                                },
+                            });
+                        }
+                    };
+                    dependencies.push(decl);
+                }
+                if dependencies.len() > MAX_DEPENDENCIES {
+                    return Err(SkillError::InvalidDependency {
+                        reason: "too many entries",
+                    });
+                }
+            }
             other => {
                 return Err(SkillError::MalformedFrontmatter {
                     reason: format!("unknown key `{other}`"),
@@ -494,6 +601,7 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
             allowed_tools,
             compatibility,
             eval_gate,
+            dependencies,
         },
         body,
     ))
@@ -773,6 +881,9 @@ fn canonical_bytes(package: &SkillPackage) -> Vec<u8> {
         "eval-gate",
         frontmatter.eval_gate.as_deref().unwrap_or("").as_bytes(),
     );
+    for dep in &frontmatter.dependencies {
+        field("dependency", dep.dependency_id().as_bytes());
+    }
     field("body", package.body.as_bytes());
     for (path, bytes) in &package.references {
         field("reference-path", path.as_bytes());
@@ -1109,6 +1220,9 @@ pub struct SkillMetadata {
     /// The eval-suite gate this skill must pass before promotion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval_gate: Option<String>,
+    /// Declared dependencies: tools, connectors, and settings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<DependencyDecl>,
 }
 
 /// Selects one version of a skill for [`SkillRegistry::get_version`].
@@ -1331,6 +1445,7 @@ impl SkillRegistry {
                 allowed_tools: frontmatter.allowed_tools,
                 compatibility: frontmatter.compatibility,
                 eval_gate: frontmatter.eval_gate,
+                dependencies: frontmatter.dependencies,
             },
             provenance: SkillProvenance {
                 source,
