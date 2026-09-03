@@ -448,9 +448,11 @@ pub mod prelude {
         ArtifactRef, BackoffParameters, CURRENT_FORMAT_VERSION, CapsuleVersion, CheckpointHeader,
         ConcurrencyPolicyParameters, DecisionAction, DecisionEvent, DecisionFamily,
         DecisionOutcome, DecisionRole, Effect, EffectReceipt, EventStatus, ExecutorPolicy,
-        JournalRef, POLICY_MAX_ATTEMPTS_ENVELOPE, POLICY_MAX_DELAY_ENVELOPE_MS, PayloadRef,
-        PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind, RunManifest,
-        TimeoutPolicyParameters, derive_policy_version,
+        JournalRef, ObligationKind, ObligationStatus, POLICY_MAX_ATTEMPTS_ENVELOPE,
+        POLICY_MAX_DELAY_ENVELOPE_MS, PauseEnvelope, PauseSchemaVersion, PayloadRef, PolicyVersion,
+        RetryPolicyParameters, RunEvent, RunEventKind, RunManifest, RunObligation, StickyApproval,
+        TimeoutPolicyParameters, ToolIdentityKey, ToolRebindingResult, derive_policy_version,
+        rebind_tool_identities,
     };
     pub use crate::registry::{
         ArtifactCommit, ArtifactRecord, ConfigResolution, LeafChange, LeafModification,

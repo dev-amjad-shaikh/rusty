@@ -288,6 +288,22 @@ pub struct EffectReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_id: Option<String>,
 }
+/// One incremental chunk of a streaming assistant response, journaled
+/// durably before in-memory assembly consumes it (EP-01-S11).
+///
+/// Chunks are fidelity evidence: they replay byte-for-byte so a UI can
+/// reconstruct the exact stream that originally rendered, while
+/// `derive_messages` uses only the assembled `ChatMessage`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantChunk {
+    /// The incremental text produced since the previous chunk.
+    pub delta: String,
+    /// Strictly monotonic index from 0 within the step.
+    pub stream_index: u64,
+    /// `true` on the terminal chunk of the stream.
+    #[serde(default)]
+    pub finish: bool,
+}
 
 /// The outcome status of a journaled event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -940,6 +956,12 @@ pub enum RunEventKind {
     /// [`crate::inbox::RunCancellation`] — the closed
     /// [`crate::inbox::CancelCause`], the `keep_inbox` disposition, and what
     /// a dropping cancellation discarded.
+    /// One incremental chunk of a streaming assistant response (EP-01-S11).
+    /// Input is empty; output carries the [`AssistantChunk`] — the delta,
+    /// the monotonic `stream_index`, and the finish flag. Journaled before
+    /// the assembled [`ModelCall`] so chunks are durable-first and replay
+    /// can reconstruct the exact token sequence that originally rendered.
+    AssistantChunk,
     RunCancelled,
 }
 
@@ -2033,6 +2055,303 @@ pub struct JournalRef {
 
     /// Journal head hash (chained SHA-256) at the boundary.
     pub sha256: String,
+}
+
+// ---------------------------------------------------------------------------
+// Pause envelope: versioned snapshot with tool-identity rebinding (EP-03-S06)
+// ---------------------------------------------------------------------------
+
+/// The semver schema version of a [`PauseEnvelope`]. Bump only on breaking
+/// changes to the envelope; additive evolution uses serde defaults instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PauseSchemaVersion {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+}
+
+impl PauseSchemaVersion {
+    /// The current envelope schema version (1.0.0).
+    pub const CURRENT: Self = Self {
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+
+    /// The minimum version this build can read. Older envelopes deserialize
+    /// under the additive-evolution contract; newer envelopes fail the floor
+    /// check with a typed error naming both versions.
+    pub const MINIMUM: Self = Self::CURRENT;
+
+    /// Check that `self >= MINIMUM`. Fails closed with a message naming the
+    /// envelope's version, the required minimum, and the feature that raised
+    /// the floor.
+    pub fn check_floor(&self, feature: &str) -> crate::error::Result<()> {
+        if self < &Self::MINIMUM {
+            return Err(RustyError::Checkpoint(format!(
+                "pause envelope schema version {}.{}.{} is below the minimum                  {}.{}.{} required by feature `{feature}` — upgrade the runtime                  to resume; incompatible envelopes are never silently reinterpreted",
+                self.major, self.minor, self.patch,
+                Self::MINIMUM.major, Self::MINIMUM.minor, Self::MINIMUM.patch,
+            )));
+        }
+        Ok(())
+    }
+
+    /// String representation for logging and error messages.
+    pub fn as_string(&self) -> String {
+        format!("{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+impl Default for PauseSchemaVersion {
+    fn default() -> Self {
+        Self::CURRENT
+    }
+}
+
+impl PartialOrd for PauseSchemaVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PauseSchemaVersion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.major
+            .cmp(&other.major)
+            .then_with(|| self.minor.cmp(&other.minor))
+            .then_with(|| self.patch.cmp(&other.patch))
+    }
+}
+
+/// A key that uniquely identifies a tool within an agent's scope, used for
+/// rebinding tool identities across pause/resume boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ToolIdentityKey {
+    /// The agent path that owns the tool (e.g. `"main"` or a subagent path).
+    pub agent_path: String,
+
+    /// The fully qualified tool name, including any combinator prefixes
+    /// (e.g. `"filtered:prefix:tool_name"`).
+    pub qualified_tool_name: String,
+}
+
+impl ToolIdentityKey {
+    /// A canonical string representation for indexing and error messages.
+    pub fn canonical(&self) -> String {
+        format!("{}/{}", self.agent_path, self.qualified_tool_name)
+    }
+}
+
+/// The status of a [`RunObligation`] in its lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObligationStatus {
+    /// The obligation is pending and blocks resume (when blocking).
+    Open,
+    /// The obligation was answered and admitted.
+    Satisfied,
+    /// The obligation was answered and refused.
+    Rejected,
+    /// The obligation expired unanswered.
+    Expired,
+}
+
+/// The kind of pause obligation, carrying the data a surface needs to render
+/// its form and validate answers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ObligationKind {
+    /// A tool call requiring human confirmation.
+    Approval {
+        /// The scope of who may approve.
+        scope: String,
+        /// Whether "always allow" is permitted.
+        #[serde(default)]
+        sticky_allowed: bool,
+    },
+
+    /// Typed input requested from a human or external system.
+    StructuredInput {
+        /// JSON Schema describing the expected answer shape.
+        input_schema: Value,
+    },
+
+    /// Output review requested.
+    Feedback {
+        /// The event id whose output is under review.
+        subject_event_id: String,
+    },
+
+    /// A tool whose execution is delegated to an external caller.
+    ExternalExecution {
+        /// The tool name being delegated.
+        tool: String,
+        /// The arguments the tool was called with.
+        arguments: Value,
+        /// JSON Schema describing the expected result shape.
+        result_schema: Value,
+    },
+}
+
+/// One outstanding requirement on a paused run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunObligation {
+    /// Stable obligation id (UUID v4).
+    pub id: String,
+
+    /// The tool call id this obligation is tied to, when tool-tied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+
+    /// The kind and its kind-specific data.
+    pub kind: ObligationKind,
+
+    /// Current lifecycle status.
+    pub status: ObligationStatus,
+
+    /// When the obligation expires, if ever.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
+
+    /// For nested member runs: the run id of the subagent that raised this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_run_id: Option<String>,
+}
+
+/// A sticky approval record: an "always allow" or "always deny" decision
+/// persisted in the envelope so resumed runs honour it without re-asking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StickyApproval {
+    /// The tool identity this sticky record binds to.
+    pub tool_key: ToolIdentityKey,
+
+    /// Whether the sticky record grants or denies.
+    pub grants: bool,
+
+    /// Who set the sticky record (for audit).
+    pub set_by: String,
+
+    /// When the sticky record was set.
+    pub set_at: DateTime<Utc>,
+}
+
+/// The export-boundary snapshot of a paused run. Small by design: transcript,
+/// memory, and scheduler state are re-derived from the log at resume.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PauseEnvelope {
+    /// Semver schema version of this envelope.
+    pub schema_version: PauseSchemaVersion,
+
+    /// The run that paused.
+    pub run_id: String,
+
+    /// The session the run belongs to.
+    pub session_id: String,
+
+    /// Log position (journal event count) at the pause boundary.
+    pub log_position: u64,
+
+    /// Open obligations that must be satisfied before resume.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligations: Vec<RunObligation>,
+
+    /// Sticky approvals carried forward from prior decisions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sticky_approvals: Vec<StickyApproval>,
+
+    /// Tool identity keys present at pause time, used for rebinding on resume.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_identities: Vec<ToolIdentityKey>,
+
+    /// The checkpoint id at the suspension point (resume loads this checkpoint).
+    pub checkpoint_id: String,
+
+    /// When the envelope was created.
+    pub created_at: DateTime<Utc>,
+}
+
+impl PauseEnvelope {
+    /// A new envelope with the current schema version.
+    pub fn new(
+        run_id: impl Into<String>,
+        session_id: impl Into<String>,
+        log_position: u64,
+        checkpoint_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: PauseSchemaVersion::CURRENT,
+            run_id: run_id.into(),
+            session_id: session_id.into(),
+            log_position,
+            obligations: Vec::new(),
+            sticky_approvals: Vec::new(),
+            tool_identities: Vec::new(),
+            checkpoint_id: checkpoint_id.into(),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Validate the envelope's schema version against this build's floor.
+    pub fn check_version(&self) -> crate::error::Result<()> {
+        self.schema_version.check_floor("pause-envelope")
+    }
+
+    /// Whether the envelope carries no open obligations (resume would proceed
+    /// immediately, used for sanity checks).
+    pub fn is_resumable(&self) -> bool {
+        self.obligations
+            .iter()
+            .all(|o| !matches!(o.status, ObligationStatus::Open))
+    }
+}
+
+/// The result of attempting to rebind tool identities from a [`PauseEnvelope`]
+/// to a live toolset.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolRebindingResult {
+    /// Every key bound to exactly one live tool.
+    Bound {
+        /// Map from canonical key string to the live tool name that was bound.
+        bindings: std::collections::HashMap<String, String>,
+    },
+    /// One or more keys could not be bound. Resume must fail with the list
+    /// of unbindable keys.
+    Unbindable {
+        /// The keys that could not be matched against the live toolset.
+        keys: Vec<ToolIdentityKey>,
+    },
+}
+
+/// Attempt to rebind every [`ToolIdentityKey`] in the envelope against the
+/// live `toolset`. Returns [`ToolRebindingResult::Bound`] when every key
+/// matches exactly one live tool, or [`ToolRebindingResult::Unbindable`] with
+/// the failing keys otherwise.
+pub fn rebind_tool_identities(envelope: &PauseEnvelope, toolset: &[String]) -> ToolRebindingResult {
+    let mut bindings = std::collections::HashMap::new();
+    let mut unbindable = Vec::new();
+
+    for key in &envelope.tool_identities {
+        let canonical = key.canonical();
+        // Match by qualified_tool_name against the live toolset.
+        // Combinator prefixes are included in the qualified name, so an
+        // exact match is required.
+        let matched: Vec<&String> = toolset
+            .iter()
+            .filter(|t| *t == &key.qualified_tool_name)
+            .collect();
+        if matched.len() == 1 {
+            bindings.insert(canonical, matched[0].clone());
+        } else {
+            unbindable.push(key.clone());
+        }
+    }
+
+    if unbindable.is_empty() {
+        ToolRebindingResult::Bound { bindings }
+    } else {
+        ToolRebindingResult::Unbindable { keys: unbindable }
+    }
 }
 
 #[cfg(test)]
