@@ -125,6 +125,7 @@
 //! Golden-file tests under `tests/golden/` pin every wire shape this module
 //! adds; any accidental drift fails CI.
 
+use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -1228,4 +1229,353 @@ pub fn rederive_section(
         truncated: assembly.truncated,
         manifest: derived,
     })
+}
+
+// --------------------------------------------------------------------- //
+// Hierarchical summary index (EP-06-S12)
+// --------------------------------------------------------------------- //
+
+/// The depth level of a summary in the hierarchical index.
+///
+/// * Level 0 — raw turns or individual memory records.
+/// * Level 1 — span summaries produced by compaction.
+/// * Level 2 — session digests produced by consolidation.
+/// * Level 3 — periodic rollups produced by the consolidation cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryLevel {
+    Level0,
+    Level1,
+    Level2,
+    Level3,
+}
+
+impl SummaryLevel {
+    /// The level as an integer.
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            SummaryLevel::Level0 => 0,
+            SummaryLevel::Level1 => 1,
+            SummaryLevel::Level2 => 2,
+            SummaryLevel::Level3 => 3,
+        }
+    }
+}
+
+/// One entry in the hierarchical summary index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SummaryIndexEntry {
+    /// The depth level of this entry.
+    pub level: SummaryLevel,
+
+    /// The content address of the record this entry represents.
+    pub memory_id: String,
+
+    /// The ids of the level-below entries this summary cites.
+    pub source_ids: Vec<String>,
+
+    /// Full-text search content: a plain-text representation of the record body.
+    pub content_text: String,
+}
+
+/// A search result from the hierarchical index, carrying citation metadata for drill-down.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SummarySearchResult {
+    /// The matching index entry.
+    pub entry: SummaryIndexEntry,
+
+    /// The level at which the match was found.
+    pub matched_level: SummaryLevel,
+
+    /// Ids of the level-below entries that can be drilled into.
+    pub drill_down_ids: Vec<String>,
+}
+
+/// The hierarchical summary index: an embedding-free, citation-bearing index
+/// that organizes memory records by summary depth level.
+///
+/// Built from a universe of [`MemoryRecord`]s, the index supports top-down
+/// full-text search and token-budget compaction without model or embedding
+/// calls.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HierarchicalSummaryIndex {
+    /// All entries in the index, in insertion order.
+    pub entries: Vec<SummaryIndexEntry>,
+}
+
+/// Well-known tag that marks a summary record as Level 1 (span summary).
+pub const TAG_SUMMARY_LEVEL1: &str = "rusty:summary:level1";
+
+/// Well-known tag that marks a summary record as Level 2 (session digest).
+pub const TAG_SUMMARY_LEVEL2: &str = "rusty:summary:level2";
+
+/// Well-known tag that marks a summary record as Level 3 (periodic rollup).
+pub const TAG_SUMMARY_LEVEL3: &str = "rusty:summary:level3";
+
+fn extract_text(record: &MemoryRecord) -> String {
+    match &record.content {
+        PayloadRef::Inline(value) => value
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| serde_json::to_string(value).unwrap_or_default()),
+        PayloadRef::Artifact(_) => String::new(),
+    }
+}
+
+fn infer_summary_level(record: &MemoryRecord) -> Option<SummaryLevel> {
+    if record.kind != MemoryKind::Summary {
+        return Some(SummaryLevel::Level0);
+    }
+    if record.tags.iter().any(|t| t == TAG_SUMMARY_LEVEL3) {
+        return Some(SummaryLevel::Level3);
+    }
+    if record.tags.iter().any(|t| t == TAG_SUMMARY_LEVEL2) {
+        return Some(SummaryLevel::Level2);
+    }
+    if record.tags.iter().any(|t| t == TAG_SUMMARY_LEVEL1) {
+        return Some(SummaryLevel::Level1);
+    }
+    // Default: a summary without an explicit level tag is treated as Level 1.
+    Some(SummaryLevel::Level1)
+}
+
+impl HierarchicalSummaryIndex {
+    /// An empty index.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert one entry.
+    pub fn insert(&mut self, entry: SummaryIndexEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Build an index from a slice of memory records.
+    ///
+    /// Non-summary records become Level 0 entries. Summary records infer their
+    /// level from well-known tags (defaulting to Level 1).
+    pub fn from_records(records: &[MemoryRecord]) -> Self {
+        let mut entries = Vec::new();
+        for record in records {
+            let Some(level) = infer_summary_level(record) else {
+                continue;
+            };
+            let content_text = extract_text(record);
+            entries.push(SummaryIndexEntry {
+                level,
+                memory_id: record.memory_id.clone(),
+                source_ids: record.provenance.evidence.source_memory_ids.clone(),
+                content_text,
+            });
+        }
+        Self { entries }
+    }
+
+    /// Lookup an entry by content address.
+    pub fn get(&self, memory_id: &str) -> Option<&SummaryIndexEntry> {
+        self.entries.iter().find(|e| e.memory_id == memory_id)
+    }
+
+    /// All entries at a given level.
+    pub fn at_level(&self, level: SummaryLevel) -> Vec<&SummaryIndexEntry> {
+        self.entries.iter().filter(|e| e.level == level).collect()
+    }
+
+    /// Top-down full-text search across levels.
+    ///
+    /// `query` is matched as a case-insensitive substring against
+    /// `content_text`. Results are returned highest-level first: coarse
+    /// matches locate the region, and [`SummarySearchResult::drill_down_ids`] descend to precise
+    /// rows. Zero model or embedding calls are issued.
+    pub fn search_top_down(&self, query: &str) -> Vec<SummarySearchResult> {
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for level in [
+            SummaryLevel::Level3,
+            SummaryLevel::Level2,
+            SummaryLevel::Level1,
+            SummaryLevel::Level0,
+        ] {
+            for entry in &self.entries {
+                if entry.level != level {
+                    continue;
+                }
+                if !entry.content_text.to_lowercase().contains(&query_lower) {
+                    continue;
+                }
+                if seen.insert(entry.memory_id.clone()) {
+                    results.push(SummarySearchResult {
+                        entry: entry.clone(),
+                        matched_level: level,
+                        drill_down_ids: entry.source_ids.clone(),
+                    });
+                }
+            }
+        }
+        results
+    }
+}
+
+/// The default hard iteration cap for [`compact_until_under`].
+pub const DEFAULT_COMPACT_ITERATION_CAP: u32 = 20;
+
+/// Token-budget compaction: substitute higher-level summaries for raw spans
+/// until the estimated token count is under budget.
+///
+/// Walks the candidate pool, replacing groups of current records with the
+/// highest-level summary that covers them, preferring the substitution that
+/// yields the greatest token savings. Each iteration must reduce the token
+/// estimate (monotonic shrinkage). If the budget is not reached within `cap`
+/// iterations, returns a typed error.
+///
+/// `summaries` must contain all summary records (`MemoryKind::Summary`) that
+/// may be substituted. A summary is eligible when at least two of its
+/// [`source_memory_ids`](crate::memory::MemoryEvidence::source_memory_ids) are
+/// present in `records`.
+pub fn compact_until_under(
+    records: Vec<MemoryRecord>,
+    summaries: &[MemoryRecord],
+    budget: &ContextBudget,
+    cap: u32,
+) -> Result<Vec<MemoryRecord>> {
+    let _summary_map: std::collections::HashMap<&str, &MemoryRecord> = summaries
+        .iter()
+        .map(|r| (r.memory_id.as_str(), r))
+        .collect();
+
+    let mut current = records;
+    let mut iterations = 0u32;
+
+    loop {
+        let cost: u32 = current
+            .iter()
+            .map(|r| estimated_tokens(r.content_bytes(), budget.margin_percent))
+            .sum();
+        if cost <= budget.max_tokens {
+            return Ok(current);
+        }
+        if iterations >= cap {
+            return Err(invalid(format!(
+                "compact_until_under exhausted its iteration cap ({cap}) — the context could \
+                 not be compacted under the budget of {} tokens (last estimate: {cost})",
+                budget.max_tokens
+            )));
+        }
+        iterations += 1;
+
+        let mut best_replacement: Option<(&MemoryRecord, Vec<usize>)> = None;
+        let mut best_savings: i64 = 0;
+
+        for summary in summaries.iter().filter(|r| r.kind == MemoryKind::Summary) {
+            let covered_indices: Vec<usize> = summary
+                .provenance
+                .evidence
+                .source_memory_ids
+                .iter()
+                .filter_map(|sid| current.iter().position(|r| r.memory_id == *sid))
+                .collect();
+            if covered_indices.len() < 2 {
+                continue;
+            }
+            let covered_cost: u32 = covered_indices
+                .iter()
+                .map(|&idx| estimated_tokens(current[idx].content_bytes(), budget.margin_percent))
+                .sum();
+            let summary_cost = estimated_tokens(summary.content_bytes(), budget.margin_percent);
+            let savings = covered_cost as i64 - summary_cost as i64;
+            if savings > best_savings {
+                best_savings = savings;
+                best_replacement = Some((summary, covered_indices));
+            }
+        }
+
+        let Some((summary, covered_indices)) = best_replacement else {
+            // No replacement found; return what we have even if over budget.
+            return Ok(current);
+        };
+
+        if best_savings <= 0 {
+            // No monotonic shrinkage possible.
+            return Ok(current);
+        }
+
+        // Avoid adding the summary if it is already in `current`.
+        let already_present = current.iter().any(|r| r.memory_id == summary.memory_id);
+
+        let mut covered_set = std::collections::HashSet::new();
+        for idx in covered_indices {
+            covered_set.insert(idx);
+        }
+
+        let mut new_current = Vec::new();
+        let mut inserted = false;
+        for (idx, record) in current.into_iter().enumerate() {
+            if covered_set.contains(&idx) {
+                if !inserted && !already_present {
+                    new_current.push(summary.clone());
+                    inserted = true;
+                }
+            } else {
+                new_current.push(record);
+            }
+        }
+        current = new_current;
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Optional vector backend behind MemoryStore (EP-06-S12 AC 4)
+// --------------------------------------------------------------------- //
+
+/// A `MemoryStore` wrapper that reserves the seam for an optional vector
+/// search backend.
+///
+/// When vector search is disabled (the default, and the only mode in R0.8),
+/// every call delegates unchanged to the inner store. The type exists so a
+/// future wave can plug in an embedding client and vector index without
+/// changing the caller surface.
+#[derive(Debug, Clone)]
+pub struct VectorMemoryStore {
+    inner: Arc<dyn MemoryStore>,
+}
+
+impl VectorMemoryStore {
+    /// Wrap `inner` in the vector seam.
+    pub fn new(inner: Arc<dyn MemoryStore>) -> Self {
+        Self { inner }
+    }
+
+    /// The underlying store.
+    pub fn inner(&self) -> &dyn MemoryStore {
+        self.inner.as_ref()
+    }
+}
+
+#[async_trait]
+impl MemoryStore for VectorMemoryStore {
+    async fn put(&self, record: &MemoryRecord) -> Result<bool> {
+        self.inner.put(record).await
+    }
+
+    async fn get(&self, memory_id: &str) -> Result<Option<MemoryRecord>> {
+        self.inner.get(memory_id).await
+    }
+
+    async fn all(&self) -> Result<Vec<MemoryRecord>> {
+        self.inner.all().await
+    }
+
+    async fn remove(&self, memory_id: &str) -> Result<bool> {
+        self.inner.remove(memory_id).await
+    }
+
+    async fn query(&self, query: &MemoryQuery, now: DateTime<Utc>) -> Result<Vec<MemoryRecord>> {
+        // Future wave: when a vector backend is configured and the query
+        // carries semantic intent, merge structural results with vector
+        // neighbours. For R0.8, delegate entirely — embeddings are the
+        // not-built list and the summary index is the only spine.
+        self.inner.query(query, now).await
+    }
 }

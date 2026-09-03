@@ -21,6 +21,7 @@ use rusty_agent_runtime::context::{
     CONTEXT_POLICY_SCHEMA_VERSION, MANIFEST_FORMAT_VERSION, MANIFEST_MESSAGE_NAME,
 };
 use rusty_agent_runtime::effects::ApprovalToken;
+use rusty_agent_runtime::error::RustyError;
 use rusty_agent_runtime::journal::{Clock, Journal, JournalSnapshot};
 use rusty_agent_runtime::learn::{
     admit_promotion, promotion_effect_id, Candidate, CandidateContent, CandidateEvaluation,
@@ -34,13 +35,14 @@ use rusty_agent_runtime::memory::{
     ScopeAddress, ValidityWindow, MEMORY_SCHEMA_VERSION,
 };
 use rusty_agent_runtime::memory_tiers::{
-    build_utility_index, consolidation_due, forgetting_candidates, rederive_section,
-    ConsolidationPolicy, ConsolidationTrigger, GateOutcome, HierarchicalKey, KeyGrammar,
-    MemoryTier, RankPolicy, RunOutcome, TieredMemoryDriver, TieredMemorySource, UtilityEntry,
-    UtilityIndex, UtilityRun, WriteGate, NEUTRAL_SUCCESS_BPS, TIER_MANIFEST_FORMAT_VERSION,
+    build_utility_index, compact_until_under, consolidation_due, forgetting_candidates,
+    rederive_section, ConsolidationPolicy, ConsolidationTrigger, GateOutcome, HierarchicalKey,
+    HierarchicalSummaryIndex, KeyGrammar, MemoryTier, RankPolicy, RunOutcome, SummaryLevel,
+    TieredMemoryDriver, TieredMemorySource, UtilityEntry, UtilityIndex, UtilityRun,
+    VectorMemoryStore, WriteGate, NEUTRAL_SUCCESS_BPS, TAG_SUMMARY_LEVEL1, TAG_SUMMARY_LEVEL2,
+    TAG_SUMMARY_LEVEL3, TIER_MANIFEST_FORMAT_VERSION,
 };
 use rusty_agent_runtime::record::{EventStatus, PayloadRef, RunEventKind};
-use rusty_agent_runtime::error::RustyError;
 
 // ---------- golden-file machinery ----------
 
@@ -131,7 +133,13 @@ fn working_record(run: &str, key: &str, clock_ms: i64, content: Value) -> Memory
     .with_key(key)
 }
 
-fn episodic_record(agent: &str, key: &str, priority: i64, clock_ms: i64, content: Value) -> MemoryRecord {
+fn episodic_record(
+    agent: &str,
+    key: &str,
+    priority: i64,
+    clock_ms: i64,
+    content: Value,
+) -> MemoryRecord {
     MemoryRecord::new(
         MemoryKind::Summary,
         ScopeAddress::new(MemoryScope::Agent, agent),
@@ -209,7 +217,15 @@ fn hierarchical_keys_parse_and_validate() {
     let key = HierarchicalKey::parse("tool.search.quirks").unwrap();
     assert_eq!(key.domain, "tool");
     assert_eq!(key.name, "search.quirks");
-    for bad in ["", "noseparator", "User.timezone", "user..timezone", "user.", ".user", "user.tz!"] {
+    for bad in [
+        "",
+        "noseparator",
+        "User.timezone",
+        "user..timezone",
+        "user.",
+        ".user",
+        "user.tz!",
+    ] {
         assert!(
             HierarchicalKey::parse(bad).is_err(),
             "key `{bad}` must fail the grammar"
@@ -229,10 +245,7 @@ fn the_gate_enforces_declared_domains() {
 
 // ---------- the write gate ----------
 
-fn gated_memory(
-    store: Arc<InMemoryMemoryStore>,
-    journal: &Journal,
-) -> JournaledMemory {
+fn gated_memory(store: Arc<InMemoryMemoryStore>, journal: &Journal) -> JournaledMemory {
     JournaledMemory::new(journal, MemorySource::Store(store))
 }
 
@@ -244,7 +257,14 @@ async fn independent_same_content_writes_converge() {
     let gate = WriteGate::new().with_grammar(KeyGrammar::declare(["user"]).unwrap());
     let now = ts(CLOCK_START_MS);
 
-    let first = semantic_record("user-7", "user.timezone", 0, 0.9, 1_000, json!({"tz": "UTC+4"}));
+    let first = semantic_record(
+        "user-7",
+        "user.timezone",
+        0,
+        0.9,
+        1_000,
+        json!({"tz": "UTC+4"}),
+    );
     let written = gate
         .write(&memory, store.as_ref(), &first, now, None)
         .await
@@ -255,7 +275,14 @@ async fn independent_same_content_writes_converge() {
     // An independent submission: same scope, key, and canonical content —
     // but a different provenance, so the content address differs and
     // store-level convergence cannot see it.
-    let second = semantic_record("user-7", "user.timezone", 0, 0.9, 2_000, json!({"tz": "UTC+4"}));
+    let second = semantic_record(
+        "user-7",
+        "user.timezone",
+        0,
+        0.9,
+        2_000,
+        json!({"tz": "UTC+4"}),
+    );
     assert_ne!(first.memory_id, second.memory_id);
     let converged = gate
         .write(&memory, store.as_ref(), &second, now, None)
@@ -293,13 +320,27 @@ async fn same_key_different_content_is_not_dedup() {
     let gate = WriteGate::new();
     let now = ts(CLOCK_START_MS);
 
-    let first = semantic_record("user-7", "user.timezone", 0, 0.9, 1_000, json!({"tz": "UTC+4"}));
+    let first = semantic_record(
+        "user-7",
+        "user.timezone",
+        0,
+        0.9,
+        1_000,
+        json!({"tz": "UTC+4"}),
+    );
     gate.write(&memory, store.as_ref(), &first, now, None)
         .await
         .unwrap();
     // Same key, a changed claim: supersession or conflict, never dedup.
-    let correction = semantic_record("user-7", "user.timezone", 0, 1.0, 2_000, json!({"tz": "UTC+5"}))
-        .with_supersedes(first.memory_id.clone());
+    let correction = semantic_record(
+        "user-7",
+        "user.timezone",
+        0,
+        1.0,
+        2_000,
+        json!({"tz": "UTC+5"}),
+    )
+    .with_supersedes(first.memory_id.clone());
     let written = gate
         .write(&memory, store.as_ref(), &correction, now, None)
         .await
@@ -308,12 +349,26 @@ async fn same_key_different_content_is_not_dedup() {
     assert_eq!(store.all().await.unwrap().len(), 2);
 
     // An expired same-content record does not block a fresh assertion.
-    let expired = semantic_record("user-7", "user.language", 0, 0.9, 500, json!({"lang": "en"}))
-        .with_expires_at(ts(600));
+    let expired = semantic_record(
+        "user-7",
+        "user.language",
+        0,
+        0.9,
+        500,
+        json!({"lang": "en"}),
+    )
+    .with_expires_at(ts(600));
     gate.write(&memory, store.as_ref(), &expired, now, None)
         .await
         .unwrap();
-    let fresh = semantic_record("user-7", "user.language", 0, 0.9, 3_000, json!({"lang": "en"}));
+    let fresh = semantic_record(
+        "user-7",
+        "user.language",
+        0,
+        0.9,
+        3_000,
+        json!({"lang": "en"}),
+    );
     let written = gate
         .write(&memory, store.as_ref(), &fresh, now, None)
         .await
@@ -334,7 +389,10 @@ async fn a_malformed_key_fails_the_gate_without_journaling() {
         .unwrap_err();
     assert!(matches!(error, RustyError::InvalidUpdate(_)), "{error}");
     assert!(store.all().await.unwrap().is_empty());
-    assert!(journal.events().is_empty(), "a refused write journals nothing");
+    assert!(
+        journal.events().is_empty(),
+        "a refused write journals nothing"
+    );
 }
 
 // ---------- consolidation scheduling ----------
@@ -367,12 +425,16 @@ fn episode_policy() -> ConsolidationPolicy {
 #[test]
 fn consolidation_fires_on_the_declared_thresholds() {
     let now = ts(10_000);
-    let universe: Vec<MemoryRecord> = (0..3).map(|n| episode("agent-1", n, 1_000 + n as i64)).collect();
+    let universe: Vec<MemoryRecord> = (0..3)
+        .map(|n| episode("agent-1", n, 1_000 + n as i64))
+        .collect();
 
     // Below the count threshold: not due.
     let mut policy = episode_policy();
     policy.max_records = Some(4);
-    assert!(consolidation_due(&policy, &universe, now, 20).unwrap().is_none());
+    assert!(consolidation_due(&policy, &universe, now, 20)
+        .unwrap()
+        .is_none());
 
     // At the threshold: due, sources oldest-first.
     let due = consolidation_due(&episode_policy(), &universe, now, 20)
@@ -391,20 +453,33 @@ fn consolidation_fires_on_the_declared_thresholds() {
     let mut policy = episode_policy();
     policy.max_records = None;
     policy.max_tokens = Some(1);
-    let due = consolidation_due(&policy, &universe, now, 20).unwrap().unwrap();
+    let due = consolidation_due(&policy, &universe, now, 20)
+        .unwrap()
+        .unwrap();
     assert_eq!(due.triggered_by, vec![ConsolidationTrigger::TokenFootprint]);
 
     // The age trigger: the oldest record is 9 s old at `now`.
     let mut policy = episode_policy();
     policy.max_records = None;
     policy.max_age_ms = Some(9_000);
-    let due = consolidation_due(&policy, &universe, now, 20).unwrap().unwrap();
+    let due = consolidation_due(&policy, &universe, now, 20)
+        .unwrap()
+        .unwrap();
     assert_eq!(due.triggered_by, vec![ConsolidationTrigger::Age]);
     policy.max_age_ms = Some(9_001);
-    assert!(consolidation_due(&policy, &universe, now, 20).unwrap().is_none());
+    assert!(consolidation_due(&policy, &universe, now, 20)
+        .unwrap()
+        .is_none());
 
     // Other scopes and domains stay out of the policy's set.
-    let off_scope = semantic_record("user-7", "user.timezone", 0, 0.9, 1_000, json!({"tz": "UTC+4"}));
+    let off_scope = semantic_record(
+        "user-7",
+        "user.timezone",
+        0,
+        0.9,
+        1_000,
+        json!({"tz": "UTC+4"}),
+    );
     let due = consolidation_due(&episode_policy(), &[off_scope], now, 20).unwrap();
     assert!(due.is_none());
 }
@@ -431,7 +506,9 @@ async fn a_due_consolidation_supersedes_sources_and_forgetting_walks_the_chain()
     // supersedes the sources in default retrieval, and plan_forget's
     // transitive invalidation takes the summary with its sources.
     let now = ts(10_000);
-    let universe: Vec<MemoryRecord> = (0..3).map(|n| episode("agent-1", n, 1_000 + n as i64)).collect();
+    let universe: Vec<MemoryRecord> = (0..3)
+        .map(|n| episode("agent-1", n, 1_000 + n as i64))
+        .collect();
     let due = consolidation_due(&episode_policy(), &universe, now, 20)
         .unwrap()
         .unwrap();
@@ -460,7 +537,9 @@ async fn a_due_consolidation_supersedes_sources_and_forgetting_walks_the_chain()
     // Consolidated records are out of the next due evaluation's set.
     let mut policy = episode_policy();
     policy.max_records = Some(1);
-    assert!(consolidation_due(&policy, &after, now, 20).unwrap().is_none());
+    assert!(consolidation_due(&policy, &after, now, 20)
+        .unwrap()
+        .is_none());
 }
 
 // ---------- the utility index ----------
@@ -501,33 +580,66 @@ async fn the_utility_index_counts_successful_and_failed_uses() {
     let mut runs: Vec<(JournalSnapshot, RunOutcome)> = Vec::new();
     for n in 0..3u8 {
         let snapshot = journaled_read_run(&store, &format!("good-{n}"), "user.good", 10_000).await;
-        runs.push((snapshot, RunOutcome { status: EventStatus::Ok, score_bps: Some(9_000) }));
+        runs.push((
+            snapshot,
+            RunOutcome {
+                status: EventStatus::Ok,
+                score_bps: Some(9_000),
+            },
+        ));
     }
     for n in 0..2u8 {
         let snapshot = journaled_read_run(&store, &format!("bad-{n}"), "user.bad", 20_000).await;
-        runs.push((snapshot, RunOutcome { status: EventStatus::Error, score_bps: None }));
+        runs.push((
+            snapshot,
+            RunOutcome {
+                status: EventStatus::Error,
+                score_bps: None,
+            },
+        ));
     }
     // A graded run below the success bar counts as a failure even when the
     // terminal status is Ok — it completed, poorly.
     let snapshot = journaled_read_run(&store, "bad-graded", "user.bad", 30_000).await;
-    runs.push((snapshot, RunOutcome { status: EventStatus::Ok, score_bps: Some(5_500) }));
+    runs.push((
+        snapshot,
+        RunOutcome {
+            status: EventStatus::Ok,
+            score_bps: Some(5_500),
+        },
+    ));
     // An interrupted run is not terminal evidence either way.
     let snapshot = journaled_read_run(&store, "mixed-interrupted", "user.mixed", 40_000).await;
-    runs.push((snapshot, RunOutcome { status: EventStatus::Interrupted, score_bps: None }));
+    runs.push((
+        snapshot,
+        RunOutcome {
+            status: EventStatus::Interrupted,
+            score_bps: None,
+        },
+    ));
 
     let utility_runs: Vec<UtilityRun> = runs
         .iter()
-        .map(|(snapshot, outcome)| UtilityRun { snapshot, outcome: *outcome })
+        .map(|(snapshot, outcome)| UtilityRun {
+            snapshot,
+            outcome: *outcome,
+        })
         .collect();
     let index = build_utility_index(&utility_runs, Some(6_000), ts(50_000)).unwrap();
 
     assert_eq!(
         index.entries[&good.memory_id],
-        UtilityEntry { successful_uses: 3, failed_uses: 0 }
+        UtilityEntry {
+            successful_uses: 3,
+            failed_uses: 0
+        }
     );
     assert_eq!(
         index.entries[&bad.memory_id],
-        UtilityEntry { successful_uses: 0, failed_uses: 3 }
+        UtilityEntry {
+            successful_uses: 0,
+            failed_uses: 3
+        }
     );
     assert!(!index.entries.contains_key(&mixed.memory_id));
     assert_eq!(index.success_bps(&good.memory_id), 4 * 10_000 / 5);
@@ -543,7 +655,10 @@ async fn the_index_rebuilds_from_journals_byte_identically() {
     let snapshot = journaled_read_run(&store, "run-1", "user.good", 10_000).await;
     let runs = [UtilityRun {
         snapshot: &snapshot,
-        outcome: RunOutcome { status: EventStatus::Ok, score_bps: Some(9_000) },
+        outcome: RunOutcome {
+            status: EventStatus::Ok,
+            score_bps: Some(9_000),
+        },
     }];
     let first = build_utility_index(&runs, Some(6_000), ts(50_000)).unwrap();
     let second = build_utility_index(&runs, Some(6_000), ts(50_000)).unwrap();
@@ -556,7 +671,10 @@ async fn the_index_rebuilds_from_journals_byte_identically() {
         serde_json::from_str(&serde_json::to_string(&snapshot).unwrap()).unwrap();
     let runs = [UtilityRun {
         snapshot: &reparsed,
-        outcome: RunOutcome { status: EventStatus::Ok, score_bps: Some(9_000) },
+        outcome: RunOutcome {
+            status: EventStatus::Ok,
+            score_bps: Some(9_000),
+        },
     }];
     let rebuilt = build_utility_index(&runs, Some(6_000), ts(50_000)).unwrap();
     assert_eq!(
@@ -573,13 +691,20 @@ fn forgetting_candidates_are_expired_and_never_useful() {
     let expired_useful = semantic_record("user-7", "user.kept", 0, 0.9, 500, json!({"v": 2}))
         .with_expires_at(ts(600));
     let live_useless = semantic_record("user-7", "user.live", 0, 0.9, 500, json!({"v": 3}));
-    let universe = vec![expired_useless.clone(), expired_useful.clone(), live_useless];
+    let universe = vec![
+        expired_useless.clone(),
+        expired_useful.clone(),
+        live_useless,
+    ];
     let index = UtilityIndex {
         stamp: now,
-        entries: [(expired_useful.memory_id.clone(), UtilityEntry {
-            successful_uses: 2,
-            failed_uses: 0,
-        })]
+        entries: [(
+            expired_useful.memory_id.clone(),
+            UtilityEntry {
+                successful_uses: 2,
+                failed_uses: 0,
+            },
+        )]
         .into_iter()
         .collect(),
     };
@@ -593,10 +718,35 @@ fn tiered_store() -> (Arc<InMemoryMemoryStore>, Vec<MemoryRecord>) {
     // Base rank order: semantic-high (priority 9), episodic (5),
     // semantic-low (1), working (0). Tier order inverts it.
     let records = vec![
-        working_record("run-1", "run.scratch", 1_000, json!({"note": "partial draft"})),
-        episodic_record("agent-1", "episode.run_8", 5, 2_000, json!({"episode": "run-8 summary"})),
-        semantic_record("user-7", "user.timezone", 9, 0.9, 3_000, json!({"tz": "UTC+4"})),
-        semantic_record("user-7", "user.language", 1, 0.8, 4_000, json!({"lang": "en-US"})),
+        working_record(
+            "run-1",
+            "run.scratch",
+            1_000,
+            json!({"note": "partial draft"}),
+        ),
+        episodic_record(
+            "agent-1",
+            "episode.run_8",
+            5,
+            2_000,
+            json!({"episode": "run-8 summary"}),
+        ),
+        semantic_record(
+            "user-7",
+            "user.timezone",
+            9,
+            0.9,
+            3_000,
+            json!({"tz": "UTC+4"}),
+        ),
+        semantic_record(
+            "user-7",
+            "user.language",
+            1,
+            0.8,
+            4_000,
+            json!({"lang": "en-US"}),
+        ),
     ];
     let store = Arc::new(InMemoryMemoryStore::new());
     (store, records)
@@ -679,13 +829,28 @@ async fn utility_rerank_changes_selection_through_the_over_fetched_pool() {
     let utility = UtilityIndex {
         stamp: ts(50_000),
         entries: [
-            (winner.memory_id.clone(), UtilityEntry { successful_uses: 5, failed_uses: 0 }),
-            (loud.memory_id.clone(), UtilityEntry { successful_uses: 0, failed_uses: 5 }),
+            (
+                winner.memory_id.clone(),
+                UtilityEntry {
+                    successful_uses: 5,
+                    failed_uses: 0,
+                },
+            ),
+            (
+                loud.memory_id.clone(),
+                UtilityEntry {
+                    successful_uses: 0,
+                    failed_uses: 5,
+                },
+            ),
         ]
         .into_iter()
         .collect(),
     };
-    let rank = RankPolicy { utility_weight: 4, over_fetch_percent: 200 };
+    let rank = RankPolicy {
+        utility_weight: 4,
+        over_fetch_percent: 200,
+    };
     let driver = TieredMemoryDriver::new(rank, utility).unwrap();
     let journal = Journal::new("run-rerank", "t-rerank", logical_clock());
     let query = MemoryQuery {
@@ -694,7 +859,13 @@ async fn utility_rerank_changes_selection_through_the_over_fetched_pool() {
         ..MemoryQuery::default()
     };
     let section = driver
-        .assemble_section(&journal, &TieredMemorySource::Store(store.clone()), &query, &budget, None)
+        .assemble_section(
+            &journal,
+            &TieredMemorySource::Store(store.clone()),
+            &query,
+            &budget,
+            None,
+        )
         .await
         .unwrap();
 
@@ -710,7 +881,10 @@ async fn utility_rerank_changes_selection_through_the_over_fetched_pool() {
         vec![loud.memory_id.clone(), winner.memory_id.clone()]
     );
     let output = tiered_read_output(&journal.snapshot());
-    assert_eq!(output["section_manifest"]["rank"]["utility_weight"], json!(4));
+    assert_eq!(
+        output["section_manifest"]["rank"]["utility_weight"],
+        json!(4)
+    );
 
     // The floor, same inputs: the shipped rank's pick.
     let journal = Journal::new("run-rerank-floor", "t-rerank-floor", logical_clock());
@@ -738,12 +912,18 @@ async fn replay_serves_the_tiered_read_byte_identically_and_rederivation_agrees(
         stamp: ts(50_000),
         entries: [(
             records[3].memory_id.clone(),
-            UtilityEntry { successful_uses: 4, failed_uses: 0 },
+            UtilityEntry {
+                successful_uses: 4,
+                failed_uses: 0,
+            },
         )]
         .into_iter()
         .collect(),
     };
-    let rank = RankPolicy { utility_weight: 2, over_fetch_percent: 150 };
+    let rank = RankPolicy {
+        utility_weight: 2,
+        over_fetch_percent: 150,
+    };
     let driver = TieredMemoryDriver::new(rank, utility.clone()).unwrap();
 
     let journal = Journal::new("run-live", "t-live", logical_clock());
@@ -811,7 +991,10 @@ async fn replay_serves_the_tiered_read_byte_identically_and_rederivation_agrees(
 
     // A replay under different pins is divergence, loudly.
     let other = TieredMemoryDriver::new(
-        RankPolicy { utility_weight: 9, over_fetch_percent: 150 },
+        RankPolicy {
+            utility_weight: 9,
+            over_fetch_percent: 150,
+        },
         utility,
     )
     .unwrap();
@@ -832,8 +1015,14 @@ async fn replay_serves_the_tiered_read_byte_identically_and_rederivation_agrees(
 #[tokio::test]
 async fn rank_policy_validation_rejects_under_fetch() {
     let error = TieredMemoryDriver::new(
-        RankPolicy { utility_weight: 0, over_fetch_percent: 50 },
-        UtilityIndex { stamp: ts(0), entries: Default::default() },
+        RankPolicy {
+            utility_weight: 0,
+            over_fetch_percent: 50,
+        },
+        UtilityIndex {
+            stamp: ts(0),
+            entries: Default::default(),
+        },
     )
     .unwrap_err();
     assert!(matches!(error, RustyError::InvalidUpdate(_)), "{error}");
@@ -851,10 +1040,16 @@ async fn a_tiered_memory_section_flows_through_the_context_pipeline() {
     for record in &records {
         store.put(record).await.unwrap();
     }
-    let rank = RankPolicy { utility_weight: 4, over_fetch_percent: 200 };
+    let rank = RankPolicy {
+        utility_weight: 4,
+        over_fetch_percent: 200,
+    };
     let driver = TieredMemoryDriver::new(
         rank,
-        UtilityIndex { stamp: ts(50_000), entries: Default::default() },
+        UtilityIndex {
+            stamp: ts(50_000),
+            entries: Default::default(),
+        },
     )
     .unwrap();
     let budget = ContextBudget::new(512);
@@ -919,13 +1114,15 @@ async fn a_tiered_memory_section_flows_through_the_context_pipeline() {
         .expect("the manifest message");
     let text = manifest_message.content.as_deref().unwrap();
     assert!(text.starts_with(MANIFEST_FORMAT_VERSION));
-    let manifest: SectionManifest =
-        serde_json::from_str(text.split_once('\n').unwrap().1).unwrap();
+    let manifest: SectionManifest = serde_json::from_str(text.split_once('\n').unwrap().1).unwrap();
     assert_eq!(manifest.sections.len(), 1);
     // The weights and snapshot stamp are pinned in the journaled read the
     // pipeline consumed.
     let output = tiered_read_output(&snapshot);
-    assert_eq!(output["section_manifest"]["rank"], serde_json::to_value(rank).unwrap());
+    assert_eq!(
+        output["section_manifest"]["rank"],
+        serde_json::to_value(rank).unwrap()
+    );
     assert_eq!(
         output["section_manifest"]["utility_stamp"],
         json!("1970-01-01T00:00:50Z")
@@ -941,7 +1138,10 @@ fn memory_config_candidate(utility_weight: u32, created_ms: i64) -> Candidate {
             budget: ContextBudget::new(4096),
             default_filters: MemoryQuery::default(),
             schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
-            rank: Some(RankPolicy { utility_weight, over_fetch_percent: 200 }),
+            rank: Some(RankPolicy {
+                utility_weight,
+                over_fetch_percent: 200,
+            }),
             maintenance: vec![episode_policy()],
         },
         ProvenanceAuthor::Distiller {
@@ -1063,7 +1263,9 @@ fn memory_config_rank_and_maintenance_promote_and_roll_back_byte_exactly() {
     // Re-resolution by id returns the exact bytes that served before B.
     let redistilled = memory_config_candidate(4, 1_750_100_002_000);
     assert_eq!(redistilled.candidate_id, restored_id);
-    let restored_bytes = store.get(restored_id.as_str()).expect("the restored id resolves");
+    let restored_bytes = store
+        .get(restored_id.as_str())
+        .expect("the restored id resolves");
     assert_eq!(*restored_bytes, serde_json::to_vec(&redistilled).unwrap());
     let restored: Candidate = serde_json::from_slice(restored_bytes).unwrap();
     restored.verify_address().unwrap();
@@ -1103,7 +1305,10 @@ async fn golden_utility_index_shape() {
     let snapshot = journaled_read_run(&store, "run-1", "user.good", 10_000).await;
     let runs = [UtilityRun {
         snapshot: &snapshot,
-        outcome: RunOutcome { status: EventStatus::Ok, score_bps: Some(9_000) },
+        outcome: RunOutcome {
+            status: EventStatus::Ok,
+            score_bps: Some(9_000),
+        },
     }];
     let index = build_utility_index(&runs, Some(6_000), ts(50_000)).unwrap();
     assert_golden("utility_index.json", &index);
@@ -1116,8 +1321,14 @@ async fn golden_tiered_memory_read_output_shape() {
         store.put(record).await.unwrap();
     }
     let driver = TieredMemoryDriver::new(
-        RankPolicy { utility_weight: 4, over_fetch_percent: 200 },
-        UtilityIndex { stamp: ts(50_000), entries: Default::default() },
+        RankPolicy {
+            utility_weight: 4,
+            over_fetch_percent: 200,
+        },
+        UtilityIndex {
+            stamp: ts(50_000),
+            entries: Default::default(),
+        },
     )
     .unwrap();
     let journal = Journal::new("run-golden", "t-golden", logical_clock());
@@ -1197,16 +1408,40 @@ async fn utility_rerank_beats_the_zero_weight_floor_on_recorded_evidence() {
     for record in &relevant {
         let key = record.key.clone().unwrap();
         for _ in 0..12 {
-            planned.push((key.clone(), RunOutcome { status: EventStatus::Ok, score_bps: Some(8_000) }));
+            planned.push((
+                key.clone(),
+                RunOutcome {
+                    status: EventStatus::Ok,
+                    score_bps: Some(8_000),
+                },
+            ));
         }
-        planned.push((key.clone(), RunOutcome { status: EventStatus::Error, score_bps: None }));
+        planned.push((
+            key.clone(),
+            RunOutcome {
+                status: EventStatus::Error,
+                score_bps: None,
+            },
+        ));
     }
     for record in &stale {
         let key = record.key.clone().unwrap();
         for _ in 0..10 {
-            planned.push((key.clone(), RunOutcome { status: EventStatus::Error, score_bps: None }));
+            planned.push((
+                key.clone(),
+                RunOutcome {
+                    status: EventStatus::Error,
+                    score_bps: None,
+                },
+            ));
         }
-        planned.push((key.clone(), RunOutcome { status: EventStatus::Ok, score_bps: Some(5_500) }));
+        planned.push((
+            key.clone(),
+            RunOutcome {
+                status: EventStatus::Ok,
+                score_bps: Some(5_500),
+            },
+        ));
     }
     for (n, (key, outcome)) in planned.into_iter().enumerate() {
         // Each synthetic run journals one read of its key.
@@ -1216,7 +1451,10 @@ async fn utility_rerank_beats_the_zero_weight_floor_on_recorded_evidence() {
     }
     let utility_runs: Vec<UtilityRun> = runs
         .iter()
-        .map(|(snapshot, outcome)| UtilityRun { snapshot, outcome: *outcome })
+        .map(|(snapshot, outcome)| UtilityRun {
+            snapshot,
+            outcome: *outcome,
+        })
         .collect();
     let stamp = ts(500_000);
     let index = build_utility_index(&utility_runs, Some(6_000), stamp).unwrap();
@@ -1231,7 +1469,10 @@ async fn utility_rerank_beats_the_zero_weight_floor_on_recorded_evidence() {
     let budget = ContextBudget::new(PACKABLE * cost);
     let floor = TieredMemoryDriver::floor(stamp);
     let weighted = TieredMemoryDriver::new(
-        RankPolicy { utility_weight: 4, over_fetch_percent: 200 },
+        RankPolicy {
+            utility_weight: 4,
+            over_fetch_percent: 200,
+        },
         index.clone(),
     )
     .unwrap();
@@ -1300,5 +1541,287 @@ async fn utility_rerank_beats_the_zero_weight_floor_on_recorded_evidence() {
         weighted_recall_bps > floor_recall_bps,
         "utility re-ranking must beat the zero-weight floor"
     );
-    assert_eq!(floor_used, weighted_used, "non-inferior cost: same budget spent");
+    assert_eq!(
+        floor_used, weighted_used,
+        "non-inferior cost: same budget spent"
+    );
+}
+
+// --------------------------------------------------------------------- //
+// Hierarchical summary index (EP-06-S12)
+// --------------------------------------------------------------------- //
+
+fn summary_record_with_level(
+    agent: &str,
+    key: &str,
+    clock_ms: i64,
+    content: Value,
+    source_ids: Vec<String>,
+    level_tag: &str,
+) -> MemoryRecord {
+    let mut record = MemoryRecord::new(
+        MemoryKind::Summary,
+        ScopeAddress::new(MemoryScope::Agent, agent),
+        provenance(clock_ms),
+        0.8,
+        ValidityWindow::starting(ts(clock_ms - 1_000)),
+        ts(clock_ms),
+        content,
+    )
+    .unwrap()
+    .with_key(key)
+    .with_tags([level_tag]);
+    record.provenance.evidence.source_memory_ids = source_ids;
+    record
+}
+
+#[test]
+fn hierarchical_index_level_structure_and_citations() {
+    // AC 1: index construction asserting level structure and downward citations.
+    let raw_a = semantic_record("u1", "domain.a", 0, 0.9, 1_000, json!("raw content a"));
+    let raw_b = semantic_record("u1", "domain.b", 0, 0.9, 2_000, json!("raw content b"));
+    let raw_c = semantic_record("u1", "domain.c", 0, 0.9, 3_000, json!("raw content c"));
+
+    let span = summary_record_with_level(
+        "u1",
+        "span.ab",
+        4_000,
+        json!("span summary of a and b"),
+        vec![raw_a.memory_id.clone(), raw_b.memory_id.clone()],
+        TAG_SUMMARY_LEVEL1,
+    );
+
+    let digest = summary_record_with_level(
+        "u1",
+        "digest.abc",
+        5_000,
+        json!("session digest of abc"),
+        vec![span.memory_id.clone(), raw_c.memory_id.clone()],
+        TAG_SUMMARY_LEVEL2,
+    );
+
+    let rollup = summary_record_with_level(
+        "u1",
+        "rollup.all",
+        6_000,
+        json!("periodic rollup"),
+        vec![digest.memory_id.clone()],
+        TAG_SUMMARY_LEVEL3,
+    );
+
+    let index = HierarchicalSummaryIndex::from_records(&[
+        raw_a.clone(),
+        raw_b.clone(),
+        raw_c.clone(),
+        span.clone(),
+        digest.clone(),
+        rollup.clone(),
+    ]);
+
+    assert_eq!(index.entries.len(), 6);
+
+    let a_entry = index.get(&raw_a.memory_id).unwrap();
+    assert_eq!(a_entry.level, SummaryLevel::Level0);
+    assert!(a_entry.source_ids.is_empty());
+
+    let span_entry = index.get(&span.memory_id).unwrap();
+    assert_eq!(span_entry.level, SummaryLevel::Level1);
+    assert_eq!(
+        span_entry.source_ids,
+        vec![raw_a.memory_id.clone(), raw_b.memory_id.clone()]
+    );
+
+    let digest_entry = index.get(&digest.memory_id).unwrap();
+    assert_eq!(digest_entry.level, SummaryLevel::Level2);
+    assert_eq!(
+        digest_entry.source_ids,
+        vec![span.memory_id.clone(), raw_c.memory_id.clone()]
+    );
+
+    let rollup_entry = index.get(&rollup.memory_id).unwrap();
+    assert_eq!(rollup_entry.level, SummaryLevel::Level3);
+    assert_eq!(rollup_entry.source_ids, vec![digest.memory_id.clone()]);
+}
+
+#[test]
+fn top_down_search_coarse_to_fine() {
+    // AC 2: top-down retrieval with planted content at each level.
+    let raw_a = semantic_record("u1", "domain.a", 0, 0.9, 1_000, json!("raw alpha content"));
+    let raw_b = semantic_record("u1", "domain.b", 0, 0.9, 2_000, json!("raw beta content"));
+
+    let span = summary_record_with_level(
+        "u1",
+        "span.ab",
+        4_000,
+        json!("span covers alpha and beta together"),
+        vec![raw_a.memory_id.clone(), raw_b.memory_id.clone()],
+        TAG_SUMMARY_LEVEL1,
+    );
+
+    let index =
+        HierarchicalSummaryIndex::from_records(&[raw_a.clone(), raw_b.clone(), span.clone()]);
+
+    // Searching for "alpha" should find both the raw record and the summary.
+    let results = index.search_top_down("alpha");
+    assert_eq!(results.len(), 2, "search should find both raw and summary");
+
+    // Highest level first.
+    assert_eq!(results[0].matched_level, SummaryLevel::Level1);
+    assert_eq!(results[0].entry.memory_id, span.memory_id);
+    assert_eq!(
+        results[0].drill_down_ids,
+        vec![raw_a.memory_id.clone(), raw_b.memory_id.clone()]
+    );
+
+    assert_eq!(results[1].matched_level, SummaryLevel::Level0);
+    assert_eq!(results[1].entry.memory_id, raw_a.memory_id);
+
+    // Searching for something absent returns empty.
+    let empty = index.search_top_down("gamma");
+    assert!(empty.is_empty());
+}
+
+#[test]
+fn compact_until_under_reaches_budget() {
+    // AC 3: compact-until-under with a known fixture.
+    let raw_a = semantic_record("u1", "domain.a", 0, 0.9, 1_000, json!("a"));
+    let raw_b = semantic_record("u1", "domain.b", 0, 0.9, 2_000, json!("b"));
+    let raw_c = semantic_record("u1", "domain.c", 0, 0.9, 3_000, json!("c"));
+
+    // A summary that covers a and b with shorter content.
+    let span = summary_record_with_level(
+        "u1",
+        "span.ab",
+        4_000,
+        json!("ab"),
+        vec![raw_a.memory_id.clone(), raw_b.memory_id.clone()],
+        TAG_SUMMARY_LEVEL1,
+    );
+
+    let records = vec![raw_a.clone(), raw_b.clone(), raw_c.clone()];
+    let summaries = vec![span.clone()];
+
+    // Budget that fits all three raw records.
+    let generous = ContextBudget::new(10_000);
+    let result = compact_until_under(records.clone(), &summaries, &generous, 20).unwrap();
+    assert_eq!(result.len(), 3, "generous budget keeps all raw records");
+
+    // Tight budget that forces compaction.
+    let tight = ContextBudget::new(2);
+    let result = compact_until_under(records.clone(), &summaries, &tight, 20).unwrap();
+    // Should replace a and b with the span, keeping c.
+    assert_eq!(result.len(), 2, "tight budget compacts a+b into span");
+    assert!(result.iter().any(|r| r.memory_id == span.memory_id));
+    assert!(result.iter().any(|r| r.memory_id == raw_c.memory_id));
+}
+
+#[test]
+fn compact_until_under_iteration_cap() {
+    // AC 3: cap exhaustion returns typed error.
+    let raw_a = semantic_record("u1", "domain.a", 0, 0.9, 1_000, json!("long content a"));
+    let raw_b = semantic_record("u1", "domain.b", 0, 0.9, 2_000, json!("long content b"));
+
+    // A summary that is itself long, so replacing doesn't help.
+    let span = summary_record_with_level(
+        "u1",
+        "span.ab",
+        4_000,
+        json!("even longer summary content that does not save tokens"),
+        vec![raw_a.memory_id.clone(), raw_b.memory_id.clone()],
+        TAG_SUMMARY_LEVEL1,
+    );
+
+    let records = vec![raw_a.clone(), raw_b.clone()];
+    let summaries = vec![span.clone()];
+
+    // Budget that cannot be met; cap of 0 means immediate failure.
+    let tight = ContextBudget::new(1);
+    let err = compact_until_under(records, &summaries, &tight, 0).unwrap_err();
+    assert!(
+        matches!(err, RustyError::InvalidUpdate(_)),
+        "cap exhaustion must return InvalidUpdate"
+    );
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("compact_until_under exhausted its iteration cap"),
+        "error message: {msg}"
+    );
+}
+
+#[test]
+fn compact_until_under_monotonic_shrinkage() {
+    // AC 3: each iteration must reduce the token estimate.
+    let raw_a = semantic_record("u1", "domain.a", 0, 0.9, 1_000, json!("alpha"));
+    let raw_b = semantic_record("u1", "domain.b", 0, 0.9, 2_000, json!("beta"));
+    let raw_c = semantic_record("u1", "domain.c", 0, 0.9, 3_000, json!("gamma"));
+    let raw_d = semantic_record("u1", "domain.d", 0, 0.9, 4_000, json!("delta"));
+
+    let span_ab = summary_record_with_level(
+        "u1",
+        "span.ab",
+        5_000,
+        json!("ab"),
+        vec![raw_a.memory_id.clone(), raw_b.memory_id.clone()],
+        TAG_SUMMARY_LEVEL1,
+    );
+
+    let span_cd = summary_record_with_level(
+        "u1",
+        "span.cd",
+        6_000,
+        json!("cd"),
+        vec![raw_c.memory_id.clone(), raw_d.memory_id.clone()],
+        TAG_SUMMARY_LEVEL1,
+    );
+
+    let records = vec![raw_a, raw_b, raw_c, raw_d];
+    let summaries = vec![span_ab.clone(), span_cd.clone()];
+
+    let budget = ContextBudget::new(3);
+    let result = compact_until_under(records, &summaries, &budget, 20).unwrap();
+
+    // Both spans should have replaced their sources.
+    assert_eq!(result.len(), 2);
+    assert!(result.iter().any(|r| r.memory_id == span_ab.memory_id));
+    assert!(result.iter().any(|r| r.memory_id == span_cd.memory_id));
+}
+
+#[tokio::test]
+async fn vector_memory_store_delegates_identically() {
+    // AC 4 minimal: VectorMemoryStore delegates to the inner store unchanged.
+    let inner = Arc::new(InMemoryMemoryStore::new());
+    let vector = VectorMemoryStore::new(inner.clone());
+
+    let record = semantic_record("u1", "domain.x", 0, 0.9, 1_000, json!("test"));
+
+    // Put through the wrapper.
+    assert!(vector.put(&record).await.unwrap());
+    // Duplicate put returns false.
+    assert!(!vector.put(&record).await.unwrap());
+
+    // Get through the wrapper.
+    let fetched = vector.get(&record.memory_id).await.unwrap();
+    assert_eq!(fetched.as_ref(), Some(&record));
+
+    // Query through the wrapper.
+    let results = vector
+        .query(
+            &MemoryQuery {
+                key: Some("domain.x".into()),
+                ..MemoryQuery::default()
+            },
+            ts(2_000),
+        )
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].memory_id, record.memory_id);
+
+    // All returns the same record.
+    let all = vector.all().await.unwrap();
+    assert_eq!(all.len(), 1);
+
+    // Remove works.
+    assert!(vector.remove(&record.memory_id).await.unwrap());
+    assert!(!vector.remove(&record.memory_id).await.unwrap());
 }
