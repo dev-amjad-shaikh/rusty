@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApprovalDecision",
+  "description": "The closed approval vocabulary (evidence and admission wave): every approval gate in the harness decides in these terms and no others.\n\nExactly one variant grants — [`ApprovalDecision::ApprovedOnce`], with allowed-once semantics: the decision admits the single occurrence it was asked about and is spent by admitting it. Every other outcome denies, so the vocabulary is fail-closed by construction: an unanswered ask (`Unavailable`), a withdrawn ask (`Cancelled`), and a refused ask (`Rejected`) are three different facts with one shared consequence.",
+  "oneOf": [
+    {
+      "description": "The ask was approved for this occurrence only. The only granting outcome.",
+      "type": "object",
+      "required": [
+        "approved_by",
+        "decision"
+      ],
+      "properties": {
+        "approved_by": {
+          "description": "Who approved — a human operator id, a policy name, a token's `approved_by`. Evidence, not authentication.",
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approved_once"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A decider considered the ask and refused it.",
+      "type": "object",
+      "required": [
+        "decided_by",
+        "decision"
+      ],
+      "properties": {
+        "decided_by": {
+          "description": "Who refused.",
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "rejected"
+          ]
+        },
+        "reason": {
+          "description": "Why, when the decider gave a reason.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The ask was withdrawn before a decider answered.",
+      "type": "object",
+      "required": [
+        "decision"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "cancelled"
+          ]
+        },
+        "reason": {
+          "description": "Why, when the withdrawal gave a reason.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "No decider was available to answer the ask — a missing token, an unreachable approver, a gate with no decision source. Denies, indistinguishable from a refusal at the gate and deliberately distinguishable from one in the evidence.",
+      "type": "object",
+      "required": [
+        "decision"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "unavailable"
+          ]
+        },
+        "reason": {
+          "description": "Why no decider answered.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  ]
+}

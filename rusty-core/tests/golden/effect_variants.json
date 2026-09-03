@@ -1,0 +1,7 @@
+[
+  "pure",
+  "read_only",
+  "idempotent",
+  "compensatable",
+  "non_idempotent"
+]

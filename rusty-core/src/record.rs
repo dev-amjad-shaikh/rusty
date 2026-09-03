@@ -84,7 +84,19 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// ladder made mechanical (declaration order), which is what capsule
 /// manifests (R0.9) compare declared effects against grant-implied minima
 /// with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Effect {
     /// No observable effect beyond its return value: a deterministic function
@@ -177,7 +189,7 @@ impl std::fmt::Display for PolicyVersion {
 /// reference the same bytes. Consumers resolve references through the
 /// journal snapshot's artifact map; nothing here points outside the
 /// snapshot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArtifactRef {
     /// Lowercase hex SHA-256 of the canonical JSON serialization of the
     /// payload.
@@ -197,7 +209,7 @@ pub struct ArtifactRef {
 /// Serialized with adjacent tagging (`{"kind": "inline", "value": …}`):
 /// payloads are arbitrary JSON, so the tag must not be flattened into the
 /// payload the way internal tagging would require.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum PayloadRef {
     /// The payload itself, embedded in the event.
@@ -306,7 +318,7 @@ pub struct AssistantChunk {
 }
 
 /// The outcome status of a journaled event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EventStatus {
     /// Completed normally.
@@ -320,7 +332,7 @@ pub enum EventStatus {
 
 /// What a [`RunEvent`] records. Closed set; replay and analysis code matches
 /// exhaustively on it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunEventKind {
     /// A super-step began; input lists the activated node set.
@@ -975,7 +987,7 @@ pub enum RunEventKind {
 ///
 /// Event ids are `{run_id}:{seq}` — deterministic for a given journal, so a
 /// re-driven run with the same seed mints the same ids.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunEvent {
     /// Deterministic event id (`{run_id}:{seq}`).
     pub id: String,
@@ -1039,7 +1051,7 @@ pub struct RunEvent {
 /// The set mirrors the R0.10 priority order. Deliberately absent: model and
 /// agent selection (a governed semantic policy, not an automatic one) and
 /// interrupt policy (the prevented-error counterfactual is unobservable).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionFamily {
     /// Whether to re-attempt a failed effect, and with what backoff.
@@ -1059,7 +1071,7 @@ pub enum DecisionFamily {
 /// policies choose among declared actions, never free-form outputs — that is
 /// what keeps the learning problem mechanical (dense signals, closed spaces)
 /// instead of semantic.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum DecisionAction {
     /// Re-attempt the failed operation; `attempt` is the 1-based retry
@@ -1094,7 +1106,7 @@ pub enum DecisionAction {
 /// How a decided action turned out, filled in when the affected operation
 /// completes. `None` on the wire until then — decisions and outcomes are
 /// recorded separately so in-flight decisions are visible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionOutcome {
     /// The selected action led to completion.
@@ -1115,7 +1127,7 @@ pub enum DecisionOutcome {
 /// what makes the marker necessary: without it, off-policy evaluation cannot
 /// tell the decision that bound the world from the one that merely scored
 /// the same features.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionRole {
     /// The decision whose selected action executed (the floor's, in a twin
@@ -1868,7 +1880,7 @@ pub struct RunConfigDeclaration {
 /// so the vocabulary is fail-closed by construction: an unanswered ask
 /// (`Unavailable`), a withdrawn ask (`Cancelled`), and a refused ask
 /// (`Rejected`) are three different facts with one shared consequence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum ApprovalDecision {
     /// The ask was approved for this occurrence only. The only granting

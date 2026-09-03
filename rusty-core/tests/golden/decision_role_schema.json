@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DecisionRole",
+  "description": "The role a [`DecisionEvent`] played in its run (R0.10 wave 2, the runtime digital twin).\n\nAdditive to the R0.8 contract: absent from the wire when `None`, so every pre-twin decision — all of which were made by the policy whose action executed — keeps its exact shape. The twin is the first emitter that records *two* decisions at one decision point (the shadow pair), which is what makes the marker necessary: without it, off-policy evaluation cannot tell the decision that bound the world from the one that merely scored the same features.",
+  "oneOf": [
+    {
+      "description": "The decision whose selected action executed (the floor's, in a twin shadow run).",
+      "type": "string",
+      "enum": [
+        "acting"
+      ]
+    },
+    {
+      "description": "A candidate policy's decision over the same features, journaled for off-policy evidence but never executed. Well-posed evidence requires the shadow's true propensity; a shadow exploring by seeded draw is a stochastic policy with known propensities by construction.",
+      "type": "string",
+      "enum": [
+        "shadow"
+      ]
+    }
+  ]
+}

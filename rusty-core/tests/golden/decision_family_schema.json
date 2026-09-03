@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DecisionFamily",
+  "description": "The family a [`DecisionEvent`] belongs to: the closed set of executor decisions a policy may learn.\n\nThe set mirrors the R0.10 priority order. Deliberately absent: model and agent selection (a governed semantic policy, not an automatic one) and interrupt policy (the prevented-error counterfactual is unobservable).",
+  "oneOf": [
+    {
+      "description": "Whether to re-attempt a failed effect, and with what backoff.",
+      "type": "string",
+      "enum": [
+        "retry"
+      ]
+    },
+    {
+      "description": "What timeout/stopping bound to apply to an operation.",
+      "type": "string",
+      "enum": [
+        "timeout"
+      ]
+    },
+    {
+      "description": "Which equivalent worker a remote execution is placed on.",
+      "type": "string",
+      "enum": [
+        "worker_placement"
+      ]
+    },
+    {
+      "description": "Concurrency/backpressure limits for parallel execution.",
+      "type": "string",
+      "enum": [
+        "concurrency"
+      ]
+    },
+    {
+      "description": "Whether a checkpoint is written at a given boundary (headroom gated on the R0.5 experiment: mandatory after non-idempotent effects).",
+      "type": "string",
+      "enum": [
+        "checkpoint_placement"
+      ]
+    }
+  ]
+}

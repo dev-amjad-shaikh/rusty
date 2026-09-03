@@ -217,7 +217,9 @@ impl<'de> Deserialize<'de> for ToolCall {
 /// `prompt_tokens_details` / `completion_tokens_details`, Gemini's thoughts):
 /// optional and absent on the wire when unset, so the pinned serde shape of
 /// the headline fields is unchanged.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct Usage {
     /// Tokens in the prompt.
     #[serde(default)]

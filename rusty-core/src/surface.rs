@@ -8,7 +8,7 @@
 //! live session appends turns that are not journaled yet. The surface
 //! reconciles the two: **the log never lies, the surface mutates.**
 //!
-//! # Derivation model
+//! #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]Derivation model
 //!
 //! The journal has no message events; the conversation lives inside channel
 //! evidence. [`Surface::derive`] reconstructs the `messages` channel
@@ -32,7 +32,7 @@
 //! would double-count. Oversized payloads resolve through the snapshot's
 //! artifact map exactly as replay resolves them.
 //!
-//! # Surface ops
+//! #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]Surface ops
 //!
 //! Two ops, applied to the derived surface — never to the journal:
 //!
@@ -46,7 +46,7 @@
 //! surface is always recoverable: [`Surface::view_at`]`(0)` replays zero
 //! revisions — the journal-derived base — and any prefix replays history.
 //!
-//! # Honesty rules
+//! #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]Honesty rules
 //!
 //! - A replacement's citations must be *exactly* the sorted union of the
 //!   subsumed entries' citations: a seq invented is fabrication, a seq
@@ -61,7 +61,7 @@
 //! Replay and fork paths are untouched: they read the raw journal and never
 //! consult a surface.
 //!
-//! # Context-window use
+//! #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]Context-window use
 //!
 //! [`Surface::messages`] projects the current (possibly compacted) surface
 //! into the `Vec<ChatMessage>` a model node consumes — journal-derived

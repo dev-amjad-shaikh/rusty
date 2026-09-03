@@ -1,0 +1,770 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RunEvent",
+  "description": "One recorded fact about a run: the Flight Recorder's atomic evidence.\n\nEvents form a causal chain via `parent` (the event that caused this one — e.g. a node input's parent is its super-step start), and a total order via `seq`, a monotonic sequence number assigned by the journal at record time. `seq` — not wall time — is the ordering guarantee: recorded runs re-driven against a seeded clock reproduce the same sequence.\n\nEvent ids are `{run_id}:{seq}` — deterministic for a given journal, so a re-driven run with the same seed mints the same ids.",
+  "type": "object",
+  "required": [
+    "effect",
+    "id",
+    "kind",
+    "recorded_at",
+    "run_id",
+    "seq",
+    "status",
+    "thread_id"
+  ],
+  "properties": {
+    "cost_usd": {
+      "description": "Monetary cost in USD for the recorded operation, when known. `f64` micro-costs are fine here: this is evidence, not accounting — the ledger aggregates elsewhere.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double"
+    },
+    "effect": {
+      "description": "The declared effect classification of whatever produced this event.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Effect"
+        }
+      ]
+    },
+    "id": {
+      "description": "Deterministic event id (`{run_id}:{seq}`).",
+      "type": "string"
+    },
+    "input": {
+      "description": "Input payload (arguments, request, snapshot), inline or referenced.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PayloadRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kind": {
+      "description": "What happened.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/RunEventKind"
+        }
+      ]
+    },
+    "latency_ms": {
+      "description": "Wall/logical latency of the recorded operation in milliseconds, when measured. Sourced from the run's clock, so a logical clock yields reproducible values.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "node_id": {
+      "description": "The node this event is about, where applicable (`None` for run-wide events such as super-step boundaries and checkpoint writes).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "output": {
+      "description": "Output payload (result, response, updates), inline or referenced.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PayloadRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parent": {
+      "description": "The id of the event that caused this one, when there is one. A node input's parent is its super-step start; a tool call's parent is the node that invoked it; a checkpoint write's parent is the routing decision that ended the step.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recorded_at": {
+      "description": "When the event was recorded, read from the run's clock (system wall clock by default; the configured logical clock for seeded runs).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "run_id": {
+      "description": "The run this event belongs to. One `Executor::run` call = one run id.",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Monotonic sequence number within the journal, assigned at record time. The total order of the run's evidence.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "status": {
+      "description": "How the event ended.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/EventStatus"
+        }
+      ]
+    },
+    "thread_id": {
+      "description": "The thread (session) the run belongs to.",
+      "type": "string"
+    },
+    "tokens": {
+      "description": "Token usage for model calls, when the provider reported it.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Usage"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "ArtifactRef": {
+      "description": "A content-addressed reference to a payload too large to travel inline in an event (see [`INLINE_PAYLOAD_MAX_BYTES`]).\n\nThe hash is the identity: two events referencing the same `sha256` reference the same bytes. Consumers resolve references through the journal snapshot's artifact map; nothing here points outside the snapshot.",
+      "type": "object",
+      "required": [
+        "bytes",
+        "sha256"
+      ],
+      "properties": {
+        "bytes": {
+          "description": "Serialized size of the payload in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "sha256": {
+          "description": "Lowercase hex SHA-256 of the canonical JSON serialization of the payload.",
+          "type": "string"
+        }
+      }
+    },
+    "Effect": {
+      "description": "The effect taxonomy: what a journaled event did to the world outside the run's own state.\n\nThe classification is declared by the producer (node/model/tool traits carry a default with an override point) and recorded on every [`RunEvent`]. It is the input to three later policies:\n\n- **Retry** (R0.6): which failed effects may be re-attempted at all, and under what key. - **Replay** (R0.5 later waves): which effects exact replay may serve from the journal versus must re-execute. - **Capsules** (R0.9): which effects a sandboxed capsule may perform at all under its capability grants.\n\nThe order of variants is a severity ladder: each class permits strictly less automation freedom than the one before. The `Ord` derive is that ladder made mechanical (declaration order), which is what capsule manifests (R0.9) compare declared effects against grant-implied minima with.",
+      "oneOf": [
+        {
+          "description": "No observable effect beyond its return value: a deterministic function of its inputs. Re-execution is always safe and always equivalent, so replay may either re-run it or reuse the journaled output, and retries are unconstrained. Default for plain compute nodes.",
+          "type": "string",
+          "enum": [
+            "pure"
+          ]
+        },
+        {
+          "description": "Reads external state but writes nothing (a GET, a file read, a lookup). Re-execution is safe but **not** necessarily equivalent — the world may have changed — so exact replay serves the journaled output while live replay re-reads. Retries are unconstrained.",
+          "type": "string",
+          "enum": [
+            "read_only"
+          ]
+        },
+        {
+          "description": "Writes external state, but repeating the same call with the same idempotency key has the same effect as calling once (PUT semantics, upserts). Safe to retry under a stable key; exact replay may serve the journaled receipt instead of re-sending.",
+          "type": "string",
+          "enum": [
+            "idempotent"
+          ]
+        },
+        {
+          "description": "Writes external state and repeating it duplicates the effect, but a declared compensating action can logically undo it (charge/refund). Retry only with care; replay and rollback policy must pair the effect with its compensation. v1 records the classification only — compensation registration arrives with durable work (R0.6).",
+          "type": "string",
+          "enum": [
+            "compensatable"
+          ]
+        },
+        {
+          "description": "Writes external state with no safe automatic repetition (send an email, charge a card, POST without a key). Never silently retried, never served from a journal in any replay mode that claims fidelity — re-execution is an explicit, caller-approved decision. Default for model and tool calls, which the runtime cannot prove otherwise.",
+          "type": "string",
+          "enum": [
+            "non_idempotent"
+          ]
+        }
+      ]
+    },
+    "EventStatus": {
+      "description": "The outcome status of a journaled event.",
+      "oneOf": [
+        {
+          "description": "Completed normally.",
+          "type": "string",
+          "enum": [
+            "ok"
+          ]
+        },
+        {
+          "description": "Failed. The error description travels in the event's output payload.",
+          "type": "string",
+          "enum": [
+            "error"
+          ]
+        },
+        {
+          "description": "Suspended the run (a node called `interrupt()`). Control flow, not a failure — the payload is the interrupt value.",
+          "type": "string",
+          "enum": [
+            "interrupted"
+          ]
+        }
+      ]
+    },
+    "PayloadRef": {
+      "description": "How an event's input or output payload is carried.\n\nSmall values are embedded ([`PayloadRef::Inline`]); large values are content-addressed ([`PayloadRef::Artifact`]) with their bytes held in the journal's artifact map. The split keeps events cheap to scan (sequences, causal links, statuses) without forcing payloads out of the snapshot.\n\nSerialized with adjacent tagging (`{\"kind\": \"inline\", \"value\": …}`): payloads are arbitrary JSON, so the tag must not be flattened into the payload the way internal tagging would require.",
+      "oneOf": [
+        {
+          "description": "The payload itself, embedded in the event.",
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "inline"
+              ]
+            },
+            "value": true
+          }
+        },
+        {
+          "description": "A content hash of the payload; bytes live in the journal snapshot's artifact map under the same hash.",
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "artifact"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ArtifactRef"
+            }
+          }
+        }
+      ]
+    },
+    "RunEventKind": {
+      "description": "What a [`RunEvent`] records. Closed set; replay and analysis code matches exhaustively on it.",
+      "oneOf": [
+        {
+          "description": "A super-step began; input lists the activated node set.",
+          "type": "string",
+          "enum": [
+            "super_step_start"
+          ]
+        },
+        {
+          "description": "A super-step merged at the barrier; output carries the post-reducer channel values (the reducer result for the step).",
+          "type": "string",
+          "enum": [
+            "super_step_end"
+          ]
+        },
+        {
+          "description": "A node invocation was scheduled; input is its (scoped) state snapshot.",
+          "type": "string",
+          "enum": [
+            "node_input"
+          ]
+        },
+        {
+          "description": "A node invocation finished; output is its partial updates plus any routing command, with the measured latency.",
+          "type": "string",
+          "enum": [
+            "node_output"
+          ]
+        },
+        {
+          "description": "A chat-model call; input is the request (messages + tool schemas), output the response, with model identity, token usage, and cost where reported.",
+          "type": "string",
+          "enum": [
+            "model_call"
+          ]
+        },
+        {
+          "description": "A tool invocation; input is the arguments, output the result.",
+          "type": "string",
+          "enum": [
+            "tool_call"
+          ]
+        },
+        {
+          "description": "A remote-node call to a worker over the wire protocol; input is the `NodeTask`, output the `NodeTaskResponse` payload.",
+          "type": "string",
+          "enum": [
+            "remote_call"
+          ]
+        },
+        {
+          "description": "A WASM guest-module invocation; input is the guest input, output the guest output.",
+          "type": "string",
+          "enum": [
+            "wasm_call"
+          ]
+        },
+        {
+          "description": "A node suspended the run; input is the interrupt payload.",
+          "type": "string",
+          "enum": [
+            "interrupt"
+          ]
+        },
+        {
+          "description": "The run resumed from a checkpoint; input carries the checkpoint id and, when present, the resume value.",
+          "type": "string",
+          "enum": [
+            "resume"
+          ]
+        },
+        {
+          "description": "The routing phase selected the next active set; output describes the planned invocations (including `Send` fan-outs).",
+          "type": "string",
+          "enum": [
+            "routing_decision"
+          ]
+        },
+        {
+          "description": "A checkpoint was persisted; output carries the checkpoint id, step, and journal head reference stamped into it.",
+          "type": "string",
+          "enum": [
+            "checkpoint_written"
+          ]
+        },
+        {
+          "description": "An `Idempotent` effect's own confirmation, journaled by the effect's recipient (R0.6 Durable Work): output carries the [`EffectReceipt`] — the provider's confirmation id plus the idempotency key the effect ran under. Exact replay serves the receipt instead of re-sending the effect: the same journaled-output rule model and tool calls follow, extended across the crash boundary between a run and its durable tasks.",
+          "type": "string",
+          "enum": [
+            "effect_receipt"
+          ]
+        },
+        {
+          "description": "An agent was spawned (R0.7 Agent Fabric): input carries the agent id, its pinned [`crate::agents::CapabilityManifest`], and the declared [`crate::agents::StateScope`]s — the manifest's scopes are journaled with the spawn so later access checks replay against the same declaration. Wave 1 lands the variant as an inert contract; the agent host emits it.",
+          "type": "string",
+          "enum": [
+            "agent_spawn"
+          ]
+        },
+        {
+          "description": "An agent terminated (R0.7): output carries the terminal disposition (completed, failed, cancelled) and the final checkpoint reference. Wired in wave 2 for the cancellation tree: the server journals it into the agent's supervision journal when an agent/team cancel actually touches work. Host-emitted terminal exits land with the agent host.",
+          "type": "string",
+          "enum": [
+            "agent_exit"
+          ]
+        },
+        {
+          "description": "A mailbox message was submitted to an agent's mailbox (R0.7): output carries the recipient (`agent:{agent_id}`), the message kind, and the task id the queue assigned. The sender-side half of the mailbox journal pair; the envelope's `parent` links it into the team's causal tree. Wired in wave 3: the coordination runtime journals it into the pattern's journal for every member task it submits. Host-emitted sends land with the agent host.",
+          "type": "string",
+          "enum": [
+            "mailbox_send"
+          ]
+        },
+        {
+          "description": "An agent's activation began a turn on a mailbox message (R0.7): input carries the task id and idempotency key the turn is processing. The recipient-side half of the mailbox pair. Wired in wave 3 as the settlement observation: the coordination runtime journals it when a member task settles, with the terminal status and result — the pattern's evidence half of the pair. Host-emitted turn begins land with the agent host.",
+          "type": "string",
+          "enum": [
+            "mailbox_receive"
+          ]
+        },
+        {
+          "description": "A supervision decision was made (R0.7 wave 2): output carries the policy (`permanent` / `transient` / `temporary`), the triggering failure's [`EventStatus`] / error class, and the restart ordinal — the journaled decision record that makes \"no restart without a journaled decision\" auditable. Wired in wave 2: the server journals it into the agent's supervision journal on restart / escalate / manual-restart decisions.",
+          "type": "string",
+          "enum": [
+            "supervision_event"
+          ]
+        },
+        {
+          "description": "A coordination pattern (delegate / fan-out / race / quorum) began (R0.7 wave 3): output carries the pattern's typed contract — members, thresholds, effect declarations. The team's causal root for every event the pattern spawns. Wired in wave 3: the coordination runtime journals it on the pattern's first drive, before any member task exists.",
+          "type": "string",
+          "enum": [
+            "coordination_start"
+          ]
+        },
+        {
+          "description": "A coordination pattern settled (R0.7 wave 3): output carries the result reference and the per-member dispositions (completed, failed, cancelled) — the fan-in evidence record. Wired in wave 3: the coordination runtime journals it exactly once, as the pattern's terminal fact.",
+          "type": "string",
+          "enum": [
+            "coordination_end"
+          ]
+        },
+        {
+          "description": "A governed memory retrieval was performed (R0.8 Rusty Learn, wave 1): input is the canonical request — the resolved [`crate::memory::MemoryQuery`] (with `as_of` stamped through the run's clock) plus the [`crate::memory::ContextBudget`] — and output is the journaled [`crate::memory::MemoryAssembly`]: the record ids and their order, the packed records, and the token accounting. Declared [`Effect::ReadOnly`]: exact replay serves the journaled assembly instead of re-querying the store — the same journaled-output rule model and tool calls follow, applied to the memory seam so candidate evaluation is reproducible.",
+          "type": "string",
+          "enum": [
+            "memory_read"
+          ]
+        },
+        {
+          "description": "A governed memory write landed (R0.8 wave 1): an [`Effect::Idempotent`] effect under the derived key `memory:{scope}:{memory_id}` (see [`crate::memory::memory_effect_key`]), so retried submissions converge. Input carries the effect key and the memory id; output carries the stored [`crate::memory::MemoryRecord`] with its provenance — the write's attribution is journaled, not implied.",
+          "type": "string",
+          "enum": [
+            "memory_write"
+          ]
+        },
+        {
+          "description": "A memory record was forgotten (R0.8 wave 2): real deletion of derived state, with the journaled tombstone as the erasure receipt. An [`Effect::Idempotent`] effect under the derived key `memory_forget:{scope}:{memory_id}` (see [`crate::memory::memory_forget_effect_key`]), so retried erasures converge. Input carries the effect key and the memory id; output carries the [`crate::memory::MemoryForgetTombstone`] — the id, scope, reason, and dependent invalidations, metadata by construction: the tombstone has no content field, so the forgotten bytes cannot leak through the receipt of their erasure. Corrections are not a separate variant: they journal through `MemoryWrite` with the correction's attribution in the derived record's provenance.",
+          "type": "string",
+          "enum": [
+            "memory_forget"
+          ]
+        },
+        {
+          "description": "A learning candidate was created (R0.8 wave 3): a distiller's proposed change landed as an immutable, content-addressed [`crate::learn::Candidate`] — identity is integrity, so two distillations of the same change converge on one id and a tampered candidate fails its own address. An [`Effect::Idempotent`] effect under the derived key `candidate:{candidate_id}` (see [`crate::learn::candidate_effect_key`]), so retried submissions converge. Input carries the effect key and the candidate id; output carries the candidate itself — the distiller's identity and the evidence span it read are journaled with it, not implied.",
+          "type": "string",
+          "enum": [
+            "candidate_created"
+          ]
+        },
+        {
+          "description": "A candidate was evaluated against recorded evidence (R0.8 wave 3): replay re-drove recorded runs with the candidate applied, the experiment runner graded it over the versioned dataset, and the comparison diffed it against the baseline. An [`Effect::Idempotent`] effect under the derived key `evaluation:{candidate_id}:{dataset_version}` (see [`crate::learn::evaluation_effect_key`]): re-evaluation against the same dataset version converges; a new dataset version is a new evaluation. Output carries the journaled [`crate::learn::CandidateEvaluation`] — the replay divergence summary, the report pair, the dataset version, and the verdict. The evaluation is evidence, not a log line.",
+          "type": "string",
+          "enum": [
+            "candidate_evaluated"
+          ]
+        },
+        {
+          "description": "A candidate was promoted (R0.8 wave 3): the active-version pointer for its production surface moved. An [`Effect::Idempotent`] effect under the derived key `promotion:{candidate_id}` (see [`crate::learn::promotion_effect_key`]) — retried promotions converge, and recovery re-derives the same key. Output carries the [`crate::learn::PromotionReceipt`]: the pointer's previous value and the promotion's authority — the envelope version (the standing approval) or the approval token's `approved_by` for an out-of-envelope promotion.",
+          "type": "string",
+          "enum": [
+            "candidate_promoted"
+          ]
+        },
+        {
+          "description": "A promoted candidate was rolled back (R0.8 wave 3): the surface's active-version pointer re-pointed to the previous candidate. Byte-exact because candidates are content-addressed and immutable — the restored version is the one that previously served, not a reconstruction. An [`Effect::Idempotent`] effect under the derived key `rollback:{surface}:{candidate_id}` (see [`crate::learn::rollback_effect_key`]). Output carries the [`crate::learn::RollbackReceipt`]: from, to, and the causing evidence. New runs bind the re-pointed version at admission; in-flight runs keep the version their checkpoint header pins.",
+          "type": "string",
+          "enum": [
+            "candidate_rolled_back"
+          ]
+        },
+        {
+          "description": "An executor policy decision was made and recorded (R0.8 wave 4): the policy plane emitted a [`DecisionEvent`] at a decision point — v1 wires the retry classifier (`crate::durable::classify_retry`). An [`Effect::Pure`] record: the decision was already applied by the scheduler that emitted it; this event is the *evidence* of why, not a command to apply it again. Output carries the journaled [`DecisionEvent`] — features, the closed legal-action set, the selected action, the propensity, and the policy version that decided.",
+          "type": "string",
+          "enum": [
+            "policy_decision"
+          ]
+        },
+        {
+          "description": "A run manifest's capsule version pin was resolved to a content address (R0.9 Rusty Capsules, wave 1): the server's capsule registry mapped `(identity, version)` → [`crate::capsule::CapsuleId`] at admission and journaled the resolution, so the full chain — header pin → journaled resolution → receipt — reaches the manifest digest. An [`Effect::ReadOnly`] record (a registry lookup): output carries the journaled [`crate::capsule::CapsuleResolution`] — the pin name, the version string, the resolved capsule id, and the build digest the registry holds for it. A pin that resolves to a manifest failing its own content address fails admission instead — tampering is an admission error, never a journaled resolution.",
+          "type": "string",
+          "enum": [
+            "capsule_resolved"
+          ]
+        },
+        {
+          "description": "A granted capsule capability was exercised (R0.9 wave 1): the guest called a linked import and the host performed (or attempted) the operation. The capsule rule's \"every use is journaled\" half: output carries the journaled [`crate::capsule::CapsuleUse`] — the capsule id, the capability kind, the operation, and the request/response summaries. The effect class is the operation's own (a `GET` fetch records [`Effect::ReadOnly`]; a writing method records [`Effect::NonIdempotent`]), and a failed operation is journaled with [`EventStatus::Error`] — a granted call that fails is still a use.",
+          "type": "string",
+          "enum": [
+            "capsule_call"
+          ]
+        },
+        {
+          "description": "A capsule capability attempt was refused (R0.9 wave 1): either the guest probed an import its manifest's grants never linked (the structural denial — the import does not exist), or it called a granted import outside the grant's scope (a `network` grant naming host A, a fetch attempted against host B). An [`Effect::Pure`] record: nothing executed, so there is no external effect to classify — the event is the evidence that nothing happened. Output carries the journaled [`crate::capsule::CapsuleDenial`] — the capsule id, the requested capability, and **the manifest grant that was absent** (the grant that would have permitted the attempt), so the denial is attributable to a declaration, not to a stack trace.",
+          "type": "string",
+          "enum": [
+            "capsule_denied"
+          ]
+        },
+        {
+          "description": "The deployment's receipt signing key changed (R0.9 wave 3): a rotation was performed (or a host with no local secret joined a shared store) and the server journaled the new key id into the deployment's receipts journal — the run id `receipt-keys`, not any tenant's run. An [`Effect::Pure`] record: the key operation is local key material, so there is no external effect to classify — the event is the lineage evidence. Output carries the journaled [`crate::receipt::SigningKeyRotation`] — the previous key id (`None` on genesis), the new key id, its public half, and the rotation instant — so \"which key signed what, from when\" is a chained fact, and old receipts keep verifying against the key history the journal attests.",
+          "type": "string",
+          "enum": [
+            "signing_key_rotated"
+          ]
+        },
+        {
+          "description": "A registry artifact was resolved into a run at admission (R0.11 Extension Plane, wave 2): the run declared named configuration artifacts at submission, and each one resolved through its environment-tagged version pointer to the candidate the run then pinned. An [`Effect::ReadOnly`] record (a registry lookup), the [`RunEventKind::CapsuleResolved`] precedent applied to configuration. Output carries the journaled [`crate::registry::ConfigResolution`] — the artifact, the environment tag, the candidate id, the pointer slot that admitted it (active or canary), and the digest the manifest pins. This is the digest ↔ version join the manifest alone cannot express: the manifest's wire shape stays frozen (digests only), and \"which candidate produced this pin\" reads from here — the event sits in the signature-covered journal, so the audit walk signed receipt → manifest pin → resolution event → candidate → author is covered end to end.",
+          "type": "string",
+          "enum": [
+            "config_resolved"
+          ]
+        },
+        {
+          "description": "A broker connection was registered (R0.11 Extension Plane, wave 3): a named, tenant-scoped binding of a provider account to its consent scope set landed in the broker. Journaled into the deployment's broker evidence chain (the `receipt-keys` precedent applied to a second control plane). An [`Effect::Pure`] record: registration is local broker state, so the event is the lineage evidence. Output carries the [`crate::broker::ConnectionRecord`] — metadata by construction; the credential bytes live only in the sealed store envelope and can never appear here.",
+          "type": "string",
+          "enum": [
+            "connection_registered"
+          ]
+        },
+        {
+          "description": "A connection's consent act was recorded (R0.11 wave 3): the human's grant at the provider, written down as the connection's new scope ceiling. An [`Effect::Pure`] record. Output carries the journaled [`crate::broker::ConnectionConsent`] — the connection, the subject, and the recorded scope set. Scope widening is only ever this event: a new consent act, journaled; there is no silent widening path.",
+          "type": "string",
+          "enum": [
+            "connection_consented"
+          ]
+        },
+        {
+          "description": "A connection's token material rotated beneath an unchanged consent set (R0.11 wave 3): a recorded credential rotation. An [`Effect::Pure`] record. Output carries the journaled [`crate::broker::ConnectionRefresh`] — the connection and the new expiry, never the bytes. Rotation changes nothing a run pinned: the pin names the connection id and the consent set, not the secret of the moment.",
+          "type": "string",
+          "enum": [
+            "connection_refreshed"
+          ]
+        },
+        {
+          "description": "A connection was revoked (R0.11 wave 3). The status flip and this event commit together, and resolution reads live connection state, so revocation takes effect at the next tool call — not the next deploy. An [`Effect::Pure`] record. Output carries the journaled [`crate::broker::ConnectionRevocation`]: the connection and the grant that stopped holding.",
+          "type": "string",
+          "enum": [
+            "connection_revoked"
+          ]
+        },
+        {
+          "description": "A credential handle was issued (R0.11 wave 3): a tool (or capsule) declaring a credential need received a short-lived, opaque handle — scope-narrowed against the consent ceiling at issuance. An [`Effect::Pure`] record. Output carries the journaled [`crate::broker::HandleIssuance`] — the full claims, so the run's evidence pins the connection id and the consent scope set it resolved.",
+          "type": "string",
+          "enum": [
+            "credential_handle_issued"
+          ]
+        },
+        {
+          "description": "A credential handle was resolved at use (R0.11 wave 3): the broker checked live connection state, expiry, and scope coverage, and handed the credential to the host-side connector. An [`Effect::ReadOnly`] record (the resolution itself performs no external effect — the authenticated call it enables is the connector's own evidence). Output carries the journaled [`crate::broker::CredentialUse`] — handle, connection, scopes checked — never bytes (the `CapsuleCall` precedent).",
+          "type": "string",
+          "enum": [
+            "credential_use"
+          ]
+        },
+        {
+          "description": "A handle issuance or resolution was refused (R0.11 wave 3): revoked connection, expired handle, scope beyond the bound set, `needs_reauth`, unknown handle or connection, or a broker that could not perform the check. An [`Effect::Pure`] record: nothing executed, so there is no external effect to classify — the event is the evidence that nothing happened (the `CapsuleDenied` precedent). Output carries the journaled [`crate::broker::BrokerDenial`], attributable to the connection and the grant — never the bytes.",
+          "type": "string",
+          "enum": [
+            "credential_denied"
+          ]
+        },
+        {
+          "description": "A connection's refresh path failed terminally and its status flipped to `needs_reauth` (R0.11 wave 4): the provider's `invalid_grant` (or an expired refresh token) means a human must record a new consent act before the connection serves again. The flip and this event commit together, and calls fail closed with a typed re-auth signal from the next use — never silent retries with stale material, because a stale credential retried looks exactly like an attack retried. An [`Effect::Pure`] record. Output carries the journaled [`crate::broker::ConnectionReauthRequired`] — the connection, the classified failure that decided the flip, and the consent set that stopped being servable.",
+          "type": "string",
+          "enum": [
+            "connection_needs_reauth"
+          ]
+        },
+        {
+          "description": "A run artifact was committed (R0.12 Operations Plane, wave 1): an output the run produced — a generated file, image, audio, an exported dataset — became a content-addressed, retainable object in the artifact plane, committed from an SDK-declared output or from a journaled [`PayloadRef::Artifact`] the producing node opted into. An [`Effect::Pure`] record: the event *is* the commitment, so the signed receipt's head covers it transitively — the audit walk is signed receipt → journal head → this event → the producing [`crate::effects::EffectId`] → the effect's journaled record → the bytes behind the address. Output carries the journaled [`crate::artifact::ArtifactCommitment`] — the content address, the name and version index when named, the media kind, the byte count, the producing effect id, and the declared retention. The bytes never enter the journal; the journal carries the reference and the commitment, and the plane carries the rest.",
+          "type": "string",
+          "enum": [
+            "artifact_committed"
+          ]
+        },
+        {
+          "description": "The retention sweeper pruned an artifact's bytes (R0.12 Operations Plane, wave 2): every record naming the address was expired or released, and no verified signed receipt still covered it. Journaled onto the deployment's artifact evidence chain (the run id `run-artifacts`, not any tenant's run — the `receipt-keys` / `credential-broker` precedent) *before* the bytes are deleted, so a crash mid-sweep leaves the intention auditable and the bytes recoverable. An [`Effect::Pure`] record: the event is the evidence of the enforcement act. Output carries the journaled [`crate::artifact::ArtifactPrune`] — the address, the name when named, the cause, and the sweep instant.",
+          "type": "string",
+          "enum": [
+            "artifact_pruned"
+          ]
+        },
+        {
+          "description": "An operator released an artifact's retention pin (R0.12 wave 2): the explicit, attributed act that is the *only* path pruning an address a live signed receipt covers or a `pinned` policy holds. Shortening evidence retention is a governance decision with a name on it, never a sweeper optimization, so the act journals onto the deployment's artifact evidence chain before any byte moves. An [`Effect::Pure`] record. Output carries the journaled [`crate::artifact::ArtifactRelease`] — the address, the tenant and name, the operator identity, the optional reason, and the release instant.",
+          "type": "string",
+          "enum": [
+            "artifact_retention_released"
+          ]
+        },
+        {
+          "description": "A read found a live artifact record whose bytes are gone (R0.12 wave 2): the typed miss (`410 artifact_unavailable`) a retention audit reads as the difference between \"no such artifact\" and \"the record exists, the bytes do not\" — and the shape an exact replay against pruned bytes fails closed with. Journaled onto the deployment's artifact evidence chain (best-effort; the read's typed answer is the contract, the event is the evidence) so the miss is attributable without rewriting the producing run's receipt-covered journal. An [`Effect::Pure`] record. Output carries the journaled [`crate::artifact::ArtifactUnavailability`] — the address, the tenant and name, the surface that missed, and the observation instant.",
+          "type": "string",
+          "enum": [
+            "artifact_unavailable"
+          ]
+        },
+        {
+          "description": "A run was admitted under a deployment revision (R0.12 Operations Plane, wave 3): the run declared an environment at submission, and the environment's deployment pointer bound a revision for it (the full-traffic `active`, or the `canary` when the seeded draw admitted). An [`Effect::ReadOnly`] record (a pointer lookup), the [`RunEventKind::ConfigResolved`] precedent lifted from configuration to deployments. Output carries the journaled [`crate::deploy::DeploymentResolved`] — the environment, the bound `revision_id`, the pointer slot, and the pin-set digest. This is the audit walk's hinge: signed receipt → journal head → this event → the content-addressed revision → the frozen pin set → the candidates and their authors, every hop signature-covered. A pointer serving nothing binds nothing — the run fails admission instead (there is no implicit \"latest\"), so the journaled event only ever names a revision that served.",
+          "type": "string",
+          "enum": [
+            "deployment_resolved"
+          ]
+        },
+        {
+          "description": "A deployment revision was registered (R0.12 wave 3): an immutable, content-addressed declaration of what may serve landed in the control plane. Journaled onto the deployment evidence chain (the run id `deployment-control` — the `receipt-keys` / `credential-broker` precedent for a third control plane), never a run's journal: a deployment transition is not any run's event. An [`Effect::Pure`] record: registration is local control-plane state, so the event is the lineage evidence. Output carries the journaled [`crate::deploy::RevisionRegistration`] — the tenant and the revision, whose own fields carry the author and the frozen pin set.",
+          "type": "string",
+          "enum": [
+            "revision_registered"
+          ]
+        },
+        {
+          "description": "A revision was promoted into an environment (R0.12 wave 3): the environment's deployment pointer moved `active` and cleared any canary — a full promotion supersedes the experiment it graduated from. The journaled transition and the pointer move commit in one transaction (the learn store's rule: a crash cannot leave a promoted revision whose pointer never moved). An [`Effect::Pure`] record on the deployment evidence chain. Output carries the journaled [`crate::deploy::RevisionPromotion`] — the environment, the promoted revision, the displaced `previous` (the rollback path's whole story), the author, and the instant.",
+          "type": "string",
+          "enum": [
+            "revision_promoted"
+          ]
+        },
+        {
+          "description": "A serving revision was rolled back (R0.12 wave 3): the environment's pointer re-pointed `active` to the previously serving revision — byte-exact, because the restored revision is the immutable record that served before, re-derived from the chain's own transition history, never a reconstruction. An [`Effect::Pure`] record on the deployment evidence chain. Output carries the journaled [`crate::deploy::RevisionRollback`] — the environment, from, to, the cause, and the author. New runs bind the re-pointed revision at admission; in-flight runs keep the revision their journaled resolution names.",
+          "type": "string",
+          "enum": [
+            "revision_rolled_back"
+          ]
+        },
+        {
+          "description": "An environment was declared (R0.12 wave 3): an R0.11 promotion tag became a first-class record — the name, the gate and approval declarations that will govern promotions into it (wired in wave 4), and the creation metadata. An [`Effect::Pure`] record on the deployment evidence chain, so an audit reads the declaration in force when a promotion happened, not a later edit. Output carries the journaled [`crate::deploy::EnvironmentDeclaration`].",
+          "type": "string",
+          "enum": [
+            "environment_declared"
+          ]
+        },
+        {
+          "description": "An environment-scoped secret was set or rotated (R0.12 wave 3): custody, not brokerage — a static value envelope-encrypted at rest under the deployment master key, stored as ciphertext on both backends, rotated by replacement beneath the stable scoped name. An [`Effect::Pure`] record on the deployment evidence chain, metadata by construction: output carries the journaled [`crate::deploy::EnvSecretAct`] — the record, never the bytes; `rotated_at` marks a rotation beneath the stable name.",
+          "type": "string",
+          "enum": [
+            "env_secret_set"
+          ]
+        },
+        {
+          "description": "An environment-scoped secret was revoked by deletion (R0.12 wave 3): the only revocation path — there is no disable flag to forget, and the tombstone is the evidence the scope once held a value. An [`Effect::Pure`] record on the deployment evidence chain. Output carries the journaled [`crate::deploy::EnvSecretRevocation`] — the scoped name, the revoker, and the instant.",
+          "type": "string",
+          "enum": [
+            "env_secret_revoked"
+          ]
+        },
+        {
+          "description": "An environment-secret resolution was refused on scope (R0.12 wave 3): the request asked for a scope outside the environment the requester holds — the `CapsuleDenied` discipline (attributable to a declaration, not a stack trace) applied to environment scope. An [`Effect::Pure`] record: nothing resolved, so there is no external effect to classify — the event is the evidence that nothing happened. Output carries the journaled [`crate::deploy::EnvSecretDenial`], naming the scope requested and the scope the holder holds.",
+          "type": "string",
+          "enum": [
+            "env_secret_denied"
+          ]
+        },
+        {
+          "description": "A release gate evaluated a promotion into a gated environment (R0.12 wave 4): the decision journals **before** the pointer move it governs, allowed or refused — a gate whose refusals leave no evidence is a gate an audit cannot distinguish from never having run. An [`Effect::Pure`] record on the deployment evidence chain. Output carries the journaled [`crate::deploy::GateDecisionRecord`]: policy, dataset version, every check observed, and the verdict.",
+          "type": "string",
+          "enum": [
+            "gate_decision_recorded"
+          ]
+        },
+        {
+          "description": "A canary was declared on an environment's pointer (R0.12 wave 4): one revision bound to a declared fraction of new runs while the active revision serves the rest. An [`Effect::Pure`] record on the deployment evidence chain. Output carries the journaled [`crate::deploy::CanaryDeclaration`] — the binding and its author, so the seeded draw an audit replays has a declared origin.",
+          "type": "string",
+          "enum": [
+            "canary_declared"
+          ]
+        },
+        {
+          "description": "A canary was cleared from an environment's pointer (R0.12 wave 4): the experiment ended without graduating (graduation is a promotion, which clears the slot itself). An [`Effect::Pure`] record on the deployment evidence chain. Output carries the journaled [`crate::deploy::CanaryClearance`], naming the revision the slot held — the clearance is evidence about a specific binding, not a bare \"slot emptied\".",
+          "type": "string",
+          "enum": [
+            "canary_cleared"
+          ]
+        },
+        {
+          "description": "A shadow run started against a recorded source run (R0.12 wave 4): the twin of the source under a candidate revision, executed against the shadow admission boundary. An [`Effect::Pure`] record in the shadow run's own journal. Output carries the journaled [`crate::deploy::ShadowRunStarted`] — naming the source run and pinning `role: shadow`, so the twin-pair discipline is data the journal carries, not a comment.",
+          "type": "string",
+          "enum": [
+            "shadow_run_started"
+          ]
+        },
+        {
+          "description": "A shadow run's admission boundary refused an effect above read-only (R0.12 wave 4): the refusal is the shadow's reason to exist — proof the candidate cannot touch the world — so it journals served-or-not with the request it refused. An [`Effect::Pure`] record in the shadow run's journal: nothing executed, so there is no external effect to classify. Output carries the journaled [`crate::effects::ShadowRefusal`].",
+          "type": "string",
+          "enum": [
+            "shadow_effect_refused"
+          ]
+        },
+        {
+          "description": "A shadow run completed and its verdict journaled (R0.12 wave 4): refusals, how many were served from the recorded world, and which recorded calls the candidate never requested — the divergence evidence. An [`Effect::Pure`] record in the shadow run's journal. Output carries the journaled [`crate::deploy::ShadowVerdict`].",
+          "type": "string",
+          "enum": [
+            "shadow_verdict"
+          ]
+        },
+        {
+          "description": "The run declared its configuration envelope at start (evidence and admission wave): the graph version and topology hash, the active policy version, the tool allowlist, and the pinned [`RunManifest`] — the config half of the model-call envelope, so a journaled run's requests are a pure function of the log. Journaled once as the run's first event, and only when the run declares something beyond the static floor — absent means undeclared, never a default (the [`RunManifest`] discipline applied to the whole envelope), so journals recorded before this variant keep replaying byte-identically. An [`Effect::Pure`] record: the declaration changes nothing, it *is* the fact. Output carries the journaled [`RunConfigDeclaration`]. Exact replay re-derives the declaration from the recorded event and asserts field-level agreement, naming the diverging field when they differ.",
+          "type": "string",
+          "enum": [
+            "run_config_declared"
+          ]
+        },
+        {
+          "description": "A run-registered tool guard denied a dispatch (evidence and admission wave): the guard layer evaluated the finalized call — after allowlist admission, before the effect boundary, so a denial never burns a one-shot approval — and at least one guard returned a [`crate::tool::GuardDenial`]. Guards are deny-only ([`crate::tool::ToolGuard::check`] returns `Option<GuardDenial>`; there is no allow result), every guard is evaluated, and any denial blocks the dispatch — no ordering of guards can turn a denial into permission. An [`Effect::Pure`] record: nothing executed, so there is no external effect to classify — the event is the evidence that nothing happened (the [`RunEventKind::CapsuleDenied`] precedent). Input carries the canonical [`crate::replay::tool_call_request`] shape; output carries the journaled [`crate::tool::GuardDenialRecord`] — every denying guard named, so the denial is attributable to a declaration, not a stack trace. Exact replay re-derives the denial by re-running the same registered guards; the event is never served.",
+          "type": "string",
+          "enum": [
+            "tool_call_denied"
+          ]
+        },
+        {
+          "description": "An approval gate asked for a decision (evidence and admission wave): the asked half of the closed approval pair, journaled **before** the decision resolves — a gate whose asks leave no evidence is a gate an audit cannot distinguish from never having run (the [`RunEventKind::GateDecisionRecorded`] principle). An [`Effect::Pure`] record. Input carries the journaled [`ApprovalRequest`] — the asking surface and, when occurrence-scoped, the effect id. The event's causal parent anchors the pair inside the open turn (the node-input event id, the same discipline [`crate::react`] parents model and tool effects with).",
+          "type": "string",
+          "enum": [
+            "approval_asked"
+          ]
+        },
+        {
+          "description": "An approval gate's decision landed (evidence and admission wave): the decided half of the pair, parented to its `ApprovalAsked` event. An [`Effect::Pure`] record. Output carries the journaled [`ApprovalOutcome`] — the closed [`ApprovalDecision`] vocabulary, in which only `approved_once` grants and every other outcome denies. Exact replay re-journals the pair from the record when it is nested inside a served effect (the gated call never re-executes), and refuses journals whose gate evidence is not so nested — see [`crate::replay`].",
+          "type": "string",
+          "enum": [
+            "approval_decided"
+          ]
+        },
+        {
+          "description": "A message was settled into the run's durable inbox (R0.13 parity wave): a send the executor observed at a settlement point — a super-step boundary, the turn-end check, the cancellation check — entered its queue. An [`Effect::Pure`] record: the intake is run-control evidence, not an external effect. Output carries the journaled [`crate::inbox::InboxMessage`] — the inbox's monotonic intake sequence, the queue kind, the sender provenance, and the content. Journaled at settlement rather than at send time so the journal — not wall-clock arrival — fixes each message's position in the run's evidence, which is what makes exact replay of inbox-driven runs possible ([`crate::inbox::Inbox::replaying`]).",
+          "type": "string",
+          "enum": [
+            "inbox_intake"
+          ]
+        },
+        {
+          "description": "A batch of messages left the run's durable inbox into the execution (R0.13 parity wave): steering drained at a super-step boundary, staged injections riding a wake, or follow-ups consumed at the turn-end check to extend the run into another turn. An [`Effect::Pure`] record. Output carries the journaled [`crate::inbox::InboxConsumption`] — the [`crate::inbox::ConsumptionPoint`], the super-step, and the exact batch in intake order.",
+          "type": "string",
+          "enum": [
+            "inbox_consumed"
+          ]
+        },
+        {
+          "description": "The run was cancelled through its durable inbox with a typed cause (R0.13 parity wave): [`crate::inbox::Inbox::cancel`] latched the request and the executor observed it at a super-step boundary — the same transactional granularity as the cooperative-cancellation token, extended with the *who*. An [`Effect::Pure`] record: cancellation is control flow, never a failure. Output carries the journaled [`crate::inbox::RunCancellation`] — the closed [`crate::inbox::CancelCause`], the `keep_inbox` disposition, and what a dropping cancellation discarded.",
+          "type": "string",
+          "enum": [
+            "run_cancelled"
+          ]
+        }
+      ]
+    },
+    "Usage": {
+      "description": "Token usage accounting from the provider.\n\n`cached_tokens` and `reasoning_tokens` are the detail providers report beyond the three headline counts (Anthropic's cache reads, OpenAI's `prompt_tokens_details` / `completion_tokens_details`, Gemini's thoughts): optional and absent on the wire when unset, so the pinned serde shape of the headline fields is unchanged.",
+      "type": "object",
+      "properties": {
+        "cached_tokens": {
+          "description": "Prompt tokens served from the provider's cache. A *subset* of `prompt_tokens`, usually billed at a lower rate.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "completion_tokens": {
+          "description": "Tokens in the completion.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "prompt_tokens": {
+          "description": "Tokens in the prompt.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "reasoning_tokens": {
+          "description": "Completion tokens spent on reasoning rather than visible output. A *subset* of `completion_tokens`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "total_tokens": {
+          "description": "Total tokens billed.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}
