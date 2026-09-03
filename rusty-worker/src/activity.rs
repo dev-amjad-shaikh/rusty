@@ -441,6 +441,11 @@ fn classify_error(error: &RustyError) -> (ErrorClass, bool) {
         RustyError::Node(_) => (ErrorClass::Unknown, false),
         RustyError::Graph(_) => (ErrorClass::InvalidInput, false),
         RustyError::InvalidUpdate(_) => (ErrorClass::InvalidInput, false),
+        // Catalog-surface errors (package, doctor, registry) are contract
+        // violations, like `Graph`: retrying the claim changes nothing.
+        RustyError::Plugin(_) | RustyError::Doctor(_) | RustyError::Catalog(_) => {
+            (ErrorClass::InvalidInput, false)
+        }
         RustyError::Checkpoint(_) => (ErrorClass::Unknown, false),
         RustyError::Replay(_) => (ErrorClass::Unknown, false),
         RustyError::Serialization(_) => (ErrorClass::Unknown, false),
