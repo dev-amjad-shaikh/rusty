@@ -157,6 +157,14 @@ pub enum RustyError {
     /// and when to re-drive the run from its last checkpoint.
     #[error("run cancelled: {0}")]
     Cancelled(String),
+
+    /// The model-visible-means-logged invariant rejected a provider
+    /// request (EP-01-S05): the request's content is not reconstructable
+    /// from the journal, so no bytes reached the provider. Carries the
+    /// typed violation with the first divergent message index and a diff
+    /// summary.
+    #[error("invariant violation: {0}")]
+    InvariantViolation(#[from] crate::invariant::InvariantViolation),
 }
 
 impl RustyError {

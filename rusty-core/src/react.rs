@@ -62,6 +62,7 @@ use tokio::sync::mpsc;
 use crate::error::{Result, RustyError};
 use crate::executor::GraphEvent;
 use crate::graph::{Graph, GraphBuilder, Route};
+use crate::invariant::CheckingChatModel;
 use crate::journal::{Journal, PARENT_EVENT_KEY};
 use crate::llm::{ChatMessage, ChatModel};
 use crate::node::NodeOutput;
@@ -338,6 +339,31 @@ fn build_react_agent(
                         journal.clone(),
                         invocation_parent(&ctx, AGENT_NODE)?,
                     )),
+                };
+                // The model-visible-means-logged invariant (EP-01-S05):
+                // whenever the run journals, the dispatch model is wrapped
+                // in the checker, anchored on this invocation's journaled
+                // node-input event. A request the log cannot reconstruct
+                // fails before any bytes reach the provider. Replay mode is
+                // exempt: nothing live reaches a provider — the replaying
+                // wrapper serves journaled responses and already enforces
+                // request-hash equality with the recorded evidence. A
+                // journal-less run has no log to reconstruct against and is
+                // outside the durable substrate by construction.
+                let check_journal = match &evidence {
+                    EvidenceMode::None => ctx.effect_journal().cloned(),
+                    EvidenceMode::Record(journal) => Some(journal.clone()),
+                    EvidenceMode::Replay { .. } => None,
+                };
+                let model: Arc<dyn ChatModel> = match check_journal {
+                    Some(journal) => Arc::new(CheckingChatModel::new(
+                        model,
+                        crate::invariant::InvariantChecker::new(journal),
+                        ctx.config().thread_id.clone(),
+                        AGENT_NODE,
+                        invocation_parent(&ctx, AGENT_NODE)?,
+                    )),
+                    None => model,
                 };
                 tracing::debug!(
                     node = AGENT_NODE,

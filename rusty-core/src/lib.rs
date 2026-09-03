@@ -36,6 +36,10 @@
 //!   node runs, model calls, and tool calls — observe, mutate, reject, or
 //!   short-circuit with tower-style onion semantics. Layers attach to the
 //!   executor via [`executor::Executor::layer`].
+//! - **Invariant checker** ([`invariant`]): the model-visible-means-logged
+//!   invariant enforced on the [`llm::ChatModel`] dispatch seam — a request
+//!   whose history the journal cannot reconstruct is rejected before any
+//!   bytes reach the provider.
 //! - **Remote nodes** ([`remote`]): a [`remote::RemoteNode`] executes node
 //!   work on a remote worker over HTTP behind the same [`node::Node`] trait;
 //!   HITL interrupts cross the wire.
@@ -265,6 +269,7 @@ pub mod hooks;
 pub mod inbox;
 pub mod induction;
 pub mod install;
+pub mod invariant;
 pub mod journal;
 pub mod knowledge;
 pub mod learn;
@@ -391,6 +396,10 @@ pub mod prelude {
         CancelCause, ConsumptionPoint, DEFAULT_SENDER, DroppedMessages, INBOX_DELIVERY_KEY, Inbox,
         InboxBounds, InboxConsumption, InboxKind, InboxMessage, InboxSnapshot, InboxTarget,
         RunCancellation,
+    };
+    pub use crate::invariant::{
+        AssertionRequest, CheckingChatModel, InvariantChecker, InvariantViolation,
+        RequestAssertion, derive_expected_messages,
     };
     pub use crate::journal::{
         Clock, EventDraft, Journal, JournalSnapshot, PARENT_EVENT_KEY, RngSource,
