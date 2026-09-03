@@ -453,6 +453,7 @@ fn classify_error(error: &RustyError) -> (ErrorClass, bool) {
         // A handler whose own inner run was drained propagates the
         // cancellation class: control flow, never retried.
         RustyError::Cancelled(_) => (ErrorClass::Cancelled, false),
+        RustyError::Plugin(_) => (ErrorClass::Unknown, false),
     }
 }
 

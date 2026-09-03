@@ -47,6 +47,9 @@
 //!   idempotency key, so a redelivered attempt is a no-op at the effect and
 //!   the ledger is inspectable evidence of exactly how many times the
 //!   effect fired.
+//! - `RUSTY_DEMO_SKIP_FSYNC` — when set to `1`, the file-backed provider
+//!   skips `fsync` after writing the ledger. Used by the seeded-defect
+//!   test to prove the harness catches durability violations.
 //! - `RUSTY_DEMO_AGENT_ID` — when set, the worker runs as an **agent host**
 //!   (R0.7 Agent Fabric, wave 1) instead of a pool worker: it claims the
 //!   named agent's single activation lease (retrying while a dead
@@ -127,6 +130,9 @@ struct FileProvider {
     /// (see the module docs): the window in which a crash leaves "effect
     /// fired, completion never reported".
     pause: Duration,
+    /// When `true`, skip `fsync` after writing the ledger — a seeded
+    /// defect that the harness must catch (durability violation).
+    skip_fsync: bool,
 }
 
 impl FileProvider {
@@ -156,8 +162,10 @@ impl FileProvider {
         line.push('\n');
         file.write_all(line.as_bytes())
             .expect("the provider ledger must accept the effect record");
-        file.sync_all()
-            .expect("the effect must be durable at the provider before we report it");
+        if !self.skip_fsync {
+            file.sync_all()
+                .expect("the effect must be durable at the provider before we report it");
+        }
     }
 
     /// The effect logic, factored off [`ActivityContext`] so the agent-host
@@ -477,6 +485,7 @@ async fn main() {
         let provider = provider_file.map(|ledger| FileProvider {
             ledger,
             pause: Duration::from_millis(pause_ms),
+            skip_fsync: std::env::var("RUSTY_DEMO_SKIP_FSYNC").ok().as_deref() == Some("1"),
         });
         println!("rusty agent-host demo (against {server_url}, agent `{agent_id}`)");
         println!("  activate + drain the mailbox one turn at a time;");
@@ -505,6 +514,7 @@ async fn main() {
             FileProvider {
                 ledger,
                 pause: Duration::from_millis(pause_ms),
+                skip_fsync: std::env::var("RUSTY_DEMO_SKIP_FSYNC").ok().as_deref() == Some("1"),
             },
         ),
         None => worker.register("send_receipt", move |ctx: ActivityContext| async move {

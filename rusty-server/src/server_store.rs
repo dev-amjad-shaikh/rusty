@@ -3673,6 +3673,14 @@ impl JsonFileStore {
         tasks::persist(&self.root, record)
             .await
             .map_err(io_err("persist task"))?;
+        // Test hook: pause after persistence but before ack, giving the
+        // fault-injection harness a deterministic kill window (AC 1).
+        if let Some(ms) = std::env::var("RUSTY_DEMO_ENQUEUE_PAUSE_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        }
         map.insert(record.task_id.clone(), record.clone());
         Ok((record.clone(), false))
     }
@@ -10463,10 +10471,7 @@ impl ConnectorPlane {
         Ok(self.manifests.lock().await.get(&scoped).cloned())
     }
 
-    pub(crate) async fn list_manifests(
-        &self,
-        tenant: &str,
-    ) -> StoreResult<Vec<ConnectorManifest>> {
+    pub(crate) async fn list_manifests(&self, tenant: &str) -> StoreResult<Vec<ConnectorManifest>> {
         let map = self.manifests.lock().await;
         let mut manifests: Vec<ConnectorManifest> = map
             .iter()
@@ -10500,10 +10505,7 @@ impl ConnectorPlane {
         Ok(self.instances.lock().await.get(&scoped).cloned())
     }
 
-    pub(crate) async fn list_instances(
-        &self,
-        tenant: &str,
-    ) -> StoreResult<Vec<ConnectorInstance>> {
+    pub(crate) async fn list_instances(&self, tenant: &str) -> StoreResult<Vec<ConnectorInstance>> {
         let map = self.instances.lock().await;
         let mut instances: Vec<ConnectorInstance> = map
             .iter()
