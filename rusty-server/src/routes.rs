@@ -374,6 +374,7 @@ pub(crate) fn build_router(
 
     let authed = Router::new()
         .route("/ok", get(ok))
+        .route("/health", get(crate::health::health_check))
         .route("/info", get(info))
         .route("/threads", post(create_thread))
         .route("/threads/{thread_id}/fork", post(fork_thread))

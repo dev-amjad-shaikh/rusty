@@ -189,6 +189,7 @@ mod error;
 mod evaluations;
 mod gaps;
 mod gate;
+mod health;
 mod journals;
 mod knowledge;
 mod learn;
