@@ -287,6 +287,7 @@ pub mod registry_index;
 pub mod remote;
 pub mod render_intent;
 pub mod replay;
+pub mod reviewer;
 pub mod self_improve;
 pub mod session_query;
 pub mod skill;
@@ -465,6 +466,9 @@ pub mod prelude {
         MAX_INTENT_EXCERPT_CHARS, MAX_INTENT_LABEL_CHARS, MAX_INTENT_SEARCH_HITS,
         MAX_INTENT_SUMMARY_CHARS, MAX_INTENT_TABLE_COLUMNS, MAX_INTENT_TABLE_ROWS, RenderIntent,
         SearchHitView, TRUNCATION_MARKER, render_intent, render_intent_from_event,
+    };
+    pub use crate::reviewer::{
+        ExecReviewer, ReviewerDecision, ReviewerResponse, REVIEWER_MAX_TOKENS, REVIEWER_TIMEOUT_SECS,
     };
     pub use crate::replay::{
         BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FIXTURE_FORMAT_VERSION,

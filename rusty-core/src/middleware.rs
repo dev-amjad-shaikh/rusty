@@ -57,6 +57,7 @@ use serde_json::Value;
 use crate::error::{Result, RustyError};
 use crate::llm::{ChatMessage, ChatModel, ChatResponse, TokenChunk, ToolCall};
 use crate::node::NodeOutput;
+use crate::record::Effect;
 use crate::state::State;
 
 /// The interception point a [`Rejection`] originated at.
@@ -291,6 +292,7 @@ pub struct ToolInvocation {
     thread_id: String,
     node: String,
     call: ToolCall,
+    effect: Option<Effect>,
 }
 
 impl ToolInvocation {
@@ -300,6 +302,7 @@ impl ToolInvocation {
             thread_id: thread_id.into(),
             node: node.into(),
             call,
+            effect: None,
         }
     }
 
@@ -341,6 +344,16 @@ impl ToolInvocation {
     /// Convenience: replace the arguments.
     pub fn set_arguments(&mut self, arguments: Value) {
         self.call.arguments = arguments;
+    }
+
+    /// The effect class the tool declared, when known.
+    pub fn effect(&self) -> Option<Effect> {
+        self.effect
+    }
+
+    /// Set the effect class (populated by the executor before middleware).
+    pub fn set_effect(&mut self, effect: Option<Effect>) {
+        self.effect = effect;
     }
 }
 

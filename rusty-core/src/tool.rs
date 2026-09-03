@@ -577,6 +577,7 @@ impl ToolExecutor {
             } else {
                 let mut invocation =
                     ToolInvocation::new(thread_id.clone(), node.clone(), call.clone());
+                invocation.set_effect(registry.get(&call.name).map(|t| t.effect()));
                 chain
                     .run_tool(&mut invocation, |invocation| {
                         // The lookup happens after before-hooks, so a layer
