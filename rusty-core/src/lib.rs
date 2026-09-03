@@ -295,6 +295,7 @@ pub mod skill_distill;
 pub mod skill_pack;
 pub mod skills;
 pub mod state;
+pub mod subagent;
 pub mod surface;
 pub mod team_trace;
 pub mod telemetry;
@@ -495,6 +496,11 @@ pub mod prelude {
         SearchHit, SessionSearch, SessionSearchTool, SessionTraceTool,
     };
     pub use crate::state::{Reducer, State, StateSpec};
+    pub use crate::subagent::{
+        confined_toolset, DelegateDepthGuard, SubagentBlocklistGuard,
+        SubagentCapability, SubagentDispatchError, SubagentProviderDescriptor,
+        SubagentRegistry, SubagentScope, TrafficKind,
+    };
     pub use crate::surface::{
         Provenance, Surface, SurfaceEntry, SurfaceEntryKind, SurfaceOp, SurfaceRevision,
     };
