@@ -1,9 +1,9 @@
 {
-  "candidate_id": "499dc922b25c5f1345a1f7f7c25ece6953095493699bbec197d044688ffc1f42",
+  "candidate_id": "4976f03c40778b5dd63b756409591c9b678f81c4d8432d3667d101e406741beb",
   "content": {
     "kind": "skill",
     "name": "refund-with-reason",
-    "content_hash": "61cd90dcff4e9cd36348fb4d1cd575c818136b013e12c0dda611df8edeba4c27"
+    "content_hash": "1e70d1f13e62de7bdf1c3450a0eea5b62b2321cb86c477b7f32cd602e533bcf9"
   },
   "distilled_by": {
     "type": "distiller",

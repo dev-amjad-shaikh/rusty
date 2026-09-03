@@ -50,18 +50,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::{Path as AxumPath, State as AxumState};
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use rusty_agent_runtime::skill::{
-    Registration, SkillError, SkillMetadata, SkillPackage, SkillRegistry, SkillSource,
-    SkillVersion, SkillVersionSelector,
+    Registration, SkillError, SkillMetadata, SkillPackage, SkillPromotion, SkillPromotionStatus,
+    SkillRegistry, SkillSource, SkillVersion, SkillVersionSelector,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
-use crate::auth::{scope_id, TenantContext, DEFAULT_TENANT};
+use crate::auth::{DEFAULT_TENANT, TenantContext, scope_id};
 use crate::error::ApiError;
 use crate::routes::AppState;
 
@@ -222,7 +222,179 @@ fn collect_json_files(root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The server's skill plane: one [`SkillRegistry`] per tenant over the
+/// The result of evaluating a skill's promotion gate.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GateEvaluationResult {
+    /// The gate passed: the suite run succeeded.
+    Pass { run_id: String },
+    /// The gate failed: the suite run produced failing cases.
+    Fail {
+        run_id: String,
+        diagnostics: Vec<GateDiagnostic>,
+    },
+}
+
+/// One failing case diagnostic for a gate refusal.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct GateDiagnostic {
+    pub case_id: String,
+    pub reason: String,
+}
+
+/// A gate evaluator that always fails closed when no evaluator is
+/// configured in the application state.
+#[derive(Debug)]
+pub(crate) struct UnconfiguredGateEvaluator;
+
+#[async_trait::async_trait]
+impl SkillGateEvaluator for UnconfiguredGateEvaluator {
+    async fn evaluate(
+        &self,
+        _skill_name: &str,
+        _revision: u64,
+        _content_hash: &str,
+        gate_name: &str,
+    ) -> Result<GateEvaluationResult, String> {
+        Err(format!(
+            "no skill gate evaluator is configured; cannot evaluate gate `{gate_name}`"
+        ))
+    }
+}
+
+#[cfg(test)]
+/// A test-double gate evaluator that returns a pre-configured result.
+#[derive(Debug)]
+pub(crate) struct ScriptedSkillGateEvaluator {
+    pub result: Result<GateEvaluationResult, String>,
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl SkillGateEvaluator for ScriptedSkillGateEvaluator {
+    async fn evaluate(
+        &self,
+        _skill_name: &str,
+        _revision: u64,
+        _content_hash: &str,
+        _gate_name: &str,
+    ) -> Result<GateEvaluationResult, String> {
+        self.result.clone()
+    }
+}
+/// Implementations run the eval suite named in `eval_gate` against the
+/// candidate skill and return a pass/fail result.
+#[async_trait::async_trait]
+pub(crate) trait SkillGateEvaluator: Send + Sync + std::fmt::Debug {
+    /// Evaluate the gate for `skill_name` revision `revision` with
+    /// `content_hash` using the suite named `gate_name`.
+    async fn evaluate(
+        &self,
+        skill_name: &str,
+        revision: u64,
+        content_hash: &str,
+        gate_name: &str,
+    ) -> Result<GateEvaluationResult, String>;
+}
+
+/// Errors that can occur during promotion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PromotionError {
+    /// The skill was not found.
+    NotFound,
+    /// The skill has no `eval_gate` declared.
+    NoGateDeclared,
+    /// The gate evaluation itself failed (infrastructure error, not a test failure).
+    GateFailed(String),
+    /// The gate blocked: tests failed.
+    GateBlocked {
+        run_id: String,
+        diagnostics: Vec<GateDiagnostic>,
+    },
+    /// An I/O error occurred persisting the promotion record.
+    Io(String),
+}
+
+impl std::fmt::Display for PromotionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PromotionError::NotFound => write!(f, "skill not found"),
+            PromotionError::NoGateDeclared => write!(f, "skill has no eval_gate declared"),
+            PromotionError::GateFailed(msg) => write!(f, "gate evaluation failed: {msg}"),
+            PromotionError::GateBlocked { run_id, .. } => {
+                write!(f, "gate blocked by run {run_id}")
+            }
+            PromotionError::Io(msg) => write!(f, "io error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for PromotionError {}
+
+/// One promotion history record per (tenant, skill_name) stored as JSON.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PromotionHistory {
+    promotions: Vec<SkillPromotion>,
+}
+
+/// Directory for promotion records under the store root.
+fn promotions_dir(root: &Path) -> PathBuf {
+    root.join("skill-promotions")
+}
+
+/// Path for one skill's promotion history.
+fn promotion_history_path(root: &Path, tenant: &str, name: &str) -> PathBuf {
+    promotions_dir(root)
+        .join(scope_id(tenant, name))
+        .with_extension("json")
+}
+
+/// Persist one promotion atomically (temp file + rename).
+async fn persist_promotion(
+    root: &Path,
+    tenant: &str,
+    name: &str,
+    promotion: &SkillPromotion,
+) -> Result<(), PromotionError> {
+    let path = promotion_history_path(root, tenant, name);
+    let io = |msg: String| PromotionError::Io(format!("{path}: {msg}", path = path.display()));
+
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| io(format!("create dir: {e}")))?;
+    }
+
+    let mut history = match tokio::fs::read_to_string(&path).await {
+        Ok(text) => serde_json::from_str::<PromotionHistory>(&text)
+            .map_err(|e| io(format!("parse: {e}")))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            PromotionHistory { promotions: vec![] }
+        }
+        Err(e) => return Err(io(format!("read: {e}"))),
+    };
+
+    history.promotions.push(promotion.clone());
+    let bytes = serde_json::to_vec_pretty(&history).map_err(|e| io(format!("serialize: {e}")))?;
+    let tmp = path.with_extension("tmp");
+    tokio::fs::write(&tmp, bytes)
+        .await
+        .map_err(|e| io(format!("write: {e}")))?;
+    tokio::fs::rename(&tmp, &path)
+        .await
+        .map_err(|e| io(format!("rename: {e}")))
+}
+
+/// Load promotion history for one skill.
+fn load_promotion_history(root: &Path, tenant: &str, name: &str) -> Vec<SkillPromotion> {
+    let path = promotion_history_path(root, tenant, name);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str::<PromotionHistory>(&text)
+            .map(|h| h.promotions)
+            .unwrap_or_default(),
+        Err(_) => vec![],
+    }
+}
 /// durable file set under `{store_path}/skills/`.
 ///
 /// The registry is the in-memory authority for reads; the file set is the
@@ -235,6 +407,9 @@ fn collect_json_files(root: &Path, out: &mut Vec<PathBuf>) {
 pub(crate) struct SkillPlane {
     root: PathBuf,
     tenants: Mutex<HashMap<String, SkillRegistry>>,
+    /// Promotion history per (tenant, skill_name). Loaded at boot from
+    /// `{store_path}/skill-promotions/`.
+    promotions: Mutex<HashMap<(String, String), Vec<SkillPromotion>>>,
 }
 
 impl SkillPlane {
@@ -278,13 +453,160 @@ impl SkillPlane {
                 }
             }
         }
+
+        // Load promotion histories.
+        let mut promotions: HashMap<(String, String), Vec<SkillPromotion>> = HashMap::new();
+        let promo_dir = promotions_dir(root);
+        if promo_dir.exists() {
+            let entries = match std::fs::read_dir(&promo_dir) {
+                Ok(entries) => entries,
+                Err(_) => {
+                    tracing::warn!("cannot read promotion directory");
+                    return Self {
+                        root: root.to_path_buf(),
+                        tenants: Mutex::new(tenants),
+                        promotions: Mutex::new(promotions),
+                    };
+                }
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                // stem is either "{name}" (default tenant) or "{tenant}/{name}" (named tenant)
+                let (tenant, name) = if let Some(idx) = stem.find('/') {
+                    (stem[..idx].to_owned(), stem[idx + 1..].to_owned())
+                } else {
+                    (DEFAULT_TENANT.to_owned(), stem.to_owned())
+                };
+                let history = load_promotion_history(root, &tenant, &name);
+                if !history.is_empty() {
+                    promotions.insert((tenant, name), history);
+                }
+            }
+        }
+
         Self {
             root: root.to_path_buf(),
             tenants: Mutex::new(tenants),
+            promotions: Mutex::new(promotions),
         }
     }
+}
 
+impl SkillPlane {
     /// Register a validated package under `tenant`: version it through the
+    /// tenant's registry, then persist a fresh version's file. The scan
+    /// runs inside the registry and denials fail closed as
+    /// [`SkillError::ScanDenied`]; registration is idempotent on content.
+    /// Promote a skill revision through its eval gate.
+    ///
+    /// AC 1: A skill with `eval_gate` requires a passing suite run.
+    /// AC 5: If content hash unchanged, reuse newest passing run;
+    ///        if changed, demand new evaluation.
+    pub(crate) async fn promote(
+        &self,
+        tenant: &str,
+        name: &str,
+        revision: u64,
+        author: String,
+        evaluator: &dyn SkillGateEvaluator,
+    ) -> Result<SkillPromotion, PromotionError> {
+        let tenants = self.tenants.lock().await;
+        let version = tenants
+            .get(tenant)
+            .and_then(|registry| {
+                registry.get_version(name, SkillVersionSelector::Revision(revision))
+            })
+            .ok_or(PromotionError::NotFound)?;
+
+        let eval_gate = version.metadata().eval_gate.clone();
+        let gate_name = eval_gate.ok_or(PromotionError::NoGateDeclared)?;
+        let content_hash = version.content_hash().to_owned();
+        drop(tenants); // release lock before async evaluation
+
+        // AC 5: Check for existing passing run on same content hash.
+        let promotions = self.promotions.lock().await;
+        let existing = promotions
+            .get(&(tenant.to_owned(), name.to_owned()))
+            .and_then(|history| {
+                history
+                    .iter()
+                    .rfind(|p| {
+                        p.content_hash == content_hash && p.status == SkillPromotionStatus::Promoted
+                    })
+                    .cloned()
+            });
+        drop(promotions);
+
+        if let Some(promotion) = existing {
+            // Reuse the existing passing promotion for unchanged content.
+            return Ok(promotion);
+        }
+
+        // Evaluate the gate.
+        let result = evaluator
+            .evaluate(name, revision, &content_hash, &gate_name)
+            .await
+            .map_err(PromotionError::GateFailed)?;
+
+        let promotion = match result {
+            GateEvaluationResult::Pass { run_id } => SkillPromotion {
+                name: name.to_owned(),
+                revision,
+                content_hash,
+                status: SkillPromotionStatus::Promoted,
+                gate_run_id: Some(run_id),
+                author,
+                created_at: chrono::Utc::now(),
+            },
+            GateEvaluationResult::Fail {
+                run_id,
+                diagnostics,
+            } => {
+                // Record the failed attempt, then return error.
+                let failed = SkillPromotion {
+                    name: name.to_owned(),
+                    revision,
+                    content_hash,
+                    status: SkillPromotionStatus::Trial,
+                    gate_run_id: Some(run_id.clone()),
+                    author: author.clone(),
+                    created_at: chrono::Utc::now(),
+                };
+                persist_promotion(&self.root, tenant, name, &failed).await?;
+                let mut proms = self.promotions.lock().await;
+                proms
+                    .entry((tenant.to_owned(), name.to_owned()))
+                    .or_default()
+                    .push(failed);
+                return Err(PromotionError::GateBlocked {
+                    run_id,
+                    diagnostics,
+                });
+            }
+        };
+
+        persist_promotion(&self.root, tenant, name, &promotion).await?;
+        let mut proms = self.promotions.lock().await;
+        proms
+            .entry((tenant.to_owned(), name.to_owned()))
+            .or_default()
+            .push(promotion.clone());
+
+        Ok(promotion)
+    }
+
+    /// Get the promotion history for a skill.
+    #[allow(dead_code)]
+    pub(crate) async fn promotion_history(&self, tenant: &str, name: &str) -> Vec<SkillPromotion> {
+        let promotions = self.promotions.lock().await;
+        promotions
+            .get(&(tenant.to_owned(), name.to_owned()))
+            .cloned()
+            .unwrap_or_default()
+    }
     /// tenant's registry, then persist a fresh version's file. The scan
     /// runs inside the registry and denials fail closed as
     /// [`SkillError::ScanDenied`]; registration is idempotent on content.
@@ -448,7 +770,7 @@ pub(crate) async fn register_skill(
         let bytes = match decode_hex(hex) {
             Ok(bytes) => bytes,
             Err(error) => {
-                return ApiError::bad_request(format!("asset `{path}`: {error}")).into_response()
+                return ApiError::bad_request(format!("asset `{path}`: {error}")).into_response();
             }
         };
         files.insert(format!("assets/{path}"), bytes);
@@ -597,6 +919,93 @@ pub(crate) async fn get_skill_file(
     Err(not_found())
 }
 
+/// `POST /skills/{name}/promote` payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct PromoteSkillPayload {
+    /// The revision to promote. Defaults to latest if omitted.
+    revision: Option<u64>,
+    /// Who is attempting the promotion.
+    author: String,
+}
+
+/// `POST /skills/{name}/promote` — attempt promotion through the eval gate.
+/// Returns `200` with the promotion record on success, `404` if the skill
+/// or revision is unknown, `422` if no gate is declared, `403` if the gate
+/// blocks (with diagnostics).
+pub(crate) async fn promote_skill(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    AxumPath(name): AxumPath<String>,
+    Json(payload): Json<PromoteSkillPayload>,
+) -> Response {
+    let revision = match payload.revision {
+        Some(r) => r,
+        None => match state.skills.get(tenant.tenant(), &name).await {
+            Some(v) => v.revision(),
+            None => {
+                return ApiError::not_found(format!("skill `{name}` not found")).into_response();
+            }
+        },
+    };
+
+    // Use a default evaluator that fails closed when not configured.
+    let default_evaluator = crate::skills::UnconfiguredGateEvaluator;
+    let evaluator: &dyn crate::skills::SkillGateEvaluator = state
+        .skill_gate_evaluator
+        .as_deref()
+        .map(|e| e as &dyn crate::skills::SkillGateEvaluator)
+        .unwrap_or(&default_evaluator);
+
+    match state
+        .skills
+        .promote(tenant.tenant(), &name, revision, payload.author, evaluator)
+        .await
+    {
+        Ok(promotion) => {
+            let receipt = json!({
+                "name": promotion.name,
+                "revision": promotion.revision,
+                "content_hash": promotion.content_hash,
+                "status": promotion.status,
+                "gate_run_id": promotion.gate_run_id,
+                "author": promotion.author,
+                "created_at": promotion.created_at,
+            });
+            (StatusCode::OK, Json(receipt)).into_response()
+        }
+        Err(PromotionError::NotFound) => {
+            ApiError::not_found(format!("skill `{name}` revision {revision} not found"))
+                .into_response()
+        }
+        Err(PromotionError::NoGateDeclared) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "no_gate_declared",
+                "message": "this skill has no eval_gate declared and cannot be promoted",
+            })),
+        )
+            .into_response(),
+        Err(PromotionError::GateBlocked {
+            run_id,
+            diagnostics,
+        }) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "gate_blocked",
+                "message": format!("gate blocked by run {run_id}"),
+                "run_id": run_id,
+                "diagnostics": diagnostics,
+            })),
+        )
+            .into_response(),
+        Err(PromotionError::GateFailed(msg)) => {
+            ApiError::internal(format!("gate evaluation failed: {msg}")).into_response()
+        }
+        Err(PromotionError::Io(msg)) => {
+            ApiError::internal(format!("promotion persistence failed: {msg}")).into_response()
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,5 +1101,188 @@ mod tests {
         );
         assert!(decode_hex("abc").is_err());
         assert!(decode_hex("zz").is_err());
+    }
+
+    // ----------------------------------------------------------------- //
+    // Promotion gates
+    // ----------------------------------------------------------------- //
+
+    fn gated_skill_md(name: &str, body: &str, gate: &str) -> String {
+        format!(
+            "---\nname: {name}\ndescription: The {name} skill.\neval-gate: {gate}\n---\n\n{body}\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn promotion_missing_gate_refuses() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let package = SkillPackage::from_markdown(&skill_md("no-gate", "Do something.")).unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        let evaluator = ScriptedSkillGateEvaluator {
+            result: Ok(GateEvaluationResult::Pass {
+                run_id: "run-1".to_owned(),
+            }),
+        };
+        let result = plane
+            .promote("default", "no-gate", 1, "op".to_string(), &evaluator)
+            .await;
+        assert_eq!(result, Err(PromotionError::NoGateDeclared));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn promotion_failing_gate_blocks() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Do something.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        let evaluator = ScriptedSkillGateEvaluator {
+            result: Ok(GateEvaluationResult::Fail {
+                run_id: "run-fail".to_owned(),
+                diagnostics: vec![GateDiagnostic {
+                    case_id: "case-1".to_owned(),
+                    reason: "assertion failed".to_owned(),
+                }],
+            }),
+        };
+        let result = plane
+            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .await;
+        assert!(
+            matches!(result, Err(PromotionError::GateBlocked { run_id, .. }) if run_id == "run-fail")
+        );
+        // A failed promotion is recorded as Trial so the history shows the attempt.
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].status, SkillPromotionStatus::Trial);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn promotion_passing_gate_succeeds() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Do something.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        let evaluator = ScriptedSkillGateEvaluator {
+            result: Ok(GateEvaluationResult::Pass {
+                run_id: "run-pass".to_owned(),
+            }),
+        };
+        let promotion = plane
+            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(promotion.gate_run_id, Some("run-pass".to_owned()));
+
+        // History reflects the promotion.
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].status, SkillPromotionStatus::Promoted);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn promotion_stale_hash_reuses_passing_run() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Do something.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        let evaluator = ScriptedSkillGateEvaluator {
+            result: Ok(GateEvaluationResult::Pass {
+                run_id: "run-1".to_owned(),
+            }),
+        };
+        let first = plane
+            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .await
+            .unwrap();
+        assert_eq!(first.gate_run_id, Some("run-1".to_owned()));
+
+        // Re-promote the same revision: should reuse without calling evaluator again.
+        let evaluator_never_called = ScriptedSkillGateEvaluator {
+            result: Err("should not be called".to_owned()),
+        };
+        let second = plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator_never_called,
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.gate_run_id, Some("run-1".to_owned()));
+        assert_eq!(first.content_hash, second.content_hash);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn promotion_changed_hash_demands_new_evaluation() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        let evaluator1 = ScriptedSkillGateEvaluator {
+            result: Ok(GateEvaluationResult::Pass {
+                run_id: "run-1".to_owned(),
+            }),
+        };
+        let first = plane
+            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .await
+            .unwrap();
+
+        // Register a new revision with different content.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        // Promote revision 2: new content hash means new evaluation required.
+        let evaluator2 = ScriptedSkillGateEvaluator {
+            result: Ok(GateEvaluationResult::Pass {
+                run_id: "run-2".to_owned(),
+            }),
+        };
+        let second = plane
+            .promote("default", "gated", 2, "op".to_string(), &evaluator2)
+            .await
+            .unwrap();
+        assert_ne!(first.content_hash, second.content_hash);
+        assert_eq!(second.gate_run_id, Some("run-2".to_owned()));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -11,58 +11,58 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
-use axum::{middleware, Extension, Json, Router};
+use axum::{Extension, Json, Router, middleware};
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use rusty_agent_runtime::agents::{
-    AgentId, CapabilityManifest, CoordinationContract, DelegateContract, FanOutContract,
-    QuorumContract, RaceContract, StateScope, COORDINATION_RESULT_KIND,
+    AgentId, COORDINATION_RESULT_KIND, CapabilityManifest, CoordinationContract, DelegateContract,
+    FanOutContract, QuorumContract, RaceContract, StateScope,
 };
-use rusty_agent_runtime::capsule::{derive_capsule_id, CapsuleManifest, CapsuleResolution};
 #[cfg(feature = "capsules")]
 use rusty_agent_runtime::capsule::{CapsuleDenial, CapsuleOverlay, ResourceBudget};
+use rusty_agent_runtime::capsule::{CapsuleManifest, CapsuleResolution, derive_capsule_id};
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
 use rusty_agent_runtime::durable::{
-    resolve_retry_parameters, resolve_timeout_bound_ms, retry_decision_event,
-    timeout_decision_event, ResolvedRetryParameters, RetryDecision,
+    ResolvedRetryParameters, RetryDecision, resolve_retry_parameters, resolve_timeout_bound_ms,
+    retry_decision_event, timeout_decision_event,
 };
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
-    admit_promotion, candidate_effect_key, detect_policy_drift, evaluation_effect_key,
-    promotion_effect_key, rollback_effect_key, surface_for_kind, Candidate, CandidateContent,
-    CandidateId, CandidateKind, CandidateOverlay, CandidateRecord, CandidateStatus, DriftBaseline,
-    DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError, PromotionReceipt,
-    PromotionRefusal, RollbackReceipt, VersionPointer,
+    Candidate, CandidateContent, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
+    CandidateStatus, DriftBaseline, DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError,
+    PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer, admit_promotion,
+    candidate_effect_key, detect_policy_drift, evaluation_effect_key, promotion_effect_key,
+    rollback_effect_key, surface_for_kind,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
-    assemble, detect_conflicts, memory_effect_key, memory_forget_effect_key, memory_read_request,
-    plan_forget, Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason,
-    MemoryEvidence, MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
-    MemoryScope, MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
+    Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason, MemoryEvidence,
+    MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord, MemoryScope,
+    MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow, assemble, detect_conflicts,
+    memory_effect_key, memory_forget_effect_key, memory_read_request, plan_forget,
 };
 use rusty_agent_runtime::record::{
-    derive_policy_version, sha256_hex, CapsuleVersion, DecisionEvent, Effect, EffectReceipt,
-    EventStatus, ExecutorPolicy, JournalRef, PayloadRef, PolicyVersion, RunEvent, RunEventKind,
+    CapsuleVersion, DecisionEvent, Effect, EffectReceipt, EventStatus, ExecutorPolicy, JournalRef,
+    PayloadRef, PolicyVersion, RunEvent, RunEventKind, derive_policy_version, sha256_hex,
 };
-use rusty_agent_runtime::registry::{diff_candidates, ArtifactRecord, RegistryError};
+use rusty_agent_runtime::registry::{ArtifactRecord, RegistryError, diff_candidates};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
 use crate::agents::{
     self, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim, MailboxClaimScope,
 };
 use crate::assistants::{
-    valid_version_id, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord,
-    AssistantVersionView, AssistantView, CreateVersionOutcome, SetLifecycleOutcome,
-    ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT,
+    ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT, ActivateVersionOutcome,
+    AssistantRecord, AssistantVersionRecord, AssistantVersionView, AssistantView,
+    CreateVersionOutcome, SetLifecycleOutcome, valid_version_id,
 };
 use crate::auth::TenantContext;
 use crate::capsules::{CapsuleRecord, CapsuleWrite};
@@ -81,7 +81,7 @@ use crate::supervision;
 use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
 use crate::threads::ThreadRecord;
 use crate::triggers;
-use crate::{store, GraphRegistry, ServerConfig, RESERVED_NAMES};
+use crate::{GraphRegistry, RESERVED_NAMES, ServerConfig, store};
 
 /// Shared application state.
 pub(crate) struct AppState {
@@ -168,6 +168,9 @@ pub(crate) struct AppState {
     /// the durable version files under `{store_path}/skills/` — file-backed
     /// on either store backend, the receipt-keyring precedent.
     pub skills: crate::skills::SkillPlane,
+    /// Optional skill gate evaluator for promotion. When `None`, promotion
+    /// attempts fail closed with a configuration error.
+    pub skill_gate_evaluator: Option<Arc<dyn crate::skills::SkillGateEvaluator>>,
     /// The knowledge plane (capability-harness slice #4): governed sources,
     /// chunk indexes, content-addressed bytes, and purge tombstones under
     /// `{store_path}/knowledge/`, rebuilt from disk at boot. File-backed on
@@ -291,6 +294,7 @@ pub(crate) fn build_router(
         journal_locks: Mutex::new(HashMap::new()),
         evaluation_state: crate::evaluations::init_evaluation_state(),
         skills: crate::skills::SkillPlane::load(&config.store_path),
+        skill_gate_evaluator: None,
         knowledge: Arc::new(crate::server_store::KnowledgePlane::load(
             &config.store_path,
         )),
@@ -492,6 +496,7 @@ pub(crate) fn build_router(
             "/skills/{name}/versions/{revision}",
             get(crate::skills::get_skill_version),
         )
+        .route("/skills/{name}/promote", post(crate::skills::promote_skill))
         .route(
             "/skills/{name}/files/{*path}",
             get(crate::skills::get_skill_file),
@@ -1732,7 +1737,7 @@ async fn delete_run_checkpoints(
                 return Err(ApiError::internal(format!(
                     "failed to delete `{}`: {e}",
                     path.display()
-                )))
+                )));
             }
         }
     }
@@ -1981,10 +1986,12 @@ async fn list_runs(
             .then_with(|| a.run_id.cmp(&b.run_id))
     });
     recalled.truncate(limit);
-    Ok(Json(json!(recalled
-        .into_iter()
-        .map(RecalledRun::into_wire)
-        .collect::<Vec<_>>())))
+    Ok(Json(json!(
+        recalled
+            .into_iter()
+            .map(RecalledRun::into_wire)
+            .collect::<Vec<_>>()
+    )))
 }
 
 /// The `RunStatus` a persisted journal proves, in the same wire vocabulary
@@ -3398,12 +3405,12 @@ async fn set_assistant_lifecycle(
         SetLifecycleOutcome::AssistantNotFound => {
             return Err(ApiError::not_found(format!(
                 "assistant `{assistant_id}` not found"
-            )))
+            )));
         }
         SetLifecycleOutcome::Stale { active_version_id } => {
             return Err(ApiError::conflict(format!(
                 "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before changing lifecycle"
-            )))
+            )));
         }
     };
     Ok(Json(json!({
@@ -3467,24 +3474,24 @@ async fn create_assistant_version(
         CreateVersionOutcome::AssistantNotFound => {
             return Err(ApiError::not_found(format!(
                 "assistant `{assistant_id}` not found"
-            )))
+            )));
         }
         CreateVersionOutcome::Stale { active_version_id } => {
             return Err(ApiError::conflict(format!(
                 "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before creating a version"
-            )))
+            )));
         }
         CreateVersionOutcome::LimitReached => {
             return Err(ApiError::unprocessable(
                 "assistant version history reached its 256-version limit".to_string(),
-            ))
+            ));
         }
         CreateVersionOutcome::SizeLimitReached => {
             return Err(ApiError::unprocessable(format!(
                 "assistant version exceeds the {} KiB per-version or {} KiB lineage boundary",
                 ASSISTANT_VERSION_BYTES_LIMIT / 1024,
                 ASSISTANT_LINEAGE_BYTES_LIMIT / 1024
-            )))
+            )));
         }
     };
     let active_id = record.active_version_id();
@@ -3614,17 +3621,17 @@ async fn activate_assistant_version(
         ActivateVersionOutcome::AssistantNotFound => {
             return Err(ApiError::not_found(format!(
                 "assistant `{assistant_id}` not found"
-            )))
+            )));
         }
         ActivateVersionOutcome::VersionNotFound => {
             return Err(ApiError::not_found(format!(
                 "assistant version `{version_id}` not found for `{assistant_id}`"
-            )))
+            )));
         }
         ActivateVersionOutcome::Stale { active_version_id } => {
             return Err(ApiError::conflict(format!(
                 "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before activation"
-            )))
+            )));
         }
     };
     Ok(Json(json!({
@@ -4275,9 +4282,7 @@ fn lease_outcome(
         MutationOutcome::LeaseLost => Err(ApiError::conflict(format!(
             "task `{task_id}` is not leased to worker `{worker_id}` (lost, expired and reclaimed, or already settled)"
         ))),
-        MutationOutcome::Unknown => {
-            Err(ApiError::not_found(format!("task `{task_id}` not found")))
-        }
+        MutationOutcome::Unknown => Err(ApiError::not_found(format!("task `{task_id}` not found"))),
     }
 }
 
@@ -8890,20 +8895,22 @@ async fn cancel_one_agent(
     let signalled = ids(outcome.signalled);
     let mut exit_event = Value::Null;
     if !cancelled.is_empty() || !signalled.is_empty() || !run_outcome.is_empty() {
-        exit_event = json!(supervision::journal_agent_exit(
-            &state.server_store,
-            tenant,
-            agent_external,
-            "cancelled",
-            json!({
-                "cancelled_messages": cancelled,
-                "signalled_messages": signalled,
-                "signalled_runs": run_outcome.signalled,
-                "cancelled_runs": run_outcome.cancelled,
-            }),
-        )
-        .await
-        .map_err(internal_err)?);
+        exit_event = json!(
+            supervision::journal_agent_exit(
+                &state.server_store,
+                tenant,
+                agent_external,
+                "cancelled",
+                json!({
+                    "cancelled_messages": cancelled,
+                    "signalled_messages": signalled,
+                    "signalled_runs": run_outcome.signalled,
+                    "cancelled_runs": run_outcome.cancelled,
+                }),
+            )
+            .await
+            .map_err(internal_err)?
+        );
     }
     Ok(json!({
         "agent_id": agent_external,

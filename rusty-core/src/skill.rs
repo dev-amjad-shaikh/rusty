@@ -273,6 +273,10 @@ pub struct SkillFrontmatter {
     /// declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compatibility: Option<String>,
+
+    /// The eval-suite gate this skill must pass before promotion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eval_gate: Option<String>,
 }
 
 /// Strip one pair of matching surrounding quotes from a frontmatter scalar,
@@ -357,6 +361,7 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
     let mut description = None;
     let mut license = None;
     let mut compatibility = None;
+    let mut eval_gate = None;
     let mut allowed_tools = Vec::new();
     let mut allowed_tools_seen = false;
 
@@ -391,6 +396,7 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
             "description" => assign(&mut description)?,
             "license" => assign(&mut license)?,
             "compatibility" => assign(&mut compatibility)?,
+            "eval-gate" => assign(&mut eval_gate)?,
             "allowed-tools" => {
                 if allowed_tools_seen {
                     return Err(SkillError::MalformedFrontmatter {
@@ -466,6 +472,9 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
     if let Some(compatibility) = &compatibility {
         validate_optional_scalar("compatibility", compatibility)?;
     }
+    if let Some(eval_gate) = &eval_gate {
+        validate_optional_scalar("eval-gate", eval_gate)?;
+    }
 
     if body.trim().is_empty() {
         return Err(SkillError::EmptyBody);
@@ -484,6 +493,7 @@ fn parse_skill_md(text: &str) -> Result<(SkillFrontmatter, String), SkillError> 
             license,
             allowed_tools,
             compatibility,
+            eval_gate,
         },
         body,
     ))
@@ -758,6 +768,10 @@ fn canonical_bytes(package: &SkillPackage) -> Vec<u8> {
             .as_deref()
             .unwrap_or("")
             .as_bytes(),
+    );
+    field(
+        "eval-gate",
+        frontmatter.eval_gate.as_deref().unwrap_or("").as_bytes(),
     );
     field("body", package.body.as_bytes());
     for (path, bytes) in &package.references {
@@ -1074,6 +1088,10 @@ pub struct SkillMetadata {
     /// Environment compatibility note, when declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compatibility: Option<String>,
+
+    /// The eval-suite gate this skill must pass before promotion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eval_gate: Option<String>,
 }
 
 /// Selects one version of a skill for [`SkillRegistry::get_version`].
@@ -1083,6 +1101,38 @@ pub enum SkillVersionSelector {
     Revision(u64),
     /// The content address of the version.
     ContentHash(String),
+}
+
+/// The lifecycle state of a skill in the promotion pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillPromotionStatus {
+    /// Draft: not yet ready for evaluation.
+    Draft,
+    /// Trial: under evaluation, may be exercised in non-production contexts.
+    Trial,
+    /// Promoted: cleared its gate and may be bound into active skill sets.
+    Promoted,
+}
+
+/// An immutable record of one promotion attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillPromotion {
+    /// The skill name.
+    pub name: String,
+    /// The revision being promoted.
+    pub revision: u64,
+    /// The content hash of the candidate at promotion time.
+    pub content_hash: String,
+    /// The status after this record.
+    pub status: SkillPromotionStatus,
+    /// The gate run id that authorized promotion, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_run_id: Option<String>,
+    /// Who attempted or completed the promotion.
+    pub author: String,
+    /// When the record was created.
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// One immutable, content-addressed skill version — the registered form of
@@ -1263,6 +1313,7 @@ impl SkillRegistry {
                 license: frontmatter.license,
                 allowed_tools: frontmatter.allowed_tools,
                 compatibility: frontmatter.compatibility,
+                eval_gate: frontmatter.eval_gate,
             },
             provenance: SkillProvenance {
                 source,
