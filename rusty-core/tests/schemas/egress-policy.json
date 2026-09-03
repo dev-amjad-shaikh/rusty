@@ -1,0 +1,209 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EgressPolicy",
+  "description": "The full egress policy document: a set of named endpoint policies.",
+  "type": "object",
+  "required": [
+    "policies"
+  ],
+  "properties": {
+    "policies": {
+      "description": "Named endpoint policies. Evaluation iterates in document order; the first policy whose endpoint matches the destination is the one whose rules are consulted.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/EgressEndpointPolicy"
+      }
+    }
+  },
+  "definitions": {
+    "EgressEndpoint": {
+      "description": "One destination endpoint declared in the policy.",
+      "type": "object",
+      "required": [
+        "host",
+        "port",
+        "protocol"
+      ],
+      "properties": {
+        "host": {
+          "description": "Hostname or IP (the preflight-checked value, never a raw user string — canonicalization is the caller's responsibility).",
+          "type": "string"
+        },
+        "port": {
+          "description": "TCP port.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "protocol": {
+          "description": "Wire protocol.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EgressProtocol"
+            }
+          ]
+        },
+        "rewrite": {
+          "description": "Which rewrite points are active.",
+          "default": {
+            "header_rewrite": false,
+            "request_body_rewrite": false,
+            "websocket_rewrite": false
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/EgressRewrite"
+            }
+          ]
+        },
+        "tls": {
+          "description": "TLS is required for this endpoint.",
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "EgressEndpointPolicy": {
+      "description": "One named policy: an endpoint plus the ordered rules and the originating-component grant.",
+      "type": "object",
+      "required": [
+        "endpoint",
+        "name",
+        "rules"
+      ],
+      "properties": {
+        "endpoint": {
+          "description": "The destination endpoint.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EgressEndpoint"
+            }
+          ]
+        },
+        "name": {
+          "description": "Human-readable policy name (the audit trail names this).",
+          "type": "string"
+        },
+        "originating": {
+          "description": "Components permitted to use this grant. Empty means \"all components\".",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rules": {
+          "description": "Ordered rules: first match wins.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EgressRule"
+          }
+        }
+      }
+    },
+    "EgressProtocol": {
+      "description": "The wire protocol of an egress endpoint.",
+      "oneOf": [
+        {
+          "description": "HTTP/REST.",
+          "type": "string",
+          "enum": [
+            "rest"
+          ]
+        },
+        {
+          "description": "WebSocket.",
+          "type": "string",
+          "enum": [
+            "websocket"
+          ]
+        },
+        {
+          "description": "MCP (Model Context Protocol) over stdio or HTTP.",
+          "type": "string",
+          "enum": [
+            "mcp"
+          ]
+        }
+      ]
+    },
+    "EgressRewrite": {
+      "description": "Per-endpoint rewrite flags: which placeholder-substitution points are active for this destination.",
+      "type": "object",
+      "properties": {
+        "header_rewrite": {
+          "description": "Substitute placeholders in request headers.",
+          "default": false,
+          "type": "boolean"
+        },
+        "request_body_rewrite": {
+          "description": "Substitute placeholders in the request body.",
+          "default": false,
+          "type": "boolean"
+        },
+        "websocket_rewrite": {
+          "description": "Substitute placeholders in WebSocket frames.",
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "EgressRule": {
+      "description": "One rule in an endpoint policy: a grant scoped to method, path pattern, and (for MCP) tool name.",
+      "type": "object",
+      "required": [
+        "mode",
+        "path_pattern"
+      ],
+      "properties": {
+        "methods": {
+          "description": "HTTP methods this rule matches (e.g. `[\"GET\"]`). Empty means \"all methods\".",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mode": {
+          "description": "Enforcement mode.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EgressRuleMode"
+            }
+          ]
+        },
+        "path_pattern": {
+          "description": "Path glob. `*` matches one segment; `/*` at the end matches any suffix. `/api/v2/tickets/*` admits `/api/v2/tickets/123` and refuses `/api/v2/tickets/123/comments`.",
+          "type": "string"
+        },
+        "tool_names": {
+          "description": "For MCP rules: the tool names this grant covers. `None` means \"all tools on this endpoint\".",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "EgressRuleMode": {
+      "description": "A rule's enforcement mode.",
+      "oneOf": [
+        {
+          "description": "Matching traffic is admitted; a denial is a hard refusal.",
+          "type": "string",
+          "enum": [
+            "enforce"
+          ]
+        },
+        {
+          "description": "Matching traffic is admitted but an audit record is written identical in shape to a refusal — progressive rollout without schema change.",
+          "type": "string",
+          "enum": [
+            "audit"
+          ]
+        }
+      ]
+    }
+  }
+}

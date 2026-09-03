@@ -652,3 +652,389 @@ async fn tenant_isolation_404_never_403() {
 
     let _ = std::fs::remove_dir_all(store);
 }
+
+// --------------------------------------------------------------------- //
+// EP-11-S03: L7 egress policy on connector checks
+// --------------------------------------------------------------------- //
+
+use rusty_agent_runtime::egress::{
+    EgressEndpoint, EgressEndpointPolicy, EgressPolicy, EgressProtocol, EgressRewrite, EgressRule,
+    EgressRuleMode,
+};
+
+/// Build an app with the given egress policy wired into config.
+fn app_with_policy(policy: EgressPolicy) -> (Router, PathBuf) {
+    let store = temp_store();
+    let config =
+        ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()).with_egress_policy(policy);
+    (router(GraphRegistry::new(), config), store)
+}
+
+#[tokio::test]
+async fn egress_deny_by_default_blocks_check() {
+    // A policy with no matching endpoint → deny-by-default.
+    let policy = EgressPolicy {
+        policies: vec![EgressEndpointPolicy {
+            name: "other".into(),
+            endpoint: EgressEndpoint {
+                host: "other.example.com".into(),
+                port: 443,
+                protocol: EgressProtocol::Rest,
+                tls: true,
+                rewrite: EgressRewrite::default(),
+                allowed_ips: vec![],
+                allow_encoded_slashes: false,
+            },
+            rules: vec![EgressRule {
+                methods: vec!["GET".into()],
+                path_pattern: "/*".into(),
+                mode: EgressRuleMode::Enforce,
+                tool_names: None,
+            }],
+            originating: vec![],
+        }],
+    };
+    let (app, store) = app_with_policy(policy);
+    let hash = register_demo(&app, None).await;
+
+    let (status, outcome) = call(
+        &app,
+        "POST",
+        "/connectors/check",
+        Some(json!({
+            "manifest_hash": hash,
+            "config": basic_config("dev123")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(outcome["status"], "failed");
+    let msg = outcome["message"].as_str().unwrap();
+    assert!(
+        msg.contains("egress denied"),
+        "expected egress denial in message, got: {msg}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn egress_allow_policy_permits_check() {
+    // A policy that matches the fixture destination and allows GET /api/*.
+    let policy = EgressPolicy {
+        policies: vec![EgressEndpointPolicy {
+            name: "demo".into(),
+            endpoint: EgressEndpoint {
+                host: "dev123.service-now.com".into(),
+                port: 443,
+                protocol: EgressProtocol::Rest,
+                tls: true,
+                rewrite: EgressRewrite::default(),
+                allowed_ips: vec![],
+                allow_encoded_slashes: false,
+            },
+            rules: vec![EgressRule {
+                methods: vec!["GET".into()],
+                path_pattern: "/api/now/table/*".into(),
+                mode: EgressRuleMode::Enforce,
+                tool_names: None,
+            }],
+            originating: vec!["connector-check".into()],
+        }],
+    };
+    let (app, store) = app_with_policy(policy);
+    let hash = register_demo(&app, None).await;
+
+    let (status, outcome) = call(
+        &app,
+        "POST",
+        "/connectors/check",
+        Some(json!({
+            "manifest_hash": hash,
+            "config": basic_config("dev123")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // The check proceeds past egress and fails on the wire (unresolvable host
+    // in test), NOT on egress denial.
+    let msg = outcome["message"].as_str().unwrap_or("");
+    assert!(
+        !msg.contains("egress denied"),
+        "expected wire failure, not egress denial, got: {outcome}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn egress_audit_mode_logs_and_allows() {
+    // A policy in audit mode: admitted, but logged.
+    let policy = EgressPolicy {
+        policies: vec![EgressEndpointPolicy {
+            name: "demo".into(),
+            endpoint: EgressEndpoint {
+                host: "dev123.service-now.com".into(),
+                port: 443,
+                protocol: EgressProtocol::Rest,
+                tls: true,
+                rewrite: EgressRewrite::default(),
+                allowed_ips: vec![],
+                allow_encoded_slashes: false,
+            },
+            rules: vec![EgressRule {
+                methods: vec!["GET".into()],
+                path_pattern: "/api/now/table/*".into(),
+                mode: EgressRuleMode::Audit,
+                tool_names: None,
+            }],
+            originating: vec!["connector-check".into()],
+        }],
+    };
+    let (app, store) = app_with_policy(policy);
+    let hash = register_demo(&app, None).await;
+
+    let (status, outcome) = call(
+        &app,
+        "POST",
+        "/connectors/check",
+        Some(json!({
+            "manifest_hash": hash,
+            "config": basic_config("dev123")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Audit mode allows the request through, so it hits the wire and fails
+    // on network — not on egress denial.
+    let msg = outcome["message"].as_str().unwrap_or("");
+    assert!(
+        !msg.contains("egress denied"),
+        "expected wire failure, not egress denial, got: {outcome}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn egress_wrong_component_denied() {
+    // A policy scoped to a different originating component.
+    let policy = EgressPolicy {
+        policies: vec![EgressEndpointPolicy {
+            name: "demo".into(),
+            endpoint: EgressEndpoint {
+                host: "dev123.service-now.com".into(),
+                port: 443,
+                protocol: EgressProtocol::Rest,
+                tls: true,
+                rewrite: EgressRewrite::default(),
+                allowed_ips: vec![],
+                allow_encoded_slashes: false,
+            },
+            rules: vec![EgressRule {
+                methods: vec!["GET".into()],
+                path_pattern: "/api/now/table/*".into(),
+                mode: EgressRuleMode::Enforce,
+                tool_names: None,
+            }],
+            originating: vec!["mcp-client".into()], // not "connector-check"
+        }],
+    };
+    let (app, store) = app_with_policy(policy);
+    let hash = register_demo(&app, None).await;
+
+    let (status, outcome) = call(
+        &app,
+        "POST",
+        "/connectors/check",
+        Some(json!({
+            "manifest_hash": hash,
+            "config": basic_config("dev123")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(outcome["status"], "failed");
+    let msg = outcome["message"].as_str().unwrap();
+    assert!(
+        msg.contains("egress denied"),
+        "expected egress denial in message, got: {msg}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+// --------------------------------------------------------------------- //
+// EP-11-S04: SSRF preflight and DNS discipline
+// --------------------------------------------------------------------- //
+
+#[tokio::test]
+async fn egress_preflight_denies_loopback_without_pin() {
+    // A policy that matches 127.0.0.1:443 but carries no allowed_ips pin.
+    // DNS resolves 127.0.0.1 -> 127.0.0.1 (loopback); without a pin the
+    // preflight refuses with PreflightFailed (EP-11-S04 AC 1).
+    let policy = EgressPolicy {
+        policies: vec![EgressEndpointPolicy {
+            name: "localhost".into(),
+            endpoint: EgressEndpoint {
+                host: "127.0.0.1".into(),
+                port: 443,
+                protocol: EgressProtocol::Rest,
+                tls: true,
+                rewrite: EgressRewrite::default(),
+                allowed_ips: vec![], // no pin -> loopback denied
+                allow_encoded_slashes: false,
+            },
+            rules: vec![EgressRule {
+                methods: vec!["GET".into()],
+                path_pattern: "/health".into(),
+                mode: EgressRuleMode::Enforce,
+                tool_names: None,
+            }],
+            originating: vec!["connector-check".into()],
+        }],
+    };
+    let (app, store) = app_with_policy(policy);
+
+    let manifest = ConnectorManifest::new(
+        "localhost-test",
+        "1",
+        "Localhost Test",
+        "Test manifest for SSRF preflight.",
+        "https://docs.example.com/",
+        "https://127.0.0.1",
+        json!({
+            "type": "object",
+            "required": [],
+            "additionalProperties": false,
+            "properties": {}
+        }),
+        vec![ConnectorOperation {
+            name: "check".into(),
+            description: "Check connection.".into(),
+            method: HttpMethod::Get,
+            path: "/health".into(),
+            effect: OperationEffect::ReadOnly,
+            params_schema: json!({"type": "object"}),
+            headers: Vec::new(),
+            auth: Vec::new(),
+            max_response_bytes: None,
+        }],
+        "check",
+    )
+    .expect("valid manifest");
+
+    let (status, receipt) = call(
+        &app,
+        "POST",
+        "/connectors",
+        Some(serde_json::to_value(manifest).unwrap()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{receipt}");
+    let hash = receipt["hash"].as_str().unwrap();
+
+    let (status, outcome) = call(
+        &app,
+        "POST",
+        "/connectors/check",
+        Some(json!({"manifest_hash": hash, "config": {}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(outcome["status"], "failed");
+    let msg = outcome["message"].as_str().unwrap();
+    assert!(
+        msg.contains("egress denied"),
+        "expected egress denial, got: {msg}"
+    );
+    assert!(
+        msg.contains("PreflightFailed"),
+        "expected PreflightFailed reason, got: {msg}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn egress_preflight_allows_loopback_with_pin() {
+    // Same destination as above, but this time allowed_ips explicitly
+    // pins 127.0.0.1 so the preflight passes (EP-11-S04 AC 3).
+    let policy = EgressPolicy {
+        policies: vec![EgressEndpointPolicy {
+            name: "localhost".into(),
+            endpoint: EgressEndpoint {
+                host: "127.0.0.1".into(),
+                port: 443,
+                protocol: EgressProtocol::Rest,
+                tls: true,
+                rewrite: EgressRewrite::default(),
+                allowed_ips: vec!["127.0.0.1".into()], // pin -> loopback allowed
+                allow_encoded_slashes: false,
+            },
+            rules: vec![EgressRule {
+                methods: vec!["GET".into()],
+                path_pattern: "/health".into(),
+                mode: EgressRuleMode::Enforce,
+                tool_names: None,
+            }],
+            originating: vec!["connector-check".into()],
+        }],
+    };
+    let (app, store) = app_with_policy(policy);
+
+    let manifest = ConnectorManifest::new(
+        "localhost-test",
+        "1",
+        "Localhost Test",
+        "Test manifest for SSRF preflight.",
+        "https://docs.example.com/",
+        "https://127.0.0.1",
+        json!({
+            "type": "object",
+            "required": [],
+            "additionalProperties": false,
+            "properties": {}
+        }),
+        vec![ConnectorOperation {
+            name: "check".into(),
+            description: "Check connection.".into(),
+            method: HttpMethod::Get,
+            path: "/health".into(),
+            effect: OperationEffect::ReadOnly,
+            params_schema: json!({"type": "object"}),
+            headers: Vec::new(),
+            auth: Vec::new(),
+            max_response_bytes: None,
+        }],
+        "check",
+    )
+    .expect("valid manifest");
+
+    let (status, receipt) = call(
+        &app,
+        "POST",
+        "/connectors",
+        Some(serde_json::to_value(manifest).unwrap()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{receipt}");
+    let hash = receipt["hash"].as_str().unwrap();
+
+    let (status, outcome) = call(
+        &app,
+        "POST",
+        "/connectors/check",
+        Some(json!({"manifest_hash": hash, "config": {}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // The preflight passes (pinned), so the request hits the wire and fails
+    // on connection refused — NOT on egress denial.
+    let msg = outcome["message"].as_str().unwrap_or("");
+    assert!(
+        !msg.contains("egress denied"),
+        "expected wire failure after pinned preflight, not egress denial, got: {outcome}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}

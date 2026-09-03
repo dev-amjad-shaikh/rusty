@@ -1683,6 +1683,7 @@ fn error_kind(error: &RustyError) -> &'static str {
         RustyError::Plugin(_) => "plugin_error",
         RustyError::Doctor(_) => "doctor_error",
         RustyError::Catalog(_) => "catalog_error",
+        RustyError::InvariantViolation(_) => "invariant_violation",
         // Drain cancellation is control flow and takes its own terminal
         // path in `execute`; this arm exists for exhaustiveness only.
         RustyError::Cancelled(_) => "cancelled",

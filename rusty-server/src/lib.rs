@@ -672,6 +672,12 @@ pub struct ServerConfig {
     /// to operator-triggered passes, never to unprotected pruning. See
     /// [`ServerConfig::with_artifact_sweep_interval`].
     pub artifact_sweep_interval: Option<std::time::Duration>,
+    /// The layer-7 egress policy (EP-11-S03): deny-by-default rules
+    /// governing every outbound request from connectors, tools, and
+    /// sandbox processes. `None` (the default) means no policy is
+    /// enforced — the deployment is open. See
+    /// [`ServerConfig::with_egress_policy`].
+    pub egress_policy: Option<rusty_agent_runtime::egress::EgressPolicy>,
 }
 
 impl Default for ServerConfig {
@@ -703,6 +709,7 @@ impl Default for ServerConfig {
             broker_refresh_window: broker::DEFAULT_REFRESH_WINDOW,
             broker_sweep_interval: None,
             artifact_sweep_interval: None,
+            egress_policy: None,
         }
     }
 }
@@ -1032,6 +1039,13 @@ impl ServerConfig {
     /// unprotected pruning.
     pub fn with_artifact_sweep_interval(mut self, interval: std::time::Duration) -> Self {
         self.artifact_sweep_interval = Some(interval);
+        self
+    }
+
+    /// Builder-style: set the layer-7 egress policy (EP-11-S03). Without
+    /// one the deployment is open: no egress rules are enforced.
+    pub fn with_egress_policy(mut self, policy: rusty_agent_runtime::egress::EgressPolicy) -> Self {
+        self.egress_policy = Some(policy);
         self
     }
 }

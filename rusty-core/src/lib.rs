@@ -260,6 +260,7 @@ pub mod deploy;
 pub mod doctor;
 pub mod durable;
 pub mod effects;
+pub mod egress;
 pub mod error;
 pub mod executor;
 pub mod gaps;
@@ -385,6 +386,11 @@ pub mod prelude {
         PureEffect, ReadOnlyEffect, ShadowOutcomeSource, ShadowRefusal, ShadowRefusalSink,
         TypedEffect, admit_compensatable, admit_irreversible, admit_retry, admit_speculation,
         derive_effect_id,
+    };
+    pub use crate::egress::{
+        EgressDecision, EgressDenialReason, EgressEndpoint, EgressEndpointPolicy, EgressPolicy,
+        EgressProtocol, EgressRewrite, EgressRule, EgressRuleMode, PreflightResult,
+        canonicalize_path, evaluate_egress, evaluate_redirect, preflight_egress,
     };
     pub use crate::error::{LlmErrorClass, Result, RustyError};
     pub use crate::executor::{ExecutionOutcome, Executor, GraphEvent, RunConfig};
