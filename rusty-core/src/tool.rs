@@ -23,6 +23,124 @@ use crate::middleware::{MiddlewareChain, ToolInvocation};
 use crate::record::{Effect, RunEventKind};
 
 pub mod approval;
+
+/// Effect classification for execution placement (EP-05-S06).
+///
+/// Unlike [`crate::record::Effect`] which classifies retry safety, this
+/// taxonomy decides *where* a tool executes: in-process for engine-state
+/// reads, or behind a sandbox seam for anything touching code, files, or
+/// the network.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectClass {
+    /// Reads engine state only — may execute in-process when paired with
+    /// [`SandboxRequirement::None`].
+    Read,
+    /// Executes model-influenced code or touches the host filesystem.
+    Execute,
+    /// Opens network connections.
+    Egress,
+}
+
+/// Sandbox isolation requirement (EP-05-S06).
+///
+/// Declares whether a tool *must* run behind a sandbox backend that can
+/// report its enforcement level honestly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxRequirement {
+    /// No sandbox required — may run in-process if [`EffectClass::Read`].
+    None,
+    /// Must run in a sandbox backend that reports enforcement.
+    Required,
+}
+
+/// Where a tool call is placed (EP-05-S06).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// Execute in the kernel process.
+    InProcess,
+    /// Execute in a sandbox backend.
+    Sandboxed,
+}
+
+/// Why placement could not be satisfied (EP-05-S06).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlacementError {
+    /// A tool declares [`EffectClass::Execute`] or [`EffectClass::Egress`]
+    /// with [`SandboxRequirement::None`] — a configuration that would run
+    /// an unsafe tool in-process.
+    InvalidDeclaration {
+        tool: String,
+        effect_class: EffectClass,
+        sandbox_requirement: SandboxRequirement,
+    },
+    /// No sandbox backend is available for a tool that requires one.
+    NoBackendAvailable {
+        tool: String,
+        required: SandboxRequirement,
+    },
+}
+
+impl std::fmt::Display for PlacementError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlacementError::InvalidDeclaration {
+                tool,
+                effect_class,
+                sandbox_requirement,
+            } => write!(
+                f,
+                "tool `{tool}` declares effect class `{effect_class:?}` with sandbox requirement \"{sandbox_requirement:?}\": Execute/Egress tools must require a sandbox"
+            ),
+            PlacementError::NoBackendAvailable { tool, required } => write!(
+                f,
+                "tool `{tool}` requires sandbox \"{required:?}\" but no sandbox backend is available"
+            ),
+        }
+    }
+}
+
+/// Resolve the execution placement for a tool (EP-05-S06).
+///
+/// Returns `Ok(Placement::InProcess)` for [`EffectClass::Read`] +
+/// [`SandboxRequirement::None`]. Returns `Ok(Placement::Sandboxed)` for
+/// any tool with [`SandboxRequirement::Required`]. Returns `Err` for
+/// invalid declarations or when a sandbox is required but no backend
+/// exists.
+pub fn resolve_placement(
+    tool: &dyn Tool,
+    _sandbox_available: bool,
+) -> std::result::Result<Placement, PlacementError> {
+    let class = tool.effect_class();
+    let req = tool.sandbox_requirement();
+
+    // AC 2: Execute/Egress + None is a registration-time error.
+    if matches!(class, EffectClass::Execute | EffectClass::Egress)
+        && matches!(req, SandboxRequirement::None)
+    {
+        return Err(PlacementError::InvalidDeclaration {
+            tool: tool.name().to_owned(),
+            effect_class: class,
+            sandbox_requirement: req,
+        });
+    }
+
+    // AC 1: Read + None → in-process.
+    if matches!(class, EffectClass::Read) && matches!(req, SandboxRequirement::None) {
+        return Ok(Placement::InProcess);
+    }
+
+    // Everything else needs a sandbox backend.
+    if !_sandbox_available {
+        return Err(PlacementError::NoBackendAvailable {
+            tool: tool.name().to_owned(),
+            required: req,
+        });
+    }
+
+    Ok(Placement::Sandboxed)
+}
 pub mod builtins;
 
 /// Maximum serialized size of one advertised tool argument schema.
@@ -243,6 +361,25 @@ pub trait Tool: Send + Sync {
 
     /// Stable effect kind used for deterministic effect ids and compensation
     /// lookup. Defaults to the tool name.
+    /// Execution placement effect class (EP-05-S06).
+    ///
+    /// Defaults to [`EffectClass::Read`] — the most permissive for
+    /// in-process execution. Tools that touch code, files, or the network
+    /// must override to [`EffectClass::Execute`] or [`EffectClass::Egress`]
+    /// and pair with [`SandboxRequirement::Required`].
+    fn effect_class(&self) -> EffectClass {
+        EffectClass::Read
+    }
+
+    /// Sandbox isolation requirement (EP-05-S06).
+    ///
+    /// Defaults to [`SandboxRequirement::None`] — suitable for
+    /// [`EffectClass::Read`] tools. Tools with [`EffectClass::Execute`] or
+    /// [`EffectClass::Egress`] must override to [`SandboxRequirement::Required`].
+    fn sandbox_requirement(&self) -> SandboxRequirement {
+        SandboxRequirement::None
+    }
+
     fn effect_kind(&self) -> &str {
         self.name()
     }
@@ -300,13 +437,27 @@ impl ToolRegistry {
 
     /// Register a tool. Re-registering the same name replaces the tool.
     pub fn register<T: Tool + 'static>(&mut self, tool: T) -> &mut Self {
-        self.tools.insert(tool.name().to_owned(), Arc::new(tool));
+        let name = tool.name().to_owned();
+        if let Err(PlacementError::InvalidDeclaration { .. }) = resolve_placement(&tool, false) {
+            panic!(
+                "tool `{name}` declares an invalid placement: Execute/Egress tools must require a sandbox"
+            );
+        }
+        self.tools.insert(name, Arc::new(tool));
         self
     }
 
     /// Register a pre-shared tool.
     pub fn register_shared(&mut self, tool: Arc<dyn Tool>) -> &mut Self {
-        self.tools.insert(tool.name().to_owned(), tool);
+        let name = tool.name().to_owned();
+        if let Err(PlacementError::InvalidDeclaration { .. }) =
+            resolve_placement(tool.as_ref(), false)
+        {
+            panic!(
+                "tool `{name}` declares an invalid placement: Execute/Egress tools must require a sandbox"
+            );
+        }
+        self.tools.insert(name, tool);
         self
     }
 
@@ -675,6 +826,11 @@ async fn dispatch_tool(
             )));
         }
     }
+    // Placement resolution: after guards, before effect admission.
+    if let Err(e) = resolve_placement(tool.as_ref(), false) {
+        return Err(RustyError::Tool(e.to_string()));
+    }
+
     if let Some(context) = effect_admission {
         let request = tool.effect_request(call);
         if let Err(violation) = context.admit(&request) {
@@ -844,5 +1000,121 @@ mod tests {
         assert!(msg.contains("panicked"), "got: {msg}");
         assert!(msg.contains("kaboom"), "got: {msg}");
         assert_eq!(results[1].content.as_deref(), Some("still alive"));
+    }
+
+    // EP-05-S06 placement tests
+
+    struct ReadTool;
+    #[async_trait]
+    impl Tool for ReadTool {
+        fn name(&self) -> &str {
+            "read_tool"
+        }
+        fn description(&self) -> &str {
+            "A read-only tool."
+        }
+        fn parameters_schema(&self) -> Value {
+            json!({"type": "object"})
+        }
+        async fn call(&self, _args: Value) -> Result<Value> {
+            Ok(Value::Null)
+        }
+    }
+
+    struct ExecuteTool;
+    #[async_trait]
+    impl Tool for ExecuteTool {
+        fn name(&self) -> &str {
+            "execute_tool"
+        }
+        fn description(&self) -> &str {
+            "An execute tool."
+        }
+        fn parameters_schema(&self) -> Value {
+            json!({"type": "object"})
+        }
+        fn effect_class(&self) -> EffectClass {
+            EffectClass::Execute
+        }
+        async fn call(&self, _args: Value) -> Result<Value> {
+            Ok(Value::Null)
+        }
+    }
+
+    struct EgressTool;
+    #[async_trait]
+    impl Tool for EgressTool {
+        fn name(&self) -> &str {
+            "egress_tool"
+        }
+        fn description(&self) -> &str {
+            "An egress tool."
+        }
+        fn parameters_schema(&self) -> Value {
+            json!({"type": "object"})
+        }
+        fn effect_class(&self) -> EffectClass {
+            EffectClass::Egress
+        }
+        async fn call(&self, _args: Value) -> Result<Value> {
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn read_none_registers_and_executes() {
+        let mut registry = ToolRegistry::new();
+        registry.register(ReadTool);
+        assert!(registry.contains("read_tool"));
+    }
+
+    #[test]
+    #[should_panic(expected = "tool `execute_tool` declares an invalid placement")]
+    fn execute_none_fails_at_registration() {
+        let mut registry = ToolRegistry::new();
+        registry.register(ExecuteTool);
+    }
+
+    #[test]
+    #[should_panic(expected = "tool `egress_tool` declares an invalid placement")]
+    fn egress_none_fails_at_registration() {
+        let mut registry = ToolRegistry::new();
+        registry.register(EgressTool);
+    }
+
+    #[tokio::test]
+    async fn read_required_fails_at_dispatch_with_no_backend() {
+        struct ReadRequired;
+        #[async_trait]
+        impl Tool for ReadRequired {
+            fn name(&self) -> &str {
+                "read_required"
+            }
+            fn description(&self) -> &str {
+                "A read tool requiring sandbox."
+            }
+            fn parameters_schema(&self) -> Value {
+                json!({"type": "object"})
+            }
+            fn sandbox_requirement(&self) -> SandboxRequirement {
+                SandboxRequirement::Required
+            }
+            async fn call(&self, _args: Value) -> Result<Value> {
+                Ok(Value::Null)
+            }
+        }
+
+        let mut registry = ToolRegistry::new();
+        registry.register(ReadRequired);
+        let executor = ToolExecutor::new(registry);
+        let result = executor
+            .execute_one(&ToolCall::new("c1", "read_required", json!({})))
+            .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("no sandbox backend is available"),
+            "got: {msg}"
+        );
     }
 }
