@@ -8,7 +8,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**███████████████████░░░░░░░░░░░ 77%** weighted complete (118 ✅ landed · 44 ◐ partial · 20 ○ not started, of 182 stories)
+**███████████████████░░░░░░░░░░░ 77%** weighted complete (118 ✅ landed · 45 ◐ partial · 19 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -24,7 +24,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
-| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 1 | 3 | ██████████░░ 71% |
+| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 2 | 1 | ██████████░░ 83% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 8 | 1 | 3 | █████████░░░ 71% |
 
@@ -254,7 +254,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-13 — Observability, Storage, and Operations
 
-███████████░ 75% · 9 landed · 1 partial · 2 not started · milestone M0–M4
+███████████░ 83% · 9 landed · 2 partial · 1 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -267,7 +267,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-13-S07 | The standing fault-injection and load harness | P0 | ✅ | `rusty-server/tests/fault_injection.rs`: `KillSchedule` enum (`MidEffect`, `AfterEnqueue`), 4 tests covering kill-mid-effect, kill-after-enqueue, jitter-mode seeded reproducibility, seeded-defect fsync skip; `b605cb7` on `feat/ep-13-s07` |
 | EP-13-S08 | Observability derived from the log: traces, metrics, structured logs | P0 | ✅ | `rusty-otel` + `telemetry.rs`: traces, metrics, structured logs |
 | EP-13-S09 | Cost metering, budgets, and operator alerts | P0 | ✅ | `meter.rs` cost metering + budgets |
-| EP-13-S10 | Backup, restore, and disaster recovery | P1 | ○ | backup/restore/DR not started |
+| EP-13-S10 | Backup, restore, and disaster recovery | P1 | ◐ | `rustyness verify-log` subcommand ships in new binary target: gap-free seq check, paired turn-event verification (SuperStepStart/End, NodeInput/Output, CoordinationStart/End), cryptographic integrity via `Journal::from_snapshot`; `recompute_head_hash` made `pub` for test fixture construction; 6 integration tests (valid journal, missing position gap, unpaired super-step, unpaired node input, orphan close, corrupted head hash); clippy/doc clean; `ca40f39` on `feat/ep-13-s10`. **Open**: AC 1 backup config docs, AC 3 recovery objectives doc, AC 4 restore rehearsal CI, AC 5 blob locator re-verification (blocked on EP-13-S04 blob backend not on main), AC 6 retention pruning (needs audit store) |
 | EP-13-S11 | The M4 HA topology: stateless workers, pull-based work, honest health | P0 | ◐ | `rusty-worker` pull-based work; M4 HA topology partial |
 | EP-13-S12 | Zero-downtime rolling upgrade and the version-skew policy | P0 | ○ | rolling upgrade / version-skew policy not started |
 
