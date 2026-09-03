@@ -1,0 +1,18 @@
+[
+  {
+    "artifact_promoted": {
+      "candidate_id": "cand-odyssey-skill"
+    }
+  },
+  {
+    "block_filled": {
+      "block_label": "vpn-clients"
+    }
+  },
+  {
+    "failure_rate_below": {
+      "threshold_millis": 100
+    }
+  },
+  "business_decision_required"
+]

@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "mined_at": "2023-11-20T22:13:20Z",
+  "window_start": "2023-11-14T22:13:20Z",
+  "window_end": "2023-11-19T22:13:20Z",
+  "mode": "full_text_taxonomy",
+  "event_count": 6,
+  "intents": [
+    {
+      "intent_id": "in-317053554206b583f7138b394491b7abdf2a83df7ad03ac676f7f6caa747e396",
+      "label": "password reset access account",
+      "signature": [
+        "password",
+        "reset",
+        "access",
+        "account",
+        "portal"
+      ],
+      "event_ids": [
+        "ie-c2b0450dfc168e58affa68eb438e8ded545addf1e3206643395b3f7c8f3112e7",
+        "ie-df20831ab1c44fc402e0e5ca99c630e0fae2d8defcd52e21812adc4f1997ef08"
+      ],
+      "frequency": 2,
+      "seasonality_weekday": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0
+      ],
+      "resolution": {
+        "self_service": 2,
+        "deflected": 0,
+        "human_resolved": 0,
+        "unresolved": 0,
+        "abandoned": 0
+      },
+      "failure": {
+        "reopen_rate_millis": 0,
+        "reassignment_count": 0,
+        "abandonment_rate_millis": 0,
+        "ttr_median_minutes": 4,
+        "ttr_category_norm_minutes": 4
+      },
+      "failure_cost_millis": 0
+    },
+    {
+      "intent_id": "in-ab9bcedad91297107b15100f47172061868be04c5c750070d06f9615352ac1ae",
+      "label": "connect home office vpn",
+      "signature": [
+        "connect",
+        "home",
+        "office",
+        "vpn",
+        "certificate",
+        "drops",
+        "error",
+        "failing",
+        "hourly",
+        "still"
+      ],
+      "event_ids": [
+        "ie-167b2ad80ed90ea8f04fde54dc2bbbaa6f7c1dc45c223795f5672b0c89f82bdd",
+        "ie-424cecdc6b69b3bd56140b7ca4ee1bfb82ee7bf9d38a8940dfe9b1f29493089d",
+        "ie-49c09a6d6187a3fb4008640d7ff92604a50a95b4ed93ca1c6fdf84b5e5a2b371"
+      ],
+      "frequency": 3,
+      "seasonality_weekday": [
+        0,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0
+      ],
+      "resolution": {
+        "self_service": 0,
+        "deflected": 0,
+        "human_resolved": 3,
+        "unresolved": 0,
+        "abandoned": 0
+      },
+      "failure": {
+        "reopen_rate_millis": 0,
+        "reassignment_count": 1,
+        "abandonment_rate_millis": 0,
+        "ttr_median_minutes": 120,
+        "ttr_category_norm_minutes": 90
+      },
+      "failure_cost_millis": 1100
+    },
+    {
+      "intent_id": "in-e27a29173b9541384339eaa725e2b2292cc88f934d976c4e745f69b4ef6fb0dc",
+      "label": "arrived hire laptop new",
+      "signature": [
+        "arrived",
+        "hire",
+        "laptop",
+        "new"
+      ],
+      "event_ids": [
+        "ie-174072107f11a531131992609192a52ea97c6a333f2fd1363a91da1689198e0b"
+      ],
+      "frequency": 1,
+      "seasonality_weekday": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "resolution": {
+        "self_service": 0,
+        "deflected": 0,
+        "human_resolved": 0,
+        "unresolved": 0,
+        "abandoned": 1
+      },
+      "failure": {
+        "reopen_rate_millis": 0,
+        "reassignment_count": 0,
+        "abandonment_rate_millis": 1000,
+        "ttr_median_minutes": null,
+        "ttr_category_norm_minutes": 90
+      },
+      "failure_cost_millis": 300
+    }
+  ]
+}

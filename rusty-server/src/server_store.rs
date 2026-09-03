@@ -42,6 +42,7 @@ use rusty_agent_runtime::deploy::{
     StoredEnvSecret,
 };
 use rusty_agent_runtime::durable::resolve_timeout_bound_ms;
+use rusty_agent_runtime::gaps::GapLedger;
 use rusty_agent_runtime::journal::{ArtifactStore, FileArtifactStore, JournalSnapshot};
 use rusty_agent_runtime::knowledge::{ChunkRecord, KnowledgeSource, SourceTombstone};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
@@ -69,6 +70,7 @@ use crate::connectors;
 use crate::coordination::{self, CoordinationRecord};
 use crate::crons::{self, CronRecord};
 use crate::deploy;
+use crate::gaps;
 use crate::journals;
 use crate::knowledge;
 use crate::learn;
@@ -648,6 +650,20 @@ pub(crate) trait ServerStore: Send + Sync {
     ) -> StoreResult<Option<VersionPointer>>;
     /// The tenant's version pointers (order unspecified; routes sort).
     async fn list_version_pointers(&self, tenant: &str) -> StoreResult<Vec<VersionPointer>>;
+
+    // -- The demand-side gap ledger (wave 2) --------------------------- //
+
+    /// Fetch the tenant's whole gap-ledger snapshot (`None` when the
+    /// tenant has never filed — routes construct an empty ledger lazily
+    /// and persist only on the first mutation, so an unread tenant costs
+    /// no row).
+    async fn get_gap_ledger(&self, tenant: &str) -> StoreResult<Option<GapLedger>>;
+    /// Persist the tenant's whole ledger snapshot. Mutations are
+    /// serialized under the route's per-tenant lock, so the backend
+    /// upserts exactly what the lock produced — backends never merge
+    /// snapshots, and the mutation chains inside the snapshot are the
+    /// store of record.
+    async fn put_gap_ledger(&self, tenant: &str, ledger: &GapLedger) -> StoreResult<()>;
 
     // -- The configuration registry (R0.11 Extension Plane, wave 1) ----- //
 
@@ -1288,6 +1304,9 @@ pub(crate) struct JsonFileStore {
     /// per pointer under `{store_path}/learn/versions/` (the filename is
     /// the key's hash; the file body carries the key).
     versions: Mutex<HashMap<String, VersionPointer>>,
+    /// Gap-ledger snapshots keyed by tenant (demand-side learning, wave
+    /// 2), one snapshot file per tenant under `{store_path}/gaps/`.
+    gap_ledgers: Mutex<HashMap<String, GapLedger>>,
     /// The configuration registry (R0.11 wave 1): artifact records keyed
     /// by tenant-scoped surface key, one file per record under
     /// `{store_path}/registry/artifacts/` (the filename is the key's
@@ -1385,6 +1404,7 @@ impl JsonFileStore {
             memory_artifacts: memory::artifact_store(root),
             candidates: Mutex::new(learn::load_candidates(root)),
             versions: Mutex::new(learn::load_versions(root)),
+            gap_ledgers: Mutex::new(gaps::load_ledgers(root, crate::auth::DEFAULT_TENANT)),
             artifacts: Mutex::new(registry::load_artifacts(root)),
             policies: Mutex::new(policy::load_policies(root)),
             activations: Mutex::new(policy::load_activations(root)),
@@ -2710,6 +2730,22 @@ impl ServerStore for JsonFileStore {
             .collect())
     }
 
+    async fn get_gap_ledger(&self, tenant: &str) -> StoreResult<Option<GapLedger>> {
+        Ok(self.gap_ledgers.lock().await.get(tenant).cloned())
+    }
+
+    async fn put_gap_ledger(&self, tenant: &str, ledger: &GapLedger) -> StoreResult<()> {
+        let mut map = self.gap_ledgers.lock().await;
+        // File before index (the memory-put ordering): a crash between
+        // the two leaves an in-memory entry the next reload clears,
+        // never a snapshot file no index remembers.
+        gaps::persist(&self.root, tenant, crate::auth::DEFAULT_TENANT, ledger)
+            .await
+            .map_err(io_err("persist gap ledger"))?;
+        map.insert(tenant.to_string(), ledger.clone());
+        Ok(())
+    }
+
     async fn put_artifact(&self, tenant: &str, record: &ArtifactRecord) -> StoreResult<bool> {
         let scoped = crate::auth::scope_id(tenant, record.surface.as_str());
         let mut map = self.artifacts.lock().await;
@@ -3717,6 +3753,7 @@ mod postgres {
         DeploymentPointer, DeploymentRevision, EnvSecretRecord, Environment, RevisionId,
         StoredEnvSecret,
     };
+    use rusty_agent_runtime::gaps::GapLedger;
     use rusty_agent_runtime::journal::{ArtifactStore, JournalSnapshot};
     use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
     use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord};
@@ -4073,6 +4110,18 @@ mod postgres {
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )"#;
 
+    /// Gap-ledger snapshots (demand-side learning, wave 2): one row per
+    /// tenant, upserted whole on every mutation — the route's per-tenant
+    /// lock serializes read-modify-write, so the row stores exactly what
+    /// the lock produced and the backend never merges snapshots. The
+    /// mutation chains inside the snapshot are the store of record.
+    pub(crate) const CREATE_GAP_LEDGERS_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS server_gap_ledgers (
+            tenant     TEXT PRIMARY KEY,
+            snapshot   JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )"#;
+
     /// Registry artifacts (R0.11 wave 1): one row per artifact record,
     /// keyed by tenant-scoped surface key. Family and name are real
     /// columns (the registry's listing filters on them); the record —
@@ -4407,6 +4456,7 @@ mod postgres {
         CREATE_LEARN_CANDIDATES_SQL,
         CREATE_LEARN_CANDIDATES_INDEX_SQL,
         CREATE_LEARN_VERSIONS_SQL,
+        CREATE_GAP_LEDGERS_SQL,
         CREATE_REGISTRY_ARTIFACTS_SQL,
         CREATE_REGISTRY_ARTIFACTS_INDEX_SQL,
         CREATE_POLICIES_SQL,
@@ -5037,6 +5087,18 @@ mod postgres {
 
     pub(crate) const LIST_LEARN_VERSIONS_SQL: &str =
         "SELECT payload FROM server_learn_versions WHERE tenant = $1";
+
+    /// Gap-ledger statements (demand-side learning, wave 2): one
+    /// snapshot row per tenant, upserted whole — the route's per-tenant
+    /// lock owns read-modify-write, so the statement set is select +
+    /// upsert and nothing else.
+    pub(crate) const SELECT_GAP_LEDGER_SQL: &str =
+        "SELECT snapshot FROM server_gap_ledgers WHERE tenant = $1";
+
+    pub(crate) const UPSERT_GAP_LEDGER_SQL: &str = r#"
+        INSERT INTO server_gap_ledgers (tenant, snapshot)
+        VALUES ($1, $2)
+        ON CONFLICT (tenant) DO UPDATE SET snapshot = $2, updated_at = now()"#;
 
     /// Registry-artifact statements (R0.11 wave 1). Declaration is
     /// insert-only on the tenant-scoped surface key (artifact identity is
@@ -7762,6 +7824,26 @@ mod postgres {
                 .collect()
         }
 
+        async fn get_gap_ledger(&self, tenant: &str) -> StoreResult<Option<GapLedger>> {
+            let row = sqlx::query(SELECT_GAP_LEDGER_SQL)
+                .bind(tenant)
+                .fetch_optional(self.pool().await?)
+                .await
+                .map_err(db_err("select gap ledger"))?;
+            row.map(|row| record_from_payload("gap ledger", row.get::<Value, _>("snapshot")))
+                .transpose()
+        }
+
+        async fn put_gap_ledger(&self, tenant: &str, ledger: &GapLedger) -> StoreResult<()> {
+            sqlx::query(UPSERT_GAP_LEDGER_SQL)
+                .bind(tenant)
+                .bind(record_to_payload(ledger)?)
+                .execute(self.pool().await?)
+                .await
+                .map_err(db_err("upsert gap ledger"))?;
+            Ok(())
+        }
+
         async fn put_artifact(&self, tenant: &str, record: &ArtifactRecord) -> StoreResult<bool> {
             let row = sqlx::query(INSERT_REGISTRY_ARTIFACT_SQL)
                 .bind(crate::auth::scope_id(tenant, record.surface.as_str()))
@@ -9106,7 +9188,7 @@ mod postgres {
 
         #[test]
         fn migration_sql_creates_all_tables_idempotently() {
-            assert_eq!(MIGRATION_SQL.len(), 58);
+            assert_eq!(MIGRATION_SQL.len(), 59);
             for stmt in MIGRATION_SQL {
                 assert!(
                     stmt.contains("IF NOT EXISTS"),

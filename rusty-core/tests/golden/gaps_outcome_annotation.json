@@ -1,0 +1,21 @@
+{
+  "annotation_id": "oa-4164533953e1d445307aea95eec7d45bb2b3629373cfe26fa93f2cd68c4040a9",
+  "turn_ref": "session-9:turn-4",
+  "intent_id": "odyssey-login",
+  "outcome": "corrected",
+  "judge_votes": [
+    {
+      "judge": "judge:claude",
+      "vote": "corrected"
+    },
+    {
+      "judge": "judge:gpt-4o",
+      "vote": "corrected"
+    },
+    {
+      "judge": "judge:heuristic",
+      "vote": "accepted"
+    }
+  ],
+  "scored_at": "2023-11-14T22:30:00Z"
+}

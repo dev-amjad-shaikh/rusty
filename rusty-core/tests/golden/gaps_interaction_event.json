@@ -1,0 +1,18 @@
+{
+  "event_id": "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e",
+  "source": {
+    "system": "servicenow",
+    "stream": "sp_log",
+    "record_id": "SRL0042"
+  },
+  "actor": {
+    "role": "employee",
+    "id": "u-7f3a"
+  },
+  "channel": "portal_search",
+  "utterance": "odyssey login loop after password change",
+  "resolution_path": "abandoned",
+  "outcome": "no_result",
+  "occurred_at": "2023-11-14T22:13:20Z",
+  "links": []
+}

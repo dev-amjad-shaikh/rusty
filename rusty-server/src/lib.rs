@@ -187,6 +187,7 @@ mod crons;
 mod deploy;
 mod error;
 mod evaluations;
+mod gaps;
 mod gate;
 mod journals;
 mod knowledge;
@@ -294,6 +295,9 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
     "crons",
     "deployments",
     "env-secrets",
+    "gaps",
+    "hunts",
+    "induction",
     "journals",
     "keys",
     "knowledge",

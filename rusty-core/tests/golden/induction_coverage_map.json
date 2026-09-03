@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "crawled_at": "2023-11-20T22:13:20Z",
+  "claims": [
+    {
+      "claim_id": "cc-77a0746bda3f37aa71ad33501cceac0017f624be40235a9978ae1236da9ed75d",
+      "intent_id": "in-e27a29173b9541384339eaa725e2b2292cc88f934d976c4e745f69b4ef6fb0dc",
+      "artifact": {
+        "kind": "runbook",
+        "id": "KB003"
+      },
+      "confidence": "keyword_overlap",
+      "freshness": {
+        "last_revised": "2022-10-10T22:13:20Z",
+        "stale": true,
+        "references_retired_system": true
+      }
+    },
+    {
+      "claim_id": "cc-783f81042ff5c70cb7b030ed9def9a9521da764ac909d400b8f298f917d26688",
+      "intent_id": "in-ab9bcedad91297107b15100f47172061868be04c5c750070d06f9615352ac1ae",
+      "artifact": {
+        "kind": "kb_article",
+        "id": "KB001"
+      },
+      "confidence": "exact_signature",
+      "freshness": {
+        "last_revised": "2023-10-15T22:13:20Z",
+        "stale": false,
+        "references_retired_system": false
+      }
+    },
+    {
+      "claim_id": "cc-cdda468a4ed21186c91f0b370fd7650a4e7ba2632a1c0982253e081f07d3ac7c",
+      "intent_id": "in-317053554206b583f7138b394491b7abdf2a83df7ad03ac676f7f6caa747e396",
+      "artifact": {
+        "kind": "kb_article",
+        "id": "KB002"
+      },
+      "confidence": "keyword_overlap",
+      "freshness": {
+        "last_revised": "2023-11-04T22:13:20Z",
+        "stale": false,
+        "references_retired_system": false
+      }
+    }
+  ],
+  "latent_artifacts": [
+    {
+      "kind": "kb_article",
+      "id": "KB004"
+    }
+  ]
+}

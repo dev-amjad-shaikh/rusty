@@ -239,6 +239,7 @@
 
 pub mod a2a;
 pub mod agents;
+pub mod allowlist;
 pub mod artifact;
 pub mod broker;
 pub mod capability;
@@ -257,11 +258,12 @@ pub mod durable;
 pub mod effects;
 pub mod error;
 pub mod executor;
+pub mod gaps;
 pub mod goals;
 pub mod graph;
 pub mod hooks;
 pub mod inbox;
-pub mod allowlist;
+pub mod induction;
 pub mod install;
 pub mod journal;
 pub mod knowledge;

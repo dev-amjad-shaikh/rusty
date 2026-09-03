@@ -28,6 +28,17 @@ use rusty_agent_runtime::durable::{
     ResolvedRetryParameters, RetryDecision, resolve_retry_parameters, resolve_timeout_bound_ms,
     retry_decision_event, timeout_decision_event,
 };
+use rusty_agent_runtime::gaps::{
+    ActorRef, AdjacencySource, Citation, CitationKind, ClosureCriteria, ClosureEvidence,
+    EventSource, GapError, GapLedger, GapOrigin, GapStatus, GapSubject, InteractionChannel,
+    InteractionEvent, InteractionOutcome, JudgeVote, OutcomeAnnotation, OutcomeClass,
+    ResolutionPath,
+};
+use rusty_agent_runtime::induction::{
+    crawl_coverage, declared_blocks, join_maps, mine_intents, seed_ledger, CoverageConfig,
+    InductionError, MiningConfig, SupplyArtifact, DEFAULT_BLOCK_CHAR_LIMIT,
+    DEFAULT_FAILING_THRESHOLD_MILLIS,
+};
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
@@ -96,6 +107,12 @@ pub(crate) struct AppState {
     /// Per-thread locks serializing `update_state`'s read-modify-write:
     /// without one, two concurrent writes could mint the same `step`.
     pub state_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Per-tenant locks serializing gap-ledger read-modify-write
+    /// (demand-side learning, wave 2): the ledger is one snapshot per
+    /// tenant, so every mutation is a load → mutate → persist cycle
+    /// that must not interleave with a sibling — `state_locks`' shape
+    /// and reasoning, one level up (tenant, not thread).
+    pub gap_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// The cooperative drain control (R0.6 wave 2c): cancelling it stops
     /// the cron scheduler and the outbox relay, rejects new runs with 503,
     /// and parks every in-flight run at its next checkpoint boundary.
@@ -281,6 +298,7 @@ pub(crate) fn build_router(
         run_deps,
         server_store,
         state_locks: Mutex::new(HashMap::new()),
+        gap_locks: Mutex::new(HashMap::new()),
         shutdown,
         trigger_debounce: Mutex::new(HashMap::new()),
         #[cfg(feature = "capsules")]
@@ -477,6 +495,45 @@ pub(crate) fn build_router(
         .route("/memory/forget", post(forget_memory))
         .route("/memory/forget_scope", post(forget_memory_scope))
         .route("/memory/{memory_id}", get(get_memory))
+        // The demand-side gap ledger (wave 2): interaction-event
+        // ingestion, generic and runtime-shaped filing, the frontier's
+        // speculative entries, the hunting queue's work order, and the
+        // lifecycle verbs (transition / probe / close / rollback) plus
+        // the behavioral signal (outcomes, sweep). Static segments win
+        // over `/gaps/{gap_id}`, the `/memory` routing rule.
+        .route("/gaps", get(work_order_gaps))
+        .route("/gaps/events", post(record_gap_event))
+        .route("/gaps/file", post(file_gap))
+        .route("/gaps/file/escalation", post(file_gap_escalation))
+        .route("/gaps/file/correction", post(file_gap_correction))
+        .route("/gaps/file/zero_recall", post(file_gap_zero_recall))
+        .route("/gaps/speculative", post(open_speculative_gap))
+        .route("/gaps/outcomes", post(record_gap_outcome))
+        .route("/gaps/annotations", post(record_gap_annotation))
+        .route(
+            "/gaps/intents/{intent_id}/outcomes",
+            get(intent_outcome_curve),
+        )
+        .route("/gaps/sweep", post(sweep_gaps))
+        .route("/gaps/{gap_id}", get(get_gap))
+        .route("/gaps/{gap_id}/transition", post(transition_gap))
+        .route("/gaps/{gap_id}/probe", post(probe_gap))
+        .route("/gaps/{gap_id}/close", post(close_gap))
+        .route("/gaps/{gap_id}/rollback", post(rollback_gap))
+        // The induction surface (demand-side learning, wave 3): one
+        // composite pass — mine the tenant's event corpus into the
+        // intent map, invert the supplied artifacts into coverage, join
+        // the gap matrix, optionally seed the ledger. The maps are
+        // projections: answered, never stored.
+        .route("/induction/run", post(induction_run))
+        // The hunting loop (demand-side learning, wave 4): a bounded
+        // cycle takes the work order's top entries hunting; a drafted
+        // candidate moves one to trial; a contradiction parks one on
+        // the business with its evidence attached. Closure arrives
+        // through the promotion gate, not a hunt verb.
+        .route("/hunts/cycle", post(hunt_cycle))
+        .route("/hunts/{gap_id}/draft", post(hunt_draft))
+        .route("/hunts/{gap_id}/blocked", post(hunt_blocked))
         // The skill plane (skill slice): governed `SKILL.md` packages —
         // register (parse + scan + immutable version), the tier-1 metadata
         // catalog, on-demand tier-2 body and tier-3 member files, pinned
@@ -4733,6 +4790,1157 @@ async fn get_memory(
         .ok_or_else(|| ApiError::not_found(format!("memory `{memory_id}` not found")))
 }
 
+// --------------------------------------------------------------------- //
+// The demand-side gap ledger (wave 2)
+//
+// The HTTP surface over core's `gaps` contracts (`docs/gap-ledger-
+// design.md`): one ledger per tenant, persisted as a whole snapshot
+// after every mutation. Every mutating handler runs the same cycle —
+// per-tenant lock, load-or-empty, mutate through core's validated API,
+// persist — so the store backends never merge and the mutation chains
+// inside the snapshot stay the store of record. Core's purity rule is
+// kept at the edge: timestamps are injected here (`Utc::now`), never
+// taken from a clock inside the ledger.
+// --------------------------------------------------------------------- //
+
+/// The per-tenant lock serializing gap-ledger mutations (see
+/// [`AppState::gap_locks`]).
+async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
+    state
+        .gap_locks
+        .lock()
+        .await
+        .entry(tenant.to_string())
+        .or_default()
+        .clone()
+}
+
+/// Load the tenant's ledger, or an empty one — an unread tenant costs
+/// no store row; the first mutation persists.
+async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
+    Ok(state
+        .server_store
+        .get_gap_ledger(tenant)
+        .await
+        .map_err(internal_err)?
+        .unwrap_or_default())
+}
+
+/// Persist the tenant's snapshot after a mutation.
+async fn persist_gap_ledger(
+    state: &AppState,
+    tenant: &str,
+    ledger: &GapLedger,
+) -> Result<(), ApiError> {
+    state
+        .server_store
+        .put_gap_ledger(tenant, ledger)
+        .await
+        .map_err(internal_err)
+}
+
+/// Map a core ledger refusal onto the wire: schema violations are
+/// `400`, unknown ids `404`, and every state-machine or gate refusal is
+/// a `409` conflict — a ledger that drives autonomous work never fails
+/// silently, and it never fails ambiguously.
+fn gap_err(error: GapError) -> ApiError {
+    match &error {
+        GapError::EmptyField(_) | GapError::FieldTooLong { .. } | GapError::EmptyEvidence => {
+            ApiError::bad_request(error.to_string())
+        }
+        GapError::EmptyVotes => ApiError::bad_request(error.to_string()),
+        GapError::UnknownEvent(_) | GapError::UnknownGap(_) | GapError::UnknownMutation { .. } => {
+            ApiError::not_found(error.to_string())
+        }
+        GapError::EventExists(_)
+        | GapError::AnnotationExists(_)
+        | GapError::IllegalTransition { .. }
+        | GapError::UnvalidatedSpeculation(_)
+        | GapError::NotSpeculative(_)
+        | GapError::ProbeOnObserved(_)
+        | GapError::ClosureUnsatisfied { .. } => {
+            ApiError::new(StatusCode::CONFLICT, "conflict", error.to_string())
+        }
+        GapError::UnsupportedFormat(_) | GapError::Serde(_) => internal_err(error),
+    }
+}
+
+/// Whether a gap id was minted by the filing that just returned it
+/// (chain length 1 = `Filed` only) or reinforced an existing entry —
+/// the `201`/`200` distinction the memory write surface already makes.
+fn gap_created(ledger: &GapLedger, gap_id: &str) -> bool {
+    ledger
+        .chain(gap_id)
+        .map(|chain| chain.len() == 1)
+        .unwrap_or(false)
+}
+
+/// Run one locked mutation cycle and answer from its result.
+async fn mutate_gap_ledger<T>(
+    state: &AppState,
+    tenant: &TenantContext,
+    mutate: impl FnOnce(&mut GapLedger) -> Result<T, GapError>,
+) -> Result<T, ApiError> {
+    let lock = gap_lock(state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(state, tenant.tenant()).await?;
+    let result = mutate(&mut ledger).map_err(gap_err)?;
+    persist_gap_ledger(state, tenant.tenant(), &ledger).await?;
+    Ok(result)
+}
+
+#[derive(Debug, Deserialize)]
+struct GapEventPayload {
+    /// The citation anchor back into the source system.
+    source: EventSource,
+    /// Who acted (role-typed, pseudonymizable).
+    actor: ActorRef,
+    /// The channel the interaction arrived on.
+    channel: InteractionChannel,
+    /// The expressed need: query text, message, or short description.
+    utterance: String,
+    /// How it was resolved.
+    resolution_path: ResolutionPath,
+    /// What happened in the end — the failure variants are the
+    /// highest-value records.
+    outcome: InteractionOutcome,
+    /// When the interaction occurred (default: now — connectors should
+    /// always send the source row's own timestamp).
+    #[serde(default)]
+    occurred_at: Option<DateTime<Utc>>,
+    /// When it resolved, if it did.
+    #[serde(default)]
+    resolved_at: Option<DateTime<Utc>>,
+    /// Related event ids (journeys are data, not inference).
+    #[serde(default)]
+    links: Vec<String>,
+    /// Optionally assign an intent in the same call (the assignment is
+    /// versioned; `assigner` defaults to `api`).
+    #[serde(default)]
+    intent_id: Option<String>,
+    /// See `intent_id`.
+    #[serde(default)]
+    assigner: Option<String>,
+}
+
+/// `POST /gaps/events` — record an interaction event → `201 {event_id,
+/// created: true}`; `200` + `created: false` when the content address
+/// is already recorded (re-ingesting one source row converges — a
+/// re-run connector cannot double-count demand).
+async fn record_gap_event(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<GapEventPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let occurred_at = payload.occurred_at.unwrap_or(now);
+    let event = InteractionEvent::new(
+        payload.source,
+        payload.actor,
+        payload.channel,
+        payload.utterance,
+        payload.resolution_path,
+        payload.outcome,
+        occurred_at,
+        payload.resolved_at,
+        payload.links,
+    )
+    .map_err(gap_err)?;
+    let assigner = payload.assigner.unwrap_or_else(|| "api".to_string());
+    let (existed, event_id) = {
+        let lock = gap_lock(&state, tenant.tenant()).await;
+        let _guard = lock.lock().await;
+        let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+        let existed = ledger.event(&event.event_id).is_some();
+        let event_id = ledger.record_event(event).map_err(gap_err)?;
+        if let Some(intent_id) = payload.intent_id {
+            ledger
+                .assign_intent(&event_id, intent_id, assigner, now)
+                .map_err(gap_err)?;
+        }
+        persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+        (existed, event_id)
+    };
+    Ok((
+        if existed {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        },
+        Json(json!({ "event_id": event_id, "created": !existed })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct FileGapPayload {
+    /// What the gap is about (a mined intent or a free question shape).
+    subject: GapSubject,
+    /// What the agent does not know, in one sentence.
+    statement: String,
+    /// The citations justifying the gap — non-empty by schema.
+    evidence: Vec<Citation>,
+    /// Who files it: `operator`, `induction`, or `untrusted_derived`.
+    /// The runtime origins belong to the runtime-shaped endpoints
+    /// (`/gaps/file/escalation`, `/gaps/file/correction`,
+    /// `/gaps/file/zero_recall`), and `speculative` belongs to
+    /// `/gaps/speculative` — provenance classes are structurally
+    /// distinct because the ledger drives autonomous work.
+    origin: GapOrigin,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+    /// Observed demand volume behind the filing (default 1).
+    #[serde(default = "one")]
+    volume: u64,
+    /// The failure-cost estimate in milli-units (default 0).
+    #[serde(default)]
+    failure_cost_millis: u64,
+}
+
+fn one() -> u64 {
+    1
+}
+
+/// `POST /gaps/file` — file a gap → `201 {gap_id, created: true}`;
+/// `200` + `created: false` when the filing reinforced an existing
+/// entry (dedupe is reinforcement, not duplication). Filing against a
+/// closed entry reopens it — the ledger never forgets a gap closed on
+/// paper but not in practice.
+async fn file_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<FileGapPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    match payload.origin {
+        GapOrigin::Operator | GapOrigin::Induction | GapOrigin::UntrustedDerived => {}
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "origin `{other:?}` is not client-fileable: runtime origins belong to the \
+                 /gaps/file/* endpoints, speculative to /gaps/speculative — provenance \
+                 classes are structurally distinct"
+            )));
+        }
+    }
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_gap(
+            payload.subject,
+            payload.statement,
+            payload.evidence,
+            payload.origin,
+            payload.closure_criteria,
+            payload.volume,
+            payload.failure_cost_millis,
+            "api",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+/// The shared body of the runtime-shaped filing endpoints: an event
+/// citation plus the filing's own statement and closure criteria.
+#[derive(Debug, Deserialize)]
+struct RuntimeFilingPayload {
+    /// The interaction event behind the filing.
+    event_id: String,
+    /// What the agent does not know, in one sentence.
+    statement: String,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+    /// The failure-cost estimate in milli-units (default 0).
+    #[serde(default)]
+    failure_cost_millis: u64,
+}
+
+/// `POST /gaps/file/escalation` — file from an escalation event: a
+/// human had to resolve what the agent could not, and the entry closes
+/// only when the loop has extracted what the human did.
+async fn file_gap_escalation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RuntimeFilingPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_escalation(
+            &payload.event_id,
+            payload.statement,
+            payload.closure_criteria,
+            payload.failure_cost_millis,
+            "api:escalation",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+/// `POST /gaps/file/correction` — file from an operator or user
+/// correction, citing the event that produced it.
+async fn file_gap_correction(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RuntimeFilingPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_correction(
+            &payload.event_id,
+            payload.statement,
+            payload.closure_criteria,
+            payload.failure_cost_millis,
+            "api:correction",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ZeroRecallPayload {
+    /// The query recall returned nothing for.
+    query: String,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+    /// The failure-cost estimate in milli-units (default 0).
+    #[serde(default)]
+    failure_cost_millis: u64,
+}
+
+/// `POST /gaps/file/zero_recall` — file from a memory recall that
+/// returned nothing: a miss is evidence of a question the declared
+/// schema did not anticipate.
+async fn file_gap_zero_recall(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ZeroRecallPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_zero_recall(
+            &payload.query,
+            payload.closure_criteria,
+            payload.failure_cost_millis,
+            "api:zero-recall",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct SpeculativeGapPayload {
+    /// What the gap is about.
+    subject: GapSubject,
+    /// What the agent does not know, in one sentence.
+    statement: String,
+    /// The adjacency the expansion walked (structural / statistical /
+    /// model-prior, in descending order of trust).
+    adjacency: AdjacencySource,
+    /// The citation for the adjacency edge that justified the widening
+    /// — which source spoke, and which edge, stays in the record.
+    edge_citation: Citation,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+}
+
+/// `POST /gaps/speculative` — file a frontier-expansion entry.
+/// Speculation cannot cite itself as evidence: the entry cannot hunt
+/// and never appears in the work order until a demand probe validates
+/// it (`/gaps/{gap_id}/probe`).
+async fn open_speculative_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SpeculativeGapPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.open_speculative(
+            payload.subject,
+            payload.statement,
+            payload.adjacency,
+            payload.edge_citation,
+            payload.closure_criteria,
+            "frontier:api",
+            now,
+        )
+    })
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "gap_id": gap_id, "created": true, "observed": false })),
+    ))
+}
+
+/// `GET /gaps` — the hunting loop's standing work order: actionable
+/// entries (open or reopened, speculation validated) ranked by
+/// priority.
+async fn work_order_gaps(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let work_order: Vec<Value> = ledger
+        .work_order()
+        .into_iter()
+        .map(|entry| {
+            json!({
+                "gap_id": entry.gap_id,
+                "subject": entry.subject,
+                "statement": entry.statement,
+                "origin": entry.origin,
+                "status": entry.status,
+                "volume": entry.volume,
+                "failure_cost_millis": entry.failure_cost_millis,
+                "priority_score": entry.priority_score(),
+                "filed_at": entry.filed_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "work_order": work_order })))
+}
+
+/// `GET /gaps/{gap_id}` — one entry with its full mutation chain (the
+/// chain is the store of record; the entry is its fold).
+async fn get_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({
+        "entry": entry,
+        "chain": ledger.chain(&gap_id),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct TransitionGapPayload {
+    /// The target status. Closure goes through `/gaps/{gap_id}/close`
+    /// — a bare transition to `closed` would be closure without
+    /// criteria, and core refuses it.
+    to: GapStatus,
+}
+
+/// `POST /gaps/{gap_id}/transition` — move an entry through the
+/// validated status machine (`409` on an illegal edge, on parking an
+/// observed gap, or on sending unvalidated speculation hunting).
+async fn transition_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<TransitionGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.transition(&gap_id, payload.to, "api", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProbeGapPayload {
+    /// Matching demand found in the event store.
+    demand_hits: u64,
+    /// Whether reachable supply already covers the intent.
+    supply_covered: bool,
+}
+
+/// `POST /gaps/{gap_id}/probe` — record a demand/supply probe against
+/// a speculative entry. Demand found validates the entry into the
+/// ordinary queue (the probe becomes a citation); an empty probe parks
+/// the entry under the decay clock.
+async fn probe_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<ProbeGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.record_probe(
+            &gap_id,
+            payload.demand_hits,
+            payload.supply_covered,
+            "probe:api",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct CloseGapPayload {
+    /// The evidence the closure check runs against — it must match the
+    /// entry's typed criteria or the close refuses (`409`).
+    evidence: ClosureEvidence,
+}
+
+/// `POST /gaps/{gap_id}/close` — mechanical closure: the ledger checks
+/// the entry's typed criteria against the supplied evidence and closes
+/// with a resolution link, or refuses.
+async fn close_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<CloseGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.evaluate_closure(&gap_id, &payload.evidence, "api", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct RollbackGapPayload {
+    /// The mutation id to restore state to. The restore re-folds the
+    /// chain prefix ending at the target — exact, never a
+    /// reconstruction.
+    to_mutation_id: String,
+}
+
+/// `POST /gaps/{gap_id}/rollback` — roll a gap back to a prior
+/// mutation, appending a `RolledBack` link (rollback is additive,
+/// never destructive: the chain keeps the full history).
+async fn rollback_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<RollbackGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.rollback(&gap_id, &payload.to_mutation_id, "api", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GapOutcomePayload {
+    /// The intent the served turn belonged to.
+    intent_id: String,
+    /// The outcome class — a redo or correction is negative signal even
+    /// when it reads as a polite new instruction.
+    outcome: OutcomeClass,
+    /// How many outcomes of this class to record (default 1).
+    #[serde(default = "one")]
+    count: u64,
+}
+
+/// `POST /gaps/outcomes` — score served turns against their intent
+/// (the behavioral signal). Answers the intent's current failure rate
+/// per mille (`null` when unscored — an unmeasured intent is not a
+/// passing intent).
+async fn record_gap_outcome(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<GapOutcomePayload>,
+) -> Result<Json<Value>, ApiError> {
+    if payload.count == 0 {
+        return Err(ApiError::bad_request(
+            "`count` must be at least 1 — recording zero outcomes records nothing".to_string(),
+        ));
+    }
+    let lock = gap_lock(&state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    for _ in 0..payload.count {
+        ledger.record_outcome(&payload.intent_id, payload.outcome);
+    }
+    let failure_rate_millis = ledger.failure_rate_millis(&payload.intent_id);
+    persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+    Ok(Json(json!({
+        "intent_id": payload.intent_id,
+        "failure_rate_millis": failure_rate_millis,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GapAnnotationPayload {
+    /// The scored turn's anchor back into the log.
+    turn_ref: String,
+    /// The intent the turn was joined to (the miner's vocabulary).
+    intent_id: String,
+    /// The judge samples — at least one; the outcome is their majority
+    /// vote, a tie abstains to `neutral`.
+    judge_votes: Vec<JudgeVote>,
+    /// When the score was produced (default: now — scorers should send
+    /// the scoring run's own timestamp).
+    #[serde(default)]
+    scored_at: Option<DateTime<Utc>>,
+}
+
+/// `POST /gaps/annotations` — record a scored turn with its judge
+/// votes (the provenance-rich behavioral signal) → `201 {annotation_id,
+/// outcome, failure_rate_millis, closed_gap_ids}`. Re-recording the
+/// same annotation answers `200` by identity; a colliding id with
+/// different content is a `409`. A measurement that moves an intent's
+/// failure rate below an entry's threshold closes that entry in the
+/// same call — closure needs no human bookkeeping.
+async fn record_gap_annotation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<GapAnnotationPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let scored_at = payload.scored_at.unwrap_or_else(Utc::now);
+    let intent_id = payload.intent_id.clone();
+    let annotation = OutcomeAnnotation::from_votes(
+        payload.turn_ref,
+        payload.intent_id,
+        payload.judge_votes,
+        scored_at,
+    )
+    .map_err(gap_err)?;
+    let outcome = annotation.outcome;
+    let now = Utc::now();
+    let (recorded, existed) = mutate_gap_ledger(&state, &tenant, |ledger| {
+        let existed = ledger.annotation(&annotation.annotation_id).is_some();
+        ledger
+            .record_annotation(annotation, "api", now)
+            .map(|recorded| (recorded, existed))
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let status = if existed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((
+        status,
+        Json(json!({
+            "annotation_id": recorded.annotation_id,
+            "outcome": outcome,
+            "failure_rate_millis": ledger.failure_rate_millis(&intent_id),
+            "closed_gap_ids": recorded.closed_gap_ids,
+        })),
+    ))
+}
+
+/// `GET /gaps/intents/{intent_id}/outcomes` — the intent's per-turn
+/// efficacy record: the tally, the measured failure rate, and every
+/// annotation oldest first. "This skill cut this intent's correction
+/// rate" renders from this alone.
+async fn intent_outcome_curve(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(intent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let curve: Vec<&OutcomeAnnotation> = ledger.outcome_curve(&intent_id);
+    Ok(Json(json!({
+        "intent_id": intent_id,
+        "tally": ledger.tally(&intent_id),
+        "failure_rate_millis": ledger.failure_rate_millis(&intent_id),
+        "curve": curve,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct SweepGapsPayload {
+    /// The per-mille failure rate at or above which a closed gap
+    /// reopens.
+    threshold_millis: u32,
+}
+
+/// `POST /gaps/sweep` — the self-honesty pass: reopen closed gaps
+/// whose measured failure rate says the closure did not hold, and
+/// expire parked speculative entries whose decay clock ran out.
+async fn sweep_gaps(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SweepGapsPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    let (reopened, expired) = mutate_gap_ledger(&state, &tenant, |ledger| {
+        let reopened = ledger.sweep_reopens(payload.threshold_millis, "behavioral-signal", now)?;
+        let expired = ledger.expire_parked(now, "decay-clock")?;
+        Ok((reopened, expired))
+    })
+    .await?;
+    Ok(Json(json!({
+        "reopened": reopened,
+        "expired": expired,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct InductionRunPayload {
+    /// The reachable supply to invert (KB articles, runbooks, skills).
+    /// Empty is valid: every intent lands in the learn-now cell.
+    #[serde(default)]
+    artifacts: Vec<SupplyArtifact>,
+    /// Mining configuration (default: FTS+taxonomy, 400‰ Jaccard).
+    #[serde(default)]
+    mining_config: Option<MiningConfig>,
+    /// Coverage configuration (retired systems, staleness window,
+    /// keyword threshold).
+    #[serde(default)]
+    coverage_config: Option<CoverageConfig>,
+    /// The per-mille failure rate at or above which covered supply
+    /// counts as failing (default 200).
+    #[serde(default = "default_failing_threshold")]
+    failing_threshold_millis: u64,
+    /// Seed the ledger from the learn-now and failing-supply cells
+    /// (default false: a dry run renders the matrix only).
+    #[serde(default)]
+    seed: bool,
+    /// Emit declared-block specs for the top N intents (default 0).
+    #[serde(default)]
+    declared_blocks_top_n: usize,
+}
+
+fn default_failing_threshold() -> u64 {
+    DEFAULT_FAILING_THRESHOLD_MILLIS
+}
+
+/// Map an induction refusal onto the wire, delegating ledger refusals
+/// to the gap mapping.
+fn induction_err(error: InductionError) -> ApiError {
+    match error {
+        InductionError::EmptyField(_) | InductionError::FieldTooLong { .. } => {
+            ApiError::bad_request(error.to_string())
+        }
+        InductionError::Gap(gap) => gap_err(gap),
+        InductionError::UnsupportedFormat(_) | InductionError::Serde(_) => internal_err(error),
+    }
+}
+
+/// `POST /induction/run` — one composite induction pass: mine the
+/// tenant's recorded events into the intent map (appending versioned
+/// intent reassignments for events the new pass placed differently —
+/// never an in-place edit), invert the supplied artifacts into the
+/// coverage map, join the gap matrix, and optionally seed the ledger
+/// and emit declared blocks. The maps are projections: computed from
+/// the ledger's events and the caller's artifacts, answered, never
+/// stored.
+async fn induction_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<InductionRunPayload>,
+) -> Result<Json<Value>, ApiError> {
+    if payload.failing_threshold_millis > 1000 {
+        return Err(ApiError::bad_request(
+            "`failing_threshold_millis` is a per-mille rate: 0–1000".to_string(),
+        ));
+    }
+    let now = Utc::now();
+    let mining_config = payload.mining_config.unwrap_or_default();
+    let coverage_config = payload.coverage_config.unwrap_or_default();
+    let threshold = payload.failing_threshold_millis;
+    let seed = payload.seed;
+    let top_n = payload.declared_blocks_top_n;
+
+    let lock = gap_lock(&state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+
+    let events: Vec<InteractionEvent> = ledger.events().cloned().collect();
+    let intent_map = mine_intents(&events, &mining_config, now).map_err(induction_err)?;
+    // Later passes re-place events through appended versioned
+    // reassignments, never in place (EP-07-S06 AC 5).
+    let mut reassignments = 0u64;
+    for intent in &intent_map.intents {
+        for event_id in &intent.event_ids {
+            if ledger.current_intent(event_id) != Some(intent.intent_id.as_str()) {
+                ledger
+                    .assign_intent(event_id, intent.intent_id.clone(), "induction", now)
+                    .map_err(gap_err)?;
+                reassignments += 1;
+            }
+        }
+    }
+    let coverage_map = crawl_coverage(&payload.artifacts, &intent_map, &coverage_config, now)
+        .map_err(induction_err)?;
+    let matrix = join_maps(&intent_map, &coverage_map, threshold, now);
+    let seeded = if seed {
+        seed_ledger(&mut ledger, &matrix, &intent_map, now, threshold as u32)
+            .map_err(induction_err)?
+    } else {
+        Vec::new()
+    };
+    let blocks = declared_blocks(&matrix, &intent_map, top_n, DEFAULT_BLOCK_CHAR_LIMIT);
+
+    persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+    Ok(Json(json!({
+        "intent_map": intent_map,
+        "coverage_map": coverage_map,
+        "matrix": matrix,
+        "reassignments": reassignments,
+        "seeded_gap_ids": seeded,
+        "declared_blocks": blocks,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// The hunting loop (demand-side learning, wave 4): a bounded cycle
+// spends its budget on the work order's top entries, a drafted learning
+// candidate moves a hunted gap to trial, and a contradiction parks one
+// on the business with the evidence attached. Closure is not a hunt
+// verb — it arrives through the learning gate, when the candidate the
+// gap names is promoted (see `close_gaps_on_promotion`).
+// --------------------------------------------------------------------- //
+
+/// The most gaps one cycle may hunt. The budget is bounded so a
+/// misconfigured caller cannot drain the queue in one call.
+const MAX_HUNT_CYCLE_BUDGET: u32 = 64;
+
+#[derive(Debug, Deserialize)]
+struct HuntCyclePayload {
+    /// How many gaps this cycle hunts (default 1, capped at
+    /// [`MAX_HUNT_CYCLE_BUDGET`]). The cycle takes the work order's top
+    /// entries, so the budget is always spent where priority is
+    /// highest.
+    #[serde(default)]
+    max_hunts: Option<u32>,
+}
+
+/// `POST /hunts/cycle` — run one hunting cycle: move the work order's
+/// top entries into `hunting` and answer `200 {cycle_hunts, budget}`
+/// with the picks. An empty queue hunts nothing — no work is not an
+/// error.
+async fn hunt_cycle(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<HuntCyclePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let budget = payload.max_hunts.unwrap_or(1);
+    if budget == 0 {
+        return Err(ApiError::bad_request(
+            "`max_hunts` must be at least 1".to_string(),
+        ));
+    }
+    let budget = budget.min(MAX_HUNT_CYCLE_BUDGET);
+    let now = Utc::now();
+
+    let lock = gap_lock(&state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let picks: Vec<String> = ledger
+        .work_order()
+        .into_iter()
+        .take(budget as usize)
+        .map(|entry| entry.gap_id.clone())
+        .collect();
+    let mut hunts = Vec::with_capacity(picks.len());
+    for gap_id in picks {
+        ledger
+            .transition(&gap_id, GapStatus::Hunting, "hunt-cycle", now)
+            .map_err(gap_err)?;
+        let entry = ledger
+            .entry(&gap_id)
+            .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+        hunts.push(json!({
+            "gap_id": entry.gap_id,
+            "subject": entry.subject,
+            "statement": entry.statement,
+            "status": entry.status,
+            "priority_score": entry.priority_score(),
+        }));
+    }
+    persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+    Ok(Json(json!({
+        "cycle_hunts": hunts,
+        "budget": budget,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct HuntDraftPayload {
+    /// The learning candidate drafted to close the gap. It must already
+    /// exist in the store — a hunt's output is a real candidate
+    /// (journaled, evaluable), never a name.
+    candidate_id: String,
+}
+
+/// `POST /hunts/{gap_id}/draft` — attach the hunt's drafted candidate
+/// and move the gap `hunting → trial_pending` → `200 {entry}`; `404`
+/// unknown gap or candidate, `409` when the gap is not hunting (the
+/// cycle must pick it first — drafting against an open gap skips the
+/// queue's priority discipline).
+async fn hunt_draft(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<HuntDraftPayload>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .get_candidate(tenant.tenant(), &payload.candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("candidate `{}` not found", payload.candidate_id))
+        })?;
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        let entry = ledger
+            .entry(&gap_id)
+            .ok_or_else(|| GapError::UnknownGap(gap_id.clone()))?;
+        if entry.status != GapStatus::Hunting {
+            return Err(GapError::IllegalTransition {
+                from: entry.status,
+                to: GapStatus::TrialPending,
+            });
+        }
+        ledger.transition(&gap_id, GapStatus::TrialPending, "hunt:draft", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct HuntBlockedPayload {
+    /// What the hunt found that contradicts closing this gap as filed —
+    /// the reason the business must decide.
+    contradiction: String,
+    /// Where the contradiction lives (the deliverable the hunt
+    /// produced: a report, a run, a record id).
+    deliverable_ref: String,
+}
+
+/// `POST /hunts/{gap_id}/blocked` — document the contradiction on the
+/// entry (a citation, so the ledger stays the one place that knows why)
+/// and park the gap `→ blocked_on_business` → `200 {entry}`; `404`
+/// unknown gap, `409` on an illegal status edge. A blocked entry leaves
+/// the work order until the business reopens it.
+async fn hunt_blocked(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<HuntBlockedPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        let citation = Citation::new(
+            CitationKind::CoverageEdge,
+            payload.deliverable_ref.clone(),
+            Some(payload.contradiction.clone()),
+        )?;
+        ledger.add_evidence(&gap_id, vec![citation], "hunt:blocked", now)?;
+        ledger.transition(&gap_id, GapStatus::BlockedOnBusiness, "hunt:blocked", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+/// Promotion-closure sweep (demand-side learning, wave 4): a candidate
+/// promoted through the learning gate is closure evidence for every gap
+/// whose criteria name it. Best-effort, the journaled-events
+/// discipline — the promotion has already committed, so a sweep failure
+/// is logged, never surfaced, and one entry's refusal does not stop the
+/// others.
+async fn close_gaps_on_promotion(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    candidate_id: &str,
+) {
+    let now = Utc::now();
+    let result: Result<(), ApiError> = async {
+        let lock = gap_lock(state, tenant.tenant()).await;
+        let _guard = lock.lock().await;
+        let mut ledger = load_gap_ledger(state, tenant.tenant()).await?;
+        let targets: Vec<String> = ledger
+            .entries()
+            .filter(|entry| entry.status != GapStatus::Closed)
+            .filter(|entry| {
+                matches!(
+                    &entry.closure_criteria,
+                    ClosureCriteria::ArtifactPromoted { candidate_id: named }
+                    if named == candidate_id
+                )
+            })
+            .map(|entry| entry.gap_id.clone())
+            .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        for gap_id in targets {
+            let evidence = ClosureEvidence::ArtifactPromoted {
+                candidate_id: candidate_id.to_string(),
+            };
+            if let Err(error) = ledger.evaluate_closure(&gap_id, &evidence, "promotion-gate", now) {
+                tracing::warn!(%error, %gap_id, "gap closure evaluation failed");
+            }
+        }
+        persist_gap_ledger(state, tenant.tenant(), &ledger).await
+    }
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, %candidate_id, "promotion gap-closure sweep failed");
+    }
+}
+
+/// The demand question a zero-recall query asked, when it asked one: an
+/// explicit key, else the tag conjunction. An unfiltered browse that
+/// finds nothing is not a learning signal.
+fn zero_recall_question(query: &MemoryQuery) -> Option<String> {
+    if let Some(key) = &query.key {
+        return Some(key.clone());
+    }
+    if !query.tags.is_empty() {
+        return Some(query.tags.join(", "));
+    }
+    None
+}
+
+/// Zero-recall filing (demand-side learning, wave 2): a named-question
+/// miss files a gap against the question shape — evidence of a question
+/// the declared schema did not anticipate. Best-effort, the
+/// journaled-events discipline: the read is already served, so a filing
+/// failure is logged, never surfaced.
+async fn file_zero_recall_gap(state: &Arc<AppState>, tenant: &TenantContext, query: &MemoryQuery) {
+    let Some(question) = zero_recall_question(query) else {
+        return;
+    };
+    let now = Utc::now();
+    let result = mutate_gap_ledger(state, tenant, |ledger| {
+        ledger.file_zero_recall(
+            &question,
+            ClosureCriteria::BlockFilled {
+                block_label: question.clone(),
+            },
+            0,
+            "runtime:zero-recall",
+            now,
+        )
+    })
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, %question, "zero-recall gap filing failed");
+    }
+}
+
+/// Correction filing (demand-side learning, wave 2): an operator
+/// correction is evidence the recalled knowledge was wrong, not merely
+/// missing. The subject is the corrected record's key when it has one,
+/// else the correction itself; the citation anchors to the derived
+/// record so the gap traces back to the write that proved it.
+/// Best-effort — the correction is already stored.
+async fn file_correction_gap(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    correction: &Correction,
+    key: Option<&str>,
+    derived_memory_id: &str,
+) {
+    let question = match key {
+        Some(key) => key.to_string(),
+        None => format!("correction:{}", correction.correction_id),
+    };
+    let subject = match GapSubject::question_shape(&question) {
+        Ok(subject) => subject,
+        Err(error) => {
+            tracing::warn!(%error, %question, "correction gap subject failed to build");
+            return;
+        }
+    };
+    let citation = match Citation::new(
+        CitationKind::MemoryRecord,
+        derived_memory_id,
+        Some(format!("correction:{}", correction.correction_id)),
+    ) {
+        Ok(citation) => citation,
+        Err(error) => {
+            tracing::warn!(%error, %question, "correction gap citation failed to build");
+            return;
+        }
+    };
+    let statement =
+        format!("Knowledge answering `{question}` was wrong, not missing: a correction rewrote it");
+    let now = Utc::now();
+    let result = mutate_gap_ledger(state, tenant, |ledger| {
+        ledger.file_gap(
+            subject,
+            statement,
+            vec![citation],
+            GapOrigin::RuntimeCorrection,
+            ClosureCriteria::BlockFilled {
+                block_label: question.clone(),
+            },
+            1,
+            0,
+            "runtime:correction",
+            now,
+        )
+    })
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, %question, "correction gap filing failed");
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct QueryMemoryPayload {
     /// The structured filters (all optional; an empty query matches the
@@ -4841,6 +6049,13 @@ async fn query_memory(
     }
     let store = memory_read_store(&state, &tenant, &query).await?;
     let records = store.query(&query, as_of).await.map_err(internal_err)?;
+    // Zero-recall filing (demand-side learning, wave 2): a named-question
+    // miss is evidence of a question the declared schema did not
+    // anticipate. Best-effort, the journaled-events discipline — the read
+    // is already served, so a filing failure is logged, never surfaced.
+    if records.is_empty() {
+        file_zero_recall_gap(&state, &tenant, &query).await;
+    }
     match payload.budget {
         Some(budget) => {
             let assembly =
@@ -5618,6 +6833,19 @@ async fn submit_correction(
                 "correction-derived record missing immediately after write".to_string(),
             )
         })?;
+    // Correction filing (demand-side learning, wave 2): the correction
+    // is evidence the recalled knowledge was wrong, not missing. Filed
+    // on the write path only — the retry-convergence return above does
+    // not re-file, so a retried submission cannot double-count demand.
+    // Best-effort: the correction is already stored.
+    file_correction_gap(
+        &state,
+        &tenant,
+        &correction,
+        key.as_deref(),
+        &memory.memory_id,
+    )
+    .await;
     let status = if created {
         StatusCode::CREATED
     } else {
@@ -6419,6 +7647,10 @@ async fn promote_candidate(
             .map_err(internal_err)?,
         &candidate_id,
     )?;
+    // Demand-side learning (wave 4): the promotion is closure evidence
+    // for every gap whose criteria name this candidate — the hunt that
+    // drafted it is done. Best-effort: the promotion has committed.
+    close_gaps_on_promotion(&state, &tenant, &candidate_id).await;
     // Wave 4: a full-traffic policy promotion becomes an active executor
     // policy — the pointer move alone only names the surface winner; the
     // registry activation is what the admission decorator reads. Canary
