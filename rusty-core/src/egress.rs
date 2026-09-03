@@ -688,6 +688,12 @@ mod tests {
 
     #[test]
     fn schema_regenerate_golden() {
+        // Writes the golden only on explicit request: an unconditional write
+        // races `schema_matches_golden` under parallel test execution and
+        // would silently bless drift in CI.
+        if std::env::var_os("UPDATE_GOLDEN").is_none() {
+            return;
+        }
         let schema = schemars::schema_for!(EgressPolicy);
         let pretty = serde_json::to_string_pretty(&schema).expect("pretty");
         let dir = std::path::Path::new(GOLDEN_PATH).parent().unwrap();

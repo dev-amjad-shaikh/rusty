@@ -478,7 +478,7 @@ impl SubagentRegistry {
     pub fn scope_is_empty(&self, scope: &SubagentScope) -> bool {
         self.by_scope
             .get(scope.as_str())
-            .map_or(true, Vec::is_empty)
+            .is_none_or(Vec::is_empty)
     }
 
     /// Verify a dispatch request against the target provider's descriptor.
@@ -664,7 +664,7 @@ impl ToolGuard for DelegateDepthGuard {
 /// would be exceeded.
 ///
 /// Returns the restricted registry and the guard set to attach to the
-/// child's [`ToolExecutor`].
+/// child's [`crate::tool::ToolExecutor`].
 pub fn confined_toolset(
     base: &ToolRegistry,
     blocklist: &[String],
@@ -885,7 +885,7 @@ mod tests {
         assert!(SubagentScope::new("").is_err());
         assert!(SubagentScope::new("padded ").is_err());
         assert!(SubagentScope::new("with/slash").is_err());
-        assert!(SubagentScope::new(&"x".repeat(129)).is_err());
+        assert!(SubagentScope::new("x".repeat(129)).is_err());
     }
 
     #[test]

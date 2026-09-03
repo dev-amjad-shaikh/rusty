@@ -968,13 +968,14 @@ pub enum RunEventKind {
     /// [`crate::inbox::RunCancellation`] — the closed
     /// [`crate::inbox::CancelCause`], the `keep_inbox` disposition, and what
     /// a dropping cancellation discarded.
+    RunCancelled,
+
     /// One incremental chunk of a streaming assistant response (EP-01-S11).
     /// Input is empty; output carries the [`AssistantChunk`] — the delta,
     /// the monotonic `stream_index`, and the finish flag. Journaled before
-    /// the assembled [`ModelCall`] so chunks are durable-first and replay
+    /// the assembled [`crate::middleware::ModelCall`] so chunks are durable-first and replay
     /// can reconstruct the exact token sequence that originally rendered.
     AssistantChunk,
-    RunCancelled,
 }
 
 /// One recorded fact about a run: the Flight Recorder's atomic evidence.

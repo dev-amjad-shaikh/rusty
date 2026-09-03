@@ -25,6 +25,18 @@
         "protocol"
       ],
       "properties": {
+        "allow_encoded_slashes": {
+          "description": "When `true`, percent-encoded slashes (`%2F`) in path segments are accepted. `false` by default — they are refused (EP-11-S04 AC 4).",
+          "default": false,
+          "type": "boolean"
+        },
+        "allowed_ips": {
+          "description": "Explicit IP pins for this endpoint. When non-empty, DNS preflight must resolve to one of these addresses; otherwise the connection is refused (EP-11-S04 AC 3).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "host": {
           "description": "Hostname or IP (the preflight-checked value, never a raw user string — canonicalization is the caller's responsibility).",
           "type": "string"

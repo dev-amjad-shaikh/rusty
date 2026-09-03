@@ -147,7 +147,7 @@ pub enum AllowlistOutcome {
     /// The package is permitted.
     Permitted,
     /// The package is not allowlisted; an approval obligation is required.
-    PendingApproval(ApprovalObligation),
+    PendingApproval(Box<ApprovalObligation>),
     /// The package version is revoked; uninstallable in every mode.
     Revoked { reason: String },
 }
@@ -234,7 +234,7 @@ impl AllowlistChecker {
                 if any_permits {
                     AllowlistOutcome::Permitted
                 } else {
-                    AllowlistOutcome::PendingApproval(ApprovalObligation {
+                    AllowlistOutcome::PendingApproval(Box::new(ApprovalObligation {
                         package_id: manifest.id.clone(),
                         package_name: manifest.name.clone(),
                         publisher: manifest.publisher.clone(),
@@ -248,7 +248,7 @@ impl AllowlistChecker {
                             .map(|s| s.key.clone())
                             .collect(),
                         eval_evidence_url: None,
-                    })
+                    }))
                 }
             }
         }
@@ -387,7 +387,7 @@ impl AllowlistChecker {
                 reason: format!("revoked: {}", reason),
             }),
             AllowlistOutcome::PendingApproval(obligation) => {
-                let id = approval_store.create_obligation(obligation).await?;
+                let id = approval_store.create_obligation(*obligation).await?;
                 Ok(AllowlistCheckResult::PendingApproval { obligation_id: id })
             }
         }
