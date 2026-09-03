@@ -3981,6 +3981,15 @@ struct EnqueueTaskPayload {
     /// not the member); ordinary submissions leave it absent.
     #[serde(default)]
     parent: Option<String>,
+    /// Parent task id for stage-barrier grouping (EP-09-S05).
+    #[serde(default)]
+    parent_task_id: Option<String>,
+    /// Stage ordinal for barrier grouping (EP-09-S05); 0 = unstaged.
+    #[serde(default)]
+    stage: Option<u32>,
+    /// Status category for barrier semantics (EP-09-S05).
+    #[serde(default)]
+    status_category: Option<String>,
 }
 
 /// Validate an enqueue payload and build the fresh [`TaskRecord`] it
@@ -4040,6 +4049,23 @@ fn build_task_record(
     if let Some(parent) = &payload.parent {
         tasks::validate_label("parent", parent, 512).map_err(ApiError::bad_request)?;
     }
+    if let Some(parent_task_id) = &payload.parent_task_id {
+        tasks::validate_label("parent_task_id", parent_task_id, 512)
+            .map_err(ApiError::bad_request)?;
+    }
+    let status_category = match payload.status_category.as_deref() {
+        Some("backlog") => tasks::StatusCategory::Backlog,
+        Some("todo") | None => tasks::StatusCategory::Todo,
+        Some("in_progress") => tasks::StatusCategory::InProgress,
+        Some("in_review") => tasks::StatusCategory::InReview,
+        Some("done") => tasks::StatusCategory::Done,
+        Some("cancelled") => tasks::StatusCategory::Cancelled,
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "unknown `status_category` `{other}` (expected backlog|todo|in_progress|in_review|done|cancelled)"
+            )));
+        }
+    };
 
     Ok(TaskRecord::new(
         tasks::NewTask {
@@ -4057,6 +4083,9 @@ fn build_task_record(
             worker_version: payload.worker_version,
             recipient: payload.recipient,
             parent: payload.parent,
+            parent_task_id: payload.parent_task_id,
+            stage: payload.stage.unwrap_or(0),
+            status_category,
         },
         Utc::now(),
     ))
@@ -6994,6 +7023,9 @@ async fn enqueue_consolidation(
             worker_version: None,
             recipient: None,
             parent: payload.parent,
+            parent_task_id: None,
+            stage: None,
+            status_category: None,
         },
         &tenant,
     )?;
@@ -9773,6 +9805,9 @@ async fn send_agent_message(
             worker_version: None,
             recipient: Some(AgentId::new(agent_id.as_str()).mailbox_recipient()),
             parent: None,
+            parent_task_id: None,
+            stage: None,
+            status_category: None,
         },
         &tenant,
     )?;

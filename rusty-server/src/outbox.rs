@@ -184,7 +184,7 @@ pub(crate) fn spawn_relay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tasks::{NewTask, DEFAULT_MAX_ATTEMPTS, DEFAULT_POOL};
+    use crate::tasks::{NewTask, StatusCategory, DEFAULT_MAX_ATTEMPTS, DEFAULT_POOL};
 
     fn task(id: &str) -> TaskRecord {
         TaskRecord::new(
@@ -203,6 +203,9 @@ mod tests {
                 deadline: None,
                 worker_version: None,
                 parent: None,
+                parent_task_id: None,
+                stage: 0,
+                status_category: StatusCategory::Todo,
             },
             Utc::now(),
         )

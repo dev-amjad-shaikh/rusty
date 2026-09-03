@@ -248,14 +248,17 @@ pub(crate) struct MailboxClaimScope<'a> {
 /// never become invalid (the additive-evolution rule applied to
 /// validation).
 pub(crate) fn validate_recipient(recipient: &str) -> Result<(), String> {
-    let Some(agent_id) = rusty_agent_runtime::agents::agent_id_from_recipient(recipient) else {
+    let agent_id = rusty_agent_runtime::agents::agent_id_from_recipient(recipient);
+    let human_id = recipient.strip_prefix("human:");
+    let id = agent_id.or(human_id);
+    let Some(id) = id else {
         return Err(
             "`recipient` must be a mailbox address of the form `agent:{agent_id}`".to_string(),
         );
     };
-    let ok = !agent_id.is_empty()
-        && agent_id.len() <= 256
-        && agent_id
+    let ok = !id.is_empty()
+        && id.len() <= 256
+        && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
     if ok {

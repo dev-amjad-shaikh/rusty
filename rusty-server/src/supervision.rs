@@ -331,6 +331,9 @@ async fn deliver_escalation(
                         deadline: None,
                         worker_version: None,
                         parent: None,
+                        parent_task_id: None,
+                        stage: 0,
+                        status_category: crate::tasks::StatusCategory::Todo,
                     },
                     now,
                 );
@@ -366,6 +369,9 @@ async fn deliver_escalation(
             deadline: None,
             worker_version: None,
             parent: None,
+            parent_task_id: None,
+            stage: 0,
+            status_category: crate::tasks::StatusCategory::Todo,
         },
         now,
     );

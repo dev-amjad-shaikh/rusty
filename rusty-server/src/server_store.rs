@@ -326,6 +326,14 @@ pub(crate) trait ServerStore: Send + Sync {
         tenant: &str,
         status: Option<TaskStatus>,
     ) -> StoreResult<Vec<TaskRecord>>;
+    /// List all tasks whose `parent_task_id` matches the given value
+    /// (EP-09-S05 stage-barrier support). Tenant-scoped; empty vec when
+    /// none match.
+    async fn list_child_tasks(
+        &self,
+        tenant: &str,
+        parent_task_id: &str,
+    ) -> StoreResult<Vec<TaskRecord>>;
     /// Cancel a non-terminal task (control-plane operation, not
     /// lease-guarded): queued and retry-scheduled tasks move to the
     /// terminal `cancelled` state immediately; a leased task keeps its
@@ -2150,6 +2158,30 @@ impl ServerStore for JsonFileStore {
         Ok(tasks)
     }
 
+    async fn list_child_tasks(
+        &self,
+        tenant: &str,
+        parent_task_id: &str,
+    ) -> StoreResult<Vec<TaskRecord>> {
+        let mut tasks: Vec<TaskRecord> = self
+            .tasks
+            .lock()
+            .await
+            .values()
+            .filter(|t| {
+                t.tenant == tenant
+                    && t.parent_task_id.as_deref() == Some(parent_task_id)
+            })
+            .cloned()
+            .collect();
+        tasks.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.task_id.cmp(&b.task_id))
+        });
+        Ok(tasks)
+    }
+
     async fn cancel_task(
         &self,
         tenant: &str,
@@ -3906,6 +3938,9 @@ mod postgres {
             worker_version   TEXT,
             recipient        TEXT,
             parent           TEXT,
+            parent_task_id   TEXT,
+            stage            INTEGER NOT NULL DEFAULT 0,
+            status_category  TEXT NOT NULL DEFAULT 'todo',
             tokens           JSONB,
             cost_usd         DOUBLE PRECISION,
             next_attempt_at  TIMESTAMPTZ,
@@ -4451,6 +4486,9 @@ mod postgres {
         ALTER_TASKS_ADD_PARENT_SQL,
         ALTER_TASKS_ADD_TOKENS_SQL,
         ALTER_TASKS_ADD_COST_USD_SQL,
+        ALTER_TASKS_ADD_PARENT_TASK_ID_SQL,
+        ALTER_TASKS_ADD_STAGE_SQL,
+        ALTER_TASKS_ADD_STATUS_CATEGORY_SQL,
         CREATE_OUTBOX_SQL,
         CREATE_OUTBOX_PENDING_INDEX_SQL,
         CREATE_AGENTS_SQL,
@@ -4674,9 +4712,11 @@ mod postgres {
         INSERT INTO server_tasks (
             task_id, tenant, kind, payload, pool, status,
             attempt, max_attempts, error_class, effect, idempotency_key,
-            run_id, thread_id, deadline, worker_version, recipient, parent, next_attempt_at, created_at, updated_at
+            run_id, thread_id, deadline, worker_version, recipient, parent, next_attempt_at, created_at, updated_at,
+            parent_task_id, stage, status_category
         ) VALUES (
-            $1, $2, $3, $4, $5, 'queued', 0, $6, NULL, $7, $8, $9, $10, $11, $12, $13, $15, NULL, $14, $14
+            $1, $2, $3, $4, $5, 'queued', 0, $6, NULL, $7, $8, $9, $10, $11, $12, $13, $15, NULL, $14, $14,
+            $16, $17, $18
         )
         ON CONFLICT DO NOTHING
         RETURNING task_id";
@@ -4685,7 +4725,11 @@ mod postgres {
     pub(crate) const SELECT_TASK_BY_IDEMPOTENCY_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at,
+            parent_task_id, stage, status_category,
+            parent_task_id, stage, status_category,
+            parent_task_id, stage, status_category,
+            parent_task_id, stage, status_category
         FROM server_tasks
         WHERE tenant = $1 AND idempotency_key = $2";
 
@@ -4880,6 +4924,14 @@ mod postgres {
             run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
         FROM server_tasks
         WHERE tenant = $1 ORDER BY created_at, task_id";
+
+    pub(crate) const LIST_CHILD_TASKS_SQL: &str = "
+        SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
+            attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category
+        FROM server_tasks
+        WHERE tenant = $1 AND parent_task_id = $2 ORDER BY created_at, task_id";
 
     pub(crate) const LIST_TASKS_BY_STATUS_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
@@ -5716,6 +5768,16 @@ mod postgres {
             run_id: row.get("run_id"),
             thread_id: row.get("thread_id"),
             parent: row.get("parent"),
+            parent_task_id: row.get("parent_task_id"),
+            stage: u32::try_from(row.get::<Option<i32>, _>("stage").unwrap_or(0))
+                .map_err(|_| "corrupt task stage (negative)".to_string())?,
+            status_category: row
+                .get::<Option<String>, _>("status_category")
+                .map(|raw| {
+                    serde_json::from_value(serde_json::Value::String(raw))
+                        .map_err(|e| format!("corrupt task status_category: {e}"))
+                })
+                .unwrap_or(Ok(tasks::StatusCategory::default()))?,
             cancel_requested: row.get("cancel_requested"),
             deadline: row.get("deadline"),
             worker_version: row.get("worker_version"),
@@ -6773,6 +6835,20 @@ mod postgres {
                 .await
                 .map_err(db_err("get task"))?;
             row.as_ref().map(task_from_row).transpose()
+        }
+
+        async fn list_child_tasks(
+            &self,
+            tenant: &str,
+            parent_task_id: &str,
+        ) -> StoreResult<Vec<TaskRecord>> {
+            let rows = sqlx::query(LIST_CHILD_TASKS_SQL)
+                .bind(tenant)
+                .bind(parent_task_id)
+                .fetch_all(self.pool().await?)
+                .await
+                .map_err(db_err("list child tasks"))?;
+            rows.iter().map(task_from_row).collect()
         }
 
         async fn list_tasks(
@@ -9757,6 +9833,10 @@ mod postgres {
                     thread_id: None,
                     deadline: None,
                     worker_version: None,
+                    parent: None,
+                    parent_task_id: None,
+                    stage: 0,
+                    status_category: crate::tasks::StatusCategory::Todo,
                     parent: None,
                 },
                 Utc::now(),

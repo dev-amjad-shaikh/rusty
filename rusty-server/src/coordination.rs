@@ -57,19 +57,19 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use rusty_agent_runtime::agents::{
-    AgentId, CoordinationContract, CoordinationMessage, CoordinationOutcome, CoordinationStatus,
-    MemberDisposition, MemberSettlement, QuorumOutcome, QuorumResolverRecord,
-    COORDINATION_RESULT_KIND,
+    AgentId, COORDINATION_RESULT_KIND, CoordinationContract, CoordinationMessage,
+    CoordinationOutcome, CoordinationStatus, MemberDisposition, MemberSettlement, QuorumOutcome,
+    QuorumResolverRecord,
 };
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
 use rusty_agent_runtime::record::{Effect, EventStatus, PayloadRef, RunEventKind};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use crate::TaskQuota;
 use crate::auth::TenantContext;
 use crate::server_store::{ServerStore, StoreResult};
 use crate::tasks::{self, TaskRecord};
-use crate::TaskQuota;
 
 /// The deterministic run id of a coordination's journal. Distinct from
 /// executor run ids (UUIDs) and from the supervision journals by
@@ -420,6 +420,9 @@ pub(crate) async fn drive(
                     deadline,
                     worker_version: None,
                     parent: Some(send_id),
+                    parent_task_id: None,
+                    stage: 0,
+                    status_category: crate::tasks::StatusCategory::Todo,
                 },
                 now,
             ));
@@ -645,6 +648,9 @@ async fn settle(
                 deadline: None,
                 worker_version: None,
                 parent: Some(end_id.clone()),
+                parent_task_id: None,
+                stage: 0,
+                status_category: crate::tasks::StatusCategory::Todo,
             },
             now,
         );
@@ -686,6 +692,9 @@ async fn settle(
                     .and_then(|budget| budget.deadline),
                 worker_version: None,
                 parent: Some(end_id),
+                parent_task_id: None,
+                stage: 0,
+                status_category: crate::tasks::StatusCategory::Todo,
             },
             now,
         ));
@@ -1022,6 +1031,16 @@ pub(crate) async fn on_task_settled(
     task: &TaskRecord,
     now: DateTime<Utc>,
 ) -> StoreResult<()> {
+    // Stage-barrier wake (EP-09-S05): when the last non-terminal sibling
+    // of the lowest unfinished stage enters a terminal category, enqueue
+    // exactly one wake task for the parent's agent.  Composes after the
+    // settle is durable, like the coordination hook below.
+    if let Some(parent_id) = &task.parent_task_id {
+        if let Err(e) = maybe_wake_stage_barrier(store, tenant, task, parent_id, now).await {
+            tracing::warn!(error = %e, task_id = %task.task_id, "stage barrier wake failed");
+        }
+    }
+
     let Ok(message) = serde_json::from_value::<CoordinationMessage>(task.payload.clone()) else {
         return Ok(());
     };
@@ -1042,7 +1061,103 @@ pub(crate) async fn on_task_settled(
     Ok(())
 }
 
-/// Load a coordination's journal, integrity-verified, for the read
+/// Stage-barrier wake logic (EP-09-S05).  Called from [`on_task_settled`];
+/// errors are logged and swallowed so a barrier failure never blocks the
+/// coordination hook or the route response.
+///
+/// The entering-transition guard is implicit: `on_task_settled` is only
+/// reached after a successful lease-guarded mutation (complete, terminal
+/// fail, or immediate cancel), so the task was non-terminal before this
+/// call — a re-save of an already-terminal task can never reach here.
+async fn maybe_wake_stage_barrier(
+    store: &Arc<dyn ServerStore>,
+    tenant: &TenantContext,
+    settled_task: &TaskRecord,
+    parent_id: &str,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    let Some(parent) = store.get_task(tenant.tenant(), parent_id).await? else {
+        return Ok(());
+    };
+
+    // Guard: parked plans must never auto-activate.
+    if parent.status_category == tasks::StatusCategory::Backlog {
+        return Ok(());
+    }
+    // Guard: only agent-assigned parents receive a wake; human-assigned or
+    // unassigned parents get no system comment.
+    let Some(recipient) = &parent.recipient else {
+        return Ok(());
+    };
+    let Some(agent_id) = recipient.strip_prefix("agent:") else {
+        return Ok(());
+    };
+
+    let siblings = store.list_child_tasks(tenant.tenant(), parent_id).await?;
+
+    // Determine whether the stage that `settled_task` belongs to was the
+    // lowest unfinished stage and is now fully terminal.
+    let stage_tasks: Vec<&TaskRecord> = siblings
+        .iter()
+        .filter(|t| t.stage == settled_task.stage)
+        .collect();
+
+    // This task's stage must now be fully terminal.
+    if stage_tasks.iter().any(|t| !t.status_category.is_terminal()) {
+        return Ok(());
+    }
+
+    // No lower stage may be unfinished.
+    let any_lower_unfinished = siblings
+        .iter()
+        .any(|t| t.stage < settled_task.stage && !t.status_category.is_terminal());
+    if any_lower_unfinished {
+        return Ok(());
+    }
+
+    // Exactly one wake per (parent, stage), idempotency-guarded by the
+    // enqueue path.  The "system comment" is the closest thing the current
+    // substrate offers: a mailbox task addressed to the parent agent.
+    let wake_task = TaskRecord::new(
+        tasks::NewTask {
+            task_id: format!(
+                "{}--barrier--{}--{}",
+                tenant.tenant(),
+                parent.task_id,
+                settled_task.stage
+            ),
+            tenant: tenant.tenant().to_string(),
+            kind: "stage_barrier_wake".to_string(),
+            payload: json!({
+                "parent_task_id": parent.task_id,
+                "stage": settled_task.stage,
+                "agent_id": agent_id,
+            }),
+            pool: tasks::DEFAULT_POOL.to_string(),
+            recipient: Some(recipient.clone()),
+            max_attempts: 1,
+            idempotency_key: Some(format!(
+                "stage-barrier:{}:{}",
+                parent.task_id, settled_task.stage
+            )),
+            effect: Some(Effect::Pure),
+            run_id: None,
+            thread_id: None,
+            deadline: None,
+            worker_version: None,
+            parent: None,
+            parent_task_id: Some(parent.task_id.clone()),
+            stage: 0,
+            status_category: tasks::StatusCategory::Todo,
+        },
+        now,
+    );
+
+    let _ = store.enqueue_task(&wake_task).await?;
+    Ok(())
+}
+
+////// Load a coordination's journal, integrity-verified, for the read
 /// endpoints (`None` when the pattern never journaled — impossible for a
 /// driven record, but the read is honest about it).
 pub(crate) async fn load_journal(

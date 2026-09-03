@@ -48,13 +48,13 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use rusty_agent_runtime::durable::{
-    classify_retry_with_policy, ErrorClass, ResolvedRetryParameters, RetryDecision,
+    ErrorClass, ResolvedRetryParameters, RetryDecision, classify_retry_with_policy,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::record::ExecutorPolicy;
 use rusty_agent_runtime::record::{Effect, EffectReceipt};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The pool every task lands in when the enqueue payload names none.
 pub(crate) const DEFAULT_POOL: &str = "default";
@@ -124,6 +124,28 @@ pub(crate) enum TaskStatus {
     Completed,
     Dead,
     Cancelled,
+}
+
+/// Status category for stage-barrier semantics (EP-09-S05).
+/// Higher-level grouping than [`TaskStatus`] — a task's category
+/// determines barrier progression, not its exact execution state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum StatusCategory {
+    Backlog,
+    #[default]
+    Todo,
+    InProgress,
+    InReview,
+    Done,
+    Cancelled,
+}
+
+impl StatusCategory {
+    /// Terminal categories close a stage barrier (Done or Cancelled).
+    pub(crate) fn is_terminal(self) -> bool {
+        matches!(self, Self::Done | Self::Cancelled)
+    }
 }
 
 impl TaskStatus {
@@ -254,6 +276,22 @@ pub(crate) struct TaskRecord {
     /// submitted outside any journaled causality.
     #[serde(default)]
     pub parent: Option<String>,
+    /// Parent task id for stage-barrier grouping (EP-09-S05). Distinct from
+    /// `parent` which is the journal event id. When set, this task is a
+    /// child of the named parent task and participates in stage-barrier
+    /// wake logic when it settles. Additive — `None` for root tasks.
+    #[serde(default)]
+    pub parent_task_id: Option<String>,
+    /// Stage ordinal for barrier grouping (EP-09-S05). 0 = unstaged
+    /// (forms one implicit stage with other unstaged siblings).
+    /// 1-based otherwise. Additive — defaults to 0 for pre-barrier records.
+    #[serde(default)]
+    pub stage: u32,
+    /// Status category for barrier semantics (EP-09-S05). Higher-level
+    /// classification than `status` that drives stage-barrier behavior.
+    /// Additive — defaults to `Todo` for pre-barrier records.
+    #[serde(default)]
+    pub status_category: StatusCategory,
     /// Cancellation signalled to the lease holder: set by the cancel
     /// endpoint on a leased task, surfaced on heartbeat responses, and
     /// honored by the worker aborting the attempt and reporting
@@ -304,6 +342,12 @@ pub(crate) struct NewTask {
     pub deadline: Option<DateTime<Utc>>,
     /// Causal parentage (R0.7 wave 3; see [`TaskRecord::parent`]).
     pub parent: Option<String>,
+    /// Parent task id for stage-barrier grouping (EP-09-S05).
+    pub parent_task_id: Option<String>,
+    /// Stage ordinal for barrier grouping (EP-09-S05); 0 = unstaged.
+    pub stage: u32,
+    /// Status category for barrier semantics (EP-09-S05).
+    pub status_category: StatusCategory,
     /// Version pin (see [`TaskRecord::worker_version`]).
     pub worker_version: Option<String>,
 }
@@ -378,6 +422,9 @@ impl TaskRecord {
             deadline,
             worker_version,
             parent,
+            parent_task_id,
+            stage,
+            status_category,
         } = new;
         Self {
             task_id,
@@ -401,6 +448,9 @@ impl TaskRecord {
             run_id,
             thread_id,
             parent,
+            parent_task_id,
+            stage,
+            status_category,
             cancel_requested: false,
             deadline,
             worker_version,
@@ -488,6 +538,7 @@ impl TaskRecord {
         now: DateTime<Utc>,
     ) {
         self.status = TaskStatus::Completed;
+        self.status_category = StatusCategory::Done;
         self.result = Some(result);
         self.receipt = receipt;
         self.tokens = cost.tokens;
@@ -524,6 +575,7 @@ impl TaskRecord {
     /// ended (control flow, not failure — never the DLQ).
     pub(crate) fn apply_cancellation(&mut self, now: DateTime<Utc>) {
         self.status = TaskStatus::Cancelled;
+        self.status_category = StatusCategory::Cancelled;
         self.error_class = Some(ErrorClass::Cancelled);
         self.lease = None;
         self.next_attempt_at = None;
@@ -580,6 +632,7 @@ impl TaskRecord {
             }
             RetryDecision::Dead => {
                 self.status = TaskStatus::Dead;
+                self.status_category = StatusCategory::Cancelled;
                 self.next_attempt_at = None;
             }
             RetryDecision::Fail => {
@@ -592,6 +645,7 @@ impl TaskRecord {
                 } else {
                     TaskStatus::Failed
                 };
+                self.status_category = StatusCategory::Cancelled;
                 self.next_attempt_at = None;
             }
         }
@@ -627,6 +681,9 @@ impl TaskRecord {
             "run_id": self.run_id,
             "thread_id": self.thread_id,
             "parent": self.parent,
+            "parent_task_id": self.parent_task_id,
+            "stage": self.stage,
+            "status_category": self.status_category,
             "cancel_requested": self.cancel_requested,
             "deadline": self.deadline,
             "worker_version": self.worker_version,
@@ -963,6 +1020,9 @@ mod tests {
                 deadline: None,
                 worker_version: None,
                 parent: None,
+                parent_task_id: None,
+                stage: 0,
+                status_category: StatusCategory::Todo,
             },
             Utc::now(),
         )
