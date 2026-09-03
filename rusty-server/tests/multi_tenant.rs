@@ -593,3 +593,132 @@ async fn info_endpoint_is_unchanged_and_tenant_neutral() {
 
     let _ = std::fs::remove_dir_all(store);
 }
+
+// --------------------------------------------------------------------- //
+// Run-scoped endpoint isolation
+// --------------------------------------------------------------------- //
+
+#[tokio::test]
+async fn run_scoped_endpoints_are_isolated_between_tenants() {
+    let (app, store) = multi_tenant_app();
+
+    // acme creates a thread and runs it to completion.
+    let thread = create_thread_as(&app, ACME, "pipeline").await;
+    let (status, v) = call_as(
+        &app,
+        Some(ACME),
+        "POST",
+        &format!("/threads/{thread}/runs/wait"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "acme run failed: {v}");
+    let run_id = v["run_id"].as_str().unwrap().to_string();
+
+    // globex cannot see the run through any run-scoped endpoint.
+    for (method, uri) in [
+        ("GET", format!("/runs/{run_id}")),
+        ("GET", format!("/runs/{run_id}/events")),
+        ("GET", format!("/runs/{run_id}/fixture")),
+        ("POST", format!("/runs/{run_id}/cancel")),
+    ] {
+        let body = if method == "POST" {
+            Some(json!({}))
+        } else {
+            None
+        };
+        let (status, v) = call_as(&app, Some(GLOBEX), method, &uri, body).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "globex reached acme's run via {method} {uri}: {v}"
+        );
+        assert_eq!(v["error"], json!("not_found"));
+    }
+
+    // acme's own view is intact on every endpoint.
+    let (status, v) = call_as(&app, Some(ACME), "GET", &format!("/runs/{run_id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["thread_id"], json!(thread));
+
+    let (status, v) = call_as(
+        &app,
+        Some(ACME),
+        "GET",
+        &format!("/runs/{run_id}/events"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["run_id"], json!(run_id));
+    assert_eq!(v["complete"], json!(true));
+    let events = v["events"].as_array().unwrap();
+    assert!(!events.is_empty());
+
+    let (status, _) = call_as(
+        &app,
+        Some(ACME),
+        "GET",
+        &format!("/runs/{run_id}/fixture"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+// --------------------------------------------------------------------- //
+// Receipt isolation
+// --------------------------------------------------------------------- //
+
+#[tokio::test]
+async fn run_receipts_are_isolated_between_tenants() {
+    let (app, store) = multi_tenant_app();
+
+    // acme creates a thread and runs it to completion.
+    let thread = create_thread_as(&app, ACME, "pipeline").await;
+    let (status, v) = call_as(
+        &app,
+        Some(ACME),
+        "POST",
+        &format!("/threads/{thread}/runs/wait"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "acme run failed: {v}");
+    let run_id = v["run_id"].as_str().unwrap().to_string();
+
+    // globex cannot fetch the receipt.
+    let (status, v) = call_as(
+        &app,
+        Some(GLOBEX),
+        "GET",
+        &format!("/runs/{run_id}/receipt"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "globex reached acme's receipt: {v}"
+    );
+    assert_eq!(v["error"], json!("not_found"));
+
+    // acme can fetch the receipt (or get 409 if not yet minted — both
+    // prove the run was found and the isolation check passed).
+    let (status, _) = call_as(
+        &app,
+        Some(ACME),
+        "GET",
+        &format!("/runs/{run_id}/receipt"),
+        None,
+    )
+    .await;
+    assert!(
+        status == StatusCode::OK || status == StatusCode::CONFLICT,
+        "acme receipt fetch failed unexpectedly"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
