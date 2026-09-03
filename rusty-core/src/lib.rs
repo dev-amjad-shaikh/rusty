@@ -289,6 +289,7 @@ pub mod self_improve;
 pub mod session_query;
 pub mod skill;
 pub mod skill_distill;
+pub mod skill_pack;
 pub mod skills;
 pub mod state;
 pub mod surface;
@@ -303,37 +304,38 @@ pub mod wasm_node;
 
 /// Convenience re-exports of the main public API.
 pub mod prelude {
-    pub use crate::a2a::{A2aNode, A2A_PROTOCOL_VERSION};
+    pub use crate::a2a::{A2A_PROTOCOL_VERSION, A2aNode};
     pub use crate::agents::{
-        agent_id_from_recipient, AgentBudget, AgentId, CapabilityManifest, ContextGrant,
-        CoordinationContract, CoordinationKind, CoordinationMessage, CoordinationOutcome,
-        CoordinationStatus, CoordinationViolation, DelegateContract, Delegation, EscalationNotice,
-        FanOutContract, MemberDisposition, MemberFailurePolicy, MemberSettlement, QuorumContract,
-        QuorumOutcome, QuorumResolver, QuorumResolverRecord, QuorumTally, RaceContract,
-        RestartPolicy, StateScope, SupervisionAttempt, SupervisionPolicy, SupervisionTrigger,
-        AGENT_RECIPIENT_PREFIX, COORDINATION_RESULT_KIND, ESCALATION_MESSAGE_KIND,
+        AGENT_RECIPIENT_PREFIX, AgentBudget, AgentId, COORDINATION_RESULT_KIND, CapabilityManifest,
+        ContextGrant, CoordinationContract, CoordinationKind, CoordinationMessage,
+        CoordinationOutcome, CoordinationStatus, CoordinationViolation, DelegateContract,
+        Delegation, ESCALATION_MESSAGE_KIND, EscalationNotice, FanOutContract, MemberDisposition,
+        MemberFailurePolicy, MemberSettlement, QuorumContract, QuorumOutcome, QuorumResolver,
+        QuorumResolverRecord, QuorumTally, RaceContract, RestartPolicy, StateScope,
+        SupervisionAttempt, SupervisionPolicy, SupervisionTrigger, agent_id_from_recipient,
     };
     pub use crate::artifact::{
-        commit_artifact, ArtifactCommitment, ArtifactError, ArtifactLineage, ArtifactVersion,
-        CommitDeclaration, MediaKind, RetentionPolicy, RunArtifact,
+        ArtifactCommitment, ArtifactError, ArtifactLineage, ArtifactVersion, CommitDeclaration,
+        MediaKind, RetentionPolicy, RunArtifact, commit_artifact,
     };
     #[cfg(feature = "wasm")]
     pub use crate::broker::BrokeredCapsuleHost;
     pub use crate::broker::{
-        new_connection_id, new_handle_id, scopes_missing, BrokerDenial, BrokerDenialReason,
-        ClassifiedFailure, ConnectionConsent, ConnectionHealth, ConnectionProvider,
-        ConnectionReauthRequired, ConnectionRecord, ConnectionRefresh, ConnectionRevocation,
-        ConnectionStatus, CredentialBroker, CredentialHandle, CredentialMediator,
-        CredentialRequirement, CredentialTool, CredentialUse, HandleClaims, HandleIssuance,
-        IssueRequest, MediatedTool, OAuthFailure, OAuthProvider, ResolvedCredential,
-        ScriptedOAuthProvider, SealedCredential, StoredConnection, TokenGrant, TokenMaterial,
-        CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, HANDLE_TOKEN_PREFIX, SEALED_FORMAT_VERSION,
+        BrokerDenial, BrokerDenialReason, CONNECTION_ID_PREFIX, ClassifiedFailure,
+        ConnectionConsent, ConnectionHealth, ConnectionProvider, ConnectionReauthRequired,
+        ConnectionRecord, ConnectionRefresh, ConnectionRevocation, ConnectionStatus,
+        CredentialBroker, CredentialHandle, CredentialMediator, CredentialRequirement,
+        CredentialTool, CredentialUse, HANDLE_ID_PREFIX, HANDLE_TOKEN_PREFIX, HandleClaims,
+        HandleIssuance, IssueRequest, MediatedTool, OAuthFailure, OAuthProvider,
+        ResolvedCredential, SEALED_FORMAT_VERSION, ScriptedOAuthProvider, SealedCredential,
+        StoredConnection, TokenGrant, TokenMaterial, new_connection_id, new_handle_id,
+        scopes_missing,
     };
     pub use crate::capsule::{
-        any_grant_of_kind, derive_capsule_id, network_grant_covers, CapabilityGrant,
-        CapabilityKind, CapsuleDenial, CapsuleId, CapsuleIdentity, CapsuleInterface,
-        CapsuleManifest, CapsuleResolution, CapsuleUse, FilesystemMode, ResourceBudget,
-        SUPPORTED_WORLDS, WORLD_V1,
+        CapabilityGrant, CapabilityKind, CapsuleDenial, CapsuleId, CapsuleIdentity,
+        CapsuleInterface, CapsuleManifest, CapsuleResolution, CapsuleUse, FilesystemMode,
+        ResourceBudget, SUPPORTED_WORLDS, WORLD_V1, any_grant_of_kind, derive_capsule_id,
+        network_grant_covers,
     };
     pub use crate::checkpoint::{
         Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
@@ -341,94 +343,95 @@ pub mod prelude {
     #[cfg(feature = "postgres")]
     pub use crate::checkpoint_postgres::PostgresCheckpointer;
     pub use crate::composer::{
-        publish_effect_id, ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession,
-        DraftFinding, DraftReceipt, PublishComposedSkillTool, PublishReceipt, PublishSkillEffect,
-        COMPOSER_SOURCE_NAME, MAX_COMPOSED_REFERENCES, MAX_RECIPE_TEMPLATE_BYTES,
-        MAX_SESSION_DRAFTS, PUBLISH_SKILL_EFFECT_KIND, RECIPE_HTTP_METHODS,
+        COMPOSER_SOURCE_NAME, ComposeSkillTool, ComposeToolDefinitionTool, ComposerSession,
+        DraftFinding, DraftReceipt, MAX_COMPOSED_REFERENCES, MAX_RECIPE_TEMPLATE_BYTES,
+        MAX_SESSION_DRAFTS, PUBLISH_SKILL_EFFECT_KIND, PublishComposedSkillTool, PublishReceipt,
+        PublishSkillEffect, RECIPE_HTTP_METHODS, publish_effect_id,
     };
     pub use crate::deploy::{
-        deployment_admission, deployment_surface, derive_revision_id, pin_set_digest,
-        revision_promotion_effect_id, scoped_secret_name, validate_secret_name, CanaryClearance,
-        CanaryDeclaration, CanaryDeployment, DeployError, DeploymentPointer, DeploymentResolved,
-        DeploymentRevision, EnvSecretAct, EnvSecretDenial, EnvSecretRecord, EnvSecretRevocation,
-        Environment, EnvironmentDeclaration, GateCheckRecord, GateDecisionRecord, GateDeclaration,
-        GateEvaluation, GateVerdict, RegistryPin, RevisionContent, RevisionGateEvaluator,
+        CanaryClearance, CanaryDeclaration, CanaryDeployment, DeployError, DeploymentPointer,
+        DeploymentResolved, DeploymentRevision, EnvSecretAct, EnvSecretDenial, EnvSecretRecord,
+        EnvSecretRevocation, Environment, EnvironmentDeclaration, GateCheckRecord,
+        GateDecisionRecord, GateDeclaration, GateEvaluation, GateVerdict, MAX_SECRET_NAME_LEN,
+        REVISION_PROMOTION_EFFECT_KIND, RegistryPin, RevisionContent, RevisionGateEvaluator,
         RevisionId, RevisionPromotion, RevisionRegistration, RevisionRollback, ShadowRunOutcome,
-        ShadowRunStarted, ShadowVerdict, StoredEnvSecret, MAX_SECRET_NAME_LEN,
-        REVISION_PROMOTION_EFFECT_KIND,
+        ShadowRunStarted, ShadowVerdict, StoredEnvSecret, deployment_admission, deployment_surface,
+        derive_revision_id, pin_set_digest, revision_promotion_effect_id, scoped_secret_name,
+        validate_secret_name,
     };
     pub use crate::durable::{
-        backoff_delay_ms, backoff_delay_ms_with, classify_retry, classify_retry_with_policy,
-        resolve_retry_parameters, resolve_timeout_bound_ms, retry_decision_event,
-        retry_legal_actions, retry_selected_action, timeout_decision_event, timeout_legal_actions,
-        timeout_selected_action, ArtifactContract, ErrorClass, LatencyPercentiles,
-        ResolvedRetryParameters, RetryDecision, TaskBudget, TaskEnvelope, BASE_RETRY_DELAY_MS,
-        MAX_RETRY_DELAY_MS, TASK_ENVELOPE_FORMAT_VERSION,
+        ArtifactContract, BASE_RETRY_DELAY_MS, ErrorClass, LatencyPercentiles, MAX_RETRY_DELAY_MS,
+        ResolvedRetryParameters, RetryDecision, TASK_ENVELOPE_FORMAT_VERSION, TaskBudget,
+        TaskEnvelope, backoff_delay_ms, backoff_delay_ms_with, classify_retry,
+        classify_retry_with_policy, resolve_retry_parameters, resolve_timeout_bound_ms,
+        retry_decision_event, retry_legal_actions, retry_selected_action, timeout_decision_event,
+        timeout_legal_actions, timeout_selected_action,
     };
     pub use crate::effects::{
-        admit_compensatable, admit_irreversible, admit_retry, admit_speculation, derive_effect_id,
-        ApprovalToken, CompensatableEffect, CompensationHandler, CompensationRegistry, EffectId,
-        EffectViolation, IdempotentEffect, IrreversibleEffect, PureEffect, ReadOnlyEffect,
-        ShadowOutcomeSource, ShadowRefusal, ShadowRefusalSink, TypedEffect, EFFECT_ID_DOMAIN,
+        ApprovalToken, CompensatableEffect, CompensationHandler, CompensationRegistry,
+        EFFECT_ID_DOMAIN, EffectId, EffectViolation, IdempotentEffect, IrreversibleEffect,
+        PureEffect, ReadOnlyEffect, ShadowOutcomeSource, ShadowRefusal, ShadowRefusalSink,
+        TypedEffect, admit_compensatable, admit_irreversible, admit_retry, admit_speculation,
+        derive_effect_id,
     };
     pub use crate::error::{LlmErrorClass, Result, RustyError};
     pub use crate::executor::{ExecutionOutcome, Executor, GraphEvent, RunConfig};
     pub use crate::goals::{
-        parse_actor, CreateGoalTool, GetGoalTool, Goal, GoalAuditEntry, GoalAuditKind, GoalPhase,
-        GoalProvenance, GoalStore, UpdateGoalTool, GOALS_FORMAT_VERSION, GOAL_ID_PREFIX,
-        HARNESS_GOALS_PROVENANCE, MAX_GOAL_ACTOR_BYTES, MAX_GOAL_DESCRIPTION_BYTES,
-        MAX_GOAL_REASON_BYTES, MAX_GOAL_TITLE_BYTES, MAX_GOAL_TRAIL_VIEW,
+        CreateGoalTool, GOAL_ID_PREFIX, GOALS_FORMAT_VERSION, GetGoalTool, Goal, GoalAuditEntry,
+        GoalAuditKind, GoalPhase, GoalProvenance, GoalStore, HARNESS_GOALS_PROVENANCE,
+        MAX_GOAL_ACTOR_BYTES, MAX_GOAL_DESCRIPTION_BYTES, MAX_GOAL_REASON_BYTES,
+        MAX_GOAL_TITLE_BYTES, MAX_GOAL_TRAIL_VIEW, UpdateGoalTool, parse_actor,
     };
     pub use crate::graph::{ConditionalRouter, Edge, Graph, GraphBuilder, Route, Send};
     pub use crate::inbox::{
-        CancelCause, ConsumptionPoint, DroppedMessages, Inbox, InboxBounds, InboxConsumption,
-        InboxKind, InboxMessage, InboxSnapshot, InboxTarget, RunCancellation, DEFAULT_SENDER,
-        INBOX_DELIVERY_KEY,
+        CancelCause, ConsumptionPoint, DEFAULT_SENDER, DroppedMessages, INBOX_DELIVERY_KEY, Inbox,
+        InboxBounds, InboxConsumption, InboxKind, InboxMessage, InboxSnapshot, InboxTarget,
+        RunCancellation,
     };
     pub use crate::journal::{
-        Clock, EventDraft, Journal, JournalSnapshot, RngSource, PARENT_EVENT_KEY,
+        Clock, EventDraft, Journal, JournalSnapshot, PARENT_EVENT_KEY, RngSource,
     };
     pub use crate::learn::{
-        admit_promotion, canary_admits, candidate_effect_key, derive_candidate_id,
-        detect_policy_drift, distill_retry_parameters, distill_timeout_parameters,
-        evaluation_effect_key, promotion_effect_id, promotion_effect_key, rollback_effect_key,
-        surface_for_kind, AutoPromotion, CanaryBinding, Candidate, CandidateContent,
+        AutoPromotion, CANARY_DRAW_DOMAIN, CanaryBinding, Candidate, CandidateContent,
         CandidateEvaluation, CandidateEvaluator, CandidateId, CandidateKind, CandidateOverlay,
         CandidateRecord, CandidateStatus, DriftBaseline, DriftThresholds, EnvelopeRule,
         EnvironmentTag, EvaluationRequest, EvaluationThresholds, EvaluationVerdict, EvidenceSpan,
-        GrantDirection, LearnError, MiddlewareLayerConfig, PolicyDriftReport, PromotionAuthority,
-        PromotionDecision, PromotionEnvelope, PromotionReceipt, PromotionRefusal, ReplayDivergence,
-        ReplaySummary, RetryLearningConfig, RollbackReceipt, SurfaceKey, TimeoutLearningConfig,
-        TwinCandidateEvaluator, VersionPointer, CANARY_DRAW_DOMAIN, PROMOTION_EFFECT_KIND,
-        SURFACE_TAG_SEPARATOR,
+        GrantDirection, LearnError, MiddlewareLayerConfig, PROMOTION_EFFECT_KIND,
+        PolicyDriftReport, PromotionAuthority, PromotionDecision, PromotionEnvelope,
+        PromotionReceipt, PromotionRefusal, ReplayDivergence, ReplaySummary, RetryLearningConfig,
+        RollbackReceipt, SURFACE_TAG_SEPARATOR, SurfaceKey, TimeoutLearningConfig,
+        TwinCandidateEvaluator, VersionPointer, admit_promotion, canary_admits,
+        candidate_effect_key, derive_candidate_id, detect_policy_drift, distill_retry_parameters,
+        distill_timeout_parameters, evaluation_effect_key, promotion_effect_id,
+        promotion_effect_key, rollback_effect_key, surface_for_kind,
     };
     pub use crate::llm::{
         ChatMessage, ChatModel, ChatResponse, ModelPricing, OpenAiCompatibleClient, Role, ToolCall,
         Usage,
     };
     pub use crate::memory::{
-        apply_query, assemble, derive_memory_id, estimated_tokens, memory_effect_key,
-        memory_read_request, BudgetOverflow, ContextBudget, InMemoryMemoryStore, JournaledMemory,
-        MemoryAssembly, MemoryEvidence, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
-        MemoryReplaySource, MemoryScope, MemorySource, MemoryStore, ProvenanceAuthor, ScopeAddress,
-        TokenAccounting, ValidityWindow, DEFAULT_TOKEN_MARGIN_PERCENT, MEMORY_SCHEMA_VERSION,
-        TOKEN_BYTES_PER_ESTIMATE,
+        BudgetOverflow, ContextBudget, DEFAULT_TOKEN_MARGIN_PERCENT, InMemoryMemoryStore,
+        JournaledMemory, MEMORY_SCHEMA_VERSION, MemoryAssembly, MemoryEvidence, MemoryKind,
+        MemoryProvenance, MemoryQuery, MemoryRecord, MemoryReplaySource, MemoryScope, MemorySource,
+        MemoryStore, ProvenanceAuthor, ScopeAddress, TOKEN_BYTES_PER_ESTIMATE, TokenAccounting,
+        ValidityWindow, apply_query, assemble, derive_memory_id, estimated_tokens,
+        memory_effect_key, memory_read_request,
     };
     pub use crate::meter::{
-        meter_journal, CostEstimate, ModelMeter, RunMeter, TokenTotals, ToolClassTotals,
-        UNREPORTED_MODEL,
+        CostEstimate, ModelMeter, RunMeter, TokenTotals, ToolClassTotals, UNREPORTED_MODEL,
+        meter_journal,
     };
     pub use crate::middleware::{
-        instantiate_composition, Decision, InterceptPoint, Middleware, MiddlewareChain,
-        MiddlewareChatModel, ModelCall, NodeCall, Rejection, RequestLogger, ToolCallBlocklist,
-        ToolInvocation,
+        Decision, InterceptPoint, Middleware, MiddlewareChain, MiddlewareChatModel, ModelCall,
+        NodeCall, Rejection, RequestLogger, ToolCallBlocklist, ToolInvocation,
+        instantiate_composition,
     };
     pub use crate::node::{Command, Node, NodeConfig, NodeContext, NodeOutput};
     #[cfg(feature = "wasm")]
     pub use crate::plugin::CapsulePlugin;
     pub use crate::plugin::{
-        Fiber, FiberState, Plugin, PluginContext, PluginKernel, RegistrationGuard,
-        MAX_PLUGIN_CONFIG_BYTES, MAX_PLUGIN_ID_LEN,
+        Fiber, FiberState, MAX_PLUGIN_CONFIG_BYTES, MAX_PLUGIN_ID_LEN, Plugin, PluginContext,
+        PluginKernel, RegistrationGuard,
     };
     #[cfg(feature = "genai")]
     pub use crate::provider_genai::GenaiChatModel;
@@ -437,52 +440,51 @@ pub mod prelude {
         create_react_agent_with_recording,
     };
     pub use crate::receipt::{
-        derive_key_id, manifest_digest, mint_receipt, verify_receipt, PublicKey, ReceiptRejection,
-        RunReceipt, SigningKey, SigningKeyRotation, VerifiedRun, RECEIPT_FORMAT_VERSION,
+        PublicKey, RECEIPT_FORMAT_VERSION, ReceiptRejection, RunReceipt, SigningKey,
+        SigningKeyRotation, VerifiedRun, derive_key_id, manifest_digest, mint_receipt,
+        verify_receipt,
     };
     pub use crate::record::{
-        derive_policy_version, ArtifactRef, BackoffParameters, CapsuleVersion, CheckpointHeader,
+        ArtifactRef, BackoffParameters, CURRENT_FORMAT_VERSION, CapsuleVersion, CheckpointHeader,
         ConcurrencyPolicyParameters, DecisionAction, DecisionEvent, DecisionFamily,
         DecisionOutcome, DecisionRole, Effect, EffectReceipt, EventStatus, ExecutorPolicy,
-        JournalRef, PayloadRef, PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind,
-        RunManifest, TimeoutPolicyParameters, CURRENT_FORMAT_VERSION, POLICY_MAX_ATTEMPTS_ENVELOPE,
-        POLICY_MAX_DELAY_ENVELOPE_MS,
+        JournalRef, POLICY_MAX_ATTEMPTS_ENVELOPE, POLICY_MAX_DELAY_ENVELOPE_MS, PayloadRef,
+        PolicyVersion, RetryPolicyParameters, RunEvent, RunEventKind, RunManifest,
+        TimeoutPolicyParameters, derive_policy_version,
     };
     pub use crate::registry::{
-        diff_candidates, pointer_admission, resolution_pin, ArtifactCommit, ArtifactRecord,
-        ConfigResolution, LeafChange, LeafModification, PointerBinding, RegistryDiff,
-        RegistryError, TextDiffLine, MAX_ARTIFACT_NAME_LEN,
+        ArtifactCommit, ArtifactRecord, ConfigResolution, LeafChange, LeafModification,
+        MAX_ARTIFACT_NAME_LEN, PointerBinding, RegistryDiff, RegistryError, TextDiffLine,
+        diff_candidates, pointer_admission, resolution_pin,
     };
     pub use crate::render_intent::{
-        render_intent, render_intent_from_event, RenderIntent, SearchHitView,
         MAX_INTENT_EXCERPT_CHARS, MAX_INTENT_LABEL_CHARS, MAX_INTENT_SEARCH_HITS,
-        MAX_INTENT_SUMMARY_CHARS, MAX_INTENT_TABLE_COLUMNS, MAX_INTENT_TABLE_ROWS,
-        TRUNCATION_MARKER,
+        MAX_INTENT_SUMMARY_CHARS, MAX_INTENT_TABLE_COLUMNS, MAX_INTENT_TABLE_ROWS, RenderIntent,
+        SearchHitView, TRUNCATION_MARKER, render_intent, render_intent_from_event,
     };
     pub use crate::replay::{
-        BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FixtureMetadata, JournalShadowSource,
-        LogicalClockParams, RecordingChatModel, RecordingTool, ReplayFixture, ReplayOutcome,
-        ReplayParams, ReplaySource, ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
-        FIXTURE_FORMAT_VERSION,
+        BranchDiff, BranchTotals, ChannelDiff, ExactReplay, FIXTURE_FORMAT_VERSION,
+        FixtureMetadata, JournalShadowSource, LogicalClockParams, RecordingChatModel,
+        RecordingTool, ReplayFixture, ReplayOutcome, ReplayParams, ReplaySource,
+        ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
     };
     pub use crate::self_improve::{
-        assess, capability_catalog, catalog_entry, draft_skill_for_entry, publish_staged_skill,
-        BacklogEntry, BacklogProvenance, BacklogStatus, BacklogStore, BuildGapSkillTool,
-        BuildShape, Capability, CapabilityAssessment, CapabilityInspection, CapabilityStatus,
-        GapReport, InspectCapabilitiesTool, Plane, ProposeBacklogTool, SkillProposal, StagedSkill,
-        BACKLOG_ENTRY_ID_PREFIX, BACKLOG_FORMAT_VERSION, FEATURE_CAPABILITY_SETS,
+        BACKLOG_ENTRY_ID_PREFIX, BACKLOG_FORMAT_VERSION, BacklogEntry, BacklogProvenance,
+        BacklogStatus, BacklogStore, BuildGapSkillTool, BuildShape, Capability,
+        CapabilityAssessment, CapabilityInspection, CapabilityStatus, FEATURE_CAPABILITY_SETS,
         FEATURE_CODE_MODE, FEATURE_DURABLE_STEER_INBOX, FEATURE_GOALS_SUBSYSTEM,
         FEATURE_HOOKS_COMPATIBILITY, FEATURE_OS_SANDBOX, FEATURE_PERMISSION_PRESETS,
         FEATURE_PLUGIN_KERNEL, FEATURE_RENDER_INTENTS, FEATURE_STREAMING_CHUNK_CAPTURE,
-        FEATURE_SURFACE_COMPACTION, FEATURE_TELEMETRY_LEDGER, FEATURE_TOKEN_METER,
-        HARNESS_PROVENANCE, MAX_BACKLOG_EVIDENCE_BYTES, MAX_BACKLOG_GAPS,
-        MAX_BACKLOG_RATIONALE_BYTES, MAX_BACKLOG_TITLE_BYTES, MAX_PROPOSE_ENTRIES,
-        RUNBOOK_SKILL_PREFIX,
+        FEATURE_SURFACE_COMPACTION, FEATURE_TELEMETRY_LEDGER, FEATURE_TOKEN_METER, GapReport,
+        HARNESS_PROVENANCE, InspectCapabilitiesTool, MAX_BACKLOG_EVIDENCE_BYTES, MAX_BACKLOG_GAPS,
+        MAX_BACKLOG_RATIONALE_BYTES, MAX_BACKLOG_TITLE_BYTES, MAX_PROPOSE_ENTRIES, Plane,
+        ProposeBacklogTool, RUNBOOK_SKILL_PREFIX, SkillProposal, StagedSkill, assess,
+        capability_catalog, catalog_entry, draft_skill_for_entry, publish_staged_skill,
     };
     pub use crate::session_query::{
-        EventTrace, FileJournalQuery, InMemoryJournalQuery, JournalQuery, SearchField, SearchHit,
-        SessionSearch, SessionSearchTool, SessionTraceTool, MAX_EXCERPT_CHARS, MAX_QUERY_BYTES,
-        MAX_READ_EVENTS, MAX_SEARCH_RESULTS, MAX_TRACE_EVENTS,
+        EventTrace, FileJournalQuery, InMemoryJournalQuery, JournalQuery, MAX_EXCERPT_CHARS,
+        MAX_QUERY_BYTES, MAX_READ_EVENTS, MAX_SEARCH_RESULTS, MAX_TRACE_EVENTS, SearchField,
+        SearchHit, SessionSearch, SessionSearchTool, SessionTraceTool,
     };
     pub use crate::state::{Reducer, State, StateSpec};
     pub use crate::surface::{
@@ -490,17 +492,17 @@ pub mod prelude {
     };
     pub use crate::team_trace::{TeamTrace, TeamTraceNode};
     pub use crate::telemetry::{
-        redactor_fn, severity_of, AppendOutcome, InMemoryLedger, JsonlLedger, LedgerRecord,
-        MirrorCursor, MirrorReport, PayloadDrop, PayloadHasher, RedactionAction, RedactionMark,
-        Redactor, RedactorFn, Severity, SeverityFloor, TelemetryLedger, TelemetryMirror,
-        TELEMETRY_FORMAT_VERSION,
+        AppendOutcome, InMemoryLedger, JsonlLedger, LedgerRecord, MirrorCursor, MirrorReport,
+        PayloadDrop, PayloadHasher, RedactionAction, RedactionMark, Redactor, RedactorFn, Severity,
+        SeverityFloor, TELEMETRY_FORMAT_VERSION, TelemetryLedger, TelemetryMirror, redactor_fn,
+        severity_of,
     };
     pub use crate::tool::{Tool, ToolExecutor, ToolRegistry};
     pub use crate::twin::{
-        CounterfactualBranch, CounterfactualFork, DecisionContext, FaultAnchor, FaultInjection,
-        FaultSchedule, InjectedFault, Interleaving, ParameterizedPolicy, RecordedAnswer,
-        StaticFloor, Twin, TwinMetrics, TwinOutcome, TwinPolicy, TwinReport, TwinRunConfig,
-        TwinWorkItem, TwinWorld, UnevaluableCase, DEFAULT_CONCURRENCY_LADDER,
-        DEFAULT_TIMEOUT_LADDER, MIN_TIMEOUT_RUNG_MS, TWIN_FORK_POLICY_VERSION, TWIN_REPORT_BOUND,
+        CounterfactualBranch, CounterfactualFork, DEFAULT_CONCURRENCY_LADDER,
+        DEFAULT_TIMEOUT_LADDER, DecisionContext, FaultAnchor, FaultInjection, FaultSchedule,
+        InjectedFault, Interleaving, MIN_TIMEOUT_RUNG_MS, ParameterizedPolicy, RecordedAnswer,
+        StaticFloor, TWIN_FORK_POLICY_VERSION, TWIN_REPORT_BOUND, Twin, TwinMetrics, TwinOutcome,
+        TwinPolicy, TwinReport, TwinRunConfig, TwinWorkItem, TwinWorld, UnevaluableCase,
     };
 }

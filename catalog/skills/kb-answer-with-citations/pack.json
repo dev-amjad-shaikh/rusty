@@ -1,0 +1,17 @@
+{
+  "id": "kb-answer-with-citations",
+  "name": "KB Answer with Citations",
+  "version": "1.0.0",
+  "publisher": "rusty",
+  "skills": [
+    {
+      "dir": ".",
+      "dependencies": [
+        { "type": "tool", "name": "kb_search" },
+        { "type": "tool", "name": "log_gap" },
+        { "type": "connector", "id": "knowledge-base", "major": 1 }
+      ],
+      "reference_docs": ["references/grounding-rules.md"]
+    }
+  ]
+}

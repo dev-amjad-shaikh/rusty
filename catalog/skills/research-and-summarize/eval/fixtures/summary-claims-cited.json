@@ -1,0 +1,20 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "web_search", "arguments": { "query": "project status" }, "status": "ok" },
+    { "seq": 2, "name": "fetch_url", "arguments": { "url": "https://example.com/status-page" }, "status": "ok" },
+    { "seq": 3, "name": "fetch_url", "arguments": { "url": "https://example.com/changelog" }, "status": "ok" }
+  ],
+  "final_state": {
+    "summary": {
+      "claims": [
+        { "text": "The project shipped its milestone on schedule.", "citation": { "url": "https://example.com/status-page", "accessed": "2026-08-20" } },
+        { "text": "Two point releases followed within a week.", "citation": { "url": "https://example.com/changelog", "accessed": "2026-08-20" } }
+      ],
+      "uncited_count": 0
+    }
+  },
+  "latency_ms": 8400,
+  "cost_usd": 0.011,
+  "total_tokens": 5200
+}

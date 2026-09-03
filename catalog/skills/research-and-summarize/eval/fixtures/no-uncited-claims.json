@@ -1,0 +1,18 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "web_search", "arguments": { "query": "release notes" }, "status": "ok" },
+    { "seq": 2, "name": "fetch_url", "arguments": { "url": "https://example.com/releases" }, "status": "ok" }
+  ],
+  "final_state": {
+    "summary": {
+      "claims": [
+        { "text": "The release added incremental state sync.", "citation": { "url": "https://example.com/releases", "accessed": "2026-08-20" } }
+      ],
+      "uncited_count": 0
+    }
+  },
+  "latency_ms": 6100,
+  "cost_usd": 0.008,
+  "total_tokens": 3900
+}

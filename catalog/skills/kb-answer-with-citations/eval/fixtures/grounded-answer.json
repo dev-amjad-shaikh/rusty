@@ -1,0 +1,16 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "kb_search", "arguments": { "query": "rotate API key" }, "status": "ok" }
+  ],
+  "final_state": {
+    "outcome": "answered",
+    "answer": {
+      "text": "Rotate an API key from the credentials page; the old key stays valid for 24 hours.",
+      "citations": [{ "entry_id": "kb-1042", "title": "Managing API keys" }]
+    }
+  },
+  "latency_ms": 2600,
+  "cost_usd": 0.004,
+  "total_tokens": 1800
+}

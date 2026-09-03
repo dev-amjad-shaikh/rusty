@@ -1,0 +1,16 @@
+{
+  "id": "research-and-summarize",
+  "name": "Research and Summarize",
+  "version": "1.0.0",
+  "publisher": "rusty",
+  "skills": [
+    {
+      "dir": ".",
+      "dependencies": [
+        { "type": "tool", "name": "web_search" },
+        { "type": "tool", "name": "fetch_url" }
+      ],
+      "reference_docs": ["references/citation-format.md"]
+    }
+  ]
+}

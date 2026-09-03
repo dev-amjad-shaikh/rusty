@@ -1032,14 +1032,31 @@ pub enum SkillSource {
         /// The registry's name.
         name: String,
     },
+    /// Shipped by a catalog package (EP-15): `package:{id}@{version}`.
+    /// Carries the publisher and package version so an auditor can
+    /// distinguish shipped content from locally-learned content.
+    Package {
+        /// The package's stable id.
+        package_id: String,
+        /// The publisher identity from the package manifest.
+        publisher: String,
+        /// The package version that shipped the skill.
+        version: String,
+    },
 }
 
 impl SkillSource {
-    /// The canonical id string (`local:{path}` / `registry:{name}`).
+    /// The canonical id string (`local:{path}` / `registry:{name}` /
+    /// `package:{id}@{version}`).
     pub fn as_id_string(&self) -> String {
         match self {
             SkillSource::LocalPath { path } => format!("local:{path}"),
             SkillSource::Registry { name } => format!("registry:{name}"),
+            SkillSource::Package {
+                package_id,
+                version,
+                ..
+            } => format!("package:{package_id}@{version}"),
         }
     }
 }

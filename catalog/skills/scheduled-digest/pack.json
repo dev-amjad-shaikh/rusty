@@ -1,0 +1,16 @@
+{
+  "id": "scheduled-digest",
+  "name": "Scheduled Digest",
+  "version": "1.0.0",
+  "publisher": "rusty",
+  "skills": [
+    {
+      "dir": ".",
+      "dependencies": [
+        { "type": "gateway", "capability": "scheduled_autonomy" },
+        { "type": "tool", "name": "list_items" }
+      ],
+      "reference_docs": ["references/window-discipline.md"]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "route_item", "arguments": { "item_id": "msg-103", "queue": "triage-queue" }, "status": "ok" }
+  ],
+  "final_state": {
+    "triage": { "item_id": "msg-103", "category": "uncategorized" }
+  },
+  "latency_ms": 1800,
+  "cost_usd": 0.002,
+  "total_tokens": 1200
+}

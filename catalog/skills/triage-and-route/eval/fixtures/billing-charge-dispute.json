@@ -1,0 +1,12 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "route_item", "arguments": { "item_id": "msg-101", "queue": "billing-queue" }, "status": "ok" }
+  ],
+  "final_state": {
+    "triage": { "item_id": "msg-101", "category": "billing" }
+  },
+  "latency_ms": 2100,
+  "cost_usd": 0.003,
+  "total_tokens": 1400
+}

@@ -1,0 +1,17 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "list_items", "arguments": { "from": "2026-08-17T00:00:00Z", "to": "2026-08-24T00:00:00Z" }, "status": "ok" }
+  ],
+  "final_state": {
+    "digest": {
+      "window_start": "2026-08-17T00:00:00Z",
+      "window_end": "2026-08-24T00:00:00Z",
+      "items": ["item-221", "item-223", "item-230"],
+      "window_violations": 0
+    }
+  },
+  "latency_ms": 3200,
+  "cost_usd": 0.004,
+  "total_tokens": 2100
+}
