@@ -9,6 +9,7 @@ import { ReleasesPage } from "../features/operations/releases/ReleasesPage";
 import { WorkPage } from "../features/work/WorkPage";
 import { CommandCenter } from "../features/command-center/CommandCenter";
 import { useRuntimeStore } from "../state/runtime";
+import { I18nProvider } from "../i18n";
 import { AppShell } from "./AppShell";
 
 async function scan(path: "/" | "/agents" | "/work" | "/operations" | "/operations/releases") {
@@ -31,7 +32,7 @@ async function scan(path: "/" | "/agents" | "/work" | "/operations" | "/operatio
   ];
   const router = createRouter({ routeTree: root.addChildren(routes), history: createMemoryHistory({ initialEntries: [path] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+  render(<I18nProvider><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></I18nProvider>);
   await new Promise((resolve) => setTimeout(resolve, 50));
   const results = await axe.run(document.body, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] } });
   return results.violations.map((violation) => ({ id: violation.id, impact: violation.impact, nodes: violation.nodes.map((node) => node.target) }));

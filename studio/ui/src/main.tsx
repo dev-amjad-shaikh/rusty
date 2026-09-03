@@ -8,6 +8,7 @@ import "@fontsource/outfit/latin-400.css";
 import "@fontsource/ibm-plex-mono/latin-300.css";
 import "@fontsource/ibm-plex-mono/latin-400.css";
 import { router } from "./router";
+import { I18nProvider } from "./i18n";
 import "./styles/tokens.css";
 import "./styles/global.css";
 
@@ -23,8 +24,10 @@ if (!root) throw new Error("Rusty Studio root element is missing.");
 
 createRoot(root).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} context={{ queryClient }} />
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} context={{ queryClient }} />
+      </QueryClientProvider>
+    </I18nProvider>
   </StrictMode>,
 );

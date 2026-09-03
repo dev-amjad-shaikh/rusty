@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRef } from "react";
 import { useRuntimeStore } from "../state/runtime";
 import type { ServerInfo } from "../lib/contracts";
+import { I18nProvider } from "../i18n";
 import { UnsavedChangesDialog } from "../features/agents/UnsavedChangesDialog";
 import { AppShell } from "./AppShell";
 import { primaryDestinations } from "./navigation";
@@ -36,7 +37,7 @@ function renderShell(initialEntry = "/work", blockBuilder = false) {
   const prompts = createRoute({ getParentRoute: () => root, path: "/agents/prompts", component: () => <h1>Prompts area</h1> });
   const router = createRouter({ routeTree: root.addChildren([command, work, agents, builder, prompts, operations]), history: createMemoryHistory({ initialEntries: [initialEntry] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return { router, ...render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>) };
+  return { router, ...render(<I18nProvider><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></I18nProvider>) };
 }
 
 afterEach(() => vi.unstubAllGlobals());
