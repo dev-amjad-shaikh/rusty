@@ -293,6 +293,7 @@ pub mod remote;
 pub mod render_intent;
 pub mod replay;
 pub mod reviewer;
+pub mod sandbox;
 pub mod self_improve;
 pub mod session_query;
 pub mod skill;
@@ -485,6 +486,12 @@ pub mod prelude {
         FixtureMetadata, JournalShadowSource, LogicalClockParams, RecordingChatModel,
         RecordingTool, ReplayFixture, ReplayOutcome, ReplayParams, ReplaySource,
         ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
+    };
+    pub use crate::sandbox::{
+        ContainerBackend, ContainerConfig, DEFAULT_LOCAL_OUTPUT_BYTES,
+        DEFAULT_LOCAL_TIMEOUT, EnforcementLevel, LocalProcessBackend,
+        LocalProcessConfig, MAX_LOCAL_OUTPUT_BYTES, MAX_LOCAL_TIMEOUT,
+        RemoteBackend, RemoteConfig, SandboxExecutor, SandboxResult, ToolStub,
     };
     pub use crate::self_improve::{
         BACKLOG_ENTRY_ID_PREFIX, BACKLOG_FORMAT_VERSION, BacklogEntry, BacklogProvenance,

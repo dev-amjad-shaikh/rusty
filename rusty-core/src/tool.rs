@@ -21,6 +21,7 @@ use crate::journal::{EventDraft, Journal};
 use crate::llm::{ChatMessage, ToolCall};
 use crate::middleware::{MiddlewareChain, ToolInvocation};
 use crate::record::{Effect, RunEventKind};
+use crate::sandbox::{EnforcementLevel, SandboxExecutor};
 
 pub mod approval;
 
@@ -578,6 +579,7 @@ pub struct ToolExecutor {
     guard_evidence: Option<GuardEvidence>,
     thread_id: String,
     node: String,
+    sandbox: Option<Arc<dyn SandboxExecutor>>,
 }
 
 impl ToolExecutor {
@@ -643,6 +645,13 @@ impl ToolExecutor {
         self
     }
 
+    /// Builder-style: attach a sandbox backend for tools whose placement
+    /// resolves to [`Placement::Sandboxed`].
+    pub fn with_sandbox(mut self, sandbox: Arc<dyn SandboxExecutor>) -> Self {
+        self.sandbox = Some(sandbox);
+        self
+    }
+
     /// The attached middleware chain (empty when none was added).
     pub fn middleware(&self) -> &MiddlewareChain {
         &self.middleware
@@ -698,6 +707,7 @@ impl ToolExecutor {
         let guard_evidence = self.guard_evidence.clone();
         let thread_id = self.thread_id.clone();
         let node = self.node.clone();
+        let sandbox = self.sandbox.clone();
         let result = std::panic::AssertUnwindSafe(async {
             // The dispatch closure takes the call by value: the future it
             // returns must own the call it dispatches, or the borrow would
@@ -719,6 +729,7 @@ impl ToolExecutor {
                         guard_evidence.as_ref(),
                         &thread_id,
                         &node,
+                        sandbox.as_ref(),
                     )
                     .await
                 }
@@ -767,6 +778,7 @@ impl ToolExecutor {
 /// Only a call the recorded world never saw surfaces as a failure, and a
 /// non-shadow context answers `None` from
 /// [`EffectAdmissionContext::serve_shadow`] unchanged.
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_tool(
     registry: &ToolRegistry,
     call: &ToolCall,
@@ -775,6 +787,7 @@ async fn dispatch_tool(
     guard_evidence: Option<&GuardEvidence>,
     scope: &str,
     node: &str,
+    sandbox: Option<&Arc<dyn SandboxExecutor>>,
 ) -> Result<Value> {
     let tool = registry
         .get(&call.name)
@@ -827,8 +840,29 @@ async fn dispatch_tool(
         }
     }
     // Placement resolution: after guards, before effect admission.
-    if let Err(e) = resolve_placement(tool.as_ref(), false) {
-        return Err(RustyError::Tool(e.to_string()));
+    let placement = resolve_placement(tool.as_ref(), sandbox.is_some());
+    match placement {
+        Ok(Placement::InProcess) => {}
+        Ok(Placement::Sandboxed) => {
+            let backend = sandbox
+                .as_ref()
+                .expect("sandbox available verified by resolve_placement");
+            // EP-05-S05 AC: Required + Partial enforcement → typed denial.
+            if tool.sandbox_requirement() == SandboxRequirement::Required
+                && backend.enforcement() == EnforcementLevel::Partial
+            {
+                return Err(RustyError::Tool(format!(
+                    "tool `{}` requires full sandbox enforcement but backend `{}` reports partial",
+                    call.name,
+                    backend.backend_id()
+                )));
+            }
+            let result = backend
+                .execute(&call.name, &[serde_json::to_string(&call.arguments)?])
+                .await?;
+            return Ok(serde_json::to_value(result)?);
+        }
+        Err(e) => return Err(RustyError::Tool(e.to_string())),
     }
 
     if let Some(context) = effect_admission {
