@@ -1,0 +1,13 @@
+[package]
+name = "rusty-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Storage contract traits for the Rusty platform"
+
+[dependencies]
+
+[dev-dependencies]
