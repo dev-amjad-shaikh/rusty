@@ -44,7 +44,7 @@
 //!    argument gating — is a `Tool` wrapper, never middleware.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -941,6 +941,401 @@ impl Tool for ValidatingTool {
             return Ok(Value::String(argument_validation_refusal(&violations)));
         }
         self.inner.call(args).await
+    }
+}
+
+/// A [`Tool`] wrapper that prefixes the tool's name. Delegates everything
+/// except [`Tool::name`] and [`Tool::effect_kind`] (which defaults to the
+/// prefixed name so receipts and effect requests record the qualified name
+/// for correct rebinding across pause/resume).
+pub struct PrefixedTool {
+    inner: Arc<dyn Tool>,
+    prefixed_name: String,
+}
+
+impl PrefixedTool {
+    /// Wrap `inner` with `prefix` prepended to its name.
+    pub fn new(inner: Arc<dyn Tool>, prefix: impl Into<String>) -> Self {
+        let prefix = prefix.into();
+        let prefixed_name = format!("{prefix}{}", inner.name());
+        Self {
+            inner,
+            prefixed_name,
+        }
+    }
+
+    /// The wrapped tool.
+    pub fn inner(&self) -> &Arc<dyn Tool> {
+        &self.inner
+    }
+
+    /// The prefix applied to the inner tool's name.
+    pub fn prefix(&self) -> &str {
+        &self.prefixed_name[..self.prefixed_name.len() - self.inner.name().len()]
+    }
+}
+
+#[async_trait]
+impl Tool for PrefixedTool {
+    fn name(&self) -> &str {
+        &self.prefixed_name
+    }
+
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+
+    fn parameters_schema(&self) -> Value {
+        self.inner.parameters_schema()
+    }
+
+    fn effect(&self) -> Effect {
+        self.inner.effect()
+    }
+
+    fn effect_kind(&self) -> &str {
+        // Receipts and effect requests must use the prefixed name so that
+        // pause/resume rebinding finds the same qualified identity.
+        &self.prefixed_name
+    }
+
+    fn idempotency_key(&self, args: &Value) -> Option<String> {
+        self.inner.idempotency_key(args)
+    }
+
+    fn effect_request(&self, call: &ToolCall) -> EffectRequest {
+        self.inner.effect_request(call)
+    }
+
+    async fn call(&self, args: Value) -> Result<Value> {
+        self.inner.call(args).await
+    }
+}
+
+/// A [`Tool`] wrapper that overrides the model-facing name, description, and
+/// parameter schema while preserving the inner tool's validation and
+/// execution semantics. Argument validation at dispatch always runs against
+/// the wrapped tool's bundled (original) schema — presentation is dynamic,
+/// enforcement is not.
+pub struct PreparedTool {
+    inner: Arc<dyn Tool>,
+    prepared_name: String,
+    prepared_description: String,
+    prepared_schema: Value,
+}
+
+impl PreparedTool {
+    /// Wrap `inner` with overridden presentation metadata.
+    ///
+    /// The new metadata is validated against the same contract rules as
+    /// native tools (bounded name, description, JSON-object schema).
+    pub fn new(
+        inner: Arc<dyn Tool>,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters_schema: Value,
+    ) -> Result<Self> {
+        let name = name.into();
+        let description = description.into();
+        crate::tool::validate_tool_contract(&name, &description, &parameters_schema)?;
+        Ok(Self {
+            inner,
+            prepared_name: name,
+            prepared_description: description,
+            prepared_schema: parameters_schema,
+        })
+    }
+
+    /// The wrapped tool.
+    pub fn inner(&self) -> &Arc<dyn Tool> {
+        &self.inner
+    }
+}
+
+#[async_trait]
+impl Tool for PreparedTool {
+    fn name(&self) -> &str {
+        &self.prepared_name
+    }
+
+    fn description(&self) -> &str {
+        &self.prepared_description
+    }
+
+    /// The dynamic schema presented to the model for tool assembly.
+    fn parameters_schema(&self) -> Value {
+        self.prepared_schema.clone()
+    }
+
+    fn effect(&self) -> Effect {
+        self.inner.effect()
+    }
+
+    fn effect_kind(&self) -> &str {
+        // Receipts record the prepared name so pause/resume rebinding
+        // resolves to the same qualified identity.
+        &self.prepared_name
+    }
+
+    fn idempotency_key(&self, args: &Value) -> Option<String> {
+        self.inner.idempotency_key(args)
+    }
+
+    fn effect_request(&self, call: &ToolCall) -> EffectRequest {
+        self.inner.effect_request(call)
+    }
+
+    /// Validate against the **inner** schema (the ground truth), then dispatch.
+    async fn call(&self, args: Value) -> Result<Value> {
+        let violations = validate_arguments(&self.inner.parameters_schema(), &args);
+        if !violations.is_empty() {
+            return Ok(Value::String(argument_validation_refusal(&violations)));
+        }
+        self.inner.call(args).await
+    }
+}
+
+/// Predicate for filtering tools in a registry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ToolPredicate {
+    /// Include only tools whose names are in the given list.
+    ByName { names: Vec<String> },
+}
+
+impl ToolPredicate {
+    /// Check whether `tool_name` matches this predicate.
+    pub fn matches(&self, tool_name: &str) -> bool {
+        match self {
+            ToolPredicate::ByName { names } => names.iter().any(|n| n == tool_name),
+        }
+    }
+}
+
+/// Overridden presentation metadata for one tool in a [`ToolsetSpec::Prepared`]
+/// description. The runtime applies these to the model-facing catalog while
+/// keeping the inner tool's validator (the original schema) for dispatch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedOverride {
+    /// Model-facing tool name.
+    pub name: String,
+    /// Model-facing description.
+    pub description: String,
+    /// Model-facing JSON Schema for argument assembly.
+    pub parameters_schema: Value,
+}
+
+/// A serializable description of a toolset transformation. Nested specs
+/// compose: `Prefixed { prefix: "crm_", inner: Box::new(Base) }` describes
+/// a base registry with every tool prefixed by `crm_`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ToolsetSpec {
+    /// The unwrapped base registry.
+    Base,
+    /// Only tools matching `predicate` are visible and dispatchable.
+    Filtered {
+        predicate: ToolPredicate,
+        #[serde(rename = "inner")]
+        inner: Box<ToolsetSpec>,
+    },
+    /// Every tool's name is prefixed.
+    Prefixed {
+        prefix: String,
+        #[serde(rename = "inner")]
+        inner: Box<ToolsetSpec>,
+    },
+    /// Model-facing metadata is rewritten per-tool; validation stays on the
+    /// inner schema.
+    Prepared {
+        overrides: BTreeMap<String, PreparedOverride>,
+        #[serde(rename = "inner")]
+        inner: Box<ToolsetSpec>,
+    },
+    /// Tools are hidden until discovered via the `tool_discovery` call.
+    DeferLoading {
+        #[serde(rename = "inner")]
+        inner: Box<ToolsetSpec>,
+    },
+}
+
+/// Return a new registry containing only tools whose names match `predicate`.
+///
+/// A call to a filtered-out tool resolves as an unknown-tool error at
+/// dispatch time (the executor's standard behaviour).
+pub fn filtered(predicate: ToolPredicate, registry: &ToolRegistry) -> ToolRegistry {
+    let mut out = ToolRegistry::new();
+    let mut names: Vec<&str> = registry.names().collect();
+    names.sort_unstable();
+    for name in names {
+        if predicate.matches(name) {
+            out.register_shared(registry.get(name).expect("name came from the registry"));
+        }
+    }
+    out
+}
+
+/// Return a new registry with every tool wrapped in [`PrefixedTool`].
+pub fn prefixed(prefix: impl Into<String>, registry: &ToolRegistry) -> ToolRegistry {
+    let prefix = prefix.into();
+    let mut out = ToolRegistry::new();
+    let mut names: Vec<&str> = registry.names().collect();
+    names.sort_unstable();
+    for name in names {
+        let tool = registry.get(name).expect("name came from the registry");
+        out.register_shared(Arc::new(PrefixedTool::new(tool, prefix.clone())));
+    }
+    out
+}
+
+/// Return a new registry with every tool whose name appears in `overrides`
+/// wrapped in [`PreparedTool`] with the overridden metadata. Tools not
+/// listed in `overrides` pass through unchanged.
+///
+/// The override schema is validated against the tool contract rules at
+/// construction time (fail-closed).
+pub fn prepared(
+    overrides: &BTreeMap<String, PreparedOverride>,
+    registry: &ToolRegistry,
+) -> Result<ToolRegistry> {
+    let mut out = ToolRegistry::new();
+    let mut names: Vec<&str> = registry.names().collect();
+    names.sort_unstable();
+    for name in names {
+        let tool = registry.get(name).expect("name came from the registry");
+        if let Some(ovr) = overrides.get(name) {
+            out.register_shared(Arc::new(PreparedTool::new(
+                tool,
+                ovr.name.clone(),
+                ovr.description.clone(),
+                ovr.parameters_schema.clone(),
+            )?));
+        } else {
+            out.register_shared(tool);
+        }
+    }
+    Ok(out)
+}
+
+/// Resolve `spec` against `base`, producing the wrapped registry the spec
+/// describes.
+///
+/// Returns an error if the spec references tools that do not exist in the
+/// resolved inner registry (fail-closed, like [`ToolRegistry::restricted_to`]).
+/// `DeferLoading` cannot be resolved to a static registry and returns an
+/// error directing the caller to [`DeferLoadingRegistry`].
+pub fn apply_spec(base: &ToolRegistry, spec: &ToolsetSpec) -> Result<ToolRegistry> {
+    match spec {
+        ToolsetSpec::Base => Ok(base.clone()),
+        ToolsetSpec::Filtered { predicate, inner } => {
+            let resolved = apply_spec(base, inner)?;
+            Ok(filtered(predicate.clone(), &resolved))
+        }
+        ToolsetSpec::Prefixed { prefix, inner } => {
+            let resolved = apply_spec(base, inner)?;
+            Ok(prefixed(prefix.clone(), &resolved))
+        }
+        ToolsetSpec::Prepared { overrides, inner } => {
+            let resolved = apply_spec(base, inner)?;
+            prepared(overrides, &resolved)
+        }
+        ToolsetSpec::DeferLoading { .. } => Err(RustyError::Tool(
+            "DeferLoading spec must be resolved through DeferLoadingRegistry, not apply_spec"
+                .into(),
+        )),
+    }
+}
+
+/// A registry that initially exposes only a `tool_discovery` tool. Calling
+/// the discovery tool with a query substring moves matching tools from a
+/// hidden pool into the visible pool for the remainder of the session.
+///
+/// The visible pool is cheaply cloneable via [`DeferLoadingRegistry::registry`],
+/// so the agent loop can re-snapshot it each turn to pick up reveals.
+pub struct DeferLoadingRegistry {
+    visible: Arc<Mutex<ToolRegistry>>,
+    hidden: Arc<Mutex<ToolRegistry>>,
+}
+
+impl DeferLoadingRegistry {
+    /// Wrap `registry` so that all tools start hidden and only the discovery
+    /// tool is visible.
+    pub fn new(registry: &ToolRegistry) -> Self {
+        let mut hidden = ToolRegistry::new();
+        let mut names: Vec<&str> = registry.names().collect();
+        names.sort_unstable();
+        for name in names {
+            hidden.register_shared(registry.get(name).expect("name came from the registry"));
+        }
+        let visible = Arc::new(Mutex::new(ToolRegistry::new()));
+        let hidden = Arc::new(Mutex::new(hidden));
+        let discovery = Arc::new(DiscoveryTool {
+            visible: visible.clone(),
+            hidden: hidden.clone(),
+        });
+        visible.lock().unwrap().register_shared(discovery);
+        Self { visible, hidden }
+    }
+
+    /// A clone of the currently visible registry. Call this each turn to
+    /// observe tools that have been revealed by prior discovery calls.
+    pub fn registry(&self) -> ToolRegistry {
+        self.visible.lock().unwrap().clone()
+    }
+
+    /// `true` when every tool has been revealed.
+    pub fn fully_revealed(&self) -> bool {
+        self.hidden.lock().unwrap().is_empty()
+    }
+}
+
+struct DiscoveryTool {
+    visible: Arc<Mutex<ToolRegistry>>,
+    hidden: Arc<Mutex<ToolRegistry>>,
+}
+
+#[async_trait]
+impl Tool for DiscoveryTool {
+    fn name(&self) -> &str {
+        "tool_discovery"
+    }
+
+    fn description(&self) -> &str {
+        "Discover available tools by name substring. Revealed tools become visible for the rest of the session."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Substring to match against hidden tool names"
+                }
+            },
+            "required": ["query"]
+        })
+    }
+
+    fn effect(&self) -> Effect {
+        Effect::ReadOnly
+    }
+
+    async fn call(&self, args: Value) -> Result<Value> {
+        let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+        let mut hidden = self.hidden.lock().unwrap();
+        let mut visible = self.visible.lock().unwrap();
+        let mut revealed = Vec::new();
+        let names: Vec<String> = hidden.names().map(|s| s.to_owned()).collect();
+        for name in names {
+            if name.contains(query) {
+                if let Some(tool) = hidden.unregister(&name) {
+                    visible.register_shared(tool);
+                    revealed.push(name);
+                }
+            }
+        }
+        Ok(json!({"revealed": revealed}))
     }
 }
 
