@@ -15,3 +15,5 @@
 //! The migration preserves the established crate graph one trait at a time.
 
 #![warn(missing_docs)]
+
+pub mod blob;

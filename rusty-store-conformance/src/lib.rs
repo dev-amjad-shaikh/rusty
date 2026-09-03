@@ -22,6 +22,7 @@
 #![warn(missing_docs)]
 
 pub mod artifact;
+pub mod blob;
 
 use std::fmt;
 
