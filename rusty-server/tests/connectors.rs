@@ -512,13 +512,10 @@ async fn catalog_derives_one_tool_per_operation() {
     assert_eq!(status, StatusCode::OK, "{catalog}");
     let tools = catalog["tools"].as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    // The check operation is the setup gate, not a callable tool.
     assert_eq!(
         names,
-        vec![
-            "servicenow/check-connection",
-            "servicenow/create-incident",
-            "servicenow/get-record"
-        ]
+        vec!["servicenow/create-incident", "servicenow/get-record"]
     );
     assert_eq!(catalog["manifest_hash"], hash);
 
@@ -576,7 +573,8 @@ async fn restart_replays_manifests_and_instances_byte_exact() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{catalog}");
-    assert_eq!(catalog["tools"].as_array().unwrap().len(), 3);
+    // The check operation is the setup gate, not a callable tool.
+    assert_eq!(catalog["tools"].as_array().unwrap().len(), 2);
 
     let _ = std::fs::remove_dir_all(store);
 }

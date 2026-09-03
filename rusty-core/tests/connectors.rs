@@ -580,13 +580,10 @@ fn catalog_derives_one_tool_per_operation() {
     let manifest = demo_manifest();
     let catalog = manifest.derive_catalog().expect("catalog derives");
     let names: Vec<&str> = catalog.iter().map(|cap| cap.name.as_str()).collect();
+    // The check operation is the setup gate, not a callable tool.
     assert_eq!(
         names,
-        vec![
-            "servicenow/check-connection",
-            "servicenow/create-incident",
-            "servicenow/get-record"
-        ]
+        vec!["servicenow/create-incident", "servicenow/get-record"]
     );
     let get = catalog
         .iter()

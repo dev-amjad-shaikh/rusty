@@ -331,6 +331,39 @@ pub trait ApprovalStore: Send + Sync {
     async fn create_obligation(&self, obligation: ApprovalObligation) -> Result<String>;
 }
 
+/// In-memory [`ApprovalStore`] for tests and local development.
+#[derive(Debug, Default)]
+pub struct MemoryApprovalStore {
+    obligations: std::sync::Mutex<Vec<ApprovalObligation>>,
+    next_id: std::sync::atomic::AtomicU64,
+}
+
+impl MemoryApprovalStore {
+    /// Return the obligations recorded so far.
+    pub fn obligations(&self) -> Vec<ApprovalObligation> {
+        self.obligations
+            .lock()
+            .expect("approval store poisoned")
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl ApprovalStore for MemoryApprovalStore {
+    async fn create_obligation(&self, obligation: ApprovalObligation) -> Result<String> {
+        let id = format!(
+            "ob-{}",
+            self.next_id
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        );
+        self.obligations
+            .lock()
+            .expect("approval store poisoned")
+            .push(obligation);
+        Ok(id)
+    }
+}
+
 impl AllowlistChecker {
     /// Check an install request, using the approval store when needed.
     pub async fn check_install(
