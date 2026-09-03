@@ -39,6 +39,15 @@
 //! - **Release gates** ([`gate`]) — versioned policies turn candidate reports
 //!   and baseline comparisons into deterministic allow/block decisions with
 //!   machine-readable evidence for every configured check.
+//! - **Span trees** ([`trace`]) — [`trace::SpanTree`] distills a run's Flight
+//!   Recorder journal into a queryable execution tree (`rusty.run` →
+//!   `rusty.super_step` → `rusty.node` → leaf calls), with ordering and
+//!   ancestry derived from journal positions, never wall-clock races.
+//! - **Span queries** ([`span_query`]) — serializable structural assertions
+//!   over the span tree: selection by name and attribute predicates,
+//!   existence/count/ordering/ancestry/concurrency/budget constraints, a
+//!   versioned attribute vocabulary validated at authoring time, and failure
+//!   reports that diagnose the miss without opening the raw trace.
 //!
 //! ## Quick sketch
 //!
@@ -77,7 +86,9 @@ pub mod feedback;
 pub mod gate;
 pub mod judge;
 pub mod online_scoring;
+pub mod span_query;
 pub mod statistics;
+pub mod trace;
 
 pub use assertion::{Assertion, AssertionResult};
 pub use clustering::{
@@ -117,6 +128,12 @@ pub use online_scoring::{
     OnlineScoringRunner, OutcomeAnnotation, SamplingDecision, ScorerBinding, ScorerOutcome,
     ScorerRegistry, ScoringTask,
 };
+pub use span_query::{
+    AttributeKind, AttributePredicate, PredicateOp, QueryFailure, QueryVerdict, SpanConstraint,
+    SpanQuery, SpanSelection, SpanSummary, SPAN_VOCABULARY, SPAN_VOCABULARY_VERSION,
+    VocabularyEntry, evaluate_all, evaluate_query,
+};
+pub use trace::{AttributeValue, SPAN_NAMES, SpanTree, TraceSpan};
 pub use statistics::{
     STATISTICAL_REGRESSION_FORMAT_VERSION, StatisticalDecision, StatisticalRegressionConfig,
     StatisticalRegressionReport, detect_pass_rate_regression,

@@ -1,0 +1,45 @@
+{
+  "passed": false,
+  "failure": {
+    "query": {
+      "constraint": "before",
+      "other": {
+        "name": "rusty.tool_call",
+        "predicates": [
+          {
+            "attribute": "tool",
+            "op": "eq",
+            "value": "calc"
+          }
+        ]
+      },
+      "select": {
+        "name": "rusty.tool_call",
+        "predicates": [
+          {
+            "attribute": "tool",
+            "op": "eq",
+            "value": "search"
+          }
+        ]
+      }
+    },
+    "clause": "before.ordering",
+    "detail": "order is ambiguous or inverted: latest selected close at seq 18, earliest other open at seq 14",
+    "matched": [
+      {
+        "span_id": "span-12-18",
+        "name": "rusty.tool_call",
+        "start_seq": 12,
+        "end_seq": 18,
+        "attributes": {
+          "effect": "read_only",
+          "has_receipt": true,
+          "latency_ms": 400,
+          "status": "ok",
+          "tool": "search"
+        }
+      }
+    ]
+  }
+}

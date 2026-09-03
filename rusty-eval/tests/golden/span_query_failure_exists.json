@@ -1,0 +1,75 @@
+{
+  "passed": false,
+  "failure": {
+    "query": {
+      "constraint": "exists",
+      "select": {
+        "name": "rusty.tool_call",
+        "predicates": [
+          {
+            "attribute": "tool",
+            "op": "eq",
+            "value": "shell"
+          }
+        ]
+      }
+    },
+    "clause": "exists",
+    "detail": "selection matched no spans",
+    "nearest": [
+      {
+        "span_id": "span-1-40",
+        "name": "rusty.run",
+        "start_seq": 1,
+        "end_seq": 40,
+        "attributes": {
+          "events": 40,
+          "thread": "t-1"
+        }
+      },
+      {
+        "span_id": "span-2-9",
+        "name": "rusty.super_step",
+        "start_seq": 2,
+        "end_seq": 9,
+        "attributes": {
+          "step": 0
+        }
+      },
+      {
+        "span_id": "span-3-8",
+        "name": "rusty.node",
+        "start_seq": 3,
+        "end_seq": 8,
+        "attributes": {
+          "latency_ms": 500,
+          "node": "planner",
+          "status": "ok"
+        }
+      },
+      {
+        "span_id": "span-4-4",
+        "name": "rusty.model_call",
+        "start_seq": 4,
+        "end_seq": 4,
+        "attributes": {
+          "cost_usd": 0.002,
+          "effect": "read_only",
+          "latency_ms": 300,
+          "model": "gpt-4o",
+          "status": "ok",
+          "tokens_total": 120
+        }
+      },
+      {
+        "span_id": "span-10-39",
+        "name": "rusty.super_step",
+        "start_seq": 10,
+        "end_seq": 39,
+        "attributes": {
+          "step": 1
+        }
+      }
+    ]
+  }
+}
