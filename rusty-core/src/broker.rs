@@ -108,9 +108,159 @@ pub fn hex_decode(hex: &str) -> Option<Vec<u8>> {
 }
 
 // --------------------------------------------------------------------- //
-// The connection model
+// SecretRef — placeholder reference, never the value
 // --------------------------------------------------------------------- //
 
+/// A secret reference names a credential and cannot yield it: everything
+/// inside the boundary handles names, only the egress layer dereferences.
+///
+/// Placeholder grammar: `rusty:secret:<store>:<key>` where `<store>` and
+/// `<key>` match `[a-z0-9][a-z0-9_-]{0,63}`. Serializes as that string.
+/// `Debug` and `Display` print the placeholder, never a value; there is no
+/// method on this type that returns the secret value — dereference exists
+/// only on the egress layer's private resolver.
+/// The fields are private and no resolution method exists on the public API:
+/// ```compile_fail
+/// use rusty_agent_runtime::broker::SecretRef;
+/// let r = SecretRef::parse("rusty:secret:vault:key").unwrap();
+/// let _ = r.store; // field `store` is private
+/// ```
+/// ```compile_fail
+/// use rusty_agent_runtime::broker::SecretRef;
+/// let r = SecretRef::parse("rusty:secret:vault:key").unwrap();
+/// let _ = r.resolve(); // no method `resolve` on `SecretRef`
+/// ```
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct SecretRef {
+    store: String,
+    key: String,
+}
+
+/// Why a `SecretRef` could not be parsed from a string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretRefParseError {
+    /// Missing the `rusty:secret:` prefix.
+    MissingPrefix,
+    /// The store or key segment violates `[a-z0-9][a-z0-9_-]{0,63}`.
+    InvalidSegment {
+        segment: &'static str,
+        value: String,
+    },
+}
+
+impl std::fmt::Display for SecretRefParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SecretRefParseError::MissingPrefix => {
+                write!(f, "secret ref must start with `rusty:secret:`")
+            }
+            SecretRefParseError::InvalidSegment { segment, value } => write!(
+                f,
+                "secret ref `{segment}` segment `{value}` violates \
+                 [a-z0-9][a-z0-9_-]{{0,63}}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SecretRefParseError {}
+
+/// `true` when `s` matches `[a-z0-9][a-z0-9_-]{0,63}`.
+fn secret_segment_ok(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    let rest_len = chars.count();
+    if rest_len > 63 {
+        return false;
+    }
+    s.chars()
+        .skip(1)
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+impl SecretRef {
+    /// Parse a `SecretRef` from its placeholder string.
+    pub fn parse(s: &str) -> std::result::Result<Self, SecretRefParseError> {
+        let rest = s
+            .strip_prefix("rusty:secret:")
+            .ok_or(SecretRefParseError::MissingPrefix)?;
+        let (store, key) = rest
+            .split_once(':')
+            .ok_or(SecretRefParseError::InvalidSegment {
+                segment: "store",
+                value: rest.to_owned(),
+            })?;
+        if !secret_segment_ok(store) {
+            return Err(SecretRefParseError::InvalidSegment {
+                segment: "store",
+                value: store.to_owned(),
+            });
+        }
+        if !secret_segment_ok(key) {
+            return Err(SecretRefParseError::InvalidSegment {
+                segment: "key",
+                value: key.to_owned(),
+            });
+        }
+        Ok(Self {
+            store: store.to_owned(),
+            key: key.to_owned(),
+        })
+    }
+}
+
+impl std::fmt::Display for SecretRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "rusty:secret:{}:{}", self.store, self.key)
+    }
+}
+
+impl std::fmt::Debug for SecretRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SecretRef(\"rusty:secret:{}:{}\")", self.store, self.key)
+    }
+}
+
+impl Serialize for SecretRef {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for SecretRef {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Self::parse(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<String> for SecretRef {
+    type Error = SecretRefParseError;
+    fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl From<SecretRef> for String {
+    fn from(value: SecretRef) -> Self {
+        value.to_string()
+    }
+}
+
+// --------------------------------------------------------------------- //
+// The connection model
+// --------------------------------------------------------------------- //
+// --------------------------------------------------------------------- //
 /// The provider kind of a [`ConnectionRecord`]. Closed enum, additive
 /// evolution — a fifth kind lands as a new variant, never a rewrite of
 /// pinned shapes (the `CandidateKind` rule).
@@ -1509,6 +1659,201 @@ pub trait CredentialBroker: std::fmt::Debug + Send + Sync {
         token: &str,
         scopes: &BTreeSet<String>,
     ) -> std::result::Result<ResolvedCredential, BrokerDenial>;
+}
+
+// --------------------------------------------------------------------- //
+// Secret resolver — egress-only, never in tool code
+// --------------------------------------------------------------------- //
+
+/// The egress-layer secret resolver: the *only* seam that can turn a
+/// [`SecretRef`] into [`TokenMaterial`]. Drawn as a trait (the
+/// `NetworkConnector` boundary) so the egress policy plane plugs its
+/// own implementation — vault, HSM, environment — while core owns the
+/// contract and the proof that tool code cannot call it.
+///
+/// Implementations MUST fail closed: an unknown secret, a store read
+/// failure, or a policy refusal is a [`BrokerDenial`], never a panic
+/// or an empty string.
+#[async_trait]
+pub trait SecretResolver: std::fmt::Debug + Send + Sync {
+    /// Resolve a [`SecretRef`] to its [`TokenMaterial`]. The caller
+    /// (the egress connector, never tool code) presents the reference;
+    /// the resolver returns the bytes or a typed, attributable denial.
+    async fn resolve_secret(
+        &self,
+        secret_ref: &SecretRef,
+    ) -> std::result::Result<TokenMaterial, BrokerDenial>;
+}
+
+/// A scripted secret resolver for tests and embedder smoke checks —
+/// the stand-in for a live vault or HSM, so no test needs a network.
+/// Secrets are looked up by their placeholder string; unknown refs
+/// fail closed with [`BrokerDenialReason::BrokerUnavailable`].
+#[derive(Debug)]
+pub struct ScriptedSecretResolver {
+    secrets: Mutex<HashMap<String, TokenMaterial>>,
+}
+
+impl Default for ScriptedSecretResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScriptedSecretResolver {
+    /// An empty resolver: every lookup fails closed.
+    pub fn new() -> Self {
+        Self {
+            secrets: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Builder-style: insert one secret under its placeholder.
+    pub fn with_secret(self, secret_ref: &SecretRef, material: TokenMaterial) -> Self {
+        self.secrets
+            .lock()
+            .expect("scripted resolver lock")
+            .insert(secret_ref.to_string(), material);
+        self
+    }
+}
+
+#[async_trait]
+impl SecretResolver for ScriptedSecretResolver {
+    async fn resolve_secret(
+        &self,
+        secret_ref: &SecretRef,
+    ) -> std::result::Result<TokenMaterial, BrokerDenial> {
+        self.secrets
+            .lock()
+            .unwrap()
+            .get(&secret_ref.to_string())
+            .cloned()
+            .ok_or_else(|| {
+                BrokerDenial::unavailable(format!(
+                    "secret ref `{secret_ref}` is unknown to this resolver"
+                ))
+            })
+    }
+}
+// --------------------------------------------------------------------- //
+// Wire probe — prove the rewrite on the wire before the attachment goes live
+// --------------------------------------------------------------------- //
+
+/// The outcome of a wire-level probe: the egress layer sent a request
+/// carrying the placeholder, captured the redacted evidence after the
+/// rewrite point, and classified the result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireProbeOutcome {
+    /// The placeholder was rewritten to the credential value in flight.
+    Rewritten,
+    /// The placeholder reached the wire unchanged — the rewrite did not
+    /// happen, so the attachment must not go live.
+    NotRewritten,
+    /// The target endpoint was unreachable — the probe could not complete,
+    /// so the attachment must not go live.
+    Unreachable,
+}
+
+/// A recorded wire probe: the evidence that a [`SecretRef`] resolves
+/// correctly at a specific endpoint before any dependent tool goes live.
+/// Append-only in the `wire_probes` table; liveness is decided by the
+/// newest record for the `(secret_ref, endpoint)` pair.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WireProbeRecord {
+    /// SHA-256 hash of the redacted outbound wire evidence after the
+    /// rewrite point. The evidence itself is not stored — only its hash,
+    /// so a later audit can verify integrity without retaining the probe
+    /// traffic.
+    pub evidence_hash: String,
+
+    /// The secret reference that was probed.
+    pub secret_ref: SecretRef,
+
+    /// The endpoint the probe targeted.
+    pub endpoint: String,
+
+    /// When the probe was performed.
+    pub probed_at: DateTime<Utc>,
+
+    /// The classified outcome.
+    pub outcome: WireProbeOutcome,
+}
+
+/// The probe ledger: append-only storage for [`WireProbeRecord`]s with
+/// newest-wins lookup by `(secret_ref, endpoint)`. Implementations are
+/// the `wire_probes` table in production; core owns the contract.
+#[async_trait]
+pub trait ProbeLedger: std::fmt::Debug + Send + Sync {
+    /// Append one probe record. Never overwrites history.
+    async fn record_probe(&self, record: WireProbeRecord) -> Result<()>;
+
+    /// The newest probe for this `(secret_ref, endpoint)` pair, if any.
+    async fn newest_probe(&self, secret_ref: &SecretRef, endpoint: &str)
+        -> Option<WireProbeRecord>;
+}
+
+/// An in-memory probe ledger for tests and embedder smoke checks.
+#[derive(Debug)]
+pub struct ScriptedProbeLedger {
+    records: Mutex<Vec<WireProbeRecord>>,
+}
+
+impl Default for ScriptedProbeLedger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScriptedProbeLedger {
+    /// An empty ledger: every lookup returns `None`.
+    pub fn new() -> Self {
+        Self {
+            records: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Builder-style: insert one probe record.
+    pub fn with_probe(self, record: WireProbeRecord) -> Self {
+        self.records
+            .lock()
+            .expect("scripted probe ledger lock")
+            .push(record);
+        self
+    }
+    /// The number of records stored (for append-only assertions).
+    pub fn record_count(&self) -> usize {
+        self.records
+            .lock()
+            .expect("scripted probe ledger lock")
+            .len()
+    }
+}
+
+#[async_trait]
+impl ProbeLedger for ScriptedProbeLedger {
+    async fn record_probe(&self, record: WireProbeRecord) -> Result<()> {
+        self.records
+            .lock()
+            .expect("scripted probe ledger lock")
+            .push(record);
+        Ok(())
+    }
+
+    async fn newest_probe(
+        &self,
+        secret_ref: &SecretRef,
+        endpoint: &str,
+    ) -> Option<WireProbeRecord> {
+        self.records
+            .lock()
+            .expect("scripted probe ledger lock")
+            .iter()
+            .filter(|r| r.secret_ref == *secret_ref && r.endpoint == endpoint)
+            .max_by_key(|r| r.probed_at)
+            .cloned()
+    }
 }
 
 // --------------------------------------------------------------------- //

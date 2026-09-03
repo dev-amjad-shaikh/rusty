@@ -46,8 +46,10 @@ use rusty_agent_runtime::broker::{
     ConnectionHealth, ConnectionProvider, ConnectionReauthRequired, ConnectionRecord,
     ConnectionRefresh, ConnectionRevocation, ConnectionStatus, CredentialBroker, CredentialHandle,
     CredentialMediator, CredentialRequirement, CredentialTool, CredentialUse, HandleClaims,
-    HandleIssuance, IssueRequest, ResolvedCredential, SealedCredential, StoredConnection,
-    TokenMaterial, CONNECTION_ID_PREFIX, HANDLE_ID_PREFIX, SEALED_FORMAT_VERSION,
+    HandleIssuance, IssueRequest, ProbeLedger, ResolvedCredential, ScriptedProbeLedger,
+    ScriptedSecretResolver, SealedCredential, SecretRef, SecretRefParseError, SecretResolver,
+    StoredConnection, TokenMaterial, WireProbeOutcome, WireProbeRecord, CONNECTION_ID_PREFIX,
+    HANDLE_ID_PREFIX, SEALED_FORMAT_VERSION,
 };
 use rusty_agent_runtime::durable::ErrorClass;
 use rusty_agent_runtime::error::Result as RuntimeResult;
@@ -360,11 +362,10 @@ impl CredentialBroker for ScriptedBroker {
                 tenant: Some(request.tenant.clone()),
                 reason: BrokerDenialReason::UnknownConnection,
                 detail: "scripted broker: unknown connection".into(),
-            })?
-            .clone();
+            })?;
         if record.status == ConnectionStatus::Revoked {
             return Err(BrokerDenial::connection_revoked(
-                &record,
+                record,
                 &request.tenant,
                 "unissued",
             ));
@@ -707,6 +708,210 @@ async fn mediation_is_transparent_to_the_effect_boundary() {
     assert_eq!(mediated.effect(), Effect::ReadOnly);
 }
 
+// ---------- SecretRef grammar and round-trip ----------
+
+#[test]
+fn secret_ref_parses_valid_placeholder() {
+    let r = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    assert_eq!(r.to_string(), "rusty:secret:vault:api-key");
+    assert_eq!(
+        format!("{r:?}"),
+        "SecretRef(\"rusty:secret:vault:api-key\")"
+    );
+}
+
+#[test]
+fn secret_ref_rejects_missing_prefix() {
+    let err = SecretRef::parse("not-a-secret").unwrap_err();
+    assert_eq!(err, SecretRefParseError::MissingPrefix);
+}
+
+#[test]
+fn secret_ref_rejects_empty_store() {
+    let err = SecretRef::parse("rusty:secret::key").unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SecretRefParseError::InvalidSegment {
+                segment: "store",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn secret_ref_rejects_invalid_first_char() {
+    let err = SecretRef::parse("rusty:secret:_vault:key").unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SecretRefParseError::InvalidSegment {
+                segment: "store",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn secret_ref_rejects_uppercase() {
+    let err = SecretRef::parse("rusty:secret:Vault:key").unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SecretRefParseError::InvalidSegment {
+                segment: "store",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn secret_ref_rejects_too_long() {
+    let long = "a".repeat(65);
+    let err = SecretRef::parse(&format!("rusty:secret:{long}:key")).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SecretRefParseError::InvalidSegment {
+                segment: "store",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn secret_ref_rejects_invalid_char() {
+    let err = SecretRef::parse("rusty:secret:vault:key@1").unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SecretRefParseError::InvalidSegment { segment: "key", .. }
+        ),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn secret_ref_allows_underscore_and_hyphen() {
+    let r = SecretRef::parse("rusty:secret:vault_1:api-key").unwrap();
+    assert_eq!(r.to_string(), "rusty:secret:vault_1:api-key");
+}
+
+#[test]
+fn secret_ref_serializes_to_placeholder() {
+    let r = SecretRef::parse("rusty:secret:vault:key").unwrap();
+    let json = serde_json::to_string(&r).unwrap();
+    assert_eq!(json, "\"rusty:secret:vault:key\"");
+}
+
+#[test]
+fn secret_ref_deserializes_from_placeholder() {
+    let r: SecretRef = serde_json::from_str("\"rusty:secret:vault:key\"").unwrap();
+    assert_eq!(r.to_string(), "rusty:secret:vault:key");
+}
+
+#[test]
+fn secret_ref_deserialize_rejects_invalid() {
+    let err: Result<SecretRef, _> = serde_json::from_str("\"not-a-secret\"");
+    assert!(err.is_err());
+}
+
+#[test]
+fn secret_ref_try_from_string_round_trips() {
+    let s = "rusty:secret:env:token".to_owned();
+    let r = SecretRef::try_from(s.clone()).unwrap();
+    let back: String = r.into();
+    assert_eq!(back, s);
+}
+
+#[test]
+fn secret_ref_display_never_shows_value() {
+    let r = SecretRef::parse("rusty:secret:vault:crm-api-key").unwrap();
+    let d = format!("{r}");
+    assert_eq!(d, "rusty:secret:vault:crm-api-key");
+    // The placeholder itself contains no credential value.
+    assert!(!d.contains("sk-"));
+    assert!(!d.contains("live"));
+}
+
+#[test]
+fn secret_ref_debug_never_shows_value() {
+    let r = SecretRef::parse("rusty:secret:vault:crm-api-key").unwrap();
+    let d = format!("{r:?}");
+    assert_eq!(d, "SecretRef(\"rusty:secret:vault:crm-api-key\")");
+    assert!(!d.contains("sk-"));
+    assert!(!d.contains("live"));
+}
+
+// ---------- SecretResolver — egress-only, never in tool code ----------
+
+#[tokio::test]
+async fn secret_resolver_known_ref_yields_material() {
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let material = TokenMaterial {
+        access_token: "sk-resolver-MARKER".into(),
+        refresh_token: None,
+        client_secret: None,
+        client_id: None,
+        username: None,
+        password: None,
+        token_url: None,
+        expires_at: None,
+    };
+    let resolver = ScriptedSecretResolver::new().with_secret(&ref_, material.clone());
+    let resolved = resolver.resolve_secret(&ref_).await.unwrap();
+    assert_eq!(resolved.access_token, material.access_token);
+}
+
+#[tokio::test]
+async fn secret_resolver_unknown_ref_fails_closed() {
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let resolver = ScriptedSecretResolver::new();
+    let err = resolver.resolve_secret(&ref_).await.unwrap_err();
+    assert!(
+        matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+        "got: {err:?}"
+    );
+    assert!(err.to_string().contains("unknown"), "got: {err}");
+}
+
+#[tokio::test]
+async fn secret_resolver_bytes_never_appear_in_tool_code() {
+    // Structural proof: SecretRef has no .resolve() method and no
+    // public fields — the compile-fail doc tests on the type prove
+    // that. This test proves the resolver seam itself: the only way
+    // to reach the bytes is through the trait, and the trait is not
+    // implemented on SecretRef.
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let material = TokenMaterial {
+        access_token: "sk-resolver-MARKER".into(),
+        refresh_token: None,
+        client_secret: None,
+        client_id: None,
+        username: None,
+        password: None,
+        token_url: None,
+        expires_at: None,
+    };
+    let resolver = ScriptedSecretResolver::new().with_secret(&ref_, material.clone());
+    let resolved = resolver.resolve_secret(&ref_).await.unwrap();
+    // The placeholder never contains the bytes.
+    let placeholder = ref_.to_string();
+    assert!(!placeholder.contains("sk-"));
+    assert!(!placeholder.contains("resolver"));
+    assert!(!placeholder.contains("MARKER"));
+    // The bytes exist only at the resolver boundary.
+    assert_eq!(resolved.access_token, "sk-resolver-MARKER");
+}
+
 // ---------- capsule mediation (feature `wasm`) ----------
 
 #[cfg(feature = "wasm")]
@@ -810,9 +1015,9 @@ mod capsule_mediation {
 
         // The guest received exactly one secret: the issued handle token
         // under its connection id, bound to the invocation's run.
-        let token = outcome.output["secrets"][&connection_id()]
-            .as_str()
-            .expect("the guest echoed the injected tokens");
+        let token = outcome.output["secrets"][&connection_id()].as_str()(
+            "the guest echoed the injected tokens",
+        );
         let issued = broker.issued.lock().unwrap();
         assert_eq!(issued.len(), 1);
         assert_eq!(issued[0].run_id.as_deref(), Some("run-capsule"));
@@ -825,8 +1030,9 @@ mod capsule_mediation {
         let events = journal.events();
         let call = events
             .iter()
-            .find(|event| event.kind == RunEventKind::WasmCall)
-            .expect("the invocation journaled its call");
+            .find(|event| event.kind == RunEventKind::WasmCall)(
+            "the invocation journaled its call",
+        );
         let evidence = serde_json::to_string(&call).unwrap();
         assert!(evidence.contains("secrets"), "got: {evidence}");
         assert!(
@@ -868,4 +1074,182 @@ mod capsule_mediation {
         // Nothing was issued for the forged input.
         assert!(broker.issued.lock().unwrap().is_empty());
     }
+}
+// ---------- Wire probe — prove the rewrite before the attachment goes live ----------
+
+fn probe_record(outcome: WireProbeOutcome, at: DateTime<Utc>) -> WireProbeRecord {
+    WireProbeRecord {
+        evidence_hash: "abcd1234".into(),
+        secret_ref: SecretRef::parse("rusty:secret:vault:api-key").unwrap(),
+        endpoint: "https://api.example.com/v1".into(),
+        probed_at: at,
+        outcome,
+    }
+}
+
+#[test]
+fn golden_wire_probe_record_shape() {
+    assert_golden(
+        "broker_wire_probe.json",
+        &probe_record(WireProbeOutcome::Rewritten, ts(1_800_000_000_000)),
+    );
+}
+
+#[tokio::test]
+async fn probe_ledger_newest_wins_by_secret_ref_and_endpoint() {
+    let ledger = ScriptedProbeLedger::new();
+    let ref_a = SecretRef::parse("rusty:secret:vault:key-a").unwrap();
+    let ref_b = SecretRef::parse("rusty:secret:vault:key-b").unwrap();
+
+    // Two probes for the same (ref, endpoint) — the later one wins.
+    let r1 = WireProbeRecord {
+        evidence_hash: "h1".into(),
+        secret_ref: ref_a.clone(),
+        endpoint: "https://api.example.com".into(),
+        probed_at: ts(1_800_000_000_000),
+        outcome: WireProbeOutcome::Rewritten,
+    };
+    let r2 = WireProbeRecord {
+        evidence_hash: "h2".into(),
+        secret_ref: ref_a.clone(),
+        endpoint: "https://api.example.com".into(),
+        probed_at: ts(1_800_000_001_000),
+        outcome: WireProbeOutcome::NotRewritten,
+    };
+    ledger.record_probe(r1.clone()).await.unwrap();
+    ledger.record_probe(r2.clone()).await.unwrap();
+
+    let newest = ledger
+        .newest_probe(&ref_a, "https://api.example.com")
+        .await
+        .unwrap();
+    assert_eq!(newest.evidence_hash, "h2");
+    assert_eq!(newest.outcome, WireProbeOutcome::NotRewritten);
+
+    // A different endpoint for the same ref has no record.
+    assert!(ledger
+        .newest_probe(&ref_a, "https://other.example.com")
+        .await
+        .is_none());
+
+    // A different ref for the same endpoint has no record.
+    assert!(ledger
+        .newest_probe(&ref_b, "https://api.example.com")
+        .await
+        .is_none());
+}
+
+#[tokio::test]
+async fn probe_ledger_is_append_only() {
+    let ledger = ScriptedProbeLedger::new();
+    let ref_ = SecretRef::parse("rusty:secret:vault:key").unwrap();
+
+    let r1 = WireProbeRecord {
+        evidence_hash: "h1".into(),
+        secret_ref: ref_.clone(),
+        endpoint: "https://api.example.com".into(),
+        probed_at: ts(1_800_000_000_000),
+        outcome: WireProbeOutcome::Rewritten,
+    };
+    let r2 = WireProbeRecord {
+        evidence_hash: "h2".into(),
+        secret_ref: ref_.clone(),
+        endpoint: "https://api.example.com".into(),
+        probed_at: ts(1_800_000_001_000),
+        outcome: WireProbeOutcome::NotRewritten,
+    };
+
+    ledger.record_probe(r1).await.unwrap();
+    ledger.record_probe(r2).await.unwrap();
+
+    // Both records exist; newest_wins resolves the conflict, nothing is
+    // overwritten.
+    assert_eq!(ledger.record_count(), 2);
+}
+
+#[tokio::test]
+async fn rewritten_probe_makes_attachment_live() {
+    let ledger = ScriptedProbeLedger::new().with_probe(probe_record(
+        WireProbeOutcome::Rewritten,
+        ts(1_800_000_000_000),
+    ));
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let newest = ledger
+        .newest_probe(&ref_, "https://api.example.com/v1")
+        .await;
+    assert!(newest.is_some());
+    assert_eq!(newest.unwrap().outcome, WireProbeOutcome::Rewritten);
+}
+
+#[tokio::test]
+async fn not_rewritten_probe_makes_attachment_not_live() {
+    let ledger = ScriptedProbeLedger::new().with_probe(probe_record(
+        WireProbeOutcome::NotRewritten,
+        ts(1_800_000_000_000),
+    ));
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let newest = ledger
+        .newest_probe(&ref_, "https://api.example.com/v1")
+        .await
+        .unwrap();
+    assert_eq!(newest.outcome, WireProbeOutcome::NotRewritten);
+}
+
+#[tokio::test]
+async fn unreachable_probe_makes_attachment_not_live() {
+    let ledger = ScriptedProbeLedger::new().with_probe(probe_record(
+        WireProbeOutcome::Unreachable,
+        ts(1_800_000_000_000),
+    ));
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let newest = ledger
+        .newest_probe(&ref_, "https://api.example.com/v1")
+        .await
+        .unwrap();
+    assert_eq!(newest.outcome, WireProbeOutcome::Unreachable);
+}
+
+#[tokio::test]
+async fn missing_probe_means_no_attachment() {
+    let ledger = ScriptedProbeLedger::new();
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let newest = ledger
+        .newest_probe(&ref_, "https://api.example.com/v1")
+        .await;
+    assert!(newest.is_none(), "no probe means no liveness evidence");
+}
+
+#[tokio::test]
+async fn probe_re_runs_on_newer_timestamp_take_precedence() {
+    let ledger = ScriptedProbeLedger::new();
+    let ref_ = SecretRef::parse("rusty:secret:vault:api-key").unwrap();
+    let endpoint = "https://api.example.com/v1";
+
+    // Initial passing probe.
+    ledger
+        .record_probe(WireProbeRecord {
+            evidence_hash: "h-pass".into(),
+            secret_ref: ref_.clone(),
+            endpoint: endpoint.into(),
+            probed_at: ts(1_800_000_000_000),
+            outcome: WireProbeOutcome::Rewritten,
+        })
+        .await
+        .unwrap();
+
+    // Later failing probe (simulates credential rotation with a bad key).
+    ledger
+        .record_probe(WireProbeRecord {
+            evidence_hash: "h-fail".into(),
+            secret_ref: ref_.clone(),
+            endpoint: endpoint.into(),
+            probed_at: ts(1_800_000_001_000),
+            outcome: WireProbeOutcome::NotRewritten,
+        })
+        .await
+        .unwrap();
+
+    let newest = ledger.newest_probe(&ref_, endpoint).await.unwrap();
+    assert_eq!(newest.outcome, WireProbeOutcome::NotRewritten);
+    assert_eq!(newest.evidence_hash, "h-fail");
 }

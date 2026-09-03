@@ -1,0 +1,7 @@
+{
+  "evidence_hash": "abcd1234",
+  "secret_ref": "rusty:secret:vault:api-key",
+  "endpoint": "https://api.example.com/v1",
+  "probed_at": "2027-01-15T08:00:00Z",
+  "outcome": "rewritten"
+}

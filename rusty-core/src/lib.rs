@@ -337,10 +337,11 @@ pub mod prelude {
         ConnectionRecord, ConnectionRefresh, ConnectionRevocation, ConnectionStatus,
         CredentialBroker, CredentialHandle, CredentialMediator, CredentialRequirement,
         CredentialTool, CredentialUse, HANDLE_ID_PREFIX, HANDLE_TOKEN_PREFIX, HandleClaims,
-        HandleIssuance, IssueRequest, MediatedTool, OAuthFailure, OAuthProvider,
-        ResolvedCredential, SEALED_FORMAT_VERSION, ScriptedOAuthProvider, SealedCredential,
-        StoredConnection, TokenGrant, TokenMaterial, new_connection_id, new_handle_id,
-        scopes_missing,
+        HandleIssuance, IssueRequest, MediatedTool, OAuthFailure, OAuthProvider, ProbeLedger,
+        ResolvedCredential, SEALED_FORMAT_VERSION, ScriptedOAuthProvider, ScriptedProbeLedger,
+        ScriptedSecretResolver, SealedCredential, SecretRef, SecretRefParseError, SecretResolver,
+        StoredConnection, TokenGrant, TokenMaterial, WireProbeOutcome, WireProbeRecord,
+        new_connection_id, new_handle_id, scopes_missing,
     };
     pub use crate::capsule::{
         CapabilityGrant, CapabilityKind, CapsuleDenial, CapsuleId, CapsuleIdentity,
