@@ -283,13 +283,12 @@ impl KeyGrammar {
         let mut set = std::collections::BTreeSet::new();
         for domain in domains {
             let domain = domain.into();
-            HierarchicalKey::parse(&format!("{domain}.x"))
-                .map_err(|_| {
-                    invalid(format!(
-                        "key grammar domain `{domain}` is not a valid key segment — the domain \
+            HierarchicalKey::parse(&format!("{domain}.x")).map_err(|_| {
+                invalid(format!(
+                    "key grammar domain `{domain}` is not a valid key segment — the domain \
                          is the segment before the first dot, never a pattern"
-                    ))
-                })?;
+                ))
+            })?;
             if domain.contains('.') {
                 return Err(invalid(format!(
                     "key grammar domain `{domain}` carries a dot — a domain is one segment"
@@ -705,8 +704,7 @@ impl UtilityEntry {
     /// neutral prior and a single success does not read as certainty.
     /// Integer arithmetic, byte-reproducible everywhere.
     pub fn smoothed_success_bps(&self) -> u32 {
-        ((self.successful_uses + 1) * 10_000 / (self.successful_uses + self.failed_uses + 2))
-            as u32
+        ((self.successful_uses + 1) * 10_000 / (self.successful_uses + self.failed_uses + 2)) as u32
     }
 }
 
@@ -758,12 +756,10 @@ pub fn build_utility_index(
     for run in runs {
         use crate::record::EventStatus;
         let succeeded = match run.outcome.status {
-            EventStatus::Ok => {
-                match (run.outcome.score_bps, success_min_score_bps) {
-                    (Some(score), Some(min)) => score >= min,
-                    _ => true,
-                }
-            }
+            EventStatus::Ok => match (run.outcome.score_bps, success_min_score_bps) {
+                (Some(score), Some(min)) => score >= min,
+                _ => true,
+            },
             EventStatus::Error => false,
             // A suspended run is not terminal evidence of memory quality.
             EventStatus::Interrupted => continue,
@@ -1015,9 +1011,7 @@ impl TieredMemoryDriver {
             TieredMemorySource::Store(store) => {
                 let started = journal.clock().now();
                 let records = store.query(&resolved, as_of).await?;
-                let latency_ms = (journal.clock().now() - started)
-                    .num_milliseconds()
-                    .max(0) as u64;
+                let latency_ms = (journal.clock().now() - started).num_milliseconds().max(0) as u64;
                 let (assembly, manifest) = self.rerank(records, budget)?;
                 let mut output = serde_json::to_value(&assembly)?;
                 output

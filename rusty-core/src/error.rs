@@ -117,6 +117,15 @@ pub enum RustyError {
     #[error("plugin error: {0}")]
     Plugin(String),
 
+    /// Doctor contract failures: missing migration chain, repair failure,
+    /// halted upgrade.
+    #[error("doctor error: {0}")]
+    Doctor(String),
+
+    /// Catalog/registry failures: install, update, rollback, index verification.
+    #[error("catalog error: {0}")]
+    Catalog(String),
+
     /// Exact-replay failures (Flight Recorder, R0.5): the run diverged from
     /// the journaled evidence (request-hash mismatch, effect-order violation,
     /// unserved recorded effects), a journal snapshot or fixture failed

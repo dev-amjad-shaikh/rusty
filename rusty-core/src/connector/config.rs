@@ -43,10 +43,7 @@ pub fn compile_spec(spec: &Value) -> std::result::Result<jsonschema::Validator, 
 /// is that variant's own first failure, so a missing field inside an
 /// auth variant names `credentials.username`, not the opaque
 /// "not valid under any of the schemas" at `credentials`.
-pub fn validate_config(
-    spec: &Value,
-    config: &Value,
-) -> std::result::Result<(), String> {
+pub fn validate_config(spec: &Value, config: &Value) -> std::result::Result<(), String> {
     let validator = compile_spec(spec)?;
     validator
         .validate(config)
@@ -158,7 +155,9 @@ fn discriminated_variant<'a>(schema: &'a Value, value: &Value) -> Option<&'a Val
                 .unwrap_or_default();
             !consts.is_empty()
                 && consts.iter().all(|(key, sub)| {
-                    value.get(*key).is_some_and(|v| v == sub.get("const").unwrap())
+                    value
+                        .get(*key)
+                        .is_some_and(|v| v == sub.get("const").unwrap())
                 })
         })
         .max_by_key(|variant| {
@@ -268,9 +267,7 @@ fn walk_secrets(schema: &Value, value: &Value, prefix: &str, out: &mut Vec<(Stri
         let subschema = schema
             .get("properties")
             .and_then(|p| p.get(key))
-            .or_else(|| {
-                variant.and_then(|v| v.get("properties").and_then(|p| p.get(key)))
-            });
+            .or_else(|| variant.and_then(|v| v.get("properties").and_then(|p| p.get(key))));
         if let Some(subschema) = subschema {
             walk_secrets(subschema, item, &format!("{prefix}{key}."), out);
         }
@@ -302,9 +299,9 @@ fn remove_path(value: &mut Value, path: &str) {
                 if let Some(child) = object.get_mut(head) {
                     remove_path(child, rest);
                 }
-                object.get(head).is_some_and(|child| {
-                    child.as_object().is_some_and(serde_json::Map::is_empty)
-                })
+                object
+                    .get(head)
+                    .is_some_and(|child| child.as_object().is_some_and(serde_json::Map::is_empty))
             }
             None => {
                 object.remove(head);
@@ -337,10 +334,14 @@ pub fn insert_masked_secrets(
     sealed: &BTreeMap<String, SealedCredential>,
 ) -> Value {
     for path in sealed.keys() {
-        insert_path(&mut config, path, Value::Object(serde_json::Map::from_iter([(
-            SECRET_FLAG.to_owned(),
-            Value::Bool(true),
-        )])));
+        insert_path(
+            &mut config,
+            path,
+            Value::Object(serde_json::Map::from_iter([(
+                SECRET_FLAG.to_owned(),
+                Value::Bool(true),
+            )])),
+        );
     }
     config
 }
