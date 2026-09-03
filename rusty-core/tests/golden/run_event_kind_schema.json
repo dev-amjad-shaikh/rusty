@@ -466,7 +466,7 @@
       ]
     },
     {
-      "description": "One incremental chunk of a streaming assistant response (EP-01-S11). Input is empty; output carries the [`AssistantChunk`] — the delta, the monotonic `stream_index`, and the finish flag. Journaled before the assembled [`ModelCall`] so chunks are durable-first and replay can reconstruct the exact token sequence that originally rendered.",
+      "description": "One incremental chunk of a streaming assistant response (EP-01-S11). Input is empty; output carries the [`AssistantChunk`] — the delta, the monotonic `stream_index`, and the finish flag. Journaled before the assembled [`crate::middleware::ModelCall`] so chunks are durable-first and replay can reconstruct the exact token sequence that originally rendered.",
       "type": "string",
       "enum": [
         "assistant_chunk"
