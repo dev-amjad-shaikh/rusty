@@ -1,0 +1,140 @@
+{
+  "id": "github",
+  "version": "0.1.0",
+  "display_name": "GitHub",
+  "description": "Read and write issues, pull requests, and repositories via the GitHub REST API.",
+  "documentation_url": "https://docs.github.com/en/rest",
+  "base_url": "https://api.github.com",
+  "connection_specification": {
+    "type": "object",
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "GitHub personal access token",
+            "rusty_secret": true
+          }
+        },
+        "required": ["token"]
+      }
+    },
+    "required": ["credentials"]
+  },
+  "operations": [
+    {
+      "name": "list-repos",
+      "description": "List repositories for the authenticated user",
+      "method": "GET",
+      "path": "/user/repos",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["all", "owner", "member"]
+          },
+          "sort": {
+            "type": "string",
+            "enum": ["created", "updated", "pushed", "full_name"]
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ]
+    },
+    {
+      "name": "get-issue",
+      "description": "Get a single issue by owner, repo, and issue number",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/issues/{issue_number}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "owner": { "type": "string" },
+          "repo": { "type": "string" },
+          "issue_number": { "type": "integer" }
+        },
+        "required": ["owner", "repo", "issue_number"]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ]
+    },
+    {
+      "name": "create-issue",
+      "description": "Create a new issue in a repository",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/issues",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "owner": { "type": "string" },
+          "repo": { "type": "string" },
+          "title": { "type": "string" },
+          "body": { "type": "string" }
+        },
+        "required": ["owner", "repo", "title"]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ]
+    },
+    {
+      "name": "list-pull-requests",
+      "description": "List pull requests for a repository",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/pulls",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "owner": { "type": "string" },
+          "repo": { "type": "string" },
+          "state": {
+            "type": "string",
+            "enum": ["open", "closed", "all"]
+          }
+        },
+        "required": ["owner", "repo"]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "description": "Verify credentials by fetching the authenticated user",
+      "method": "GET",
+      "path": "/user",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ]
+    }
+  ],
+  "check": "check"
+}

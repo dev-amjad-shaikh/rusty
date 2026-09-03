@@ -441,8 +441,11 @@ impl ConnectorManifest {
     /// params schema passed through, the declared effect mapped onto the
     /// wire taxonomy. Sorted by name; deterministic for one manifest.
     pub fn derive_catalog(&self) -> Result<Vec<crate::tool::ToolCapability>> {
-        let mut capabilities = Vec::with_capacity(self.operations.len());
+        let mut capabilities = Vec::with_capacity(self.operations.len().saturating_sub(1));
         for operation in &self.operations {
+            if operation.name == self.check {
+                continue;
+            }
             let name = format!("{}/{}", self.id, operation.name);
             capabilities.push(crate::tool::ToolCapability {
                 name,
@@ -456,8 +459,6 @@ impl ConnectorManifest {
     }
 }
 
-// --------------------------------------------------------------------- //
-// Placeholders
 // --------------------------------------------------------------------- //
 
 /// Scan a template for `{field}` placeholders, returning each field path
