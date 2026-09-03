@@ -177,6 +177,31 @@ pub enum OperationAuth {
         /// The token template (e.g. `{credentials.token}`).
         token: String,
     },
+    /// Custom header auth: `name: <value>`.
+    Header {
+        /// The header name (e.g. `X-API-Key`).
+        name: String,
+        /// The value template (e.g. `{credentials.api_key}`).
+        value_template: String,
+    },
+    /// Query parameter auth: appended to the URL.
+    Query {
+        /// The query parameter name (e.g. `api_key`).
+        name: String,
+        /// The value template (e.g. `{credentials.api_key}`).
+        value_template: String,
+    },
+    /// OAuth2 client credentials flow.
+    OAuth2ClientCredentials {
+        /// The token endpoint URL template (e.g. `{token_url}`).
+        token_url: String,
+        /// The client id template (e.g. `{credentials.client_id}`).
+        client_id_template: String,
+        /// The client secret template (e.g. `{credentials.client_secret}`).
+        client_secret_template: String,
+        /// The scope template, optional (e.g. `{credentials.scope}`).
+        scope_template: Option<String>,
+    },
 }
 
 impl OperationAuth {
@@ -185,6 +210,24 @@ impl OperationAuth {
         match self {
             OperationAuth::Basic { username, password } => vec![username, password],
             OperationAuth::Bearer { token } => vec![token],
+            OperationAuth::Header { value_template, .. } => vec![value_template],
+            OperationAuth::Query { value_template, .. } => vec![value_template],
+            OperationAuth::OAuth2ClientCredentials {
+                token_url,
+                client_id_template,
+                client_secret_template,
+                scope_template,
+            } => {
+                let mut v: Vec<&str> = vec![
+                    token_url.as_str(),
+                    client_id_template.as_str(),
+                    client_secret_template.as_str(),
+                ];
+                if let Some(scope) = scope_template {
+                    v.push(scope.as_str());
+                }
+                v
+            }
         }
     }
 }

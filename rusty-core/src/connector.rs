@@ -40,8 +40,10 @@ use crate::error::RustyError;
 
 pub mod check;
 pub mod config;
+pub mod curation;
 pub mod instance;
 pub mod manifest;
+pub mod openapi;
 
 pub use check::{
     execute_check, render_operation_request, CheckOutcome, CheckRequest, CheckResponse,
@@ -51,11 +53,13 @@ pub use config::{
     compile_spec, extract_secrets, insert_masked_secrets, insert_opened_secrets, validate_config,
     without_secrets, SECRET_FLAG,
 };
+pub use curation::{curate, CuratedConnector, CuratedOperation, CurationRule};
 pub use instance::{ConnectorInstance, INSTANCE_ID_PREFIX, MAX_INSTANCE_ID_LEN};
 pub use manifest::{
     render_template, scan_placeholders, ConnectorManifest, ConnectorOperation, HttpMethod,
     OperationAuth, OperationEffect,
 };
+pub use openapi::{diff_imports, import_openapi, OpenApiImport, UnmappedOperation};
 
 /// Build a [`RustyError::Tool`] with a `connector:` context prefix, the
 /// same convention `mcp:` uses for the MCP client.

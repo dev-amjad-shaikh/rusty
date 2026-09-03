@@ -107,6 +107,16 @@ impl CheckOutcome {
     }
 }
 
+/// The result of rendering one auth alternative.
+enum RenderedAuth {
+    /// `Authorization: <value>`
+    Authorization(String),
+    /// Custom header: `name: value`
+    Header(String, String),
+    /// Query parameter to append to the URL.
+    QueryParam(String, String),
+}
+
 /// Render one operation's request against a config: base URL, path,
 /// declared headers, and the first auth alternative whose templates all
 /// resolve. Fails closed on the first unresolvable template. Rendered
@@ -145,25 +155,42 @@ pub fn render_operation_request(
     // First fully-resolvable alternative wins; an operation with
     // alternatives that none resolve fails closed — the config's variant
     // does not match the operation's auth declaration.
+    let mut url = url;
     if !operation.auth.is_empty() {
         let mut rendered = None;
         for alternative in &operation.auth {
             match render_auth(alternative, config) {
-                Ok(header) => {
-                    rendered = Some(header);
+                Ok(auth) => {
+                    rendered = Some(auth);
                     break;
                 }
                 Err(_) => continue,
             }
         }
-        let Some(header) = rendered else {
+        let Some(auth) = rendered else {
             return Err(conn_err(format!(
                 "operation `{}` declares auth, but no alternative's placeholders resolve \
                  against this config",
                 operation.name
             )));
         };
-        headers.push(("Authorization".to_owned(), header));
+        match auth {
+            RenderedAuth::Authorization(value) => {
+                headers.push(("Authorization".to_owned(), value));
+            }
+            RenderedAuth::Header(name, value) => {
+                if value.contains(['\r', '\n']) {
+                    return Err(conn_err(format!(
+                        "rendered header `{name}` contains a newline"
+                    )));
+                }
+                headers.push((name, value));
+            }
+            RenderedAuth::QueryParam(name, value) => {
+                let separator = if url.contains('?') { '&' } else { '?' };
+                url = format!("{url}{separator}{name}={value}");
+            }
+        }
     }
     Ok(CheckRequest {
         method: operation.method,
@@ -174,22 +201,87 @@ pub fn render_operation_request(
     })
 }
 
-fn render_auth(auth: &OperationAuth, config: &serde_json::Value) -> Result<String> {
+fn render_auth(auth: &OperationAuth, config: &serde_json::Value) -> Result<RenderedAuth> {
     match auth {
         OperationAuth::Basic { username, password } => {
             let username = super::manifest::render_template(username, config)?;
             let password = super::manifest::render_template(password, config)?;
-            Ok(format!(
+            Ok(RenderedAuth::Authorization(format!(
                 "Basic {}",
                 base64_encode(format!("{username}:{password}").as_bytes())
-            ))
+            )))
         }
         OperationAuth::Bearer { token } => {
             let token = super::manifest::render_template(token, config)?;
             if token.contains(['\r', '\n']) {
                 return Err(conn_err("rendered bearer token contains a newline"));
             }
-            Ok(format!("Bearer {token}"))
+            Ok(RenderedAuth::Authorization(format!("Bearer {token}")))
+        }
+        OperationAuth::Header {
+            name,
+            value_template,
+        } => {
+            let value = super::manifest::render_template(value_template, config)?;
+            Ok(RenderedAuth::Header(name.clone(), value))
+        }
+        OperationAuth::Query {
+            name,
+            value_template,
+        } => {
+            let value = super::manifest::render_template(value_template, config)?;
+            Ok(RenderedAuth::QueryParam(name.clone(), value))
+        }
+        OperationAuth::OAuth2ClientCredentials {
+            token_url,
+            client_id_template,
+            client_secret_template,
+            scope_template,
+        } => {
+            let token_url = super::manifest::render_template(token_url, config)?;
+            let client_id = super::manifest::render_template(client_id_template, config)?;
+            let client_secret = super::manifest::render_template(client_secret_template, config)?;
+            let scope = scope_template
+                .as_ref()
+                .map(|t| super::manifest::render_template(t, config))
+                .transpose()?;
+
+            // Exchange client credentials for an access token.
+            // This may block briefly; run on a fresh thread with its own
+            // runtime so the call works whether or not we are already
+            // inside a Tokio runtime.
+            let token = std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+                rt.block_on(async {
+                    let client = reqwest::Client::new();
+                    let mut params = vec![
+                        ("grant_type", "client_credentials"),
+                        ("client_id", &client_id),
+                        ("client_secret", &client_secret),
+                    ];
+                    if let Some(ref scope) = scope {
+                        params.push(("scope", scope));
+                    }
+                    let resp = client
+                        .post(&token_url)
+                        .form(&params)
+                        .send()
+                        .await
+                        .map_err(|e| conn_err(format!("OAuth2 token request failed: {e}")))?;
+                    let body: serde_json::Value = resp
+                        .json()
+                        .await
+                        .map_err(|e| conn_err(format!("OAuth2 token response invalid: {e}")))?;
+                    body.get("access_token")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .ok_or_else(|| conn_err("OAuth2 response missing access_token"))
+                })
+            })
+            .join()
+            .map_err(|e| conn_err(format!("OAuth2 thread panicked: {e:?}")))??;
+
+            Ok(RenderedAuth::Authorization(format!("Bearer {token}")))
         }
     }
 }
