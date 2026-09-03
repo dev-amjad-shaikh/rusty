@@ -76,42 +76,48 @@ pub mod experiment;
 pub mod feedback;
 pub mod gate;
 pub mod judge;
+pub mod online_scoring;
 pub mod statistics;
 
 pub use assertion::{Assertion, AssertionResult};
 pub use clustering::{
-    cluster_failures, AssertionFailureKey, ExecutionFailureCategory, FailureCause, FailureCluster,
-    FailureClusterReport, FailureEvidenceRef, FailureOccurrence, FailureSignature,
-    FailureTermination, FAILURE_CLUSTER_REPORT_FORMAT_VERSION,
+    AssertionFailureKey, ExecutionFailureCategory, FAILURE_CLUSTER_REPORT_FORMAT_VERSION,
+    FailureCause, FailureCluster, FailureClusterReport, FailureEvidenceRef, FailureOccurrence,
+    FailureSignature, FailureTermination, cluster_failures,
 };
 pub use compare::{
-    compare, AssertionDelta, CaseChange, CaseDelta, CompareThresholds, ComparisonReport,
-    LatencyDelta, Regression,
+    AssertionDelta, CaseChange, CaseDelta, CompareThresholds, ComparisonReport, LatencyDelta,
+    Regression, compare,
 };
 pub use dataset::{
-    Dataset, EvalCase, Expectation, ExpectedToolCall, StatePredicate, DATASET_FORMAT_VERSION,
+    DATASET_FORMAT_VERSION, Dataset, EvalCase, Expectation, ExpectedToolCall, StatePredicate,
 };
 pub use error::{EvalError, Result};
 pub use evidence::{RunEvidence, RunStatus, ToolCallRecord};
 pub use experiment::{
     AssertionPassRate, CaseReport, CaseRunReport, ExperimentConfig, ExperimentReport,
-    ExperimentRunner, LatencyStats, PreparedRun, ReportSummary, REPORT_FORMAT_VERSION,
+    ExperimentRunner, LatencyStats, PreparedRun, REPORT_FORMAT_VERSION, ReportSummary,
 };
 pub use feedback::{
-    AnnotationQueue, AnnotationStatus, AnnotationTask, ResolutionAuthority, ReviewCandidate,
-    ReviewDecision, ReviewLease, ReviewResolution, ReviewRubric, ReviewSubmission, RubricCriterion,
-    StoredReview, TraceRef, FEEDBACK_FORMAT_VERSION,
+    AnnotationQueue, AnnotationStatus, AnnotationTask, FEEDBACK_FORMAT_VERSION,
+    ResolutionAuthority, ReviewCandidate, ReviewDecision, ReviewLease, ReviewResolution,
+    ReviewRubric, ReviewSubmission, RubricCriterion, StoredReview, TraceRef,
 };
 pub use gate::{
-    evaluate_gate, GateCheck, GateDecision, GateMetric, GateOutcome, GatePolicy,
-    GATE_DECISION_FORMAT_VERSION, GATE_POLICY_FORMAT_VERSION,
+    GATE_DECISION_FORMAT_VERSION, GATE_POLICY_FORMAT_VERSION, GateCheck, GateDecision, GateMetric,
+    GateOutcome, GatePolicy, evaluate_gate,
 };
 pub use judge::{
-    JudgeModel, JudgeRequest, JudgeVerdict, ModelJudge, RuleBasedJudge,
     DEFAULT_MODEL_JUDGE_MAX_REQUEST_BYTES, DEFAULT_MODEL_JUDGE_MAX_RESPONSE_BYTES,
-    DEFAULT_MODEL_JUDGE_PASS_SCORE, MAX_MODEL_JUDGE_RATIONALE_BYTES,
+    DEFAULT_MODEL_JUDGE_PASS_SCORE, JudgeModel, JudgeRequest, JudgeVerdict,
+    MAX_MODEL_JUDGE_RATIONALE_BYTES, ModelJudge, RuleBasedJudge,
+};
+pub use online_scoring::{
+    BudgetTracker, InMemoryBudgetTracker, OUTCOME_ANNOTATION_FORMAT_VERSION, OnlineScoringPolicy,
+    OnlineScoringRunner, OutcomeAnnotation, SamplingDecision, ScorerBinding, ScorerOutcome,
+    ScorerRegistry, ScoringTask,
 };
 pub use statistics::{
-    detect_pass_rate_regression, StatisticalDecision, StatisticalRegressionConfig,
-    StatisticalRegressionReport, STATISTICAL_REGRESSION_FORMAT_VERSION,
+    STATISTICAL_REGRESSION_FORMAT_VERSION, StatisticalDecision, StatisticalRegressionConfig,
+    StatisticalRegressionReport, detect_pass_rate_regression,
 };
