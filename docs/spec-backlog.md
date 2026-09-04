@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**███████████████████░░░░░░░░░░░ 78%** weighted complete (120 ✅ landed · 44 ◐ partial · 18 ○ not started, of 182 stories)
+**███████████████████░░░░░░░░░░░ 78%** weighted complete (120 ✅ landed · 45 ◐ partial · 17 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -70,7 +70,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-03 — Durability, Checkpoints and Pause
 
-██████████░░ 91% · 9 landed · 1 partial · 1 not started · milestone M1
+██████████░░ 91% · 9 landed · 2 partial · 0 not started · milestone M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
