@@ -385,12 +385,12 @@ pub trait ChatModel: Send + Sync {
     /// Recorder, R0.5): recorded on model-call journal events and used by
     /// retry/replay policy.
     ///
-    /// The default is [`crate::record::Effect::NonIdempotent`]: a provider
+    /// The default is [`rusty_api::Effect::NonIdempotent`]: a provider
     /// call is billable and unverifiable, so the restrictive class applies.
     /// Override only with justification (e.g. a local deterministic model
     /// could argue for `ReadOnly`; cached completions for `Idempotent`).
-    fn effect(&self) -> crate::record::Effect {
-        crate::record::Effect::NonIdempotent
+    fn effect(&self) -> rusty_api::Effect {
+        rusty_api::Effect::NonIdempotent
     }
 
     /// The model's per-token pricing, when known.

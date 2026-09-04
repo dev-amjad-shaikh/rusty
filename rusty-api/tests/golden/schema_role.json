@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Role",
+  "description": "Chat message role.",
+  "oneOf": [
+    {
+      "description": "System prompt / instructions.",
+      "type": "string",
+      "enum": [
+        "system"
+      ]
+    },
+    {
+      "description": "End-user input.",
+      "type": "string",
+      "enum": [
+        "user"
+      ]
+    },
+    {
+      "description": "Model output (may carry tool calls).",
+      "type": "string",
+      "enum": [
+        "assistant"
+      ]
+    },
+    {
+      "description": "Tool execution result (must carry `tool_call_id`).",
+      "type": "string",
+      "enum": [
+        "tool"
+      ]
+    }
+  ]
+}

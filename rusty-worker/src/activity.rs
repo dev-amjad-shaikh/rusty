@@ -449,6 +449,11 @@ fn classify_error(error: &RustyError) -> (ErrorClass, bool) {
         // An invariant violation is a content contract breach by the model:
         // retrying the same claim replays the same breach.
         RustyError::InvariantViolation(_) => (ErrorClass::InvalidInput, false),
+        // Frozen-tier and chunk-assembly violations are likewise declaration
+        // or content contract breaches: never transient.
+        RustyError::FrozenTierViolation { .. } | RustyError::ChunkAssemblyMismatch { .. } => {
+            (ErrorClass::InvalidInput, false)
+        }
         RustyError::Checkpoint(_) => (ErrorClass::Unknown, false),
         RustyError::Replay(_) => (ErrorClass::Unknown, false),
         RustyError::Serialization(_) => (ErrorClass::Unknown, false),

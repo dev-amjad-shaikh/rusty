@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChatMessage",
+  "description": "A single chat message.\n\nSerialization follows the OpenAI chat-completions schema: `content` may be null on assistant tool-call messages; `tool_calls` and `tool_call_id` are omitted when absent.",
+  "type": "object",
+  "required": [
+    "role"
+  ],
+  "properties": {
+    "content": {
+      "description": "Text content. `None` is legal for assistant messages that only carry tool calls.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Optional participant name (multi-agent disambiguation).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "description": "Who produced this message.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Role"
+        }
+      ]
+    },
+    "tool_call_id": {
+      "description": "Required on `role: tool` messages: the tool call this answers.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool_calls": {
+      "description": "Tool calls requested by the assistant.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ToolCall"
+      }
+    }
+  },
+  "definitions": {
+    "Role": {
+      "description": "Chat message role.",
+      "oneOf": [
+        {
+          "description": "System prompt / instructions.",
+          "type": "string",
+          "enum": [
+            "system"
+          ]
+        },
+        {
+          "description": "End-user input.",
+          "type": "string",
+          "enum": [
+            "user"
+          ]
+        },
+        {
+          "description": "Model output (may carry tool calls).",
+          "type": "string",
+          "enum": [
+            "assistant"
+          ]
+        },
+        {
+          "description": "Tool execution result (must carry `tool_call_id`).",
+          "type": "string",
+          "enum": [
+            "tool"
+          ]
+        }
+      ]
+    },
+    "ToolCall": {
+      "description": "A tool call requested by the model.\n\nWire format is the OpenAI function-calling shape: `{\"id\": \"...\", \"type\": \"function\", \"function\": {\"name\": \"...\", \"arguments\": \"<json string>\"}}`. The `arguments` field is exposed as a parsed [`Value`]; serialization re-encodes it to the string form the API expects.",
+      "type": "object",
+      "required": [
+        "arguments",
+        "id",
+        "name"
+      ],
+      "properties": {
+        "arguments": {
+          "description": "Parsed arguments."
+        },
+        "id": {
+          "description": "Provider-assigned call id (echoed back in the tool-result message).",
+          "type": "string"
+        },
+        "name": {
+          "description": "Tool name.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

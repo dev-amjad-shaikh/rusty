@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Usage",
+  "description": "Token usage accounting from the provider.\n\n`cached_tokens` and `reasoning_tokens` are the detail providers report beyond the three headline counts (Anthropic's cache reads, OpenAI's `prompt_tokens_details` / `completion_tokens_details`, Gemini's thoughts): optional and absent on the wire when unset, so the pinned serde shape of the headline fields is unchanged.",
+  "type": "object",
+  "properties": {
+    "cached_tokens": {
+      "description": "Prompt tokens served from the provider's cache. A *subset* of `prompt_tokens`, usually billed at a lower rate.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "completion_tokens": {
+      "description": "Tokens in the completion.",
+      "default": 0,
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "prompt_tokens": {
+      "description": "Tokens in the prompt.",
+      "default": 0,
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "reasoning_tokens": {
+      "description": "Completion tokens spent on reasoning rather than visible output. A *subset* of `completion_tokens`.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "total_tokens": {
+      "description": "Total tokens billed.",
+      "default": 0,
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  }
+}

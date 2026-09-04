@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OutboundMessage",
+  "description": "A normalized outbound message produced by the kernel.",
+  "type": "object",
+  "required": [
+    "content",
+    "to"
+  ],
+  "properties": {
+    "content": {
+      "description": "The message payload.",
+      "type": "string"
+    },
+    "to": {
+      "description": "Target participant identity.",
+      "type": "string"
+    }
+  }
+}

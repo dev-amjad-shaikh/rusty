@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BlockWrite",
+  "description": "A write request for a memory block.",
+  "type": "object",
+  "required": [
+    "block_id",
+    "overwrite",
+    "payload"
+  ],
+  "properties": {
+    "block_id": {
+      "description": "Block identifier.",
+      "type": "string"
+    },
+    "overwrite": {
+      "description": "Whether this write should overwrite an existing block.",
+      "type": "boolean"
+    },
+    "payload": {
+      "description": "The payload to store."
+    }
+  }
+}

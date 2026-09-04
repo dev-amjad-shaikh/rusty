@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RustyApiError",
+  "description": "Errors arising from ABI-level operations in the Rusty platform.",
+  "oneOf": [
+    {
+      "description": "A provider returned an error or the request could not be completed.",
+      "type": "object",
+      "required": [
+        "Provider"
+      ],
+      "properties": {
+        "Provider": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "A capability or feature is not supported by the implementation.",
+      "type": "object",
+      "required": [
+        "NotSupported"
+      ],
+      "properties": {
+        "NotSupported": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "The request was malformed or violated an invariant.",
+      "type": "object",
+      "required": [
+        "InvalidRequest"
+      ],
+      "properties": {
+        "InvalidRequest": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

@@ -1,0 +1,1044 @@
+pub mod rusty_api
+pub enum rusty_api::Effect
+pub rusty_api::Effect::Compensatable
+pub rusty_api::Effect::Idempotent
+pub rusty_api::Effect::NonIdempotent
+pub rusty_api::Effect::Pure
+pub rusty_api::Effect::ReadOnly
+impl rusty_api::Effect
+pub fn rusty_api::Effect::is_freely_repeatable(self) -> bool
+impl core::clone::Clone for rusty_api::Effect
+pub fn rusty_api::Effect::clone(&self) -> rusty_api::Effect
+impl core::cmp::Eq for rusty_api::Effect
+impl core::cmp::Ord for rusty_api::Effect
+pub fn rusty_api::Effect::cmp(&self, &rusty_api::Effect) -> core::cmp::Ordering
+impl core::cmp::PartialEq for rusty_api::Effect
+pub fn rusty_api::Effect::eq(&self, &rusty_api::Effect) -> bool
+impl core::cmp::PartialOrd for rusty_api::Effect
+pub fn rusty_api::Effect::partial_cmp(&self, &rusty_api::Effect) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for rusty_api::Effect
+pub fn rusty_api::Effect::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::Effect
+pub fn rusty_api::Effect::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::Effect
+impl core::marker::StructuralPartialEq for rusty_api::Effect
+impl schemars::JsonSchema for rusty_api::Effect
+pub fn rusty_api::Effect::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::Effect::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::Effect::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::Effect
+pub fn rusty_api::Effect::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::Effect
+pub fn rusty_api::Effect::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::Effect
+impl core::marker::Send for rusty_api::Effect
+impl core::marker::Sync for rusty_api::Effect
+impl core::marker::Unpin for rusty_api::Effect
+impl core::marker::UnsafeUnpin for rusty_api::Effect
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::Effect
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::Effect
+impl<T, U> core::convert::Into<U> for rusty_api::Effect where U: core::convert::From<T>
+pub fn rusty_api::Effect::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::Effect where U: core::convert::Into<T>
+pub type rusty_api::Effect::Error = never
+pub fn rusty_api::Effect::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::Effect where U: core::convert::TryFrom<T>
+pub type rusty_api::Effect::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::Effect::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::Effect where T: core::clone::Clone
+pub type rusty_api::Effect::Owned = T
+pub fn rusty_api::Effect::clone_into(&self, &mut T)
+pub fn rusty_api::Effect::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::Effect where T: 'static + ?core::marker::Sized
+pub fn rusty_api::Effect::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::Effect where T: ?core::marker::Sized
+pub fn rusty_api::Effect::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::Effect where T: ?core::marker::Sized
+pub fn rusty_api::Effect::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::Effect where T: core::clone::Clone
+pub unsafe fn rusty_api::Effect::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::Effect
+pub fn rusty_api::Effect::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::Effect where T: core::clone::Clone
+pub fn rusty_api::Effect::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::Effect where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::EffectClass
+pub rusty_api::EffectClass::Egress
+pub rusty_api::EffectClass::Execute
+pub rusty_api::EffectClass::Read
+impl core::clone::Clone for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::clone(&self) -> rusty_api::EffectClass
+impl core::cmp::Eq for rusty_api::EffectClass
+impl core::cmp::PartialEq for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::eq(&self, &rusty_api::EffectClass) -> bool
+impl core::fmt::Debug for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::EffectClass
+impl core::marker::StructuralPartialEq for rusty_api::EffectClass
+impl schemars::JsonSchema for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::EffectClass::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::EffectClass::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::EffectClass
+impl core::marker::Send for rusty_api::EffectClass
+impl core::marker::Sync for rusty_api::EffectClass
+impl core::marker::Unpin for rusty_api::EffectClass
+impl core::marker::UnsafeUnpin for rusty_api::EffectClass
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::EffectClass
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::EffectClass
+impl<T, U> core::convert::Into<U> for rusty_api::EffectClass where U: core::convert::From<T>
+pub fn rusty_api::EffectClass::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::EffectClass where U: core::convert::Into<T>
+pub type rusty_api::EffectClass::Error = never
+pub fn rusty_api::EffectClass::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::EffectClass where U: core::convert::TryFrom<T>
+pub type rusty_api::EffectClass::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::EffectClass::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::EffectClass where T: core::clone::Clone
+pub type rusty_api::EffectClass::Owned = T
+pub fn rusty_api::EffectClass::clone_into(&self, &mut T)
+pub fn rusty_api::EffectClass::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::EffectClass where T: 'static + ?core::marker::Sized
+pub fn rusty_api::EffectClass::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::EffectClass where T: ?core::marker::Sized
+pub fn rusty_api::EffectClass::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::EffectClass where T: ?core::marker::Sized
+pub fn rusty_api::EffectClass::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::EffectClass where T: core::clone::Clone
+pub unsafe fn rusty_api::EffectClass::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::EffectClass
+pub fn rusty_api::EffectClass::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::EffectClass where T: core::clone::Clone
+pub fn rusty_api::EffectClass::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::EffectClass where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::EnforcementLevel
+pub rusty_api::EnforcementLevel::Full
+pub rusty_api::EnforcementLevel::Partial
+impl core::clone::Clone for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::clone(&self) -> rusty_api::EnforcementLevel
+impl core::cmp::Eq for rusty_api::EnforcementLevel
+impl core::cmp::PartialEq for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::eq(&self, &rusty_api::EnforcementLevel) -> bool
+impl core::fmt::Debug for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::EnforcementLevel
+impl core::marker::StructuralPartialEq for rusty_api::EnforcementLevel
+impl schemars::JsonSchema for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::EnforcementLevel::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::EnforcementLevel::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::EnforcementLevel
+impl core::marker::Send for rusty_api::EnforcementLevel
+impl core::marker::Sync for rusty_api::EnforcementLevel
+impl core::marker::Unpin for rusty_api::EnforcementLevel
+impl core::marker::UnsafeUnpin for rusty_api::EnforcementLevel
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::EnforcementLevel
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::EnforcementLevel
+impl<T, U> core::convert::Into<U> for rusty_api::EnforcementLevel where U: core::convert::From<T>
+pub fn rusty_api::EnforcementLevel::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::EnforcementLevel where U: core::convert::Into<T>
+pub type rusty_api::EnforcementLevel::Error = never
+pub fn rusty_api::EnforcementLevel::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::EnforcementLevel where U: core::convert::TryFrom<T>
+pub type rusty_api::EnforcementLevel::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::EnforcementLevel::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::EnforcementLevel where T: core::clone::Clone
+pub type rusty_api::EnforcementLevel::Owned = T
+pub fn rusty_api::EnforcementLevel::clone_into(&self, &mut T)
+pub fn rusty_api::EnforcementLevel::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::EnforcementLevel where T: 'static + ?core::marker::Sized
+pub fn rusty_api::EnforcementLevel::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::EnforcementLevel where T: ?core::marker::Sized
+pub fn rusty_api::EnforcementLevel::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::EnforcementLevel where T: ?core::marker::Sized
+pub fn rusty_api::EnforcementLevel::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::EnforcementLevel where T: core::clone::Clone
+pub unsafe fn rusty_api::EnforcementLevel::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::EnforcementLevel
+pub fn rusty_api::EnforcementLevel::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::EnforcementLevel where T: core::clone::Clone
+pub fn rusty_api::EnforcementLevel::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::EnforcementLevel where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::ObserverEvent
+pub rusty_api::ObserverEvent::BudgetConsumed
+pub rusty_api::ObserverEvent::BudgetConsumed::consumed: u64
+pub rusty_api::ObserverEvent::BudgetConsumed::kind: alloc::string::String
+pub rusty_api::ObserverEvent::BudgetConsumed::limit: u64
+pub rusty_api::ObserverEvent::EventAppended
+pub rusty_api::ObserverEvent::EventAppended::event_id: uuid::Uuid
+pub rusty_api::ObserverEvent::EventAppended::kind: alloc::string::String
+pub rusty_api::ObserverEvent::InvariantViolation
+pub rusty_api::ObserverEvent::InvariantViolation::detail: alloc::string::String
+pub rusty_api::ObserverEvent::InvariantViolation::invariant: alloc::string::String
+pub rusty_api::ObserverEvent::PhaseEntered
+pub rusty_api::ObserverEvent::PhaseEntered::phase: alloc::string::String
+pub rusty_api::ObserverEvent::PhaseEntered::step: u32
+pub rusty_api::ObserverEvent::PhaseExited
+pub rusty_api::ObserverEvent::PhaseExited::phase: alloc::string::String
+pub rusty_api::ObserverEvent::PhaseExited::step: u32
+pub rusty_api::ObserverEvent::PhaseExited::summary: core::option::Option<serde_json::value::Value>
+pub rusty_api::ObserverEvent::SeamDecision
+pub rusty_api::ObserverEvent::SeamDecision::handlers: alloc::vec::Vec<alloc::string::String>
+pub rusty_api::ObserverEvent::SeamDecision::outcome: alloc::string::String
+pub rusty_api::ObserverEvent::SeamDecision::seam: alloc::string::String
+impl core::clone::Clone for rusty_api::ObserverEvent
+pub fn rusty_api::ObserverEvent::clone(&self) -> rusty_api::ObserverEvent
+impl core::cmp::PartialEq for rusty_api::ObserverEvent
+pub fn rusty_api::ObserverEvent::eq(&self, &rusty_api::ObserverEvent) -> bool
+impl core::fmt::Debug for rusty_api::ObserverEvent
+pub fn rusty_api::ObserverEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::ObserverEvent
+impl schemars::JsonSchema for rusty_api::ObserverEvent
+pub fn rusty_api::ObserverEvent::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::ObserverEvent::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::ObserverEvent::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::ObserverEvent
+pub fn rusty_api::ObserverEvent::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::ObserverEvent
+pub fn rusty_api::ObserverEvent::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::ObserverEvent
+impl core::marker::Send for rusty_api::ObserverEvent
+impl core::marker::Sync for rusty_api::ObserverEvent
+impl core::marker::Unpin for rusty_api::ObserverEvent
+impl core::marker::UnsafeUnpin for rusty_api::ObserverEvent
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ObserverEvent
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ObserverEvent
+impl<T, U> core::convert::Into<U> for rusty_api::ObserverEvent where U: core::convert::From<T>
+pub fn rusty_api::ObserverEvent::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ObserverEvent where U: core::convert::Into<T>
+pub type rusty_api::ObserverEvent::Error = never
+pub fn rusty_api::ObserverEvent::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ObserverEvent where U: core::convert::TryFrom<T>
+pub type rusty_api::ObserverEvent::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ObserverEvent::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ObserverEvent where T: core::clone::Clone
+pub type rusty_api::ObserverEvent::Owned = T
+pub fn rusty_api::ObserverEvent::clone_into(&self, &mut T)
+pub fn rusty_api::ObserverEvent::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ObserverEvent where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ObserverEvent::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ObserverEvent where T: ?core::marker::Sized
+pub fn rusty_api::ObserverEvent::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ObserverEvent where T: ?core::marker::Sized
+pub fn rusty_api::ObserverEvent::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ObserverEvent where T: core::clone::Clone
+pub unsafe fn rusty_api::ObserverEvent::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ObserverEvent
+pub fn rusty_api::ObserverEvent::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ObserverEvent where T: core::clone::Clone
+pub fn rusty_api::ObserverEvent::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::ObserverEvent where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::Role
+pub rusty_api::Role::Assistant
+pub rusty_api::Role::System
+pub rusty_api::Role::Tool
+pub rusty_api::Role::User
+impl core::clone::Clone for rusty_api::Role
+pub fn rusty_api::Role::clone(&self) -> rusty_api::Role
+impl core::cmp::Eq for rusty_api::Role
+impl core::cmp::PartialEq for rusty_api::Role
+pub fn rusty_api::Role::eq(&self, &rusty_api::Role) -> bool
+impl core::fmt::Debug for rusty_api::Role
+pub fn rusty_api::Role::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::Role
+pub fn rusty_api::Role::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::Role
+impl core::marker::StructuralPartialEq for rusty_api::Role
+impl schemars::JsonSchema for rusty_api::Role
+pub fn rusty_api::Role::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::Role::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::Role::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::Role
+pub fn rusty_api::Role::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::Role
+pub fn rusty_api::Role::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::Role
+impl core::marker::Send for rusty_api::Role
+impl core::marker::Sync for rusty_api::Role
+impl core::marker::Unpin for rusty_api::Role
+impl core::marker::UnsafeUnpin for rusty_api::Role
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::Role
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::Role
+impl<T, U> core::convert::Into<U> for rusty_api::Role where U: core::convert::From<T>
+pub fn rusty_api::Role::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::Role where U: core::convert::Into<T>
+pub type rusty_api::Role::Error = never
+pub fn rusty_api::Role::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::Role where U: core::convert::TryFrom<T>
+pub type rusty_api::Role::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::Role::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::Role where T: core::clone::Clone
+pub type rusty_api::Role::Owned = T
+pub fn rusty_api::Role::clone_into(&self, &mut T)
+pub fn rusty_api::Role::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::Role where T: 'static + ?core::marker::Sized
+pub fn rusty_api::Role::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::Role where T: ?core::marker::Sized
+pub fn rusty_api::Role::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::Role where T: ?core::marker::Sized
+pub fn rusty_api::Role::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::Role where T: core::clone::Clone
+pub unsafe fn rusty_api::Role::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::Role
+pub fn rusty_api::Role::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::Role where T: core::clone::Clone
+pub fn rusty_api::Role::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::Role where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::RustyApiError
+pub rusty_api::RustyApiError::InvalidRequest(alloc::string::String)
+pub rusty_api::RustyApiError::NotSupported(alloc::string::String)
+pub rusty_api::RustyApiError::Provider(alloc::string::String)
+impl core::clone::Clone for rusty_api::RustyApiError
+pub fn rusty_api::RustyApiError::clone(&self) -> rusty_api::RustyApiError
+impl core::cmp::PartialEq for rusty_api::RustyApiError
+pub fn rusty_api::RustyApiError::eq(&self, &rusty_api::RustyApiError) -> bool
+impl core::error::Error for rusty_api::RustyApiError
+impl core::fmt::Debug for rusty_api::RustyApiError
+pub fn rusty_api::RustyApiError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rusty_api::RustyApiError
+pub fn rusty_api::RustyApiError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::RustyApiError
+impl schemars::JsonSchema for rusty_api::RustyApiError
+pub fn rusty_api::RustyApiError::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::RustyApiError::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::RustyApiError::schema_name() -> alloc::string::String
+impl core::marker::Freeze for rusty_api::RustyApiError
+impl core::marker::Send for rusty_api::RustyApiError
+impl core::marker::Sync for rusty_api::RustyApiError
+impl core::marker::Unpin for rusty_api::RustyApiError
+impl core::marker::UnsafeUnpin for rusty_api::RustyApiError
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::RustyApiError
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::RustyApiError
+impl<T, U> core::convert::Into<U> for rusty_api::RustyApiError where U: core::convert::From<T>
+pub fn rusty_api::RustyApiError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::RustyApiError where U: core::convert::Into<T>
+pub type rusty_api::RustyApiError::Error = never
+pub fn rusty_api::RustyApiError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::RustyApiError where U: core::convert::TryFrom<T>
+pub type rusty_api::RustyApiError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::RustyApiError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::RustyApiError where T: core::clone::Clone
+pub type rusty_api::RustyApiError::Owned = T
+pub fn rusty_api::RustyApiError::clone_into(&self, &mut T)
+pub fn rusty_api::RustyApiError::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rusty_api::RustyApiError where T: core::fmt::Display + ?core::marker::Sized
+pub fn rusty_api::RustyApiError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rusty_api::RustyApiError where T: 'static + ?core::marker::Sized
+pub fn rusty_api::RustyApiError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::RustyApiError where T: ?core::marker::Sized
+pub fn rusty_api::RustyApiError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::RustyApiError where T: ?core::marker::Sized
+pub fn rusty_api::RustyApiError::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::RustyApiError where T: core::clone::Clone
+pub unsafe fn rusty_api::RustyApiError::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::RustyApiError
+pub fn rusty_api::RustyApiError::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::RustyApiError where T: core::clone::Clone
+pub fn rusty_api::RustyApiError::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+pub enum rusty_api::SandboxRequirement
+pub rusty_api::SandboxRequirement::Container
+pub rusty_api::SandboxRequirement::LocalProcess
+pub rusty_api::SandboxRequirement::None
+pub rusty_api::SandboxRequirement::Remote
+impl core::clone::Clone for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::clone(&self) -> rusty_api::SandboxRequirement
+impl core::cmp::Eq for rusty_api::SandboxRequirement
+impl core::cmp::PartialEq for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::eq(&self, &rusty_api::SandboxRequirement) -> bool
+impl core::fmt::Debug for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::SandboxRequirement
+impl core::marker::StructuralPartialEq for rusty_api::SandboxRequirement
+impl schemars::JsonSchema for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::SandboxRequirement::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::SandboxRequirement::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::SandboxRequirement
+impl core::marker::Send for rusty_api::SandboxRequirement
+impl core::marker::Sync for rusty_api::SandboxRequirement
+impl core::marker::Unpin for rusty_api::SandboxRequirement
+impl core::marker::UnsafeUnpin for rusty_api::SandboxRequirement
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::SandboxRequirement
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::SandboxRequirement
+impl<T, U> core::convert::Into<U> for rusty_api::SandboxRequirement where U: core::convert::From<T>
+pub fn rusty_api::SandboxRequirement::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::SandboxRequirement where U: core::convert::Into<T>
+pub type rusty_api::SandboxRequirement::Error = never
+pub fn rusty_api::SandboxRequirement::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::SandboxRequirement where U: core::convert::TryFrom<T>
+pub type rusty_api::SandboxRequirement::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::SandboxRequirement::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::SandboxRequirement where T: core::clone::Clone
+pub type rusty_api::SandboxRequirement::Owned = T
+pub fn rusty_api::SandboxRequirement::clone_into(&self, &mut T)
+pub fn rusty_api::SandboxRequirement::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::SandboxRequirement where T: 'static + ?core::marker::Sized
+pub fn rusty_api::SandboxRequirement::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::SandboxRequirement where T: ?core::marker::Sized
+pub fn rusty_api::SandboxRequirement::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::SandboxRequirement where T: ?core::marker::Sized
+pub fn rusty_api::SandboxRequirement::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::SandboxRequirement where T: core::clone::Clone
+pub unsafe fn rusty_api::SandboxRequirement::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::SandboxRequirement
+pub fn rusty_api::SandboxRequirement::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::SandboxRequirement where T: core::clone::Clone
+pub fn rusty_api::SandboxRequirement::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::SandboxRequirement where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::BlockWrite
+pub rusty_api::BlockWrite::block_id: alloc::string::String
+pub rusty_api::BlockWrite::overwrite: bool
+pub rusty_api::BlockWrite::payload: serde_json::value::Value
+impl core::clone::Clone for rusty_api::BlockWrite
+pub fn rusty_api::BlockWrite::clone(&self) -> rusty_api::BlockWrite
+impl core::cmp::PartialEq for rusty_api::BlockWrite
+pub fn rusty_api::BlockWrite::eq(&self, &rusty_api::BlockWrite) -> bool
+impl core::fmt::Debug for rusty_api::BlockWrite
+pub fn rusty_api::BlockWrite::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::BlockWrite
+impl schemars::JsonSchema for rusty_api::BlockWrite
+pub fn rusty_api::BlockWrite::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::BlockWrite::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::BlockWrite::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::BlockWrite
+pub fn rusty_api::BlockWrite::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::BlockWrite
+pub fn rusty_api::BlockWrite::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::BlockWrite
+impl core::marker::Send for rusty_api::BlockWrite
+impl core::marker::Sync for rusty_api::BlockWrite
+impl core::marker::Unpin for rusty_api::BlockWrite
+impl core::marker::UnsafeUnpin for rusty_api::BlockWrite
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::BlockWrite
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::BlockWrite
+impl<T, U> core::convert::Into<U> for rusty_api::BlockWrite where U: core::convert::From<T>
+pub fn rusty_api::BlockWrite::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::BlockWrite where U: core::convert::Into<T>
+pub type rusty_api::BlockWrite::Error = never
+pub fn rusty_api::BlockWrite::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::BlockWrite where U: core::convert::TryFrom<T>
+pub type rusty_api::BlockWrite::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::BlockWrite::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::BlockWrite where T: core::clone::Clone
+pub type rusty_api::BlockWrite::Owned = T
+pub fn rusty_api::BlockWrite::clone_into(&self, &mut T)
+pub fn rusty_api::BlockWrite::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::BlockWrite where T: 'static + ?core::marker::Sized
+pub fn rusty_api::BlockWrite::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::BlockWrite where T: ?core::marker::Sized
+pub fn rusty_api::BlockWrite::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::BlockWrite where T: ?core::marker::Sized
+pub fn rusty_api::BlockWrite::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::BlockWrite where T: core::clone::Clone
+pub unsafe fn rusty_api::BlockWrite::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::BlockWrite
+pub fn rusty_api::BlockWrite::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::BlockWrite where T: core::clone::Clone
+pub fn rusty_api::BlockWrite::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::BlockWrite where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::ChatMessage
+pub rusty_api::ChatMessage::content: core::option::Option<alloc::string::String>
+pub rusty_api::ChatMessage::name: core::option::Option<alloc::string::String>
+pub rusty_api::ChatMessage::role: rusty_api::Role
+pub rusty_api::ChatMessage::tool_call_id: core::option::Option<alloc::string::String>
+pub rusty_api::ChatMessage::tool_calls: alloc::vec::Vec<rusty_api::ToolCall>
+impl rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::assistant(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn rusty_api::ChatMessage::assistant_tool_calls(alloc::vec::Vec<rusty_api::ToolCall>) -> Self
+pub fn rusty_api::ChatMessage::has_tool_calls(&self) -> bool
+pub fn rusty_api::ChatMessage::system(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn rusty_api::ChatMessage::tool_result(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn rusty_api::ChatMessage::user(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::clone(&self) -> rusty_api::ChatMessage
+impl core::cmp::PartialEq for rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::eq(&self, &rusty_api::ChatMessage) -> bool
+impl core::fmt::Debug for rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::ChatMessage
+impl schemars::JsonSchema for rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::ChatMessage::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::ChatMessage::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::ChatMessage
+impl core::marker::Send for rusty_api::ChatMessage
+impl core::marker::Sync for rusty_api::ChatMessage
+impl core::marker::Unpin for rusty_api::ChatMessage
+impl core::marker::UnsafeUnpin for rusty_api::ChatMessage
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ChatMessage
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ChatMessage
+impl<T, U> core::convert::Into<U> for rusty_api::ChatMessage where U: core::convert::From<T>
+pub fn rusty_api::ChatMessage::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ChatMessage where U: core::convert::Into<T>
+pub type rusty_api::ChatMessage::Error = never
+pub fn rusty_api::ChatMessage::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ChatMessage where U: core::convert::TryFrom<T>
+pub type rusty_api::ChatMessage::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ChatMessage::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ChatMessage where T: core::clone::Clone
+pub type rusty_api::ChatMessage::Owned = T
+pub fn rusty_api::ChatMessage::clone_into(&self, &mut T)
+pub fn rusty_api::ChatMessage::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ChatMessage where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ChatMessage::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ChatMessage where T: ?core::marker::Sized
+pub fn rusty_api::ChatMessage::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ChatMessage where T: ?core::marker::Sized
+pub fn rusty_api::ChatMessage::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ChatMessage where T: core::clone::Clone
+pub unsafe fn rusty_api::ChatMessage::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ChatMessage
+pub fn rusty_api::ChatMessage::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ChatMessage where T: core::clone::Clone
+pub fn rusty_api::ChatMessage::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::ChatMessage where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::ChatResponse
+pub rusty_api::ChatResponse::message: rusty_api::ChatMessage
+pub rusty_api::ChatResponse::model: core::option::Option<alloc::string::String>
+pub rusty_api::ChatResponse::usage: core::option::Option<rusty_api::Usage>
+impl core::clone::Clone for rusty_api::ChatResponse
+pub fn rusty_api::ChatResponse::clone(&self) -> rusty_api::ChatResponse
+impl core::fmt::Debug for rusty_api::ChatResponse
+pub fn rusty_api::ChatResponse::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rusty_api::ChatResponse
+impl core::marker::Send for rusty_api::ChatResponse
+impl core::marker::Sync for rusty_api::ChatResponse
+impl core::marker::Unpin for rusty_api::ChatResponse
+impl core::marker::UnsafeUnpin for rusty_api::ChatResponse
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ChatResponse
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ChatResponse
+impl<T, U> core::convert::Into<U> for rusty_api::ChatResponse where U: core::convert::From<T>
+pub fn rusty_api::ChatResponse::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ChatResponse where U: core::convert::Into<T>
+pub type rusty_api::ChatResponse::Error = never
+pub fn rusty_api::ChatResponse::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ChatResponse where U: core::convert::TryFrom<T>
+pub type rusty_api::ChatResponse::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ChatResponse::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ChatResponse where T: core::clone::Clone
+pub type rusty_api::ChatResponse::Owned = T
+pub fn rusty_api::ChatResponse::clone_into(&self, &mut T)
+pub fn rusty_api::ChatResponse::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ChatResponse where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ChatResponse::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ChatResponse where T: ?core::marker::Sized
+pub fn rusty_api::ChatResponse::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ChatResponse where T: ?core::marker::Sized
+pub fn rusty_api::ChatResponse::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ChatResponse where T: core::clone::Clone
+pub unsafe fn rusty_api::ChatResponse::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ChatResponse
+pub fn rusty_api::ChatResponse::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ChatResponse where T: core::clone::Clone
+pub fn rusty_api::ChatResponse::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+pub struct rusty_api::InboundMessage
+pub rusty_api::InboundMessage::content: alloc::string::String
+pub rusty_api::InboundMessage::from: alloc::string::String
+pub rusty_api::InboundMessage::received_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+impl core::clone::Clone for rusty_api::InboundMessage
+pub fn rusty_api::InboundMessage::clone(&self) -> rusty_api::InboundMessage
+impl core::cmp::PartialEq for rusty_api::InboundMessage
+pub fn rusty_api::InboundMessage::eq(&self, &rusty_api::InboundMessage) -> bool
+impl core::fmt::Debug for rusty_api::InboundMessage
+pub fn rusty_api::InboundMessage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::InboundMessage
+impl schemars::JsonSchema for rusty_api::InboundMessage
+pub fn rusty_api::InboundMessage::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::InboundMessage::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::InboundMessage::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::InboundMessage
+pub fn rusty_api::InboundMessage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::InboundMessage
+pub fn rusty_api::InboundMessage::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::InboundMessage
+impl core::marker::Send for rusty_api::InboundMessage
+impl core::marker::Sync for rusty_api::InboundMessage
+impl core::marker::Unpin for rusty_api::InboundMessage
+impl core::marker::UnsafeUnpin for rusty_api::InboundMessage
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::InboundMessage
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::InboundMessage
+impl<T, U> core::convert::Into<U> for rusty_api::InboundMessage where U: core::convert::From<T>
+pub fn rusty_api::InboundMessage::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::InboundMessage where U: core::convert::Into<T>
+pub type rusty_api::InboundMessage::Error = never
+pub fn rusty_api::InboundMessage::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::InboundMessage where U: core::convert::TryFrom<T>
+pub type rusty_api::InboundMessage::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::InboundMessage::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::InboundMessage where T: core::clone::Clone
+pub type rusty_api::InboundMessage::Owned = T
+pub fn rusty_api::InboundMessage::clone_into(&self, &mut T)
+pub fn rusty_api::InboundMessage::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::InboundMessage where T: 'static + ?core::marker::Sized
+pub fn rusty_api::InboundMessage::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::InboundMessage where T: ?core::marker::Sized
+pub fn rusty_api::InboundMessage::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::InboundMessage where T: ?core::marker::Sized
+pub fn rusty_api::InboundMessage::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::InboundMessage where T: core::clone::Clone
+pub unsafe fn rusty_api::InboundMessage::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::InboundMessage
+pub fn rusty_api::InboundMessage::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::InboundMessage where T: core::clone::Clone
+pub fn rusty_api::InboundMessage::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::InboundMessage where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::MemoryEntry
+pub rusty_api::MemoryEntry::content: alloc::string::String
+pub rusty_api::MemoryEntry::created_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub rusty_api::MemoryEntry::id: uuid::Uuid
+pub rusty_api::MemoryEntry::provenance: core::option::Option<alloc::string::String>
+impl core::clone::Clone for rusty_api::MemoryEntry
+pub fn rusty_api::MemoryEntry::clone(&self) -> rusty_api::MemoryEntry
+impl core::cmp::PartialEq for rusty_api::MemoryEntry
+pub fn rusty_api::MemoryEntry::eq(&self, &rusty_api::MemoryEntry) -> bool
+impl core::fmt::Debug for rusty_api::MemoryEntry
+pub fn rusty_api::MemoryEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::MemoryEntry
+impl schemars::JsonSchema for rusty_api::MemoryEntry
+pub fn rusty_api::MemoryEntry::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::MemoryEntry::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::MemoryEntry::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::MemoryEntry
+pub fn rusty_api::MemoryEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::MemoryEntry
+pub fn rusty_api::MemoryEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::MemoryEntry
+impl core::marker::Send for rusty_api::MemoryEntry
+impl core::marker::Sync for rusty_api::MemoryEntry
+impl core::marker::Unpin for rusty_api::MemoryEntry
+impl core::marker::UnsafeUnpin for rusty_api::MemoryEntry
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::MemoryEntry
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::MemoryEntry
+impl<T, U> core::convert::Into<U> for rusty_api::MemoryEntry where U: core::convert::From<T>
+pub fn rusty_api::MemoryEntry::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::MemoryEntry where U: core::convert::Into<T>
+pub type rusty_api::MemoryEntry::Error = never
+pub fn rusty_api::MemoryEntry::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::MemoryEntry where U: core::convert::TryFrom<T>
+pub type rusty_api::MemoryEntry::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::MemoryEntry::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::MemoryEntry where T: core::clone::Clone
+pub type rusty_api::MemoryEntry::Owned = T
+pub fn rusty_api::MemoryEntry::clone_into(&self, &mut T)
+pub fn rusty_api::MemoryEntry::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::MemoryEntry where T: 'static + ?core::marker::Sized
+pub fn rusty_api::MemoryEntry::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::MemoryEntry where T: ?core::marker::Sized
+pub fn rusty_api::MemoryEntry::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::MemoryEntry where T: ?core::marker::Sized
+pub fn rusty_api::MemoryEntry::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::MemoryEntry where T: core::clone::Clone
+pub unsafe fn rusty_api::MemoryEntry::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::MemoryEntry
+pub fn rusty_api::MemoryEntry::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::MemoryEntry where T: core::clone::Clone
+pub fn rusty_api::MemoryEntry::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::MemoryEntry where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::ModelCapabilities
+pub rusty_api::ModelCapabilities::context_window: core::option::Option<u64>
+pub rusty_api::ModelCapabilities::reasoning: bool
+pub rusty_api::ModelCapabilities::streaming: bool
+pub rusty_api::ModelCapabilities::tool_calling: bool
+impl core::clone::Clone for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::clone(&self) -> rusty_api::ModelCapabilities
+impl core::cmp::Eq for rusty_api::ModelCapabilities
+impl core::cmp::PartialEq for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::eq(&self, &rusty_api::ModelCapabilities) -> bool
+impl core::default::Default for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::default() -> rusty_api::ModelCapabilities
+impl core::fmt::Debug for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rusty_api::ModelCapabilities
+impl core::marker::StructuralPartialEq for rusty_api::ModelCapabilities
+impl schemars::JsonSchema for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::ModelCapabilities::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::ModelCapabilities::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::ModelCapabilities
+impl core::marker::Send for rusty_api::ModelCapabilities
+impl core::marker::Sync for rusty_api::ModelCapabilities
+impl core::marker::Unpin for rusty_api::ModelCapabilities
+impl core::marker::UnsafeUnpin for rusty_api::ModelCapabilities
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ModelCapabilities
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ModelCapabilities
+impl<T, U> core::convert::Into<U> for rusty_api::ModelCapabilities where U: core::convert::From<T>
+pub fn rusty_api::ModelCapabilities::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ModelCapabilities where U: core::convert::Into<T>
+pub type rusty_api::ModelCapabilities::Error = never
+pub fn rusty_api::ModelCapabilities::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ModelCapabilities where U: core::convert::TryFrom<T>
+pub type rusty_api::ModelCapabilities::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ModelCapabilities::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ModelCapabilities where T: core::clone::Clone
+pub type rusty_api::ModelCapabilities::Owned = T
+pub fn rusty_api::ModelCapabilities::clone_into(&self, &mut T)
+pub fn rusty_api::ModelCapabilities::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ModelCapabilities where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ModelCapabilities::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ModelCapabilities where T: ?core::marker::Sized
+pub fn rusty_api::ModelCapabilities::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ModelCapabilities where T: ?core::marker::Sized
+pub fn rusty_api::ModelCapabilities::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ModelCapabilities where T: core::clone::Clone
+pub unsafe fn rusty_api::ModelCapabilities::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ModelCapabilities
+pub fn rusty_api::ModelCapabilities::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ModelCapabilities where T: core::clone::Clone
+pub fn rusty_api::ModelCapabilities::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::ModelCapabilities where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::ModelPricing
+pub rusty_api::ModelPricing::cached_input_per_million: core::option::Option<f64>
+pub rusty_api::ModelPricing::input_per_million: f64
+pub rusty_api::ModelPricing::output_per_million: f64
+impl rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::cost_usd(&self, &rusty_api::Usage) -> f64
+pub fn rusty_api::ModelPricing::new(f64, f64) -> Self
+pub fn rusty_api::ModelPricing::with_cached_input(self, f64) -> Self
+impl core::clone::Clone for rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::clone(&self) -> rusty_api::ModelPricing
+impl core::cmp::PartialEq for rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::eq(&self, &rusty_api::ModelPricing) -> bool
+impl core::fmt::Debug for rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rusty_api::ModelPricing
+impl core::marker::StructuralPartialEq for rusty_api::ModelPricing
+impl schemars::JsonSchema for rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::ModelPricing::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::ModelPricing::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::ModelPricing
+impl core::marker::Send for rusty_api::ModelPricing
+impl core::marker::Sync for rusty_api::ModelPricing
+impl core::marker::Unpin for rusty_api::ModelPricing
+impl core::marker::UnsafeUnpin for rusty_api::ModelPricing
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ModelPricing
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ModelPricing
+impl<T, U> core::convert::Into<U> for rusty_api::ModelPricing where U: core::convert::From<T>
+pub fn rusty_api::ModelPricing::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ModelPricing where U: core::convert::Into<T>
+pub type rusty_api::ModelPricing::Error = never
+pub fn rusty_api::ModelPricing::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ModelPricing where U: core::convert::TryFrom<T>
+pub type rusty_api::ModelPricing::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ModelPricing::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ModelPricing where T: core::clone::Clone
+pub type rusty_api::ModelPricing::Owned = T
+pub fn rusty_api::ModelPricing::clone_into(&self, &mut T)
+pub fn rusty_api::ModelPricing::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ModelPricing where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ModelPricing::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ModelPricing where T: ?core::marker::Sized
+pub fn rusty_api::ModelPricing::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ModelPricing where T: ?core::marker::Sized
+pub fn rusty_api::ModelPricing::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ModelPricing where T: core::clone::Clone
+pub unsafe fn rusty_api::ModelPricing::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ModelPricing
+pub fn rusty_api::ModelPricing::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ModelPricing where T: core::clone::Clone
+pub fn rusty_api::ModelPricing::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::ModelPricing where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::OutboundMessage
+pub rusty_api::OutboundMessage::content: alloc::string::String
+pub rusty_api::OutboundMessage::to: alloc::string::String
+impl core::clone::Clone for rusty_api::OutboundMessage
+pub fn rusty_api::OutboundMessage::clone(&self) -> rusty_api::OutboundMessage
+impl core::cmp::PartialEq for rusty_api::OutboundMessage
+pub fn rusty_api::OutboundMessage::eq(&self, &rusty_api::OutboundMessage) -> bool
+impl core::fmt::Debug for rusty_api::OutboundMessage
+pub fn rusty_api::OutboundMessage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::OutboundMessage
+impl schemars::JsonSchema for rusty_api::OutboundMessage
+pub fn rusty_api::OutboundMessage::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::OutboundMessage::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::OutboundMessage::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::OutboundMessage
+pub fn rusty_api::OutboundMessage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::OutboundMessage
+pub fn rusty_api::OutboundMessage::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::OutboundMessage
+impl core::marker::Send for rusty_api::OutboundMessage
+impl core::marker::Sync for rusty_api::OutboundMessage
+impl core::marker::Unpin for rusty_api::OutboundMessage
+impl core::marker::UnsafeUnpin for rusty_api::OutboundMessage
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::OutboundMessage
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::OutboundMessage
+impl<T, U> core::convert::Into<U> for rusty_api::OutboundMessage where U: core::convert::From<T>
+pub fn rusty_api::OutboundMessage::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::OutboundMessage where U: core::convert::Into<T>
+pub type rusty_api::OutboundMessage::Error = never
+pub fn rusty_api::OutboundMessage::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::OutboundMessage where U: core::convert::TryFrom<T>
+pub type rusty_api::OutboundMessage::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::OutboundMessage::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::OutboundMessage where T: core::clone::Clone
+pub type rusty_api::OutboundMessage::Owned = T
+pub fn rusty_api::OutboundMessage::clone_into(&self, &mut T)
+pub fn rusty_api::OutboundMessage::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::OutboundMessage where T: 'static + ?core::marker::Sized
+pub fn rusty_api::OutboundMessage::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::OutboundMessage where T: ?core::marker::Sized
+pub fn rusty_api::OutboundMessage::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::OutboundMessage where T: ?core::marker::Sized
+pub fn rusty_api::OutboundMessage::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::OutboundMessage where T: core::clone::Clone
+pub unsafe fn rusty_api::OutboundMessage::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::OutboundMessage
+pub fn rusty_api::OutboundMessage::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::OutboundMessage where T: core::clone::Clone
+pub fn rusty_api::OutboundMessage::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::OutboundMessage where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::TokenChunk
+pub rusty_api::TokenChunk::delta: alloc::string::String
+pub rusty_api::TokenChunk::finish: bool
+pub rusty_api::TokenChunk::raw: core::option::Option<serde_json::value::Value>
+impl core::clone::Clone for rusty_api::TokenChunk
+pub fn rusty_api::TokenChunk::clone(&self) -> rusty_api::TokenChunk
+impl core::fmt::Debug for rusty_api::TokenChunk
+pub fn rusty_api::TokenChunk::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rusty_api::TokenChunk
+impl core::marker::Send for rusty_api::TokenChunk
+impl core::marker::Sync for rusty_api::TokenChunk
+impl core::marker::Unpin for rusty_api::TokenChunk
+impl core::marker::UnsafeUnpin for rusty_api::TokenChunk
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::TokenChunk
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::TokenChunk
+impl<T, U> core::convert::Into<U> for rusty_api::TokenChunk where U: core::convert::From<T>
+pub fn rusty_api::TokenChunk::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::TokenChunk where U: core::convert::Into<T>
+pub type rusty_api::TokenChunk::Error = never
+pub fn rusty_api::TokenChunk::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::TokenChunk where U: core::convert::TryFrom<T>
+pub type rusty_api::TokenChunk::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::TokenChunk::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::TokenChunk where T: core::clone::Clone
+pub type rusty_api::TokenChunk::Owned = T
+pub fn rusty_api::TokenChunk::clone_into(&self, &mut T)
+pub fn rusty_api::TokenChunk::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::TokenChunk where T: 'static + ?core::marker::Sized
+pub fn rusty_api::TokenChunk::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::TokenChunk where T: ?core::marker::Sized
+pub fn rusty_api::TokenChunk::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::TokenChunk where T: ?core::marker::Sized
+pub fn rusty_api::TokenChunk::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::TokenChunk where T: core::clone::Clone
+pub unsafe fn rusty_api::TokenChunk::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::TokenChunk
+pub fn rusty_api::TokenChunk::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::TokenChunk where T: core::clone::Clone
+pub fn rusty_api::TokenChunk::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+pub struct rusty_api::ToolCall
+pub rusty_api::ToolCall::arguments: serde_json::value::Value
+pub rusty_api::ToolCall::id: alloc::string::String
+pub rusty_api::ToolCall::name: alloc::string::String
+impl rusty_api::ToolCall
+pub fn rusty_api::ToolCall::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, serde_json::value::Value) -> Self
+impl core::clone::Clone for rusty_api::ToolCall
+pub fn rusty_api::ToolCall::clone(&self) -> rusty_api::ToolCall
+impl core::cmp::PartialEq for rusty_api::ToolCall
+pub fn rusty_api::ToolCall::eq(&self, &rusty_api::ToolCall) -> bool
+impl core::fmt::Debug for rusty_api::ToolCall
+pub fn rusty_api::ToolCall::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::ToolCall
+impl schemars::JsonSchema for rusty_api::ToolCall
+pub fn rusty_api::ToolCall::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::ToolCall::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::ToolCall::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::ToolCall
+pub fn rusty_api::ToolCall::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::ToolCall
+pub fn rusty_api::ToolCall::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+impl core::marker::Freeze for rusty_api::ToolCall
+impl core::marker::Send for rusty_api::ToolCall
+impl core::marker::Sync for rusty_api::ToolCall
+impl core::marker::Unpin for rusty_api::ToolCall
+impl core::marker::UnsafeUnpin for rusty_api::ToolCall
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ToolCall
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ToolCall
+impl<T, U> core::convert::Into<U> for rusty_api::ToolCall where U: core::convert::From<T>
+pub fn rusty_api::ToolCall::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ToolCall where U: core::convert::Into<T>
+pub type rusty_api::ToolCall::Error = never
+pub fn rusty_api::ToolCall::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ToolCall where U: core::convert::TryFrom<T>
+pub type rusty_api::ToolCall::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ToolCall::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ToolCall where T: core::clone::Clone
+pub type rusty_api::ToolCall::Owned = T
+pub fn rusty_api::ToolCall::clone_into(&self, &mut T)
+pub fn rusty_api::ToolCall::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ToolCall where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ToolCall::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ToolCall where T: ?core::marker::Sized
+pub fn rusty_api::ToolCall::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ToolCall where T: ?core::marker::Sized
+pub fn rusty_api::ToolCall::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ToolCall where T: core::clone::Clone
+pub unsafe fn rusty_api::ToolCall::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ToolCall
+pub fn rusty_api::ToolCall::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ToolCall where T: core::clone::Clone
+pub fn rusty_api::ToolCall::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::ToolCall where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::ToolOutput
+pub rusty_api::ToolOutput::display: alloc::string::String
+pub rusty_api::ToolOutput::structured: serde_json::value::Value
+impl core::clone::Clone for rusty_api::ToolOutput
+pub fn rusty_api::ToolOutput::clone(&self) -> rusty_api::ToolOutput
+impl core::cmp::PartialEq for rusty_api::ToolOutput
+pub fn rusty_api::ToolOutput::eq(&self, &rusty_api::ToolOutput) -> bool
+impl core::fmt::Debug for rusty_api::ToolOutput
+pub fn rusty_api::ToolOutput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::ToolOutput
+impl schemars::JsonSchema for rusty_api::ToolOutput
+pub fn rusty_api::ToolOutput::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::ToolOutput::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::ToolOutput::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::ToolOutput
+pub fn rusty_api::ToolOutput::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::ToolOutput
+pub fn rusty_api::ToolOutput::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::ToolOutput
+impl core::marker::Send for rusty_api::ToolOutput
+impl core::marker::Sync for rusty_api::ToolOutput
+impl core::marker::Unpin for rusty_api::ToolOutput
+impl core::marker::UnsafeUnpin for rusty_api::ToolOutput
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ToolOutput
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ToolOutput
+impl<T, U> core::convert::Into<U> for rusty_api::ToolOutput where U: core::convert::From<T>
+pub fn rusty_api::ToolOutput::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ToolOutput where U: core::convert::Into<T>
+pub type rusty_api::ToolOutput::Error = never
+pub fn rusty_api::ToolOutput::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ToolOutput where U: core::convert::TryFrom<T>
+pub type rusty_api::ToolOutput::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ToolOutput::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ToolOutput where T: core::clone::Clone
+pub type rusty_api::ToolOutput::Owned = T
+pub fn rusty_api::ToolOutput::clone_into(&self, &mut T)
+pub fn rusty_api::ToolOutput::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ToolOutput where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ToolOutput::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ToolOutput where T: ?core::marker::Sized
+pub fn rusty_api::ToolOutput::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ToolOutput where T: ?core::marker::Sized
+pub fn rusty_api::ToolOutput::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ToolOutput where T: core::clone::Clone
+pub unsafe fn rusty_api::ToolOutput::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ToolOutput
+pub fn rusty_api::ToolOutput::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ToolOutput where T: core::clone::Clone
+pub fn rusty_api::ToolOutput::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::ToolOutput where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::Usage
+pub rusty_api::Usage::cached_tokens: core::option::Option<u64>
+pub rusty_api::Usage::completion_tokens: u64
+pub rusty_api::Usage::prompt_tokens: u64
+pub rusty_api::Usage::reasoning_tokens: core::option::Option<u64>
+pub rusty_api::Usage::total_tokens: u64
+impl core::clone::Clone for rusty_api::Usage
+pub fn rusty_api::Usage::clone(&self) -> rusty_api::Usage
+impl core::cmp::Eq for rusty_api::Usage
+impl core::cmp::PartialEq for rusty_api::Usage
+pub fn rusty_api::Usage::eq(&self, &rusty_api::Usage) -> bool
+impl core::default::Default for rusty_api::Usage
+pub fn rusty_api::Usage::default() -> rusty_api::Usage
+impl core::fmt::Debug for rusty_api::Usage
+pub fn rusty_api::Usage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rusty_api::Usage
+impl core::marker::StructuralPartialEq for rusty_api::Usage
+impl schemars::JsonSchema for rusty_api::Usage
+pub fn rusty_api::Usage::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::Usage::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::Usage::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::Usage
+pub fn rusty_api::Usage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::Usage
+pub fn rusty_api::Usage::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::Usage
+impl core::marker::Send for rusty_api::Usage
+impl core::marker::Sync for rusty_api::Usage
+impl core::marker::Unpin for rusty_api::Usage
+impl core::marker::UnsafeUnpin for rusty_api::Usage
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::Usage
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::Usage
+impl<T, U> core::convert::Into<U> for rusty_api::Usage where U: core::convert::From<T>
+pub fn rusty_api::Usage::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::Usage where U: core::convert::Into<T>
+pub type rusty_api::Usage::Error = never
+pub fn rusty_api::Usage::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::Usage where U: core::convert::TryFrom<T>
+pub type rusty_api::Usage::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::Usage::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::Usage where T: core::clone::Clone
+pub type rusty_api::Usage::Owned = T
+pub fn rusty_api::Usage::clone_into(&self, &mut T)
+pub fn rusty_api::Usage::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::Usage where T: 'static + ?core::marker::Sized
+pub fn rusty_api::Usage::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::Usage where T: ?core::marker::Sized
+pub fn rusty_api::Usage::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::Usage where T: ?core::marker::Sized
+pub fn rusty_api::Usage::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::Usage where T: core::clone::Clone
+pub unsafe fn rusty_api::Usage::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::Usage
+pub fn rusty_api::Usage::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::Usage where T: core::clone::Clone
+pub fn rusty_api::Usage::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::Usage where T: for<'de> serde_core::de::Deserialize<'de>
+pub trait rusty_api::Channel: core::marker::Send + core::marker::Sync
+pub fn rusty_api::Channel::listen(&self) -> core::pin::Pin<alloc::boxed::Box<(dyn futures_core::stream::Stream<Item = rusty_api::InboundMessage> + core::marker::Send)>>
+pub fn rusty_api::Channel::send<'life0, 'async_trait>(&'life0 self, rusty_api::OutboundMessage) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub trait rusty_api::Memory: core::marker::Send + core::marker::Sync
+pub fn rusty_api::Memory::recall<'life0, 'life1, 'async_trait>(&'life0 self, &'life1 str, usize) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<alloc::vec::Vec<rusty_api::MemoryEntry>, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait
+pub fn rusty_api::Memory::write_blocks<'life0, 'async_trait>(&'life0 self, alloc::vec::Vec<rusty_api::BlockWrite>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub trait rusty_api::ModelProvider: core::marker::Send + core::marker::Sync
+pub fn rusty_api::ModelProvider::capabilities(&self) -> rusty_api::ModelCapabilities
+pub fn rusty_api::ModelProvider::effect(&self) -> rusty_api::Effect
+pub fn rusty_api::ModelProvider::get_response<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 [rusty_api::ChatMessage], &'life2 [serde_json::value::Value]) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ChatResponse, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn rusty_api::ModelProvider::pricing(&self) -> core::option::Option<rusty_api::ModelPricing>
+pub fn rusty_api::ModelProvider::stream_response<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 [rusty_api::ChatMessage], &'life2 [serde_json::value::Value], &'life3 mut (dyn core::ops::function::FnMut(rusty_api::TokenChunk) + core::marker::Send)) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ChatResponse, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub trait rusty_api::Observer: core::marker::Send + core::marker::Sync
+pub fn rusty_api::Observer::notify(&self, rusty_api::ObserverEvent)
+pub trait rusty_api::RuntimeAdapter: core::marker::Send + core::marker::Sync
+pub fn rusty_api::RuntimeAdapter::enforcement(&self) -> rusty_api::EnforcementLevel
+pub fn rusty_api::RuntimeAdapter::execute<'life0, 'async_trait>(&'life0 self, uuid::Uuid, serde_json::value::Value, serde_json::value::Value) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ToolOutput, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub fn rusty_api::RuntimeAdapter::provision<'life0, 'async_trait>(&'life0 self, uuid::Uuid) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub fn rusty_api::RuntimeAdapter::teardown<'life0, 'async_trait>(&'life0 self, uuid::Uuid) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub trait rusty_api::Tool: core::marker::Send + core::marker::Sync
+pub fn rusty_api::Tool::effect_class(&self) -> rusty_api::EffectClass
+pub fn rusty_api::Tool::invoke(&self, serde_json::value::Value) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ToolOutput, rusty_api::RustyApiError>> + core::marker::Send + '_)>>
+pub fn rusty_api::Tool::name(&self) -> &str
+pub fn rusty_api::Tool::sandbox_requirement(&self) -> rusty_api::SandboxRequirement
+pub fn rusty_api::Tool::schema(&self) -> serde_json::value::Value

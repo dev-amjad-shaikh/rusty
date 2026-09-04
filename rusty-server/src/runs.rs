@@ -1684,6 +1684,8 @@ fn error_kind(error: &RustyError) -> &'static str {
         RustyError::Doctor(_) => "doctor_error",
         RustyError::Catalog(_) => "catalog_error",
         RustyError::InvariantViolation(_) => "invariant_violation",
+        RustyError::FrozenTierViolation { .. } => "frozen_tier_violation",
+        RustyError::ChunkAssemblyMismatch { .. } => "chunk_assembly_mismatch",
         // Drain cancellation is control flow and takes its own terminal
         // path in `execute`; this arm exists for exhaustiveness only.
         RustyError::Cancelled(_) => "cancelled",

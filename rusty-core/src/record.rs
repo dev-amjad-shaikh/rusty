@@ -36,6 +36,8 @@ use sha2::{Digest, Sha256};
 use crate::error::RustyError;
 use crate::llm::Usage;
 
+pub use rusty_api::Effect;
+
 /// The current on-disk format version of [`CheckpointHeader`].
 ///
 /// Bump only on a breaking change to the checkpoint envelope; additive
@@ -63,83 +65,6 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
-}
-
-/// The effect taxonomy: what a journaled event did to the world outside the
-/// run's own state.
-///
-/// The classification is declared by the producer (node/model/tool traits
-/// carry a default with an override point) and recorded on every
-/// [`RunEvent`]. It is the input to three later policies:
-///
-/// - **Retry** (R0.6): which failed effects may be re-attempted at all, and
-///   under what key.
-/// - **Replay** (R0.5 later waves): which effects exact replay may serve
-///   from the journal versus must re-execute.
-/// - **Capsules** (R0.9): which effects a sandboxed capsule may perform at
-///   all under its capability grants.
-///
-/// The order of variants is a severity ladder: each class permits strictly
-/// less automation freedom than the one before. The `Ord` derive is that
-/// ladder made mechanical (declaration order), which is what capsule
-/// manifests (R0.9) compare declared effects against grant-implied minima
-/// with.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Effect {
-    /// No observable effect beyond its return value: a deterministic function
-    /// of its inputs. Re-execution is always safe and always equivalent, so
-    /// replay may either re-run it or reuse the journaled output, and retries
-    /// are unconstrained. Default for plain compute nodes.
-    Pure,
-
-    /// Reads external state but writes nothing (a GET, a file read, a
-    /// lookup). Re-execution is safe but **not** necessarily equivalent — the
-    /// world may have changed — so exact replay serves the journaled output
-    /// while live replay re-reads. Retries are unconstrained.
-    ReadOnly,
-
-    /// Writes external state, but repeating the same call with the same
-    /// idempotency key has the same effect as calling once (PUT semantics,
-    /// upserts). Safe to retry under a stable key; exact replay may serve
-    /// the journaled receipt instead of re-sending.
-    Idempotent,
-
-    /// Writes external state and repeating it duplicates the effect, but a
-    /// declared compensating action can logically undo it (charge/refund).
-    /// Retry only with care; replay and rollback policy must pair the effect
-    /// with its compensation. v1 records the classification only —
-    /// compensation registration arrives with durable work (R0.6).
-    Compensatable,
-
-    /// Writes external state with no safe automatic repetition (send an
-    /// email, charge a card, POST without a key). Never silently retried,
-    /// never served from a journal in any replay mode that claims fidelity —
-    /// re-execution is an explicit, caller-approved decision. Default for
-    /// model and tool calls, which the runtime cannot prove otherwise.
-    NonIdempotent,
-}
-
-impl Effect {
-    /// Whether re-executing this effect during replay or retry is
-    /// unconditionally safe (no duplication risk). `Compensatable` and
-    /// `NonIdempotent` are the only classes requiring human or policy
-    /// approval before re-execution.
-    pub fn is_freely_repeatable(self) -> bool {
-        matches!(self, Effect::Pure | Effect::ReadOnly | Effect::Idempotent)
-    }
 }
 
 /// A versioned identity for the executor policy that was active during a

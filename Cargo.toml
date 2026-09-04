@@ -4,6 +4,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "rusty-api",
     "rusty-core",
     "rusty-server",
     "rusty-worker",

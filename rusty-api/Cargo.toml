@@ -1,0 +1,20 @@
+[package]
+name = "rusty-api"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+description = "Dependency-light trait ABI for the Rusty platform — shared types and traits."
+keywords = ["agent", "llm", "abi"]
+categories = ["asynchronous"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+schemars = { version = "0.8", features = ["uuid1", "chrono"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+semver = "1"
+futures-core = "0.3"
+thiserror = "2"
