@@ -213,6 +213,7 @@ mod supervision;
 mod tasks;
 mod threads;
 mod triggers;
+pub mod verify;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

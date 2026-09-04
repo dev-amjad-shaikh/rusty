@@ -75,6 +75,8 @@ cedar-policy = { version = "4", optional = true }
 # only, no native TLS, with `stream` for byte-ceiling-enforced incremental
 # reads.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+# CLI argument parsing for the rustyness binary (EP-13-S10).
+clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
@@ -82,3 +84,7 @@ tokio = { version = "1", features = ["full", "test-util"] }
 # Trigger tests sign webhook bodies the way an external sender would.
 hmac = "0.12"
 sha2 = "0.10"
+
+[[bin]]
+name = "rustyness"
+path = "src/bin/rustyness.rs"

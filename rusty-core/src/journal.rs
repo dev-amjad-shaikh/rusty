@@ -685,7 +685,7 @@ fn chained_hash(prev: &str, event: &RunEvent) -> crate::error::Result<String> {
 /// [`Journal::from_snapshot`] and the run-receipt verifier
 /// ([`crate::receipt::verify_receipt`]) so a receipt's head and the
 /// journal's head are the same bytes by construction.
-pub(crate) fn recompute_head_hash(events: &[RunEvent]) -> crate::error::Result<String> {
+pub fn recompute_head_hash(events: &[RunEvent]) -> crate::error::Result<String> {
     let mut head_hash = sha256_hex(b"");
     for event in events {
         head_hash = chained_hash(&head_hash, event)?;
