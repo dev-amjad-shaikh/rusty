@@ -383,6 +383,7 @@ pub(crate) fn build_router(
         .route("/threads", post(create_thread))
         .route("/threads/{thread_id}", get(get_thread))
         .route("/threads/{thread_id}/fork", post(fork_thread))
+        .route("/threads/{thread_id}/regenerate", post(regenerate_thread))
         .route(
             "/threads/{thread_id}/state",
             get(get_state).post(update_state),
@@ -1195,10 +1196,11 @@ async fn fork_thread(
     }
 
     // Fork inside the tenant's checkpoint namespace.
+    let src_internal = tenant.scope(&thread_id);
     let copied = state
         .checkpointer
         .fork_thread(
-            &tenant.scope(&thread_id),
+            &src_internal,
             &new_internal_id,
             payload.checkpoint_id.as_deref(),
         )
@@ -1212,6 +1214,24 @@ async fn fork_thread(
                 ApiError::bad_request(message)
             }
         })?;
+
+    // Determine seed_length: the step at the boundary (last copied checkpoint).
+    let seed_length = if let Some(id) = &payload.checkpoint_id {
+        state
+            .checkpointer
+            .get_by_id(&src_internal, id)
+            .await
+            .map_err(internal_err)?
+            .map(|cp| cp.step)
+    } else {
+        state
+            .checkpointer
+            .list(&src_internal)
+            .await
+            .map_err(internal_err)?
+            .last()
+            .map(|cp| cp.step)
+    };
 
     let fork = ThreadRecord {
         thread_id: new_thread_id.clone(),
@@ -1242,6 +1262,126 @@ async fn fork_thread(
             "thread_id": new_thread_id,
             "checkpoints_copied": copied,
             "seed_length": copied,
+        })),
+    ))
+}
+
+// --------------------------------------------------------------------- //
+// Regenerate (fork + immediate turn)
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct RegeneratePayload {
+    /// Client-chosen id for the regenerated thread (a UUID v4 is generated when omitted).
+    #[serde(default)]
+    new_thread_id: Option<String>,
+    /// Regenerate from this checkpoint. Omit to use the latest checkpoint.
+    #[serde(default)]
+    checkpoint_id: Option<String>,
+    /// Input to the regenerated turn (defaults to empty object).
+    #[serde(default)]
+    input: Option<Value>,
+}
+
+/// `POST /threads/{id}/regenerate` — fork the thread at a checkpoint and
+/// immediately run one turn on the fork, so the original transcript is never
+/// mutated and the two generations are comparable side by side.
+async fn regenerate_thread(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<RegeneratePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    // 1. Fork first (reuses the fork handler logic inline).
+    let record = require_thread(&state, &tenant, &thread_id).await?;
+    let new_thread_id = payload
+        .new_thread_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("new_thread_id", &new_thread_id)?;
+
+    let new_internal_id = tenant.scope(&new_thread_id);
+    if state
+        .server_store
+        .get_thread(&new_internal_id)
+        .await
+        .map_err(internal_err)?
+        .is_some()
+    {
+        return Err(ApiError::conflict(format!(
+            "thread `{new_thread_id}` already exists"
+        )));
+    }
+
+    let src_internal = tenant.scope(&thread_id);
+    let copied = state
+        .checkpointer
+        .fork_thread(
+            &src_internal,
+            &new_internal_id,
+            payload.checkpoint_id.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            let message = e.to_string();
+            if message.contains("unknown checkpoint id") {
+                ApiError::not_found(message)
+            } else {
+                ApiError::bad_request(message)
+            }
+        })?;
+
+    let seed_length = if let Some(id) = &payload.checkpoint_id {
+        state
+            .checkpointer
+            .get_by_id(&src_internal, id)
+            .await
+            .map_err(internal_err)?
+            .map(|cp| cp.step)
+    } else {
+        state
+            .checkpointer
+            .list(&src_internal)
+            .await
+            .map_err(internal_err)?
+            .last()
+            .map(|cp| cp.step)
+    };
+
+    let fork = ThreadRecord {
+        thread_id: new_thread_id.clone(),
+        tenant: tenant.tenant().to_string(),
+        graph: record.graph.clone(),
+        metadata: json!({}),
+        forked_from: Some(thread_id.clone()),
+        seed_length,
+        created_at: Utc::now(),
+    };
+    let created = state
+        .server_store
+        .create_thread(&new_internal_id, &fork)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        return Err(ApiError::conflict(format!(
+            "thread `{new_thread_id}` already exists"
+        )));
+    }
+
+    // 2. Immediately schedule a run on the fork.
+    let run_payload = RunPayload {
+        input: payload.input.or_else(|| Some(json!({}))),
+        ..Default::default()
+    };
+    let scheduled = schedule_for_thread(&state, &tenant, &new_thread_id, run_payload).await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "thread_id": new_thread_id,
+            "checkpoints_copied": copied,
+            "seed_length": seed_length,
+            "run_id": scheduled.run_id,
         })),
     ))
 }
