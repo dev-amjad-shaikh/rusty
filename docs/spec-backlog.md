@@ -18,7 +18,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
-| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 1 | 1 | ██████████░░ 91% |
+| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 2 | 0 | ██████████░░ 91% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
@@ -84,7 +84,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-03-S08 | Interrupt as a resumable exception with ordinal matching | — | ✅ | interrupts as resumable exceptions, ordinal matching |
 | EP-03-S09 | Message-granular checkpoints: continue, fork, regenerate, time-travel | — | ◐ | `ThreadRecord` gains `forked_from`/`seed_length` (standardized on EP-01-S10's lineage in merge wave 2); `POST /threads/{id}/fork` populates lineage; `GET /threads/{id}` retrieves lineage; `POST /threads/{id}/regenerate` forks + schedules run; `POST /threads/{id}/continue` shadows original; `rusty-server/tests/message_granular.rs` 3 tests (fork_lineage, regenerate_is_fork, continue_shadows_never_deletes) pass; `rusty-server/tests/time_travel.rs` 5/5 pass; clippy/doc clean; `6de69af` on `main`; open: `paused_fork_isolation` AC (pause/obligation infra not fully wired in test harness) |
 | EP-03-S10 | Crash-resume conformance: kill anywhere, recompute the frontier | — | ✅ | crash-resume recovery proofs (kill-anywhere tests) |
-| EP-03-S11 | Pause longevity and expiry governance | — | ○ | **UNBLOCKED 2026-09-02**: EP-03-S06 pause-obligation types (`PauseEnvelope`, `RunObligation`, `ObligationKind`, `ObligationStatus`, `StickyApproval`) are on `main` in `rusty-core/src/record.rs` (merge wave `dbf5846`). AC 1–5 (90-day resume, default TTL, cancellation, expiry sweep, approval query) ready to implement. |
+| EP-03-S11 | Pause longevity and expiry governance | — | ◐ | **Server-side infrastructure shipped `8fd9522`**: `JsonFileStore` obligation + pause-envelope persistence (`obligations/`, `pause_envelopes/` dirs, atomic temp+rename writes); `ServerStore` trait methods (`put_obligations`, `get_obligations`, `list_obligations`, `update_obligation_status`, `sweep_expired_obligations`, `put_pause_envelope`, `get_pause_envelope`); `POST /runs/{id}/cancel` handles `Paused` → cancels run via `RunManager`, expires all open obligations; `GET /v1/approvals` + `POST /v1/approvals/sweep` routes; 2 unit tests (`obligations_round_trip_and_sweep`, `pause_envelope_round_trip`) pass; 127 lib tests, clippy/doc clean. **Open**: AC 1 (90-day resume across version upgrade) requires executor pause-obligation wiring not yet present; AC 2 (default TTL stamping) needs executor-side obligation creation to test end-to-end. |
 
 ## EP-04 — Gateway, Sessions and Channels
 
