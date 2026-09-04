@@ -1359,6 +1359,253 @@ pub fn exclude_recall_injected(
         })
         .cloned()
         .collect()
+// Rewrite validation (EP-06-S09): loss-bounded, hash-checked curated rewrites
+// --------------------------------------------------------------------- //
+
+/// The default fraction of facts that may be lost in a rewrite without
+/// explicit justification. A rewrite dropping more than this fraction must
+/// enumerate each removal with a justification recorded in the audit trail.
+pub const DEFAULT_LOSS_BOUND_FRACTION: f64 = 0.20;
+
+/// A proposed rewrite of a curated memory record.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RewriteProposal {
+    /// The content hash (`sha256` of canonical content) the proposal was
+    /// derived from. Commit succeeds only if the stored record's content
+    /// hash still matches — optimistic concurrency, no force-commit.
+    pub expected_pre_image_hash: String,
+    /// The proposed new content.
+    pub proposed_content: Value,
+    /// Justifications for removed facts (required when loss exceeds bound).
+    /// Each justification corresponds to one removed fact, enumerated in
+    /// the audit trail.
+    #[serde(default)]
+    pub justifications: Vec<String>,
+    /// The configured loss bound fraction (default 0.20 = 20%).
+    #[serde(default = "default_loss_bound_fraction")]
+    pub loss_bound_fraction: f64,
+}
+
+fn default_loss_bound_fraction() -> f64 {
+    DEFAULT_LOSS_BOUND_FRACTION
+}
+
+/// The result of validating a rewrite proposal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RewriteValidation {
+    /// Whether the proposal passed all checks.
+    pub passed: bool,
+    /// The pre-image content hash.
+    pub pre_image_hash: String,
+    /// The post-image content hash.
+    pub post_image_hash: String,
+    /// Number of distinct facts in the pre-image.
+    pub fact_count_before: usize,
+    /// Number of distinct facts in the post-image.
+    pub fact_count_after: usize,
+    /// Facts present in pre-image but absent in post-image.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_facts: Vec<String>,
+    /// A human-readable diff summary.
+    pub diff_summary: String,
+    /// The reason for refusal, when `passed` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_reason: Option<String>,
+}
+
+/// An audit entry for a rewrite attempt (success or failure).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RewriteAudit {
+    /// The pre-image record's content address.
+    pub pre_image_memory_id: String,
+    /// The post-image record's content address (when committed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_image_memory_id: Option<String>,
+    /// The pre-image content.
+    pub pre_image: Value,
+    /// The post-image content (when committed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_image: Option<Value>,
+    /// The diff summary.
+    pub diff_summary: String,
+    /// Source entry citations (the `source_memory_ids` that drove the rewrite).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_citations: Vec<String>,
+    /// The acting session id (side-stamped consolidation session).
+    pub acting_session_id: String,
+    /// The validation results.
+    pub validation: RewriteValidation,
+    /// When the audit entry was created.
+    pub audited_at: DateTime<Utc>,
+}
+
+/// Validate a rewrite proposal against a stored pre-image record.
+///
+/// Checks (in order):
+///
+/// 1. **Hash match** — the stored record's content hash must equal
+///    `proposal.expected_pre_image_hash`. A mismatch means the record
+///    changed since the proposal was built (optimistic-concurrency failure).
+/// 2. **Loss bound** — the fraction of distinct retained facts that dropped
+///    must not exceed `proposal.loss_bound_fraction` (default 20%), unless
+///    the proposal enumerates each removal with a justification.
+///
+/// Returns `RewriteValidation` with `passed: true` when all checks pass,
+/// `passed: false` with `refusal_reason` set otherwise. The block is
+/// untouched on failure; the caller logs the refusal.
+///
+/// Fact counting is shape-aware: arrays count elements; objects with a
+/// single array value count that array's elements (the common block shape
+/// `{"facts": [...]}`); objects count key-value pairs; strings count
+/// non-empty lines; scalars count as one fact.
+pub fn validate_rewrite(
+    pre_image: &MemoryRecord,
+    proposal: &RewriteProposal,
+) -> Result<RewriteValidation> {
+    let pre_image_hash = pre_image.content.content_hash()?;
+    let post_image_ref = content_ref_of(&proposal.proposed_content);
+    let post_image_hash = post_image_ref.content_hash()?;
+
+    // Check 1: hash match (optimistic concurrency).
+    if pre_image_hash != proposal.expected_pre_image_hash {
+        let diff_summary = format!(
+            "hash mismatch: expected {}, stored record hashes to {}",
+            proposal.expected_pre_image_hash, pre_image_hash
+        );
+        return Ok(RewriteValidation {
+            passed: false,
+            pre_image_hash,
+            post_image_hash,
+            fact_count_before: 0,
+            fact_count_after: 0,
+            removed_facts: Vec::new(),
+            diff_summary,
+            refusal_reason: Some(
+                "pre-image hash mismatch — the record changed since the proposal was built"
+                    .to_string(),
+            ),
+        });
+    }
+
+    // Resolve pre-image content for fact counting.
+    let pre_image_content = match &pre_image.content {
+        PayloadRef::Inline(v) => v.clone(),
+        PayloadRef::Artifact(reference) => {
+            // Artifact-referenced payloads are not supported for rewrite
+            // validation in R0.8 — curated blocks are inline by design.
+            return Err(invalid(format!(
+                "rewrite validation for artifact-referenced payload `{}` requires artifact \
+                 resolution — not supported in R0.8",
+                reference.sha256
+            )));
+        }
+    };
+
+    let facts_before = count_facts(&pre_image_content);
+    let facts_after = count_facts(&proposal.proposed_content);
+    let removed = compute_removed_facts(&pre_image_content, &proposal.proposed_content);
+
+    let fact_count_before = facts_before.len();
+    let fact_count_after = facts_after.len();
+
+    // Check 2: loss bound.
+    let loss_fraction = if fact_count_before == 0 {
+        0.0
+    } else {
+        let dropped = fact_count_before.saturating_sub(fact_count_after);
+        dropped as f64 / fact_count_before as f64
+    };
+
+    let within_bound = loss_fraction <= proposal.loss_bound_fraction;
+    let justifications_sufficient =
+        !removed.is_empty() && proposal.justifications.len() >= removed.len();
+    let passed = within_bound || justifications_sufficient;
+
+    let diff_summary = format!(
+        "facts: {fact_count_before} → {fact_count_after} ({} removed, {:.1}% loss){}",
+        removed.len(),
+        loss_fraction * 100.0,
+        if passed { "" } else { " — exceeds bound" }
+    );
+
+    let refusal_reason = if passed {
+        None
+    } else if !within_bound && !justifications_sufficient {
+        Some(format!(
+            "loss bound exceeded: {:.1}% > {:.1}% ({} facts removed, {} justifications \
+             provided); each removal must be enumerated with a justification",
+            loss_fraction * 100.0,
+            proposal.loss_bound_fraction * 100.0,
+            removed.len(),
+            proposal.justifications.len()
+        ))
+    } else {
+        Some("rewrite validation failed".to_string())
+    };
+
+    Ok(RewriteValidation {
+        passed,
+        pre_image_hash,
+        post_image_hash,
+        fact_count_before,
+        fact_count_after,
+        removed_facts: removed,
+        diff_summary,
+        refusal_reason,
+    })
+}
+
+/// Count distinct facts in a memory content value.
+///
+/// The counting strategy depends on the JSON shape:
+///
+/// * **Array** — each element is a fact.
+/// * **Object with one array-valued key** — count that array's elements
+///   (the common curated-block shape `{"facts": [...]}`).
+/// * **Object (general)** — each top-level key-value pair is a fact.
+/// * **String** — split by newline, count non-empty lines.
+/// * **Scalar** — counts as one fact.
+fn count_facts(content: &Value) -> Vec<String> {
+    match content {
+        Value::Array(arr) => arr.iter().map(canonical_fact_key).collect(),
+        Value::Object(map) => {
+            // If the object has exactly one key whose value is an array,
+            // count the array elements (common block shape).
+            if map.len() == 1 {
+                if let Some(Value::Array(arr)) = map.values().next() {
+                    return arr.iter().map(canonical_fact_key).collect();
+                }
+            }
+            map.iter()
+                .map(|(k, v)| format!("{k}: {}", canonical_fact_key(v)))
+                .collect()
+        }
+        Value::String(s) => s
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(|line| line.to_lowercase())
+            .collect(),
+        _ => vec![canonical_fact_key(content)],
+    }
+}
+
+/// A canonical string key for a fact, used for deduplication and comparison.
+fn canonical_fact_key(fact: &Value) -> String {
+    match fact {
+        Value::String(s) => s.trim().to_lowercase(),
+        _ => serde_json::to_string(&crate::record::canonicalize_value(fact))
+            .unwrap_or_else(|_| "???".to_string()),
+    }
+}
+
+/// Compute which facts from the pre-image are absent in the post-image.
+fn compute_removed_facts(pre_image: &Value, post_image: &Value) -> Vec<String> {
+    let before: std::collections::HashSet<String> = count_facts(pre_image).into_iter().collect();
+    let after: std::collections::HashSet<String> = count_facts(post_image).into_iter().collect();
+    let mut removed: Vec<String> = before.difference(&after).cloned().collect();
+    removed.sort();
+    removed
 }
 
 // --------------------------------------------------------------------- //
