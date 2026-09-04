@@ -179,6 +179,11 @@ pub enum RustyError {
     /// summary.
     #[error("invariant violation: {0}")]
     InvariantViolation(#[from] crate::invariant::InvariantViolation),
+    /// Chunk deltas concatenated in stream_index order do not equal the
+    /// assembled assistant message text (EP-01-S11 AC 2). A typed mismatch,
+    /// never a silent inconsistency.
+    #[error("chunk assembly mismatch: expected {expected:?}, got {actual:?}")]
+    ChunkAssemblyMismatch { expected: String, actual: String },
 }
 
 impl RustyError {

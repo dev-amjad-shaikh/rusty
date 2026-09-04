@@ -631,27 +631,52 @@ impl ChatModel for RecordingChatModel {
     ) -> Result<ChatResponse> {
         let started = self.journal.clock().now();
         let capture = self.capture_chunks;
-        let mut chunks: Vec<Value> = Vec::new();
+        let mut chunk_deltas: Vec<String> = Vec::new();
         let result = self
             .inner
             .chat_stream(messages, tools, &mut |chunk| {
                 if capture {
-                    let mut entry = json!({ "delta": chunk.delta.clone(), "finish": chunk.finish });
-                    if let Some(raw) = &chunk.raw {
-                        entry["raw"] = raw.clone();
+                    let assistant_chunk = crate::record::AssistantChunk {
+                        delta: chunk.delta.clone(),
+                        stream_index: chunk_deltas.len() as u64,
+                        finish: chunk.finish,
+                    };
+                    let mut draft =
+                        EventDraft::new(RunEventKind::AssistantChunk, self.inner.effect())
+                            .parent(self.parent.clone())
+                            .output(
+                                serde_json::to_value(&assistant_chunk)
+                                    .expect("AssistantChunk serializes"),
+                            );
+                    if let Some(node) = &self.node_id {
+                        draft = draft.node(node.clone());
                     }
-                    chunks.push(entry);
+                    self.journal.record(draft);
+                    chunk_deltas.push(chunk.delta.clone());
                 }
                 on_token(chunk)
             })
             .await;
+        // EP-01-S11 AC 2: verify chunk assembly equals the model response.
+        if capture {
+            if let Ok(ref response) = result {
+                let assembled: String = chunk_deltas.iter().cloned().collect();
+                let expected = response.message.content.as_deref().unwrap_or("");
+                if assembled != expected {
+                    return Err(crate::error::RustyError::ChunkAssemblyMismatch {
+                        expected: expected.to_string(),
+                        actual: assembled,
+                    });
+                }
+            }
+        }
         let latency_ms = (self.journal.clock().now() - started)
             .num_milliseconds()
             .max(0) as u64;
         self.journal_outcome(
             latency_ms,
             model_call_request(messages, tools),
-            capture.then_some(chunks),
+            None,
             result,
         )
     }
