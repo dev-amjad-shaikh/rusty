@@ -296,7 +296,7 @@ impl ModelPricing {
 
 /// One chat-completion response (single choice; multi-choice responses are
 /// not modeled).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChatResponse {
     /// The assistant message (text and/or tool calls).
     pub message: ChatMessage,

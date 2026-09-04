@@ -49,12 +49,13 @@
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::error::{Result, RustyError};
+use crate::error::{LlmErrorClass, Result, RustyError};
 use crate::llm::{ChatMessage, ChatModel, ChatResponse, TokenChunk, ToolCall};
 use crate::node::NodeOutput;
 use crate::record::Effect;
@@ -165,6 +166,22 @@ pub enum Decision<R> {
     /// After-hook: replace the result with `R` and skip the remaining
     /// (outer) after-hooks.
     ShortCircuit(R),
+}
+
+/// The verdict a model-error hook returns.
+///
+/// Distinct from [`Decision`] because error handlers have a `Retry`
+/// variant that re-executes the inner model call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModelErrorDecision {
+    /// Delegate to the next handler.
+    Continue,
+    /// Retry the operation after `delay`.
+    Retry { delay: Duration },
+    /// Use this response instead (recovery succeeded).
+    Recovered(ChatResponse),
+    /// Transform the error into a structured rejection.
+    Reject(Rejection),
 }
 
 /// Node-run interception context: the invocation a node is about to run with.
@@ -394,6 +411,22 @@ pub trait Middleware: Send + Sync {
         let _ = (call, response);
         Decision::Continue
     }
+    /// Model call error handler (waterfall, registration order).
+    ///
+    /// Called when the inner model call fails. Return
+    /// [`ModelErrorDecision::Continue`] to delegate to the next handler,
+    /// [`ModelErrorDecision::Retry`] to re-execute the call after a delay,
+    /// [`ModelErrorDecision::Recovered`] to substitute a successful response,
+    /// or [`ModelErrorDecision::Reject`] to transform the error.
+    async fn on_model_error(
+        &self,
+        call: &mut ModelCall,
+        error: &RustyError,
+        attempt: u32,
+    ) -> ModelErrorDecision {
+        let _ = (call, error, attempt);
+        ModelErrorDecision::Continue
+    }
 
     /// Tool call, inbound (registration order).
     async fn before_tool(&self, call: &mut ToolInvocation) -> Decision<Value> {
@@ -511,6 +544,8 @@ impl MiddlewareChain {
 
     /// Run the onion around a model call. Same contract as
     /// [`MiddlewareChain::run_node`].
+    /// Run the onion around a model call. Same contract as
+    /// [`MiddlewareChain::run_node`].
     pub async fn run_model<F, Fut>(&self, call: &mut ModelCall, op: F) -> Result<ChatResponse>
     where
         F: FnOnce(&ModelCall) -> Fut + Send,
@@ -533,6 +568,82 @@ impl MiddlewareChain {
             None => {
                 entered = self.layers.len();
                 op(call).await?
+            }
+        };
+        for layer in self.layers[..entered].iter().rev() {
+            match layer.after_model(call, &mut result).await {
+                Decision::Continue => {}
+                Decision::Reject(rejection) => return Err(rejection.into_error()),
+                Decision::ShortCircuit(response) => {
+                    result = response;
+                    break;
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Run the onion around a model call with retry support.
+    ///
+    /// Like [`run_model`], but the operation may be re-executed when an
+    /// [`on_model_error`](Middleware::on_model_error) handler returns
+    /// [`ModelErrorDecision::Retry`]. Used by the non-streaming `chat` path;
+    /// streaming uses [`run_model`] because the token callback is `FnOnce`.
+    pub async fn run_model_retry<F, Fut>(
+        &self,
+        call: &mut ModelCall,
+        mut op: F,
+    ) -> Result<ChatResponse>
+    where
+        F: FnMut(&ModelCall) -> Fut + Send,
+        Fut: Future<Output = Result<ChatResponse>> + Send,
+    {
+        let mut entered = 0;
+        let mut substitute = None;
+        for layer in &self.layers {
+            match layer.before_model(call).await {
+                Decision::Continue => entered += 1,
+                Decision::Reject(rejection) => return Err(rejection.into_error()),
+                Decision::ShortCircuit(response) => {
+                    substitute = Some(response);
+                    break;
+                }
+            }
+        }
+        let mut result = match substitute {
+            Some(response) => response,
+            None => {
+                entered = self.layers.len();
+                let mut attempt: u32 = 0;
+                loop {
+                    match op(call).await {
+                        Ok(response) => break response,
+                        Err(e) => {
+                            let mut decision = ModelErrorDecision::Continue;
+                            for layer in &self.layers {
+                                decision = layer.on_model_error(call, &e, attempt).await;
+                                match decision {
+                                    ModelErrorDecision::Continue => continue,
+                                    ModelErrorDecision::Retry { .. } => break,
+                                    ModelErrorDecision::Recovered(_) => break,
+                                    ModelErrorDecision::Reject(_) => break,
+                                }
+                            }
+                            match decision {
+                                ModelErrorDecision::Continue => return Err(e),
+                                ModelErrorDecision::Retry { delay } => {
+                                    tokio::time::sleep(delay).await;
+                                    attempt += 1;
+                                    continue;
+                                }
+                                ModelErrorDecision::Recovered(response) => break response,
+                                ModelErrorDecision::Reject(rejection) => {
+                                    return Err(rejection.into_error());
+                                }
+                            }
+                        }
+                    }
+                }
             }
         };
         for layer in self.layers[..entered].iter().rev() {
@@ -645,7 +756,7 @@ impl ChatModel for MiddlewareChatModel {
             tools.to_vec(),
         );
         self.chain
-            .run_model(&mut call, |call| {
+            .run_model_retry(&mut call, |call| {
                 let inner = Arc::clone(&self.inner);
                 let messages = call.messages().to_vec();
                 let tools = call.tools().to_vec();
@@ -835,6 +946,139 @@ impl Middleware for ToolCallBlocklist {
         }
     }
 }
+/// Retry policy for transient provider failures.
+///
+/// Configurable ceiling, base delay, and backoff multiplier. Retries only
+/// [`LlmErrorClass::RateLimited`], [`LlmErrorClass::Timeout`], and
+/// [`LlmErrorClass::Server`] errors — auth and invalid-request failures are
+/// never retried.
+#[derive(Debug, Clone)]
+pub struct RetryHandler {
+    ceiling: u32,
+    base_delay: Duration,
+    backoff_multiplier: f64,
+}
+
+impl RetryHandler {
+    /// Default: 2 retries after the initial attempt, 100 ms base, 2× backoff.
+    pub fn new() -> Self {
+        Self {
+            ceiling: 2,
+            base_delay: Duration::from_millis(100),
+            backoff_multiplier: 2.0,
+        }
+    }
+
+    /// Override the retry ceiling (attempts *after* the first).
+    pub fn with_ceiling(mut self, ceiling: u32) -> Self {
+        self.ceiling = ceiling;
+        self
+    }
+
+    /// Override the base delay.
+    pub fn with_base_delay(mut self, delay: Duration) -> Self {
+        self.base_delay = delay;
+        self
+    }
+
+    /// Override the backoff multiplier.
+    pub fn with_backoff_multiplier(mut self, multiplier: f64) -> Self {
+        self.backoff_multiplier = multiplier;
+        self
+    }
+
+    /// Compute the delay for `attempt` (0-indexed after the first failure).
+    fn delay(&self, attempt: u32) -> Duration {
+        let factor = self.backoff_multiplier.powf(attempt as f64);
+        let millis = (self.base_delay.as_millis() as f64 * factor) as u64;
+        Duration::from_millis(millis)
+    }
+}
+
+impl Default for RetryHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Middleware for RetryHandler {
+    fn name(&self) -> &str {
+        "retry_handler"
+    }
+
+    async fn on_model_error(
+        &self,
+        _call: &mut ModelCall,
+        error: &RustyError,
+        attempt: u32,
+    ) -> ModelErrorDecision {
+        if attempt >= self.ceiling {
+            return ModelErrorDecision::Continue;
+        }
+        match error.llm_class() {
+            LlmErrorClass::RateLimited | LlmErrorClass::Timeout | LlmErrorClass::Server => {
+                ModelErrorDecision::Retry {
+                    delay: self.delay(attempt),
+                }
+            }
+            _ => ModelErrorDecision::Continue,
+        }
+    }
+}
+
+/// Overflow recovery: compacts the message context when a provider rejects
+/// the request for being too large, then retries once.
+///
+/// The compaction replaces the oldest user/assistant exchanges (excluding the
+/// system prompt and the most recent turn) with a summary system message.
+/// This is a reference implementation; production deployments may supply a
+/// custom compactor that uses the [`crate::surface::Surface`] mechanism.
+#[derive(Debug, Clone, Default)]
+pub struct OverflowRecoveryHandler;
+
+impl OverflowRecoveryHandler {
+    /// A new overflow-recovery handler.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl Middleware for OverflowRecoveryHandler {
+    fn name(&self) -> &str {
+        "overflow_recovery"
+    }
+
+    async fn on_model_error(
+        &self,
+        call: &mut ModelCall,
+        error: &RustyError,
+        _attempt: u32,
+    ) -> ModelErrorDecision {
+        let msg = error.to_string().to_lowercase();
+        let is_overflow = msg.contains("context length")
+            || msg.contains("token limit")
+            || msg.contains("too large")
+            || msg.contains("maximum context");
+        if !is_overflow {
+            return ModelErrorDecision::Continue;
+        }
+        let messages = call.messages_mut();
+        if messages.len() > 3 {
+            // Keep system prompt (index 0) and the most recent exchange.
+            let to_compact = messages.len() - 2;
+            let summary = ChatMessage::system(format!(
+                "[{} earlier messages compacted due to context overflow]",
+                to_compact
+            ));
+            messages.splice(1..messages.len() - 1, [summary]);
+        }
+        ModelErrorDecision::Retry {
+            delay: Duration::from_millis(0),
+        }
+    }
+}
 
 /// Instantiate a journaled [`crate::learn::MiddlewareLayerConfig`] composition
 /// into a live [`MiddlewareChain`].
@@ -843,12 +1087,15 @@ impl Middleware for ToolCallBlocklist {
 /// resolved layer order in the journal, so instantiation must be a pure,
 /// deterministic function of the journaled value against the **compiled-in
 /// layer vocabulary** — the same names [`MiddlewareChain::names`] reports.
-/// Two layers are in the vocabulary today:
+/// Four layers are in the vocabulary today:
 ///
 /// - `request_logger` — zero-config; a `config` payload is refused (a config
 ///   the layer ignores would be evidence the chain cannot honor);
 /// - `tool_call_blocklist` — requires `{"blocked": ["tool.name", ...],
 ///   "reason": "..."?}`; `reason` defaults to the layer's own reason code.
+/// - `retry_handler` — optional config `{"ceiling": 3, "base_delay_ms": 100,
+///   "backoff_multiplier": 2.0}`; all keys optional with the defaults above.
+/// - `overflow_recovery` — zero-config; a `config` payload is refused.
 ///
 /// An unknown layer name, a config on a config-free layer, or a malformed
 /// config is an error naming the vocabulary — the set NEVER grows by
@@ -898,10 +1145,33 @@ pub fn instantiate_composition(
                 }
                 chain.push(Arc::new(layer));
             }
+            "retry_handler" => {
+                let mut handler = RetryHandler::new();
+                if let Some(config) = &entry.config {
+                    if let Some(ceiling) = config.get("ceiling").and_then(|v| v.as_u64()) {
+                        handler = handler.with_ceiling(ceiling as u32);
+                    }
+                    if let Some(ms) = config.get("base_delay_ms").and_then(|v| v.as_u64()) {
+                        handler = handler.with_base_delay(Duration::from_millis(ms));
+                    }
+                    if let Some(m) = config.get("backoff_multiplier").and_then(|v| v.as_f64()) {
+                        handler = handler.with_backoff_multiplier(m);
+                    }
+                }
+                chain.push(Arc::new(handler));
+            }
+            "overflow_recovery" => {
+                if entry.config.is_some() {
+                    return Err(RustyError::Graph(
+                        "middleware layer `overflow_recovery` takes no config payload".to_owned(),
+                    ));
+                }
+                chain.push(Arc::new(OverflowRecoveryHandler::new()));
+            }
             other => {
                 return Err(RustyError::Graph(format!(
                     "unknown middleware layer `{other}`: the compiled-in vocabulary is \
-                     [request_logger, tool_call_blocklist]"
+                     [request_logger, tool_call_blocklist, retry_handler, overflow_recovery]"
                 )));
             }
         }
