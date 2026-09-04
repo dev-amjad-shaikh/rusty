@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**███████████████████░░░░░░░░░░░ 78%** weighted complete (119 ✅ landed · 45 ◐ partial · 18 ○ not started, of 182 stories)
+**███████████████████░░░░░░░░░░░ 78%** weighted complete (120 ✅ landed · 44 ◐ partial · 18 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -25,7 +25,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
-| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 6 | 3 | 3 | ███████░░░░░ 62% |
+| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 8 | 2 | 2 | ████████░░░░ 67% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 2 | 1 | ██████████░░ 83% |
