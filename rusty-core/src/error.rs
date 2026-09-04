@@ -145,6 +145,20 @@ pub enum RustyError {
     #[error("invalid state update: {0}")]
     InvalidUpdate(String),
 
+    /// A frozen directive-tier prefix was mutated between assembly and
+    /// dispatch, or a handler attempted to modify the system-message segment
+    /// that was sealed at session start. The tier name, expected hash, and
+    /// actual hash are recorded for forensics.
+    #[error("frozen tier violation in '{tier}': expected {expected_hash}, got {actual_hash}")]
+    FrozenTierViolation {
+        /// Which tier was violated (stable, context, volatile, or whole).
+        tier: String,
+        /// The SHA-256 recorded at assembly time.
+        expected_hash: String,
+        /// The SHA-256 computed at verification time.
+        actual_hash: String,
+    },
+
     /// The run was cancelled cooperatively through
     /// [`crate::executor::RunConfig::cancellation`] (R0.6 wave 2c, drain):
     /// the executor stopped *at a super-step boundary*, so the boundary

@@ -739,6 +739,105 @@ pub struct ContextAssembly {
 }
 
 // --------------------------------------------------------------------- //
+// Frozen three-tier prompt assembly (EP-02-S09)
+// --------------------------------------------------------------------- //
+
+/// The three directive tiers that compose the frozen system prefix.
+///
+/// Assembled once at session start and held byte-identical for the session's
+/// life so provider prefix caching, resume, and the review fork are
+/// deterministic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectiveTiers {
+    /// Identity and standing guidance — the agent's self-concept and normative
+    /// instructions that rarely change.
+    pub stable: String,
+
+    /// Workspace snapshot — the current project state, file tree, and active
+    /// context that changes at human pace.
+    pub context: String,
+
+    /// Skills index, memory snapshot, user profile — the fastest-moving tier,
+    /// captured at session start and refreshed only at new sessions.
+    pub volatile: String,
+}
+
+/// One tier's forensic record: byte length and SHA-256 at assembly time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TierRecord {
+    /// Tier name (`stable`, `context`, `volatile`, or `whole`).
+    pub kind: String,
+
+    /// Byte length of the tier text in the concatenated prefix.
+    pub bytes: usize,
+
+    /// SHA-256 of the tier text, lowercase hex.
+    pub sha256: String,
+}
+
+/// The durably recorded frozen-prefix assembly: per-tier records plus the
+/// whole-prefix hash. Stored beside the session so resume on another node
+/// reproduces the exact prefix without re-rendering.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrozenPrefixRecord {
+    /// Per-tier length-and-hash records, in concatenation order.
+    pub tiers: Vec<TierRecord>,
+
+    /// SHA-256 of the entire concatenated prefix, lowercase hex.
+    pub whole_prefix_sha256: String,
+}
+
+/// The frozen prefix: concatenated tier text plus its verification record.
+///
+/// Created by [`ContextPipeline::assemble_frozen_prefix`] at session start
+/// and verified by [`FrozenPrefix::verify`] before every provider dispatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrozenPrefix {
+    /// The concatenated three-tier text that becomes the session's system
+    /// prompt.
+    pub text: String,
+
+    /// The forensic record stored beside the session.
+    pub record: FrozenPrefixRecord,
+}
+
+impl FrozenPrefix {
+    /// Verify that `actual_prefix` is byte-identical to the prefix recorded at
+    /// assembly time. On mismatch, return [`RustyError::FrozenTierViolation`]
+    /// naming the first divergent tier.
+    pub fn verify(&self, actual_prefix: &str) -> Result<()> {
+        let actual_hash = crate::record::sha256_hex(actual_prefix.as_bytes());
+        if actual_hash == self.record.whole_prefix_sha256 {
+            return Ok(());
+        }
+
+        // Walk tiers in order to name the first divergent one.
+        let mut offset = 0usize;
+        for tier in &self.record.tiers {
+            let end = (offset + tier.bytes).min(actual_prefix.len());
+            let tier_text = &actual_prefix[offset..end];
+            let actual_tier_hash = crate::record::sha256_hex(tier_text.as_bytes());
+            if actual_tier_hash != tier.sha256 {
+                return Err(RustyError::FrozenTierViolation {
+                    tier: tier.kind.clone(),
+                    expected_hash: tier.sha256.clone(),
+                    actual_hash,
+                });
+            }
+            offset += tier.bytes;
+        }
+
+        // Individual tiers matched but the whole did not — padding or boundary
+        // drift outside the recorded tiers.
+        Err(RustyError::FrozenTierViolation {
+            tier: "whole".to_owned(),
+            expected_hash: self.record.whole_prefix_sha256.clone(),
+            actual_hash,
+        })
+    }
+}
+
+// --------------------------------------------------------------------- //
 // Section rendering
 // --------------------------------------------------------------------- //
 
@@ -935,6 +1034,42 @@ impl ContextPipeline {
     /// The policy this pipeline assembles under.
     pub fn policy(&self) -> &ContextPolicy {
         &self.policy
+    }
+    /// Assemble the frozen three-tier prefix from `tiers`.
+    ///
+    /// Concatenates stable + context + volatile, records each tier's byte
+    /// length and SHA-256 plus the whole-prefix hash. Deterministic: equal
+    /// `DirectiveTiers` produce byte-identical prefixes and records.
+    pub fn assemble_frozen_prefix(&self, tiers: &DirectiveTiers) -> Result<FrozenPrefix> {
+        let stable_hash = crate::record::sha256_hex(tiers.stable.as_bytes());
+        let context_hash = crate::record::sha256_hex(tiers.context.as_bytes());
+        let volatile_hash = crate::record::sha256_hex(tiers.volatile.as_bytes());
+
+        let text = format!("{}{}{}", tiers.stable, tiers.context, tiers.volatile);
+        let whole_hash = crate::record::sha256_hex(text.as_bytes());
+
+        let record = FrozenPrefixRecord {
+            tiers: vec![
+                TierRecord {
+                    kind: "stable".to_owned(),
+                    bytes: tiers.stable.len(),
+                    sha256: stable_hash,
+                },
+                TierRecord {
+                    kind: "context".to_owned(),
+                    bytes: tiers.context.len(),
+                    sha256: context_hash,
+                },
+                TierRecord {
+                    kind: "volatile".to_owned(),
+                    bytes: tiers.volatile.len(),
+                    sha256: volatile_hash,
+                },
+            ],
+            whole_prefix_sha256: whole_hash,
+        };
+
+        Ok(FrozenPrefix { text, record })
     }
 
     /// Count one item (a message, or a tool schema wrapped as a synthetic
@@ -1680,6 +1815,7 @@ pub struct AssemblingChatModel {
     task_tags: Vec<String>,
     tool_outcomes: BTreeMap<String, ToolOutcomeStats>,
     effect_ceiling: Option<Effect>,
+    frozen_prefix: Option<FrozenPrefix>,
     memory: Option<JournaledMemory>,
 }
 
@@ -1697,6 +1833,7 @@ impl AssemblingChatModel {
             tool_outcomes: BTreeMap::new(),
             effect_ceiling: None,
             memory: None,
+            frozen_prefix: None,
         }
     }
 
@@ -1755,6 +1892,13 @@ impl AssemblingChatModel {
         self.memory = Some(memory);
         self
     }
+    /// Builder-style: the frozen three-tier prefix assembled at session
+    /// start. When set, the prefix is prepended as the first system message
+    /// on every call and verified before dispatch.
+    pub fn with_frozen_prefix(mut self, prefix: FrozenPrefix) -> Self {
+        self.frozen_prefix = Some(prefix);
+        self
+    }
 
     /// The pipeline this wrapper assembles through.
     pub fn pipeline(&self) -> &ContextPipeline {
@@ -1766,8 +1910,15 @@ impl AssemblingChatModel {
         // per-call `tools` argument is superseded (documented on
         // `with_tool_manifests`). Otherwise the per-call schemas are the
         // fallback path.
+        //
+        // When a frozen prefix is present, the identity section is part of
+        // the frozen system prompt and is not re-assembled per call.
         let inputs = ContextInputs {
-            identity: self.identity.clone(),
+            identity: if self.frozen_prefix.is_some() {
+                None
+            } else {
+                self.identity.clone()
+            },
             task: self.task.clone(),
             skills: self.skills.clone(),
             tools: if self.tool_manifests.is_empty() {
@@ -1781,7 +1932,21 @@ impl AssemblingChatModel {
             effect_ceiling: self.effect_ceiling,
             history: messages.to_vec(),
         };
-        self.pipeline.assemble(&inputs, self.memory.as_ref()).await
+        let mut assembly = self
+            .pipeline
+            .assemble(&inputs, self.memory.as_ref())
+            .await?;
+
+        // Prepend the frozen prefix as the first system message. The
+        // pipeline omits identity when frozen_prefix is set, so the
+        // manifest rides at index 0; we insert the prefix before it.
+        if let Some(prefix) = &self.frozen_prefix {
+            assembly
+                .messages
+                .insert(0, ChatMessage::system(&prefix.text));
+        }
+
+        Ok(assembly)
     }
 }
 
@@ -1789,6 +1954,17 @@ impl AssemblingChatModel {
 impl ChatModel for AssemblingChatModel {
     async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
         let assembly = self.assemble(messages, tools).await?;
+
+        // Pre-dispatch frozen-prefix verification (EP-02-S09 AC 2).
+        if let Some(prefix) = &self.frozen_prefix {
+            let actual_prefix = assembly
+                .messages
+                .first()
+                .and_then(|m| m.content.as_deref())
+                .unwrap_or("");
+            prefix.verify(actual_prefix)?;
+        }
+
         self.inner.chat(&assembly.messages, &assembly.tools).await
     }
 
@@ -1799,6 +1975,17 @@ impl ChatModel for AssemblingChatModel {
         on_token: &mut (dyn FnMut(TokenChunk) + Send),
     ) -> Result<ChatResponse> {
         let assembly = self.assemble(messages, tools).await?;
+
+        // Pre-dispatch frozen-prefix verification (EP-02-S09 AC 2).
+        if let Some(prefix) = &self.frozen_prefix {
+            let actual_prefix = assembly
+                .messages
+                .first()
+                .and_then(|m| m.content.as_deref())
+                .unwrap_or("");
+            prefix.verify(actual_prefix)?;
+        }
+
         self.inner
             .chat_stream(&assembly.messages, &assembly.tools, on_token)
             .await
