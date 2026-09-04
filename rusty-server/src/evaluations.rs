@@ -1058,3 +1058,469 @@ pub(crate) async fn get_gate(
         .map(|item| decode(item.value, "gate"))
         .transpose()
 }
+
+// ------------------------------------------------------------------
+// Conformance suites and runs (EP-12-S09 server-side)
+// ------------------------------------------------------------------
+
+const CONFORMANCE_SUITE_NAMESPACE: &str = "studio_eval_conformance_suites";
+const CONFORMANCE_SUITE_CATALOG_NAMESPACE: &str = "studio_eval_conformance_suite_catalog";
+const CONFORMANCE_RUN_NAMESPACE: &str = "studio_eval_conformance_runs";
+const CONFORMANCE_RUN_CATALOG_NAMESPACE: &str = "studio_eval_conformance_run_catalog";
+const CONFORMANCE_SUITE_CATALOG_KEY: &str = "recent";
+const CONFORMANCE_RUN_CATALOG_KEY: &str = "recent";
+const MAX_CONFORMANCE_SUITE_SUMMARIES: usize = 200;
+const MAX_CONFORMANCE_RUN_SUMMARIES: usize = 200;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConformanceSuiteRecord {
+    pub name: String,
+    pub version: String,
+    pub suite_json: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum ConformanceRunStatus {
+    Queued,
+    Running,
+    Complete,
+    Failed { reason: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConformanceRunRecord {
+    pub run_id: String,
+    pub suite_name: String,
+    pub suite_version: String,
+    pub target: String,
+    pub target_version: String,
+    pub status: ConformanceRunStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<rusty_eval::ConformanceReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConformanceSuiteSummary {
+    pub name: String,
+    pub version: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConformanceRunSummary {
+    pub run_id: String,
+    pub suite_name: String,
+    pub suite_version: String,
+    pub target: String,
+    pub target_version: String,
+    pub status: ConformanceRunStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub(crate) struct ConformanceSuiteCatalog {
+    pub suites: Vec<ConformanceSuiteSummary>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub(crate) struct ConformanceRunCatalog {
+    pub runs: Vec<ConformanceRunSummary>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+struct StoredConformanceSuiteCatalog {
+    records: Vec<ConformanceSuiteSummary>,
+    truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+struct StoredConformanceRunCatalog {
+    records: Vec<ConformanceRunSummary>,
+    truncated: bool,
+}
+
+impl From<&ConformanceSuiteRecord> for ConformanceSuiteSummary {
+    fn from(record: &ConformanceSuiteRecord) -> Self {
+        Self {
+            name: record.name.clone(),
+            version: record.version.clone(),
+            created_at: record.created_at,
+        }
+    }
+}
+
+impl From<&ConformanceRunRecord> for ConformanceRunSummary {
+    fn from(record: &ConformanceRunRecord) -> Self {
+        Self {
+            run_id: record.run_id.clone(),
+            suite_name: record.suite_name.clone(),
+            suite_version: record.suite_version.clone(),
+            target: record.target.clone(),
+            target_version: record.target_version.clone(),
+            status: record.status.clone(),
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        }
+    }
+}
+
+fn conformance_suite_key(name: &str, version: &str) -> String {
+    sha256_hex(format!("{name}\0{version}").as_bytes())
+}
+
+pub(crate) async fn persist_conformance_suite(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    record: &ConformanceSuiteRecord,
+) -> Result<bool, ApiError> {
+    crate::routes::validate_client_id("suite name", &record.name)?;
+    crate::routes::validate_client_id("suite version", &record.version)?;
+    let key = conformance_suite_key(&record.name, &record.version);
+    let suite_namespace = namespace(tenant, CONFORMANCE_SUITE_NAMESPACE);
+    let created = store
+        .kv_create(&suite_namespace, &key, encode(record)?)
+        .await
+        .map_err(crate::routes::internal_err)?
+        .is_some();
+    let durable = if created {
+        record.clone()
+    } else {
+        let existing = store
+            .kv_get(&suite_namespace, &key)
+            .await
+            .map_err(crate::routes::internal_err)?
+            .ok_or_else(|| {
+                ApiError::conflict("suite creation raced; retry the exact request".to_owned())
+            })?;
+        let existing: ConformanceSuiteRecord = decode(existing.value, "conformance suite")?;
+        if existing.name != record.name
+            || existing.version != record.version
+            || existing.suite_json != record.suite_json
+        {
+            return Err(ApiError::conflict(format!(
+                "suite `{}@{}` already exists with different content",
+                record.name, record.version
+            )));
+        }
+        existing
+    };
+    update_conformance_suite_catalog(store, tenant, &durable).await?;
+    Ok(created)
+}
+
+async fn update_conformance_suite_catalog(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    record: &ConformanceSuiteRecord,
+) -> Result<(), ApiError> {
+    let catalog_namespace = namespace(tenant, CONFORMANCE_SUITE_CATALOG_NAMESPACE);
+    for _ in 0..16 {
+        let current = store
+            .kv_get(&catalog_namespace, CONFORMANCE_SUITE_CATALOG_KEY)
+            .await
+            .map_err(crate::routes::internal_err)?;
+        let mut catalog = match current.as_ref() {
+            Some(item) => decode(item.value.clone(), "conformance suite catalog")?,
+            None => StoredConformanceSuiteCatalog::default(),
+        };
+        catalog
+            .records
+            .retain(|item| item.name != record.name || item.version != record.version);
+        catalog.records.push(ConformanceSuiteSummary::from(record));
+        catalog.records.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.version.cmp(&right.version))
+        });
+        if catalog.records.len() > MAX_CONFORMANCE_SUITE_SUMMARIES {
+            catalog.truncated = true;
+            catalog.records.truncate(MAX_CONFORMANCE_SUITE_SUMMARIES);
+        }
+        let value = encode(&catalog)?;
+        let written = match current {
+            Some(item) => store
+                .kv_compare_and_swap(
+                    &catalog_namespace,
+                    CONFORMANCE_SUITE_CATALOG_KEY,
+                    item.updated_at,
+                    value,
+                )
+                .await
+                .map_err(crate::routes::internal_err)?
+                .is_some(),
+            None => store
+                .kv_create(&catalog_namespace, CONFORMANCE_SUITE_CATALOG_KEY, value)
+                .await
+                .map_err(crate::routes::internal_err)?
+                .is_some(),
+        };
+        if written {
+            return Ok(());
+        }
+    }
+    Err(ApiError::conflict(
+        "conformance suite catalog changed too quickly; retry".to_owned(),
+    ))
+}
+
+pub(crate) async fn list_conformance_suites(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+) -> Result<ConformanceSuiteCatalog, ApiError> {
+    let catalog: StoredConformanceSuiteCatalog = match store
+        .kv_get(
+            &namespace(tenant, CONFORMANCE_SUITE_CATALOG_NAMESPACE),
+            CONFORMANCE_SUITE_CATALOG_KEY,
+        )
+        .await
+        .map_err(crate::routes::internal_err)?
+    {
+        Some(item) => decode(item.value, "conformance suite catalog")?,
+        None => StoredConformanceSuiteCatalog::default(),
+    };
+    let mut records = catalog.records;
+    records.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| right.created_at.cmp(&left.created_at))
+    });
+    Ok(ConformanceSuiteCatalog {
+        suites: records,
+        truncated: catalog.truncated,
+    })
+}
+
+pub(crate) async fn get_conformance_suite(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    name: &str,
+    version: &str,
+) -> Result<Option<ConformanceSuiteRecord>, ApiError> {
+    store
+        .kv_get(
+            &namespace(tenant, CONFORMANCE_SUITE_NAMESPACE),
+            &conformance_suite_key(name, version),
+        )
+        .await
+        .map_err(crate::routes::internal_err)?
+        .map(|item| decode(item.value, "conformance suite"))
+        .transpose()
+}
+
+pub(crate) async fn persist_conformance_run(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    record: &ConformanceRunRecord,
+) -> Result<bool, ApiError> {
+    let run_namespace = namespace(tenant, CONFORMANCE_RUN_NAMESPACE);
+    let created = store
+        .kv_create(&run_namespace, &record.run_id, encode(record)?)
+        .await
+        .map_err(crate::routes::internal_err)?
+        .is_some();
+    if created {
+        update_conformance_run_catalog(store, tenant, record).await?;
+        return Ok(true);
+    }
+    let existing = store
+        .kv_get(&run_namespace, &record.run_id)
+        .await
+        .map_err(crate::routes::internal_err)?
+        .ok_or_else(|| ApiError::conflict("conformance run creation raced; retry".to_owned()))?;
+    let existing: ConformanceRunRecord = decode(existing.value, "conformance run")?;
+    if existing.suite_name != record.suite_name
+        || existing.suite_version != record.suite_version
+        || existing.target != record.target
+        || existing.target_version != record.target_version
+    {
+        return Err(ApiError::conflict(format!(
+            "run `{}` already exists with a different plan",
+            record.run_id
+        )));
+    }
+    store
+        .kv_put(&run_namespace, &record.run_id, encode(record)?)
+        .await
+        .map_err(crate::routes::internal_err)?;
+    update_conformance_run_catalog(store, tenant, record).await?;
+    Ok(false)
+}
+
+async fn update_conformance_run_catalog(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    record: &ConformanceRunRecord,
+) -> Result<(), ApiError> {
+    let catalog_namespace = namespace(tenant, CONFORMANCE_RUN_CATALOG_NAMESPACE);
+    for _ in 0..16 {
+        let current = store
+            .kv_get(&catalog_namespace, CONFORMANCE_RUN_CATALOG_KEY)
+            .await
+            .map_err(crate::routes::internal_err)?;
+        let mut catalog = match current.as_ref() {
+            Some(item) => decode(item.value.clone(), "conformance run catalog")?,
+            None => StoredConformanceRunCatalog::default(),
+        };
+        catalog.records.retain(|item| item.run_id != record.run_id);
+        catalog.records.push(ConformanceRunSummary::from(record));
+        catalog
+            .records
+            .sort_by_key(|item| std::cmp::Reverse(item.created_at));
+        if catalog.records.len() > MAX_CONFORMANCE_RUN_SUMMARIES {
+            catalog.truncated = true;
+            catalog.records.truncate(MAX_CONFORMANCE_RUN_SUMMARIES);
+        }
+        while serde_json::to_vec(&catalog)
+            .map_err(|error| {
+                ApiError::internal(format!("serialize conformance run catalog: {error}"))
+            })?
+            .len()
+            > MAX_CATALOG_BYTES
+        {
+            if catalog.records.pop().is_none() {
+                break;
+            }
+            catalog.truncated = true;
+        }
+        let value = encode(&catalog)?;
+        let written = match current {
+            Some(item) => store
+                .kv_compare_and_swap(
+                    &catalog_namespace,
+                    CONFORMANCE_RUN_CATALOG_KEY,
+                    item.updated_at,
+                    value,
+                )
+                .await
+                .map_err(crate::routes::internal_err)?
+                .is_some(),
+            None => store
+                .kv_create(&catalog_namespace, CONFORMANCE_RUN_CATALOG_KEY, value)
+                .await
+                .map_err(crate::routes::internal_err)?
+                .is_some(),
+        };
+        if written {
+            return Ok(());
+        }
+    }
+    Err(ApiError::conflict(
+        "conformance run catalog changed too quickly; retry".to_owned(),
+    ))
+}
+
+pub(crate) async fn get_conformance_run(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    run_id: &str,
+) -> Result<Option<ConformanceRunRecord>, ApiError> {
+    store
+        .kv_get(&namespace(tenant, CONFORMANCE_RUN_NAMESPACE), run_id)
+        .await
+        .map_err(crate::routes::internal_err)?
+        .map(|item| decode(item.value, "conformance run"))
+        .transpose()
+}
+
+pub(crate) async fn list_conformance_runs(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+) -> Result<ConformanceRunCatalog, ApiError> {
+    let catalog: StoredConformanceRunCatalog = match store
+        .kv_get(
+            &namespace(tenant, CONFORMANCE_RUN_CATALOG_NAMESPACE),
+            CONFORMANCE_RUN_CATALOG_KEY,
+        )
+        .await
+        .map_err(crate::routes::internal_err)?
+    {
+        Some(item) => decode(item.value, "conformance run catalog")?,
+        None => StoredConformanceRunCatalog::default(),
+    };
+    Ok(ConformanceRunCatalog {
+        runs: catalog.records,
+        truncated: catalog.truncated,
+    })
+}
+
+/// Check whether `target`@`target_version` has a passing conformance run
+/// for `suite_name`@`suite_version`.  Used by registration endpoints
+/// (AC 2).
+pub(crate) async fn target_has_passing_conformance_run(
+    store: &Arc<dyn ServerStore>,
+    tenant: &str,
+    suite_name: &str,
+    suite_version: &str,
+    target: &str,
+    target_version: &str,
+) -> Result<Option<String>, ApiError> {
+    let catalog = list_conformance_runs(store, tenant).await?;
+    for run in catalog.runs {
+        if run.suite_name == suite_name
+            && run.suite_version == suite_version
+            && run.target == target
+            && run.target_version == target_version
+        {
+            if let ConformanceRunStatus::Complete = run.status {
+                // The report itself carries `passed`; we need the full record.
+                if let Some(record) = get_conformance_run(store, tenant, &run.run_id).await? {
+                    if let Some(ref report) = record.report {
+                        if report.passed {
+                            return Ok(Some(run.run_id));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Conformance registry: holds check implementations and can run suites.
+pub struct ConformanceRegistry {
+    runner: rusty_eval::ConformanceRunner,
+}
+
+impl std::fmt::Debug for ConformanceRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConformanceRegistry")
+            .field("runner", &"<ConformanceRunner>")
+            .finish()
+    }
+}
+
+impl Default for ConformanceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConformanceRegistry {
+    pub fn new() -> Self {
+        Self {
+            runner: rusty_eval::ConformanceRunner::new(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn register(&mut self, check: Box<dyn rusty_eval::ConformanceCheck>) {
+        self.runner.register(check);
+    }
+
+    pub async fn run(
+        &self,
+        suite: &rusty_eval::ConformanceSuite,
+        target: &str,
+    ) -> rusty_eval::ConformanceReport {
+        self.runner.run(suite, target).await
+    }
+}

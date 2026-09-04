@@ -466,7 +466,7 @@ pub struct ReportSummary {
 }
 
 impl ReportSummary {
-    fn compute(cases: &[CaseReport]) -> Self {
+    pub fn compute(cases: &[CaseReport]) -> Self {
         let runs: Vec<&CaseRunReport> = cases.iter().flat_map(|case| &case.runs).collect();
         let runs_passed = runs.iter().filter(|run| run.passed).count();
 

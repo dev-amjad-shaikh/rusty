@@ -69,6 +69,10 @@ pub enum EvalError {
     #[error("judge error: {0}")]
     Judge(String),
 
+    /// Invalid configuration or input validation failure.
+    #[error("validation error: {0}")]
+    Validation(String),
+
     /// Invalid configuration or incomparable evidence for a statistical test.
     #[error("statistics error: {0}")]
     Statistics(String),

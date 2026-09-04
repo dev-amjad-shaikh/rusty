@@ -78,6 +78,7 @@
 pub mod assertion;
 pub mod clustering;
 pub mod compare;
+pub mod conformance;
 pub mod dataset;
 pub mod error;
 pub mod evidence;
@@ -99,6 +100,11 @@ pub use clustering::{
 pub use compare::{
     AssertionDelta, CaseChange, CaseDelta, CompareThresholds, ComparisonReport, LatencyDelta,
     Regression, compare,
+};
+pub use conformance::{
+    to_experiment_report, ConformanceCase, ConformanceCheck, ConformanceReport, ConformanceRunner,
+    ConformanceSeverity, ConformanceSuite, ConformanceVerdict, CONFORMANCE_REPORT_FORMAT_VERSION,
+    CONFORMANCE_SUITE_FORMAT_VERSION,
 };
 pub use dataset::{
     DATASET_FORMAT_VERSION, Dataset, EvalCase, Expectation, ExpectedToolCall, StatePredicate,

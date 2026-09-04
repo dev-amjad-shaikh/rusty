@@ -670,6 +670,21 @@ pub(crate) fn build_router(
         .route("/experiments/compare", get(compare_experiments))
         .route("/gates", post(create_gate).get(list_gates))
         .route("/gates/{gate_name}", get(get_gate))
+        // Conformance suites and runs (EP-12-S09 server-side).
+        .route(
+            "/conformance-suites",
+            post(create_conformance_suite).get(list_conformance_suites),
+        )
+        .route(
+            "/conformance-suites/{name}/versions/{version}",
+            get(get_conformance_suite),
+        )
+        .route(
+            "/conformance-runs",
+            post(create_conformance_run).get(list_conformance_runs),
+        )
+        .route("/conformance-runs/{run_id}", get(get_conformance_run))
+        .route("/conformance-checks", get(check_conformance_status))
         // The configuration registry (R0.11 wave 1): named, owned
         // artifacts indexing the candidate pipeline (never a fork of it),
         // the append-only commit history, and diff views computed on
@@ -11487,4 +11502,182 @@ async fn get_gate(
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found(format!("gate `{gate_name}` not found")))
+}
+
+// ------------------------------------------------------------------
+// Conformance suites and runs (EP-12-S09 server-side)
+// ------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CreateConformanceSuitePayload {
+    name: String,
+    version: String,
+    suite_json: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateConformanceSuiteResponse {
+    name: String,
+    version: String,
+    created: bool,
+}
+
+async fn create_conformance_suite(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateConformanceSuitePayload>,
+) -> Result<(StatusCode, Json<CreateConformanceSuiteResponse>), ApiError> {
+    validate_client_id("suite name", &payload.name)?;
+    validate_client_id("suite version", &payload.version)?;
+    let now = Utc::now();
+    let record = evaluations::ConformanceSuiteRecord {
+        name: payload.name.clone(),
+        version: payload.version.clone(),
+        suite_json: payload.suite_json,
+        created_at: now,
+    };
+    let created =
+        evaluations::persist_conformance_suite(&state.server_store, tenant.tenant(), &record)
+            .await?;
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(CreateConformanceSuiteResponse {
+            name: payload.name,
+            version: payload.version,
+            created,
+        }),
+    ))
+}
+
+async fn list_conformance_suites(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog =
+        evaluations::list_conformance_suites(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "suites": catalog.suites, "truncated": catalog.truncated }),
+    ))
+}
+
+async fn get_conformance_suite(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Json<evaluations::ConformanceSuiteRecord>, ApiError> {
+    evaluations::get_conformance_suite(&state.server_store, tenant.tenant(), &name, &version)
+        .await?
+        .map(Json)
+        .ok_or_else(|| {
+            ApiError::not_found(format!("conformance suite `{name}@{version}` not found"))
+        })
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateConformanceRunPayload {
+    suite_name: String,
+    suite_version: String,
+    target: String,
+    target_version: String,
+}
+
+async fn create_conformance_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateConformanceRunPayload>,
+) -> Result<(StatusCode, Json<evaluations::ConformanceRunRecord>), ApiError> {
+    let suite = evaluations::get_conformance_suite(
+        &state.server_store,
+        tenant.tenant(),
+        &payload.suite_name,
+        &payload.suite_version,
+    )
+    .await?
+    .ok_or_else(|| {
+        ApiError::not_found(format!(
+            "suite `{}@{}` not found",
+            payload.suite_name, payload.suite_version
+        ))
+    })?;
+    let suite_value: rusty_eval::ConformanceSuite = serde_json::from_str(&suite.suite_json)
+        .map_err(|error| ApiError::internal(format!("stored suite is invalid: {error}")))?;
+    let run_id = format!("conf-{}", uuid::Uuid::new_v4());
+    let now = Utc::now();
+    let mut record = evaluations::ConformanceRunRecord {
+        run_id: run_id.clone(),
+        suite_name: payload.suite_name.clone(),
+        suite_version: payload.suite_version.clone(),
+        target: payload.target.clone(),
+        target_version: payload.target_version.clone(),
+        status: evaluations::ConformanceRunStatus::Running,
+        created_at: now,
+        updated_at: now,
+        report: None,
+    };
+    evaluations::persist_conformance_run(&state.server_store, tenant.tenant(), &record).await?;
+
+    // Run the suite against the target using a local registry.
+    // In production, checks are registered by owning crates at boot time;
+    // for now we run with whatever checks are available.
+    let registry = evaluations::ConformanceRegistry::new();
+    let report = registry.run(&suite_value, &payload.target).await;
+    record.status = evaluations::ConformanceRunStatus::Complete;
+    record.report = Some(report);
+    record.updated_at = Utc::now();
+    evaluations::persist_conformance_run(&state.server_store, tenant.tenant(), &record).await?;
+
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+async fn list_conformance_runs(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog = evaluations::list_conformance_runs(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "runs": catalog.runs, "truncated": catalog.truncated }),
+    ))
+}
+
+async fn get_conformance_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<evaluations::ConformanceRunRecord>, ApiError> {
+    evaluations::get_conformance_run(&state.server_store, tenant.tenant(), &run_id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("conformance run `{run_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct ConformanceCheckQuery {
+    suite_name: String,
+    suite_version: String,
+    target: String,
+    target_version: String,
+}
+
+async fn check_conformance_status(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Query(query): Query<ConformanceCheckQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let run_id = evaluations::target_has_passing_conformance_run(
+        &state.server_store,
+        tenant.tenant(),
+        &query.suite_name,
+        &query.suite_version,
+        &query.target,
+        &query.target_version,
+    )
+    .await?;
+    Ok(Json(json!({
+        "passing": run_id.is_some(),
+        "run_id": run_id,
+    })))
 }
