@@ -1160,6 +1160,208 @@ impl Correction {
 }
 
 // --------------------------------------------------------------------- //
+// Consolidation gating and high-water marks (EP-06-S08 wave 2 partial)
+// --------------------------------------------------------------------- //
+
+/// How often an agent's memory is consolidated in background. Declarative
+/// configuration — the cadence lives in the agent's blueprint and the
+/// gateway scheduler evaluates it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidationCadence {
+    /// Minimum main-line turns that must accumulate since the last
+    /// completed pass before a new pass may fire. Frequency gating: a
+    /// pass with fewer unprocessed turns exits immediately with a logged
+    /// skip.
+    pub min_turns: u32,
+
+    /// Maximum wall-clock interval between passes, in milliseconds.
+    /// When unset, only the turn count gate applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_interval_ms: Option<u64>,
+}
+
+/// The persisted state of a consolidation pass series: the high-water mark
+/// and bookkeeping the scheduler reads to decide whether a pass is due.
+///
+/// Stored as an ordinary memory record with a well-known key so it travels
+/// through the same storage contract as every other record and is
+/// tenant-isolated, auditable, and backup-restore coherent by construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidationState {
+    /// The event position / turn count the last successful pass processed
+    /// up to. The next pass reads only events strictly after this mark.
+    pub high_water_mark: u64,
+
+    /// When the last successful pass completed. Used for the interval
+    /// check in [`frequency_gate`].
+    pub last_run_at: DateTime<Utc>,
+
+    /// How many main-line turns have been observed since `last_run_at`.
+    /// The scheduler increments this as it sees new turn-completion events;
+    /// a successful pass resets it to zero.
+    pub turns_since_last: u64,
+}
+
+impl ConsolidationState {
+    /// A fresh state: mark at zero, now as the baseline, no turns seen.
+    pub fn new(now: DateTime<Utc>) -> Self {
+        Self {
+            high_water_mark: 0,
+            last_run_at: now,
+            turns_since_last: 0,
+        }
+    }
+
+    /// Advance the mark after a successful pass: bump the high-water mark,
+    /// reset the turn counter, and stamp `last_run_at`.
+    pub fn advance(&mut self, new_mark: u64, now: DateTime<Utc>) {
+        self.high_water_mark = new_mark;
+        self.last_run_at = now;
+        self.turns_since_last = 0;
+    }
+}
+
+/// The well-known key for storing a [`ConsolidationState`] as a memory
+/// record. The key is scoped to the agent by the record's [`ScopeAddress`],
+/// so one state per agent per tenant.
+pub const CONSOLIDATION_STATE_KEY: &str = "_rusty_consolidation_state";
+
+/// Evaluate frequency gating: does `state` satisfy `cadence` at `now`?
+///
+/// Returns `Ok(true)` when both the turn-count threshold and the optional
+/// interval threshold are met. Returns `Ok(false)` when gating blocks the
+/// pass — the caller logs the skip.
+///
+/// A pass that fires but fails does **not** advance the mark (EP-06-S08
+/// AC 3), so `state` is read-only here.
+pub fn frequency_gate(
+    state: &ConsolidationState,
+    cadence: &ConsolidationCadence,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    if state.turns_since_last < cadence.min_turns as u64 {
+        return Ok(false);
+    }
+    if let Some(max_interval_ms) = cadence.max_interval_ms {
+        let elapsed_ms = (now - state.last_run_at).num_milliseconds().max(0) as u64;
+        if elapsed_ms < max_interval_ms {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Compute the reason a frequency gate refused the pass, for logging.
+pub fn frequency_gate_reason(
+    state: &ConsolidationState,
+    cadence: &ConsolidationCadence,
+    now: DateTime<Utc>,
+) -> String {
+    let mut parts = Vec::new();
+    if state.turns_since_last < cadence.min_turns as u64 {
+        parts.push(format!(
+            "turns {} < {}",
+            state.turns_since_last, cadence.min_turns
+        ));
+    }
+    if let Some(max_interval_ms) = cadence.max_interval_ms {
+        let elapsed_ms = (now - state.last_run_at).num_milliseconds().max(0) as u64;
+        if elapsed_ms < max_interval_ms {
+            parts.push(format!(
+                "elapsed {} ms < {} ms",
+                elapsed_ms, max_interval_ms
+            ));
+        }
+    }
+    if parts.is_empty() {
+        "gate would pass".to_string()
+    } else {
+        format!("frequency gate blocked: {}", parts.join(", "))
+    }
+}
+
+/// Load the consolidation state for an agent from `store`. Returns a fresh
+/// state when no record with the well-known key exists.
+pub async fn load_consolidation_state(
+    store: &dyn MemoryStore,
+    scope: &ScopeAddress,
+    now: DateTime<Utc>,
+) -> Result<ConsolidationState> {
+    let query = MemoryQuery {
+        scope: Some(scope.clone()),
+        key: Some(CONSOLIDATION_STATE_KEY.to_string()),
+        ..MemoryQuery::default()
+    };
+    let records = store.query(&query, now).await?;
+    if let Some(record) = records.into_iter().next() {
+        match &record.content {
+            PayloadRef::Inline(value) => {
+                let state: ConsolidationState = serde_json::from_value(value.clone())
+                    .map_err(|e| invalid(format!("corrupt consolidation state: {e}")))?;
+                Ok(state)
+            }
+            PayloadRef::Artifact(_) => Err(invalid(
+                "consolidation state must be inline — artifact reference is unsupported",
+            )),
+        }
+    } else {
+        Ok(ConsolidationState::new(now))
+    }
+}
+
+/// Persist `state` as a memory record under the well-known key. Idempotent:
+/// retries converge on the same content address.
+pub async fn persist_consolidation_state(
+    store: &dyn MemoryStore,
+    scope: &ScopeAddress,
+    state: &ConsolidationState,
+    provenance: MemoryProvenance,
+) -> Result<String> {
+    let content = serde_json::to_value(state)?;
+    let record = MemoryRecord::new(
+        MemoryKind::Fact,
+        scope.clone(),
+        provenance,
+        1.0,
+        ValidityWindow::starting(state.last_run_at),
+        state.last_run_at,
+        content,
+    )?
+    .with_key(CONSOLIDATION_STATE_KEY);
+    store.put(&record).await?;
+    Ok(record.memory_id)
+}
+
+/// Filter candidate records to exclude content that originated from recall
+/// injection — the recall-loop prevention rule (EP-06-S08 AC 5).
+///
+/// Heuristic: a record whose provenance evidence names a `run_id` that
+/// matches a known recall-injection run, or whose tags contain
+/// `recall_injected`, is excluded. The caller supplies `injected_run_ids`
+/// from the journal span being processed.
+pub fn exclude_recall_injected(
+    records: &[MemoryRecord],
+    injected_run_ids: &[String],
+) -> Vec<MemoryRecord> {
+    let injected: std::collections::HashSet<&str> =
+        injected_run_ids.iter().map(String::as_str).collect();
+    records
+        .iter()
+        .filter(|record| {
+            let from_injected_run = record
+                .provenance
+                .evidence
+                .run_id
+                .as_deref()
+                .is_some_and(|run_id| injected.contains(run_id));
+            let tagged_injected = record.tags.iter().any(|t| t == "recall_injected");
+            !from_injected_run && !tagged_injected
+        })
+        .cloned()
+        .collect()
+}
+
+// --------------------------------------------------------------------- //
 // Forgetting (R0.8 wave 2): real deletion with a journaled receipt
 // --------------------------------------------------------------------- //
 
