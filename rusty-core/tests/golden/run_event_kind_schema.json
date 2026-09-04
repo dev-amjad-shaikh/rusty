@@ -459,6 +459,13 @@
       ]
     },
     {
+      "description": "A provider request was prepared with its provenance stamp. Input carries the [`rusty_api::TurnStamp`] (session id, traffic class, turn id, boundary, and component attribution). Journaled before dispatch so every provider call is attributable and harvestable from day one.",
+      "type": "string",
+      "enum": [
+        "request_header"
+      ]
+    },
+    {
       "description": "The run was cancelled through its durable inbox with a typed cause (R0.13 parity wave): [`crate::inbox::Inbox::cancel`] latched the request and the executor observed it at a super-step boundary — the same transactional granularity as the cooperative-cancellation token, extended with the *who*. An [`Effect::Pure`] record: cancellation is control flow, never a failure. Output carries the journaled [`crate::inbox::RunCancellation`] — the closed [`crate::inbox::CancelCause`], the `keep_inbox` disposition, and what a dropping cancellation discarded.",
       "type": "string",
       "enum": [

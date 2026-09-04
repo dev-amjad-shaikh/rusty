@@ -545,12 +545,15 @@ impl RecordingChatModel {
     /// Builder-style: capture streaming chunks as evidence when the wrapper
     /// is driven through [`ChatModel::chat_stream`]. Off by default — with
     /// capture off the journaled event is byte-identical to the pre-stream
-    /// shape, so existing journals keep replaying. With capture on, the
-    /// model-call event's output gains a `chunks` array (each chunk's
-    /// `delta` and `finish`, plus the provider's raw chunk when the wire
-    /// supplied one) alongside the `message` / `model` / `usage` keys
-    /// [`model_call_response`] freezes. Chunks are record-side evidence
-    /// only: exact replay serves the completed response, never the deltas.
+    /// shape, so existing journals keep replaying. With capture on, each
+    /// chunk is journaled as its own [`RunEventKind::AssistantChunk`] event
+    /// (the chunk's `delta`, its `stream_index`, and `finish`) under the
+    /// same parent as the model call, the concatenated deltas are checked
+    /// against the completed response ([`crate::error::RustyError::ChunkAssemblyMismatch`]
+    /// on divergence), and the model-call event itself keeps the
+    /// `message` / `model` / `usage` shape [`model_call_response`] freezes.
+    /// Chunks are record-side evidence only: exact replay serves the
+    /// completed response, never the deltas.
     pub fn with_chunk_capture(mut self, capture: bool) -> Self {
         self.capture_chunks = capture;
         self

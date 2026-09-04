@@ -585,10 +585,10 @@ impl MiddlewareChain {
 
     /// Run the onion around a model call with retry support.
     ///
-    /// Like [`run_model`], but the operation may be re-executed when an
+    /// Like [`Self::run_model`], but the operation may be re-executed when an
     /// [`on_model_error`](Middleware::on_model_error) handler returns
     /// [`ModelErrorDecision::Retry`]. Used by the non-streaming `chat` path;
-    /// streaming uses [`run_model`] because the token callback is `FnOnce`.
+    /// streaming uses [`Self::run_model`] because the token callback is `FnOnce`.
     pub async fn run_model_retry<F, Fut>(
         &self,
         call: &mut ModelCall,

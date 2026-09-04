@@ -1323,24 +1323,7 @@ async fn fork_thread(
             }
         })?;
 
-    // Determine seed_length: the step at the boundary (last copied checkpoint).
-    let seed_length = if let Some(id) = &payload.checkpoint_id {
-        state
-            .checkpointer
-            .get_by_id(&src_internal, id)
-            .await
-            .map_err(internal_err)?
-            .map(|cp| cp.step)
-    } else {
-        state
-            .checkpointer
-            .list(&src_internal)
-            .await
-            .map_err(internal_err)?
-            .last()
-            .map(|cp| cp.step)
-    };
-
+    // Seed length is the count of checkpoints copied from the parent.
     let fork = ThreadRecord {
         thread_id: new_thread_id.clone(),
         tenant: tenant.tenant().to_string(),

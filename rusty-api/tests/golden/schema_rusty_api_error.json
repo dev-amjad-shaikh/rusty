@@ -41,6 +41,19 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "A requested provider prefix is not registered.",
+      "type": "object",
+      "required": [
+        "ProviderNotRegistered"
+      ],
+      "properties": {
+        "ProviderNotRegistered": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   ]
 }

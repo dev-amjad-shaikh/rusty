@@ -1132,18 +1132,33 @@ async fn chat_stream_capture_journals_the_chunks_and_forwards_the_deltas() {
     );
     assert_eq!(response.message.content.as_deref(), Some("hello world"));
 
+    // Chunk capture journals each delta as its own durable-first
+    // `AssistantChunk` event (EP-01-S11), ahead of the assembled model call.
     let events = journal.events();
-    assert_eq!(events.len(), 1);
-    let call = &events[0];
-    assert_eq!(call.kind, RunEventKind::ModelCall);
-    let output = inline_output(call);
+    assert_eq!(events.len(), 3);
+    let chunks: Vec<_> = events
+        .iter()
+        .filter(|event| event.kind == RunEventKind::AssistantChunk)
+        .collect();
+    assert_eq!(chunks.len(), 2);
+    let first = inline_output(chunks[0]);
+    let second = inline_output(chunks[1]);
     assert_eq!(
-        output["chunks"],
+        json!([first, second]),
         json!([
-            {"delta": "hello ", "finish": false},
-            {"delta": "world", "finish": true, "raw": {"provider": "chunk"}},
+            {"delta": "hello ", "stream_index": 0, "finish": false},
+            {"delta": "world", "stream_index": 1, "finish": true},
         ]),
-        "the journaled output carries the captured chunk stream"
+        "each chunk is journaled with its monotonic stream index"
+    );
+    let call = events
+        .iter()
+        .find(|event| event.kind == RunEventKind::ModelCall)
+        .expect("the assembled model call is journaled after the chunks");
+    assert_eq!(
+        inline_output(call)["message"]["content"],
+        json!("hello world"),
+        "the assembled call closes the stream"
     );
 }
 

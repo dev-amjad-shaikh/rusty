@@ -148,7 +148,7 @@
       }
     },
     "Effect": {
-      "description": "The effect taxonomy: what a journaled event did to the world outside the run's own state.\n\nThe classification is declared by the producer (node/model/tool traits carry a default with an override point) and recorded on every [`RunEvent`]. It is the input to three later policies:\n\n- **Retry** (R0.6): which failed effects may be re-attempted at all, and under what key. - **Replay** (R0.5 later waves): which effects exact replay may serve from the journal versus must re-execute. - **Capsules** (R0.9): which effects a sandboxed capsule may perform at all under its capability grants.\n\nThe order of variants is a severity ladder: each class permits strictly less automation freedom than the one before. The `Ord` derive is that ladder made mechanical (declaration order), which is what capsule manifests (R0.9) compare declared effects against grant-implied minima with.",
+      "description": "The effect taxonomy: what a journaled event did to the world outside the run's own state.\n\nThe classification is declared by the producer (node/model/tool traits carry a default with an override point) and recorded on every journaled event. It is the input to three later policies:\n\n- **Retry**: which failed effects may be re-attempted at all, and under what key. - **Replay**: which effects exact replay may serve from the journal versus must re-execute. - **Capsules**: which effects a sandboxed capsule may perform at all under its capability grants.\n\nThe order of variants is a severity ladder: each class permits strictly less automation freedom than the one before. The `Ord` derive is that ladder made mechanical (declaration order), which is what capsule manifests compare declared effects against grant-implied minima with.",
       "oneOf": [
         {
           "description": "No observable effect beyond its return value: a deterministic function of its inputs. Re-execution is always safe and always equivalent, so replay may either re-run it or reuse the journaled output, and retries are unconstrained. Default for plain compute nodes.",
@@ -172,7 +172,7 @@
           ]
         },
         {
-          "description": "Writes external state and repeating it duplicates the effect, but a declared compensating action can logically undo it (charge/refund). Retry only with care; replay and rollback policy must pair the effect with its compensation. v1 records the classification only — compensation registration arrives with durable work (R0.6).",
+          "description": "Writes external state and repeating it duplicates the effect, but a declared compensating action can logically undo it (charge/refund). Retry only with care; replay and rollback policy must pair the effect with its compensation.",
           "type": "string",
           "enum": [
             "compensatable"
@@ -710,6 +710,13 @@
           "type": "string",
           "enum": [
             "inbox_consumed"
+          ]
+        },
+        {
+          "description": "A provider request was prepared with its provenance stamp. Input carries the [`rusty_api::TurnStamp`] (session id, traffic class, turn id, boundary, and component attribution). Journaled before dispatch so every provider call is attributable and harvestable from day one.",
+          "type": "string",
+          "enum": [
+            "request_header"
           ]
         },
         {

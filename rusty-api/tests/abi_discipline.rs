@@ -119,6 +119,9 @@ const KNOWN_INWARD_VIOLATIONS: &[(&str, &str)] = &[
     ("rusty-worker", "rusty-agent-runtime"),
     ("rusty-otel", "rusty-agent-runtime"),
     ("rusty-eval", "rusty-agent-runtime"),
+    // Dev-dependency only: rusty-agent-runtime's skill-pack tests run the
+    // bundled eval suites through the real gate path.
+    ("rusty-agent-runtime", "rusty-eval"),
 ];
 
 #[test]

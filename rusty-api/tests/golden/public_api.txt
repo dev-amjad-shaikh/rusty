@@ -300,6 +300,7 @@ pub enum rusty_api::RustyApiError
 pub rusty_api::RustyApiError::InvalidRequest(alloc::string::String)
 pub rusty_api::RustyApiError::NotSupported(alloc::string::String)
 pub rusty_api::RustyApiError::Provider(alloc::string::String)
+pub rusty_api::RustyApiError::ProviderNotRegistered(alloc::string::String)
 impl core::clone::Clone for rusty_api::RustyApiError
 pub fn rusty_api::RustyApiError::clone(&self) -> rusty_api::RustyApiError
 impl core::cmp::PartialEq for rusty_api::RustyApiError
@@ -403,6 +404,115 @@ pub fn rusty_api::SandboxRequirement::from(T) -> T
 impl<T> dyn_clone::DynClone for rusty_api::SandboxRequirement where T: core::clone::Clone
 pub fn rusty_api::SandboxRequirement::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
 impl<T> serde_core::de::DeserializeOwned for rusty_api::SandboxRequirement where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::TrafficClass
+pub rusty_api::TrafficClass::Main
+pub rusty_api::TrafficClass::Side
+impl core::clone::Clone for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::clone(&self) -> rusty_api::TrafficClass
+impl core::cmp::Eq for rusty_api::TrafficClass
+impl core::cmp::PartialEq for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::eq(&self, &rusty_api::TrafficClass) -> bool
+impl core::fmt::Debug for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::TrafficClass
+impl core::marker::StructuralPartialEq for rusty_api::TrafficClass
+impl schemars::JsonSchema for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::TrafficClass::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::TrafficClass::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::TrafficClass
+impl core::marker::Send for rusty_api::TrafficClass
+impl core::marker::Sync for rusty_api::TrafficClass
+impl core::marker::Unpin for rusty_api::TrafficClass
+impl core::marker::UnsafeUnpin for rusty_api::TrafficClass
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::TrafficClass
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::TrafficClass
+impl<T, U> core::convert::Into<U> for rusty_api::TrafficClass where U: core::convert::From<T>
+pub fn rusty_api::TrafficClass::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::TrafficClass where U: core::convert::Into<T>
+pub type rusty_api::TrafficClass::Error = never
+pub fn rusty_api::TrafficClass::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::TrafficClass where U: core::convert::TryFrom<T>
+pub type rusty_api::TrafficClass::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::TrafficClass::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::TrafficClass where T: core::clone::Clone
+pub type rusty_api::TrafficClass::Owned = T
+pub fn rusty_api::TrafficClass::clone_into(&self, &mut T)
+pub fn rusty_api::TrafficClass::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::TrafficClass where T: 'static + ?core::marker::Sized
+pub fn rusty_api::TrafficClass::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::TrafficClass where T: ?core::marker::Sized
+pub fn rusty_api::TrafficClass::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::TrafficClass where T: ?core::marker::Sized
+pub fn rusty_api::TrafficClass::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::TrafficClass where T: core::clone::Clone
+pub unsafe fn rusty_api::TrafficClass::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::TrafficClass
+pub fn rusty_api::TrafficClass::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::TrafficClass where T: core::clone::Clone
+pub fn rusty_api::TrafficClass::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::TrafficClass where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::TurnBoundary
+pub rusty_api::TurnBoundary::Continuation
+pub rusty_api::TurnBoundary::End
+pub rusty_api::TurnBoundary::Start
+impl core::clone::Clone for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::clone(&self) -> rusty_api::TurnBoundary
+impl core::cmp::Eq for rusty_api::TurnBoundary
+impl core::cmp::PartialEq for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::eq(&self, &rusty_api::TurnBoundary) -> bool
+impl core::fmt::Debug for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::TurnBoundary
+impl core::marker::StructuralPartialEq for rusty_api::TurnBoundary
+impl schemars::JsonSchema for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::TurnBoundary::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::TurnBoundary::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::TurnBoundary
+impl core::marker::Send for rusty_api::TurnBoundary
+impl core::marker::Sync for rusty_api::TurnBoundary
+impl core::marker::Unpin for rusty_api::TurnBoundary
+impl core::marker::UnsafeUnpin for rusty_api::TurnBoundary
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::TurnBoundary
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::TurnBoundary
+impl<T, U> core::convert::Into<U> for rusty_api::TurnBoundary where U: core::convert::From<T>
+pub fn rusty_api::TurnBoundary::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::TurnBoundary where U: core::convert::Into<T>
+pub type rusty_api::TurnBoundary::Error = never
+pub fn rusty_api::TurnBoundary::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::TurnBoundary where U: core::convert::TryFrom<T>
+pub type rusty_api::TurnBoundary::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::TurnBoundary::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::TurnBoundary where T: core::clone::Clone
+pub type rusty_api::TurnBoundary::Owned = T
+pub fn rusty_api::TurnBoundary::clone_into(&self, &mut T)
+pub fn rusty_api::TurnBoundary::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::TurnBoundary where T: 'static + ?core::marker::Sized
+pub fn rusty_api::TurnBoundary::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::TurnBoundary where T: ?core::marker::Sized
+pub fn rusty_api::TurnBoundary::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::TurnBoundary where T: ?core::marker::Sized
+pub fn rusty_api::TurnBoundary::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::TurnBoundary where T: core::clone::Clone
+pub unsafe fn rusty_api::TurnBoundary::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::TurnBoundary
+pub fn rusty_api::TurnBoundary::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::TurnBoundary where T: core::clone::Clone
+pub fn rusty_api::TurnBoundary::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::TurnBoundary where T: for<'de> serde_core::de::Deserialize<'de>
 pub struct rusty_api::BlockWrite
 pub rusty_api::BlockWrite::block_id: alloc::string::String
 pub rusty_api::BlockWrite::overwrite: bool
@@ -553,6 +663,59 @@ impl<T> core::convert::From<T> for rusty_api::ChatResponse
 pub fn rusty_api::ChatResponse::from(T) -> T
 impl<T> dyn_clone::DynClone for rusty_api::ChatResponse where T: core::clone::Clone
 pub fn rusty_api::ChatResponse::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+pub struct rusty_api::ComponentAttribution
+pub rusty_api::ComponentAttribution::component: alloc::string::String
+pub rusty_api::ComponentAttribution::sub_id: core::option::Option<alloc::string::String>
+impl core::clone::Clone for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::clone(&self) -> rusty_api::ComponentAttribution
+impl core::cmp::Eq for rusty_api::ComponentAttribution
+impl core::cmp::PartialEq for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::eq(&self, &rusty_api::ComponentAttribution) -> bool
+impl core::fmt::Debug for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for rusty_api::ComponentAttribution
+impl schemars::JsonSchema for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::ComponentAttribution::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::ComponentAttribution::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::ComponentAttribution
+impl core::marker::Send for rusty_api::ComponentAttribution
+impl core::marker::Sync for rusty_api::ComponentAttribution
+impl core::marker::Unpin for rusty_api::ComponentAttribution
+impl core::marker::UnsafeUnpin for rusty_api::ComponentAttribution
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::ComponentAttribution
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::ComponentAttribution
+impl<T, U> core::convert::Into<U> for rusty_api::ComponentAttribution where U: core::convert::From<T>
+pub fn rusty_api::ComponentAttribution::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::ComponentAttribution where U: core::convert::Into<T>
+pub type rusty_api::ComponentAttribution::Error = never
+pub fn rusty_api::ComponentAttribution::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::ComponentAttribution where U: core::convert::TryFrom<T>
+pub type rusty_api::ComponentAttribution::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::ComponentAttribution::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::ComponentAttribution where T: core::clone::Clone
+pub type rusty_api::ComponentAttribution::Owned = T
+pub fn rusty_api::ComponentAttribution::clone_into(&self, &mut T)
+pub fn rusty_api::ComponentAttribution::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::ComponentAttribution where T: 'static + ?core::marker::Sized
+pub fn rusty_api::ComponentAttribution::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::ComponentAttribution where T: ?core::marker::Sized
+pub fn rusty_api::ComponentAttribution::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::ComponentAttribution where T: ?core::marker::Sized
+pub fn rusty_api::ComponentAttribution::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::ComponentAttribution where T: core::clone::Clone
+pub unsafe fn rusty_api::ComponentAttribution::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::ComponentAttribution
+pub fn rusty_api::ComponentAttribution::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::ComponentAttribution where T: core::clone::Clone
+pub fn rusty_api::ComponentAttribution::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::ComponentAttribution where T: for<'de> serde_core::de::Deserialize<'de>
 pub struct rusty_api::InboundMessage
 pub rusty_api::InboundMessage::content: alloc::string::String
 pub rusty_api::InboundMessage::from: alloc::string::String
@@ -960,6 +1123,59 @@ pub fn rusty_api::ToolOutput::from(T) -> T
 impl<T> dyn_clone::DynClone for rusty_api::ToolOutput where T: core::clone::Clone
 pub fn rusty_api::ToolOutput::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
 impl<T> serde_core::de::DeserializeOwned for rusty_api::ToolOutput where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::TurnStamp
+pub rusty_api::TurnStamp::issued_by: rusty_api::ComponentAttribution
+pub rusty_api::TurnStamp::session_id: uuid::Uuid
+pub rusty_api::TurnStamp::traffic: rusty_api::TrafficClass
+pub rusty_api::TurnStamp::turn_boundary: rusty_api::TurnBoundary
+pub rusty_api::TurnStamp::turn_id: uuid::Uuid
+impl core::clone::Clone for rusty_api::TurnStamp
+pub fn rusty_api::TurnStamp::clone(&self) -> rusty_api::TurnStamp
+impl core::cmp::PartialEq for rusty_api::TurnStamp
+pub fn rusty_api::TurnStamp::eq(&self, &rusty_api::TurnStamp) -> bool
+impl core::fmt::Debug for rusty_api::TurnStamp
+pub fn rusty_api::TurnStamp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rusty_api::TurnStamp
+impl schemars::JsonSchema for rusty_api::TurnStamp
+pub fn rusty_api::TurnStamp::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::TurnStamp::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::TurnStamp::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::TurnStamp
+pub fn rusty_api::TurnStamp::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::TurnStamp
+pub fn rusty_api::TurnStamp::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::TurnStamp
+impl core::marker::Send for rusty_api::TurnStamp
+impl core::marker::Sync for rusty_api::TurnStamp
+impl core::marker::Unpin for rusty_api::TurnStamp
+impl core::marker::UnsafeUnpin for rusty_api::TurnStamp
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::TurnStamp
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::TurnStamp
+impl<T, U> core::convert::Into<U> for rusty_api::TurnStamp where U: core::convert::From<T>
+pub fn rusty_api::TurnStamp::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::TurnStamp where U: core::convert::Into<T>
+pub type rusty_api::TurnStamp::Error = never
+pub fn rusty_api::TurnStamp::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::TurnStamp where U: core::convert::TryFrom<T>
+pub type rusty_api::TurnStamp::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::TurnStamp::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::TurnStamp where T: core::clone::Clone
+pub type rusty_api::TurnStamp::Owned = T
+pub fn rusty_api::TurnStamp::clone_into(&self, &mut T)
+pub fn rusty_api::TurnStamp::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::TurnStamp where T: 'static + ?core::marker::Sized
+pub fn rusty_api::TurnStamp::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::TurnStamp where T: ?core::marker::Sized
+pub fn rusty_api::TurnStamp::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::TurnStamp where T: ?core::marker::Sized
+pub fn rusty_api::TurnStamp::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::TurnStamp where T: core::clone::Clone
+pub unsafe fn rusty_api::TurnStamp::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::TurnStamp
+pub fn rusty_api::TurnStamp::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::TurnStamp where T: core::clone::Clone
+pub fn rusty_api::TurnStamp::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::TurnStamp where T: for<'de> serde_core::de::Deserialize<'de>
 pub struct rusty_api::Usage
 pub rusty_api::Usage::cached_tokens: core::option::Option<u64>
 pub rusty_api::Usage::completion_tokens: u64
@@ -1026,9 +1242,9 @@ pub fn rusty_api::Memory::write_blocks<'life0, 'async_trait>(&'life0 self, alloc
 pub trait rusty_api::ModelProvider: core::marker::Send + core::marker::Sync
 pub fn rusty_api::ModelProvider::capabilities(&self) -> rusty_api::ModelCapabilities
 pub fn rusty_api::ModelProvider::effect(&self) -> rusty_api::Effect
-pub fn rusty_api::ModelProvider::get_response<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 [rusty_api::ChatMessage], &'life2 [serde_json::value::Value]) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ChatResponse, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn rusty_api::ModelProvider::get_response<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 rusty_api::TurnStamp, &'life2 [rusty_api::ChatMessage], &'life3 [serde_json::value::Value]) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ChatResponse, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
 pub fn rusty_api::ModelProvider::pricing(&self) -> core::option::Option<rusty_api::ModelPricing>
-pub fn rusty_api::ModelProvider::stream_response<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 [rusty_api::ChatMessage], &'life2 [serde_json::value::Value], &'life3 mut (dyn core::ops::function::FnMut(rusty_api::TokenChunk) + core::marker::Send)) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ChatResponse, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn rusty_api::ModelProvider::stream_response<'life0, 'life1, 'life2, 'life3, 'life4, 'async_trait>(&'life0 self, &'life1 rusty_api::TurnStamp, &'life2 [rusty_api::ChatMessage], &'life3 [serde_json::value::Value], &'life4 mut (dyn core::ops::function::FnMut(rusty_api::TokenChunk) + core::marker::Send)) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<rusty_api::ChatResponse, rusty_api::RustyApiError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait, 'life4: 'async_trait
 pub trait rusty_api::Observer: core::marker::Send + core::marker::Sync
 pub fn rusty_api::Observer::notify(&self, rusty_api::ObserverEvent)
 pub trait rusty_api::RuntimeAdapter: core::marker::Send + core::marker::Sync
