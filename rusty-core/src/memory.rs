@@ -1359,6 +1359,8 @@ pub fn exclude_recall_injected(
         })
         .cloned()
         .collect()
+}
+
 // Rewrite validation (EP-06-S09): loss-bounded, hash-checked curated rewrites
 // --------------------------------------------------------------------- //
 

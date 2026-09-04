@@ -1,15 +1,18 @@
-//! API-key authentication middleware (`X-Api-Key` header) and the tenant
-//! model: every configured API key maps to exactly one tenant, and every
-//! request resolves to a [`TenantContext`] injected into the request
-//! extensions.
+//! API-key authentication middleware (`X-Api-Key` header), RBAC scope
+//! enforcement, and the tenant model: every configured API key maps to exactly
+//! one tenant and a set of scopes, and every request resolves to a
+//! [`TenantContext`] injected into the request extensions.
 //!
 //! ## Tenancy model
 //!
-//! - `ServerConfig::with_api_key(k)` (legacy) maps `k` to the [`DEFAULT_TENANT`].
-//! - `ServerConfig::with_tenant_key(tenant, k)` maps `k` to `tenant`.
+//! - `ServerConfig::with_api_key(k)` (legacy) maps `k` to the [`DEFAULT_TENANT`]
+//!   with the super-user scope `*:*:*`.
+//! - `ServerConfig::with_tenant_key(tenant, k)` maps `k` to `tenant` with the
+//!   super-user scope.
+//! - `ServerConfig::api_key_scopes` overrides the default scope set for a key.
 //! - No keys configured at all: open (dev) mode — no header required and
-//!   every request runs as the default tenant, preserving v0.2/v0.3 behavior
-//!   bit-for-bit.
+//!   every request runs as the default tenant with super-user scopes,
+//!   preserving v0.2/v0.3 behavior bit-for-bit.
 //!
 //! ## Isolation scheme
 //!
@@ -29,10 +32,10 @@ use std::sync::Arc;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::json;
+use axum::response::Response;
+use rusty_agent_runtime::scope::{Scope, scope_authorizes};
 
+use crate::error::AdmissionReason;
 use crate::routes::AppState;
 
 /// The tenant every request resolves to when no tenant keys are configured
@@ -45,15 +48,21 @@ pub(crate) const DEFAULT_TENANT: &str = "default";
 #[derive(Debug, Clone)]
 pub(crate) struct TenantContext {
     tenant: String,
+    scopes: Vec<Scope>,
 }
 
 impl TenantContext {
-    pub(crate) fn new(tenant: String) -> Self {
-        Self { tenant }
+    pub(crate) fn new(tenant: String, scopes: Vec<Scope>) -> Self {
+        Self { tenant, scopes }
     }
 
     pub(crate) fn tenant(&self) -> &str {
         &self.tenant
+    }
+
+    /// The granted scopes for this caller.
+    pub(crate) fn scopes(&self) -> &[Scope] {
+        &self.scopes
     }
 
     /// The internal id for a tenant-scoped resource: `{tenant}/{id}` for
@@ -113,38 +122,76 @@ pub(crate) fn tenant_of_internal(internal_id: &str) -> &str {
     }
 }
 
-/// Resolve the request's tenant: with keys configured, the `X-Api-Key`
-/// header must match a configured key (401 otherwise) and selects that
-/// key's tenant; with no keys configured the server is in open (dev) mode
-/// and every request runs as the default tenant. The resolved
-/// [`TenantContext`] is inserted into the request extensions.
+/// Resolve the request's tenant and scopes: with keys configured, the
+/// `X-Api-Key` header must match a configured key (401 otherwise) and
+/// selects that key's tenant and scope set; with no keys configured the
+/// server is in open (dev) mode and every request runs as the default
+/// tenant with super-user scopes. The resolved [`TenantContext`] is
+/// inserted into the request extensions.
 pub(crate) async fn require_api_key(
     State(state): State<Arc<AppState>>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let tenant = if state.config.auth_enabled() {
+    let (tenant, scopes) = if state.config.auth_enabled() {
         let provided = request
             .headers()
             .get("x-api-key")
             .and_then(|v| v.to_str().ok());
-        match provided.and_then(|key| state.config.tenant_for_key(key)) {
-            Some(tenant) => tenant.to_string(),
+        match provided {
+            Some(key) => match state.config.tenant_for_key(key) {
+                Some(tenant) => {
+                    let scopes = state.config.scopes_for_key(key);
+                    (tenant.to_string(), scopes)
+                }
+                None => {
+                    return AdmissionReason::Unauthorized.into_response(StatusCode::UNAUTHORIZED);
+                }
+            },
             None => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({
-                        "error": "unauthorized",
-                        "message": "a valid `X-Api-Key` header is required",
-                    })),
-                )
-                    .into_response();
+                return AdmissionReason::Unauthorized.into_response(StatusCode::UNAUTHORIZED);
             }
         }
     } else {
-        DEFAULT_TENANT.to_string()
+        (
+            DEFAULT_TENANT.to_string(),
+            vec![
+                Scope::parse("*:*").expect("super-user collection scope is valid"),
+                Scope::parse("*:*:*").expect("super-user instance scope is valid"),
+            ],
+        )
     };
-    request.extensions_mut().insert(TenantContext::new(tenant));
+    request
+        .extensions_mut()
+        .insert(TenantContext::new(tenant, scopes));
+    next.run(request).await
+}
+
+/// Scope-enforcement middleware: runs after [`require_api_key`] and before
+/// handler logic. Looks up the required scope for the route from the
+/// [`ScopeTable`] and verifies the caller's granted scopes authorize it.
+///
+/// If the route has no declared scope, the request is allowed (backward
+/// compatibility during transition). If the caller lacks the required scope,
+/// returns [`AdmissionReason::Unauthorized`] with **403 Forbidden** —
+/// enumeration-safe because the check happens before any handler logic can
+/// probe resource existence.
+pub(crate) async fn require_scope(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let tenant = request.extensions().get::<TenantContext>();
+    let method = request.method().as_str();
+    let path = request.uri().path();
+
+    if let Some(required) = state.scope_table.required_scope(method, path) {
+        let authorized = tenant.is_some_and(|t| scope_authorizes(t.scopes(), required));
+        if !authorized {
+            return AdmissionReason::Unauthorized.into_response(StatusCode::FORBIDDEN);
+        }
+    }
+
     next.run(request).await
 }
 

@@ -1,9 +1,33 @@
 //! HTTP error type: a status code plus a JSON `{error, message}` body.
 
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::{Value, json};
+
+/// The reason a request was refused admission.
+///
+/// Carried verbatim in the response body per `contracts:gateway-protocol`.
+#[derive(Debug, Clone, Serialize)]
+pub enum AdmissionReason {
+    /// The caller lacks the required scope or credential.
+    #[serde(rename = "Unauthorized")]
+    Unauthorized,
+}
+
+impl AdmissionReason {
+    /// Render as an RFC 9457 Problem Details response.
+    pub fn into_response(self, status: StatusCode) -> Response {
+        let body = json!({
+            "type": "https://rusty.dev/problems/admission-refused",
+            "title": "Admission refused",
+            "status": status.as_u16(),
+            "reason": self,
+        });
+        (status, Json(body)).into_response()
+    }
+}
 
 /// An API error rendered as `{ "error": <kind>, "message": <detail> }` with
 /// the matching HTTP status.

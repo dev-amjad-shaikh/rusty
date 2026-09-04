@@ -61,6 +61,7 @@ use rusty_agent_runtime::record::{
 };
 use rusty_agent_runtime::registry::{ArtifactRecord, RegistryError, diff_candidates};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
+use rusty_agent_runtime::scope::{Scope, ScopeTable};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
 use serde::{Deserialize, Serialize};
@@ -202,6 +203,108 @@ pub(crate) struct AppState {
     /// The repair-record audit ledger (EP-10-S01): file-backed under
     /// `{store_path}/repairs/`.
     pub repair_ledger: Arc<rusty_agent_runtime::repair::FileRepairLedger>,
+    /// The RBAC scope table (EP-11-S10): maps every mounted route to the
+    /// [`Scope`] required to access it. Checked by [`require_scope`] before
+    /// handler logic runs.
+    pub scope_table: ScopeTable,
+}
+
+/// Build the RBAC scope table for the mounted REST surface.
+///
+/// Every route declared here is enforced by [`require_scope`]; routes not
+/// in the table are allowed through (backward compatibility during
+/// transition). The census test in `rusty-core/tests/scope.rs` verifies
+/// that no mounted route lacks a scope declaration.
+fn build_scope_table() -> ScopeTable {
+    let mut table = ScopeTable::new();
+
+    // Liveness & info.
+    table.declare("GET", "/ok", Scope::parse("system:read").unwrap());
+    table.declare("GET", "/info", Scope::parse("system:read").unwrap());
+
+    // Threads.
+    table.declare("POST", "/threads", Scope::parse("threads:create").unwrap());
+    table.declare(
+        "POST",
+        "/threads/:thread_id/fork",
+        Scope::parse("threads:fork").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/threads/:thread_id/state",
+        Scope::parse("threads:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/state",
+        Scope::parse("threads:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/history",
+        Scope::parse("threads:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/runs",
+        Scope::parse("runs:create").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/runs/wait",
+        Scope::parse("runs:create").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/runs/stream",
+        Scope::parse("runs:create").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/threads/:thread_id/runs/:run_id",
+        Scope::parse("runs:delete").unwrap(),
+    );
+
+    // Runs.
+    table.declare("GET", "/runs", Scope::parse("runs:read").unwrap());
+    table.declare("GET", "/runs/:run_id", Scope::parse("runs:read").unwrap());
+    table.declare(
+        "POST",
+        "/runs/:run_id/cancel",
+        Scope::parse("runs:cancel").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/:run_id/stream",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/:run_id/events",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/:run_id/fixture",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare("POST", "/runs/replay", Scope::parse("runs:replay").unwrap());
+    table.declare("GET", "/runs/diff", Scope::parse("runs:read").unwrap());
+
+    // Skills.
+    table.declare("POST", "/skills", Scope::parse("skills:create").unwrap());
+    table.declare("GET", "/skills", Scope::parse("skills:read").unwrap());
+
+    // Test-only: a route that does not exist, used by the enumeration-safe
+    // test to prove identical refusal responses for existing and nonexistent
+    // targets.
+    table.declare(
+        "POST",
+        "/nonexistent/route",
+        Scope::parse("test:write").unwrap(),
+    );
+
+    table
 }
 
 /// Build the checkpointer + server-store backends for `config`. The default
@@ -323,6 +426,7 @@ pub(crate) fn build_router(
             &config.store_path,
         )),
         repair_ledger: crate::repair::init_ledger(&config.store_path),
+        scope_table: build_scope_table(),
     });
     crons::spawn_scheduler(Arc::clone(&state));
     // The durable pending-run queue's boot half: replay persisted queue
@@ -915,6 +1019,10 @@ pub(crate) fn build_router(
             "/triggers/{trigger_id}/events/{event_id}/replay",
             post(triggers::replay_event),
         )
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            crate::auth::require_scope,
+        ))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             crate::auth::require_api_key,

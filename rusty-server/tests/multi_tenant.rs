@@ -8,12 +8,12 @@
 
 use std::path::PathBuf;
 
-use axum::body::{to_bytes, Body, Bytes};
-use axum::http::{Request, StatusCode};
 use axum::Router;
+use axum::body::{Body, Bytes, to_bytes};
+use axum::http::{Request, StatusCode};
 use rusty_agent_runtime::prelude::*;
-use rusty_agent_server::{router, GraphRegistry, ServerConfig};
-use serde_json::{json, Value};
+use rusty_agent_server::{GraphRegistry, ServerConfig, router};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 const ACME: (&str, &str) = ("x-api-key", "acme-secret");
@@ -118,7 +118,11 @@ async fn unknown_and_missing_keys_are_401() {
     // No header at all → 401.
     let (status, v) = call_as(&app, None, "GET", "/ok", None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(v["error"], json!("unauthorized"));
+    assert_eq!(v["reason"], json!("Unauthorized"));
+    assert_eq!(
+        v["type"],
+        json!("https://rusty.dev/problems/admission-refused")
+    );
 
     // Unknown key → 401 (even a well-formed one).
     let (status, _) = call_as(&app, Some(("x-api-key", "no-such-key")), "GET", "/ok", None).await;
@@ -385,16 +389,20 @@ async fn assistants_are_isolated_between_tenants() {
     }
 
     // On disk the records are separated per tenant.
-    assert!(store
-        .join("assistants")
-        .join("acme")
-        .join("bot.json")
-        .exists());
-    assert!(store
-        .join("assistants")
-        .join("globex")
-        .join("bot.json")
-        .exists());
+    assert!(
+        store
+            .join("assistants")
+            .join("acme")
+            .join("bot.json")
+            .exists()
+    );
+    assert!(
+        store
+            .join("assistants")
+            .join("globex")
+            .join("bot.json")
+            .exists()
+    );
     assert!(!store.join("assistants").join("bot.json").exists());
 
     let _ = std::fs::remove_dir_all(store);

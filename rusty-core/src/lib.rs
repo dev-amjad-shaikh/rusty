@@ -296,6 +296,7 @@ pub mod repair;
 pub mod replay;
 pub mod reviewer;
 pub mod sandbox;
+pub mod scope;
 pub mod seam_catalog;
 pub mod self_improve;
 pub mod session_query;
@@ -502,6 +503,10 @@ pub mod prelude {
         LocalProcessConfig, MAX_LOCAL_OUTPUT_BYTES, MAX_LOCAL_TIMEOUT,
         RemoteBackend, RemoteConfig, SandboxExecutor, SandboxResult, ToolStub,
     };
+    pub use crate::scope::{
+        parse_scope_set, scope_authorizes, scope_matches, AdapterScopeDecl, RoutePattern, Scope, ScopeParseError, ScopeTable,
+    };
+
     pub use crate::self_improve::{
         BACKLOG_ENTRY_ID_PREFIX, BACKLOG_FORMAT_VERSION, BacklogEntry, BacklogProvenance,
         BacklogStatus, BacklogStore, BuildGapSkillTool, BuildShape, Capability,

@@ -520,6 +520,10 @@ pub struct ServerConfig {
     /// are isolated from all others (cross-tenant access answers `404`).
     pub api_keys: Vec<(String, String)>,
 
+    /// Per-key scope grants for RBAC testing (EP-11-S10). Keys without an
+    /// explicit entry receive the super-user scope `*:*:*`.
+    pub api_key_scopes: HashMap<String, Vec<String>>,
+
     /// Per-run SSE event-log capacity (frames retained for replay, default
     /// 1000).
     pub event_log_capacity: usize,
@@ -690,6 +694,7 @@ impl Default for ServerConfig {
             max_concurrent_runs_per_thread: 1,
             api_key: None,
             api_keys: Vec::new(),
+            api_key_scopes: HashMap::new(),
             event_log_capacity: 1000,
             outbox_relay_interval: crate::outbox::DEFAULT_RELAY_INTERVAL,
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
@@ -783,6 +788,22 @@ impl ServerConfig {
             return Some("default");
         }
         None
+    }
+
+    /// The scopes granted to a presented API key. Keys without an explicit
+    /// entry in [`ServerConfig::api_key_scopes`] receive the super-user
+    /// scope `*:*:*`.
+    pub fn scopes_for_key(&self, key: &str) -> Vec<rusty_agent_runtime::scope::Scope> {
+        use rusty_agent_runtime::scope::Scope;
+        self.api_key_scopes
+            .get(key)
+            .map(|scopes| scopes.iter().filter_map(|s| Scope::parse(s).ok()).collect())
+            .unwrap_or_else(|| {
+                vec![
+                    Scope::parse("*:*").expect("super-user collection scope is valid"),
+                    Scope::parse("*:*:*").expect("super-user instance scope is valid"),
+                ]
+            })
     }
 
     /// Builder-style: persist everything in Postgres at `url` (e.g.
