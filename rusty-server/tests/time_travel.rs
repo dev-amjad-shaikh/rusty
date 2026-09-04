@@ -117,6 +117,12 @@ async fn state(app: &Router, thread: &str) -> Value {
     v
 }
 
+async fn thread_record(app: &Router, thread: &str) -> Value {
+    let (status, v) = call(app, "GET", &format!("/threads/{thread}"), None).await;
+    assert_eq!(status, StatusCode::OK, "get thread failed: {v}");
+    v
+}
+
 // --------------------------------------------------------------------- //
 // Fork
 // --------------------------------------------------------------------- //
@@ -139,8 +145,14 @@ async fn fork_full_history_copies_all_checkpoints() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "fork failed: {v}");
     assert_eq!(v["checkpoints_copied"], json!(2));
+    assert_eq!(v["seed_length"], json!(2));
     let fork = v["thread_id"].as_str().unwrap().to_string();
     assert_ne!(fork, thread);
+
+    // Lineage is recorded on the thread record.
+    let rec = thread_record(&app, &fork).await;
+    assert_eq!(rec["forked_from"], json!(thread));
+    assert_eq!(rec["seed_length"], json!(2));
 
     let fork_state = state(&app, &fork).await;
     assert_eq!(fork_state["values"]["log"], json!(["first", "second"]));
@@ -191,6 +203,11 @@ async fn fork_mid_history_copies_up_to_checkpoint() {
     assert_eq!(status, StatusCode::CREATED, "mid-history fork failed: {v}");
     assert_eq!(v["thread_id"], json!("fork-at-step0"));
     assert_eq!(v["checkpoints_copied"], json!(1));
+    assert_eq!(v["seed_length"], json!(1));
+
+    let rec = thread_record(&app, "fork-at-step0").await;
+    assert_eq!(rec["forked_from"], json!(thread));
+    assert_eq!(rec["seed_length"], json!(1));
 
     // The fork sits at the step-0 boundary: `first` done, `second` pending.
     let fork_state = state(&app, "fork-at-step0").await;

@@ -379,6 +379,8 @@ async fn ensure_a2a_context(
         tenant: tenant.tenant().to_string(),
         graph: A2A_THREAD_GRAPH.to_string(),
         metadata: Value::Null,
+        forked_from: None,
+        seed_length: None,
         created_at: Utc::now(),
     };
     state

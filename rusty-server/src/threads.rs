@@ -31,6 +31,12 @@ pub(crate) struct ThreadRecord {
     pub graph: String,
     #[serde(default)]
     pub metadata: Value,
+    /// Parent thread id when this thread was forked from another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<String>,
+    /// Number of checkpoints copied from the parent at fork time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_length: Option<usize>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -127,6 +133,8 @@ mod tests {
             tenant: "default".to_string(),
             graph: "pipeline".to_string(),
             metadata: json!({"origin": "test"}),
+            forked_from: None,
+            seed_length: None,
             created_at: Utc::now(),
         };
         let tenant_record = ThreadRecord {
@@ -134,6 +142,8 @@ mod tests {
             tenant: "acme".to_string(),
             graph: "pipeline".to_string(),
             metadata: Value::Null,
+            forked_from: None,
+            seed_length: None,
             created_at: Utc::now(),
         };
         persist(&tmp.0, &internal_id(&default_record), &default_record)
@@ -160,5 +170,27 @@ mod tests {
         std::fs::create_dir_all(&threads_dir).unwrap();
         std::fs::write(threads_dir.join("broken.json"), b"not json").unwrap();
         assert!(load(&tmp.0).is_empty());
+    }
+
+    #[tokio::test]
+    async fn fork_lineage_round_trips() {
+        let tmp = TestDir::new();
+        let fork_record = ThreadRecord {
+            thread_id: "fork-1".to_string(),
+            tenant: "default".to_string(),
+            graph: "pipeline".to_string(),
+            metadata: Value::Null,
+            forked_from: Some("parent-1".to_string()),
+            seed_length: Some(3),
+            created_at: Utc::now(),
+        };
+        persist(&tmp.0, &internal_id(&fork_record), &fork_record)
+            .await
+            .unwrap();
+
+        let loaded = load(&tmp.0);
+        let rec = &loaded["fork-1"];
+        assert_eq!(rec.forked_from.as_deref(), Some("parent-1"));
+        assert_eq!(rec.seed_length, Some(3));
     }
 }

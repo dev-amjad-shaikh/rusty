@@ -9764,6 +9764,8 @@ mod postgres {
                 tenant: "acme".to_string(),
                 graph: "pipeline".to_string(),
                 metadata: json!({"origin": "cron"}),
+                forked_from: None,
+                seed_length: None,
                 created_at: Utc::now(),
             };
             let payload = record_to_payload(&record).unwrap();

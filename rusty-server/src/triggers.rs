@@ -506,6 +506,8 @@ async fn execute_action(
                 tenant: tenant.to_string(),
                 graph: assistant.graph.clone(),
                 metadata: json!({"trigger_id": external_trigger_id, "trigger": "webhook"}),
+                forked_from: None,
+                seed_length: None,
                 created_at: Utc::now(),
             };
             state

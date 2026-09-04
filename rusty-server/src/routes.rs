@@ -381,6 +381,7 @@ pub(crate) fn build_router(
         .route("/health", get(crate::health::health_check))
         .route("/info", get(info))
         .route("/threads", post(create_thread))
+        .route("/threads/{thread_id}", get(get_thread))
         .route("/threads/{thread_id}/fork", post(fork_thread))
         .route(
             "/threads/{thread_id}/state",
@@ -1104,6 +1105,8 @@ async fn create_thread(
         tenant: tenant.tenant().to_string(),
         graph: payload.graph,
         metadata: payload.metadata.unwrap_or(Value::Null),
+        forked_from: None,
+        seed_length: None,
         created_at: Utc::now(),
     };
     // Check-and-insert in the store (durable, so pre-restart checkpoints
@@ -1119,6 +1122,16 @@ async fn create_thread(
         )));
     }
     Ok((StatusCode::CREATED, Json(record)))
+}
+
+/// `GET /threads/{id}` — fetch the thread record.
+async fn get_thread(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<ThreadRecord>, ApiError> {
+    let record = require_thread(&state, &tenant, &thread_id).await?;
+    Ok(Json(record))
 }
 
 // --------------------------------------------------------------------- //
@@ -1189,10 +1202,9 @@ async fn fork_thread(
         thread_id: new_thread_id.clone(),
         tenant: tenant.tenant().to_string(),
         graph: record.graph,
-        metadata: json!({
-            "forked_from": thread_id,
-            "fork_checkpoint_id": payload.checkpoint_id,
-        }),
+        metadata: json!({}),
+        forked_from: Some(thread_id.clone()),
+        seed_length: Some(copied),
         created_at: Utc::now(),
     };
     // A create that loses a same-id race answers 409 (the existence check
@@ -1214,6 +1226,7 @@ async fn fork_thread(
         Json(json!({
             "thread_id": new_thread_id,
             "checkpoints_copied": copied,
+            "seed_length": copied,
         })),
     ))
 }

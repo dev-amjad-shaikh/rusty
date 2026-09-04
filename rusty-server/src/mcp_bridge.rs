@@ -274,6 +274,8 @@ async fn call_tool(
         tenant: tenant.tenant().to_string(),
         graph: name.clone(),
         metadata: Value::Null,
+        forked_from: None,
+        seed_length: None,
         created_at: Utc::now(),
     };
     if let Err(e) = state

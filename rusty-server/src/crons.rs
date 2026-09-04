@@ -274,6 +274,8 @@ async fn fire(state: Arc<AppState>, cron: CronRecord) {
         tenant: tenant.to_string(),
         graph: cron.graph.clone(),
         metadata: json!({"cron_id": external_cron_id, "trigger": "cron"}),
+        forked_from: None,
+        seed_length: None,
         created_at: Utc::now(),
     };
     // Persist like API-created threads: a cron-fired thread's checkpoints
