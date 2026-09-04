@@ -12,12 +12,127 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use rusty_agent_runtime::repair::{
-    FileRepairLedger, RepairComponent, RepairLedger, RepairOutcome, RepairQuery, RepairRecord,
+    file_knowledge_repair, FileRepairLedger, KnowledgeCause, KnowledgeClassifier, RepairComponent,
+    RepairLedger, RepairOutcome, RepairQuery, RepairRecord,
 };
 
 use crate::auth::TenantContext;
 use crate::error::ApiError;
-use crate::routes::{internal_err, AppState};
+use crate::routes::{internal_err, load_gap_ledger, persist_gap_ledger, AppState};
+
+// ---------------------------------------------------------------------------
+// Knowledge-level repair filing (EP-10-S09)
+// ---------------------------------------------------------------------------
+
+/// Request body for `POST /repairs/knowledge`.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct KnowledgeRepairRequest {
+    /// The failure signature to classify.
+    pub failure_signature: String,
+    /// How many times this failure has occurred.
+    pub occurrence_count: u32,
+    /// The session id, if any.
+    pub session_id: Option<String>,
+    /// The attempt id, if any.
+    pub attempt_id: Option<String>,
+    /// Evidence citations (record ids, log positions).
+    pub evidence: Vec<String>,
+    /// Repair record ids in the chain leading to this filing.
+    pub repair_chain: Vec<String>,
+    /// Optional skill manifest hash for divergence detection.
+    pub skill_manifest_hash: Option<String>,
+}
+
+/// Response for `POST /repairs/knowledge`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct KnowledgeRepairResponse {
+    /// Whether the filing was accepted (side-band, always true for valid input).
+    pub accepted: bool,
+    /// The classified cause.
+    pub cause: String,
+}
+
+/// Side-band knowledge-repair filing endpoint.
+///
+/// Classifies the failure, and if knowledge-level, spawns a background task
+/// to file a gap-ledger entry and emit a repair record. Returns immediately
+/// so the caller's failure path is never blocked.
+pub(crate) async fn file_knowledge(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(req): Json<KnowledgeRepairRequest>,
+) -> Result<Json<KnowledgeRepairResponse>, ApiError> {
+    // Classify the failure.
+    let cause = if req.occurrence_count >= 2 {
+        KnowledgeClassifier::classify_identical_failure_across_retries(
+            &req.failure_signature,
+            req.occurrence_count,
+        )
+    } else {
+        KnowledgeCause::Environmental
+    };
+
+    // If a skill manifest hash is provided, treat as divergence.
+    let cause = if let Some(ref hash) = req.skill_manifest_hash {
+        KnowledgeClassifier::classify_plan_reality_divergence(
+            hash,
+            &req.failure_signature,
+            req.occurrence_count,
+        )
+    } else {
+        cause
+    };
+
+    let cause_str = match &cause {
+        KnowledgeCause::Knowledge { .. } => "knowledge",
+        KnowledgeCause::Environmental => "environmental",
+    };
+
+    // Side-band: spawn the filing if knowledge-level.
+    if let KnowledgeCause::Knowledge { .. } = cause {
+        let tenant_id = tenant.tenant().to_string();
+        let state = Arc::clone(&state);
+        let evidence_ids = req.evidence.clone();
+        let chain = req.repair_chain.clone();
+        let session = req.session_id.clone();
+        let attempt = req.attempt_id.clone();
+        let cause = cause.clone();
+
+        tokio::spawn(async move {
+            let Ok(mut ledger) = load_gap_ledger(&state, &tenant_id).await else {
+                return;
+            };
+            let evidence: Vec<rusty_agent_runtime::gaps::Citation> = evidence_ids
+                .iter()
+                .filter_map(|id| {
+                    rusty_agent_runtime::gaps::Citation::new(
+                        rusty_agent_runtime::gaps::CitationKind::RunReceipt,
+                        id.clone(),
+                        Some("cited evidence from failure path".to_string()),
+                    )
+                    .ok()
+                })
+                .collect();
+
+            let _ = file_knowledge_repair(
+                &mut ledger,
+                state.repair_ledger.as_ref(),
+                cause,
+                evidence,
+                session,
+                attempt,
+                chain,
+            );
+
+            let _ = persist_gap_ledger(&state, &tenant_id, &ledger).await;
+        });
+    }
+
+    Ok(Json(KnowledgeRepairResponse {
+        accepted: true,
+        cause: cause_str.to_string(),
+    }))
+}
 
 /// Query parameters for `GET /repairs`.
 #[derive(Debug, Clone, Deserialize, Default)]

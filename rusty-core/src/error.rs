@@ -172,7 +172,9 @@ pub enum RustyError {
     #[error("run cancelled: {0}")]
     Cancelled(String),
 
-    /// The model-visible-means-logged invariant rejected a provider
+    /// A gap-ledger operation failed (filing, reinforcement, closure, etc.).
+    #[error("gap error: {0}")]
+    Gap(#[from] crate::gaps::GapError),
     /// request (EP-01-S05): the request's content is not reconstructable
     /// from the journal, so no bytes reached the provider. Carries the
     /// typed violation with the first divergent message index and a diff

@@ -1688,10 +1688,12 @@ fn error_kind(error: &RustyError) -> &'static str {
         RustyError::ChunkAssemblyMismatch { .. } => "chunk_assembly_mismatch",
         // Drain cancellation is control flow and takes its own terminal
         // path in `execute`; this arm exists for exhaustiveness only.
+        RustyError::Gap(_) => "gap_error",
+        // Drain cancellation is control flow and takes its own terminal
+        // path in `execute`; this arm exists for exhaustiveness only.
         RustyError::Cancelled(_) => "cancelled",
     }
 }
-
 // --------------------------------------------------------------------- //
 // Tests
 // --------------------------------------------------------------------- //

@@ -177,6 +177,203 @@ pub enum RepairOutcome {
     Failed,
 }
 
+// ---------------------------------------------------------------------------
+// Knowledge-level repair filing (EP-10-S09)
+// ---------------------------------------------------------------------------
+
+/// The result of classifying a failure cause at the knowledge-repair rung.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KnowledgeCause {
+    /// A knowledge-level cause: the agent lacks information or its
+    /// instructions diverge from observed reality. Filed as a gap entry.
+    Knowledge {
+        /// Human-readable statement of what the gap is.
+        statement: String,
+        /// The subject of the gap (intent or question shape).
+        subject: crate::gaps::GapSubject,
+        /// Observable closure criteria.
+        closure_criteria: crate::gaps::ClosureCriteria,
+    },
+    /// An environmental cause (provider outage, network, etc.): the ladder
+    /// handled it, no gap is filed.
+    Environmental,
+}
+
+/// Classifies failure signatures into knowledge-level vs environmental causes.
+///
+/// The classifier is heuristic: repeated patterns that indicate ignorance
+/// (unknown tools, unavailable capabilities, identical failures across retries)
+/// produce [`KnowledgeCause::Knowledge`]; transient infrastructure failures
+/// produce [`KnowledgeCause::Environmental`].
+pub struct KnowledgeClassifier;
+
+impl KnowledgeClassifier {
+    /// Classify repeated unknown-tool calls.
+    ///
+    /// A single unknown-tool call may be a typo; repeated calls to the same
+    /// plausible-but-absent tool name indicate a knowledge gap.
+    pub fn classify_unknown_tool(tool_name: &str, attempt_count: u32) -> KnowledgeCause {
+        if attempt_count >= 2 {
+            KnowledgeCause::Knowledge {
+                statement: format!("Agent repeatedly called unknown tool '{tool_name}'"),
+                subject: crate::gaps::GapSubject::question_shape(&format!("use tool {tool_name}"))
+                    .unwrap_or_else(|_| crate::gaps::GapSubject::Intent {
+                        intent_id: "unknown-tool".to_string(),
+                    }),
+                closure_criteria: crate::gaps::ClosureCriteria::ArtifactPromoted {
+                    candidate_id: format!("skill:tool-knowledge:{tool_name}"),
+                },
+            }
+        } else {
+            KnowledgeCause::Environmental
+        }
+    }
+
+    /// Classify a plan step that names a capability the toolset cannot fulfil.
+    pub fn classify_plan_step_unavailable(step: &str) -> KnowledgeCause {
+        KnowledgeCause::Knowledge {
+            statement: format!("Plan step '{step}' requires a capability not in the toolset"),
+            subject: crate::gaps::GapSubject::question_shape(&format!("execute plan step: {step}"))
+                .unwrap_or_else(|_| crate::gaps::GapSubject::Intent {
+                    intent_id: "unavailable-capability".to_string(),
+                }),
+            closure_criteria: crate::gaps::ClosureCriteria::ArtifactPromoted {
+                candidate_id: format!("skill:plan-capability:{step}"),
+            },
+        }
+    }
+
+    /// Classify an instruction that failed identically across retries.
+    ///
+    /// A failure that repeats with the same signature after rung-1 repair
+    /// suggests the instruction itself is wrong, not the execution context.
+    pub fn classify_identical_failure_across_retries(
+        failure_signature: &str,
+        retry_count: u32,
+    ) -> KnowledgeCause {
+        if retry_count >= 2 {
+            KnowledgeCause::Knowledge {
+                statement: format!(
+                    "Identical failure '{failure_signature}' persisted across {retry_count} retries"
+                ),
+                subject: crate::gaps::GapSubject::question_shape(&format!(
+                    "resolve failure: {failure_signature}"
+                ))
+                .unwrap_or_else(|_| crate::gaps::GapSubject::Intent {
+                    intent_id: "persistent-failure".to_string(),
+                }),
+                closure_criteria: crate::gaps::ClosureCriteria::FailureRateBelow {
+                    threshold_millis: 100, // 10% failure-rate ceiling
+                },
+            }
+        } else {
+            KnowledgeCause::Environmental
+        }
+    }
+
+    /// Classify plan-reality divergence: a skill's instructed step fails
+    /// against observed behaviour past the configured repeat threshold.
+    pub fn classify_plan_reality_divergence(
+        skill_manifest_hash: &str,
+        failing_step: &str,
+        repeat_count: u32,
+    ) -> KnowledgeCause {
+        if repeat_count >= 2 {
+            KnowledgeCause::Knowledge {
+                statement: format!(
+                    "Skill {skill_manifest_hash} instructs step '{failing_step}' which contradicts observed behaviour"
+                ),
+                subject: crate::gaps::GapSubject::question_shape(&format!(
+                    "skill divergence: {skill_manifest_hash}"
+                ))
+                .unwrap_or_else(|_| crate::gaps::GapSubject::Intent {
+                    intent_id: "plan-reality-divergence".to_string(),
+                }),
+                closure_criteria: crate::gaps::ClosureCriteria::ArtifactPromoted {
+                    candidate_id: format!("skill:patch:{skill_manifest_hash}"),
+                },
+            }
+        } else {
+            KnowledgeCause::Environmental
+        }
+    }
+
+    /// Provider outage or network partition — environmental, not knowledge.
+    pub fn classify_provider_outage() -> KnowledgeCause {
+        KnowledgeCause::Environmental
+    }
+
+    /// Network error — environmental, not knowledge.
+    pub fn classify_network_error() -> KnowledgeCause {
+        KnowledgeCause::Environmental
+    }
+}
+
+/// File a knowledge-level repair gap entry and emit a typed repair record.
+///
+/// Returns the gap id if a knowledge cause was filed, or `None` if the
+/// cause was environmental (nothing to file).
+pub fn file_knowledge_repair(
+    ledger: &mut crate::gaps::GapLedger,
+    repair_ledger: &dyn RepairLedger,
+    cause: KnowledgeCause,
+    evidence: Vec<crate::gaps::Citation>,
+    session_id: Option<String>,
+    attempt_id: Option<String>,
+    repair_record_chain: Vec<String>,
+) -> crate::error::Result<Option<String>> {
+    match cause {
+        KnowledgeCause::Knowledge {
+            statement,
+            subject,
+            closure_criteria,
+        } => {
+            let now = Utc::now();
+            let mut citations = evidence;
+            // Cite the repair-record chain as evidence.
+            for record_id in repair_record_chain {
+                if let Ok(citation) = crate::gaps::Citation::new(
+                    crate::gaps::CitationKind::RunReceipt,
+                    record_id,
+                    Some("repair record in the escalation chain".to_string()),
+                ) {
+                    citations.push(citation);
+                }
+            }
+            let gap_id = ledger.file_gap(
+                subject,
+                statement,
+                citations,
+                crate::gaps::GapOrigin::RuntimeCorrection,
+                closure_criteria,
+                1,
+                1000, // default failure-cost estimate
+                "runtime:knowledge-repair",
+                now,
+            )?;
+            let record = RepairRecordBuilder::new()
+                .component(RepairComponent::AttemptScheduler)
+                .trigger(RepairTrigger::ProviderError {
+                    error_class: "knowledge_gap".to_string(),
+                    provider_call_id: gap_id.clone(),
+                })
+                .action(RepairAction::ProviderRetry {
+                    rung: RepairRung::Knowledge,
+                })
+                .outcome(RepairOutcome::Escalated)
+                .start_time(now)
+                .end_time(now)
+                .session_id(session_id.unwrap_or_default())
+                .attempt_id(attempt_id.unwrap_or_default())
+                .citation(gap_id.clone())
+                .build();
+            let _ = repair_ledger.append(record);
+            Ok(Some(gap_id))
+        }
+        KnowledgeCause::Environmental => Ok(None),
+    }
+}
+
 /// One typed repair record. Immutable once created.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepairRecord {

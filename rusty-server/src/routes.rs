@@ -11,23 +11,24 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
-use axum::{Extension, Json, Router, middleware};
+use axum::{middleware, Extension, Json, Router};
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use rusty_agent_runtime::agents::{
-    AgentId, COORDINATION_RESULT_KIND, CapabilityManifest, CoordinationContract, DelegateContract,
-    FanOutContract, QuorumContract, RaceContract, StateScope,
+    AgentId, CapabilityManifest, CoordinationContract, DelegateContract, FanOutContract,
+    QuorumContract, RaceContract, StateScope, COORDINATION_RESULT_KIND,
 };
+use rusty_agent_runtime::capsule::{derive_capsule_id, CapsuleManifest, CapsuleResolution};
 #[cfg(feature = "capsules")]
 use rusty_agent_runtime::capsule::{CapsuleDenial, CapsuleOverlay, ResourceBudget};
-use rusty_agent_runtime::capsule::{CapsuleManifest, CapsuleResolution, derive_capsule_id};
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
 use rusty_agent_runtime::durable::{
-    ResolvedRetryParameters, RetryDecision, resolve_retry_parameters, resolve_timeout_bound_ms,
-    retry_decision_event, timeout_decision_event,
+    resolve_retry_parameters, resolve_timeout_bound_ms, retry_decision_event,
+    timeout_decision_event, ResolvedRetryParameters, RetryDecision,
 };
+use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::gaps::{
     ActorRef, AdjacencySource, Citation, CitationKind, ClosureCriteria, ClosureEvidence,
     EventSource, GapError, GapLedger, GapOrigin, GapStatus, GapSubject, InteractionChannel,
@@ -39,42 +40,41 @@ use rusty_agent_runtime::induction::{
     InductionError, MiningConfig, SupplyArtifact, DEFAULT_BLOCK_CHAR_LIMIT,
     DEFAULT_FAILING_THRESHOLD_MILLIS,
 };
-use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
-    Candidate, CandidateContent, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
-    CandidateStatus, DriftBaseline, DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError,
-    PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer, admit_promotion,
-    candidate_effect_key, detect_policy_drift, evaluation_effect_key, promotion_effect_key,
-    rollback_effect_key, surface_for_kind,
+    admit_promotion, candidate_effect_key, detect_policy_drift, evaluation_effect_key,
+    promotion_effect_key, rollback_effect_key, surface_for_kind, Candidate, CandidateContent,
+    CandidateId, CandidateKind, CandidateOverlay, CandidateRecord, CandidateStatus, DriftBaseline,
+    DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError, PromotionReceipt,
+    PromotionRefusal, RollbackReceipt, VersionPointer,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
-    Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason, MemoryEvidence,
-    MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord, MemoryScope,
-    MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow, assemble, detect_conflicts,
-    memory_effect_key, memory_forget_effect_key, memory_read_request, plan_forget,
+    assemble, detect_conflicts, memory_effect_key, memory_forget_effect_key, memory_read_request,
+    plan_forget, Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason,
+    MemoryEvidence, MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
+    MemoryScope, MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
 use rusty_agent_runtime::record::{
-    CapsuleVersion, DecisionEvent, Effect, EffectReceipt, EventStatus, ExecutorPolicy, JournalRef,
-    PayloadRef, PolicyVersion, RunEvent, RunEventKind, derive_policy_version, sha256_hex,
+    derive_policy_version, sha256_hex, CapsuleVersion, DecisionEvent, Effect, EffectReceipt,
+    EventStatus, ExecutorPolicy, JournalRef, PayloadRef, PolicyVersion, RunEvent, RunEventKind,
 };
-use rusty_agent_runtime::registry::{ArtifactRecord, RegistryError, diff_candidates};
+use rusty_agent_runtime::registry::{diff_candidates, ArtifactRecord, RegistryError};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::scope::{Scope, ScopeTable};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use crate::agents::{
     self, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim, MailboxClaimScope,
 };
 use crate::assistants::{
-    ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT, ActivateVersionOutcome,
-    AssistantRecord, AssistantVersionRecord, AssistantVersionView, AssistantView,
-    CreateVersionOutcome, SetLifecycleOutcome, valid_version_id,
+    valid_version_id, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord,
+    AssistantVersionView, AssistantView, CreateVersionOutcome, SetLifecycleOutcome,
+    ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT,
 };
 use crate::auth::TenantContext;
 use crate::capsules::{CapsuleRecord, CapsuleWrite};
@@ -93,7 +93,7 @@ use crate::supervision;
 use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
 use crate::threads::ThreadRecord;
 use crate::triggers;
-use crate::{GraphRegistry, RESERVED_NAMES, ServerConfig, store};
+use crate::{store, GraphRegistry, ServerConfig, RESERVED_NAMES};
 
 /// Shared application state.
 pub(crate) struct AppState {
@@ -290,6 +290,19 @@ fn build_scope_table() -> ScopeTable {
     );
     table.declare("POST", "/runs/replay", Scope::parse("runs:replay").unwrap());
     table.declare("GET", "/runs/diff", Scope::parse("runs:read").unwrap());
+
+    // Repairs.
+    table.declare("GET", "/repairs", Scope::parse("repairs:read").unwrap());
+    table.declare(
+        "GET",
+        "/repairs/:record_id",
+        Scope::parse("repairs:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/repairs/knowledge",
+        Scope::parse("repairs:write").unwrap(),
+    );
 
     // Skills.
     table.declare("POST", "/skills", Scope::parse("skills:create").unwrap());
@@ -723,6 +736,7 @@ pub(crate) fn build_router(
         // trigger class, outcome, time range, session, or attempt.
         .route("/repairs", get(crate::repair::list_repairs))
         .route("/repairs/{record_id}", get(crate::repair::get_repair))
+        .route("/repairs/knowledge", post(crate::repair::file_knowledge))
         // The learning-candidate lifecycle (R0.8 wave 3): creation plus
         // the three journaled transitions, and the version-pointer
         // listing. Every transition requires `run_id` — the journal is
@@ -2311,12 +2325,10 @@ async fn list_runs(
             .then_with(|| a.run_id.cmp(&b.run_id))
     });
     recalled.truncate(limit);
-    Ok(Json(json!(
-        recalled
-            .into_iter()
-            .map(RecalledRun::into_wire)
-            .collect::<Vec<_>>()
-    )))
+    Ok(Json(json!(recalled
+        .into_iter()
+        .map(RecalledRun::into_wire)
+        .collect::<Vec<_>>())))
 }
 
 /// The `RunStatus` a persisted journal proves, in the same wire vocabulary
@@ -5114,7 +5126,7 @@ async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
 
 /// Load the tenant's ledger, or an empty one — an unread tenant costs
 /// no store row; the first mutation persists.
-async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
+pub(crate) async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
     Ok(state
         .server_store
         .get_gap_ledger(tenant)
@@ -5124,7 +5136,7 @@ async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, Ap
 }
 
 /// Persist the tenant's snapshot after a mutation.
-async fn persist_gap_ledger(
+pub(crate) async fn persist_gap_ledger(
     state: &AppState,
     tenant: &str,
     ledger: &GapLedger,
@@ -5140,7 +5152,7 @@ async fn persist_gap_ledger(
 /// `400`, unknown ids `404`, and every state-machine or gate refusal is
 /// a `409` conflict — a ledger that drives autonomous work never fails
 /// silently, and it never fails ambiguously.
-fn gap_err(error: GapError) -> ApiError {
+pub(crate) fn gap_err(error: GapError) -> ApiError {
     match &error {
         GapError::EmptyField(_) | GapError::FieldTooLong { .. } | GapError::EmptyEvidence => {
             ApiError::bad_request(error.to_string())
@@ -10430,22 +10442,20 @@ async fn cancel_one_agent(
     let signalled = ids(outcome.signalled);
     let mut exit_event = Value::Null;
     if !cancelled.is_empty() || !signalled.is_empty() || !run_outcome.is_empty() {
-        exit_event = json!(
-            supervision::journal_agent_exit(
-                &state.server_store,
-                tenant,
-                agent_external,
-                "cancelled",
-                json!({
-                    "cancelled_messages": cancelled,
-                    "signalled_messages": signalled,
-                    "signalled_runs": run_outcome.signalled,
-                    "cancelled_runs": run_outcome.cancelled,
-                }),
-            )
-            .await
-            .map_err(internal_err)?
-        );
+        exit_event = json!(supervision::journal_agent_exit(
+            &state.server_store,
+            tenant,
+            agent_external,
+            "cancelled",
+            json!({
+                "cancelled_messages": cancelled,
+                "signalled_messages": signalled,
+                "signalled_runs": run_outcome.signalled,
+                "cancelled_runs": run_outcome.cancelled,
+            }),
+        )
+        .await
+        .map_err(internal_err)?);
     }
     Ok(json!({
         "agent_id": agent_external,
