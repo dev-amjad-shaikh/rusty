@@ -535,6 +535,7 @@ pub mod prelude {
         SeverityFloor, TELEMETRY_FORMAT_VERSION, TelemetryLedger, TelemetryMirror, redactor_fn,
         severity_of,
     };
+    pub use crate::mcp::{InProcessMcpBridge, InProcessMountError};
     pub use crate::tool::{Tool, ToolExecutor, ToolRegistry};
     pub use crate::twin::{
         CounterfactualBranch, CounterfactualFork, DEFAULT_CONCURRENCY_LADDER,

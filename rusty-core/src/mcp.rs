@@ -42,10 +42,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -763,6 +763,254 @@ impl McpStdioClient {
 }
 
 // ---------------------------------------------------------------------------
+// In-process MCP bridge
+// ---------------------------------------------------------------------------
+
+use crate::record::Effect;
+use crate::tool::ToolRegistry;
+
+/// Error raised when a tool is refused by the in-process MCP bridge at mount
+/// time because its effect class is not in the allowed set.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InProcessMountError {
+    pub tool_name: String,
+    pub effect: Effect,
+    pub allowed: Vec<Effect>,
+}
+
+impl std::fmt::Display for InProcessMountError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "in-process MCP bridge refused tool `{}`: effect {:?} not in allowed set {:?}",
+            self.tool_name, self.effect, self.allowed
+        )
+    }
+}
+
+impl std::error::Error for InProcessMountError {}
+
+/// An in-process MCP server that exposes native Rusty [`Tool`]s over a
+/// memory-based transport.
+///
+/// The bridge creates a paired [`McpClient`] and server task: from the
+/// client's perspective the tools look exactly like an external MCP server,
+/// but no serialization to bytes occurs and the server dispatches directly
+/// to the native [`Tool::call`] implementation.
+///
+/// # Mount-time validation
+///
+/// By default only [`Effect::Pure`] and [`Effect::ReadOnly`] tools are
+/// accepted. Use [`InProcessMcpBridge::with_allowed_effects`] to override.
+/// Mounting refuses any tool whose effect is outside the allowed set with a
+/// typed [`InProcessMountError`] (AC 3).
+///
+/// # Example
+///
+/// ```ignore
+/// use rusty_agent_runtime::mcp::InProcessMcpBridge;
+/// use rusty_agent_runtime::tool::ToolRegistry;
+/// use std::sync::Arc;
+///
+/// let bridge = InProcessMcpBridge::new(Arc::new(registry)).unwrap();
+/// let client = bridge.client();
+/// let tools = client.into_tools().await.unwrap();
+/// ```
+#[derive(Clone, Debug)]
+pub struct InProcessMcpBridge {
+    registry: Arc<ToolRegistry>,
+    allowed_effects: Vec<Effect>,
+    server_name: String,
+}
+
+impl InProcessMcpBridge {
+    /// Create a new bridge over `registry`.
+    ///
+    /// Defaults to accepting only [`Effect::Pure`] and [`Effect::ReadOnly`].
+    /// Returns an error on the first tool whose effect is not allowed.
+    pub fn new(registry: Arc<ToolRegistry>) -> Self {
+        Self {
+            registry,
+            allowed_effects: vec![Effect::Pure, Effect::ReadOnly],
+            server_name: "rusty-in-process".to_owned(),
+        }
+    }
+
+    /// Set the effect classes allowed for in-process mounting.
+    pub fn with_allowed_effects(mut self, effects: Vec<Effect>) -> Self {
+        self.allowed_effects = effects;
+        self
+    }
+
+    /// Set the server name reported in `initialize`.
+    pub fn with_server_name(mut self, name: impl Into<String>) -> Self {
+        self.server_name = name.into();
+        self
+    }
+
+    /// Create an [`McpClient`] connected to this bridge over an in-memory
+    /// transport.
+    ///
+    /// The returned client is initialized and ready for `list_tools` /
+    /// `call_tool`. The server task runs in the background until the client
+    /// (and all clones) drop.
+    pub fn client(&self) -> std::result::Result<McpClient, InProcessMountError> {
+        self.validate()?;
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+
+        let registry = Arc::clone(&self.registry);
+        let server_name = self.server_name.clone();
+        tokio::spawn(async move {
+            let _ = server_loop(registry, server_read, server_write, server_name).await;
+        });
+
+        let client = McpClient::connect(client_read, client_write);
+        Ok(client)
+    }
+
+    fn validate(&self) -> std::result::Result<(), InProcessMountError> {
+        for tool in self.registry.tools() {
+            if !self.allowed_effects.contains(&tool.effect()) {
+                return Err(InProcessMountError {
+                    tool_name: tool.name().to_owned(),
+                    effect: tool.effect(),
+                    allowed: self.allowed_effects.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Background server loop: reads JSON-RPC requests from `reader`, dispatches
+/// to native tools, and writes responses to `writer`.
+async fn server_loop<R, W>(
+    registry: Arc<ToolRegistry>,
+    reader: R,
+    mut writer: W,
+    server_name: String,
+) -> io::Result<()>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    let mut reader = BufReader::new(reader);
+    let framing = Framing::NewlineDelimited;
+
+    loop {
+        let request = match read_framed(&mut reader, framing).await? {
+            Some(v) => v,
+            None => break, // EOF
+        };
+
+        let id = request.get("id").cloned().unwrap_or(Value::Null);
+        let method = request
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+
+        let response = match method.as_str() {
+            "initialize" => {
+                let result = json!({
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "serverInfo": { "name": server_name, "version": env!("CARGO_PKG_VERSION") },
+                    "capabilities": {}
+                });
+                json_response(&id, result)
+            }
+            "notifications/initialized" => {
+                // No response for notifications
+                continue;
+            }
+            "tools/list" => {
+                let tools: Vec<Value> = registry
+                    .tools()
+                    .map(|tool| {
+                        json!({
+                            "name": tool.name(),
+                            "description": tool.description(),
+                            "inputSchema": tool.parameters_schema(),
+                        })
+                    })
+                    .collect();
+                json_response(&id, json!({ "tools": tools }))
+            }
+            "tools/call" => {
+                let params = request.get("params").cloned().unwrap_or(Value::Null);
+                let name = params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+
+                match registry.get(&name) {
+                    Some(tool) => match tool.call(arguments).await {
+                        Ok(value) => {
+                            let text = match value {
+                                Value::String(s) => s,
+                                other => other.to_string(),
+                            };
+                            json_response(
+                                &id,
+                                json!({
+                                    "content": [{ "type": "text", "text": text }],
+                                    "isError": false,
+                                }),
+                            )
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            json_response(
+                                &id,
+                                json!({
+                                    "content": [{ "type": "text", "text": msg }],
+                                    "isError": true,
+                                }),
+                            )
+                        }
+                    },
+                    None => json_response(
+                        &id,
+                        json!({
+                            "content": [{
+                                "type": "text",
+                                "text": format!("unknown tool: {name}")
+                            }],
+                            "isError": true,
+                        }),
+                    ),
+                }
+            }
+            _ => json_error(&id, -32601, format!("method not found: {method}")),
+        };
+
+        write_framed(&mut writer, framing, &response).await?;
+    }
+
+    Ok(())
+}
+
+fn json_response(id: &Value, result: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result,
+    })
+}
+
+fn json_error(id: &Value, code: i64, message: String) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message },
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tool adapter
 // ---------------------------------------------------------------------------
 
@@ -987,7 +1235,7 @@ impl Tool for JournaledMcpTool {
 mod tests {
     use super::*;
     use crate::tool::ToolRegistry;
-    use tokio::io::{duplex, DuplexStream};
+    use tokio::io::{DuplexStream, duplex};
 
     /// A scripted mock MCP server speaking the full handshake.
     async fn run_mock_server(stream: DuplexStream, framing: Framing) {
@@ -1211,9 +1459,11 @@ mod tests {
 
         // Registry schemas remain OpenAI-shaped with the MCP tool inside.
         let schemas = registry.schemas();
-        assert!(schemas
-            .iter()
-            .any(|s| s["function"]["name"] == json!("echo")));
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s["function"]["name"] == json!("echo"))
+        );
     }
 
     #[tokio::test]

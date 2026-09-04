@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::effects::{EffectAdmissionContext, EffectRequest};
 use crate::error::{Result, RustyError};
@@ -498,6 +498,11 @@ impl ToolRegistry {
         self.tools.is_empty()
     }
 
+    /// All registered tools, in arbitrary order.
+    pub fn tools(&self) -> impl Iterator<Item = &Arc<dyn Tool>> {
+        self.tools.values()
+    }
+
     /// OpenAI-format tool schemas for the chat API, one per registered tool:
     /// `{"type": "function", "function": {"name", "description", "parameters"}}`.
     /// Pass directly as the `tools` argument of
@@ -966,11 +971,13 @@ mod tests {
         assert_eq!(results[1].tool_call_id.as_deref(), Some("c2"));
         assert!(results[1].content.as_deref().unwrap().starts_with("ERROR:"));
         assert_eq!(results[2].tool_call_id.as_deref(), Some("c3"));
-        assert!(results[2]
-            .content
-            .as_deref()
-            .unwrap()
-            .contains("unknown tool"));
+        assert!(
+            results[2]
+                .content
+                .as_deref()
+                .unwrap()
+                .contains("unknown tool")
+        );
     }
 
     struct Panic;
