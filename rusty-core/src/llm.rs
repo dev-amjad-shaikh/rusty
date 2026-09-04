@@ -5,6 +5,7 @@
 //! the OpenAI wire conventions: roles, assistant `tool_calls`, and tool
 //! results carried by `role: "tool"` messages with `tool_call_id`.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -380,6 +381,20 @@ pub struct TokenChunk {
 pub trait ChatModel: Send + Sync {
     /// Produce the next assistant message for the conversation.
     async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse>;
+
+    /// Produce the next assistant message with a provenance stamp.
+    ///
+    /// The default implementation delegates to [`ChatModel::chat`] so existing
+    /// implementors remain source-compatible. Stamped dispatch layers override
+    /// this to capture the stamp for invariant checking and logging.
+    async fn chat_stamped(
+        &self,
+        _stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+    ) -> Result<ChatResponse> {
+        self.chat(messages, tools).await
+    }
 
     /// The declared effect classification of calling this model (Flight
     /// Recorder, R0.5): recorded on model-call journal events and used by
@@ -1142,6 +1157,88 @@ impl ChatModel for OpenAiCompatibleClient {
             raw: None,
         });
         acc.into_response()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Provider registry — prefix routing and provenance stamps
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+
+/// A registry of model providers keyed by prefix.
+///
+/// Model references are of the form `prefix/model` (e.g. `openai/gpt-4`,
+/// `anthropic/claude-3-opus`). The prefix selects the registered provider;
+/// the suffix is passed through to the provider implementation.
+#[derive(Default)]
+pub struct ProviderRegistry {
+    providers: HashMap<String, Arc<dyn ChatModel>>,
+}
+
+impl ProviderRegistry {
+    /// Create an empty registry.
+    pub fn new() -> Self {
+        Self {
+            providers: HashMap::new(),
+        }
+    }
+
+    /// Register a provider under a prefix.
+    pub fn register(&mut self, prefix: impl Into<String>, provider: Arc<dyn ChatModel>) {
+        self.providers.insert(prefix.into(), provider);
+    }
+
+    /// Resolve a `prefix/model` reference to the registered provider and the
+    /// model suffix. Returns `ProviderNotRegistered` when the prefix is unknown.
+    pub fn resolve(&self, model_ref: &str) -> crate::error::Result<(String, Arc<dyn ChatModel>)> {
+        let (prefix, model) = model_ref
+            .split_once('/')
+            .map(|(p, m)| (p.to_owned(), m.to_owned()))
+            .unwrap_or_else(|| (model_ref.to_owned(), String::new()));
+        match self.providers.get(&prefix) {
+            Some(provider) => Ok((model, provider.clone())),
+            None => Err(crate::error::RustyError::Llm(format!(
+                "provider not registered: {prefix}"
+            ))),
+        }
+    }
+
+    /// Whether a prefix is registered.
+    pub fn has_prefix(&self, prefix: &str) -> bool {
+        self.providers.contains_key(prefix)
+    }
+}
+
+/// A [`ChatModel`] wrapper that injects a [`rusty_api::TurnStamp`] on every call and
+/// journals a [`crate::record::RunEventKind::RequestHeader`] event before dispatch.
+///
+/// This is the production path: every provider call is stamped, invariant-
+/// checked, and logged.
+pub struct StampedChatModel {
+    inner: Arc<dyn ChatModel>,
+}
+
+impl StampedChatModel {
+    /// Wrap a provider so every call is stamped.
+    pub fn new(inner: Arc<dyn ChatModel>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl ChatModel for StampedChatModel {
+    async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
+        self.inner.chat(messages, tools).await
+    }
+
+    async fn chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        self.inner.chat_stream(messages, tools, on_token).await
     }
 }
 

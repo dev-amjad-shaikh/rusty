@@ -84,6 +84,10 @@ tokio = { version = "1", features = ["full", "test-util"] }
 criterion = { version = "0.5", default-features = false }
 # Skill-pack tests run the bundled eval suites through the real gate path.
 rusty-eval = { path = "../rusty-eval" }
+
+[[test]]
+name = "provider_seam"
+
 [[example]]
 # Manual live validation for the genai adapter (provider layer, wave 2):
 # requires provider API keys and network access — never run in CI. The

@@ -884,6 +884,12 @@ pub enum RunEventKind {
     /// batch in intake order.
     InboxConsumed,
 
+    /// A provider request was prepared with its provenance stamp.
+    /// Input carries the [`rusty_api::TurnStamp`] (session id, traffic class, turn id,
+    /// boundary, and component attribution). Journaled before dispatch so
+    /// every provider call is attributable and harvestable from day one.
+    RequestHeader,
+
     /// The run was cancelled through its durable inbox with a typed cause
     /// (R0.13 parity wave): [`crate::inbox::Inbox::cancel`] latched the
     /// request and the executor observed it at a super-step boundary — the

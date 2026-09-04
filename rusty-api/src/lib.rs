@@ -388,6 +388,66 @@ pub enum RustyApiError {
     /// The request was malformed or violated an invariant.
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+
+    /// A requested provider prefix is not registered.
+    #[error("provider not registered: {0}")]
+    ProviderNotRegistered(String),
+}
+
+// ---------------------------------------------------------------------------
+// Turn stamp — provenance attribution on every provider call
+// ---------------------------------------------------------------------------
+
+/// Traffic classification for a provider call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TrafficClass {
+    /// User-facing session: the main conversation line.
+    Main,
+    /// Subagent, review fork, hunt, or consolidation traffic.
+    Side,
+}
+
+/// Where a step sits within its turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnBoundary {
+    /// The first step of a turn.
+    Start,
+    /// A middle step between start and end.
+    Continuation,
+    /// The step that resolves the turn.
+    End,
+}
+
+/// Which component issued a provider call, propagated across task boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct ComponentAttribution {
+    /// Component name (e.g. "react_agent", "review_fork", "consolidation").
+    pub component: String,
+    /// Optional sub-identifier (e.g. agent id, hunt id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_id: Option<String>,
+}
+
+/// Provenance stamp carried on every provider call.
+///
+/// Three cheap fields (OpenClaw-RL) that keep the trace pipeline, the eval
+/// harness, and the entire weights-improvement path open, plus component
+/// attribution. Outcome annotations are joined to stamped turns after the
+/// fact by the behavioral scorer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TurnStamp {
+    /// Stable session identity across resumes and surfaces.
+    pub session_id: uuid::Uuid,
+    /// Main-line (user-facing) vs. side traffic.
+    pub traffic: TrafficClass,
+    /// Turn identity within the session.
+    pub turn_id: uuid::Uuid,
+    /// Where this step sits within its turn.
+    pub turn_boundary: TurnBoundary,
+    /// Which component issued this call.
+    pub issued_by: ComponentAttribution,
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +476,7 @@ pub trait ModelProvider: Send + Sync {
     /// Produce a complete response for the conversation.
     async fn get_response(
         &self,
+        stamp: &TurnStamp,
         messages: &[ChatMessage],
         tools: &[Value],
     ) -> std::result::Result<ChatResponse, RustyApiError>;
@@ -426,11 +487,12 @@ pub trait ModelProvider: Send + Sync {
     /// the whole assistant text as a single [`TokenChunk`] with `finish: true`.
     async fn stream_response(
         &self,
+        stamp: &TurnStamp,
         messages: &[ChatMessage],
         tools: &[Value],
         on_token: &mut (dyn FnMut(TokenChunk) + Send),
     ) -> std::result::Result<ChatResponse, RustyApiError> {
-        let response = self.get_response(messages, tools).await?;
+        let response = self.get_response(stamp, messages, tools).await?;
         on_token(TokenChunk {
             delta: response.message.content.clone().unwrap_or_default(),
             finish: true,
