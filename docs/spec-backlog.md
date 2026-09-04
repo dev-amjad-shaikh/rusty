@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**███████████████████░░░░░░░░░░░ 77%** weighted complete (118 ✅ landed · 45 ◐ partial · 19 ○ not started, of 182 stories)
+**███████████████████░░░░░░░░░░░ 78%** weighted complete (119 ✅ landed · 45 ◐ partial · 18 ○ not started, of 182 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -25,7 +25,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
-| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
+| EP-10 Self-Healing and Resilience | M1–M3 | 12 | 6 | 3 | 3 | ███████░░░░░ 62% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 2 | 1 | ██████████░░ 83% |
@@ -201,7 +201,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-10 — Self-Healing and Resilience
 
-███████░░░░░ 54% · 5 landed · 3 partial · 4 not started · milestone M1–M3
+███████░░░░░ 67% · 8 landed · 2 partial · 2 not started · milestone M1–M3
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -212,8 +212,8 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-10-S05 | Heartbeat watchdog and the orphan sweep | — | ✅ | heartbeat watchdog + orphan sweep (`/tasks/heartbeat`) |
 | EP-10-S06 | Stuck-turn detection: shielded grace, then escalation | — | ◐ | **BLOCKED**: phase-based cancellation handles not present in executor; `ToolBudget.timeout_ms` does not exist; turn lease release mechanism (EP-04-S05) not wired to kernel; shielded grace window infrastructure absent. Cannot implement AC 1–5 without EP-02/EP-04/EP-05 dependency infrastructure. |
 | EP-10-S07 | Dependency fingerprints on skills and playbooks | — | ✅ | `rusty-core/src/skill.rs`: `DependencyDecl` + frontmatter parsing; `rusty-core/src/skills.rs`: `DependencyIndex`, `FingerprintStatus`, hygiene checks; `rusty-core/tests/dependency_fingerprints.rs`: 24 tests (declare, missing, malformed, circular, satisfied, changed, expired, orphaned, transitive, co-occurrence, lock, lock drift, stale lock, revalidation, revalidation failure, lock creation, lock round-trip, lock corruption, lock migration, hygiene pass/fail, hygiene mixed, hygiene error, index rebuild, concurrent modification); clippy/doc clean; `bcb8bf1` on `main` |
-| EP-10-S08 | Event-driven invalidation and the revalidation cycle | — | ○ | **UNBLOCKED 2026-09-02**: EP-07-S09/S10 gap-ledger infrastructure is on `main` (merge wave `dbf5846`): `/gaps` surface, zero-recall/correction hooks, `/hunts` cycle/draft/blocked. AC 1–5 ready to implement. |
-| EP-10-S09 | Knowledge-level repair: failures file the cause | — | ◐ | knowledge-level repair via gap filing (W2 in flight) |
+| EP-10-S08 | Event-driven invalidation and the revalidation cycle | — | ✅ | `POST /skills/invalidate` handler in `rusty-server/src/skills.rs`: scans registry metadata for dependents, demotes promoted skills via `SkillPlane::demote()`, files revalidation gap entries via `mutate_gap_ledger`, emits one `RepairRecord` via `RepairRecordBuilder`; fixed `package_of()` in `skills.rs` to rebuild `eval_gate` and `dependencies` frontmatter fields on reload (was dropping them, breaking dependency tracking across restart); wired route and scope auth in `rusty-server/src/routes.rs`; 3 integration tests in `rusty-server/tests/invalidation.rs` (`invalidation_demotes_promoted_dependent`, `invalidation_skips_non_promoted`, `invalidation_batch_multiple_dependents`); clippy/doc clean; `2e53b55` on `feat/ep-10-s08` |
+| EP-10-S09 | Knowledge-level repair: failures file the cause | — | ✅ | `KnowledgeCause`/`KnowledgeClassifier` in `rusty-core/src/repair.rs` (classifies unknown-tool repeats, plan-reality divergence, identical failures across retries vs environmental); `file_knowledge_repair()` files `RuntimeCorrection` gap entries via `GapLedger::file_gap()` with repair-record chain citations; `Gap` variant added to `RustyError` in `rusty-core/src/error.rs`; `POST /repairs/knowledge` handler in `rusty-server/src/repair.rs` (side-band: spawns tokio task, returns immediately); wired in `rusty-server/src/routes.rs` with scope declarations; `pub(crate)` visibility fixes for `load_gap_ledger`/`persist_gap_ledger`/`gap_err`; 5 integration tests in `rusty-server/tests/knowledge_repair.rs` (knowledge signature files gap with runtime_correction origin, environmental failure does not file, divergence cites manifest hash, dedup accrues volume across 10 filings, side-band latency <200ms); clippy/doc clean; `3b783af` on `feat/ep-10-s09` |
 | EP-10-S10 | The component health model: liveness, readiness, honest degradation | — | ✅ | `HealthStatus`/`ComponentHealth`/`HealthReport` types + aggregation logic; `GET /health` handler with async probes for `store` (list_assistants), `checkpointer` (list dummy thread), `broker` (list), `connectors` (list_manifests), `deployment` (list_environments), `knowledge` (all_sources), `receipt_keyring` (list_receipt_keys), `artifact_retention` (list_run_artifacts); structural Up for `skills` (boot-loaded) and `evaluation_state` (in-memory runtime); 1 integration test (`health_returns_200_with_components`); clippy/doc clean; `cea6772` + `92d4692` on `main` |
 | EP-10-S11 | Circuit breakers on flapping tools and connectors | — | ○ | **BLOCKED**: `Middleware::after_tool` is success-path only; no outcome hook runs on tool errors. A circuit breaker cannot observe failures through the middleware layer. Needs either an `on_tool_error` middleware hook or a different integration point (e.g., `ToolExecutor` level).
 | EP-10-S12 | Self-healing conformance: the fault matrix | — | ○ | fault-matrix conformance not started |
