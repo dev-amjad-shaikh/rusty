@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::{Path as AxumPath, State as AxumState};
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use rusty_agent_runtime::skill::{
@@ -58,12 +58,17 @@ use rusty_agent_runtime::skill::{
     SkillRegistry, SkillSource, SkillVersion, SkillVersionSelector,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use crate::auth::{DEFAULT_TENANT, TenantContext, scope_id};
+use crate::auth::{scope_id, TenantContext, DEFAULT_TENANT};
 use crate::error::ApiError;
 use crate::routes::AppState;
+use rusty_agent_runtime::gaps::{Citation, CitationKind, ClosureCriteria, GapOrigin, GapSubject};
+use rusty_agent_runtime::repair::{
+    RepairAction, RepairComponent, RepairLedger, RepairOutcome, RepairRecordBuilder, RepairRung,
+    RepairTrigger,
+};
 
 /// The skills directory under the store root. `skills` is a reserved
 /// layout name (see [`crate::RESERVED_NAMES`]): client-chosen tenant and
@@ -131,6 +136,17 @@ fn package_of(version: &SkillVersion) -> Result<SkillPackage, SkillError> {
     }
     if let Some(compatibility) = &metadata.compatibility {
         frontmatter.push_str(&format!("\ncompatibility: {compatibility}"));
+    }
+    if let Some(eval_gate) = &metadata.eval_gate {
+        frontmatter.push_str(&format!("\neval-gate: {eval_gate}"));
+    }
+    if !metadata.dependencies.is_empty() {
+        let dep_list: Vec<String> = metadata
+            .dependencies
+            .iter()
+            .map(|d| d.dependency_id())
+            .collect();
+        frontmatter.push_str(&format!("\ndependencies: {}", dep_list.join(", ")));
     }
     let skill_md = format!("---\n{frontmatter}\n---\n\n{}", version.body());
     let mut files = BTreeMap::new();
@@ -598,6 +614,42 @@ impl SkillPlane {
         Ok(promotion)
     }
 
+    /// Demote a skill to Trial, appending a record to the promotion history.
+    pub(crate) async fn demote(
+        &self,
+        tenant: &str,
+        name: &str,
+        author: String,
+    ) -> Result<SkillPromotion, PromotionError> {
+        let tenants = self.tenants.lock().await;
+        let version = tenants
+            .get(tenant)
+            .and_then(|registry| registry.get(name))
+            .ok_or(PromotionError::NotFound)?;
+        let revision = version.revision();
+        let content_hash = version.content_hash().to_owned();
+        drop(tenants);
+
+        let promotion = SkillPromotion {
+            name: name.to_owned(),
+            revision,
+            content_hash,
+            status: SkillPromotionStatus::Trial,
+            gate_run_id: None,
+            author,
+            created_at: chrono::Utc::now(),
+        };
+
+        persist_promotion(&self.root, tenant, name, &promotion).await?;
+        let mut proms = self.promotions.lock().await;
+        proms
+            .entry((tenant.to_owned(), name.to_owned()))
+            .or_default()
+            .push(promotion.clone());
+
+        Ok(promotion)
+    }
+
     /// Get the promotion history for a skill.
     #[allow(dead_code)]
     pub(crate) async fn promotion_history(&self, tenant: &str, name: &str) -> Vec<SkillPromotion> {
@@ -1006,6 +1058,161 @@ pub(crate) async fn promote_skill(
         }
     }
 }
+/// `POST /skills/invalidate` payload.
+#[derive(Debug, Deserialize)]
+pub(crate) struct InvalidateSkillsPayload {
+    /// The dependency id that changed (e.g. `tool:create_ticket`).
+    dependency_id: String,
+    /// The old SHA-256 fingerprint.
+    old_fingerprint: String,
+    /// The new SHA-256 fingerprint.
+    new_fingerprint: String,
+    /// What caused the change (e.g. `tool_reregistered`).
+    change_source: String,
+}
+
+/// `POST /skills/invalidate` — event-driven invalidation of skills whose
+/// declared dependencies changed. Every promoted dependent is demoted to
+/// Trial and a revalidation gap entry is filed. One repair record covers
+/// the whole episode.
+pub(crate) async fn invalidate_skills(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<InvalidateSkillsPayload>,
+) -> Response {
+    let start_time = chrono::Utc::now();
+
+    // Find all skills in the tenant that declare this dependency.
+    let skills = state.skills.list(tenant.tenant()).await;
+    let mut affected: Vec<String> = Vec::new();
+    for meta in &skills {
+        let dep_ids: Vec<String> = meta
+            .dependencies
+            .iter()
+            .map(|d| d.dependency_id())
+            .collect();
+        if dep_ids.contains(&payload.dependency_id) {
+            affected.push(meta.name.clone());
+        }
+    }
+
+    let mut demotions: Vec<String> = Vec::new();
+    let mut gap_ids: Vec<String> = Vec::new();
+
+    for skill_name in &affected {
+        let history = state
+            .skills
+            .promotion_history(tenant.tenant(), skill_name)
+            .await;
+        let current = history
+            .last()
+            .map(|p| p.status)
+            .unwrap_or(SkillPromotionStatus::Trial);
+        if current != SkillPromotionStatus::Promoted {
+            continue;
+        }
+        match state
+            .skills
+            .demote(tenant.tenant(), skill_name, "invalidation".to_owned())
+            .await
+        {
+            Ok(_) => {
+                demotions.push(skill_name.clone());
+
+                // File a revalidation gap entry for the demoted skill.
+                let now = chrono::Utc::now();
+                let skill_name_inner = skill_name.clone();
+                let dep_id = payload.dependency_id.clone();
+                let gap_result = crate::routes::mutate_gap_ledger(&state, &tenant, |ledger| {
+                    let subject = GapSubject::question_shape(&format!(
+                        "Revalidate skill {skill_name_inner} after dependency change"
+                    ))?;
+                    let statement = format!(
+                        "Skill {skill_name_inner} was demoted after dependency {dep_id} changed"
+                    );
+                    let evidence = vec![
+                        Citation::new(
+                            CitationKind::MemoryRecord,
+                            format!("dep-change:{}:{}", dep_id, payload.new_fingerprint),
+                            Some("dependency change record".to_owned()),
+                        )?,
+                        Citation::new(
+                            CitationKind::MemoryRecord,
+                            format!("skill:{skill_name_inner}"),
+                            Some("skill manifest hash at invalidation".to_owned()),
+                        )?,
+                    ];
+                    let closure = ClosureCriteria::ArtifactPromoted {
+                        candidate_id: format!("skill:{skill_name_inner}"),
+                    };
+                    ledger.file_gap(
+                        subject,
+                        statement,
+                        evidence,
+                        GapOrigin::RuntimeCorrection,
+                        closure,
+                        1,
+                        10_000,
+                        "invalidation",
+                        now,
+                    )
+                })
+                .await;
+
+                match gap_result {
+                    Ok(gap_id) => gap_ids.push(gap_id),
+                    Err(e) => {
+                        tracing::warn!(%e, "failed to file revalidation gap for skill {}", skill_name);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(%e, "demotion failed for skill {}", skill_name);
+            }
+        }
+    }
+
+    // Emit one repair record for the episode.
+    let outcome = if demotions.is_empty() {
+        RepairOutcome::Repaired
+    } else {
+        RepairOutcome::Escalated
+    };
+    let record = RepairRecordBuilder::new()
+        .component(RepairComponent::DependencyInvalidation)
+        .trigger(RepairTrigger::DependencyChange {
+            dependency_id: payload.dependency_id.clone(),
+            old_fingerprint: payload.old_fingerprint,
+            new_fingerprint: payload.new_fingerprint,
+        })
+        .action(RepairAction::DependencyInvalidation {
+            rung: RepairRung::Knowledge,
+        })
+        .outcome(outcome)
+        .start_time(start_time)
+        .end_time(chrono::Utc::now())
+        .citation(format!("change_source:{}", payload.change_source))
+        .attempt_count(demotions.len() as u32)
+        .build();
+    let _ = state.repair_ledger.append(record);
+
+    let status = if demotions.is_empty() {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    (
+        status,
+        Json(json!({
+            "dependency_id": payload.dependency_id,
+            "affected": affected.len(),
+            "demoted": demotions,
+            "gap_ids": gap_ids,
+        })),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
