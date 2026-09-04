@@ -84,11 +84,6 @@ tokio = { version = "1", features = ["full", "test-util"] }
 criterion = { version = "0.5", default-features = false }
 # Skill-pack tests run the bundled eval suites through the real gate path.
 rusty-eval = { path = "../rusty-eval" }
-# EP-11-S03: JSON Schema generation for the egress policy document. Only
-# needed in tests — the generated golden snapshot is the published schema;
-# runtime validation uses the already-present `jsonschema` crate.
-schemars = "0.8"
-
 [[example]]
 # Manual live validation for the genai adapter (provider layer, wave 2):
 # requires provider API keys and network access — never run in CI. The

@@ -296,6 +296,7 @@ pub mod repair;
 pub mod replay;
 pub mod reviewer;
 pub mod sandbox;
+pub mod seam_catalog;
 pub mod self_improve;
 pub mod session_query;
 pub mod skill;

@@ -1,0 +1,336 @@
+{
+  "version": "0.12.0",
+  "entries": [
+    {
+      "name": "node_run",
+      "dispatch_mode": "around",
+      "payload_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "state": {
+            "description": "The state snapshot at the time of invocation."
+          },
+          "step": {
+            "format": "uint",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "thread_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "state",
+          "step",
+          "thread_id"
+        ],
+        "title": "NodeCallPayload",
+        "type": "object"
+      },
+      "return_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updates": {
+            "additionalProperties": true,
+            "default": {},
+            "type": "object"
+          }
+        },
+        "title": "NodeOutputSchema",
+        "type": "object"
+      },
+      "decision_variants": [
+        "continue",
+        "reject",
+        "short_circuit"
+      ]
+    },
+    {
+      "name": "model_call",
+      "dispatch_mode": "around",
+      "payload_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ChatMessageSchema": {
+            "properties": {
+              "content": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "$ref": "#/definitions/RoleSchema"
+              },
+              "tool_call_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool_calls": {
+                "items": {
+                  "$ref": "#/definitions/ToolCallSchema"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "role"
+            ],
+            "type": "object"
+          },
+          "RoleSchema": {
+            "enum": [
+              "System",
+              "User",
+              "Assistant",
+              "Tool"
+            ],
+            "type": "string"
+          },
+          "ToolCallSchema": {
+            "properties": {
+              "arguments": true,
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arguments",
+              "id",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/definitions/ChatMessageSchema"
+            },
+            "type": "array"
+          },
+          "node": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "tools": {
+            "items": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages",
+          "node",
+          "thread_id",
+          "tools"
+        ],
+        "title": "ModelCallPayload",
+        "type": "object"
+      },
+      "return_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ChatMessageSchema": {
+            "properties": {
+              "content": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "$ref": "#/definitions/RoleSchema"
+              },
+              "tool_call_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool_calls": {
+                "items": {
+                  "$ref": "#/definitions/ToolCallSchema"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "role"
+            ],
+            "type": "object"
+          },
+          "RoleSchema": {
+            "enum": [
+              "System",
+              "User",
+              "Assistant",
+              "Tool"
+            ],
+            "type": "string"
+          },
+          "ToolCallSchema": {
+            "properties": {
+              "arguments": true,
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arguments",
+              "id",
+              "name"
+            ],
+            "type": "object"
+          },
+          "UsageSchema": {
+            "properties": {
+              "cached_tokens": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "completion_tokens": {
+                "default": 0,
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "prompt_tokens": {
+                "default": 0,
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "total_tokens": {
+                "default": 0,
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "properties": {
+          "message": {
+            "$ref": "#/definitions/ChatMessageSchema"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/UsageSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ChatResponseSchema",
+        "type": "object"
+      },
+      "decision_variants": [
+        "continue",
+        "reject",
+        "short_circuit"
+      ]
+    },
+    {
+      "name": "tool_call",
+      "dispatch_mode": "around",
+      "payload_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ToolCallSchema": {
+            "properties": {
+              "arguments": true,
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arguments",
+              "id",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "call": {
+            "$ref": "#/definitions/ToolCallSchema"
+          },
+          "node": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "node",
+          "thread_id"
+        ],
+        "title": "ToolInvocationPayload",
+        "type": "object"
+      },
+      "return_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "AnyValue"
+      },
+      "decision_variants": [
+        "continue",
+        "reject",
+        "short_circuit"
+      ]
+    }
+  ]
+}
