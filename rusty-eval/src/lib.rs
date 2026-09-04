@@ -75,6 +75,8 @@
 //! # }
 //! ```
 
+pub mod simulator;
+
 pub mod assertion;
 pub mod clustering;
 pub mod compare;
@@ -143,4 +145,8 @@ pub use trace::{AttributeValue, SPAN_NAMES, SpanTree, TraceSpan};
 pub use statistics::{
     STATISTICAL_REGRESSION_FORMAT_VERSION, StatisticalDecision, StatisticalRegressionConfig,
     StatisticalRegressionReport, detect_pass_rate_regression,
+};
+pub use simulator::{
+    run_simulation, BehaviorRule, SimulationResult, SimulationScenario, SteeringTool,
+    TerminationCause, TerminationCriteria, Trigger, UserAction,
 };
