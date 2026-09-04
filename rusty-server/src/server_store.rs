@@ -46,9 +46,10 @@ use rusty_agent_runtime::gaps::GapLedger;
 use rusty_agent_runtime::journal::{ArtifactStore, FileArtifactStore, JournalSnapshot};
 use rusty_agent_runtime::knowledge::{ChunkRecord, KnowledgeSource, SourceTombstone};
 use rusty_agent_runtime::learn::{CandidateRecord, CandidateStatus, VersionPointer};
-use rusty_agent_runtime::memory::{apply_query, MemoryQuery, MemoryRecord};
+use rusty_agent_runtime::memory::{MemoryQuery, MemoryRecord, apply_query};
 use rusty_agent_runtime::receipt::RunReceipt;
 use rusty_agent_runtime::record::ArtifactRef;
+use rusty_agent_runtime::record::{ObligationStatus, PauseEnvelope, RunObligation};
 use rusty_agent_runtime::registry::{ArtifactCommit, ArtifactRecord};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -58,8 +59,8 @@ use crate::agents::{
     MailboxClaimScope,
 };
 use crate::assistants::{
-    self, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord, CreateVersionOutcome,
-    SetLifecycleOutcome, ASSISTANT_VERSION_LIMIT,
+    self, ASSISTANT_VERSION_LIMIT, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord,
+    CreateVersionOutcome, SetLifecycleOutcome,
 };
 #[cfg(feature = "capsules")]
 use crate::capsule_policy::{
@@ -941,13 +942,13 @@ pub(crate) trait ServerStore: Send + Sync {
     /// unregistered version — a corrupt store the serving path refuses
     /// to guess around.
     async fn active_capsule_policy(&self, tenant: &str)
-        -> StoreResult<Option<CapsulePolicyRecord>>;
+    -> StoreResult<Option<CapsulePolicyRecord>>;
     #[cfg(feature = "capsules")]
     /// Every tenant's active policy body, as `(tenant, record)` pairs —
     /// the startup preload's scan. Postgres answers it from the `active`
     /// column directly; the JSON backend folds the pointer files.
     async fn list_active_capsule_policies(&self)
-        -> StoreResult<Vec<(String, CapsulePolicyRecord)>>;
+    -> StoreResult<Vec<(String, CapsulePolicyRecord)>>;
     #[cfg(feature = "capsules")]
     /// Attach (or replace) one tenant overlay, keyed by tenant-scoped
     /// overlay name. `true` when the name is new; `false` when the
@@ -1164,6 +1165,38 @@ pub(crate) trait ServerStore: Send + Sync {
         name: &str,
         environment: &str,
     ) -> StoreResult<bool>;
+
+    // -- Pause obligations (EP-03-S11) --------------------------------- //
+
+    /// Persist the open obligations for a paused run. Replaces any
+    /// earlier obligations for the same run id.
+    #[allow(dead_code)]
+    async fn put_obligations(&self, run_id: &str, obligations: &[RunObligation])
+    -> StoreResult<()>;
+    /// Fetch the obligations stored for `run_id`.
+    async fn get_obligations(&self, run_id: &str) -> StoreResult<Vec<RunObligation>>;
+    /// List obligations, optionally filtered to one run. Open obligations
+    /// are returned first when no run filter is given.
+    async fn list_obligations(&self, run_id: Option<&str>) -> StoreResult<Vec<RunObligation>>;
+    /// Atomically update the status of one obligation when it is still
+    /// `Open`. Returns `true` when the obligation existed and was updated.
+    async fn update_obligation_status(
+        &self,
+        obligation_id: &str,
+        status: ObligationStatus,
+    ) -> StoreResult<bool>;
+    /// Expire every open obligation whose `expires_at` is at or before
+    /// `now`. Returns the count expired and the affected run ids.
+    async fn sweep_expired_obligations(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<(usize, Vec<String>)>;
+    /// Persist a pause envelope for a run.
+    #[allow(dead_code)]
+    async fn put_pause_envelope(&self, envelope: &PauseEnvelope) -> StoreResult<()>;
+    /// Fetch the pause envelope for `run_id`.
+    #[allow(dead_code)]
+    async fn get_pause_envelope(&self, run_id: &str) -> StoreResult<Option<PauseEnvelope>>;
 }
 
 /// The outcome of a deployment pointer move
@@ -1389,6 +1422,14 @@ pub(crate) struct JsonFileStore {
     /// secret under `{store_path}/env-secrets/`. This index only ever
     /// holds ciphertext; the deploy module owns the cryptography.
     env_secrets: Mutex<HashMap<String, StoredEnvSecret>>,
+    /// Pause obligations keyed by run id, one JSON file per run under
+    /// `{store_path}/obligations/` containing `Vec<RunObligation>`.
+    #[allow(dead_code)]
+    obligations: Mutex<HashMap<String, Vec<RunObligation>>>,
+    /// Pause envelopes keyed by run id, one JSON file per run under
+    /// `{store_path}/pause_envelopes/` containing `PauseEnvelope`.
+    #[allow(dead_code)]
+    pause_envelopes: Mutex<HashMap<String, PauseEnvelope>>,
 }
 
 impl JsonFileStore {
@@ -1434,12 +1475,111 @@ impl JsonFileStore {
             environments: Mutex::new(deploy::load_environments(root)),
             deployment_pointers: Mutex::new(deploy::load_pointers(root)),
             env_secrets: Mutex::new(deploy::load_env_secrets(root)),
+            obligations: Mutex::new(load_obligations(root)),
+            pause_envelopes: Mutex::new(load_pause_envelopes(root)),
         }
     }
 }
 
 fn io_err(context: &str) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{context}: {e}")
+}
+
+// --------------------------------------------------------------------- //
+// Pause obligations & envelopes persistence helpers (EP-03-S11)
+// --------------------------------------------------------------------- //
+
+fn obligations_dir(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("obligations")
+}
+
+#[allow(dead_code)]
+async fn persist_obligations(
+    root: &std::path::Path,
+    run_id: &str,
+    obligations: &[rusty_agent_runtime::record::RunObligation],
+) -> std::io::Result<()> {
+    let dir = obligations_dir(root);
+    tokio::fs::create_dir_all(&dir).await?;
+    let bytes = serde_json::to_vec_pretty(obligations)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let path = dir.join(format!("{run_id}.json"));
+    let tmp = dir.join(format!("{run_id}.tmp"));
+    tokio::fs::write(&tmp, bytes).await?;
+    tokio::fs::rename(&tmp, path).await
+}
+
+fn load_obligations(
+    root: &std::path::Path,
+) -> std::collections::HashMap<String, Vec<rusty_agent_runtime::record::RunObligation>> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(entries) = std::fs::read_dir(obligations_dir(root)) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let parsed = std::fs::read_to_string(&path).ok().and_then(|raw| {
+            serde_json::from_str::<Vec<rusty_agent_runtime::record::RunObligation>>(&raw).ok()
+        });
+        match parsed {
+            Some(obligations) => {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    out.insert(stem.to_string(), obligations);
+                }
+            }
+            None => tracing::warn!(path = %path.display(), "skipping unreadable obligations file"),
+        }
+    }
+    out
+}
+
+fn pause_envelopes_dir(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("pause_envelopes")
+}
+
+#[allow(dead_code)]
+async fn persist_pause_envelope(
+    root: &std::path::Path,
+    envelope: &rusty_agent_runtime::record::PauseEnvelope,
+) -> std::io::Result<()> {
+    let dir = pause_envelopes_dir(root);
+    tokio::fs::create_dir_all(&dir).await?;
+    let bytes = serde_json::to_vec_pretty(envelope)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let path = dir.join(format!("{}.json", envelope.run_id));
+    let tmp = dir.join(format!("{}.tmp", envelope.run_id));
+    tokio::fs::write(&tmp, bytes).await?;
+    tokio::fs::rename(&tmp, path).await
+}
+
+fn load_pause_envelopes(
+    root: &std::path::Path,
+) -> std::collections::HashMap<String, rusty_agent_runtime::record::PauseEnvelope> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(entries) = std::fs::read_dir(pause_envelopes_dir(root)) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let parsed = std::fs::read_to_string(&path).ok().and_then(|raw| {
+            serde_json::from_str::<rusty_agent_runtime::record::PauseEnvelope>(&raw).ok()
+        });
+        match parsed {
+            Some(envelope) => {
+                out.insert(envelope.run_id.clone(), envelope);
+            }
+            None => {
+                tracing::warn!(path = %path.display(), "skipping unreadable pause envelope file")
+            }
+        }
+    }
+    out
 }
 
 /// The lease a claim hands out under the acting executor policy (R0.10
@@ -2168,10 +2308,7 @@ impl ServerStore for JsonFileStore {
             .lock()
             .await
             .values()
-            .filter(|t| {
-                t.tenant == tenant
-                    && t.parent_task_id.as_deref() == Some(parent_task_id)
-            })
+            .filter(|t| t.tenant == tenant && t.parent_task_id.as_deref() == Some(parent_task_id))
             .cloned()
             .collect();
         tasks.sort_by(|a, b| {
@@ -3681,6 +3818,162 @@ impl ServerStore for JsonFileStore {
         map.remove(&scoped);
         Ok(true)
     }
+
+    // -- Pause obligations (EP-03-S11) --------------------------------- //
+
+    async fn put_obligations(
+        &self,
+        run_id: &str,
+        obligations: &[rusty_agent_runtime::record::RunObligation],
+    ) -> StoreResult<()> {
+        persist_obligations(&self.root, run_id, obligations)
+            .await
+            .map_err(io_err("persist obligations"))?;
+        self.obligations
+            .lock()
+            .await
+            .insert(run_id.to_string(), obligations.to_vec());
+        Ok(())
+    }
+
+    async fn get_obligations(
+        &self,
+        run_id: &str,
+    ) -> StoreResult<Vec<rusty_agent_runtime::record::RunObligation>> {
+        Ok(self
+            .obligations
+            .lock()
+            .await
+            .get(run_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn list_obligations(
+        &self,
+        run_id: Option<&str>,
+    ) -> StoreResult<Vec<rusty_agent_runtime::record::RunObligation>> {
+        let map = self.obligations.lock().await;
+        if let Some(id) = run_id {
+            return Ok(map.get(id).cloned().unwrap_or_default());
+        }
+        let mut out: Vec<rusty_agent_runtime::record::RunObligation> =
+            map.values().flatten().cloned().collect();
+        // Open obligations first, then by expires_at
+        out.sort_by(|a, b| {
+            let a_open = matches!(
+                a.status,
+                rusty_agent_runtime::record::ObligationStatus::Open
+            );
+            let b_open = matches!(
+                b.status,
+                rusty_agent_runtime::record::ObligationStatus::Open
+            );
+            b_open
+                .cmp(&a_open)
+                .then_with(|| a.expires_at.cmp(&b.expires_at))
+        });
+        Ok(out)
+    }
+
+    async fn update_obligation_status(
+        &self,
+        obligation_id: &str,
+        status: rusty_agent_runtime::record::ObligationStatus,
+    ) -> StoreResult<bool> {
+        let run_id = {
+            let mut map = self.obligations.lock().await;
+            let mut found = None;
+            for (run_id, obligations) in map.iter_mut() {
+                if let Some(obligation) = obligations.iter_mut().find(|o| o.id == obligation_id) {
+                    if !matches!(
+                        obligation.status,
+                        rusty_agent_runtime::record::ObligationStatus::Open
+                    ) {
+                        return Ok(false);
+                    }
+                    obligation.status = status;
+                    found = Some(run_id.clone());
+                    break;
+                }
+            }
+            found
+        };
+        if let Some(run_id) = run_id {
+            let vec = self
+                .obligations
+                .lock()
+                .await
+                .get(&run_id)
+                .cloned()
+                .unwrap_or_default();
+            persist_obligations(&self.root, &run_id, &vec)
+                .await
+                .map_err(io_err("persist obligations"))?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn sweep_expired_obligations(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<(usize, Vec<String>)> {
+        let affected_runs = {
+            let mut map = self.obligations.lock().await;
+            let mut expired_count = 0usize;
+            let mut affected = Vec::new();
+            for (run_id, obligations) in map.iter_mut() {
+                let mut dirty = false;
+                for obligation in obligations.iter_mut() {
+                    if matches!(
+                        obligation.status,
+                        rusty_agent_runtime::record::ObligationStatus::Open
+                    ) && obligation.expires_at.is_some_and(|exp| exp <= now)
+                    {
+                        obligation.status = rusty_agent_runtime::record::ObligationStatus::Expired;
+                        expired_count += 1;
+                        dirty = true;
+                    }
+                }
+                if dirty {
+                    affected.push(run_id.clone());
+                }
+            }
+            (expired_count, affected, map.clone())
+        };
+        let (expired_count, affected, snapshot) = affected_runs;
+        for run_id in &affected {
+            if let Some(vec) = snapshot.get(run_id) {
+                persist_obligations(&self.root, run_id, vec)
+                    .await
+                    .map_err(io_err("persist obligations"))?;
+            }
+        }
+        Ok((expired_count, affected))
+    }
+
+    async fn put_pause_envelope(
+        &self,
+        envelope: &rusty_agent_runtime::record::PauseEnvelope,
+    ) -> StoreResult<()> {
+        persist_pause_envelope(&self.root, envelope)
+            .await
+            .map_err(io_err("persist pause envelope"))?;
+        self.pause_envelopes
+            .lock()
+            .await
+            .insert(envelope.run_id.clone(), envelope.clone());
+        Ok(())
+    }
+
+    async fn get_pause_envelope(
+        &self,
+        run_id: &str,
+    ) -> StoreResult<Option<rusty_agent_runtime::record::PauseEnvelope>> {
+        Ok(self.pause_envelopes.lock().await.get(run_id).cloned())
+    }
 }
 
 impl JsonFileStore {
@@ -3788,7 +4081,7 @@ mod postgres {
     use chrono::{DateTime, Utc};
     use rusty_agent_runtime::artifact::RunArtifact;
     use rusty_agent_runtime::broker::StoredConnection;
-    use rusty_agent_runtime::checkpoint::{encode_delta, Checkpoint, DeltaPolicy};
+    use rusty_agent_runtime::checkpoint::{Checkpoint, DeltaPolicy, encode_delta};
     use rusty_agent_runtime::deploy::{
         DeploymentPointer, DeploymentRevision, EnvSecretRecord, Environment, RevisionId,
         StoredEnvSecret,
@@ -3813,9 +4106,9 @@ mod postgres {
         MailboxClaimScope,
     };
     use crate::assistants::{
+        ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT, ASSISTANT_VERSION_LIMIT,
         ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord, AssistantView,
-        CreateVersionOutcome, SetLifecycleOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT,
-        ASSISTANT_VERSION_BYTES_LIMIT, ASSISTANT_VERSION_LIMIT,
+        CreateVersionOutcome, SetLifecycleOutcome,
     };
     #[cfg(feature = "capsules")]
     use crate::capsule_policy::{
@@ -9879,11 +10172,13 @@ mod postgres {
             let (staged, deduplicated) = store.outbox_enqueue(&task).await.unwrap();
             assert!(!deduplicated);
             assert_eq!(staged.task_id, task.task_id);
-            assert!(store
-                .get_task(&tenant, &task.task_id)
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                store
+                    .get_task(&tenant, &task.task_id)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
 
             // The first publish inserts the task and marks the row; a
             // crash-recovery second pass (or the next relay tick) finds
@@ -9892,16 +10187,20 @@ mod postgres {
             let published = store.outbox_publish_pending(100, Utc::now()).await.unwrap();
             assert_eq!(published.len(), 1);
             assert_eq!(published[0].task_id, task.task_id);
-            assert!(store
-                .get_task(&tenant, &task.task_id)
-                .await
-                .unwrap()
-                .is_some());
-            assert!(store
-                .outbox_publish_pending(100, Utc::now())
-                .await
-                .unwrap()
-                .is_empty());
+            assert!(
+                store
+                    .get_task(&tenant, &task.task_id)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                store
+                    .outbox_publish_pending(100, Utc::now())
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
         }
 
         #[tokio::test]
@@ -9933,16 +10232,20 @@ mod postgres {
                 published[0].task_id, landed.task_id,
                 "the publish resolves to the pre-existing task"
             );
-            assert!(store
-                .get_task(&tenant, &staged.task_id)
-                .await
-                .unwrap()
-                .is_none());
-            assert!(store
-                .outbox_publish_pending(100, Utc::now())
-                .await
-                .unwrap()
-                .is_empty());
+            assert!(
+                store
+                    .get_task(&tenant, &staged.task_id)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                store
+                    .outbox_publish_pending(100, Utc::now())
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
         }
 
         #[tokio::test]
@@ -9980,16 +10283,20 @@ mod postgres {
                 .checkpoint_and_enqueue(&checkpoint, std::slice::from_ref(&second))
                 .await;
             assert!(err.is_err(), "duplicate checkpoint id must abort");
-            assert!(store
-                .outbox_publish_pending(100, Utc::now())
-                .await
-                .unwrap()
-                .is_empty());
-            assert!(store
-                .get_task(&tenant, &second.task_id)
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                store
+                    .outbox_publish_pending(100, Utc::now())
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                store
+                    .get_task(&tenant, &second.task_id)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
         }
 
         // --------------------------------------------------------- //
@@ -10038,7 +10345,7 @@ mod postgres {
         /// is a real seal (fresh data key per call, so a rotation is a
         /// different ciphertext).
         fn live_env_secret(name: &str, environment: &str) -> StoredEnvSecret {
-            use rusty_agent_runtime::broker::{hex_encode, SEALED_FORMAT_VERSION};
+            use rusty_agent_runtime::broker::{SEALED_FORMAT_VERSION, hex_encode};
             use rusty_agent_runtime::learn::EnvironmentTag;
             use rusty_agent_runtime::memory::ProvenanceAuthor;
             StoredEnvSecret {
@@ -10079,35 +10386,43 @@ mod postgres {
             // Registration converges; reads stay tenant-scoped.
             assert!(store.put_revision(&tenant, &rev_a).await.unwrap());
             assert!(!store.put_revision(&tenant, &rev_a).await.unwrap());
-            assert!(store
-                .get_revision(&tenant, rev_a.revision_id.as_str())
-                .await
-                .unwrap()
-                .is_some());
-            assert!(store
-                .get_revision("t-other", rev_a.revision_id.as_str())
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                store
+                    .get_revision(&tenant, rev_a.revision_id.as_str())
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                store
+                    .get_revision("t-other", rev_a.revision_id.as_str())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(store.list_revisions(&tenant).await.unwrap().len(), 1);
 
             let environment = live_environment(&format!("staging-{}", uniq()));
             assert!(store.put_environment(&tenant, &environment).await.unwrap());
             assert!(!store.put_environment(&tenant, &environment).await.unwrap());
-            assert!(store
-                .get_environment(&tenant, environment.name.as_str())
-                .await
-                .unwrap()
-                .is_some());
+            assert!(
+                store
+                    .get_environment(&tenant, environment.name.as_str())
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
             assert_eq!(store.list_environments(&tenant).await.unwrap().len(), 1);
 
             // The move: nothing serves yet, the first promotion applies
             // and the journal commits in the same transaction.
-            assert!(store
-                .get_deployment_pointer(&tenant, &surface)
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                store
+                    .get_deployment_pointer(&tenant, &surface)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             let base = DeploymentPointer::new(rusty_agent_runtime::learn::SurfaceKey::new(
                 surface.clone(),
             ));
@@ -10186,16 +10501,20 @@ mod postgres {
                 !store.set_env_secret(&tenant, &stored).await.unwrap(),
                 "the second set rotates (xmax reports the update)"
             );
-            assert!(store
-                .get_env_secret(&tenant, &name, "staging")
-                .await
-                .unwrap()
-                .is_some());
-            assert!(store
-                .get_env_secret("t-other", &name, "staging")
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                store
+                    .get_env_secret(&tenant, &name, "staging")
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                store
+                    .get_env_secret("t-other", &name, "staging")
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             let listed = store.list_env_secrets(&tenant).await.unwrap();
             assert_eq!(listed.len(), 1);
             assert_eq!(listed[0].name, name);
@@ -10213,19 +10532,25 @@ mod postgres {
                 "rotation replaces the envelope beneath the stable scoped key"
             );
 
-            assert!(store
-                .delete_env_secret(&tenant, &name, "staging")
-                .await
-                .unwrap());
-            assert!(!store
-                .delete_env_secret(&tenant, &name, "staging")
-                .await
-                .unwrap());
-            assert!(store
-                .get_env_secret(&tenant, &name, "staging")
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                store
+                    .delete_env_secret(&tenant, &name, "staging")
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .delete_env_secret(&tenant, &name, "staging")
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                store
+                    .get_env_secret(&tenant, &name, "staging")
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
         }
     }
 }
@@ -10342,7 +10667,7 @@ impl KnowledgePlane {
                     "a different source record already occupies content hash {} — a version is \
                      immutable, and its hash is its identity",
                     source.content_hash
-                ))
+                ));
             }
             None => {}
         }
@@ -10532,7 +10857,7 @@ impl ConnectorPlane {
                     "a different manifest already occupies content hash {} — a manifest is \
                      immutable, and its hash is its identity",
                     manifest.hash
-                ))
+                ));
             }
             None => {}
         }
@@ -10686,11 +11011,13 @@ mod deploy_store_tests {
             !store.put_revision("acme", &rev).await.unwrap(),
             "an existing address converges — no rewrite"
         );
-        assert!(store
-            .get_revision("acme", rev.revision_id.as_str())
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            store
+                .get_revision("acme", rev.revision_id.as_str())
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert!(
             store
                 .get_revision("globex", rev.revision_id.as_str())
@@ -10705,30 +11032,38 @@ mod deploy_store_tests {
         let environment = environment("staging");
         assert!(store.put_environment("acme", &environment).await.unwrap());
         assert!(!store.put_environment("acme", &environment).await.unwrap());
-        assert!(store
-            .get_environment("acme", "staging")
-            .await
-            .unwrap()
-            .is_some());
-        assert!(store
-            .get_environment("globex", "staging")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .get_environment("acme", "staging")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .get_environment("globex", "staging")
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(store.list_environments("acme").await.unwrap().len(), 1);
 
         // A restart reloads both record sets from disk.
         let reloaded = JsonFileStore::load(&root);
-        assert!(reloaded
-            .get_revision("acme", rev.revision_id.as_str())
-            .await
-            .unwrap()
-            .is_some());
-        assert!(reloaded
-            .get_environment("acme", "staging")
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            reloaded
+                .get_revision("acme", rev.revision_id.as_str())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            reloaded
+                .get_environment("acme", "staging")
+                .await
+                .unwrap()
+                .is_some()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -10750,11 +11085,13 @@ mod deploy_store_tests {
         };
 
         // Nothing promoted yet: the environment serves nothing.
-        assert!(store
-            .get_deployment_pointer("acme", surface)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .get_deployment_pointer("acme", surface)
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         let journal =
             Journal::new("deployment-control", "deployment-control", Clock::System).snapshot();
@@ -10775,11 +11112,13 @@ mod deploy_store_tests {
                 .active,
             Some(rev_a.revision_id.clone())
         );
-        assert!(store
-            .get_journal("deployment-control")
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            store
+                .get_journal("deployment-control")
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         // A stale expectation conflicts and changes nothing.
         let outcome = store
@@ -10842,16 +11181,20 @@ mod deploy_store_tests {
             !store.set_env_secret("acme", &stored).await.unwrap(),
             "the second set rotates"
         );
-        assert!(store
-            .get_env_secret("acme", "database-url", "staging")
-            .await
-            .unwrap()
-            .is_some());
-        assert!(store
-            .get_env_secret("globex", "database-url", "staging")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .get_env_secret("acme", "database-url", "staging")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .get_env_secret("globex", "database-url", "staging")
+                .await
+                .unwrap()
+                .is_none()
+        );
         let listed = store.list_env_secrets("acme").await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "database-url");
@@ -10882,10 +11225,12 @@ mod deploy_store_tests {
             rotated.envelope
         );
 
-        assert!(store
-            .delete_env_secret("acme", "database-url", "staging")
-            .await
-            .unwrap());
+        assert!(
+            store
+                .delete_env_secret("acme", "database-url", "staging")
+                .await
+                .unwrap()
+        );
         assert!(
             !store
                 .delete_env_secret("acme", "database-url", "staging")
@@ -10893,11 +11238,101 @@ mod deploy_store_tests {
                 .unwrap(),
             "delete reports absence"
         );
-        assert!(store
-            .get_env_secret("acme", "database-url", "staging")
+        assert!(
+            store
+                .get_env_secret("acme", "database-url", "staging")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn obligations_round_trip_and_sweep() {
+        use chrono::Utc;
+        use rusty_agent_runtime::record::{ObligationKind, ObligationStatus, RunObligation};
+
+        let root =
+            std::env::temp_dir().join(format!("rusty-obligations-test-{}", uuid::Uuid::new_v4()));
+        let store = JsonFileStore::load(&root);
+
+        let run_id = "run-1";
+        let obligations = vec![
+            RunObligation {
+                id: "obl-1".into(),
+                tool_call_id: Some("tc-1".into()),
+                kind: ObligationKind::Approval {
+                    scope: "user".into(),
+                    sticky_allowed: false,
+                },
+                status: ObligationStatus::Open,
+                expires_at: Some(Utc::now() - chrono::Duration::hours(1)),
+                member_run_id: None,
+            },
+            RunObligation {
+                id: "obl-2".into(),
+                tool_call_id: Some("tc-2".into()),
+                kind: ObligationKind::Approval {
+                    scope: "admin".into(),
+                    sticky_allowed: true,
+                },
+                status: ObligationStatus::Open,
+                expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
+                member_run_id: None,
+            },
+        ];
+
+        store.put_obligations(run_id, &obligations).await.unwrap();
+        let loaded = store.get_obligations(run_id).await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "obl-1");
+
+        // Sweep should expire obl-1
+        let (count, affected) = store.sweep_expired_obligations(Utc::now()).await.unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(affected, vec!["run-1"]);
+
+        let after_sweep = store.get_obligations(run_id).await.unwrap();
+        assert_eq!(after_sweep[0].status, ObligationStatus::Expired);
+        assert_eq!(after_sweep[1].status, ObligationStatus::Open);
+
+        // Update status
+        let updated = store
+            .update_obligation_status("obl-2", ObligationStatus::Satisfied)
             .await
-            .unwrap()
-            .is_none());
+            .unwrap();
+        assert!(updated);
+        let after_update = store.get_obligations(run_id).await.unwrap();
+        assert_eq!(after_update[1].status, ObligationStatus::Satisfied);
+
+        // List all obligations (open first)
+        let all = store.list_obligations(None).await.unwrap();
+        assert_eq!(all.len(), 2);
+        let ids: Vec<_> = all.iter().map(|o| o.id.as_str()).collect();
+        assert!(ids.contains(&"obl-1"));
+        assert!(ids.contains(&"obl-2"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn pause_envelope_round_trip() {
+        use rusty_agent_runtime::record::PauseEnvelope;
+
+        let root = std::env::temp_dir().join(format!("rusty-pause-test-{}", uuid::Uuid::new_v4()));
+        let store = JsonFileStore::load(&root);
+
+        let envelope = PauseEnvelope::new("run-1", "session-1", 42, "chk-1");
+        store.put_pause_envelope(&envelope).await.unwrap();
+
+        let loaded = store.get_pause_envelope("run-1").await.unwrap();
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap().run_id, "run-1");
+
+        let missing = store.get_pause_envelope("run-2").await.unwrap();
+        assert!(missing.is_none());
+
         let _ = std::fs::remove_dir_all(root);
     }
 }

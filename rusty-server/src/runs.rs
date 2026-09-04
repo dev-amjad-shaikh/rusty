@@ -49,13 +49,13 @@ use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
 use rusty_agent_runtime::record::{Effect, RunEventKind};
 use rusty_agent_runtime::state::State;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use serde_json::{Value, json};
+use tokio::sync::{Mutex, broadcast, mpsc, watch};
 
+use crate::GraphRegistry;
 use crate::error::ApiError;
 use crate::pending_runs::PendingRunRecord;
 use crate::server_store::ServerStore;
-use crate::GraphRegistry;
 
 // --------------------------------------------------------------------- //
 // Run payload (accepted by all three run endpoints)
@@ -246,6 +246,9 @@ pub enum RunStatus {
     Success,
     /// Suspended on an interrupt; resumable via `command.resume`.
     Interrupted,
+    /// Paused on open obligations; resumable via `POST /v1/runs/{id}/resume`
+    /// with answers.
+    Paused,
     /// Failed.
     Error,
     /// Stopped by the graceful-shutdown drain (R0.6 wave 2c) at a
@@ -263,6 +266,7 @@ impl RunStatus {
             RunStatus::Running => "running",
             RunStatus::Success => "success",
             RunStatus::Interrupted => "interrupted",
+            RunStatus::Paused => "paused",
             RunStatus::Error => "error",
             RunStatus::Cancelled => "cancelled",
         }
@@ -276,6 +280,13 @@ impl RunStatus {
             self,
             RunStatus::Success | RunStatus::Interrupted | RunStatus::Error | RunStatus::Cancelled
         )
+    }
+
+    /// `true` for statuses that are done in this process but may resume
+    /// in place (Paused) or via a new run (Interrupted).
+    #[allow(dead_code)]
+    pub(crate) fn is_suspended(self) -> bool {
+        matches!(self, RunStatus::Paused | RunStatus::Interrupted)
     }
 }
 
@@ -506,6 +517,9 @@ pub(crate) enum RunCancel {
     /// The run was queued behind another; it was dequeued and finished
     /// terminal-`cancelled` without ever starting.
     CancelledQueued,
+    /// The run was paused on obligations; it was cancelled immediately and
+    /// its open obligations expired.
+    CancelledPaused,
     /// The run was already terminal; nothing changed.
     Terminal,
     /// No such run.
@@ -717,6 +731,22 @@ impl RunManager {
                 });
                 handle.terminal.send_replace(Some(terminal));
                 RunCancel::CancelledQueued
+            }
+            RunStatus::Paused => {
+                let wire_thread_id = handle.wire_thread_id.clone();
+                let handle = inner
+                    .runs
+                    .get_mut(run_id)
+                    .expect("the handle was resolved above");
+                handle.status = RunStatus::Cancelled;
+                let terminal = json!({
+                    "run_id": run_id,
+                    "thread_id": wire_thread_id,
+                    "status": "cancelled",
+                    "message": "cancelled while paused; open obligations expired",
+                });
+                handle.terminal.send_replace(Some(terminal));
+                RunCancel::CancelledPaused
             }
             // Terminal runs (including an already-cancelled one) are
             // untouched — cancellation is control flow, idempotent by
@@ -1806,12 +1836,13 @@ mod tests {
         let outcome = cancel_run(&deps, &queued.run_id).await;
         assert_eq!(outcome, RunCancel::CancelledQueued);
         // The record left the store with the transition...
-        assert!(deps
-            .server_store
-            .list_pending_runs()
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            deps.server_store
+                .list_pending_runs()
+                .await
+                .unwrap()
+                .is_empty()
+        );
         // ...so a fresh boot over the same store restores nothing (no
         // zombie run re-appears).
         let reboot = test_deps(&tmp.0);
@@ -1854,12 +1885,13 @@ mod tests {
         // Not double-scheduled, and the zombie record is cleared.
         assert!(deps.manager.info("run-stale").await.is_none());
         assert!(!deps.manager.thread_busy("thread-1").await);
-        assert!(deps
-            .server_store
-            .list_pending_runs()
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            deps.server_store
+                .list_pending_runs()
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -1894,11 +1926,12 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(status, Some(RunStatus::Success));
-        assert!(deps
-            .server_store
-            .list_pending_runs()
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            deps.server_store
+                .list_pending_runs()
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 }
