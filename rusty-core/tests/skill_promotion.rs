@@ -53,6 +53,7 @@ fn skill_promotion_serde_round_trip() {
         status: SkillPromotionStatus::Promoted,
         gate_run_id: Some("run-42".to_owned()),
         gate_name: Some("billing-regression".to_owned()),
+        gate_version: Some("1.4.0".to_owned()),
         author: "operator:ada".to_owned(),
         created_at: chrono::Utc::now(),
     };
@@ -64,6 +65,7 @@ fn skill_promotion_serde_round_trip() {
     assert_eq!(decoded.status, original.status);
     assert_eq!(decoded.gate_run_id, original.gate_run_id);
     assert_eq!(decoded.gate_name, original.gate_name);
+    assert_eq!(decoded.gate_version, original.gate_version);
     assert_eq!(decoded.author, original.author);
 }
 
@@ -99,5 +101,17 @@ fn skill_promotion_deserializes_without_gate_name() {
     let json = r#"{"name":"a-skill","revision":1,"content_hash":"hash","status":"promoted","gate_run_id":"run-1","author":"dev","created_at":"2024-01-01T00:00:00Z"}"#;
     let promotion: SkillPromotion = serde_json::from_str(json).expect("deserializes");
     assert_eq!(promotion.gate_name, None);
+    assert_eq!(promotion.gate_version, None);
     assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+}
+
+#[test]
+fn skill_promotion_deserializes_without_gate_version() {
+    // History written before held-out enforcement (EP-17-S03) carries a
+    // gate name but no suite version; the bump comparison treats the
+    // version as unknown rather than failing to load.
+    let json = r#"{"name":"a-skill","revision":2,"content_hash":"hash","status":"promoted","gate_run_id":"run-2","gate_name":"suite-a","author":"dev","created_at":"2024-01-01T00:00:00Z"}"#;
+    let promotion: SkillPromotion = serde_json::from_str(json).expect("deserializes");
+    assert_eq!(promotion.gate_name.as_deref(), Some("suite-a"));
+    assert_eq!(promotion.gate_version, None);
 }

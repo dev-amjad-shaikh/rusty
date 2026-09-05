@@ -1267,6 +1267,13 @@ pub struct SkillPromotion {
     /// predate it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_name: Option<String>,
+    /// The suite version of the gate run that authorized this promotion.
+    /// The held-out check (EP-17-S03) compares it against a later
+    /// decision's suite version to recognize a version bump; absent when
+    /// the evaluator did not report a version or the record predates the
+    /// check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_version: Option<String>,
     /// Who attempted or completed the promotion.
     pub author: String,
     /// When the record was created.

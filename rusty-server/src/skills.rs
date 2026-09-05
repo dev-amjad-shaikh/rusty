@@ -226,8 +226,14 @@ fn collect_json_files(root: &Path, out: &mut Vec<PathBuf>) {
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GateEvaluationResult {
-    /// The gate passed: the suite run succeeded.
-    Pass { run_id: String },
+    /// The gate passed: the suite run succeeded. `suite_version` is the
+    /// version of the suite the run executed, when the evaluator knows it —
+    /// the held-out enforcement (EP-17-S03) relies on it to recognize a
+    /// version bump; when absent, that enforcement degrades with a warning.
+    Pass {
+        run_id: String,
+        suite_version: Option<String>,
+    },
     /// The gate failed: the suite run produced failing cases.
     Fail {
         run_id: String,
@@ -307,6 +313,83 @@ pub(crate) trait SkillGateEvaluator: Send + Sync + std::fmt::Debug {
     ) -> Result<GateEvaluationResult, String>;
 }
 
+/// Evidence that a promotion candidate passed a suite other than the
+/// declared gate — the held-out transfer check (EP-17-S03).
+#[async_trait::async_trait]
+pub(crate) trait HeldOutEvidence: Send + Sync + std::fmt::Debug {
+    /// Whether `skill` at `content_hash` carries a passing run on any suite
+    /// other than `declared_gate`.
+    async fn has_held_out_pass(
+        &self,
+        skill: &str,
+        content_hash: &str,
+        declared_gate: &str,
+    ) -> Result<bool, String>;
+}
+
+/// Held-out evidence backed by the conformance run catalog (EP-12-S09):
+/// suite runs recorded through `POST /conformance-runs` are the queryable
+/// record, keyed by `target` = skill name and `target_version` = content
+/// hash — no new storage.
+pub(crate) struct CatalogHeldOutEvidence {
+    store: Arc<dyn crate::server_store::ServerStore>,
+    tenant: String,
+}
+
+impl std::fmt::Debug for CatalogHeldOutEvidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CatalogHeldOutEvidence")
+            .field("tenant", &self.tenant)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CatalogHeldOutEvidence {
+    pub(crate) fn new(store: Arc<dyn crate::server_store::ServerStore>, tenant: &str) -> Self {
+        Self {
+            store,
+            tenant: tenant.to_owned(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl HeldOutEvidence for CatalogHeldOutEvidence {
+    async fn has_held_out_pass(
+        &self,
+        skill: &str,
+        content_hash: &str,
+        declared_gate: &str,
+    ) -> Result<bool, String> {
+        let catalog = crate::evaluations::list_conformance_runs(&self.store, &self.tenant)
+            .await
+            .map_err(|e| format!("list conformance runs: {e}"))?;
+        for run in catalog.runs {
+            if run.target != skill
+                || run.target_version != content_hash
+                || run.suite_name == declared_gate
+                || !matches!(
+                    run.status,
+                    crate::evaluations::ConformanceRunStatus::Complete
+                )
+            {
+                continue;
+            }
+            // The summary says complete; the full record's report says passed.
+            let record =
+                crate::evaluations::get_conformance_run(&self.store, &self.tenant, &run.run_id)
+                    .await
+                    .map_err(|e| format!("load conformance run: {e}"))?;
+            if let Some(report) = record.and_then(|r| r.report) {
+                if report.passed {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
 /// Errors that can occur during promotion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PromotionError {
@@ -324,6 +407,11 @@ pub(crate) enum PromotionError {
     /// The regression pack blocked: evals a past promotion passed now fail
     /// against the candidate (EP-17-S02).
     RegressionBlocked { failures: Vec<RegressionFailure> },
+    /// The held-out requirement blocked: this skill already passed the
+    /// declared gate at this exact suite version, and the candidate shows
+    /// neither a passing held-out suite run nor a suite version bump
+    /// (EP-17-S03).
+    HeldOutRequired { gate: String, suite_version: String },
     /// An I/O error occurred persisting the promotion record.
     Io(String),
 }
@@ -345,6 +433,15 @@ impl std::fmt::Display for PromotionError {
                     .join(", ");
                 write!(f, "regression pack blocked by: {gates}")
             }
+            PromotionError::HeldOutRequired {
+                gate,
+                suite_version,
+            } => write!(
+                f,
+                "held-out evidence required: gate `{gate}` at suite version {suite_version} \
+                 already authorized this skill; supply a passing held-out suite run or a \
+                 suite version bump"
+            ),
             PromotionError::Io(msg) => write!(f, "io error: {msg}"),
         }
     }
@@ -553,6 +650,11 @@ impl SkillPlane {
     /// every gate a past promotion passed (the regression pack, derived
     /// from the promotion history) is re-run against the candidate, and a
     /// regression blocks with a typed refusal naming the regressed cases.
+    /// EP-17-S03: A candidate promoting on a gate this skill already passed
+    /// at the same suite version has had tuning exposure to those cases; the
+    /// decision then requires a passing held-out suite run. A suite version
+    /// bump is fresh cases and exempts, pairing with the conformance
+    /// registry's version-bump invalidation (EP-12-S09).
     pub(crate) async fn promote(
         &self,
         tenant: &str,
@@ -560,6 +662,7 @@ impl SkillPlane {
         revision: u64,
         author: String,
         evaluator: &dyn SkillGateEvaluator,
+        held_out: &dyn HeldOutEvidence,
     ) -> Result<SkillPromotion, PromotionError> {
         let tenants = self.tenants.lock().await;
         let version = tenants
@@ -599,8 +702,11 @@ impl SkillPlane {
             .await
             .map_err(PromotionError::GateFailed)?;
 
-        let run_id = match result {
-            GateEvaluationResult::Pass { run_id } => run_id,
+        let (run_id, suite_version) = match result {
+            GateEvaluationResult::Pass {
+                run_id,
+                suite_version,
+            } => (run_id, suite_version),
             GateEvaluationResult::Fail {
                 run_id,
                 diagnostics,
@@ -613,6 +719,7 @@ impl SkillPlane {
                     status: SkillPromotionStatus::Trial,
                     gate_run_id: Some(run_id.clone()),
                     gate_name: Some(gate_name.clone()),
+                    gate_version: None,
                     author: author.clone(),
                     created_at: chrono::Utc::now(),
                 };
@@ -628,6 +735,63 @@ impl SkillPlane {
                 });
             }
         };
+
+        // EP-17-S03: held-out transfer. When this skill already promoted on
+        // the declared gate at this exact suite version, the author has had
+        // tuning exposure to those cases, so this decision cannot rest on
+        // that suite alone: require a passing held-out run for the
+        // candidate. A version bump means fresh cases and exempts. An
+        // evaluator that reports no suite version leaves the version
+        // comparison unprovable; enforcement degrades with a warning.
+        if let Some(version) = suite_version.as_deref() {
+            let prior_same_version = {
+                let promotions = self.promotions.lock().await;
+                promotions
+                    .get(&(tenant.to_owned(), name.to_owned()))
+                    .map(|history| {
+                        history.iter().any(|p| {
+                            p.status == SkillPromotionStatus::Promoted
+                                && p.gate_name.as_deref() == Some(gate_name.as_str())
+                                && p.gate_version.as_deref() == Some(version)
+                        })
+                    })
+                    .unwrap_or(false)
+            };
+            if prior_same_version
+                && !held_out
+                    .has_held_out_pass(name, &content_hash, &gate_name)
+                    .await
+                    .map_err(PromotionError::GateFailed)?
+            {
+                let failed = SkillPromotion {
+                    name: name.to_owned(),
+                    revision,
+                    content_hash,
+                    status: SkillPromotionStatus::Trial,
+                    gate_run_id: Some(run_id.clone()),
+                    gate_name: Some(gate_name.clone()),
+                    gate_version: Some(version.to_owned()),
+                    author: author.clone(),
+                    created_at: chrono::Utc::now(),
+                };
+                persist_promotion(&self.root, tenant, name, &failed).await?;
+                let mut proms = self.promotions.lock().await;
+                proms
+                    .entry((tenant.to_owned(), name.to_owned()))
+                    .or_default()
+                    .push(failed);
+                return Err(PromotionError::HeldOutRequired {
+                    gate: gate_name.clone(),
+                    suite_version: version.to_owned(),
+                });
+            }
+        } else {
+            tracing::warn!(
+                skill = %name,
+                gate = %gate_name,
+                "gate run reported no suite version; held-out enforcement degraded"
+            );
+        }
 
         // EP-17-S02: the declared gate passed. Before the promotion stands,
         // re-run the regression pack — every gate a past promotion passed —
@@ -678,6 +842,7 @@ impl SkillPlane {
                 status: SkillPromotionStatus::Trial,
                 gate_run_id: Some(failures[0].run_id.clone()),
                 gate_name: Some(gate_name.clone()),
+                gate_version: suite_version.clone(),
                 author: author.clone(),
                 created_at: chrono::Utc::now(),
             };
@@ -697,6 +862,7 @@ impl SkillPlane {
             status: SkillPromotionStatus::Promoted,
             gate_run_id: Some(run_id),
             gate_name: Some(gate_name),
+            gate_version: suite_version,
             author,
             created_at: chrono::Utc::now(),
         };
@@ -1069,9 +1235,20 @@ pub(crate) async fn promote_skill(
         .map(|e| e as &dyn crate::skills::SkillGateEvaluator)
         .unwrap_or(&default_evaluator);
 
+    // Held-out evidence comes from the conformance run catalog (EP-17-S03).
+    let held_out =
+        crate::skills::CatalogHeldOutEvidence::new(state.server_store.clone(), tenant.tenant());
+
     match state
         .skills
-        .promote(tenant.tenant(), &name, revision, payload.author, evaluator)
+        .promote(
+            tenant.tenant(),
+            &name,
+            revision,
+            payload.author,
+            evaluator,
+            &held_out,
+        )
         .await
     {
         Ok(promotion) => {
@@ -1120,6 +1297,23 @@ pub(crate) async fn promote_skill(
             })),
         )
             .into_response(),
+        Err(PromotionError::HeldOutRequired {
+            gate,
+            suite_version,
+        }) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "held_out_required",
+                "message": format!(
+                    "gate `{gate}` at suite version {suite_version} already authorized this \
+                     skill; promotion requires a passing held-out suite run for the candidate \
+                     or a suite version bump"
+                ),
+                "gate": gate,
+                "suite_version": suite_version,
+            })),
+        )
+            .into_response(),
         Err(PromotionError::GateFailed(msg)) => {
             ApiError::internal(format!("gate evaluation failed: {msg}")).into_response()
         }
@@ -1145,6 +1339,29 @@ mod tests {
         SkillSource::LocalPath {
             path: "/skills/test".to_owned(),
         }
+    }
+
+    /// Held-out evidence double: each promotion test declares whether the
+    /// candidate carries a passing held-out run (EP-17-S03).
+    #[derive(Debug)]
+    struct ScriptedHeldOutEvidence {
+        held_out: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl HeldOutEvidence for ScriptedHeldOutEvidence {
+        async fn has_held_out_pass(
+            &self,
+            _skill: &str,
+            _content_hash: &str,
+            _declared_gate: &str,
+        ) -> Result<bool, String> {
+            Ok(self.held_out)
+        }
+    }
+
+    fn no_held_out() -> ScriptedHeldOutEvidence {
+        ScriptedHeldOutEvidence { held_out: false }
     }
 
     #[tokio::test]
@@ -1248,10 +1465,18 @@ mod tests {
         let evaluator = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
+                suite_version: None,
             }),
         };
         let result = plane
-            .promote("default", "no-gate", 1, "op".to_string(), &evaluator)
+            .promote(
+                "default",
+                "no-gate",
+                1,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
             .await;
         assert_eq!(result, Err(PromotionError::NoGateDeclared));
         let _ = std::fs::remove_dir_all(root);
@@ -1279,7 +1504,14 @@ mod tests {
             }),
         };
         let result = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
             .await;
         assert!(
             matches!(result, Err(PromotionError::GateBlocked { run_id, .. }) if run_id == "run-fail")
@@ -1306,10 +1538,18 @@ mod tests {
         let evaluator = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-pass".to_owned(),
+                suite_version: None,
             }),
         };
         let promotion = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
@@ -1337,10 +1577,18 @@ mod tests {
         let evaluator = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
+                suite_version: None,
             }),
         };
         let first = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(first.gate_run_id, Some("run-1".to_owned()));
@@ -1356,6 +1604,7 @@ mod tests {
                 1,
                 "op".to_string(),
                 &evaluator_never_called,
+                &no_held_out(),
             )
             .await
             .unwrap();
@@ -1378,10 +1627,18 @@ mod tests {
         let evaluator1 = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
+                suite_version: None,
             }),
         };
         let first = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1397,10 +1654,18 @@ mod tests {
         let evaluator2 = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-2".to_owned(),
+                suite_version: None,
             }),
         };
         let second = plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator2)
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_ne!(first.content_hash, second.content_hash);
@@ -1426,6 +1691,21 @@ mod tests {
                 gate.to_owned(),
                 Ok(GateEvaluationResult::Pass {
                     run_id: run_id.to_owned(),
+                    suite_version: None,
+                }),
+            )
+        }
+
+        fn pass_versioned(
+            gate: &str,
+            run_id: &str,
+            suite_version: &str,
+        ) -> (String, Result<GateEvaluationResult, String>) {
+            (
+                gate.to_owned(),
+                Ok(GateEvaluationResult::Pass {
+                    run_id: run_id.to_owned(),
+                    suite_version: Some(suite_version.to_owned()),
                 }),
             )
         }
@@ -1488,7 +1768,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         let promotion = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
@@ -1515,7 +1802,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1537,7 +1831,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         let promotion = plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator2)
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
@@ -1568,7 +1869,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1589,7 +1897,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         let result = plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator2)
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
             .await;
         match result {
             Err(PromotionError::RegressionBlocked { failures }) => {
@@ -1628,7 +1943,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1648,7 +1970,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator2)
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1671,7 +2000,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         let result = plane
-            .promote("default", "gated", 3, "op".to_string(), &evaluator3)
+            .promote(
+                "default",
+                "gated",
+                3,
+                "op".to_string(),
+                &evaluator3,
+                &no_held_out(),
+            )
             .await;
         match result {
             Err(PromotionError::RegressionBlocked { failures }) => {
@@ -1712,7 +2048,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1728,6 +2071,7 @@ mod tests {
                 1,
                 "op".to_string(),
                 &evaluator_never_called,
+                &no_held_out(),
             )
             .await
             .unwrap();
@@ -1756,7 +2100,14 @@ mod tests {
             }),
         };
         let blocked = plane
-            .promote("default", "gated", 1, "op".to_string(), &failing)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &failing,
+                &no_held_out(),
+            )
             .await;
         assert!(matches!(blocked, Err(PromotionError::GateBlocked { .. })));
 
@@ -1775,7 +2126,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator)
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(evaluator.calls(), vec!["suite-a".to_owned()]);
@@ -1799,7 +2157,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1818,7 +2183,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         let result = plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator2)
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
             .await;
         match result {
             Err(PromotionError::GateFailed(msg)) => {
@@ -1875,7 +2247,14 @@ mod tests {
             calls: std::sync::Mutex::new(vec![]),
         };
         let promotion = plane
-            .promote("default", "legacy", 1, "op".to_string(), &evaluator)
+            .promote(
+                "default",
+                "legacy",
+                1,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
@@ -1883,6 +2262,362 @@ mod tests {
         let history = plane.promotion_history("default", "legacy").await;
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].gate_name, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // ----------------------------------------------------------------- //
+    // Held-out split enforcement (EP-17-S03)
+    // ----------------------------------------------------------------- //
+
+    /// Records the identity the held-out check is queried with.
+    #[derive(Debug)]
+    struct RecordingHeldOutEvidence {
+        held_out: bool,
+        calls: std::sync::Mutex<Vec<(String, String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HeldOutEvidence for RecordingHeldOutEvidence {
+        async fn has_held_out_pass(
+            &self,
+            skill: &str,
+            content_hash: &str,
+            declared_gate: &str,
+        ) -> Result<bool, String> {
+            self.calls.lock().unwrap().push((
+                skill.to_owned(),
+                content_hash.to_owned(),
+                declared_gate.to_owned(),
+            ));
+            Ok(self.held_out)
+        }
+    }
+
+    #[tokio::test]
+    async fn repromotion_same_gate_same_version_requires_held_out() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // Revision 2 passes the same gate at the same suite version: the
+        // author has had tuning exposure to exactly those cases.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let result = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
+            .await;
+        assert_eq!(
+            result,
+            Err(PromotionError::HeldOutRequired {
+                gate: "suite-a".to_owned(),
+                suite_version: "1.0".to_owned(),
+            })
+        );
+        // The blocked attempt is recorded as Trial; revision 2 never promotes.
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].status, SkillPromotionStatus::Trial);
+        assert_eq!(history[1].gate_version.as_deref(), Some("1.0"));
+        assert_eq!(history[1].gate_run_id.as_deref(), Some("run-2"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn held_out_pass_satisfies_transfer_requirement() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        // A passing run on a held-out suite exists for this candidate.
+        let held_out = ScriptedHeldOutEvidence { held_out: true };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &held_out,
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(promotion.gate_version.as_deref(), Some("1.0"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn suite_version_bump_exempts_held_out() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // The suite bumped to 2.0: fresh cases the candidate could not have
+        // been tuned against, so the gate alone suffices.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "2.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(promotion.gate_version.as_deref(), Some("2.0"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn unversioned_gate_run_degrades_held_out_enforcement() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // The evaluator reports no suite version for the fresh run: the
+        // same-version exposure is unprovable, so enforcement degrades (with
+        // a warning) rather than inventing a version.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-2")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(promotion.gate_version, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn held_out_check_queries_with_candidate_identity() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        let registration = plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let candidate_hash = registration.version.content_hash().to_owned();
+
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let held_out = RecordingHeldOutEvidence {
+            held_out: true,
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                &held_out,
+            )
+            .await
+            .unwrap();
+        // The check is keyed by skill name and candidate content hash, and
+        // excludes the declared gate from what counts as held-out.
+        let calls = held_out.calls.lock().unwrap().clone();
+        assert_eq!(
+            calls,
+            vec![("gated".to_owned(), candidate_hash, "suite-a".to_owned())]
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
