@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a8a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 9px center;cursor:pointer}</style></helmet>
+<div style="display:flex;flex-direction:column;gap:22px;font-family:'Instrument Sans',system-ui,sans-serif;color:var(--ink)">
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Identity</div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px">
+      <label style="display:flex;flex-direction:column;gap:4px;min-width:0">
+        <span style="font-size:12px;color:var(--ink2)">Name</span>
+        <input value="{{ d.name }}" onInput="{{ onName }}" placeholder="e.g. Deal Desk Assistant" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+        <sc-if value="{{ v.name }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.name }}</span></sc-if>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;min-width:0">
+        <span style="font-size:12px;color:var(--ink2)">Model</span>
+        <select value="{{ d.model }}" onChange="{{ onModel }}" style="width:100%;box-sizing:border-box;padding:7px 28px 7px 10px;border:1px solid var(--line);border-radius:8px;background-color:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none">
+          <sc-for list="{{ models }}" as="m" hint-placeholder-count="3"><option value="{{ m }}">{{ m }}</option></sc-for>
+        </select>
+      </label>
+    </div>
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:12px;color:var(--ink2)">Description</span>
+      <input value="{{ d.description }}" onInput="{{ onDescription }}" placeholder="One line the catalog and Slack will show" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+    </label>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <span style="font-size:12px;color:var(--ink2)">Autonomy</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <sc-for list="{{ autonomyOptions }}" as="a" hint-placeholder-count="3">
+          <button onClick="{{ a.pick }}" style="padding:7px 12px;border-radius:8px;border:1px solid {{ a.border }};background:{{ a.bg }};color:{{ a.color }};font:inherit;font-size:12px;font-weight:600;cursor:pointer">{{ a.label }}</button>
+        </sc-for>
+      </div>
+      <sc-if value="{{ v.autonomy }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.autonomy }}</span></sc-if>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 10px">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Goal &amp; measures</div>
+      <button onClick="{{ addMeasure }}" style="white-space:nowrap;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:12px;cursor:pointer;font-weight:500">+ Measure</button>
+    </div>
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:12px;color:var(--ink2)">Goal</span>
+      <input value="{{ d.goal }}" onInput="{{ onGoal }}" placeholder="One outcome sentence" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+      <sc-if value="{{ v.goal }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.goal }}</span></sc-if>
+    </label>
+    <sc-if value="{{ noMeasures }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:12px;border:1px dashed var(--line);border-radius:8px;font-size:12px;color:var(--ink3)">No measures. Add at least one so the agent knows what it is judged on.</div>
+    </sc-if>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ measureItems }}" as="m" hint-placeholder-count="1">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;border:1px solid {{ m.border }};border-radius:8px;background:var(--panel)">
+          <input value="{{ m.name }}" onInput="{{ m.onName }}" placeholder="Measure" style="flex:1 1 140px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+          <select value="{{ m.source }}" onChange="{{ m.onSource }}" style="flex:0 1 96px;min-width:0;padding:7px 28px 7px 10px;border:1px solid var(--line);border-radius:8px;background-color:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none">
+            <option value="outcome">outcome</option><option value="connector">connector</option><option value="eval">eval suite</option>
+          </select>
+          <input value="{{ m.target }}" onInput="{{ m.onTarget }}" placeholder="≥ 70%" style="flex:0 1 80px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none"></input>
+          <input value="{{ m.window }}" onInput="{{ m.onWindow }}" placeholder="7d" style="flex:0 1 64px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none"></input>
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+            <button onClick="{{ m.cycleKind }}" title="target · gate · guardrail" style="padding:3px 8px;border-radius:999px;border:1px solid {{ m.kindColor }};background:transparent;color:{{ m.kindColor }};font:inherit;font-size:11px;font-weight:700;letter-spacing:.04em;cursor:pointer">{{ m.kind }}</button>
+            <button onClick="{{ m.remove }}" style="padding:4px 6px;border:none;background:transparent;color:var(--ink3);font:inherit;font-size:14px;cursor:pointer">×</button>
+          </div>
+          <sc-if value="{{ m.violation }}" hint-placeholder-val="{{ false }}"><span style="flex:1 1 100%;font-size:12px;color:var(--err)">{{ m.violation }}</span></sc-if>
+        </div>
+      </sc-for>
+    </div>
+    <sc-if value="{{ v.measures }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.measures }}</span></sc-if>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 10px">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Directive</div>
+      <span style="font-size:11px;color:var(--ink3)">Frozen at session start · three tiers</span>
+    </div>
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:12px;color:var(--ink2)">Stable · identity and guidance</span>
+      <textarea value="{{ d.stable }}" onInput="{{ onStable }}" rows="5" placeholder="Who this agent is, how it behaves, what it never does." style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;line-height:1.5;resize:vertical;outline:none"></textarea>
+      <sc-if value="{{ v.stable }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.stable }}</span></sc-if>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:12px;color:var(--ink2)">Context · workspace facts</span>
+      <textarea value="{{ d.context }}" onInput="{{ onContext }}" rows="3" placeholder="Team names, SLAs, escalation paths, house style." style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;line-height:1.5;resize:vertical;outline:none"></textarea>
+    </label>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Connectors</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <sc-for list="{{ connectorItems }}" as="c" hint-placeholder-count="4">
+        <button onClick="{{ c.toggle }}" style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;border:1px solid {{ c.border }};background:{{ c.bg }};color:var(--ink);font:inherit;font-size:13px;cursor:pointer">
+          <span style="width:8px;height:8px;border-radius:50%;background:{{ c.dot }}"></span>
+          <span style="font-weight:600">{{ c.name }}</span>
+          <span style="font-size:11px;color:var(--ink3)">{{ c.toolCount }} tools</span>
+        </button>
+      </sc-for>
+    </div>
+    <sc-if value="{{ v.secret }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.secret }}</span></sc-if>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 10px">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Toolset</div>
+      <span style="font-size:11px;color:var(--ink3)">Chips edit the ToolsetSpec directly</span>
+    </div>
+    <sc-if value="{{ noTools }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:14px;border:1px dashed var(--line);border-radius:8px;font-size:12px;color:var(--ink3)">No tools mounted — pick a connector above.</div>
+    </sc-if>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ toolItems }}" as="t" hint-placeholder-count="3">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid {{ t.border }};border-radius:8px;background:var(--panel);flex-wrap:wrap">
+          <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink)">{{ t.id }}</code>
+          <span style="font-size:10px;font-weight:700;letter-spacing:.05em;padding:2px 6px;border-radius:4px;color:{{ t.effectColor }};border:1px solid {{ t.effectColor }}">{{ t.effect }}</span>
+          <span style="flex:1"></span>
+          <sc-if value="{{ t.wrapped }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ t.toggleWrap }}" title="Remove approval wrapper" style="padding:3px 8px;border-radius:999px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent);font:inherit;font-size:11px;font-weight:600;cursor:pointer">approval_required · org_admins ×</button>
+          </sc-if>
+          <sc-if value="{{ t.unwrapped }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ t.toggleWrap }}" style="padding:3px 8px;border-radius:999px;border:1px dashed var(--line);background:transparent;color:var(--ink3);font:inherit;font-size:11px;cursor:pointer">+ wrap</button>
+          </sc-if>
+          <sc-if value="{{ t.violation }}" hint-placeholder-val="{{ false }}"><span style="width:100%;font-size:12px;color:var(--err)">{{ t.violation }}</span></sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 10px">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Tool rules</div>
+      <button onClick="{{ addRule }}" style="white-space:nowrap;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:12px;cursor:pointer;font-weight:500">+ Rule</button>
+    </div>
+    <sc-if value="{{ noRules }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:12px;border:1px dashed var(--line);border-radius:8px;font-size:12px;color:var(--ink3)">No rules. Rules compile into the prompt and into the guard.</div>
+    </sc-if>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ ruleItems }}" as="r" hint-placeholder-count="1">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;border:1px solid {{ r.border }};border-radius:8px;background:var(--panel)">
+          <select value="{{ r.tool }}" onChange="{{ r.onTool }}" style="flex:0 1 150px;min-width:0;padding:7px 28px 7px 10px;border:1px solid var(--line);border-radius:8px;background-color:var(--panel);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none">
+            <option value="">all tools</option>
+            <sc-for list="{{ toolIds }}" as="tid" hint-placeholder-count="2"><option value="{{ tid }}">{{ tid }}</option></sc-for>
+          </select>
+          <input value="{{ r.rule }}" onInput="{{ r.onRule }}" placeholder="Never … / Only when …" style="flex:1 1 140px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+          <button onClick="{{ r.remove }}" style="padding:4px 8px;border:none;background:transparent;color:var(--ink3);font:inherit;font-size:14px;cursor:pointer">×</button>
+          <sc-if value="{{ r.violation }}" hint-placeholder-val="{{ false }}"><span style="flex:1 1 100%;font-size:12px;color:var(--err)">{{ r.violation }}</span></sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Skills</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ skillItems }}" as="s" hint-placeholder-count="3">
+        <button onClick="{{ s.toggle }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid {{ s.border }};border-radius:8px;background:{{ s.bg }};color:var(--ink);font:inherit;text-align:left;cursor:pointer">
+          <span style="width:14px;height:14px;border-radius:4px;border:1px solid {{ s.boxBorder }};background:{{ s.boxBg }};flex-shrink:0"></span>
+          <code style="font-family:'JetBrains Mono',monospace;font-size:12px">{{ s.id }}</code>
+          <span style="font-size:12px;color:var(--ink2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.desc }}</span>
+          <span style="font-size:10px;font-weight:700;letter-spacing:.05em;padding:2px 6px;border-radius:4px;color:{{ s.stateColor }};border:1px solid {{ s.stateColor }}">{{ s.state }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 10px">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Memory blocks</div>
+      <button onClick="{{ addBlock }}" style="white-space:nowrap;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:12px;cursor:pointer;font-weight:500">+ Block</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ blockItems }}" as="b" hint-placeholder-count="1">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;border:1px solid {{ b.border }};border-radius:8px;background:var(--panel)">
+          <input value="{{ b.label }}" onInput="{{ b.onLabel }}" placeholder="label" style="flex:0 1 130px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none"></input>
+          <input value="{{ b.description }}" onInput="{{ b.onDesc }}" placeholder="Description — load-bearing prompt content" style="flex:1 1 140px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+          <span style="font-size:11px;color:var(--ink3);margin-left:auto">{{ b.limit }} ch</span>
+          <button onClick="{{ b.remove }}" style="padding:4px 8px;border:none;background:transparent;color:var(--ink3);font:inherit;font-size:14px;cursor:pointer">×</button>
+          <sc-if value="{{ b.violation }}" hint-placeholder-val="{{ false }}"><span style="flex:1 1 100%;font-size:12px;color:var(--err)">{{ b.violation }}</span></sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Channel</div>
+    <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px">
+      <select value="{{ d.channelKind }}" onChange="{{ onChannelKind }}" style="padding:7px 28px 7px 10px;border:1px solid var(--line);border-radius:8px;background-color:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none">
+        <option value="">Unbound</option>
+        <option value="slack">Slack</option>
+        <option value="teams">Microsoft Teams</option>
+        <option value="email">Email</option>
+        <option value="web">Web widget</option>
+      </select>
+      <input value="{{ d.channelTarget }}" onInput="{{ onChannelTarget }}" placeholder="#channel, mailbox, or host" style="min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+    </div>
+    <sc-if value="{{ v.channel }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.channel }}</span></sc-if>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 10px">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Triggers</div>
+      <div style="display:flex;gap:6px">
+        <button onClick="{{ addCron }}" style="white-space:nowrap;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:12px;cursor:pointer;font-weight:500">+ Schedule</button>
+        <button onClick="{{ addEvent }}" style="white-space:nowrap;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:12px;cursor:pointer;font-weight:500">+ Event</button>
+      </div>
+    </div>
+    <sc-if value="{{ noTriggers }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:12px;border:1px dashed var(--line);border-radius:8px;font-size:12px;color:var(--ink3)">Runs only when messaged. Add a schedule or a connector event to run without one.</div>
+    </sc-if>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ triggerItems }}" as="t" hint-placeholder-count="1">
+        <div style="display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid {{ t.border }};border-radius:8px;background:var(--panel)">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span style="padding:3px 8px;border-radius:999px;background:var(--code);font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--ink2)">{{ t.kindLabel }}</span>
+            <sc-if value="{{ t.isCron }}" hint-placeholder-val="{{ true }}">
+              <input value="{{ t.spec }}" onInput="{{ t.onSpec }}" placeholder="0 7 * * 1" style="flex:1 1 120px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none"></input>
+              <span style="font-size:12px;color:var(--ink3)">{{ t.next }}</span>
+            </sc-if>
+            <sc-if value="{{ t.isEvent }}" hint-placeholder-val="{{ false }}">
+              <select value="{{ t.spec }}" onChange="{{ t.onSpec }}" style="flex:1 1 160px;min-width:0;padding:7px 28px 7px 10px;border:1px solid var(--line);border-radius:8px;background-color:var(--panel);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none">
+                <option value="">choose event</option>
+                <sc-for list="{{ eventOptions }}" as="ev" hint-placeholder-count="2"><option value="{{ ev }}">{{ ev }}</option></sc-for>
+              </select>
+            </sc-if>
+            <button onClick="{{ t.remove }}" style="margin-left:auto;padding:4px 6px;border:none;background:transparent;color:var(--ink3);font:inherit;font-size:14px;cursor:pointer">×</button>
+          </div>
+          <input value="{{ t.prompt }}" onInput="{{ t.onPrompt }}" placeholder="Seed prompt the run starts with" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;outline:none"></input>
+          <sc-if value="{{ t.violation }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ t.violation }}</span></sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Learning policy</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+      <button onClick="{{ toggleReview }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;cursor:pointer;text-align:left;font-weight:500">
+        <span>Post-turn review fork</span>
+        <span style="font-size:11px;font-weight:700;color:{{ reviewColor }}">{{ reviewLabel }}</span>
+      </button>
+      <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:13px">
+        <span>Consolidation</span>
+        <input value="{{ d.cadence }}" onInput="{{ onCadence }}" style="flex:1 1 0;min-width:0;max-width:110px;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none"></input>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:13px">
+        <span>Promotion gate</span>
+        <select value="{{ d.gateSuite }}" onChange="{{ onGate }}" style="flex:1 1 0;min-width:0;max-width:100%;padding:7px 28px 7px 10px;border:1px solid var(--line);border-radius:4px;background-color:var(--panel);color:var(--ink);font:inherit;font-size:13px;outline:none">
+          <option value="">— none —</option>
+          <option value="service-desk-regression">service-desk-regression</option>
+          <option value="deal-desk-regression">deal-desk-regression</option>
+          <option value="release-notes-golden">release-notes-golden</option>
+        </select>
+      </label>
+    </div>
+    <sc-if value="{{ v.gate }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--err)">{{ v.gate }}</span></sc-if>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:560,&quot;height&quot;:900},&quot;draft&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;AgentDraft&quot;},&quot;violations&quot;:{&quot;editor&quot;:null,&quot;default&quot;:[],&quot;tsType&quot;:&quot;Violation[]&quot;},&quot;connectors&quot;:{&quot;editor&quot;:null,&quot;default&quot;:[],&quot;tsType&quot;:&quot;Connector[]&quot;},&quot;skills&quot;:{&quot;editor&quot;:null,&quot;default&quot;:[],&quot;tsType&quot;:&quot;Skill[]&quot;},&quot;models&quot;:{&quot;editor&quot;:null,&quot;default&quot;:[],&quot;tsType&quot;:&quot;string[]&quot;},&quot;connectorEvents&quot;:{&quot;editor&quot;:null,&quot;default&quot;:{},&quot;tsType&quot;:&quot;Record&lt;string,string[]&gt;&quot;},&quot;setField&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;(field: string, value: unknown) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const p = this.props;
+    const d = p.draft || {};
+    const set = (k, v) => p.setField && p.setField(k, v);
+    const viol = p.violations || [];
+    const byPath = (path) => { const f = viol.find(x => x.path === path); return f ? f.message : false; };
+    const v = {
+      name: byPath('identity.name'), autonomy: byPath('autonomy'), stable: byPath('directive.stable'),
+      secret: byPath('connectors.secret'), channel: byPath('channels[0]'), gate: byPath('learning.promotion_gate'), goal: byPath('goal.statement'), measures: byPath('goal.measures')
+    };
+    const effectColor = e => e === 'Read' ? 'var(--ok)' : e === 'Write' ? 'var(--warn)' : 'var(--err)';
+    const stateColor = s => s === 'Promoted' ? 'var(--ok)' : s === 'Trial' ? 'var(--warn)' : 'var(--ink3)';
+    const conns = p.connectors || [];
+    const selConn = new Set(d.connectors || []);
+    const connectorItems = conns.map(c => ({
+      name: c.name, toolCount: c.tools.length,
+      border: selConn.has(c.id) ? 'var(--accent)' : 'var(--line)',
+      bg: selConn.has(c.id) ? 'var(--accent-soft)' : 'var(--panel)',
+      dot: c.probe === 'pass' ? 'var(--ok)' : c.probe === 'pending' ? 'var(--warn)' : 'var(--err)',
+      toggle: () => { const n = new Set(selConn); n.has(c.id) ? n.delete(c.id) : n.add(c.id); set('connectors', [...n]); }
+    }));
+    const wraps = new Set(d.wrapped || []);
+    const toolItems = conns.filter(c => selConn.has(c.id)).flatMap(c => c.tools.map(t => {
+      const tv = byPath('toolsets.' + t.id);
+      return {
+        id: t.id, effect: t.effect, effectColor: effectColor(t.effect),
+        wrapped: wraps.has(t.id), unwrapped: !wraps.has(t.id), violation: tv,
+        border: tv ? 'var(--err)' : 'var(--line)',
+        toggleWrap: () => { const n = new Set(wraps); n.has(t.id) ? n.delete(t.id) : n.add(t.id); set('wrapped', [...n]); }
+      };
+    }));
+    const selSk = new Set(d.skills || []);
+    const skillItems = (p.skills || []).filter(s => s.state !== 'Archived').map(s => ({
+      id: s.id, desc: s.desc, state: s.state, stateColor: stateColor(s.state),
+      border: selSk.has(s.id) ? 'var(--accent)' : 'var(--line)', bg: selSk.has(s.id) ? 'var(--accent-soft)' : 'var(--panel)',
+      boxBorder: selSk.has(s.id) ? 'var(--accent)' : 'var(--ink3)', boxBg: selSk.has(s.id) ? 'var(--accent)' : 'transparent',
+      toggle: () => { const n = new Set(selSk); n.has(s.id) ? n.delete(s.id) : n.add(s.id); set('skills', [...n]); }
+    }));
+    const blocks = d.memory || [];
+    const blockItems = blocks.map((b, i) => {
+      const bv = byPath('memory[' + i + '].description') || byPath('memory[' + i + '].label');
+      const upd = (patch) => set('memory', blocks.map((x, j) => j === i ? { ...x, ...patch } : x));
+      return { ...b, violation: bv, border: bv ? 'var(--err)' : 'var(--line)',
+        onLabel: e => upd({ label: e.target.value }), onDesc: e => upd({ description: e.target.value }),
+        remove: () => set('memory', blocks.filter((_, j) => j !== i)) };
+    });
+    const measures = d.measures || [];
+    const kindColor = k => k === 'gate' ? 'var(--ink)' : k === 'guardrail' ? 'var(--warn)' : 'var(--ok)';
+    const measureItems = measures.map((m, i) => { const mv = byPath('goal.measures[' + i + ']'); const upd = patch => set('measures', measures.map((x, j) => j === i ? { ...x, ...patch } : x)); return { ...m, violation: mv, border: mv ? 'var(--err)' : 'var(--line)', kindColor: kindColor(m.kind), onName: e => upd({ name: e.target.value }), onSource: e => upd({ source: e.target.value }), onTarget: e => upd({ target: e.target.value }), onWindow: e => upd({ window: e.target.value }), cycleKind: () => { const o = ['target', 'gate', 'guardrail']; upd({ kind: o[(o.indexOf(m.kind) + 1) % 3] }); }, remove: () => set('measures', measures.filter((_, j) => j !== i)) }; });
+    const triggers = d.triggers || [];
+    const nextFire = spec => { const p = spec.trim().split(/\s+/); if (p.length !== 5) return ''; const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; const hh = p[1] === '*' ? 'every hour' : String(p[1]).padStart(2, '0') + ':' + (p[0] === '*' ? '00' : String(p[0]).padStart(2, '0')); const day = p[4] === '*' ? 'daily' : dow[Number(p[4]) % 7] || p[4]; return 'next: ' + day + ' ' + hh; };
+    const eventOptions = (d.connectors || []).flatMap(c => (p.connectorEvents || {})[c] || []);
+    const triggerItems = triggers.map((t, i) => { const tv = byPath('triggers[' + i + '].spec') || byPath('triggers[' + i + '].prompt'); const upd = patch => set('triggers', triggers.map((x, j) => j === i ? { ...x, ...patch } : x)); return { ...t, isCron: t.kind === 'cron', isEvent: t.kind === 'event', kindLabel: t.kind === 'cron' ? 'SCHEDULE' : 'EVENT', next: t.kind === 'cron' ? nextFire(t.spec) : '', violation: tv, border: tv ? 'var(--err)' : 'var(--line)', onSpec: e => upd({ spec: e.target.value }), onPrompt: e => upd({ prompt: e.target.value }), remove: () => set('triggers', triggers.filter((_, j) => j !== i)) }; });
+    const rules = d.rules || [];
+    const ruleItems = rules.map((r, i) => { const rv = byPath('tool_rules[' + i + ']'); const upd = patch => set('rules', rules.map((x, j) => j === i ? { ...x, ...patch } : x)); return { ...r, violation: rv, border: rv ? 'var(--err)' : 'var(--line)', onTool: e => upd({ tool: e.target.value }), onRule: e => upd({ rule: e.target.value }), remove: () => set('rules', rules.filter((_, j) => j !== i)) }; });
+    const toolIds = toolItems.map(t => t.id);
+    const autonomyOptions = ['read_only', 'supervised', 'full'].map(a => ({
+      label: a, pick: () => set('autonomy', a),
+      border: d.autonomy === a ? 'var(--accent)' : 'var(--line)', bg: d.autonomy === a ? 'var(--accent-soft)' : 'var(--panel)',
+      color: d.autonomy === a ? 'var(--accent)' : 'var(--ink2)'
+    }));
+    return {
+      d, v, models: p.models || [], autonomyOptions, connectorItems, toolItems, noTools: toolItems.length === 0, skillItems, blockItems,
+      onName: e => set('name', e.target.value), onDescription: e => set('description', e.target.value), onModel: e => set('model', e.target.value),
+      onStable: e => set('stable', e.target.value), onContext: e => set('context', e.target.value),
+      onChannelKind: e => set('channelKind', e.target.value), onChannelTarget: e => set('channelTarget', e.target.value),
+      onCadence: e => set('cadence', e.target.value), onGate: e => set('gateSuite', e.target.value),
+      toggleReview: () => set('reviewFork', !d.reviewFork),
+      reviewLabel: d.reviewFork ? 'ON' : 'OFF', reviewColor: d.reviewFork ? 'var(--ok)' : 'var(--ink3)',
+      measureItems, noMeasures: measures.length === 0, addMeasure: () => set('measures', [...measures, { name: '', source: 'outcome', target: '', window: '7d', kind: 'target' }]), onGoal: e => set('goal', e.target.value),
+      triggerItems, eventOptions, noTriggers: triggers.length === 0, addCron: () => set('triggers', [...triggers, { kind: 'cron', spec: '0 7 * * 1', prompt: '' }]), addEvent: () => set('triggers', [...triggers, { kind: 'event', spec: '', prompt: '' }]),
+      ruleItems, toolIds, noRules: rules.length === 0, addRule: () => set('rules', [...rules, { tool: '', rule: '' }]),
+      addBlock: () => set('memory', [...blocks, { label: 'new_block', description: '', limit: 2000, scope: 'agent' }])
+    };
+  }
+}
+</script>
+</body>
+</html>
