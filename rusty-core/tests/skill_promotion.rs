@@ -52,6 +52,7 @@ fn skill_promotion_serde_round_trip() {
         content_hash: "abc123".to_owned(),
         status: SkillPromotionStatus::Promoted,
         gate_run_id: Some("run-42".to_owned()),
+        gate_name: Some("billing-regression".to_owned()),
         author: "operator:ada".to_owned(),
         created_at: chrono::Utc::now(),
     };
@@ -62,6 +63,7 @@ fn skill_promotion_serde_round_trip() {
     assert_eq!(decoded.content_hash, original.content_hash);
     assert_eq!(decoded.status, original.status);
     assert_eq!(decoded.gate_run_id, original.gate_run_id);
+    assert_eq!(decoded.gate_name, original.gate_name);
     assert_eq!(decoded.author, original.author);
 }
 
@@ -87,4 +89,15 @@ fn skill_promotion_deserializes_without_gate_run_id() {
     let promotion: SkillPromotion = serde_json::from_str(json).expect("deserializes");
     assert_eq!(promotion.gate_run_id, None);
     assert_eq!(promotion.status, SkillPromotionStatus::Draft);
+}
+
+#[test]
+fn skill_promotion_deserializes_without_gate_name() {
+    // History written before the regression pack (EP-17-S02) carries no
+    // gate name; it must still load, with the pack treating the record as
+    // predating gate tracking.
+    let json = r#"{"name":"a-skill","revision":1,"content_hash":"hash","status":"promoted","gate_run_id":"run-1","author":"dev","created_at":"2024-01-01T00:00:00Z"}"#;
+    let promotion: SkillPromotion = serde_json::from_str(json).expect("deserializes");
+    assert_eq!(promotion.gate_name, None);
+    assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
 }

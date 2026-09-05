@@ -1260,6 +1260,13 @@ pub struct SkillPromotion {
     /// The gate run id that authorized promotion, when applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_run_id: Option<String>,
+    /// The gate (eval suite) whose passing run authorized this promotion.
+    /// Recorded so a later promotion decision can re-run every
+    /// previously-passing gate as the regression pack (EP-17-S02); records
+    /// written before the pack existed carry no gate name and simply
+    /// predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_name: Option<String>,
     /// Who attempted or completed the promotion.
     pub author: String,
     /// When the record was created.
