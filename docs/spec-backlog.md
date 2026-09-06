@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████░░░░░░░░░ 70%** weighted complete (120 ✅ landed · 45 ◐ partial · 39 ○ not started, of 204 stories)
+**█████████████████████░░░░░░░░░ 70%** weighted complete (121 ✅ landed · 44 ◐ partial · 39 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -22,7 +22,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
-| EP-07 Skills and Self-Learning | M2 | 12 | 2 | 10 | 0 | ███████░░░░░ 58% |
+| EP-07 Skills and Self-Learning | M2 | 12 | 3 | 9 | 0 | ████████░░░░ 63% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 8 | 2 | 2 | ████████░░░░ 67% |
@@ -105,7 +105,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-04-S09 | Built-in adapter: Slack | — | ○ | **BLOCKED**: depends on EP-04-S07 channel adapter trait which has no infrastructure in workspace |
 | EP-04-S10 | Multi-device and cross-surface session continuity | — | ○ | **BLOCKED**: depends on EP-04-S08 (◐) and EP-04-S09 (○), both blocked on EP-04-S07 channel adapter trait which has no infrastructure |
 | EP-04-S11 | Gateway-owned scheduling: cron, heartbeat, idleness | — | ✅ | gateway-owned scheduling (`/crons`, `triggers.rs`) |
-| EP-04-S12 | Approval custody and routing across surfaces | — | ◐ | approvals landed; cross-surface custody routing partial |
+| EP-04-S12 | Approval custody and routing across surfaces | — | ◐ | approvals landed; cross-surface custody routing open — blocked: depends on EP-04-S07 (○, blocked) channel adapter trait; no surface registry to route custody across |
 
 ## EP-05 — Tool System and Sandboxing
 
@@ -147,15 +147,15 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-07 — Skills and Self-Learning
 
-███████░░░░░ 58% · 2 landed · 10 partial · 0 not started · milestone M2
+████████░░░░ 63% · 3 landed · 9 partial · 0 not started · milestone M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
 | EP-07-S01 | Skill packages with progressive disclosure | — | ✅ | `skill.rs` packages with progressive disclosure |
 | EP-07-S02 | The governed lifecycle and the content-addressed skill ledger | — | ✅ | `skills.rs` governed lifecycle, content-addressed ledger |
 | EP-07-S03 | Editorial governance: patch-before-create, the curator, retention scoring | — | ◐ | `skill_distill.rs`; curator + retention scoring partial |
-| EP-07-S04 | The post-turn background review fork | — | ◐ | `self_improve.rs` review path; post-turn background fork partial |
-| EP-07-S05 | Interaction-event ingestion through governed connectors | — | ◐ | `gaps.rs` interaction events (W1 `8f89668`, `main`); connector ingestion open |
+| EP-07-S04 | The post-turn background review fork | — | ◐ | `self_improve.rs` review path; post-turn background fork open — blocked: the fork's review turn needs memory readable as tools, and no `Tool` impl exists over `memory.rs`/`learn.rs` yet |
+| EP-07-S05 | Interaction-event ingestion through governed connectors | — | ✅ | `gaps.rs` interaction events (W1 `8f89668`, `main`); connector ingestion landed on `feat/ep-07-s05` (`f44f352`): `connector/execute.rs` tool-mounted governed execution + `connector/ingest.rs` corpus normalization (failures preserved), `POST /connectors/instances/{id}/ingest` + `GET .../receipts` in server `connectors.rs`; conformance `connector_execute.rs` (11) + `interaction_store.rs` (5) + `connector_ingestion.rs` (5) |
 | EP-07-S06 | Demand-side intent mining and the intent map | — | ◐ | `induction.rs` + `POST /induction/run` landed on `main` (W3/W3b); vector-index clustering mode open |
 | EP-07-S07 | Supply-side coverage reverse-engineering | — | ◐ | `induction.rs` coverage crawl + claims landed (W3); connector-driven crawl w/ receipts open |
 | EP-07-S08 | The gap matrix, the seeded ledger, and declared blocks | — | ◐ | `induction.rs` join + seeding + declared blocks landed (W3); block mounting + matrix UI open |
