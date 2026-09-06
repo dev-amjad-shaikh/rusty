@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████░░░░░░░░░ 70%** weighted complete (121 ✅ landed · 44 ◐ partial · 39 ○ not started, of 204 stories)
+**█████████████████████░░░░░░░░░ 70%** weighted complete (122 ✅ landed · 43 ◐ partial · 39 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -22,7 +22,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
-| EP-07 Skills and Self-Learning | M2 | 12 | 3 | 9 | 0 | ████████░░░░ 63% |
+| EP-07 Skills and Self-Learning | M2 | 12 | 4 | 8 | 0 | ████████░░░░ 67% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 8 | 2 | 2 | ████████░░░░ 67% |
@@ -147,7 +147,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-07 — Skills and Self-Learning
 
-████████░░░░ 63% · 3 landed · 9 partial · 0 not started · milestone M2
+████████░░░░ 67% · 4 landed · 8 partial · 0 not started · milestone M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -156,7 +156,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-07-S03 | Editorial governance: patch-before-create, the curator, retention scoring | — | ◐ | `skill_distill.rs`; curator + retention scoring partial |
 | EP-07-S04 | The post-turn background review fork | — | ◐ | `self_improve.rs` review path; post-turn background fork open — blocked: the fork's review turn needs memory readable as tools, and no `Tool` impl exists over `memory.rs`/`learn.rs` yet |
 | EP-07-S05 | Interaction-event ingestion through governed connectors | — | ✅ | `gaps.rs` interaction events (W1 `8f89668`, `main`); connector ingestion landed on `feat/ep-07-s05` (`f44f352`): `connector/execute.rs` tool-mounted governed execution + `connector/ingest.rs` corpus normalization (failures preserved), `POST /connectors/instances/{id}/ingest` + `GET .../receipts` in server `connectors.rs`; conformance `connector_execute.rs` (11) + `interaction_store.rs` (5) + `connector_ingestion.rs` (5) |
-| EP-07-S06 | Demand-side intent mining and the intent map | — | ◐ | `induction.rs` + `POST /induction/run` landed on `main` (W3/W3b); vector-index clustering mode open |
+| EP-07-S06 | Demand-side intent mining and the intent map | — | ✅ | `induction.rs` + `POST /induction/run` landed on `main` (W3/W3b); vector-index clustering mode landed on `feat/ep-07-s06` (`2c8c110`): `EmbeddingIndex` seam + `ClusteringMode::VectorIndex` nearest-centroid pass, typed refusals (`VectorIndexUnavailable` → 422, `VectorMismatch`), `ServerConfig::with_embedding_index`; core induction 26 tests + server induction 7 |
 | EP-07-S07 | Supply-side coverage reverse-engineering | — | ◐ | `induction.rs` coverage crawl + claims landed (W3); connector-driven crawl w/ receipts open |
 | EP-07-S08 | The gap matrix, the seeded ledger, and declared blocks | — | ◐ | `induction.rs` join + seeding + declared blocks landed (W3); block mounting + matrix UI open |
 | EP-07-S09 | Runtime gap filing | — | ◐ | `/gaps` surface + zero-recall/correction hooks landed on `main` (W2) |
