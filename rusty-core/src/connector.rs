@@ -40,6 +40,7 @@ use crate::error::RustyError;
 
 pub mod check;
 pub mod config;
+pub mod crawl;
 pub mod curation;
 pub mod execute;
 pub mod ingest;
@@ -54,6 +55,9 @@ pub use check::{
 pub use config::{
     SECRET_FLAG, compile_spec, extract_secrets, insert_masked_secrets, insert_opened_secrets,
     validate_config, without_secrets,
+};
+pub use crawl::{
+    CrawlError, normalize_supply_corpus, normalize_supply_record, parse_artifact_kind,
 };
 pub use curation::{CuratedConnector, CuratedOperation, CurationRule, curate};
 pub use execute::{

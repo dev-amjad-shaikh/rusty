@@ -53,6 +53,7 @@ use rusty_agent_runtime::connector::{
     INSTANCE_ID_PREFIX, execute_check, extract_secrets, insert_masked_secrets,
     insert_opened_secrets, validate_config, without_secrets,
 };
+use rusty_agent_runtime::induction::{CoverageConfig, crawl_coverage, mine_intents};
 
 use crate::auth::TenantContext;
 use crate::error::ApiError;
@@ -1224,6 +1225,176 @@ pub(crate) async fn ingest(
         "by_resolution_path": by_resolution_path,
         "by_outcome": by_outcome,
         "event_ids": event_ids,
+        "receipts": receipts,
+    })))
+}
+
+/// The crawl payload: the read operation to pull the knowledge corpus
+/// with, the source class, the artifact kind the stream holds, optional
+/// call arguments, and optional coverage-config overrides.
+#[derive(Deserialize)]
+pub(crate) struct CrawlPayload {
+    /// The manifest operation that reads the knowledge corpus. Same
+    /// rule as ingestion: read-only or idempotent, never a mutation.
+    operation: String,
+    /// The source class (`servicenow` — the only mapped class today).
+    system: String,
+    /// The artifact kind the stream holds (`kb_article`, `sop`,
+    /// `runbook`, `macro`, `catalog_item`, `skill`, `memory_block`) —
+    /// declared by the caller, because the table name alone does not
+    /// honestly say what a custom table contains.
+    kind: String,
+    /// Call arguments for the operation (schema-validated against the
+    /// operation's `params_schema`).
+    #[serde(default)]
+    params: Option<Value>,
+    /// Known-retired systems, overriding the coverage default (empty).
+    #[serde(default)]
+    retired_systems: Option<Vec<String>>,
+    /// Staleness horizon in days, overriding the coverage default.
+    #[serde(default)]
+    stale_after_days: Option<u32>,
+    /// Keyword-overlap threshold (per mille), overriding the default.
+    #[serde(default)]
+    keyword_threshold_millis: Option<u32>,
+}
+
+/// `POST /connectors/instances/{id}/crawl` — pull the reachable
+/// knowledge corpus through the instance's declared read operation,
+/// normalize every record into a [`rusty_agent_runtime::induction::SupplyArtifact`],
+/// and run the coverage crawl against the tenant's mined intent map.
+/// Every call is journaled as a receipt (EP-07-S05), so every coverage
+/// claim traces back to a governed exchange. The map is a projection,
+/// computed and answered, never stored. Normalization is all-or-nothing:
+/// one unmappable record fails the crawl with a typed 422 rather than
+/// overstating the gaps a silently narrowed supply would report.
+pub(crate) async fn crawl(
+    AxumState(state): AxumState<std::sync::Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    AxumPath(instance_id): AxumPath<String>,
+    Json(payload): Json<CrawlPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let kind = rusty_agent_runtime::connector::parse_artifact_kind(&payload.kind)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    if payload.system != "servicenow" {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_source_class",
+            format!(
+                "source class `{}` has no crawl mapping (supported: `servicenow`)",
+                payload.system
+            ),
+        ));
+    }
+    let instance = state
+        .connectors
+        .get_instance(tenant.tenant(), &instance_id)
+        .await
+        .map_err(store_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
+    let manifest = manifest_for(&state, &tenant, &instance.manifest_hash).await?;
+    let operation = manifest.operation(&payload.operation).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "manifest `{}` declares no operation `{}`",
+            manifest.id, payload.operation
+        ))
+    })?;
+    match operation.effect {
+        rusty_agent_runtime::connector::OperationEffect::ReadOnly
+        | rusty_agent_runtime::connector::OperationEffect::Idempotent => {}
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "operation `{}` declares effect `{other:?}` — the crawl runs read operations only",
+                operation.name
+            )));
+        }
+    }
+
+    let executor = ServerOperationExecutor::new(
+        state.clone(),
+        tenant.tenant(),
+        &instance_id,
+        &payload.operation,
+    );
+    let body = rusty_agent_runtime::connector::OperationExecutor::execute(
+        &executor,
+        payload.params.clone().unwrap_or_else(|| json!({})),
+    )
+    .await
+    .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "crawl_failed", e.to_string()))?;
+
+    // The corpus: a bare array of records, or the ServiceNow table
+    // envelope's `result` array — the ingestion contract's shape.
+    let records = match &body {
+        Value::Array(records) => records.clone(),
+        Value::Object(map) => match map.get("result").and_then(Value::as_array) {
+            Some(records) => records.clone(),
+            None => {
+                return Err(ApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "unexpected_corpus_shape",
+                    "the crawl body is an object without a `result` array — expected a record \
+                     array or the table-API envelope"
+                        .to_owned(),
+                ));
+            }
+        },
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unexpected_corpus_shape",
+                "the crawl body is not a record array".to_owned(),
+            ));
+        }
+    };
+    let artifacts = rusty_agent_runtime::connector::normalize_supply_corpus(kind, &records)
+        .map_err(|e| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "normalization_failed",
+                e.to_string(),
+            )
+        })?;
+
+    // Demand side: mine the tenant's recorded events into the intent
+    // projection the coverage map joins against.
+    let now = Utc::now();
+    let intent_map = {
+        let lock = crate::routes::gap_lock(&state, tenant.tenant()).await;
+        let _guard = lock.lock().await;
+        let ledger = crate::routes::load_gap_ledger(&state, tenant.tenant()).await?;
+        let events: Vec<_> = ledger.events().cloned().collect();
+        mine_intents(
+            &events,
+            &rusty_agent_runtime::induction::MiningConfig::default(),
+            state.config.embedding_index.as_deref(),
+            now,
+        )
+        .map_err(crate::routes::induction_err)?
+    };
+
+    let mut coverage_config = CoverageConfig::default();
+    if let Some(retired) = payload.retired_systems {
+        coverage_config.retired_systems = retired;
+    }
+    if let Some(days) = payload.stale_after_days {
+        coverage_config.stale_after_days = days;
+    }
+    if let Some(threshold) = payload.keyword_threshold_millis {
+        coverage_config.keyword_threshold_millis = threshold;
+    }
+    let coverage_map = crawl_coverage(&artifacts, &intent_map, &coverage_config, now)
+        .map_err(crate::routes::induction_err)?;
+
+    let receipts = executor.receipt_ids();
+    Ok(Json(json!({
+        "instance_id": instance_id,
+        "operation": payload.operation,
+        "kind": payload.kind,
+        "artifacts": artifacts.len(),
+        "coverage_map": coverage_map,
         "receipts": receipts,
     })))
 }

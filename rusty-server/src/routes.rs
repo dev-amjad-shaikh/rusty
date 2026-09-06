@@ -731,6 +731,15 @@ pub(crate) fn build_router(
             "/connectors/instances/{instance_id}/receipts",
             get(crate::connectors::instance_receipts),
         )
+        // Supply-side coverage crawl (EP-07-S07): pull the knowledge
+        // corpus through the instance's declared read operation,
+        // normalize every record into a supply artifact, and run the
+        // coverage crawl over the tenant's mined intent map — receipted
+        // per call, so every claim traces to a journaled exchange.
+        .route(
+            "/connectors/instances/{instance_id}/crawl",
+            post(crate::connectors::crawl),
+        )
         // Repair-record audit stream (EP-10-S01): query by component,
         // trigger class, outcome, time range, session, or attempt.
         .route("/repairs", get(crate::repair::list_repairs))
@@ -5868,7 +5877,7 @@ fn default_failing_threshold() -> u64 {
 
 /// Map an induction refusal onto the wire, delegating ledger refusals
 /// to the gap mapping.
-fn induction_err(error: InductionError) -> ApiError {
+pub(crate) fn induction_err(error: InductionError) -> ApiError {
     match error {
         InductionError::EmptyField(_) | InductionError::FieldTooLong { .. } => {
             ApiError::bad_request(error.to_string())
