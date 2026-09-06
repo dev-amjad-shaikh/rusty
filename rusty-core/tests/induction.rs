@@ -13,9 +13,11 @@ use rusty_agent_runtime::gaps::{
     InteractionEvent, InteractionOutcome, ResolutionPath,
 };
 use rusty_agent_runtime::induction::{
-    ArtifactKind, ConfidenceGrade, CoverageConfig, DEFAULT_FAILING_THRESHOLD_MILLIS, IntentMap,
-    MatrixCell, MiningConfig, SupplyArtifact, crawl_coverage, declared_blocks, derive_intent_id,
-    diff_assignments, join_maps, mine_intents, seed_ledger, token_signature,
+    ArtifactKind, ClusteringMode, ConfidenceGrade, CoverageConfig,
+    DEFAULT_FAILING_THRESHOLD_MILLIS, DEFAULT_VECTOR_THRESHOLD_MILLIS, EmbeddingIndex,
+    InductionError, IntentMap, MatrixCell, MiningConfig, SupplyArtifact, crawl_coverage,
+    declared_blocks, derive_intent_id, diff_assignments, join_maps, mine_intents, seed_ledger,
+    token_signature,
 };
 use serde::Serialize;
 
@@ -159,7 +161,13 @@ fn vpn_intent_id() -> String {
 }
 
 fn mine() -> IntentMap {
-    mine_intents(&corpus(), &MiningConfig::default(), ts(BASE + 6 * DAY)).unwrap()
+    mine_intents(
+        &corpus(),
+        &MiningConfig::default(),
+        None,
+        ts(BASE + 6 * DAY),
+    )
+    .unwrap()
 }
 
 fn password_intent(map: &IntentMap) -> &rusty_agent_runtime::induction::Intent {
@@ -304,7 +312,7 @@ fn utterances_without_content_tokens_cluster_by_channel() {
             None,
         ),
     ];
-    let map = mine_intents(&events, &MiningConfig::default(), ts(BASE + 3 * DAY)).unwrap();
+    let map = mine_intents(&events, &MiningConfig::default(), None, ts(BASE + 3 * DAY)).unwrap();
     assert_eq!(
         map.intents.len(),
         2,
@@ -380,7 +388,7 @@ fn a_later_pass_reports_moves_as_reassignments() {
         jaccard_threshold_millis: 950,
         ..MiningConfig::default()
     };
-    let after = mine_intents(&corpus(), &strict, ts(BASE + 6 * DAY)).unwrap();
+    let after = mine_intents(&corpus(), &strict, None, ts(BASE + 6 * DAY)).unwrap();
     let moves = diff_assignments(&before, &after);
     let vpn_moves: Vec<_> = moves
         .iter()
@@ -650,4 +658,233 @@ fn golden_gap_matrix() {
         ts(BASE + 6 * DAY),
     );
     assert_golden("induction_gap_matrix.json", &matrix);
+}
+
+// ---------- vector-index clustering mode (EP-07-S06) ----------
+
+/// A deterministic test embedder: each content token (the mining
+/// pass's own signature tokenizer) contributes to two fixed slots via
+/// FNV-1a, so texts sharing tokens land near each other and identical
+/// texts embed identically across runs and builds — the property the
+/// projection contract needs from any index.
+#[derive(Debug)]
+struct TokenBagIndex {
+    dimensions: usize,
+}
+
+impl TokenBagIndex {
+    fn fnv(token: &str) -> u64 {
+        let mut hash = 0xcbf29ce484222325u64;
+        for byte in token.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+}
+
+impl EmbeddingIndex for TokenBagIndex {
+    fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
+    fn embed(&self, text: &str) -> Vec<f64> {
+        let mut vector = vec![0.0; self.dimensions];
+        for token in token_signature(text) {
+            let hash = Self::fnv(&token);
+            vector[(hash % self.dimensions as u64) as usize] += 1.0;
+            vector[((hash >> 32) % self.dimensions as u64) as usize] += 0.5;
+        }
+        vector
+    }
+}
+
+fn vector_config(threshold_millis: u32) -> MiningConfig {
+    MiningConfig {
+        mode: ClusteringMode::VectorIndex,
+        vector_threshold_millis: threshold_millis,
+        ..MiningConfig::default()
+    }
+}
+
+fn mine_vector(threshold_millis: u32) -> IntentMap {
+    let index = TokenBagIndex { dimensions: 4096 };
+    mine_intents(
+        &corpus(),
+        &vector_config(threshold_millis),
+        Some(&index),
+        ts(BASE + 6 * DAY),
+    )
+    .unwrap()
+}
+
+#[test]
+fn vector_mode_recovers_the_known_clusters_with_citations() {
+    let map = mine_vector(550);
+    map.check().unwrap();
+    assert_eq!(map.mode, ClusteringMode::VectorIndex);
+
+    // The known structure: vpn (3), password (2), laptop (1) — and
+    // every intent cites concrete events, summing to the corpus.
+    assert_eq!(map.intents.len(), 3);
+    let cited: usize = map.intents.iter().map(|i| i.event_ids.len()).sum();
+    assert_eq!(cited, 6);
+    for intent in &map.intents {
+        assert!(
+            !intent.event_ids.is_empty(),
+            "an intent without citations is not emitted"
+        );
+    }
+
+    // Same clusters as the full-text pass: the intent ids match, so
+    // downstream consumers see one identity per demand line regardless
+    // of mode.
+    let fts = mine();
+    let vector_ids: Vec<&str> = map.intents.iter().map(|i| i.intent_id.as_str()).collect();
+    let fts_ids: Vec<&str> = fts.intents.iter().map(|i| i.intent_id.as_str()).collect();
+    assert_eq!(vector_ids, fts_ids);
+
+    // The failure signal rides through the vector path unchanged: the
+    // vpn intent is still the human-resolved, twice-escalated one.
+    let vpn = map.get(&vpn_intent_id()).unwrap();
+    assert_eq!(vpn.resolution.human_resolved, 3);
+    assert_eq!(vpn.failure.reassignment_count, 1);
+}
+
+#[test]
+fn both_modes_agree_on_the_top_of_the_ranking() {
+    let vector = mine_vector(550);
+    let fts = mine();
+    assert_eq!(
+        vector.ranked().first().map(|i| i.intent_id.as_str()),
+        fts.ranked().first().map(|i| i.intent_id.as_str()),
+        "the costliest demand line tops the map in both modes"
+    );
+}
+
+#[test]
+fn vector_mode_is_byte_deterministic_across_reruns() {
+    let first = mine_vector(550);
+    let second = mine_vector(550);
+    assert_eq!(
+        serde_json::to_string(&first).unwrap(),
+        serde_json::to_string(&second).unwrap(),
+        "dropping the map and re-mining reproduces it byte-for-byte"
+    );
+}
+
+#[test]
+fn vector_mode_without_an_index_refuses_typed() {
+    let error = mine_intents(&corpus(), &vector_config(550), None, ts(BASE + 6 * DAY)).unwrap_err();
+    assert!(
+        matches!(error, InductionError::VectorIndexUnavailable),
+        "expected VectorIndexUnavailable, got {error}"
+    );
+}
+
+#[test]
+fn a_lying_index_fails_typed() {
+    #[derive(Debug)]
+    struct LiarIndex;
+    impl EmbeddingIndex for LiarIndex {
+        fn dimensions(&self) -> usize {
+            8
+        }
+        fn embed(&self, _: &str) -> Vec<f64> {
+            vec![0.0; 7]
+        }
+    }
+    let error = mine_intents(
+        &corpus(),
+        &vector_config(550),
+        Some(&LiarIndex),
+        ts(BASE + 6 * DAY),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            InductionError::VectorMismatch {
+                expected: 8,
+                got: 7
+            }
+        ),
+        "expected VectorMismatch, got {error}"
+    );
+}
+
+#[test]
+fn zero_vectors_open_one_cluster_per_event() {
+    #[derive(Debug)]
+    struct ZeroIndex;
+    impl EmbeddingIndex for ZeroIndex {
+        fn dimensions(&self) -> usize {
+            4
+        }
+        fn embed(&self, _: &str) -> Vec<f64> {
+            vec![0.0; 4]
+        }
+    }
+    let map = mine_intents(
+        &corpus(),
+        &vector_config(550),
+        Some(&ZeroIndex),
+        ts(BASE + 6 * DAY),
+    )
+    .unwrap();
+    map.check().unwrap();
+    assert_eq!(
+        map.intents.len(),
+        6,
+        "a degenerate index fragments visibly, never silently merges"
+    );
+}
+
+#[test]
+fn a_stricter_vector_threshold_moves_events_via_reassignments() {
+    let before = mine_vector(550);
+    let vpn_id = vpn_intent_id();
+
+    // At 1000‰ only identical texts merge: every event opens its own
+    // cluster, and the diff reports each move against the prior pass.
+    let after = mine_vector(1000);
+    let moves = diff_assignments(&before, &after);
+    let vpn_moves: Vec<_> = moves
+        .iter()
+        .filter(|m| m.from_intent.as_deref() == Some(vpn_id.as_str()))
+        .collect();
+    assert_eq!(vpn_moves.len(), 2, "INC002 and INC003 moved out");
+    for reassignment in &vpn_moves {
+        assert_ne!(reassignment.to_intent, vpn_id);
+    }
+    assert!(diff_assignments(&after, &after).is_empty());
+}
+
+#[test]
+fn clustering_mode_wire_names_are_stable() {
+    assert_eq!(
+        serde_json::to_value(ClusteringMode::FullTextTaxonomy).unwrap(),
+        serde_json::json!("full_text_taxonomy")
+    );
+    assert_eq!(
+        serde_json::to_value(ClusteringMode::VectorIndex).unwrap(),
+        serde_json::json!("vector_index")
+    );
+}
+
+#[test]
+fn mining_config_without_the_vector_threshold_deserializes_to_default() {
+    let config: MiningConfig = serde_json::from_value(serde_json::json!({
+        "mode": "vector_index",
+        "jaccard_threshold_millis": 400,
+        "human_resolution_cost_millis": 100,
+        "escalation_cost_millis": 500,
+        "abandonment_cost_millis": 300,
+        "ttr_over_norm_cost_millis": 10
+    }))
+    .unwrap();
+    assert_eq!(
+        config.vector_threshold_millis, DEFAULT_VECTOR_THRESHOLD_MILLIS,
+        "older payloads missing the new knob land on the default"
+    );
 }

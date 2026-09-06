@@ -5873,8 +5873,11 @@ fn induction_err(error: InductionError) -> ApiError {
         InductionError::EmptyField(_) | InductionError::FieldTooLong { .. } => {
             ApiError::bad_request(error.to_string())
         }
+        InductionError::VectorIndexUnavailable => ApiError::unprocessable(error.to_string()),
         InductionError::Gap(gap) => gap_err(gap),
-        InductionError::UnsupportedFormat(_) | InductionError::Serde(_) => internal_err(error),
+        InductionError::UnsupportedFormat(_)
+        | InductionError::VectorMismatch { .. }
+        | InductionError::Serde(_) => internal_err(error),
     }
 }
 
@@ -5908,7 +5911,13 @@ async fn induction_run(
     let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
 
     let events: Vec<InteractionEvent> = ledger.events().cloned().collect();
-    let intent_map = mine_intents(&events, &mining_config, now).map_err(induction_err)?;
+    let intent_map = mine_intents(
+        &events,
+        &mining_config,
+        state.config.embedding_index.as_deref(),
+        now,
+    )
+    .map_err(induction_err)?;
     // Later passes re-place events through appended versioned
     // reassignments, never in place (EP-07-S06 AC 5).
     let mut reassignments = 0u64;

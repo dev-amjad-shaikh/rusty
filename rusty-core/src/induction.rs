@@ -72,6 +72,13 @@ pub const MAX_LABEL_BYTES: usize = 256;
 pub const MAX_SIGNATURE_TOKENS: usize = 10;
 /// The default Jaccard threshold (per mille) for cluster assignment.
 pub const DEFAULT_JACCARD_THRESHOLD_MILLIS: u32 = 400;
+/// The default cosine threshold (per mille) for cluster assignment in
+/// vector-index mode.
+pub const DEFAULT_VECTOR_THRESHOLD_MILLIS: u32 = 700;
+
+fn default_vector_threshold_millis() -> u32 {
+    DEFAULT_VECTOR_THRESHOLD_MILLIS
+}
 /// The default keyword-overlap threshold (per mille) for a weak
 /// coverage claim.
 pub const DEFAULT_KEYWORD_THRESHOLD_MILLIS: u32 = 250;
@@ -100,6 +107,18 @@ pub enum InductionError {
     /// A snapshot declared a format version this build cannot read.
     #[error("unsupported format version: {0}")]
     UnsupportedFormat(u32),
+    /// Vector-index clustering was requested with no index configured.
+    #[error("vector-index clustering requested but no embedding index is configured")]
+    VectorIndexUnavailable,
+    /// The configured index returned a vector outside its declared
+    /// width — a deployment bug, not a corpus problem.
+    #[error("embedding index returned {got} dimensions, declared {expected}")]
+    VectorMismatch {
+        /// The width the index declared.
+        expected: usize,
+        /// The width it actually returned.
+        got: usize,
+    },
     /// Ledger seeding was refused by the ledger.
     #[error("gap ledger refused seeding: {0}")]
     Gap(#[from] GapError),
@@ -190,15 +209,32 @@ fn jaccard_millis(a: &[String], b: &[String]) -> u32 {
 // Intent mining
 // --------------------------------------------------------------------- //
 
-/// How the corpus was clustered. `FullTextTaxonomy` is the mode this
-/// crate implements; the map records which mode produced it so a later
-/// vector-indexed pass is a distinct artifact, not a silent change.
+/// How the corpus was clustered. The map records which mode produced it
+/// so a later pass under a different mode is a distinct artifact, not a
+/// silent change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClusteringMode {
     /// Token-signature clustering with channel fallback — the mode that
     /// needs nothing beyond the event store itself.
     FullTextTaxonomy,
+    /// Nearest-centroid clustering over embedding vectors from the
+    /// configured [`EmbeddingIndex`]. Requesting it with no index
+    /// configured is a typed refusal, never a silent downgrade.
+    VectorIndex,
+}
+
+/// The vector-index seam: embeds interaction text into a fixed-width
+/// vector space. A deployment configures one when an embedding model is
+/// available; when none is configured the mining pass runs in
+/// full-text-plus-taxonomy mode. Implementations must be deterministic —
+/// the same text must always yield the same vector, or re-mining the
+/// same corpus would not reproduce the map byte-for-byte.
+pub trait EmbeddingIndex: std::fmt::Debug + Send + Sync {
+    /// The space's fixed width.
+    fn dimensions(&self) -> usize;
+    /// Embed one utterance.
+    fn embed(&self, text: &str) -> Vec<f64>;
 }
 
 /// The mining pass's configuration. Weights are milli-units: the
@@ -212,6 +248,10 @@ pub struct MiningConfig {
     /// The Jaccard threshold (per mille) at or above which an event
     /// joins an existing cluster instead of opening one.
     pub jaccard_threshold_millis: u32,
+    /// The cosine threshold (per mille) at or above which an event joins
+    /// an existing cluster's centroid in vector-index mode.
+    #[serde(default = "default_vector_threshold_millis")]
+    pub vector_threshold_millis: u32,
     /// Milli-cost per human-resolved event (human resolution minutes,
     /// flattened to a per-event weight).
     pub human_resolution_cost_millis: u64,
@@ -231,6 +271,7 @@ impl Default for MiningConfig {
         Self {
             mode: ClusteringMode::FullTextTaxonomy,
             jaccard_threshold_millis: DEFAULT_JACCARD_THRESHOLD_MILLIS,
+            vector_threshold_millis: DEFAULT_VECTOR_THRESHOLD_MILLIS,
             human_resolution_cost_millis: 100,
             escalation_cost_millis: 500,
             abandonment_cost_millis: 300,
@@ -487,15 +528,24 @@ impl ClusterBuilder {
 /// Mine the interaction-event corpus into the ranked intent map.
 ///
 /// Deterministic: events are processed in `(occurred_at, event_id)`
-/// order, each joins the earliest-created cluster whose representative
-/// signature clears the Jaccard threshold (else opens one), and the map
-/// serializes canonically — re-mining the same corpus with the same
-/// config reproduces it byte-for-byte. An event whose utterance carries
-/// no content tokens falls back to a channel signature, so silence
-/// clusters with silence on the same channel rather than fragmenting.
+/// order, each joins the earliest-created clearing cluster (else opens
+/// one), and the map serializes canonically — re-mining the same corpus
+/// with the same config reproduces it byte-for-byte. An event whose
+/// utterance carries no content tokens falls back to a channel
+/// signature, so silence clusters with silence on the same channel
+/// rather than fragmenting.
+///
+/// Two clustering modes: `FullTextTaxonomy` matches on Jaccard token
+/// signatures and needs nothing beyond the store; `VectorIndex` matches
+/// on cosine similarity against running cluster centroids from the
+/// configured [`EmbeddingIndex`] and refuses with
+/// [`InductionError::VectorIndexUnavailable`] when no index is
+/// configured — requesting a mode the deployment cannot serve is a
+/// typed refusal, never a silent downgrade.
 pub fn mine_intents(
     events: &[InteractionEvent],
     config: &MiningConfig,
+    index: Option<&dyn EmbeddingIndex>,
     at: DateTime<Utc>,
 ) -> Result<IntentMap> {
     // The category norms: per-channel median time-to-resolution over the
@@ -521,28 +571,27 @@ pub fn mine_intents(
             .then_with(|| a.event_id.cmp(&b.event_id))
     });
 
-    let mut clusters: Vec<ClusterBuilder> = Vec::new();
-    for event in sorted {
-        let mut signature = token_signature(&event.utterance);
-        if signature.is_empty() {
-            signature = vec![format!("channel:{}", channel_key(event.channel))];
-        }
-        // The best clearing cluster wins; ties go to the earliest
-        // created, so assignment never depends on hash order.
-        let mut best: Option<(usize, u32)> = None;
-        for (index, cluster) in clusters.iter().enumerate() {
-            let score = jaccard_millis(&signature, &cluster.representative());
-            if score >= config.jaccard_threshold_millis
-                && best.is_none_or(|(_, best_score)| score > best_score)
-            {
-                best = Some((index, score));
+    // Signatures feed cluster identity and labeling in both modes; the
+    // channel fallback keeps silent events from fragmenting.
+    let signatures: Vec<Vec<String>> = sorted
+        .iter()
+        .map(|event| {
+            let signature = token_signature(&event.utterance);
+            if signature.is_empty() {
+                vec![format!("channel:{}", channel_key(event.channel))]
+            } else {
+                signature
             }
+        })
+        .collect();
+
+    let clusters = match config.mode {
+        ClusteringMode::FullTextTaxonomy => assign_by_signature(&sorted, &signatures, config),
+        ClusteringMode::VectorIndex => {
+            let index = index.ok_or(InductionError::VectorIndexUnavailable)?;
+            assign_by_vector(&sorted, &signatures, config, index)?
         }
-        match best {
-            Some((index, _)) => clusters[index].assign(&signature, event.clone()),
-            None => clusters.push(ClusterBuilder::new(signature, event.clone())),
-        }
-    }
+    };
 
     let mut intents = Vec::with_capacity(clusters.len());
     for cluster in clusters {
@@ -641,6 +690,105 @@ fn resolution_minutes(event: &InteractionEvent) -> Option<u64> {
     let resolved = event.resolved_at?;
     let minutes = (resolved - event.occurred_at).num_minutes();
     (minutes >= 0).then_some(minutes as u64)
+}
+
+/// Full-text-plus-taxonomy assignment: an event joins the cluster whose
+/// representative signature clears the Jaccard threshold; ties go to
+/// the earliest created, so assignment never depends on hash order.
+fn assign_by_signature(
+    sorted: &[&InteractionEvent],
+    signatures: &[Vec<String>],
+    config: &MiningConfig,
+) -> Vec<ClusterBuilder> {
+    let mut clusters: Vec<ClusterBuilder> = Vec::new();
+    for (event, signature) in sorted.iter().zip(signatures) {
+        let mut best: Option<(usize, u32)> = None;
+        for (index, cluster) in clusters.iter().enumerate() {
+            let score = jaccard_millis(signature, &cluster.representative());
+            if score >= config.jaccard_threshold_millis
+                && best.is_none_or(|(_, best_score)| score > best_score)
+            {
+                best = Some((index, score));
+            }
+        }
+        match best {
+            Some((index, _)) => clusters[index].assign(signature, (*event).clone()),
+            None => clusters.push(ClusterBuilder::new(signature.clone(), (*event).clone())),
+        }
+    }
+    clusters
+}
+
+/// Vector-index assignment: an event joins the cluster whose centroid
+/// clears the cosine threshold, else opens one. The centroid is the
+/// running sum of member vectors — cosine is scale-invariant, so the
+/// unnormalized sum serves and the arithmetic order stays fixed, which
+/// keeps the pass deterministic given a deterministic index.
+fn assign_by_vector(
+    sorted: &[&InteractionEvent],
+    signatures: &[Vec<String>],
+    config: &MiningConfig,
+    index: &dyn EmbeddingIndex,
+) -> Result<Vec<ClusterBuilder>> {
+    let dimensions = index.dimensions();
+    let mut clusters: Vec<(ClusterBuilder, Vec<f64>)> = Vec::new();
+    for (event, signature) in sorted.iter().zip(signatures) {
+        let text = if event.utterance.trim().is_empty() {
+            format!("channel:{}", channel_key(event.channel))
+        } else {
+            event.utterance.clone()
+        };
+        let vector = index.embed(&text);
+        if vector.len() != dimensions {
+            return Err(InductionError::VectorMismatch {
+                expected: dimensions,
+                got: vector.len(),
+            });
+        }
+        let mut best: Option<(usize, u32)> = None;
+        for (position, (_, centroid_sum)) in clusters.iter().enumerate() {
+            let score = cosine_millis(&vector, centroid_sum);
+            if score >= config.vector_threshold_millis
+                && best.is_none_or(|(_, best_score)| score > best_score)
+            {
+                best = Some((position, score));
+            }
+        }
+        match best {
+            Some((position, _)) => {
+                let (cluster, centroid_sum) = &mut clusters[position];
+                cluster.assign(signature, (*event).clone());
+                for (slot, value) in centroid_sum.iter_mut().zip(&vector) {
+                    *slot += value;
+                }
+            }
+            None => clusters.push((
+                ClusterBuilder::new(signature.clone(), (*event).clone()),
+                vector,
+            )),
+        }
+    }
+    Ok(clusters.into_iter().map(|(cluster, _)| cluster).collect())
+}
+
+/// Cosine similarity in milli-units, clamped to [0, 1000]: negative
+/// similarities and zero-norm vectors both floor at 0, so they never
+/// clear a positive threshold.
+fn cosine_millis(a: &[f64], b: &[f64]) -> u32 {
+    let mut dot = 0.0;
+    let mut norm_a = 0.0;
+    let mut norm_b = 0.0;
+    for (x, y) in a.iter().zip(b) {
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0;
+    }
+    (dot / (norm_a.sqrt() * norm_b.sqrt()) * 1000.0)
+        .clamp(0.0, 1000.0)
+        .round() as u32
 }
 
 /// The channel's stable string key (the serde repr).

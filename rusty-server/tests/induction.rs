@@ -367,3 +367,128 @@ async fn one_tenants_induction_never_touches_anothers_ledger() {
 
     let _ = std::fs::remove_dir_all(store);
 }
+
+// --------------------------------------------------------------------- //
+// Vector-index clustering mode (EP-07-S06)
+// --------------------------------------------------------------------- //
+
+/// The deterministic test embedder, mirroring the core suite's: each
+/// content token contributes to two fixed FNV-1a slots, so texts
+/// sharing tokens land near each other and identical texts embed
+/// identically across runs.
+#[derive(Debug)]
+struct TokenBagIndex {
+    dimensions: usize,
+}
+
+impl rusty_agent_runtime::induction::EmbeddingIndex for TokenBagIndex {
+    fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
+    fn embed(&self, text: &str) -> Vec<f64> {
+        let mut vector = vec![0.0; self.dimensions];
+        for token in rusty_agent_runtime::induction::token_signature(text) {
+            let mut hash = 0xcbf29ce484222325u64;
+            for byte in token.as_bytes() {
+                hash ^= *byte as u64;
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+            vector[(hash % self.dimensions as u64) as usize] += 1.0;
+            vector[((hash >> 32) % self.dimensions as u64) as usize] += 0.5;
+        }
+        vector
+    }
+}
+
+fn vector_mining_config() -> Value {
+    json!({
+        "mode": "vector_index",
+        "jaccard_threshold_millis": 400,
+        "vector_threshold_millis": 550,
+        "human_resolution_cost_millis": 100,
+        "escalation_cost_millis": 500,
+        "abandonment_cost_millis": 300,
+        "ttr_over_norm_cost_millis": 10
+    })
+}
+
+#[tokio::test]
+async fn vector_mode_without_a_configured_index_is_a_422() {
+    let (app, store) = app();
+    seed_corpus(&app).await;
+
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/induction/run",
+        Some(json!({
+            "artifacts": artifacts(),
+            "mining_config": vector_mining_config(),
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "an unconfigured vector mode refuses typed, never silently downgrades: {v}"
+    );
+
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
+async fn vector_mode_mines_through_the_configured_index() {
+    let store = temp_store();
+    let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone())
+        .with_embedding_index(std::sync::Arc::new(TokenBagIndex { dimensions: 4096 }));
+    let app_with_index = router(GraphRegistry::new(), config);
+    seed_corpus(&app_with_index).await;
+
+    let v = run_induction(
+        &app_with_index,
+        json!({
+            "artifacts": artifacts(),
+            "mining_config": vector_mining_config(),
+        }),
+    )
+    .await;
+    assert_eq!(v["intent_map"]["mode"], json!("vector_index"));
+    let intents = v["intent_map"]["intents"].as_array().unwrap();
+    assert_eq!(
+        intents.len(),
+        2,
+        "the vpn and password clusters: {intents:?}"
+    );
+    let mut sizes: Vec<usize> = intents
+        .iter()
+        .map(|i| i["event_ids"].as_array().unwrap().len())
+        .collect();
+    sizes.sort();
+    assert_eq!(sizes, vec![2, 3]);
+
+    // The full-text pass over the same corpus lands the same intent
+    // identities: mode changes the clustering path, not the demand
+    // lines downstream consumers join on.
+    let (fts_app, fts_store) = app();
+    seed_corpus(&fts_app).await;
+    let f = run_induction(&fts_app, json!({"artifacts": artifacts()})).await;
+    assert_eq!(f["intent_map"]["mode"], json!("full_text_taxonomy"));
+    let vector_ids: Vec<&str> = intents
+        .iter()
+        .map(|i| i["intent_id"].as_str().unwrap())
+        .collect();
+    let mut fts_ids: Vec<&str> = f["intent_map"]["intents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["intent_id"].as_str().unwrap())
+        .collect();
+    fts_ids.sort();
+    let mut vector_ids = vector_ids;
+    vector_ids.sort();
+    assert_eq!(vector_ids, fts_ids);
+
+    let _ = std::fs::remove_dir_all(store);
+    let _ = std::fs::remove_dir_all(fts_store);
+}

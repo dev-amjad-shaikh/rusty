@@ -691,6 +691,12 @@ pub struct ServerConfig {
     /// sockets; production deployments leave it `None`. See
     /// [`ServerConfig::with_connector_transport`].
     pub connector_transport: Option<Arc<dyn rusty_agent_runtime::connector::ConnectorTransport>>,
+
+    /// The embedding index (EP-07-S06): when set, intent mining may run
+    /// in vector-index mode; when `None`, requesting that mode is a
+    /// typed 422 refusal rather than a silent downgrade to full-text
+    /// clustering. See [`ServerConfig::with_embedding_index`].
+    pub embedding_index: Option<Arc<dyn rusty_agent_runtime::induction::EmbeddingIndex>>,
 }
 
 impl Default for ServerConfig {
@@ -725,6 +731,7 @@ impl Default for ServerConfig {
             artifact_sweep_interval: None,
             egress_policy: None,
             connector_transport: None,
+            embedding_index: None,
         }
     }
 }
@@ -1089,6 +1096,17 @@ impl ServerConfig {
         transport: Arc<dyn rusty_agent_runtime::connector::ConnectorTransport>,
     ) -> Self {
         self.connector_transport = Some(transport);
+        self
+    }
+
+    /// Builder-style: configure the embedding index (EP-07-S06). With an
+    /// index set, intent mining may run in vector-index mode; without
+    /// one, that mode refuses typed. Tests inject a deterministic fake.
+    pub fn with_embedding_index(
+        mut self,
+        index: Arc<dyn rusty_agent_runtime::induction::EmbeddingIndex>,
+    ) -> Self {
+        self.embedding_index = Some(index);
         self
     }
 }
