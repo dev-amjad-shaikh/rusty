@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**██████████████████████░░░░░░░░ 72%** weighted complete (124 ✅ landed · 45 ◐ partial · 35 ○ not started, of 204 stories)
+**██████████████████████░░░░░░░░ 72%** weighted complete (125 ✅ landed · 45 ◐ partial · 34 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -32,7 +32,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 8 | 1 | 3 | █████████░░░ 71% |
 | EP-16 Rustynome Studio v2 (design handoff) | M4–M5 | 16 | 0 | 0 | 16 | ░░░░░░░░░░░░░░░░ 0% |
-| EP-17 Self-Improvement Measurement (survey fast-follows) | M2–M4 | 6 | 4 | 0 | 2 | ████░░ 67% |
+| EP-17 Self-Improvement Measurement (survey fast-follows) | M2–M4 | 6 | 5 | 0 | 1 | █████░ 83% |
 
 ## EP-01 — Event Log and State Substrate
 
@@ -348,7 +348,7 @@ Design source: `docs/studio-v2-design-handoff/` (owner-supplied, 2026-09-05 — 
 
 ## EP-17 — Self-Improvement Measurement (survey fast-follows)
 
-████░░ 67% · 4 landed · 0 partial · 2 not started · milestone M2–M4
+█████░ 83% · 5 landed · 0 partial · 1 not started · milestone M2–M4
 
 Source: `docs/self-improving-agents-survey-notes.md` (2026-09-04) — lessons from *Self-Improvements in Modern Agentic Systems: A Survey* (arXiv:2607.13104) mapped onto Rusty. The survey's evaluation lens requires an improvement claim to report regressions on previously solved tasks, held-out transfer, and attribution to the updated component; these stories close that gap inside EP-12/EP-06 machinery.
 
@@ -359,7 +359,7 @@ Source: `docs/self-improving-agents-survey-notes.md` (2026-09-04) — lessons fr
 | EP-17-S03 | Held-out split enforcement in eval gates (R3) | P0 | ✅ | `rusty-server/src/skills.rs` (`5620a6c` on `feat/ep-17-s02`): `GateEvaluationResult::Pass` carries `suite_version`; `SkillPromotion` gains `gate_version` (serde-default); a candidate promoting on a gate the skill already passed at the same suite version requires a passing held-out run — `HeldOutEvidence` seam with `CatalogHeldOutEvidence` over the conformance run catalog (target=skill name, target_version=content hash, excluding the declared gate; EP-12-S09 persistence, no new storage); suite version bump exempts (pairs with version-bump invalidation); unversioned gate runs degrade enforcement with a warning rather than blocking on an unprovable comparison; typed `PromotionError::HeldOutRequired { gate, suite_version }` refusal + Trial record; handler answers 403 `held_out_required`; 5 tests (same-version blocked, held-out satisfies, bump exempts, unversioned degrades, candidate-identity query) + 2 core serde tests; 565 server + 1551 core tests green, clippy/doc clean |
 | EP-17-S04 | Attribution fields on eval artifacts (R4) | P1 | ✅ | `rusty-core/src/skill.rs` + `rusty-server/src/skills.rs` (`ec70507` on `feat/ep-17-s02`): `ScaffoldAttribution` rollup (prompt tier hash `FrozenPrefixRecord::whole_prefix_sha256`, memory high-water mark `ConsolidationState::high_water_mark`, skill pack version `SkillSource::Package` version, prefix-routed model stamp) rides `GateEvaluationResult::Pass` — every field optional, an evaluator that cannot source one reports `None` rather than inventing it; `SkillPromotion` gains `attribution` + `changed_from_baseline` (both serde-default; pre-rollup history loads with `None`); `attribution_diff()` names the components differing from the newest prior Promoted record, in declaration order — `None` when no baseline or either side unknown, `Some([])` for an unchanged scaffold, a field absent on either side unprovable rather than a change; held-out/regression-blocked Trial records carry the same attribution as a Promoted one; promote receipt returns both fields; 7 server tests (recorded, no baseline, delta naming, empty delta, degraded delta, one-sided unknown, blocked Trial) + 5 core tests (diff per component, declaration order, identical, one-sided unknown, component serde); 572 server + 1556 core tests green, clippy/doc clean |
 | EP-17-S05 | Consolidation provenance-diversity check (R5) | P1 | ○ | Extends EP-06-S09 loss-bounded validation: a consolidation collapsing N independent sources into claims attributable to fewer sources requires stronger justification. Concrete form of memory-poisoning defense for learned summaries. Depends on EP-06-S08 (blocked) unblocking |
-| EP-17-S06 | Docs: adopt the survey vocabulary (R6) | P2 | ○ | "Durable vs transient update", "scaffold vs parametric loop", "generator vs governed critic" in `learn-design.md`, `gap-ledger-design.md`, and the anatomy docs — the design already implements these ideas; naming them makes it legible from the literature |
+| EP-17-S06 | Docs: adopt the survey vocabulary (R6) | P2 | ✅ | `docs/learn-design.md` + `docs/gap-ledger-design.md` + `docs/architecture.md` (`feat/ep-17-s02`): the survey's three vocabulary pairs (arXiv:2607.13104) named where the concepts already live — Learn's "Lineage, named" gains the survey entry (scaffold loop not parametric, transient vs durable updates with every durable update gating through the candidate pipeline, generator / governed critic split with critics as platform infrastructure); the gap ledger's composition section names itself the generator to the promotion gate's governed critic; the anatomy glossary defines all three pairs and points at the ADR |
 
 ## Updating this tracker
 

@@ -484,3 +484,6 @@ Contributing: [CONTRIBUTING.md](../CONTRIBUTING.md) (workspace-wide) and [rusty-
 - **Interrupt** — a node-initiated suspension of the whole run, resumable via a checkpoint and a resume value.
 - **Send** — a routing instruction that fans one node out over runtime-generated items, each with scoped input state.
 - **Active set** — the nodes scheduled to run in a super-step.
+- **Scaffold vs parametric loop** — the two loops an agent system can improve through: updates to the operational scaffold (prompts, memory, tools, graph) or updates to model weights. Rusty is scaffold-loop only (`docs/self-improvement-adr.md`).
+- **Durable vs transient update** — a transient update lives in one run's context and dies with it; a durable update persists, and every durable update gates through governed promotion (`docs/learn-design.md`).
+- **Generator vs governed critic** — the split between what proposes improvements (distillers, induction, hunts) and what decides them (replay, eval gates, promotion). Critics are platform infrastructure, never learned components.
