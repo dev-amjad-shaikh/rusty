@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████░░░░░░░░░ 71%** weighted complete (123 ✅ landed · 45 ◐ partial · 36 ○ not started, of 204 stories)
+**██████████████████████░░░░░░░░ 72%** weighted complete (124 ✅ landed · 45 ◐ partial · 35 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -32,7 +32,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 8 | 1 | 3 | █████████░░░ 71% |
 | EP-16 Rustynome Studio v2 (design handoff) | M4–M5 | 16 | 0 | 0 | 16 | ░░░░░░░░░░░░░░░░ 0% |
-| EP-17 Self-Improvement Measurement (survey fast-follows) | M2–M4 | 6 | 3 | 0 | 3 | ███░░░ 50% |
+| EP-17 Self-Improvement Measurement (survey fast-follows) | M2–M4 | 6 | 4 | 0 | 2 | ████░░ 67% |
 
 ## EP-01 — Event Log and State Substrate
 
@@ -348,13 +348,13 @@ Design source: `docs/studio-v2-design-handoff/` (owner-supplied, 2026-09-05 — 
 
 ## EP-17 — Self-Improvement Measurement (survey fast-follows)
 
-███░░░ 50% · 3 landed · 0 partial · 3 not started · milestone M2–M4
+████░░ 67% · 4 landed · 0 partial · 2 not started · milestone M2–M4
 
 Source: `docs/self-improving-agents-survey-notes.md` (2026-09-04) — lessons from *Self-Improvements in Modern Agentic Systems: A Survey* (arXiv:2607.13104) mapped onto Rusty. The survey's evaluation lens requires an improvement claim to report regressions on previously solved tasks, held-out transfer, and attribution to the updated component; these stories close that gap inside EP-12/EP-06 machinery.
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-17-S01 | ADR: Rusty is scaffolding-only self-improvement (R1) | P1 | ○ | Short architecture decision record: all persistent updates gate through EP-12-S08-style promotion; control-logic self-modification (survey branch 2.4, Gödel-machine line) is deliberately not built until gates mature. Preempts the most common question about a "self-improving agent platform" |
+| EP-17-S01 | ADR: Rusty is scaffolding-only self-improvement (R1) | P1 | ✅ | `docs/self-improvement-adr.md` (`feat/ep-17-s02`): every persistent scaffold update (prompts, memories, skills, policies, tool permissions) gates through the EP-12-S08 promotion contract — immutable candidate, recorded evidence, journaled transition, one-operation rollback; control-logic self-modification (survey branch 2.4, Darwin Gödel Machine / STOP / ADAS / AlphaEvolve line) is ruled out — gates, evaluators, and the learning loop stay platform code no agent may modify or supply; reopening conditions written down (gates matured in production + external review, by amendment not PR) |
 | EP-17-S02 | Regression packs as a promotion-gate input (R2) | P0 | ✅ | `rusty-server/src/skills.rs` (`e1af6a8` on `feat/ep-17-s02`): `regression_pack()` derives the canonical suite of previously-passing evals from the promotion history (Promoted records only, declared gate excluded, first-pass order); `promote()` re-runs every pack member against the candidate after the declared gate passes and blocks with typed `PromotionError::RegressionBlocked { failures }` naming each regressed gate, run, and case; blocked attempts recorded as Trial; infra errors on pack members fail closed; unchanged-content reuse (EP-12-S08 AC 5) skips re-evaluation; `SkillPromotion` gains `gate_name` (serde-default; pre-pack history loads and predates the pack); handler answers 403 `regression_blocked`; 8 pack tests (empty pack, re-run, typed refusal, all-cases naming, reuse skip, Trial exclusion, infra fail-closed, pre-pack history) + `RecordingGateEvaluator` double; 565 server + 1551 core tests green, clippy/doc clean |
 | EP-17-S03 | Held-out split enforcement in eval gates (R3) | P0 | ✅ | `rusty-server/src/skills.rs` (`5620a6c` on `feat/ep-17-s02`): `GateEvaluationResult::Pass` carries `suite_version`; `SkillPromotion` gains `gate_version` (serde-default); a candidate promoting on a gate the skill already passed at the same suite version requires a passing held-out run — `HeldOutEvidence` seam with `CatalogHeldOutEvidence` over the conformance run catalog (target=skill name, target_version=content hash, excluding the declared gate; EP-12-S09 persistence, no new storage); suite version bump exempts (pairs with version-bump invalidation); unversioned gate runs degrade enforcement with a warning rather than blocking on an unprovable comparison; typed `PromotionError::HeldOutRequired { gate, suite_version }` refusal + Trial record; handler answers 403 `held_out_required`; 5 tests (same-version blocked, held-out satisfies, bump exempts, unversioned degrades, candidate-identity query) + 2 core serde tests; 565 server + 1551 core tests green, clippy/doc clean |
 | EP-17-S04 | Attribution fields on eval artifacts (R4) | P1 | ✅ | `rusty-core/src/skill.rs` + `rusty-server/src/skills.rs` (`ec70507` on `feat/ep-17-s02`): `ScaffoldAttribution` rollup (prompt tier hash `FrozenPrefixRecord::whole_prefix_sha256`, memory high-water mark `ConsolidationState::high_water_mark`, skill pack version `SkillSource::Package` version, prefix-routed model stamp) rides `GateEvaluationResult::Pass` — every field optional, an evaluator that cannot source one reports `None` rather than inventing it; `SkillPromotion` gains `attribution` + `changed_from_baseline` (both serde-default; pre-rollup history loads with `None`); `attribution_diff()` names the components differing from the newest prior Promoted record, in declaration order — `None` when no baseline or either side unknown, `Some([])` for an unchanged scaffold, a field absent on either side unprovable rather than a change; held-out/regression-blocked Trial records carry the same attribution as a Promoted one; promote receipt returns both fields; 7 server tests (recorded, no baseline, delta naming, empty delta, degraded delta, one-sided unknown, blocked Trial) + 5 core tests (diff per component, declaration order, identical, one-sided unknown, component serde); 572 server + 1556 core tests green, clippy/doc clean |
