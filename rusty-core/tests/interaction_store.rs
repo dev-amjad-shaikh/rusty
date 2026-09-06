@@ -203,3 +203,88 @@ fn wire_shape_keeps_the_schema_names() {
     assert_eq!(value["resolution_path"], json!("human_resolved"));
     assert_eq!(value["outcome"], json!("resolved"));
 }
+
+// ---------- untrusted-derived filing (EP-07-S09 AC5) ----------
+
+#[test]
+fn filings_citing_untrusted_events_land_as_untrusted_derived() {
+    use rusty_agent_runtime::gaps::{ClosureCriteria, GapOrigin, OriginClass};
+
+    let mut ledger = GapLedger::new();
+    let untrusted = event("vendor-mail", "email", "EM-1", "vpn keeps dropping")
+        .with_origin_class(OriginClass::Untrusted);
+    let trusted = event("servicenow", "incident", "INC-1", "vpn keeps dropping");
+    let untrusted_id = ledger.record_event(untrusted).unwrap();
+    let trusted_id = ledger.record_event(trusted).unwrap();
+
+    let criteria = || ClosureCriteria::BlockFilled {
+        block_label: "vpn guidance".to_string(),
+    };
+
+    // Same surface, same statement shape — the content's trust class,
+    // not the filing surface, decides the recorded origin.
+    let from_untrusted = ledger
+        .file_correction(
+            &untrusted_id,
+            "vendor doc was wrong",
+            criteria(),
+            0,
+            "test",
+            at(50),
+        )
+        .unwrap();
+    let from_trusted = ledger
+        .file_correction(
+            &trusted_id,
+            "vendor doc was wrong",
+            criteria(),
+            0,
+            "test",
+            at(51),
+        )
+        .unwrap();
+
+    let untrusted_entry = ledger.entry(&from_untrusted).unwrap();
+    assert_eq!(untrusted_entry.origin, GapOrigin::UntrustedDerived);
+    let trusted_entry = ledger.entry(&from_trusted).unwrap();
+    assert_eq!(trusted_entry.origin, GapOrigin::RuntimeCorrection);
+
+    // Escalation filings follow the same rule.
+    let escalated = ledger
+        .file_escalation(
+            &untrusted_id,
+            "vendor doc escalated",
+            criteria(),
+            0,
+            "test",
+            at(52),
+        )
+        .unwrap();
+    assert_eq!(
+        ledger.entry(&escalated).unwrap().origin,
+        GapOrigin::UntrustedDerived
+    );
+}
+
+#[test]
+fn origin_class_rides_outside_the_content_address() {
+    use rusty_agent_runtime::gaps::OriginClass;
+
+    let plain = event("servicenow", "incident", "INC-9", "vpn down");
+    let marked = event("servicenow", "incident", "INC-9", "vpn down")
+        .with_origin_class(OriginClass::Untrusted);
+    assert_eq!(
+        plain.event_id, marked.event_id,
+        "trust classifies the evidence; it is not the evidence"
+    );
+
+    // Wire back-compat: a pre-EP-07-S09 event without the field
+    // deserializes trusted, and a trusted event never grows the field.
+    let wire = serde_json::to_value(&plain).unwrap();
+    assert!(wire.get("origin_class").is_none());
+    let decoded: InteractionEvent = serde_json::from_value(wire).unwrap();
+    assert_eq!(decoded.origin_class, OriginClass::Trusted);
+
+    let marked_wire = serde_json::to_value(&marked).unwrap();
+    assert_eq!(marked_wire["origin_class"], json!("untrusted"));
+}

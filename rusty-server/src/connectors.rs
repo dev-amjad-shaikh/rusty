@@ -1075,6 +1075,12 @@ pub(crate) struct IngestPayload {
     /// operation's `params_schema`).
     #[serde(default)]
     params: Option<Value>,
+    /// The corpus's trust class (`trusted` default, `untrusted` for a
+    /// third-party feed — a vendor mailbox, a scraped page): markings
+    /// ride the ingested events, and filings derived from them land as
+    /// `untrusted_derived` downstream (EP-07-S09 AC5).
+    #[serde(default)]
+    origin_class: Option<String>,
 }
 
 /// `POST /connectors/instances/{id}/ingest` — pull the source corpus
@@ -1166,8 +1172,18 @@ pub(crate) async fn ingest(
             ));
         }
     };
-    let events = rusty_agent_runtime::connector::normalize_corpus(&payload.system, &records)
-        .map_err(|e| {
+    let origin_class = match payload.origin_class.as_deref() {
+        None | Some("trusted") => rusty_agent_runtime::gaps::OriginClass::Trusted,
+        Some("untrusted") => rusty_agent_runtime::gaps::OriginClass::Untrusted,
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "unknown origin class `{other}` (expected `trusted` or `untrusted`)"
+            )));
+        }
+    };
+    let events =
+        rusty_agent_runtime::connector::normalize_corpus(&payload.system, &records, origin_class)
+            .map_err(|e| {
             ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "normalization_failed",

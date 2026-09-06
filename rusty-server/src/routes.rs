@@ -5531,15 +5531,54 @@ async fn open_speculative_gap(
 
 /// `GET /gaps` — the hunting loop's standing work order: actionable
 /// entries (open or reopened, speculation validated) ranked by
-/// priority.
+/// priority. `?origin=<wire name>` filters to one provenance class —
+/// `untrusted_derived` is the governance read (EP-07-S09 AC5).
+#[derive(Debug, Deserialize)]
+struct WorkOrderQuery {
+    /// Restrict to one origin's wire name (the unit variants:
+    /// `induction`, `runtime_escalation`, `runtime_correction`,
+    /// `zero_recall`, `operator`, `untrusted_derived`).
+    #[serde(default)]
+    origin: Option<String>,
+}
+
 async fn work_order_gaps(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
+    axum::extract::Query(query): axum::extract::Query<WorkOrderQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    if let Some(origin) = &query.origin {
+        // Validate the filter against the origin vocabulary: a typo
+        // silently answering an empty list would read as "no
+        // untrusted-derived gaps" — the one read that must not lie.
+        let known = [
+            "induction",
+            "runtime_escalation",
+            "runtime_correction",
+            "zero_recall",
+            "operator",
+            "untrusted_derived",
+        ];
+        if !known.contains(&origin.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "unknown origin filter `{origin}` (expected one of: {})",
+                known.join(", ")
+            )));
+        }
+    }
     let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
     let work_order: Vec<Value> = ledger
         .work_order()
         .into_iter()
+        .filter(|entry| {
+            query.origin.as_deref().is_none_or(|origin| {
+                serde_json::to_value(entry.origin)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .as_deref()
+                    == Some(origin)
+            })
+        })
         .map(|entry| {
             json!({
                 "gap_id": entry.gap_id,

@@ -267,6 +267,31 @@ pub enum InteractionOutcome {
     NoClick,
 }
 
+/// Whether the interaction's content is trustworthy at face value as
+/// demand evidence (EP-07-S09 AC5). A first-party support transcript is
+/// trusted; a vendor email or a scraped page is not — and a filing
+/// derived from untrusted content must be structurally distinguishable
+/// in the ledger, so the hunting loop can hold it to stricter rules.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginClass {
+    /// First-party content, taken at face value.
+    #[default]
+    Trusted,
+    /// Third-party content: usable as evidence, never as the filing's
+    /// stated origin.
+    Untrusted,
+}
+
+impl OriginClass {
+    /// Whether the class is the trusted default (the serde skip rule:
+    /// trusted events carry no field on the wire, so pre-EP-07-S09
+    /// corpora round-trip unchanged).
+    pub fn is_trusted(&self) -> bool {
+        matches!(self, OriginClass::Trusted)
+    }
+}
+
 /// Where the event came from — the citation anchor back into the source
 /// system. Every downstream artifact (intent clusters, gap entries,
 /// coverage claims) cites events, and citation is only meaningful against
@@ -325,6 +350,13 @@ pub struct InteractionEvent {
     /// escalation that followed the chat. Journeys are data, not
     /// inference.
     pub links: Vec<String>,
+    /// The content's trust class (EP-07-S09 AC5): filings derived from
+    /// untrusted events file as `UntrustedDerived` whatever surface they
+    /// came in through. Outside the content address — trust classifies
+    /// the evidence; it is not the evidence. Absent from the wire while
+    /// trusted, so existing corpora round-trip unchanged.
+    #[serde(default, skip_serializing_if = "OriginClass::is_trusted")]
+    pub origin_class: OriginClass,
 }
 
 /// The canonical, id-free serialization an event id hashes.
@@ -408,7 +440,16 @@ impl InteractionEvent {
             occurred_at,
             resolved_at,
             links,
+            origin_class: OriginClass::Trusted,
         })
+    }
+
+    /// Builder-style: mark the content's trust class (EP-07-S09 AC5).
+    /// Safe to apply after construction: the class rides outside the
+    /// content address, so it never changes the event's id.
+    pub fn with_origin_class(mut self, origin_class: OriginClass) -> Self {
+        self.origin_class = origin_class;
+        self
     }
 }
 
@@ -1311,7 +1352,8 @@ impl GapLedger {
     /// File from an escalation event: a human had to resolve what the
     /// agent could not. The subject is the event's current intent, or a
     /// question shape from its utterance when clustering has not claimed
-    /// it yet.
+    /// it yet. An untrusted event files as `UntrustedDerived` whatever
+    /// surface it came in through (EP-07-S09 AC5).
     pub fn file_escalation(
         &mut self,
         event_id: &str,
@@ -1326,7 +1368,7 @@ impl GapLedger {
             subject,
             statement,
             vec![citation],
-            GapOrigin::RuntimeEscalation,
+            self.origin_for_event(event_id, GapOrigin::RuntimeEscalation),
             closure_criteria,
             1,
             failure_cost_millis,
@@ -1335,7 +1377,8 @@ impl GapLedger {
         )
     }
 
-    /// File from an operator or user correction.
+    /// File from an operator or user correction. An untrusted event
+    /// files as `UntrustedDerived` (EP-07-S09 AC5).
     pub fn file_correction(
         &mut self,
         event_id: &str,
@@ -1350,13 +1393,24 @@ impl GapLedger {
             subject,
             statement,
             vec![citation],
-            GapOrigin::RuntimeCorrection,
+            self.origin_for_event(event_id, GapOrigin::RuntimeCorrection),
             closure_criteria,
             1,
             failure_cost_millis,
             actor,
             at,
         )
+    }
+
+    /// The filing origin for a runtime event citation: the surface's own
+    /// origin when the event is trusted, `UntrustedDerived` when the
+    /// content came from a third party (a vendor email, a scraped page)
+    /// — the structural distinction the hunting loop reads.
+    fn origin_for_event(&self, event_id: &str, surface: GapOrigin) -> GapOrigin {
+        match self.events.get(event_id).map(|event| event.origin_class) {
+            Some(OriginClass::Untrusted) => GapOrigin::UntrustedDerived,
+            _ => surface,
+        }
     }
 
     /// File from a memory recall that returned nothing. A zero-recall

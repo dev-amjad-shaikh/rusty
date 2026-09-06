@@ -15,7 +15,9 @@ use rusty_agent_runtime::connector::{
     normalize_servicenow_record,
 };
 use rusty_agent_runtime::error::Result as RuntimeResult;
-use rusty_agent_runtime::gaps::{InteractionChannel, InteractionOutcome, ResolutionPath};
+use rusty_agent_runtime::gaps::{
+    InteractionChannel, InteractionOutcome, OriginClass, ResolutionPath,
+};
 use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::tool::{EffectClass, Tool};
 use serde_json::{Value, json};
@@ -477,7 +479,7 @@ fn corpus_normalization_resolves_journeys_to_event_links() {
     );
     // The incident cites the search that preceded it.
     incident["links"] = json!(["sp_log/SP-9", "sp_log/SP-UNKNOWN"]);
-    let events = normalize_corpus("servicenow", &[search, incident]).unwrap();
+    let events = normalize_corpus("servicenow", &[search, incident], OriginClass::Trusted).unwrap();
     assert_eq!(events.len(), 2);
     // The in-corpus reference resolved to the search's event id; the
     // out-of-corpus one dropped — a link must cite an immutable row.
@@ -498,8 +500,8 @@ fn reingestion_converges_on_the_same_event_ids() {
             json!({"short_description": "vpn down", "state": "resolved"}),
         ),
     ];
-    let first = normalize_corpus("servicenow", &corpus).unwrap();
-    let second = normalize_corpus("servicenow", &corpus).unwrap();
+    let first = normalize_corpus("servicenow", &corpus, OriginClass::Trusted).unwrap();
+    let second = normalize_corpus("servicenow", &corpus, OriginClass::Trusted).unwrap();
     let first_ids: Vec<&str> = first.iter().map(|e| e.event_id.as_str()).collect();
     let second_ids: Vec<&str> = second.iter().map(|e| e.event_id.as_str()).collect();
     assert_eq!(first_ids, second_ids, "content addresses are stable");

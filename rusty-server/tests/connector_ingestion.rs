@@ -546,3 +546,63 @@ async fn ingestion_is_tenant_isolated() {
 
     let _ = std::fs::remove_dir_all(store);
 }
+
+#[tokio::test]
+async fn an_untrusted_corpus_files_its_filings_as_untrusted_derived() {
+    let transport = Arc::new(CorpusTransport::serving(corpus()));
+    let (app, store) = app_with(transport);
+    let instance_id = register_and_instantiate(&app).await;
+
+    // Ingest the corpus marked as third-party content.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/connectors/instances/{instance_id}/ingest"),
+        Some(json!({
+            "operation": "read-corpus",
+            "system": "servicenow",
+            "params": {"window": "2026-W01"},
+            "origin_class": "untrusted"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ingested"], json!(13));
+    let event_id = body["event_ids"][0].as_str().unwrap().to_owned();
+
+    // A runtime filing citing one of those events lands as
+    // untrusted_derived, whatever surface it came in through.
+    let (status, filed) = call(
+        &app,
+        "POST",
+        "/gaps/file/escalation",
+        Some(json!({
+            "event_id": event_id,
+            "statement": "vendor feed escalated this",
+            "closure_criteria": {"block_filled": {"block_label": "vendor guidance"}}
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{filed}");
+    let gap_id = filed["gap_id"].as_str().unwrap();
+
+    // The governance read: the origin filter isolates exactly the
+    // untrusted-derived entries.
+    let (status, work) = call(&app, "GET", "/gaps?origin=untrusted_derived", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = work["work_order"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{work}");
+    assert_eq!(rows[0]["gap_id"], json!(gap_id));
+    assert_eq!(rows[0]["origin"], json!("untrusted_derived"));
+
+    let (status, work) = call(&app, "GET", "/gaps?origin=runtime_escalation", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(work["work_order"].as_array().unwrap().is_empty());
+
+    // A typo'd filter is a typed 400 — never a silent empty list reading
+    // as "no untrusted-derived gaps".
+    let (status, _) = call(&app, "GET", "/gaps?origin=untrusted", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let _ = std::fs::remove_dir_all(store);
+}

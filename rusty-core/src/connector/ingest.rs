@@ -20,7 +20,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::gaps::{
-    ActorRef, EventSource, InteractionChannel, InteractionEvent, InteractionOutcome, ResolutionPath,
+    ActorRef, EventSource, InteractionChannel, InteractionEvent, InteractionOutcome, OriginClass,
+    ResolutionPath,
 };
 
 /// A record the normalizer cannot honestly map.
@@ -151,13 +152,19 @@ pub fn normalize_servicenow_record(
 /// linked, so journeys land as data. References outside the corpus are
 /// dropped — a link must cite an immutable row, and a row we did not
 /// ingest is not one.
+///
+/// `origin_class` marks the whole corpus's trust (EP-07-S09 AC5): a
+/// connector reading a third-party feed (a vendor mailbox, a scraped
+/// page) ingests as `Untrusted`, and filings derived from those events
+/// land as `UntrustedDerived` downstream.
 pub fn normalize_corpus(
     system: &str,
     records: &[Value],
+    origin_class: OriginClass,
 ) -> Result<Vec<InteractionEvent>, IngestError> {
     let mut events = Vec::with_capacity(records.len());
     for record in records {
-        events.push(normalize_servicenow_record(system, record)?);
+        events.push(normalize_servicenow_record(system, record)?.with_origin_class(origin_class));
     }
     // Source ref → event id, for link resolution.
     let by_ref: std::collections::HashMap<String, String> = events
