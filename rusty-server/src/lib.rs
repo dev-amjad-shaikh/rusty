@@ -683,6 +683,14 @@ pub struct ServerConfig {
     /// enforced — the deployment is open. See
     /// [`ServerConfig::with_egress_policy`].
     pub egress_policy: Option<rusty_agent_runtime::egress::EgressPolicy>,
+
+    /// The connector transport override (EP-07-S05): when set, every
+    /// connector operation execution — the check gate and ingestion
+    /// alike — sends through this transport instead of the reqwest
+    /// default. Exists so tests drive a scripted fixture without
+    /// sockets; production deployments leave it `None`. See
+    /// [`ServerConfig::with_connector_transport`].
+    pub connector_transport: Option<Arc<dyn rusty_agent_runtime::connector::ConnectorTransport>>,
 }
 
 impl Default for ServerConfig {
@@ -716,6 +724,7 @@ impl Default for ServerConfig {
             broker_sweep_interval: None,
             artifact_sweep_interval: None,
             egress_policy: None,
+            connector_transport: None,
         }
     }
 }
@@ -1068,6 +1077,18 @@ impl ServerConfig {
     /// one the deployment is open: no egress rules are enforced.
     pub fn with_egress_policy(mut self, policy: rusty_agent_runtime::egress::EgressPolicy) -> Self {
         self.egress_policy = Some(policy);
+        self
+    }
+
+    /// Builder-style: override the connector transport (EP-07-S05). Every
+    /// connector operation execution — the check gate and ingestion
+    /// alike — sends through this transport. Tests inject a scripted
+    /// fixture here; production leaves it unset for the reqwest default.
+    pub fn with_connector_transport(
+        mut self,
+        transport: Arc<dyn rusty_agent_runtime::connector::ConnectorTransport>,
+    ) -> Self {
+        self.connector_transport = Some(transport);
         self
     }
 }

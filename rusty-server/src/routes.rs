@@ -28,6 +28,7 @@ use rusty_agent_runtime::durable::{
     ResolvedRetryParameters, RetryDecision, resolve_retry_parameters, resolve_timeout_bound_ms,
     retry_decision_event, timeout_decision_event,
 };
+use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::gaps::{
     ActorRef, AdjacencySource, Citation, CitationKind, ClosureCriteria, ClosureEvidence,
     EventSource, GapError, GapLedger, GapOrigin, GapStatus, GapSubject, InteractionChannel,
@@ -35,11 +36,10 @@ use rusty_agent_runtime::gaps::{
     ResolutionPath,
 };
 use rusty_agent_runtime::induction::{
-    crawl_coverage, declared_blocks, join_maps, mine_intents, seed_ledger, CoverageConfig,
-    InductionError, MiningConfig, SupplyArtifact, DEFAULT_BLOCK_CHAR_LIMIT,
-    DEFAULT_FAILING_THRESHOLD_MILLIS,
+    CoverageConfig, DEFAULT_BLOCK_CHAR_LIMIT, DEFAULT_FAILING_THRESHOLD_MILLIS, InductionError,
+    MiningConfig, SupplyArtifact, crawl_coverage, declared_blocks, join_maps, mine_intents,
+    seed_ledger,
 };
-use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
     Candidate, CandidateContent, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
@@ -718,6 +718,18 @@ pub(crate) fn build_router(
         .route(
             "/connectors/instances/{instance_id}/catalog",
             get(crate::connectors::instance_catalog),
+        )
+        // Interaction-event ingestion (EP-07-S05): pull the source corpus
+        // through the instance's declared read operation, normalize every
+        // record, and file it into the tenant's gap ledger — idempotent
+        // by content address, receipted per call.
+        .route(
+            "/connectors/instances/{instance_id}/ingest",
+            post(crate::connectors::ingest),
+        )
+        .route(
+            "/connectors/instances/{instance_id}/receipts",
+            get(crate::connectors::instance_receipts),
         )
         // Repair-record audit stream (EP-10-S01): query by component,
         // trigger class, outcome, time range, session, or attempt.
@@ -5102,7 +5114,7 @@ async fn get_memory(
 
 /// The per-tenant lock serializing gap-ledger mutations (see
 /// [`AppState::gap_locks`]).
-async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
+pub(crate) async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
     state
         .gap_locks
         .lock()
@@ -5114,7 +5126,7 @@ async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
 
 /// Load the tenant's ledger, or an empty one — an unread tenant costs
 /// no store row; the first mutation persists.
-async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
+pub(crate) async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
     Ok(state
         .server_store
         .get_gap_ledger(tenant)
@@ -5124,7 +5136,7 @@ async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, Ap
 }
 
 /// Persist the tenant's snapshot after a mutation.
-async fn persist_gap_ledger(
+pub(crate) async fn persist_gap_ledger(
     state: &AppState,
     tenant: &str,
     ledger: &GapLedger,
