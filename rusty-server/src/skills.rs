@@ -54,8 +54,9 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use rusty_agent_runtime::skill::{
-    Registration, SkillError, SkillMetadata, SkillPackage, SkillPromotion, SkillPromotionStatus,
-    SkillRegistry, SkillSource, SkillVersion, SkillVersionSelector,
+    Registration, ScaffoldAttribution, SkillError, SkillMetadata, SkillPackage, SkillPromotion,
+    SkillPromotionStatus, SkillRegistry, SkillSource, SkillVersion, SkillVersionSelector,
+    attribution_diff,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -230,9 +231,13 @@ pub(crate) enum GateEvaluationResult {
     /// version of the suite the run executed, when the evaluator knows it —
     /// the held-out enforcement (EP-17-S03) relies on it to recognize a
     /// version bump; when absent, that enforcement degrades with a warning.
+    /// `attribution` is the scaffold the evaluation ran against, rolled up
+    /// from the eval run's journal (EP-17-S04); `None` when the evaluator
+    /// cannot source it.
     Pass {
         run_id: String,
         suite_version: Option<String>,
+        attribution: Option<ScaffoldAttribution>,
     },
     /// The gate failed: the suite run produced failing cases.
     Fail {
@@ -655,6 +660,11 @@ impl SkillPlane {
     /// decision then requires a passing held-out suite run. A suite version
     /// bump is fresh cases and exempts, pairing with the conformance
     /// registry's version-bump invalidation (EP-12-S09).
+    /// EP-17-S04: The record carries the scaffold the evaluation ran against
+    /// (prompt tier hash, memory high-water mark, skill pack version, model
+    /// stamp — a rollup from the eval run's journal, reported by the
+    /// evaluator) plus the components that differ from the baseline
+    /// promotion, so an improvement claim names what changed.
     pub(crate) async fn promote(
         &self,
         tenant: &str,
@@ -702,11 +712,12 @@ impl SkillPlane {
             .await
             .map_err(PromotionError::GateFailed)?;
 
-        let (run_id, suite_version) = match result {
+        let (run_id, suite_version, attribution) = match result {
             GateEvaluationResult::Pass {
                 run_id,
                 suite_version,
-            } => (run_id, suite_version),
+                attribution,
+            } => (run_id, suite_version, attribution),
             GateEvaluationResult::Fail {
                 run_id,
                 diagnostics,
@@ -720,6 +731,8 @@ impl SkillPlane {
                     gate_run_id: Some(run_id.clone()),
                     gate_name: Some(gate_name.clone()),
                     gate_version: None,
+                    attribution: None,
+                    changed_from_baseline: None,
                     author: author.clone(),
                     created_at: chrono::Utc::now(),
                 };
@@ -734,6 +747,29 @@ impl SkillPlane {
                     diagnostics,
                 });
             }
+        };
+
+        // EP-17-S04: diff the candidate's scaffold attribution against the
+        // baseline — the newest prior Promoted record. Computed once and
+        // carried on whatever record this decision persists. `None` when
+        // there is no baseline or either side's attribution is unknown; an
+        // empty list means the scaffold is unchanged.
+        let changed_from_baseline = match &attribution {
+            Some(candidate) => {
+                let promotions = self.promotions.lock().await;
+                let baseline = promotions
+                    .get(&(tenant.to_owned(), name.to_owned()))
+                    .and_then(|history| {
+                        history.iter().rev().find_map(|p| {
+                            (p.status == SkillPromotionStatus::Promoted)
+                                .then(|| p.attribution.clone())
+                                .flatten()
+                        })
+                    });
+                drop(promotions);
+                baseline.map(|b| attribution_diff(candidate, &b))
+            }
+            None => None,
         };
 
         // EP-17-S03: held-out transfer. When this skill already promoted on
@@ -771,6 +807,8 @@ impl SkillPlane {
                     gate_run_id: Some(run_id.clone()),
                     gate_name: Some(gate_name.clone()),
                     gate_version: Some(version.to_owned()),
+                    attribution: attribution.clone(),
+                    changed_from_baseline: changed_from_baseline.clone(),
                     author: author.clone(),
                     created_at: chrono::Utc::now(),
                 };
@@ -843,6 +881,8 @@ impl SkillPlane {
                 gate_run_id: Some(failures[0].run_id.clone()),
                 gate_name: Some(gate_name.clone()),
                 gate_version: suite_version.clone(),
+                attribution: attribution.clone(),
+                changed_from_baseline: changed_from_baseline.clone(),
                 author: author.clone(),
                 created_at: chrono::Utc::now(),
             };
@@ -863,6 +903,8 @@ impl SkillPlane {
             gate_run_id: Some(run_id),
             gate_name: Some(gate_name),
             gate_version: suite_version,
+            attribution,
+            changed_from_baseline,
             author,
             created_at: chrono::Utc::now(),
         };
@@ -1258,6 +1300,8 @@ pub(crate) async fn promote_skill(
                 "content_hash": promotion.content_hash,
                 "status": promotion.status,
                 "gate_run_id": promotion.gate_run_id,
+                "attribution": promotion.attribution,
+                "changed_from_baseline": promotion.changed_from_baseline,
                 "author": promotion.author,
                 "created_at": promotion.created_at,
             });
@@ -1325,7 +1369,7 @@ pub(crate) async fn promote_skill(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_agent_runtime::skill::SkillPackage;
+    use rusty_agent_runtime::skill::{ScaffoldComponent, SkillPackage};
 
     fn store_root() -> PathBuf {
         std::env::temp_dir().join(format!("rusty-skills-test-{}", uuid::Uuid::new_v4()))
@@ -1466,6 +1510,7 @@ mod tests {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
                 suite_version: None,
+                attribution: None,
             }),
         };
         let result = plane
@@ -1539,6 +1584,7 @@ mod tests {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-pass".to_owned(),
                 suite_version: None,
+                attribution: None,
             }),
         };
         let promotion = plane
@@ -1578,6 +1624,7 @@ mod tests {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
                 suite_version: None,
+                attribution: None,
             }),
         };
         let first = plane
@@ -1628,6 +1675,7 @@ mod tests {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
                 suite_version: None,
+                attribution: None,
             }),
         };
         let first = plane
@@ -1655,6 +1703,7 @@ mod tests {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-2".to_owned(),
                 suite_version: None,
+                attribution: None,
             }),
         };
         let second = plane
@@ -1692,6 +1741,7 @@ mod tests {
                 Ok(GateEvaluationResult::Pass {
                     run_id: run_id.to_owned(),
                     suite_version: None,
+                    attribution: None,
                 }),
             )
         }
@@ -1706,6 +1756,22 @@ mod tests {
                 Ok(GateEvaluationResult::Pass {
                     run_id: run_id.to_owned(),
                     suite_version: Some(suite_version.to_owned()),
+                    attribution: None,
+                }),
+            )
+        }
+
+        fn pass_attributed(
+            gate: &str,
+            run_id: &str,
+            attribution: ScaffoldAttribution,
+        ) -> (String, Result<GateEvaluationResult, String>) {
+            (
+                gate.to_owned(),
+                Ok(GateEvaluationResult::Pass {
+                    run_id: run_id.to_owned(),
+                    suite_version: None,
+                    attribution: Some(attribution),
                 }),
             )
         }
@@ -2617,6 +2683,298 @@ mod tests {
         assert_eq!(
             calls,
             vec![("gated".to_owned(), candidate_hash, "suite-a".to_owned())]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // ----------------------------------------------------------------- //
+    // Scaffold attribution on eval artifacts (EP-17-S04)
+    // ----------------------------------------------------------------- //
+
+    fn scaffold(
+        prompt_tier_hash: &str,
+        memory_high_water: u64,
+        skill_pack_version: &str,
+        model_stamp: &str,
+    ) -> ScaffoldAttribution {
+        ScaffoldAttribution {
+            prompt_tier_hash: Some(prompt_tier_hash.to_owned()),
+            memory_high_water: Some(memory_high_water),
+            skill_pack_version: Some(skill_pack_version.to_owned()),
+            model_stamp: Some(model_stamp.to_owned()),
+        }
+    }
+
+    async fn register_and_promote(
+        plane: &SkillPlane,
+        body: &str,
+        revision: u64,
+        result: (String, Result<GateEvaluationResult, String>),
+    ) -> SkillPromotion {
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", body, "suite-a")).unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator = RecordingGateEvaluator {
+            results: [result].into_iter().collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                revision,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn promotion_records_scaffold_attribution() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let promotion = register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        let attribution = promotion.attribution.expect("attribution recorded");
+        assert_eq!(attribution.prompt_tier_hash.as_deref(), Some("sha256:a"));
+        assert_eq!(attribution.memory_high_water, Some(7));
+        assert_eq!(attribution.skill_pack_version.as_deref(), Some("1.2.0"));
+        assert_eq!(attribution.model_stamp.as_deref(), Some("openai/gpt-4"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn first_promotion_has_no_baseline() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let promotion = register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.changed_from_baseline, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn changed_from_baseline_names_delta() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-2",
+                scaffold("sha256:b", 7, "1.2.0", "openai/gpt-4o"),
+            ),
+        )
+        .await;
+        assert_eq!(
+            promotion.changed_from_baseline,
+            Some(vec![
+                ScaffoldComponent::PromptTierHash,
+                ScaffoldComponent::ModelStamp,
+            ])
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn unchanged_scaffold_yields_empty_delta() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-2",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.changed_from_baseline, Some(vec![]));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn missing_attribution_degrades_delta() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        // The candidate's evaluator cannot source attribution: the delta
+        // degrades to unknown rather than reporting every component.
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass("suite-a", "run-2"),
+        )
+        .await;
+        assert_eq!(promotion.attribution, None);
+        assert_eq!(promotion.changed_from_baseline, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn one_sided_unknown_field_is_not_a_change() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                ScaffoldAttribution {
+                    prompt_tier_hash: Some("sha256:a".to_owned()),
+                    memory_high_water: None,
+                    skill_pack_version: Some("1.2.0".to_owned()),
+                    model_stamp: Some("openai/gpt-4".to_owned()),
+                },
+            ),
+        )
+        .await;
+        // The baseline never recorded a high-water mark; the candidate's
+        // Some(9) is unprovable as a change, not evidence of one.
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-2",
+                scaffold("sha256:a", 9, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.changed_from_baseline, Some(vec![]));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn blocked_trials_carry_attribution() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let attributed_versioned = |run_id: &str, prefix: &str| {
+            (
+                "suite-a".to_owned(),
+                Ok(GateEvaluationResult::Pass {
+                    run_id: run_id.to_owned(),
+                    suite_version: Some("1.0".to_owned()),
+                    attribution: Some(scaffold(prefix, 7, "1.2.0", "openai/gpt-4")),
+                }),
+            )
+        };
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            attributed_versioned("run-1", "sha256:a"),
+        )
+        .await;
+
+        // Revision 2 passes the same gate at the same suite version with a
+        // changed scaffold; held-out enforcement blocks the promotion, and
+        // the Trial record still carries the attribution and its delta.
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator = RecordingGateEvaluator {
+            results: [attributed_versioned("run-2", "sha256:b")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let result = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator,
+                &no_held_out(),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(PromotionError::HeldOutRequired { .. })
+        ));
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 2);
+        let trial = &history[1];
+        assert_eq!(trial.status, SkillPromotionStatus::Trial);
+        assert_eq!(
+            trial
+                .attribution
+                .as_ref()
+                .and_then(|a| a.prompt_tier_hash.as_deref()),
+            Some("sha256:b")
+        );
+        assert_eq!(
+            trial.changed_from_baseline,
+            Some(vec![ScaffoldComponent::PromptTierHash])
         );
         let _ = std::fs::remove_dir_all(root);
     }
