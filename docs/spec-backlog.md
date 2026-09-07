@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████░░░░░░░░░ 70%** weighted complete (122 ✅ landed · 43 ◐ partial · 39 ○ not started, of 204 stories)
+**█████████████████████░░░░░░░░░ 71%** weighted complete (122 ✅ landed · 44 ◐ partial · 38 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -23,7 +23,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 4 | 8 | 0 | ████████░░░░ 67% |
-| EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 3 | 1 | █████████░░░ 77% |
+| EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 4 | 0 | ██████████░░ 82% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 8 | 2 | 2 | ████████░░░░ 67% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
@@ -166,7 +166,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-08 — Agent Blueprints and Registry
 
-█████████░░░ 77% · 7 landed · 3 partial · 1 not started · milestone M0–M4
+██████████░░ 82% · 7 landed · 4 partial · 0 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -177,7 +177,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-08-S05 | Versioning: immutable published versions and the draft/published/deprecated lifecycle | — | ✅ | immutable versions, draft/published/deprecated lifecycle |
 | EP-08-S06 | The registry API and Rustynome authoring | — | ◐ | registry API landed; Rustynome authoring UI partial |
 | EP-08-S07 | Learning-policy declaration and enforcement | — | ✅ | `/policy/*` learning-policy declaration + enforcement |
-| EP-08-S08 | Fleet upgrade at safe boundaries | — | ○ | fleet upgrade at safe boundaries not started |
+| EP-08-S08 | Fleet upgrade at safe boundaries | — | ◐ | landed on `feat/ep-08-s08` (`95cbec4`): `upgrades.rs` pin store + `UpgradePlane` (content-derived operation id, one open op per assistant, ancestor-lineage session selection, tenant-owned), run-admission seam in `schedule_for_thread` (first assistant run pins; open op adopts at the boundary with operator attribution logged; unresolved target records `failed` and the run stays on the prior pin), `POST/GET /assistants/{id}/upgrades[/{op}]` (201/200 replay/409 key-conflict/409 in-progress/404 unknown target), governing version feeds recursion-limit + tool defaults; 7 integration tests incl. poisoned-target-after-restart and tenant isolation — open residue: AC3's `paused` status and resume-under-paused-version await the pause store landing on `main` (EP-03-S11, unmerged), AC2's blueprint-side prefix re-assembly / memory-block mount have no assistant substrate on this chain |
 | EP-08-S09 | Blueprint export and import | — | ✅ | blueprint export/import |
 | EP-08-S10 | Template blueprints for the out-of-the-box catalog | — | ◐ | template blueprints partial |
 | EP-08-S11 | Version provenance for audit | — | ◐ | version provenance for audit partial |
