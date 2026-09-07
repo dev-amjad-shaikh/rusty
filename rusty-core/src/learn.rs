@@ -469,6 +469,14 @@ pub struct Candidate {
     #[serde(default, skip_serializing_if = "EvidenceSpan::is_empty")]
     pub evidence: EvidenceSpan,
 
+    /// The editorial provenance (EP-07-S03): which patch-before-create
+    /// rung an automated skill mutation landed on, with the justification
+    /// a `CreateNew` landing owes. Skill candidates only; beside the
+    /// content address, never inside it — attribution is not identity.
+    /// Absent from the wire when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editorial: Option<crate::skill_editorial::EditorialProvenance>,
+
     /// When the distiller minted the candidate.
     pub created_at: DateTime<Utc>,
 }
@@ -487,8 +495,28 @@ impl Candidate {
             content,
             distilled_by,
             evidence,
+            editorial: None,
             created_at,
         })
+    }
+
+    /// Attach the editorial provenance (EP-07-S03): which
+    /// patch-before-create rung this automated skill mutation landed on.
+    /// Skill candidates only, validated before attachment — a `CreateNew`
+    /// landing without its stated reason never enters the ledger. The
+    /// content address does not move: provenance is attribution, not
+    /// identity.
+    pub fn with_editorial_provenance(
+        mut self,
+        provenance: crate::skill_editorial::EditorialProvenance,
+    ) -> std::result::Result<Self, crate::skill_editorial::EditorialError> {
+        use crate::skill_editorial::EditorialError;
+        if !matches!(self.content, CandidateContent::Skill { .. }) {
+            return Err(EditorialError::NotSkillCandidate);
+        }
+        provenance.validate()?;
+        self.editorial = Some(provenance);
+        Ok(self)
     }
 
     /// The candidate's kind.

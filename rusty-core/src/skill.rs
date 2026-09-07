@@ -1244,6 +1244,14 @@ pub enum SkillPromotionStatus {
     Trial,
     /// Promoted: cleared its gate and may be bound into active skill sets.
     Promoted,
+    /// Cold: retention decayed below the cold threshold (EP-07-S03); out
+    /// of the prompt index until an operator restores it — the state
+    /// machine admits no traffic-driven way back.
+    Cold,
+    /// Archived: idle past the configured period while `Cold`, or
+    /// consolidated into an umbrella by the curator. Never deleted —
+    /// `Restore` by an operator returns it to `Promoted`.
+    Archived,
 }
 
 /// An immutable record of one promotion attempt.

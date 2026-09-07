@@ -814,6 +814,69 @@ pub(crate) async fn list_skills(
     Json(json!({ "skills": skills }))
 }
 
+// --------------------------------------------------------------------- //
+// Editorial governance (EP-07-S03)
+// --------------------------------------------------------------------- //
+
+/// `GET /skills/editorial/rung-distribution` query: the window, both
+/// bounds optional RFC 3339 (`since` includes, `until` excludes).
+#[derive(Debug, Deserialize)]
+pub(crate) struct RungDistributionQuery {
+    since: Option<String>,
+    until: Option<String>,
+}
+
+/// Parse one optional RFC 3339 window bound; a malformed bound is a
+/// caller error (`400`), never a silently open window.
+fn parse_window_bound(
+    name: &str,
+    value: Option<String>,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
+    value
+        .map(|raw| {
+            chrono::DateTime::parse_from_rfc3339(&raw)
+                .map(|parsed| parsed.with_timezone(&chrono::Utc))
+                .map_err(|_| {
+                    ApiError::bad_request(format!(
+                        "`{name}` must be RFC 3339 (e.g. 2026-09-01T00:00:00Z)"
+                    ))
+                })
+        })
+        .transpose()
+}
+
+/// `GET /skills/editorial/rung-distribution` — the taxonomy's standing
+/// health metric: how many automated skill mutations landed on each
+/// patch-before-create rung over the window. The tenant's candidate store
+/// is the ledger read (a candidate's editorial provenance is the recorded
+/// rung; its `created_at` is the mutation instant); every rung reports,
+/// zero-filled. `400` on malformed or inverted windows.
+pub(crate) async fn rung_distribution(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    axum::extract::Query(query): axum::extract::Query<RungDistributionQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let window = rusty_agent_runtime::skill_editorial::DistributionWindow {
+        since: parse_window_bound("since", query.since)?,
+        until: parse_window_bound("until", query.until)?,
+    };
+    let records = state
+        .server_store
+        .list_candidates(tenant.tenant())
+        .await
+        .map_err(|error| ApiError::internal(format!("list candidates: {error}")))?;
+    let mutations = records.iter().filter_map(|record| {
+        record
+            .candidate
+            .editorial
+            .as_ref()
+            .map(|provenance| (record.candidate.created_at, provenance.rung))
+    });
+    let distribution = rusty_agent_runtime::skill_editorial::rung_distribution(mutations, &window)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(json!(distribution)))
+}
+
 /// `GET /skills/{name}` — the latest version's receipt plus the revision
 /// count (`404` unknown/cross-tenant — the two are indistinguishable by
 /// design).

@@ -294,6 +294,11 @@ fn build_scope_table() -> ScopeTable {
     // Skills.
     table.declare("POST", "/skills", Scope::parse("skills:create").unwrap());
     table.declare("GET", "/skills", Scope::parse("skills:read").unwrap());
+    table.declare(
+        "GET",
+        "/skills/editorial/rung-distribution",
+        Scope::parse("skills:read").unwrap(),
+    );
 
     // Test-only: a route that does not exist, used by the enumeration-safe
     // test to prove identical refusal responses for existing and nonexistent
@@ -655,6 +660,10 @@ pub(crate) fn build_router(
             post(crate::skills::register_skill).get(crate::skills::list_skills),
         )
         .route("/skills/{name}", get(crate::skills::get_skill))
+        .route(
+            "/skills/editorial/rung-distribution",
+            get(crate::skills::rung_distribution),
+        )
         .route("/skills/{name}/body", get(crate::skills::get_skill_body))
         .route(
             "/skills/{name}/history",

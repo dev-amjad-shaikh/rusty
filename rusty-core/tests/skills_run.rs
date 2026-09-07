@@ -112,7 +112,11 @@ fn binding(tags: &[&str], tools: &[&str], task_shape: Option<&str>) -> SkillBind
 }
 
 fn catalog_entry(metadata: SkillMetadata, binding: SkillBinding) -> SkillCatalogEntry {
-    SkillCatalogEntry { metadata, binding }
+    SkillCatalogEntry {
+        metadata,
+        binding,
+        lifecycle: None,
+    }
 }
 
 struct Search;

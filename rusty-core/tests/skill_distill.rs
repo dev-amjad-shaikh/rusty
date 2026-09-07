@@ -1134,6 +1134,7 @@ async fn release_proof_trajectory_to_promoted_skill_and_back() {
         binding: pin(&candidate.candidate_id)
             .expect("the pin extracts")
             .binding,
+        lifecycle: None,
     }];
     let selection = select_skills(
         &SkillSelectionFeatures::default(),
