@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████░░░░░░░░░ 71%** weighted complete (122 ✅ landed · 44 ◐ partial · 38 ○ not started, of 204 stories)
+**█████████████████████░░░░░░░░░ 71%** weighted complete (123 ✅ landed · 43 ◐ partial · 38 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -22,7 +22,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
-| EP-07 Skills and Self-Learning | M2 | 12 | 4 | 8 | 0 | ████████░░░░ 67% |
+| EP-07 Skills and Self-Learning | M2 | 12 | 5 | 7 | 0 | █████████░░░ 71% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 4 | 0 | ██████████░░ 82% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 8 | 2 | 2 | ████████░░░░ 67% |
@@ -147,7 +147,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-07 — Skills and Self-Learning
 
-████████░░░░ 67% · 4 landed · 8 partial · 0 not started · milestone M2
+█████████░░░ 71% · 5 landed · 7 partial · 0 not started · milestone M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -162,7 +162,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-07-S09 | Runtime gap filing | — | ◐ | `/gaps` surface + zero-recall/correction hooks landed on `main` (W2); AC 4 dedupe/reinforce-by-content-address landed (W1 `file_gap`); AC 5 untrusted-derived filing landed on `feat/ep-07-s09` (`4aa2f9f`): `OriginClass` on interaction events (outside the content address), ingest `origin_class` marking, filing-origin override + `GET /gaps?origin=` filter; AC 1's automatic filing on conversational escalation commit remains — blocked on EP-04 escalation routing (no turn-level escalation surface exists) |
 | EP-07-S10 | The hunting loop and eval-gated promotion | — | ◐ | `/hunts` cycle/draft/blocked + promotion-gated closure landed on `main` (W4); autonomous hunt driver open — blocked: AC1 selects within the blueprint's `LearningPolicy.hunting_budget` (absent from blueprints/`CapabilityManifest`) and each hunt is the EP-07-S04 review fork, itself blocked on memory tools |
 | EP-07-S11 | Frontier expansion | — | ◐ | `gaps.rs` speculative frontier, probes + decay (W1); AC5/AC6 cycle + AC3/AC4 schedule landed on `feat/ep-07-s11` (`7802bac`): `frontier.rs` `ExpansionPolicy` dials (mastery threshold/evidence floor/stability window/max opens/max probes), `assess_domain` mastery gate (intent failure rates via `outcome_tally` + retention churn window; pins are governance not churn), `run_expansion_cycle` (typed `DomainNotMastered` refusal with named reasons, exact per-cycle bounds with deferrals named, decisions journal source + edge via ledger mutations), `ProbeSchedule { next_probe_at, expires_at }` + `probes_due`; 11 cycle tests — open residue: the autonomous expansion driver and the dials' `LearningPolicy` home await EP-08 (same blocker class as S10), probe *execution* stays caller-run, expiry closes as `expired:no-demand` rather than a distinct `Expired` status |
-| EP-07-S12 | The behavioral signal and per-intent efficacy | — | ◐ | outcome annotations w/ judge votes, majority scoring, auto failure-rate closure, per-intent curves landed on `main` (W5 `c6ce6ae`); AC2/AC5 + AC1's seam landed on `feat/ep-07-s12` (`03c300d`): `judge.rs` `JudgeSampler` seam + `HeuristicJudgeSampler` (redo > correction > accept precedence, polite corrections negative, one judge one vote), `score_turn` minting content-addressed annotations; server `POST /gaps/annotations` exactly-one-of `judge_votes`/`signal` (both 400, neither 400, unconfigured sampler 422), `ServerConfig::with_judge_sampler`; AC5 `RetentionBook::apply_outcome_penalty` (policy `outcome_penalty_milli`, `OutcomePenalized` ledger mutation with intent named, pinned/archived/unknown refused, transitions stay tick-owned); AC1 seam `TurnStampAssertion` + `AssertionRequest.stamp` + `CheckingChatModel::chat_stamped` + real `StampedChatModel`; core 1629 / server 571 — AC1 residue: default registration in the ReAct loop awaits honest turn-identity plumbing; AC6's doc claim unwritten |
+| EP-07-S12 | The behavioral signal and per-intent efficacy | — | ✅ | AC3/AC4 on `main` (W5 `c6ce6ae`): content-addressed `OutcomeAnnotation`, per-intent `outcome_curve`, failure-rate closure + reopen; AC2/AC5 + AC1 seam on `feat/ep-07-s12` (`03c300d`): `JudgeSampler`/`HeuristicJudgeSampler` majority scoring with recorded votes, `RetentionBook::apply_outcome_penalty` (`OutcomePenalized`), `TurnStampAssertion` + `StampedChatModel` + `chat_stamped`; AC1 registration + AC6 on `feat/ep-07-s12-stamps` (`11312ef`): `RunConfig::with_turn_stamp` → executor forwards under `TURN_STAMP_KEY`, the ReAct dispatcher re-attributes per-call boundary (`start`/`continuation`, resume-aware) and fills a blank component as `react_agent`, wraps blocking + streaming dispatch (`chat_stream_stamped`), and registers the assertion on the run's checker; the server mints session=thread/turn=run/`main` at schedule (non-uuid thread ids honestly carry none; EP-07 background loops mint `side` on their own path as they land), and `RecordingChatModel` journals `RequestHeader` before every stamped dispatch — a later training consumer reads stamps + annotations with no harness change; 4 core + 2 server tests |
 
 ## EP-08 — Agent Blueprints and Registry
 
