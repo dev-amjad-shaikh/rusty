@@ -105,6 +105,11 @@ pub(crate) struct AppState {
     /// Postgres). Thread records live here — not in a route-local map — so
     /// they survive restarts alongside their checkpoints.
     pub server_store: Arc<dyn ServerStore>,
+    /// The fleet-upgrade plane (EP-08-S08): per-session assistant version
+    /// pins and upgrade operations, one JSON file per record under the
+    /// store root, loaded at router build. Adoption happens only at
+    /// run-admission turn boundaries.
+    pub upgrades: crate::upgrades::UpgradePlane,
     /// Per-thread locks serializing `update_state`'s read-modify-write:
     /// without one, two concurrent writes could mint the same `step`.
     pub state_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
@@ -408,6 +413,7 @@ pub(crate) fn build_router(
         checkpointer,
         run_deps,
         server_store,
+        upgrades: crate::upgrades::UpgradePlane::load(&config.store_path),
         state_locks: Mutex::new(HashMap::new()),
         gap_locks: Mutex::new(HashMap::new()),
         shutdown,
@@ -572,6 +578,14 @@ pub(crate) fn build_router(
         .route(
             "/assistants/{assistant_id}/versions/{version_id}/activate",
             post(activate_assistant_version),
+        )
+        .route(
+            "/assistants/{assistant_id}/upgrades",
+            post(initiate_upgrade).get(list_upgrades),
+        )
+        .route(
+            "/assistants/{assistant_id}/upgrades/{operation_id}",
+            get(get_upgrade),
         )
         .route("/crons", post(create_cron).get(list_crons))
         .route("/crons/{cron_id}", delete(delete_cron))
@@ -1810,12 +1824,96 @@ async fn schedule_for_thread(
                 assistant.graph, record.graph
             )));
         }
+        // Fleet upgrades (EP-08-S08): the thread's pin decides which
+        // immutable version this run governs by. The first assistant-bound
+        // run on a thread pins the version it admits under; an open
+        // upgrade operation covering the session adopts its target now —
+        // at the turn boundary, before the run is scheduled — so an
+        // in-flight turn always completes under its pinned version and no
+        // code path re-pins mid-turn. A target that no longer resolves
+        // fails that session on the operation record; the run proceeds
+        // under its prior version, still serviceable.
+        let governing_version = match state.upgrades.pin_for(&internal_id) {
+            Some(pin) if pin.assistant_id == *assistant_id => {
+                let mut version_id = pin.version_id.clone();
+                if let Some(operation) = state
+                    .upgrades
+                    .open_operation_for(&tenant.scope(assistant_id), &internal_id)
+                {
+                    if operation.target_version_id != version_id {
+                        match assistant.version(&operation.target_version_id) {
+                            Some(target) => {
+                                state
+                                    .upgrades
+                                    .set_pin(
+                                        &internal_id,
+                                        crate::upgrades::AssistantPin {
+                                            assistant_id: assistant_id.clone(),
+                                            version_id: target.version_id.clone(),
+                                        },
+                                    )
+                                    .map_err(internal_err)?;
+                                state.upgrades.record_adoption(
+                                    &operation.operation_id,
+                                    &internal_id,
+                                    Utc::now(),
+                                );
+                                tracing::info!(
+                                    thread = %thread_id,
+                                    assistant = %assistant_id,
+                                    from = %version_id,
+                                    to = %target.version_id,
+                                    operator = %operation.initiated_by,
+                                    "fleet upgrade adopted at turn boundary"
+                                );
+                                version_id = target.version_id;
+                            }
+                            None => {
+                                state.upgrades.record_failure(
+                                    &operation.operation_id,
+                                    &internal_id,
+                                    format!(
+                                        "target version `{}` no longer resolves for assistant `{assistant_id}`",
+                                        operation.target_version_id
+                                    ),
+                                    Utc::now(),
+                                );
+                            }
+                        }
+                    }
+                }
+                version_id
+            }
+            _ => {
+                // First touch (or a blueprint switch — a fresh binding on
+                // this thread): pin the version this run admits under.
+                let active = assistant.active_version_id();
+                state
+                    .upgrades
+                    .set_pin(
+                        &internal_id,
+                        crate::upgrades::AssistantPin {
+                            assistant_id: assistant_id.clone(),
+                            version_id: active.clone(),
+                        },
+                    )
+                    .map_err(internal_err)?;
+                active
+            }
+        };
+        // The governing version's config supplies the run's defaults:
+        // under a pin this is the pinned snapshot, not the assistant's
+        // active serving fields; unpinned legacy threads read the active
+        // version exactly as before (the serving fields mirror it).
+        let governing_config = assistant
+            .version(&governing_version)
+            .map(|version| version.config)
+            .unwrap_or_else(|| assistant.config.clone());
         // Assistant config supplies a default recursion limit; an explicit
         // `config.recursion_limit` on the payload wins.
         let payload_limit = payload.config.as_ref().and_then(|c| c.recursion_limit);
         if payload_limit.is_none() {
-            if let Some(limit) = assistant
-                .config
+            if let Some(limit) = governing_config
                 .get("recursion_limit")
                 .and_then(Value::as_u64)
             {
@@ -1834,7 +1932,7 @@ async fn schedule_for_thread(
             config.tool_allowlist.is_some() || config.capability_set.is_some()
         });
         if !declared {
-            if let Some(names) = assistant_tool_default(&assistant.config) {
+            if let Some(names) = assistant_tool_default(&governing_config) {
                 payload
                     .config
                     .get_or_insert_with(RunConfigPayload::default)
@@ -3993,6 +4091,148 @@ async fn activate_assistant_version(
         "assistant": record.view(assistant_id),
         "activated": activated,
     })))
+}
+
+// --------------------------------------------------------------------- //
+// Fleet upgrades (EP-08-S08)
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct InitiateUpgradePayload {
+    /// The published version covered sessions adopt into.
+    target_version_id: String,
+    /// Mandatory idempotency key: the operation id derives from
+    /// `(tenant, assistant, key)`, so a replay converges by identity.
+    idempotency_key: String,
+}
+
+/// The operation's wire shape: sessions as a thread-sorted array, never
+/// the internal-id map (the internal key carries the tenant prefix).
+fn upgrade_view(operation: &crate::upgrades::UpgradeOperation) -> Value {
+    json!({
+        "operation_id": operation.operation_id,
+        "assistant_id": operation.assistant_id,
+        "target_version_id": operation.target_version_id,
+        "initiated_by": operation.initiated_by,
+        "idempotency_key": operation.idempotency_key,
+        "created_at": operation.created_at,
+        "open": operation.is_open(),
+        "sessions": operation
+            .sessions
+            .values()
+            .map(|session| json!({
+                "thread_id": session.thread_id,
+                "from_version_id": session.from_version_id,
+                "status": session.status,
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// `POST /assistants/{id}/upgrades` — open a fleet upgrade to a published
+/// version: every session pinned to an ancestor of the target joins as
+/// `awaiting_turn` and adopts at its next turn boundary → `201` with the
+/// operation. Replaying the same idempotency key answers `200` with the
+/// existing operation; the key spent on a different target is a `409`; a
+/// second operation while one is still open is a `409` — which operation
+/// a boundary adopts into must never be ambiguous.
+async fn initiate_upgrade(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<InitiateUpgradePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if payload.idempotency_key.is_empty() || payload.idempotency_key.len() > 256 {
+        return Err(ApiError::bad_request(
+            "`idempotency_key` must be 1 to 256 bytes".to_string(),
+        ));
+    }
+    if !valid_version_id(&payload.target_version_id) {
+        return Err(ApiError::bad_request(
+            "`target_version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    let assistant = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let outcome = state.upgrades.initiate(
+        &tenant,
+        &assistant,
+        &payload.target_version_id,
+        &payload.idempotency_key,
+        Utc::now(),
+    );
+    use crate::upgrades::InitiateOutcome::*;
+    match outcome {
+        Created(operation) => Ok((StatusCode::CREATED, Json(upgrade_view(&operation)))),
+        Existing(operation) => Ok((StatusCode::OK, Json(upgrade_view(&operation)))),
+        KeyConflict { existing } => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "upgrade_key_conflict",
+            format!(
+                "idempotency key already opened operation `{existing}` against a different target"
+            ),
+        )),
+        TargetUnknown => Err(ApiError::not_found(format!(
+            "assistant version `{}` not found for `{assistant_id}`",
+            payload.target_version_id
+        ))),
+        InProgress { operation_id } => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "upgrade_in_progress",
+            format!(
+                "operation `{operation_id}` still has sessions awaiting adoption; convergence completes it"
+            ),
+        )),
+    }
+}
+
+/// `GET /assistants/{id}/upgrades` — the assistant's operations, newest
+/// first, each with per-session status.
+async fn list_upgrades(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let mut operations = state.upgrades.list_for(&tenant.scope(&assistant_id));
+    operations.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.operation_id.cmp(&left.operation_id))
+    });
+    Ok(Json(json!({
+        "upgrades": operations.iter().map(upgrade_view).collect::<Vec<_>>(),
+    })))
+}
+
+/// `GET /assistants/{id}/upgrades/{op}` — one operation with per-session
+/// status. An operation of another assistant (or tenant) is a 404, never
+/// a leak.
+async fn get_upgrade(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, operation_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let operation = state
+        .upgrades
+        .get(&operation_id)
+        .filter(|operation| {
+            crate::auth::scope_id(&operation.tenant, &operation.assistant_id)
+                == tenant.scope(&assistant_id)
+        })
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "upgrade operation `{operation_id}` not found for `{assistant_id}`"
+            ))
+        })?;
+    Ok(Json(upgrade_view(&operation)))
 }
 
 // --------------------------------------------------------------------- //

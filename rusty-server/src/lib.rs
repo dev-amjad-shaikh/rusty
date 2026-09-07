@@ -213,6 +213,7 @@ mod supervision;
 mod tasks;
 mod threads;
 mod triggers;
+mod upgrades;
 pub mod verify;
 
 use std::collections::HashMap;
