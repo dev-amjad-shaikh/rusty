@@ -340,6 +340,44 @@ fn build_react_agent(
                         invocation_parent(&ctx, AGENT_NODE)?,
                     )),
                 };
+                // Provenance stamping (EP-07-S12 AC1): the scheduler's
+                // turn identity arrives under TURN_STAMP_KEY. The
+                // dispatcher re-attributes what only it honestly knows —
+                // the per-call boundary (this run's first dispatch starts
+                // the turn; later iterations and resumed runs continue
+                // it) and the issuing component when the scheduler left
+                // it unnamed.
+                let stamp: Option<rusty_api::TurnStamp> =
+                    match ctx.config().extra.get(crate::llm::TURN_STAMP_KEY) {
+                        Some(value) => {
+                            let stamp: rusty_api::TurnStamp = serde_json::from_value(value.clone())
+                            .map_err(|error| {
+                                RustyError::Node(format!(
+                                    "node `{AGENT_NODE}` received a malformed turn stamp: {error}"
+                                ))
+                            })?;
+                            let turn_boundary =
+                                if ctx.config().step == 0 && ctx.config().resume.is_none() {
+                                    rusty_api::TurnBoundary::Start
+                                } else {
+                                    rusty_api::TurnBoundary::Continuation
+                                };
+                            let issued_by = if stamp.issued_by.component.trim().is_empty() {
+                                rusty_api::ComponentAttribution {
+                                    component: "react_agent".to_string(),
+                                    sub_id: None,
+                                }
+                            } else {
+                                stamp.issued_by
+                            };
+                            Some(rusty_api::TurnStamp {
+                                turn_boundary,
+                                issued_by,
+                                ..stamp
+                            })
+                        }
+                        None => None,
+                    };
                 // The model-visible-means-logged invariant (EP-01-S05):
                 // whenever the run journals, the dispatch model is wrapped
                 // in the checker, anchored on this invocation's journaled
@@ -349,20 +387,35 @@ fn build_react_agent(
                 // wrapper serves journaled responses and already enforces
                 // request-hash equality with the recorded evidence. A
                 // journal-less run has no log to reconstruct against and is
-                // outside the durable substrate by construction.
+                // outside the durable substrate by construction. A stamped
+                // run also registers the turn-stamp assertion, so an
+                // unstamped dispatch on a stamped run fails the same seam.
                 let check_journal = match &evidence {
                     EvidenceMode::None => ctx.effect_journal().cloned(),
                     EvidenceMode::Record(journal) => Some(journal.clone()),
                     EvidenceMode::Replay { .. } => None,
                 };
                 let model: Arc<dyn ChatModel> = match check_journal {
-                    Some(journal) => Arc::new(CheckingChatModel::new(
-                        model,
-                        crate::invariant::InvariantChecker::new(journal),
-                        ctx.config().thread_id.clone(),
-                        AGENT_NODE,
-                        invocation_parent(&ctx, AGENT_NODE)?,
-                    )),
+                    Some(journal) => {
+                        let mut checker = crate::invariant::InvariantChecker::new(journal);
+                        if stamp.is_some() {
+                            checker = checker
+                                .with_assertion(Arc::new(crate::invariant::TurnStampAssertion));
+                        }
+                        Arc::new(CheckingChatModel::new(
+                            model,
+                            checker,
+                            ctx.config().thread_id.clone(),
+                            AGENT_NODE,
+                            invocation_parent(&ctx, AGENT_NODE)?,
+                        ))
+                    }
+                    None => model,
+                };
+                // Outermost: the stamping wrapper turns every dispatch —
+                // blocking or streaming — into a stamped one.
+                let model: Arc<dyn ChatModel> = match stamp {
+                    Some(stamp) => Arc::new(crate::llm::StampedChatModel::new(model, stamp)),
                     None => model,
                 };
                 tracing::debug!(

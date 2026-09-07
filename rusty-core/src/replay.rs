@@ -613,8 +613,75 @@ impl RecordingChatModel {
 #[async_trait]
 impl ChatModel for RecordingChatModel {
     async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
+        self.dispatch(None, messages, tools).await
+    }
+
+    async fn chat_stamped(
+        &self,
+        stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+    ) -> Result<ChatResponse> {
+        self.dispatch(Some(stamp), messages, tools).await
+    }
+
+    async fn chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        self.dispatch_stream(None, messages, tools, on_token).await
+    }
+
+    async fn chat_stream_stamped(
+        &self,
+        stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        self.dispatch_stream(Some(stamp), messages, tools, on_token)
+            .await
+    }
+
+    fn effect(&self) -> Effect {
+        self.inner.effect()
+    }
+
+    fn pricing(&self) -> Option<crate::llm::ModelPricing> {
+        self.inner.pricing()
+    }
+}
+
+impl RecordingChatModel {
+    /// The `RequestHeader` event (EP-07-S12 AC1/AC6): journaled before
+    /// dispatch so every provider call is attributable — and harvestable
+    /// by a later training consumer — from the journal alone.
+    fn journal_header(&self, stamp: &rusty_api::TurnStamp) {
+        let mut draft = EventDraft::new(RunEventKind::RequestHeader, Effect::ReadOnly)
+            .parent(self.parent.clone())
+            .input(serde_json::to_value(stamp).expect("a TurnStamp always serializes"));
+        if let Some(node) = &self.node_id {
+            draft = draft.node(node.clone());
+        }
+        self.journal.record(draft);
+    }
+
+    async fn dispatch(
+        &self,
+        stamp: Option<&rusty_api::TurnStamp>,
+        messages: &[ChatMessage],
+        tools: &[Value],
+    ) -> Result<ChatResponse> {
+        if let Some(stamp) = stamp {
+            self.journal_header(stamp);
+        }
         let started = self.journal.clock().now();
-        let result = self.inner.chat(messages, tools).await;
+        let result = match stamp {
+            Some(stamp) => self.inner.chat_stamped(stamp, messages, tools).await,
+            None => self.inner.chat(messages, tools).await,
+        };
         let latency_ms = (self.journal.clock().now() - started)
             .num_milliseconds()
             .max(0) as u64;
@@ -626,40 +693,47 @@ impl ChatModel for RecordingChatModel {
         )
     }
 
-    async fn chat_stream(
+    async fn dispatch_stream(
         &self,
+        stamp: Option<&rusty_api::TurnStamp>,
         messages: &[ChatMessage],
         tools: &[Value],
         on_token: &mut (dyn FnMut(TokenChunk) + Send),
     ) -> Result<ChatResponse> {
+        if let Some(stamp) = stamp {
+            self.journal_header(stamp);
+        }
         let started = self.journal.clock().now();
         let capture = self.capture_chunks;
         let mut chunk_deltas: Vec<String> = Vec::new();
-        let result = self
-            .inner
-            .chat_stream(messages, tools, &mut |chunk| {
-                if capture {
-                    let assistant_chunk = crate::record::AssistantChunk {
-                        delta: chunk.delta.clone(),
-                        stream_index: chunk_deltas.len() as u64,
-                        finish: chunk.finish,
-                    };
-                    let mut draft =
-                        EventDraft::new(RunEventKind::AssistantChunk, self.inner.effect())
-                            .parent(self.parent.clone())
-                            .output(
-                                serde_json::to_value(&assistant_chunk)
-                                    .expect("AssistantChunk serializes"),
-                            );
-                    if let Some(node) = &self.node_id {
-                        draft = draft.node(node.clone());
-                    }
-                    self.journal.record(draft);
-                    chunk_deltas.push(chunk.delta.clone());
+        let mut forward = |chunk: TokenChunk| {
+            if capture {
+                let assistant_chunk = crate::record::AssistantChunk {
+                    delta: chunk.delta.clone(),
+                    stream_index: chunk_deltas.len() as u64,
+                    finish: chunk.finish,
+                };
+                let mut draft = EventDraft::new(RunEventKind::AssistantChunk, self.inner.effect())
+                    .parent(self.parent.clone())
+                    .output(
+                        serde_json::to_value(&assistant_chunk).expect("AssistantChunk serializes"),
+                    );
+                if let Some(node) = &self.node_id {
+                    draft = draft.node(node.clone());
                 }
-                on_token(chunk)
-            })
-            .await;
+                self.journal.record(draft);
+                chunk_deltas.push(chunk.delta.clone());
+            }
+            on_token(chunk)
+        };
+        let result = match stamp {
+            Some(stamp) => {
+                self.inner
+                    .chat_stream_stamped(stamp, messages, tools, &mut forward)
+                    .await
+            }
+            None => self.inner.chat_stream(messages, tools, &mut forward).await,
+        };
         // EP-01-S11 AC 2: verify chunk assembly equals the model response.
         if capture {
             if let Ok(ref response) = result {
@@ -682,14 +756,6 @@ impl ChatModel for RecordingChatModel {
             None,
             result,
         )
-    }
-
-    fn effect(&self) -> Effect {
-        self.inner.effect()
-    }
-
-    fn pricing(&self) -> Option<crate::llm::ModelPricing> {
-        self.inner.pricing()
     }
 }
 

@@ -502,6 +502,19 @@ impl ChatModel for CheckingChatModel {
         self.inner.chat_stream(messages, tools, on_token).await
     }
 
+    async fn chat_stream_stamped(
+        &self,
+        stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        self.check(messages, tools, Some(stamp))?;
+        self.inner
+            .chat_stream_stamped(stamp, messages, tools, on_token)
+            .await
+    }
+
     fn effect(&self) -> crate::record::Effect {
         self.inner.effect()
     }

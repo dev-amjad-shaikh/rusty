@@ -274,6 +274,15 @@ pub struct RunConfig {
     /// attached inbox that never accepted a send — is byte-identical to
     /// prior behavior.
     pub inbox: Option<crate::inbox::Inbox>,
+
+    /// The run's provenance stamp (EP-07-S12 AC1): the scheduler's honest
+    /// turn identity — session, turn, traffic class, issuer — forwarded
+    /// into every node invocation under [`crate::llm::TURN_STAMP_KEY`].
+    /// Stamp-aware dispatchers (the prebuilt ReAct agent) re-attribute the
+    /// per-call boundary and dispatch through the stamped seam; every other
+    /// node ignores the key. `None` (the default) is byte-identical to
+    /// prior behavior.
+    pub turn_stamp: Option<rusty_api::TurnStamp>,
 }
 
 impl Default for RunConfig {
@@ -307,6 +316,7 @@ impl RunConfig {
             tool_allowlist: None,
             tool_guards: Vec::new(),
             inbox: None,
+            turn_stamp: None,
         }
     }
 
@@ -440,6 +450,16 @@ impl RunConfig {
     /// checkpoint's stamped snapshot instead.
     pub fn with_inbox(mut self, inbox: crate::inbox::Inbox) -> Self {
         self.inbox = Some(inbox);
+        self
+    }
+
+    /// Attach the run's provenance stamp (EP-07-S12 AC1). The scheduler
+    /// mints it from the identity it honestly holds — session, turn,
+    /// traffic class, issuing component; the dispatcher re-attributes the
+    /// per-call turn boundary. The executor forwards it into every node
+    /// invocation under [`crate::llm::TURN_STAMP_KEY`].
+    pub fn with_turn_stamp(mut self, stamp: rusty_api::TurnStamp) -> Self {
+        self.turn_stamp = Some(stamp);
         self
     }
 
@@ -1258,6 +1278,17 @@ impl Executor {
                     crate::tool::TOOL_ALLOWLIST_KEY.to_owned(),
                     serde_json::to_value(tool_allowlist)
                         .expect("tool allowlist serialization is infallible"),
+                );
+            }
+            // Provenance stamp (EP-07-S12 AC1): the scheduler's turn
+            // identity rides into every invocation; stamp-aware
+            // dispatchers (the prebuilt ReAct agent) re-attribute and
+            // dispatch through the stamped seam, every other node ignores
+            // the key.
+            if let Some(stamp) = &config.turn_stamp {
+                extra.insert(
+                    crate::llm::TURN_STAMP_KEY.to_owned(),
+                    serde_json::to_value(stamp).expect("a turn stamp always serializes"),
                 );
             }
             // Durable inbox: the boundary-drained batch rides into every

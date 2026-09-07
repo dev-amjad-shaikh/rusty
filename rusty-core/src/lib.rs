@@ -414,7 +414,7 @@ pub mod prelude {
     };
     pub use crate::invariant::{
         AssertionRequest, CheckingChatModel, InvariantChecker, InvariantViolation,
-        RequestAssertion, derive_expected_messages,
+        RequestAssertion, TurnStampAssertion, derive_expected_messages,
     };
     pub use crate::journal::{
         Clock, EventDraft, Journal, JournalSnapshot, PARENT_EVENT_KEY, RngSource,
@@ -434,8 +434,8 @@ pub mod prelude {
         promotion_effect_key, rollback_effect_key, surface_for_kind,
     };
     pub use crate::llm::{
-        ChatMessage, ChatModel, ChatResponse, ModelPricing, OpenAiCompatibleClient, Role, ToolCall,
-        Usage,
+        ChatMessage, ChatModel, ChatResponse, ModelPricing, OpenAiCompatibleClient, Role,
+        StampedChatModel, TURN_STAMP_KEY, ToolCall, Usage,
     };
     pub use crate::memory::{
         BudgetOverflow, ContextBudget, DEFAULT_TOKEN_MARGIN_PERCENT, InMemoryMemoryStore,
@@ -554,4 +554,7 @@ pub mod prelude {
         StaticFloor, TWIN_FORK_POLICY_VERSION, TWIN_REPORT_BOUND, Twin, TwinMetrics, TwinOutcome,
         TwinPolicy, TwinReport, TwinRunConfig, TwinWorkItem, TwinWorld, UnevaluableCase,
     };
+    // Provenance stamping (EP-07-S12): the stamp types every scheduler
+    // mints and every stamped dispatcher carries.
+    pub use rusty_api::{ComponentAttribution, TrafficClass, TurnBoundary, TurnStamp};
 }

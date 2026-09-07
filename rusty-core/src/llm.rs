@@ -396,6 +396,21 @@ pub trait ChatModel: Send + Sync {
         self.chat(messages, tools).await
     }
 
+    /// Stream the next assistant message with a provenance stamp.
+    ///
+    /// The default delegates to [`ChatModel::chat_stream`], mirroring
+    /// [`ChatModel::chat_stamped`]: stamping layers override it so a
+    /// streaming dispatch carries the same provenance as a blocking one.
+    async fn chat_stream_stamped(
+        &self,
+        _stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        self.chat_stream(messages, tools, on_token).await
+    }
+
     /// The declared effect classification of calling this model (Flight
     /// Recorder, R0.5): recorded on model-call journal events and used by
     /// retry/replay policy.
@@ -1210,6 +1225,13 @@ impl ProviderRegistry {
     }
 }
 
+/// The run's provenance stamp rides into every node invocation under this
+/// `NodeConfig::extra` key (EP-07-S12 AC1), inserted by the executor when
+/// the caller attached one through [`crate::executor::RunConfig::with_turn_stamp`].
+/// Stamp-aware dispatchers (the prebuilt ReAct agent) re-attribute and
+/// dispatch through the stamped seam; every other node ignores the key.
+pub const TURN_STAMP_KEY: &str = "rusty.turn_stamp";
+
 /// A [`ChatModel`] wrapper that stamps every call with its
 /// [`rusty_api::TurnStamp`] (EP-07-S12 AC1): the plain `chat` and
 /// `chat_stream` paths dispatch through the stamped seam, so a provider
@@ -1256,7 +1278,23 @@ impl ChatModel for StampedChatModel {
         tools: &[Value],
         on_token: &mut (dyn FnMut(TokenChunk) + Send),
     ) -> Result<ChatResponse> {
-        self.inner.chat_stream(messages, tools, on_token).await
+        self.inner
+            .chat_stream_stamped(&self.stamp, messages, tools, on_token)
+            .await
+    }
+
+    async fn chat_stream_stamped(
+        &self,
+        stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        on_token: &mut (dyn FnMut(TokenChunk) + Send),
+    ) -> Result<ChatResponse> {
+        // As with `chat_stamped`: a caller presenting its own stamp
+        // overrides the wrapper's.
+        self.inner
+            .chat_stream_stamped(stamp, messages, tools, on_token)
+            .await
     }
 }
 
