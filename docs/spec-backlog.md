@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████░░░░░░░░░ 71%** weighted complete (123 ✅ landed · 43 ◐ partial · 38 ○ not started, of 204 stories)
+**█████████████████████░░░░░░░░░ 71%** weighted complete (122 ✅ landed · 44 ◐ partial · 38 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -23,7 +23,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 5 | 7 | 0 | █████████░░░ 71% |
-| EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 7 | 4 | 0 | ██████████░░ 82% |
+| EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 6 | 5 | 0 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 8 | 2 | 2 | ████████░░░░ 67% |
 | EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
@@ -161,12 +161,12 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-07-S08 | The gap matrix, the seeded ledger, and declared blocks | — | ◐ | `induction.rs` join + seeding + declared blocks landed (W3); block mounting open — blocked: AC3 mounts "per the blueprint's memory schema path (EP-06/EP-08)" and no blueprint memory schema exists (`registry.rs`: memory configuration pins deferred to "its own wave"); matrix UI open — belongs to the studio surface (EP-14/EP-16) |
 | EP-07-S09 | Runtime gap filing | — | ◐ | `/gaps` surface + zero-recall/correction hooks landed on `main` (W2); AC 4 dedupe/reinforce-by-content-address landed (W1 `file_gap`); AC 5 untrusted-derived filing landed on `feat/ep-07-s09` (`4aa2f9f`): `OriginClass` on interaction events (outside the content address), ingest `origin_class` marking, filing-origin override + `GET /gaps?origin=` filter; AC 1's automatic filing on conversational escalation commit remains — blocked on EP-04 escalation routing (no turn-level escalation surface exists) |
 | EP-07-S10 | The hunting loop and eval-gated promotion | — | ◐ | `/hunts` cycle/draft/blocked + promotion-gated closure landed on `main` (W4); autonomous hunt driver open — blocked: AC1 selects within the blueprint's `LearningPolicy.hunting_budget` (absent from blueprints/`CapabilityManifest`) and each hunt is the EP-07-S04 review fork, itself blocked on memory tools |
-| EP-07-S11 | Frontier expansion | — | ◐ | `gaps.rs` speculative frontier, probes + decay (W1); AC5/AC6 cycle + AC3/AC4 schedule landed on `feat/ep-07-s11` (`7802bac`): `frontier.rs` `ExpansionPolicy` dials (mastery threshold/evidence floor/stability window/max opens/max probes), `assess_domain` mastery gate (intent failure rates via `outcome_tally` + retention churn window; pins are governance not churn), `run_expansion_cycle` (typed `DomainNotMastered` refusal with named reasons, exact per-cycle bounds with deferrals named, decisions journal source + edge via ledger mutations), `ProbeSchedule { next_probe_at, expires_at }` + `probes_due`; 11 cycle tests — open residue: the autonomous expansion driver and the dials' `LearningPolicy` home await EP-08 (same blocker class as S10), probe *execution* stays caller-run, expiry closes as `expired:no-demand` rather than a distinct `Expired` status |
+| EP-07-S11 | Frontier expansion | — | ◐ | `gaps.rs` speculative frontier, probes + decay (W1); AC5/AC6 cycle + AC3/AC4 schedule landed on `feat/ep-07-s11` (`7802bac`): `frontier.rs` `ExpansionPolicy` dials (mastery threshold/evidence floor/stability window/max opens/max probes), `assess_domain` mastery gate (intent failure rates via `outcome_tally` + retention churn window; pins are governance not churn), `run_expansion_cycle` (typed `DomainNotMastered` refusal with named reasons, exact per-cycle bounds with deferrals named, decisions journal source + edge via ledger mutations), `ProbeSchedule { next_probe_at, expires_at }` + `probes_due`; 11 cycle tests — open residue: the autonomous expansion driver and the dials' `LearningPolicy` home await EP-08 (same blocker class as S10), probe *execution* stays caller-run, expiry closes as `expired:no-demand` rather than a distinct `Expired` status; driver + dials' home blocked: `LearningPolicy` does not exist (see EP-08-S07) |
 | EP-07-S12 | The behavioral signal and per-intent efficacy | — | ✅ | AC3/AC4 on `main` (W5 `c6ce6ae`): content-addressed `OutcomeAnnotation`, per-intent `outcome_curve`, failure-rate closure + reopen; AC2/AC5 + AC1 seam on `feat/ep-07-s12` (`03c300d`): `JudgeSampler`/`HeuristicJudgeSampler` majority scoring with recorded votes, `RetentionBook::apply_outcome_penalty` (`OutcomePenalized`), `TurnStampAssertion` + `StampedChatModel` + `chat_stamped`; AC1 registration + AC6 on `feat/ep-07-s12-stamps` (`11312ef`): `RunConfig::with_turn_stamp` → executor forwards under `TURN_STAMP_KEY`, the ReAct dispatcher re-attributes per-call boundary (`start`/`continuation`, resume-aware) and fills a blank component as `react_agent`, wraps blocking + streaming dispatch (`chat_stream_stamped`), and registers the assertion on the run's checker; the server mints session=thread/turn=run/`main` at schedule (non-uuid thread ids honestly carry none; EP-07 background loops mint `side` on their own path as they land), and `RecordingChatModel` journals `RequestHeader` before every stamped dispatch — a later training consumer reads stamps + annotations with no harness change; 4 core + 2 server tests |
 
 ## EP-08 — Agent Blueprints and Registry
 
-██████████░░ 82% · 7 landed · 4 partial · 0 not started · milestone M0–M4
+█████████░░░ 77% · 6 landed · 5 partial · 0 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -176,7 +176,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-08-S04 | Instantiation into sessions with version pinning | — | ✅ | instantiation with version pinning (`/assistants`) |
 | EP-08-S05 | Versioning: immutable published versions and the draft/published/deprecated lifecycle | — | ✅ | immutable versions, draft/published/deprecated lifecycle |
 | EP-08-S06 | The registry API and Rustynome authoring | — | ◐ | registry API landed; Rustynome authoring UI partial |
-| EP-08-S07 | Learning-policy declaration and enforcement | — | ✅ | `/policy/*` learning-policy declaration + enforcement |
+| EP-08-S07 | Learning-policy declaration and enforcement | — | ◐ | re-judged: the cited `/policy/*` surface is the executor policy plane (`ExecutorPolicy` retry/timeout/concurrency parameters, R0.7/R0.12 lineage), not this story's `LearningPolicy`; no learning declaration exists in the blueprint contract and no EP-07 loop reads one — S08's adoption boundary (`95cbec4`) is the seam a policy change would ride |
 | EP-08-S08 | Fleet upgrade at safe boundaries | — | ◐ | landed on `feat/ep-08-s08` (`95cbec4`): `upgrades.rs` pin store + `UpgradePlane` (content-derived operation id, one open op per assistant, ancestor-lineage session selection, tenant-owned), run-admission seam in `schedule_for_thread` (first assistant run pins; open op adopts at the boundary with operator attribution logged; unresolved target records `failed` and the run stays on the prior pin), `POST/GET /assistants/{id}/upgrades[/{op}]` (201/200 replay/409 key-conflict/409 in-progress/404 unknown target), governing version feeds recursion-limit + tool defaults; 7 integration tests incl. poisoned-target-after-restart and tenant isolation — open residue: AC3's `paused` status and resume-under-paused-version await the pause store landing on `main` (EP-03-S11, unmerged), AC2's blueprint-side prefix re-assembly / memory-block mount have no assistant substrate on this chain |
 | EP-08-S09 | Blueprint export and import | — | ✅ | blueprint export/import |
 | EP-08-S10 | Template blueprints for the out-of-the-box catalog | — | ◐ | template blueprints partial |
