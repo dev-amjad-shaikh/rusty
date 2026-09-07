@@ -79,6 +79,11 @@ pub enum InvariantViolation {
         #[serde(skip_serializing_if = "Option::is_none")]
         actual: Option<Value>,
     },
+    /// The request carried no provenance stamp (EP-07-S12 AC1): every
+    /// provider request — live turn, review fork, hunt, curator,
+    /// consolidation — is stamped from day one, so an unstamped request
+    /// fails the same seam the reconstructability check runs on.
+    MissingTurnStamp,
 }
 
 impl fmt::Display for InvariantViolation {
@@ -86,6 +91,9 @@ impl fmt::Display for InvariantViolation {
         match self {
             Self::UnloggedContent { index, detail, .. } => {
                 write!(f, "unlogged content at message {index}: {detail}")
+            }
+            Self::MissingTurnStamp => {
+                write!(f, "the request carries no provenance stamp")
             }
         }
     }
@@ -107,6 +115,36 @@ pub struct AssertionRequest<'a> {
     pub tools: &'a [Value],
     /// The run's journal, for assertions that consult the evidence.
     pub journal: &'a Journal,
+    /// The provenance stamp the caller presented, when it dispatched
+    /// through the stamped path ([`ChatModel::chat_stamped`]). `None`
+    /// means the caller used the unstamped path — which is exactly what
+    /// [`TurnStampAssertion`] refuses.
+    pub stamp: Option<&'a rusty_api::TurnStamp>,
+}
+
+/// The turn-stamp assertion (EP-07-S12 AC1): a provider request without a
+/// provenance stamp fails the seam — the same refusal path the
+/// reconstructability check uses. Register it through
+/// [`InvariantChecker::with_assertion`] on deployments where stamping is
+/// mandatory; callers dispatch stamped through [`ChatModel::chat_stamped`]
+/// (or a stamping wrapper such as [`crate::llm::StampedChatModel`]).
+#[derive(Debug, Default)]
+pub struct TurnStampAssertion;
+
+impl RequestAssertion for TurnStampAssertion {
+    fn name(&self) -> &str {
+        "turn_stamp"
+    }
+
+    fn check(&self, request: &AssertionRequest<'_>) -> std::result::Result<(), InvariantViolation> {
+        match request.stamp {
+            Some(stamp) if !stamp.issued_by.component.trim().is_empty() => Ok(()),
+            // A stamp with no component attribution is no stamp: the
+            // provenance chain must name its issuer.
+            Some(_) => Err(InvariantViolation::MissingTurnStamp),
+            None => Err(InvariantViolation::MissingTurnStamp),
+        }
+    }
 }
 
 /// A request assertion registered on the checker alongside the built-in
@@ -281,9 +319,11 @@ impl InvariantChecker {
     /// Verify that `messages` — the history segment about to be sent by
     /// `node` in the invocation journaled as `node_input_event` — is
     /// exactly what the log reconstructs, then run the registered
-    /// assertions. Read-only: a pass journals nothing, and a rejection
-    /// journals nothing either; the refusal is announced through `tracing`
-    /// for the observer pipeline.
+    /// assertions. `stamp` is the provenance stamp the caller presented
+    /// (`None` on the unstamped dispatch path — which registered
+    /// assertions may refuse). Read-only: a pass journals nothing, and a
+    /// rejection journals nothing either; the refusal is announced through
+    /// `tracing` for the observer pipeline.
     pub fn check_request(
         &self,
         thread_id: &str,
@@ -291,6 +331,7 @@ impl InvariantChecker {
         node_input_event: &str,
         messages: &[ChatMessage],
         tools: &[Value],
+        stamp: Option<&rusty_api::TurnStamp>,
     ) -> std::result::Result<(), InvariantViolation> {
         let expected = derive_expected_messages(&self.journal, node_input_event).map_err(
             |error| match error {
@@ -360,6 +401,7 @@ impl InvariantChecker {
             messages,
             tools,
             journal: &self.journal,
+            stamp,
         };
         for assertion in &self.assertions {
             if let Err(violation) = assertion.check(&request) {
@@ -414,7 +456,12 @@ impl CheckingChatModel {
         }
     }
 
-    fn check(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<()> {
+    fn check(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[Value],
+        stamp: Option<&rusty_api::TurnStamp>,
+    ) -> Result<()> {
         self.checker
             .check_request(
                 &self.thread_id,
@@ -422,6 +469,7 @@ impl CheckingChatModel {
                 &self.parent_event,
                 messages,
                 tools,
+                stamp,
             )
             .map_err(RustyError::InvariantViolation)
     }
@@ -430,8 +478,18 @@ impl CheckingChatModel {
 #[async_trait]
 impl ChatModel for CheckingChatModel {
     async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
-        self.check(messages, tools)?;
+        self.check(messages, tools, None)?;
         self.inner.chat(messages, tools).await
+    }
+
+    async fn chat_stamped(
+        &self,
+        stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+    ) -> Result<ChatResponse> {
+        self.check(messages, tools, Some(stamp))?;
+        self.inner.chat_stamped(stamp, messages, tools).await
     }
 
     async fn chat_stream(
@@ -440,7 +498,7 @@ impl ChatModel for CheckingChatModel {
         tools: &[Value],
         on_token: &mut (dyn FnMut(TokenChunk) + Send),
     ) -> Result<ChatResponse> {
-        self.check(messages, tools)?;
+        self.check(messages, tools, None)?;
         self.inner.chat_stream(messages, tools, on_token).await
     }
 

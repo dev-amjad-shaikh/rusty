@@ -68,6 +68,17 @@ pub struct RetentionPolicy {
 
     /// Score regained per load — a skill-view of the skill during a turn.
     pub load_replenish_milli: u32,
+
+    /// Score lost when the skill's intent outcome curve fails to improve
+    /// over the evaluation window (EP-07-S12 AC5) — skills that do not
+    /// move their numbers lose retention.
+    #[serde(default = "default_outcome_penalty_milli")]
+    pub outcome_penalty_milli: u32,
+}
+
+/// The default outcome penalty (per-mille points).
+fn default_outcome_penalty_milli() -> u32 {
+    150
 }
 
 impl Default for RetentionPolicy {
@@ -77,6 +88,7 @@ impl Default for RetentionPolicy {
             idle_archive_secs: 30 * SECS_PER_DAY,
             decay_per_idle_day_milli: 100,
             load_replenish_milli: 200,
+            outcome_penalty_milli: default_outcome_penalty_milli(),
         }
     }
 }
@@ -102,6 +114,11 @@ impl RetentionPolicy {
         if self.load_replenish_milli == 0 || self.load_replenish_milli > RETENTION_SCALE_MILLI {
             return Err(RetentionError::InvalidPolicy {
                 reason: "load_replenish_milli must be in 1..=1000",
+            });
+        }
+        if self.outcome_penalty_milli == 0 || self.outcome_penalty_milli > RETENTION_SCALE_MILLI {
+            return Err(RetentionError::InvalidPolicy {
+                reason: "outcome_penalty_milli must be in 1..=1000",
             });
         }
         if self.idle_archive_secs == 0 {
@@ -137,6 +154,16 @@ pub enum RetentionMutation {
     Pinned,
     /// The pin lifted; decay resumes from the pin's accounting instant.
     Unpinned,
+    /// The skill's intent outcome curve failed to improve over the
+    /// evaluation window (EP-07-S12 AC5): the retention score took the
+    /// configured penalty. Skills that do not move their numbers lose
+    /// retention.
+    OutcomePenalized {
+        /// The intent whose curve stayed flat.
+        intent_id: String,
+        /// The penalty applied (per-mille points).
+        penalty_milli: u32,
+    },
     /// The curator consolidated this skill into an umbrella: this record
     /// archives and names where its material now lives.
     ConsolidatedIntoUmbrella {
@@ -255,6 +282,12 @@ pub enum RetentionError {
         /// The rule the policy broke.
         reason: &'static str,
     },
+
+    /// A retention act attempted on a pinned skill. A pin is the
+    /// operator's exemption — penalties and decay both respect it, and
+    /// the exemption answers with a typed refusal, not a silent no-op.
+    #[error("skill `{0}` is pinned — retention-exempt; unpin it before penalizing")]
+    Pinned(String),
 }
 
 /// One lifecycle move a tick produced — the audit summary callers report.
@@ -431,6 +464,54 @@ impl RetentionBook {
         record.decay_accounted_until = now;
         record.record(actor, RetentionMutation::Restored, now);
         Ok(())
+    }
+
+    /// Penalize a skill whose intent's outcome curve did not improve over
+    /// the evaluation window (EP-07-S12 AC5): the score drops by the
+    /// policy's outcome penalty, and the act journals with the intent
+    /// named. The caller owns the measurement — it reads the per-intent
+    /// curve ([`crate::gaps::GapLedger::outcome_curve`]) and judges
+    /// improvement over its configured window; the book owns the penalty
+    /// and the audit. A penalty can push a score below the cold
+    /// threshold; the *transition* is the next tick's to observe, so
+    /// penalty timing never depends on tick cadence. Pinned skills refuse
+    /// (the operator's exemption covers penalties), archived skills are
+    /// already out.
+    pub fn apply_outcome_penalty(
+        &mut self,
+        name: &str,
+        intent_id: &str,
+        policy: &RetentionPolicy,
+        now: DateTime<Utc>,
+        actor: &str,
+    ) -> Result<u32, RetentionError> {
+        policy.validate()?;
+        let record = self
+            .skills
+            .get_mut(name)
+            .ok_or_else(|| RetentionError::UntrackedSkill(name.to_owned()))?;
+        if record.pinned {
+            return Err(RetentionError::Pinned(name.to_owned()));
+        }
+        if record.lifecycle == SkillPromotionStatus::Archived {
+            return Err(RetentionError::InvalidTransition {
+                skill: name.to_owned(),
+                from: record.lifecycle,
+                action: "penalize",
+            });
+        }
+        record.score_milli = record
+            .score_milli
+            .saturating_sub(policy.outcome_penalty_milli);
+        record.record(
+            actor,
+            RetentionMutation::OutcomePenalized {
+                intent_id: intent_id.to_owned(),
+                penalty_milli: policy.outcome_penalty_milli,
+            },
+            now,
+        );
+        Ok(record.score_milli)
     }
 
     /// Charge idleness and move the skills whose scores or idle periods

@@ -35,6 +35,7 @@ fn policy() -> RetentionPolicy {
         idle_archive_secs: 3_600,
         decay_per_idle_day_milli: 100,
         load_replenish_milli: 200,
+        outcome_penalty_milli: 150,
     }
 }
 
@@ -518,4 +519,147 @@ fn cold_and_archived_skills_leave_the_prompt_index() {
             other => panic!("expected a lifecycle exclusion, got {other:?}"),
         }
     }
+}
+
+// --------------------------------------------------------------------- //
+// Outcome penalties (EP-07-S12 AC5): a negative judge signal charges the
+// skill's retention score, journaled with the intent named
+// --------------------------------------------------------------------- //
+
+#[test]
+fn a_negative_outcome_charges_the_score_and_journals_the_intent() {
+    let policy = policy();
+    let mut book = RetentionBook::new();
+    book.register_promoted("deploy-web-service", t0()).unwrap();
+
+    let score = book
+        .apply_outcome_penalty(
+            "deploy-web-service",
+            "intent.deploy-web-service",
+            &policy,
+            at(t0(), DAY),
+            "judge",
+        )
+        .unwrap();
+    assert_eq!(score, RETENTION_SCALE_MILLI - 150);
+
+    let record = book.get("deploy-web-service").unwrap();
+    assert_eq!(
+        record.ledger.last().unwrap().mutation,
+        RetentionMutation::OutcomePenalized {
+            intent_id: "intent.deploy-web-service".to_owned(),
+            penalty_milli: 150,
+        }
+    );
+    assert_eq!(record.ledger.last().unwrap().actor, "judge");
+    // A penalty is a judgment, not traffic: the idle base stays at
+    // registration, so the next tick charges the full two idle days on
+    // top of the penalty — 1000 - 150 - 2*100 = 650.
+    let transitions = book.tick(&policy, at(t0(), 2 * DAY), "retention").unwrap();
+    assert!(transitions.is_empty(), "650 is still warm");
+    assert_eq!(book.get("deploy-web-service").unwrap().score_milli, 650);
+}
+
+#[test]
+fn a_penalty_below_the_cold_threshold_transitions_on_the_next_tick() {
+    let policy = policy();
+    let mut book = RetentionBook::new();
+    book.register_promoted("deploy-web-service", t0()).unwrap();
+
+    // Five idle days: 1000 - 500 = 500. Two penalties: 500 - 300 = 200,
+    // below the cold threshold of 300 — but crossings are tick-owned, so
+    // the skill stays Promoted until the next tick sees it.
+    book.tick(&policy, at(t0(), 5 * DAY), "retention").unwrap();
+    for intent in ["intent.a", "intent.b"] {
+        book.apply_outcome_penalty(
+            "deploy-web-service",
+            intent,
+            &policy,
+            at(t0(), 5 * DAY),
+            "judge",
+        )
+        .unwrap();
+    }
+    let record = book.get("deploy-web-service").unwrap();
+    assert_eq!(record.score_milli, 200);
+    assert_eq!(
+        record.lifecycle,
+        SkillPromotionStatus::Promoted,
+        "a penalty is a charge, not a transition"
+    );
+
+    let transitions = book
+        .tick(&policy, at(t0(), 5 * DAY + 1), "retention")
+        .unwrap();
+    assert_eq!(transitions.len(), 1);
+    assert_eq!(transitions[0].to, SkillPromotionStatus::Cold);
+}
+
+#[test]
+fn a_pinned_skill_is_penalty_exempt() {
+    let policy = policy();
+    let mut book = RetentionBook::new();
+    book.register_promoted("deploy-web-service", t0()).unwrap();
+    book.pin("deploy-web-service", "operator", t0()).unwrap();
+
+    let err = book
+        .apply_outcome_penalty(
+            "deploy-web-service",
+            "intent.deploy-web-service",
+            &policy,
+            at(t0(), DAY),
+            "judge",
+        )
+        .expect_err("a pin outranks the penalty");
+    assert!(
+        matches!(err, RetentionError::Pinned(ref name) if name == "deploy-web-service"),
+        "the refusal names the pin: {err}"
+    );
+    assert_eq!(
+        book.get("deploy-web-service").unwrap().score_milli,
+        RETENTION_SCALE_MILLI,
+        "a refused penalty never touches the score"
+    );
+}
+
+#[test]
+fn an_archived_skill_cannot_be_penalized() {
+    let policy = policy();
+    let mut book = RetentionBook::new();
+    book.register_promoted("deploy-web-service", t0()).unwrap();
+    // Idle straight through to archived.
+    book.tick(&policy, at(t0(), 8 * DAY), "retention").unwrap();
+    book.tick(&policy, at(t0(), 8 * DAY + 3_600), "retention")
+        .unwrap();
+    assert_eq!(
+        book.get("deploy-web-service").unwrap().lifecycle,
+        SkillPromotionStatus::Archived
+    );
+
+    let err = book
+        .apply_outcome_penalty(
+            "deploy-web-service",
+            "intent.deploy-web-service",
+            &policy,
+            at(t0(), 9 * DAY),
+            "judge",
+        )
+        .expect_err("an archived skill is out of the game");
+    assert!(
+        matches!(err, RetentionError::InvalidTransition { .. }),
+        "the refusal names the transition rule: {err}"
+    );
+}
+
+#[test]
+fn a_penalty_on_an_unknown_skill_is_named_not_invented() {
+    let policy = policy();
+    let mut book = RetentionBook::new();
+    let err = book
+        .apply_outcome_penalty("ghost-skill", "intent.ghost", &policy, t0(), "judge")
+        .expect_err("the book refuses what it does not track");
+    assert!(
+        matches!(err, RetentionError::UntrackedSkill(ref name) if name == "ghost-skill"),
+        "the refusal names the skill: {err}"
+    );
 }

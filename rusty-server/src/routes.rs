@@ -5791,8 +5791,17 @@ struct GapAnnotationPayload {
     /// The intent the turn was joined to (the miner's vocabulary).
     intent_id: String,
     /// The judge samples — at least one; the outcome is their majority
-    /// vote, a tie abstains to `neutral`.
+    /// vote, a tie abstains to `neutral`. Optional when `signal` is
+    /// given: the platform's configured judge sampler scores the signal
+    /// into votes.
+    #[serde(default)]
     judge_votes: Vec<JudgeVote>,
+    /// The turn's next state for the platform to score through its
+    /// configured judge sampler (EP-07-S12 AC2) — the following user
+    /// message or the downstream tool result. Exactly one of
+    /// `judge_votes` / `signal` must be present.
+    #[serde(default)]
+    signal: Option<rusty_agent_runtime::judge::OutcomeSignal>,
     /// When the score was produced (default: now — scorers should send
     /// the scoring run's own timestamp).
     #[serde(default)]
@@ -5813,13 +5822,38 @@ async fn record_gap_annotation(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let scored_at = payload.scored_at.unwrap_or_else(Utc::now);
     let intent_id = payload.intent_id.clone();
-    let annotation = OutcomeAnnotation::from_votes(
-        payload.turn_ref,
-        payload.intent_id,
-        payload.judge_votes,
-        scored_at,
-    )
-    .map_err(gap_err)?;
+    // Exactly one evidence path: caller-supplied votes, or the platform's
+    // configured judge sampler scoring the next-state signal (EP-07-S12
+    // AC2). Both-present is ambiguous; neither-present is an evidence-free
+    // annotation — both are caller errors, and an unconfigured sampler is
+    // a deployment error (422, the embedding-index precedent).
+    let judge_votes = match (payload.judge_votes.is_empty(), payload.signal) {
+        (false, None) => payload.judge_votes,
+        (true, Some(signal)) => {
+            let sampler = state.config.judge_sampler.as_ref().ok_or_else(|| {
+                ApiError::unprocessable(
+                    "no judge sampler is configured; send `judge_votes` explicitly".to_string(),
+                )
+            })?;
+            sampler
+                .sample(&signal)
+                .await
+                .map_err(|error| ApiError::internal(format!("judge sampling: {error}")))?
+        }
+        (false, Some(_)) => {
+            return Err(ApiError::bad_request(
+                "send exactly one of `judge_votes` or `signal`, never both".to_string(),
+            ));
+        }
+        (true, None) => {
+            return Err(ApiError::bad_request(
+                "an annotation needs evidence: `judge_votes` or a `signal` to score".to_string(),
+            ));
+        }
+    };
+    let annotation =
+        OutcomeAnnotation::from_votes(payload.turn_ref, payload.intent_id, judge_votes, scored_at)
+            .map_err(gap_err)?;
     let outcome = annotation.outcome;
     let now = Utc::now();
     let (recorded, existed) = mutate_gap_ledger(&state, &tenant, |ledger| {

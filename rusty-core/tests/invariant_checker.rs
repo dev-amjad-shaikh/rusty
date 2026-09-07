@@ -186,7 +186,7 @@ async fn a_logged_request_passes_and_the_check_journals_nothing() {
 
     let before = journal.events().len();
     InvariantChecker::new(journal.clone())
-        .check_request(THREAD_ID, AGENT_NODE, &parent, &messages, &tools)
+        .check_request(THREAD_ID, AGENT_NODE, &parent, &messages, &tools, None)
         .expect("the logged request passes");
     assert_eq!(
         journal.events().len(),
@@ -245,7 +245,7 @@ async fn unlogged_content_is_rejected_at_the_divergence_index() {
 
     for (name, request, index) in cases {
         let violation = checker
-            .check_request(THREAD_ID, AGENT_NODE, &parent, &request, &tools)
+            .check_request(THREAD_ID, AGENT_NODE, &parent, &request, &tools, None)
             .expect_err(&format!("{name} must be rejected"));
         match violation {
             InvariantViolation::UnloggedContent {
@@ -255,6 +255,9 @@ async fn unlogged_content_is_rejected_at_the_divergence_index() {
             } => {
                 assert_eq!(actual, index, "{name}: divergence index");
                 assert!(!detail.is_empty(), "{name}: a diff summary rides along");
+            }
+            InvariantViolation::MissingTurnStamp => {
+                panic!("{name}: a stamped checker must not flag these replays")
             }
         }
     }
@@ -497,7 +500,7 @@ async fn a_registered_assertion_runs_after_reconstructability() {
     // With the assertion registered, even a reconstructable request fails.
     let violation = InvariantChecker::new(journal.clone())
         .with_assertion(Arc::new(AlwaysReject))
-        .check_request(THREAD_ID, AGENT_NODE, &parent, &messages, &tools)
+        .check_request(THREAD_ID, AGENT_NODE, &parent, &messages, &tools, None)
         .expect_err("the registered assertion rejects");
     assert!(matches!(
         violation,
@@ -511,10 +514,156 @@ async fn a_registered_assertion_runs_after_reconstructability() {
 async fn an_unknown_parent_anchor_is_a_violation_not_a_panic() {
     let journal = recorded_session("run-inv-anchor", THREAD_ID, "say hello").await;
     let violation = InvariantChecker::new(journal)
-        .check_request(THREAD_ID, AGENT_NODE, "run-inv-anchor:999", &[], &[])
+        .check_request(THREAD_ID, AGENT_NODE, "run-inv-anchor:999", &[], &[], None)
         .expect_err("an anchor outside the journal is rejected");
     assert!(matches!(
         violation,
         InvariantViolation::UnloggedContent { index: 0, .. }
     ));
+}
+
+// ---------- the turn-stamp assertion (EP-07-S12 AC1) ----------
+
+/// A well-formed stamp fixture: session identity, traffic class, turn
+/// identity and boundary, component attribution.
+fn stamp(traffic: rusty_api::TrafficClass) -> rusty_api::TurnStamp {
+    rusty_api::TurnStamp {
+        session_id: uuid::Uuid::new_v4(),
+        traffic,
+        turn_id: uuid::Uuid::new_v4(),
+        turn_boundary: rusty_api::TurnBoundary::Start,
+        issued_by: rusty_api::ComponentAttribution {
+            component: "react_agent".to_owned(),
+            sub_id: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn an_unstamped_request_fails_the_seam() {
+    let journal = recorded_session("run-inv-stamp", THREAD_ID, "say hello").await;
+    let (parent, messages, tools) = second_request(&journal);
+
+    // With the assertion registered, a request presenting no stamp is
+    // refused even though it reconstructs perfectly — the stamp
+    // requirement runs on the same seam.
+    let violation = InvariantChecker::new(journal.clone())
+        .with_assertion(Arc::new(rusty_agent_runtime::invariant::TurnStampAssertion))
+        .check_request(THREAD_ID, AGENT_NODE, &parent, &messages, &tools, None)
+        .expect_err("an unstamped request is refused");
+    assert_eq!(violation, InvariantViolation::MissingTurnStamp);
+
+    // A stamped request passes the same checker — and the violation is
+    // typed, so the refusal names itself on the wire.
+    InvariantChecker::new(journal)
+        .with_assertion(Arc::new(rusty_agent_runtime::invariant::TurnStampAssertion))
+        .check_request(
+            THREAD_ID,
+            AGENT_NODE,
+            &parent,
+            &messages,
+            &tools,
+            Some(&stamp(rusty_api::TrafficClass::Main)),
+        )
+        .expect("a stamped request passes");
+    let wire = serde_json::to_value(InvariantViolation::MissingTurnStamp).unwrap();
+    assert_eq!(wire["violation"], json!("missing_turn_stamp"));
+}
+
+#[tokio::test]
+async fn a_stamp_without_attribution_is_no_stamp() {
+    let journal = recorded_session("run-inv-stamp-attr", THREAD_ID, "say hello").await;
+    let (parent, messages, tools) = second_request(&journal);
+    let mut anonymous = stamp(rusty_api::TrafficClass::Side);
+    anonymous.issued_by.component = "  ".to_owned();
+
+    let violation = InvariantChecker::new(journal)
+        .with_assertion(Arc::new(rusty_agent_runtime::invariant::TurnStampAssertion))
+        .check_request(
+            THREAD_ID,
+            AGENT_NODE,
+            &parent,
+            &messages,
+            &tools,
+            Some(&anonymous),
+        )
+        .expect_err("a stamp naming no component is refused");
+    assert_eq!(violation, InvariantViolation::MissingTurnStamp);
+}
+
+#[tokio::test]
+async fn the_stamped_dispatch_path_carries_provenance_through_the_checker() {
+    let journal = recorded_session("run-inv-stamp-path", THREAD_ID, "say hello").await;
+    let (parent, messages, tools) = second_request(&journal);
+
+    let model = Arc::new(ScriptedModel::new(vec![]));
+    let checked = CheckingChatModel::new(
+        model.clone(),
+        InvariantChecker::new(journal)
+            .with_assertion(Arc::new(rusty_agent_runtime::invariant::TurnStampAssertion)),
+        THREAD_ID,
+        AGENT_NODE,
+        parent,
+    );
+
+    // The unstamped path refuses before the provider is touched.
+    let error = checked
+        .chat(&messages, &tools)
+        .await
+        .expect_err("unstamped chat is refused");
+    assert!(matches!(
+        error,
+        rusty_agent_runtime::error::RustyError::InvariantViolation(
+            InvariantViolation::MissingTurnStamp
+        )
+    ));
+    assert_eq!(model.call_count(), 0, "no bytes left the process");
+
+    // The stamped path checks and dispatches.
+    checked
+        .chat_stamped(&stamp(rusty_api::TrafficClass::Main), &messages, &tools)
+        .await
+        .expect("stamped chat dispatches");
+    assert_eq!(model.call_count(), 1);
+}
+
+#[tokio::test]
+async fn stamped_chat_model_stamps_every_call() {
+    use rusty_agent_runtime::llm::StampedChatModel;
+
+    // A spy model that records the stamp its `chat_stamped` received.
+    #[derive(Default)]
+    struct StampSpy {
+        seen: Mutex<Option<rusty_api::TurnStamp>>,
+    }
+    #[async_trait::async_trait]
+    impl ChatModel for StampSpy {
+        async fn chat(&self, _m: &[ChatMessage], _t: &[Value]) -> RustyResult<ChatResponse> {
+            panic!("a stamped wrapper never dispatches unstamped")
+        }
+        async fn chat_stamped(
+            &self,
+            stamp: &rusty_api::TurnStamp,
+            _m: &[ChatMessage],
+            _t: &[Value],
+        ) -> RustyResult<ChatResponse> {
+            *self.seen.lock().unwrap() = Some(stamp.clone());
+            Ok(ChatResponse {
+                message: ChatMessage::assistant("done"),
+                model: None,
+                usage: None,
+            })
+        }
+    }
+
+    let spy = Arc::new(StampSpy::default());
+    let wrapper = StampedChatModel::new(spy.clone(), stamp(rusty_api::TrafficClass::Side));
+    // The plain `chat` path is stamped by construction.
+    wrapper
+        .chat(&[], &[])
+        .await
+        .expect("stamped chat dispatches");
+    let seen = spy.seen.lock().unwrap().clone().expect("the stamp arrived");
+    assert_eq!(seen.traffic, rusty_api::TrafficClass::Side);
+    assert_eq!(seen.issued_by.component, "react_agent");
 }

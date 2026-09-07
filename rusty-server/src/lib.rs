@@ -697,6 +697,12 @@ pub struct ServerConfig {
     /// typed 422 refusal rather than a silent downgrade to full-text
     /// clustering. See [`ServerConfig::with_embedding_index`].
     pub embedding_index: Option<Arc<dyn rusty_agent_runtime::induction::EmbeddingIndex>>,
+
+    /// The judge sampler (EP-07-S12): when set, `POST /gaps/annotations`
+    /// accepts a next-state `signal` the platform scores into judge
+    /// votes; when `None`, that path is a typed 422 refusal. See
+    /// [`ServerConfig::with_judge_sampler`].
+    pub judge_sampler: Option<Arc<dyn rusty_agent_runtime::judge::JudgeSampler>>,
 }
 
 impl Default for ServerConfig {
@@ -732,6 +738,7 @@ impl Default for ServerConfig {
             egress_policy: None,
             connector_transport: None,
             embedding_index: None,
+            judge_sampler: None,
         }
     }
 }
@@ -1107,6 +1114,19 @@ impl ServerConfig {
         index: Arc<dyn rusty_agent_runtime::induction::EmbeddingIndex>,
     ) -> Self {
         self.embedding_index = Some(index);
+        self
+    }
+
+    /// Builder-style: configure the judge sampler (EP-07-S12). With a
+    /// sampler set, `POST /gaps/annotations` accepts a next-state `signal`
+    /// the platform scores into judge votes; without one, that path
+    /// refuses typed (`422`) and caller-supplied `judge_votes` remain the
+    /// evidence path. Tests inject the deterministic heuristic.
+    pub fn with_judge_sampler(
+        mut self,
+        sampler: Arc<dyn rusty_agent_runtime::judge::JudgeSampler>,
+    ) -> Self {
+        self.judge_sampler = Some(sampler);
         self
     }
 }

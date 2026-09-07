@@ -1210,26 +1210,44 @@ impl ProviderRegistry {
     }
 }
 
-/// A [`ChatModel`] wrapper that injects a [`rusty_api::TurnStamp`] on every call and
-/// journals a [`crate::record::RunEventKind::RequestHeader`] event before dispatch.
-///
-/// This is the production path: every provider call is stamped, invariant-
-/// checked, and logged.
+/// A [`ChatModel`] wrapper that stamps every call with its
+/// [`rusty_api::TurnStamp`] (EP-07-S12 AC1): the plain `chat` and
+/// `chat_stream` paths dispatch through the stamped seam, so a provider
+/// wrapped here never issues an unstamped request. Journaling the stamp
+/// (the `RequestHeader` event) is the recording layer's job — this
+/// wrapper's contract is provenance at the dispatch boundary.
 pub struct StampedChatModel {
     inner: Arc<dyn ChatModel>,
+    stamp: rusty_api::TurnStamp,
 }
 
 impl StampedChatModel {
-    /// Wrap a provider so every call is stamped.
-    pub fn new(inner: Arc<dyn ChatModel>) -> Self {
-        Self { inner }
+    /// Wrap a provider so every call carries `stamp`.
+    pub fn new(inner: Arc<dyn ChatModel>, stamp: rusty_api::TurnStamp) -> Self {
+        Self { inner, stamp }
+    }
+
+    /// The stamp every call carries.
+    pub fn stamp(&self) -> &rusty_api::TurnStamp {
+        &self.stamp
     }
 }
 
 #[async_trait]
 impl ChatModel for StampedChatModel {
     async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> Result<ChatResponse> {
-        self.inner.chat(messages, tools).await
+        self.inner.chat_stamped(&self.stamp, messages, tools).await
+    }
+
+    async fn chat_stamped(
+        &self,
+        stamp: &rusty_api::TurnStamp,
+        messages: &[ChatMessage],
+        tools: &[Value],
+    ) -> Result<ChatResponse> {
+        // A caller presenting its own stamp overrides the wrapper's —
+        // per-call provenance outranks the wrapper default.
+        self.inner.chat_stamped(stamp, messages, tools).await
     }
 
     async fn chat_stream(

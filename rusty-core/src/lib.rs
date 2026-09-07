@@ -272,6 +272,7 @@ pub mod induction;
 pub mod install;
 pub mod invariant;
 pub mod journal;
+pub mod judge;
 pub mod knowledge;
 pub mod learn;
 pub mod llm;
