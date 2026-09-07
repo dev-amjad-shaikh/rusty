@@ -734,6 +734,56 @@ impl GapLedgerEntry {
     pub fn priority_score(&self) -> u64 {
         self.volume.saturating_mul(self.failure_cost_millis)
     }
+
+    /// The entry's probe schedule, `Some` only while parked — Parked is
+    /// the speculative decay state, and an observed gap never parks
+    /// (EP-07-S11 AC3's `Parked { next_probe_at, expires_at }` as data).
+    pub fn probe_schedule(&self) -> Option<ProbeSchedule> {
+        if self.status != GapStatus::Parked || self.empty_probes == 0 {
+            return None;
+        }
+        let next =
+            self.updated_at + chrono::Duration::milliseconds(probe_grace_millis(self.empty_probes));
+        // Certain-expiry under continued on-schedule empty probing: the
+        // remaining graces through the MAX_EMPTY_PROBES-th miss.
+        let remaining = (self.empty_probes..MAX_EMPTY_PROBES)
+            .map(probe_grace_millis)
+            .fold(0_i64, i64::saturating_add);
+        Some(ProbeSchedule {
+            empty_probes: self.empty_probes,
+            next_probe_at: next,
+            expires_at: self.updated_at + chrono::Duration::milliseconds(remaining),
+        })
+    }
+}
+
+/// The grace after the n-th empty probe: `base * 2^(n-1)`, saturating —
+/// the same arithmetic [`GapLedger::expire_parked`] enforces.
+fn probe_grace_millis(empty_probes: u32) -> i64 {
+    PROBE_BACKOFF_BASE_MILLIS.saturating_mul(
+        1_i64
+            .checked_shl(empty_probes.saturating_sub(1))
+            .unwrap_or(i64::MAX),
+    )
+}
+
+/// The parked decay clock as data (EP-07-S11 AC3/AC4): when the next
+/// probe is due, and when an entry that keeps probing empty is certain
+/// to have expired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeSchedule {
+    /// Empty probes recorded so far.
+    pub empty_probes: u32,
+    /// When the next probe is due — the current grace deadline
+    /// (`base * 2^(n-1)` after the n-th miss; each miss doubles the
+    /// grace, so re-probes run at declining frequency).
+    pub next_probe_at: DateTime<Utc>,
+    /// The certain-expiry instant if probes keep landing empty on
+    /// schedule: the sum of the remaining grace periods through the
+    /// [`MAX_EMPTY_PROBES`]-th miss. Probes that arrive early stretch
+    /// it; this is the bound under the documented schedule, not a
+    /// promise about caller timing.
+    pub expires_at: DateTime<Utc>,
 }
 
 // --------------------------------------------------------------------- //
@@ -1671,6 +1721,29 @@ impl GapLedger {
             )?;
         }
         Ok(expired)
+    }
+
+    /// The intent's behavioral tally, when any outcome has scored — the
+    /// frontier-expansion mastery gate's read path into the behavioral
+    /// signal (EP-07-S11 AC5).
+    pub fn outcome_tally(&self, intent_id: &str) -> Option<&IntentTally> {
+        self.tallies.get(intent_id)
+    }
+
+    /// The parked speculative entries whose next probe is due at `now`,
+    /// id-sorted for a deterministic work list — the declining-frequency
+    /// re-probe schedule as a query (EP-07-S11 AC4).
+    pub fn probes_due(&self, now: DateTime<Utc>) -> Vec<String> {
+        let mut due: Vec<String> = self
+            .entries
+            .values()
+            .filter_map(|entry| {
+                let schedule = entry.probe_schedule()?;
+                (now >= schedule.next_probe_at).then(|| entry.gap_id.clone())
+            })
+            .collect();
+        due.sort();
+        due
     }
 
     // ------------------------- closure and the behavioral signal ------------------------- //

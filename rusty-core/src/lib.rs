@@ -263,6 +263,7 @@ pub mod effects;
 pub mod egress;
 pub mod error;
 pub mod executor;
+pub mod frontier;
 pub mod gaps;
 pub mod goals;
 pub mod graph;
