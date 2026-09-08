@@ -12,7 +12,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████░░░░░░░░░ 71%** weighted complete (122 ✅ landed · 44 ◐ partial · 38 ○ not started, of 204 stories)
+**█████████████████████░░░░░░░░░ 70%** weighted complete (121 ✅ landed · 45 ◐ partial · 38 ○ not started, of 204 stories)
 
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
@@ -21,7 +21,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 2 | 0 | ██████████░░ 91% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
-| EP-06 Memory | M1–M2 | 12 | 9 | 1 | 2 | ███████████░ 92% |
+| EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
 | EP-07 Skills and Self-Learning | M2 | 12 | 5 | 7 | 0 | █████████░░░ 71% |
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 6 | 5 | 0 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
@@ -128,13 +128,13 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-06 — Memory
 
-███████████░ 92% · 9 landed · 1 partial · 2 not started · milestone M1–M2
+█████████░░░ 75% · 8 landed · 2 partial · 2 not started · milestone M1–M2
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
 | EP-06-S01 | Memory blocks as first-class shared entities | P0 | ✅ | `memory.rs` blocks as first-class shared entities |
 | EP-06-S02 | Provenance-columned episodic entries | P0 | ✅ | provenance-columned episodic entries |
-| EP-06-S03 | The agent's memory tool surface | P0 | ✅ | agent memory tool surface |
+| EP-06-S03 | The agent's memory tool surface | P0 | ◐ | re-judged 2026-09-07: the ✅ named a tool surface no `impl Tool` over memory.rs/learn.rs backed; landed `cb32fb4` on `feat/ep-06-s03`: `EffectClass::Write` (engine-state mutation, in-process placement), `memory_tools.rs` `MemoryToolset` — `memory_append_entry` (trigger_phrases→tags, importance 0–10→priority, confidence (0,1], keyed supersession with a model-visible refusal on a ghost key) + `memory_replace_block` (version guard naming the current id on conflict, char-limit refusal, annotation-preserving supersede), both `Effect::Idempotent` + `SandboxRequirement::None`, mounted through the in-process MCP bridge (EP-05-S09), repair-envelope composition via `ValidatingTool`, side-session catalog narrowing via `filtered(ByName{maintenance_names()})`; core 1661 (+8), clippy/fmt/doc clean — residue: the spec's `DeclaredBlock` char-limit/`RecallAnnotations` vocabulary mapped onto the landed model (per-toolset char limit; tags/priority carry the annotations — the literal types don't exist, the EP-06-S05/S11 blocker); mounting into live runs is the consumer stories' work (EP-07-S04 fork) |
 | EP-06-S04 | Lane-one recall: zero-model-call ranked and trigger injection | P0 | ✅ | lane-one recall, zero model calls (`/memory/query`) |
 | EP-06-S05 | Lane-two recall: the escalation search sub-agent | P1 | ○ | **BLOCKED**: spec assumes `MemoryBlock`/`MemoryEntry`/`RecallInjection` model (EP-06-S01–S04) that does not exist in workspace; actual code has `MemoryRecord` with different provenance/scope model; no lane-one miss signal, no recall-injection event type, no sub-agent spawning infrastructure. Cannot implement AC 1–5 without memory-model alignment. |
 | EP-06-S06 | Session-lineage-aware full-text search | P1 | ✅ | session-lineage-aware search (`session_query.rs`) |
