@@ -811,6 +811,77 @@ impl RunManager {
         true
     }
 
+    /// Register a paused fork of `source_run_id` under a new run id on the
+    /// fork thread (EP-03-S09 AC 5): pause state forks with the session.
+    /// The fork inherits the suspension as data — payload, admissions,
+    /// recorded checkpoint ids — with a fresh frame sink, terminal
+    /// channel, and cancellation token, so signalling or answering the
+    /// source never touches the fork (and vice versa). `None` when the
+    /// source run is unknown or no longer paused.
+    ///
+    /// The fork is **not** registered as the fork thread's active run: a
+    /// paused run holds no executor, so the fork accepts new turns
+    /// immediately — resume comes through its own obligation answers, not
+    /// through the thread slot.
+    pub(crate) async fn fork_paused(
+        &self,
+        source_run_id: &str,
+        new_run_id: String,
+        new_thread_id: &str,
+        new_wire_thread_id: &str,
+        log_capacity: usize,
+        shutdown: &tokio_util::sync::CancellationToken,
+    ) -> Option<RunInfo> {
+        let mut inner = self.inner.lock().await;
+        let source = inner.runs.get(source_run_id)?;
+        if source.status != RunStatus::Paused {
+            return None;
+        }
+        // Clone the inherited state up front: bumping the fork thread's
+        // attempt counter borrows the registry mutably.
+        let graph = source.graph.clone();
+        let payload = source.payload.clone();
+        let admission = source.admission.clone();
+        let deployment = source.deployment.clone();
+        let checkpoint_ids = lock_recover(&source.checkpoint_ids).clone();
+        let attempt = {
+            let counter = inner.attempts.entry(new_thread_id.to_string()).or_insert(0);
+            *counter += 1;
+            *counter
+        };
+        let terminal = json!({
+            "run_id": new_run_id,
+            "thread_id": new_wire_thread_id,
+            "status": "paused",
+            "forked_from_run": source_run_id,
+        });
+        let (bcast_tx, _bcast_rx) = broadcast::channel(256);
+        let (terminal_tx, _terminal_rx) = watch::channel(Some(terminal));
+        let handle = RunHandle {
+            run_id: new_run_id.clone(),
+            thread_id: new_thread_id.to_string(),
+            wire_thread_id: new_wire_thread_id.to_string(),
+            graph,
+            attempt,
+            status: RunStatus::Paused,
+            payload,
+            created_at: chrono::Utc::now(),
+            admission,
+            deployment,
+            sink: FrameSink::new(log_capacity.max(16), bcast_tx),
+            terminal: terminal_tx,
+            checkpoint_ids: Arc::new(StdMutex::new(checkpoint_ids)),
+            // A child of the server drain token, like any scheduled run —
+            // never a child of the source run's token, which would couple
+            // the fork's cancellation to the parent's.
+            cancel: shutdown.child_token(),
+        };
+        let info = run_info_of(&handle);
+        inner.order.push_back(new_run_id.clone());
+        inner.runs.insert(new_run_id, handle);
+        Some(info)
+    }
+
     /// Record the terminal status + JSON, wake waiters, release the thread
     /// slot, and return the next queued run id for the thread (if any), now
     /// marked active.
