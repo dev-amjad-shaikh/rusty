@@ -1,0 +1,68 @@
+/* Studio v2 design tokens (handoff 01). Exactly two themes, switched with
+   `data-theme="light|dark"` on the shell root. Fonts: Instrument Sans (UI) and
+   JetBrains Mono (ids, code, timestamps) with system fallbacks. */
+
+:root[data-theme="light"] {
+  --canvas: #e8e8e8;
+  --bg: #f7f7f7;
+  --panel: #ffffff;
+  --line: #e6e6e6;
+  --ink: #141414;
+  --ink2: #6b6b6b;
+  --ink3: #9b9b9b;
+  --accent: #141414;
+  --accent-soft: #ececec;
+  --ok: #1f9d6a;
+  --ok-soft: #e6f6ee;
+  --warn: #b7791f;
+  --warn-soft: #fbf1dc;
+  --err: #d3322b;
+  --err-soft: #fbe6e4;
+  --code: #f2f2f2;
+  --focus: #1f9d6a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme="dark"] {
+  --canvas: #0f0f0f;
+  --bg: #171717;
+  --panel: #1d1d1d;
+  --line: #2c2c2c;
+  --ink: #f0f0f0;
+  --ink2: #a3a3a3;
+  --ink3: #6f6f6f;
+  --accent: #f0f0f0;
+  --accent-soft: #2a2a2a;
+  --ok: #3fbf85;
+  --ok-soft: #14301f;
+  --warn: #d9a541;
+  --warn-soft: #2f2712;
+  --err: #ef6b5f;
+  --err-soft: #3a1a17;
+  --code: #242424;
+  --focus: #3fbf85;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme] {
+  --font-ui: "Instrument Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --text-micro: 10px;
+  --text-meta: 11px;
+  --text-secondary: 12px;
+  --text-body: 13px;
+  --text-nav: 14px;
+  --text-pane-title: 16px;
+  --text-page-title: 18px;
+
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-main: 14px;
+  --radius-frame: 18px;
+  --radius-pill: 999px;
+
+  color: var(--ink);
+  font-family: var(--font-ui);
+  line-height: 1.5;
+}

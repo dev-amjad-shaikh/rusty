@@ -1,0 +1,204 @@
+/* Base controls (handoff 01). All sizing/color comes from tokens.css. */
+
+.button {
+  appearance: none;
+  border: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  padding: 8px 14px;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.button:focus-visible,
+.input:focus-visible,
+.select:focus-visible,
+.pill:focus-visible,
+.composer textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--panel);
+  font-weight: 600;
+}
+
+.secondary {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 500;
+  padding: 7px 13px;
+}
+
+.ghost {
+  background: transparent;
+  color: var(--ink2);
+  font-weight: 500;
+}
+
+.small {
+  font-size: var(--text-secondary);
+  padding: 6px 12px;
+}
+
+.secondary.small {
+  padding: 5px 11px;
+}
+
+.input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.input::placeholder {
+  color: var(--ink3);
+}
+
+.input:focus {
+  border-color: var(--ink3);
+}
+
+.selectWrap {
+  position: relative;
+}
+
+.select {
+  appearance: none;
+  background-color: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  padding: 8px 28px 8px 10px;
+  width: 100%;
+}
+
+.chevron {
+  color: var(--ink3);
+  pointer-events: none;
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.badge {
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  display: inline-block;
+  font-size: var(--text-micro);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 3px 5px;
+  text-transform: uppercase;
+}
+
+.toneOk { color: var(--ok); }
+.toneWarn { color: var(--warn); }
+.toneErr { color: var(--err); }
+.toneNeutral { color: var(--ink2); }
+
+.pill {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--ink2);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-secondary);
+  padding: 5px 12px;
+}
+
+.pillSelected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.statusDot {
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+  height: 7px;
+  width: 7px;
+}
+
+.statusDot.toneOk { background: var(--ok); }
+.statusDot.toneWarn { background: var(--warn); }
+.statusDot.toneErr { background: var(--err); }
+.statusDot.toneNeutral { background: var(--ink3); }
+
+.statusLabel {
+  color: var(--ink2);
+  font-size: var(--text-secondary);
+}
+
+.composer {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-main);
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+}
+
+.composer:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+.composer textarea {
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: var(--text-nav);
+  min-height: 22px;
+  resize: none;
+}
+
+.composer textarea:focus {
+  outline: none;
+}
+
+.composer textarea::placeholder {
+  color: var(--ink3);
+}
+
+.toastViewport {
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  left: 50%;
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 60;
+}
+
+.toast {
+  background: var(--ink);
+  border-radius: var(--radius-control);
+  color: var(--bg);
+  font-size: var(--text-body);
+  padding: 8px 14px;
+}
