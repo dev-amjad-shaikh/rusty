@@ -12,7 +12,9 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**██████████████████████░░░░░░░░ 72%** weighted complete (125 ✅ landed · 45 ◐ partial · 34 ○ not started, of 204 stories)
+**█████████████████████████░░░░░░░░░ 73%** weighted complete (126 ✅ landed · 45 ◐ partial · 31 ○ not started, of 202 stories)
+
+> Integration 2026-09-08: merged to `main` — the thirteen-wave stack (`3cca541`, incl. EP-04-S01 schema pipeline, EP-06-S03, EP-07-S03/S04/S05/S06/S07/S09/S11/S12, EP-08-S07/S08), EP-03-S11 server infra (`58f2fe0`), EP-10-S08 (`a0948de`), EP-10-S09 (`c72b35d`), EP-13-S10 AC5 (`4a83150`), the EP-17 chain (`bfe5b84`, composed with EP-08-S07's `gate_override` promotion path). Rows citing `feat/*` branches from those waves are now on `main`. Skipped as superseded by `1c5e080` (already on main): `feat/ep-15-s01`, `feat/ep-15-s02`, `feat/toolset-combinators`.
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
@@ -25,9 +27,9 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-08 Agent Blueprints and Registry | M0–M4 | 11 | 6 | 5 | 0 | █████████░░░ 77% |
 | EP-09 Multi-Agent Collaboration and Task Management | M3 | 12 | 5 | 7 | 0 | ████████░░░░ 67% |
 | EP-10 Self-Healing and Resilience | M1–M3 | 12 | 8 | 2 | 2 | ████████░░░░ 67% |
-| EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 3 | 3 | ████████░░░░ 67% |
+| EP-11 Security, Governance, and Multi-Tenancy | M0–M4 | 12 | 6 | 5 | 1 | █████████░░░ 71% |
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
-| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 8 | 2 | 1 | ██████████░░ 83% |
+| EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 9 | 2 | 1 | ██████████░░ 83% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
 | EP-15 Out-of-the-Box Catalog | M4 | 12 | 8 | 1 | 3 | █████████░░░ 71% |
 | EP-16 Rustynome Studio v2 (design handoff) | M4–M5 | 16 | 0 | 0 | 16 | ░░░░░░░░░░░░░░░░ 0% |
@@ -85,7 +87,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-03-S08 | Interrupt as a resumable exception with ordinal matching | — | ✅ | interrupts as resumable exceptions, ordinal matching |
 | EP-03-S09 | Message-granular checkpoints: continue, fork, regenerate, time-travel | — | ◐ | `ThreadRecord` gains `forked_from`/`seed_length` (standardized on EP-01-S10's lineage in merge wave 2); `POST /threads/{id}/fork` populates lineage; `GET /threads/{id}` retrieves lineage; `POST /threads/{id}/regenerate` forks + schedules run; `POST /threads/{id}/continue` shadows original; `rusty-server/tests/message_granular.rs` 3 tests (fork_lineage, regenerate_is_fork, continue_shadows_never_deletes) pass; `rusty-server/tests/time_travel.rs` 5/5 pass; clippy/doc clean; `6de69af` on `main`; open: `paused_fork_isolation` AC (fork must copy open obligations rebound under the fork's run id). **Blocked 2026-09-06**: obligation persistence (`put_obligations`/`get_obligations`/`update_obligation_status`) exists only on the unmerged `feat/ep-03-s11` branch (`8fd9522`), not on `main` — implementing AC 5 needs that store surface, and re-implementing it would collide with the S11 stream's claimed files. Resolvable by owner merge of `feat/ep-03-s11` |
 | EP-03-S10 | Crash-resume conformance: kill anywhere, recompute the frontier | — | ✅ | crash-resume recovery proofs (kill-anywhere tests) |
-| EP-03-S11 | Pause longevity and expiry governance | — | ◐ | **Server-side infrastructure shipped `8fd9522` on `feat/ep-03-s11` (unmerged, owner review pending)**: `JsonFileStore` obligation + pause-envelope persistence (`obligations/`, `pause_envelopes/` dirs, atomic temp+rename writes); `ServerStore` trait methods (`put_obligations`, `get_obligations`, `list_obligations`, `update_obligation_status`, `sweep_expired_obligations`, `put_pause_envelope`, `get_pause_envelope`); `POST /runs/{id}/cancel` handles `Paused` → cancels run via `RunManager`, expires all open obligations; `GET /v1/approvals` + `POST /v1/approvals/sweep` routes; 2 unit tests (`obligations_round_trip_and_sweep`, `pause_envelope_round_trip`) pass; 127 lib tests, clippy/doc clean. **Open**: AC 1 (90-day resume across version upgrade) requires executor pause-obligation wiring not yet present; AC 2 (default TTL stamping) needs executor-side obligation creation to test end-to-end. **Blocked 2026-09-06**: further S11 work builds on the same unmerged branch's store surface — owner merge of `feat/ep-03-s11` unblocks both EP-03 partials |
+| EP-03-S11 | Pause longevity and expiry governance | — | ◐ | **Server-side infrastructure shipped `8fd9522`, merged to `main` (`58f2fe0`)**: `JsonFileStore` obligation + pause-envelope persistence (`obligations/`, `pause_envelopes/` dirs, atomic temp+rename writes); `ServerStore` trait methods (`put_obligations`, `get_obligations`, `list_obligations`, `update_obligation_status`, `sweep_expired_obligations`, `put_pause_envelope`, `get_pause_envelope`); `POST /runs/{id}/cancel` handles `Paused` → cancels run via `RunManager`, expires all open obligations; `GET /v1/approvals` + `POST /v1/approvals/sweep` routes; 2 unit tests (`obligations_round_trip_and_sweep`, `pause_envelope_round_trip`) pass; 127 lib tests, clippy/doc clean. **Open**: AC 1 (90-day resume across version upgrade) requires executor pause-obligation wiring not yet present; AC 2 (default TTL stamping) needs executor-side obligation creation to test end-to-end. **Blocked 2026-09-06**: further S11 work builds on the same unmerged branch's store surface — owner merge of `feat/ep-03-s11` unblocks both EP-03 partials |
 
 ## EP-04 — Gateway, Sessions and Channels
 
@@ -93,12 +95,14 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
-| EP-04-S01 | The schema-defined protocol: frames, snapshot, sequencing | — | ◐ | Schema pipeline landed on `feat/ep-04-s01` (`c62acf3`): `rusty-api::gateway_protocol` contract types (Frame/ResponseOutcome/Pairing/TurnLease/SteeringVerb/AdmissionReason, wire-shape unit tests), `gateway_schema.rs` JSON Schema bundle + TS renderer, `gateway_protocol_schema` bin, committed artifacts (`rusty-server/schema/gateway-protocol.schema.json`, `sdks/typescript/src/gateway-protocol.d.ts`), drift gate (`tests/gateway_schema_drift.rs`) — the earlier "EP-13 pipeline missing" blocker was mis-cited; residue: WS transport itself (schema-validation at dispatch, snapshot/seq over WS, boundary events, NFR harness) — the repo streams SSE via `/threads/{id}/runs/stream`, no `Frame` transport yet || EP-04-S02 | Mandatory idempotency keys and the dedupe cache | — | ✅ | mandatory idempotency keys + dedupe |
+| EP-04-S01 | The schema-defined protocol: frames, snapshot, sequencing | — | ◐ | Schema pipeline landed on `feat/ep-04-s01` (`c62acf3`): `rusty-api::gateway_protocol` contract types (Frame/ResponseOutcome/Pairing/TurnLease/SteeringVerb/AdmissionReason, wire-shape unit tests), `gateway_schema.rs` JSON Schema bundle + TS renderer, `gateway_protocol_schema` bin, committed artifacts (`rusty-server/schema/gateway-protocol.schema.json`, `sdks/typescript/src/gateway-protocol.d.ts`), drift gate (`tests/gateway_schema_drift.rs`) — the earlier "EP-13 pipeline missing" blocker was mis-cited; residue: WS transport itself (schema-validation at dispatch, snapshot/seq over WS, boundary events, NFR harness) — the repo streams SSE via `/threads/{id}/runs/stream`, no `Frame` transport yet
+| EP-04-S02 | Mandatory idempotency keys and the dedupe cache | — | ✅ | mandatory idempotency keys + dedupe |
 | EP-04-S03 | Device pairing with challenge-nonce signing | — | ○ | **BLOCKED**: depends on EP-04-S01 (◐); schema pipeline now landed (`c62acf3`) with `Pairing` protocol types, residue is the pairing dispatch surface over the WS transport; no registration surface in workspace |
 | EP-04-S04 | Session resolution and lineage | — | ✅ | session resolution + lineage (`/threads`, `session_query.rs`) |
 | EP-04-S05 | The turn lease on the resolved session | — | ✅ | turn lease (`/tasks/claim`, heartbeat) |
 | EP-04-S06 | The steering inbox: followup, steer, inject | — | ✅ | `inbox.rs` steering: followup / steer / inject |
-| EP-04-S07 | The channel adapter trait: capabilities, authentication, scopes | — | ○ | **BLOCKED**: depends on EP-04-S01 (◐) — its schema pipeline landed (`c62acf3`), so the residue is the WS `Frame` transport plus the adapter trait itself: no `rusty-api` channel trait or gateway adapter registration infrastructure exists in workspace, server uses SSE not WS protocol, no adapter mount/dispatch surface || EP-04-S08 | Built-in adapter: web chat over WebSocket | — | ◐ | web chat over WS (`/threads/{id}/runs/stream`); full adapter surface partial |
+| EP-04-S07 | The channel adapter trait: capabilities, authentication, scopes | — | ○ | **BLOCKED**: depends on EP-04-S01 (◐) — its schema pipeline landed (`c62acf3`), so the residue is the WS `Frame` transport plus the adapter trait itself: no `rusty-api` channel trait or gateway adapter registration infrastructure exists in workspace, server uses SSE not WS protocol, no adapter mount/dispatch surface
+| EP-04-S08 | Built-in adapter: web chat over WebSocket | — | ◐ | web chat over WS (`/threads/{id}/runs/stream`); full adapter surface partial |
 | EP-04-S09 | Built-in adapter: Slack | — | ○ | **BLOCKED**: depends on EP-04-S07 channel adapter trait which has no infrastructure in workspace |
 | EP-04-S10 | Multi-device and cross-surface session continuity | — | ○ | **BLOCKED**: depends on EP-04-S08 (◐) and EP-04-S09 (○), both blocked on EP-04-S07 channel adapter trait which has no infrastructure |
 | EP-04-S11 | Gateway-owned scheduling: cron, heartbeat, idleness | — | ✅ | gateway-owned scheduling (`/crons`, `triggers.rs`) |
@@ -219,7 +223,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-11 — Security, Governance, and Multi-Tenancy
 
-██████████░░ 67% · 6 landed · 3 partial · 3 not started · milestone M0–M4
+█████████░░░ 71% · 6 landed · 5 partial · 1 not started · milestone M0–M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
