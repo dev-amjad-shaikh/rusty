@@ -281,6 +281,7 @@ pub mod llm;
 pub mod mcp;
 pub mod memory;
 pub mod memory_tiers;
+pub mod memory_tools;
 pub mod meter;
 pub mod middleware;
 pub mod node;
@@ -449,6 +450,10 @@ pub mod prelude {
         MemoryStore, ProvenanceAuthor, ScopeAddress, TOKEN_BYTES_PER_ESTIMATE, TokenAccounting,
         ValidityWindow, apply_query, assemble, derive_memory_id, estimated_tokens,
         memory_effect_key, memory_read_request,
+    };
+    pub use crate::memory_tools::{
+        DEFAULT_BLOCK_CHAR_LIMIT, MAX_IMPORTANCE, MEMORY_APPEND_ENTRY_TOOL,
+        MEMORY_REPLACE_BLOCK_TOOL, MemoryToolset, maintenance_names,
     };
     pub use crate::meter::{
         CostEstimate, ModelMeter, RunMeter, TokenTotals, ToolClassTotals, UNREPORTED_MODEL,

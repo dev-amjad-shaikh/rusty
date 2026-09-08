@@ -29,14 +29,20 @@ pub mod approval;
 ///
 /// Unlike [`crate::record::Effect`] which classifies retry safety, this
 /// taxonomy decides *where* a tool executes: in-process for engine-state
-/// reads, or behind a sandbox seam for anything touching code, files, or
-/// the network.
+/// reads and writes, or behind a sandbox seam for anything touching code,
+/// files, or the network.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectClass {
     /// Reads engine state only — may execute in-process when paired with
     /// [`SandboxRequirement::None`].
     Read,
+    /// Mutates engine state in-process — memory writes, ledger mutations:
+    /// no filesystem, no network, no model-influenced code. May execute
+    /// in-process when paired with [`SandboxRequirement::None`]; the
+    /// mutation is auditable through the journaled ToolCall/ToolResult
+    /// pair every tool call produces.
+    Write,
     /// Executes model-influenced code or touches the host filesystem.
     Execute,
     /// Opens network connections.
@@ -104,9 +110,10 @@ impl std::fmt::Display for PlacementError {
 
 /// Resolve the execution placement for a tool (EP-05-S06).
 ///
-/// Returns `Ok(Placement::InProcess)` for [`EffectClass::Read`] +
-/// [`SandboxRequirement::None`]. Returns `Ok(Placement::Sandboxed)` for
-/// any tool with [`SandboxRequirement::Required`]. Returns `Err` for
+/// Returns `Ok(Placement::InProcess)` for [`EffectClass::Read`] or
+/// [`EffectClass::Write`] + [`SandboxRequirement::None`]. Returns
+/// `Ok(Placement::Sandboxed)` for any tool with
+/// [`SandboxRequirement::Required`]. Returns `Err` for
 /// invalid declarations or when a sandbox is required but no backend
 /// exists.
 pub fn resolve_placement(
@@ -127,8 +134,12 @@ pub fn resolve_placement(
         });
     }
 
-    // AC 1: Read + None → in-process.
-    if matches!(class, EffectClass::Read) && matches!(req, SandboxRequirement::None) {
+    // AC 1: Read/Write + None → in-process: engine-state reads and
+    // in-process engine-state mutations (EP-06-S03's memory tools) need no
+    // sandbox; everything touching code, files, or the network does.
+    if matches!(class, EffectClass::Read | EffectClass::Write)
+        && matches!(req, SandboxRequirement::None)
+    {
         return Ok(Placement::InProcess);
     }
 
@@ -365,9 +376,11 @@ pub trait Tool: Send + Sync {
     /// Execution placement effect class (EP-05-S06).
     ///
     /// Defaults to [`EffectClass::Read`] — the most permissive for
-    /// in-process execution. Tools that touch code, files, or the network
-    /// must override to [`EffectClass::Execute`] or [`EffectClass::Egress`]
-    /// and pair with [`SandboxRequirement::Required`].
+    /// in-process execution. Tools that mutate engine state in-process
+    /// override to [`EffectClass::Write`]; tools that touch code, files,
+    /// or the network must override to [`EffectClass::Execute`] or
+    /// [`EffectClass::Egress`] and pair with
+    /// [`SandboxRequirement::Required`].
     fn effect_class(&self) -> EffectClass {
         EffectClass::Read
     }
