@@ -1,12 +1,12 @@
 //! Journal verification for disaster-recovery confidence (EP-13-S10).
 //!
 //! [`verify_log`] checks the per-session invariants the spec calls out:
-//! gap-free positions, paired turn events, and (when a blob store is wired)
-//! dangling locators.  It is the engine behind `rustyness verify-log` and
-//! behind the restore-rehearsal CI gate.
+//! gap-free positions, paired turn events, and (when an artifact store is
+//! wired) dangling artifact locators.  It is the engine behind
+//! `rustyness verify-log` and behind the restore-rehearsal CI gate.
 
-use rusty_agent_runtime::journal::{Clock, Journal, JournalSnapshot};
-use rusty_agent_runtime::record::{RunEvent, RunEventKind};
+use rusty_agent_runtime::journal::{ArtifactStore, Clock, Journal, JournalSnapshot};
+use rusty_agent_runtime::record::{ArtifactRef, PayloadRef, RunEvent, RunEventKind};
 use serde::{Deserialize, Serialize};
 
 /// One integrity problem found by the verifier.
@@ -29,10 +29,10 @@ pub enum IntegrityFinding {
         /// The kind of the opening event.
         open_kind: String,
     },
-    /// A locator referenced by an event does not resolve in the blob store.
-    /// Stub: the blob backend is not yet present on `main` (EP-13-S04).
+    /// An artifact locator referenced by an event does not resolve in the
+    /// artifact store or the snapshot's embedded artifact map.
     DanglingLocator {
-        /// The locator string that could not be resolved.
+        /// The locator string (sha256) that could not be resolved.
         locator: String,
         /// The event id that carried the reference.
         event_id: String,
@@ -82,15 +82,43 @@ impl VerificationReport {
 ///    `NodeOutput`; every `CoordinationStart` by a `CoordinationEnd`.
 ///    After crash repair an unclosed pair is reported as an integrity
 ///    finding (the run was interrupted mid-turn and will resume).
-/// 4. **Dangling locators** – placeholder: blob-store resolution requires
-///    EP-13-S04 (`rusty-store` blob backend) which is not yet on `main`.
+/// 4. **Dangling locators** – when an [`ArtifactStore`] is provided, every
+///    `PayloadRef::Artifact` in the event stream is checked for existence
+///    in the store or in the snapshot's embedded `artifacts` map.
 ///
 /// Returns a [`VerificationReport`] that is `passed == true` only when
 /// every check succeeds.
 pub fn verify_log(snapshot: JournalSnapshot) -> VerificationReport {
+    // Synchronous wrapper: no artifact store, so locator checks are skipped.
     let event_count = snapshot.events.len();
     let mut report = VerificationReport::new(event_count);
+    run_core_checks(snapshot, &mut report);
+    report
+}
 
+/// Async variant of [`verify_log`] that also verifies artifact references
+/// against an optional [`ArtifactStore`].
+///
+/// When `store` is `Some`, every `PayloadRef::Artifact` in the event
+/// stream is checked for existence.  Missing references are reported as
+/// [`IntegrityFinding::DanglingLocator`].
+pub async fn verify_log_with_store(
+    snapshot: JournalSnapshot,
+    store: Option<&dyn ArtifactStore>,
+) -> VerificationReport {
+    let event_count = snapshot.events.len();
+    let mut report = VerificationReport::new(event_count);
+    run_core_checks(snapshot.clone(), &mut report);
+
+    if let Some(store) = store {
+        verify_artifacts(&snapshot, store, &mut report).await;
+    }
+
+    report
+}
+
+/// Run the three core checks (integrity, positions, paired events).
+fn run_core_checks(snapshot: JournalSnapshot, report: &mut VerificationReport) {
     // 1. Integrity check via Journal::from_snapshot.
     if let Err(e) = Journal::from_snapshot(snapshot.clone(), Clock::System) {
         report.push(IntegrityFinding::IntegrityFailure {
@@ -98,7 +126,7 @@ pub fn verify_log(snapshot: JournalSnapshot) -> VerificationReport {
         });
         // Cannot proceed with event-level checks on a structurally invalid
         // snapshot; return early.
-        return report;
+        return;
     }
 
     // 2. Gap-free positions.
@@ -114,17 +142,54 @@ pub fn verify_log(snapshot: JournalSnapshot) -> VerificationReport {
     }
 
     // 3. Paired turn events.
-    // We track a stack per pairing discipline.  A journal may legally end
-    // with an unclosed pair after crash repair, but the verifier reports it
-    // so the operator knows the run must resume.
-    check_paired_events(&snapshot.events, &mut report);
+    check_paired_events(&snapshot.events, report);
+}
 
-    // 4. Dangling locators – stub until EP-13-S04 lands on main.
-    // When the blob store is available, walk every event's input/output
-    // looking for `PayloadRef::Artifact` or `PayloadRef::External` with
-    // a blob locator and verify existence.
+/// Verify that every `ArtifactRef` found in the event stream resolves.
+async fn verify_artifacts(
+    snapshot: &JournalSnapshot,
+    store: &dyn ArtifactStore,
+    report: &mut VerificationReport,
+) {
+    let refs = collect_artifact_refs(&snapshot.events);
+    for (event_id, artifact_ref) in refs {
+        let sha256 = &artifact_ref.sha256;
+        // First check the snapshot's embedded artifact map.
+        if snapshot.artifacts.contains_key(sha256) {
+            continue;
+        }
+        // Then check the external artifact store.
+        match store.contains(sha256).await {
+            Ok(true) => continue,
+            Ok(false) => {
+                report.push(IntegrityFinding::DanglingLocator {
+                    locator: sha256.clone(),
+                    event_id: event_id.clone(),
+                });
+            }
+            Err(e) => {
+                report.push(IntegrityFinding::DanglingLocator {
+                    locator: format!("{sha256} (store error: {e})"),
+                    event_id: event_id.clone(),
+                });
+            }
+        }
+    }
+}
 
-    report
+/// Walk every event's `input` and `output` and collect all
+/// `PayloadRef::Artifact` references.
+fn collect_artifact_refs(events: &[RunEvent]) -> Vec<(String, ArtifactRef)> {
+    let mut out = Vec::new();
+    for event in events {
+        if let Some(PayloadRef::Artifact(ref aref)) = event.input {
+            out.push((event.id.clone(), aref.clone()));
+        }
+        if let Some(PayloadRef::Artifact(ref aref)) = event.output {
+            out.push((event.id.clone(), aref.clone()));
+        }
+    }
+    out
 }
 
 /// Check that opening/closing event pairs are balanced.
@@ -203,9 +268,15 @@ pub fn load_snapshot(path: &std::path::Path) -> Result<JournalSnapshot, String> 
 
 /// Run verification over a file and print the report as JSON to stdout.
 ///
+/// When `artifacts_dir` is `Some`, artifact references are verified
+/// against a `FileArtifactStore` rooted at that path.
+///
 /// Returns `0` when the log passes, `1` when findings exist, `2` on I/O
 /// or parse errors.
-pub fn verify_log_file(path: &std::path::Path) -> i32 {
+pub async fn verify_log_file(
+    path: &std::path::Path,
+    artifacts_dir: Option<&std::path::Path>,
+) -> i32 {
     let snapshot = match load_snapshot(path) {
         Ok(s) => s,
         Err(e) => {
@@ -214,7 +285,14 @@ pub fn verify_log_file(path: &std::path::Path) -> i32 {
         }
     };
 
-    let report = verify_log(snapshot);
+    let store = artifacts_dir.map(|dir| rusty_agent_runtime::journal::FileArtifactStore::new(dir));
+
+    let report = if let Some(ref store) = store {
+        verify_log_with_store(snapshot, Some(store)).await
+    } else {
+        verify_log(snapshot)
+    };
+
     match serde_json::to_string_pretty(&report) {
         Ok(json) => println!("{json}"),
         Err(e) => {
