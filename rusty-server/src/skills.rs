@@ -54,8 +54,9 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use rusty_agent_runtime::skill::{
-    Registration, SkillError, SkillMetadata, SkillPackage, SkillPromotion, SkillPromotionStatus,
-    SkillRegistry, SkillSource, SkillVersion, SkillVersionSelector,
+    Registration, ScaffoldAttribution, SkillError, SkillMetadata, SkillPackage, SkillPromotion,
+    SkillPromotionStatus, SkillRegistry, SkillSource, SkillVersion, SkillVersionSelector,
+    attribution_diff,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -242,8 +243,18 @@ fn collect_json_files(root: &Path, out: &mut Vec<PathBuf>) {
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GateEvaluationResult {
-    /// The gate passed: the suite run succeeded.
-    Pass { run_id: String },
+    /// The gate passed: the suite run succeeded. `suite_version` is the
+    /// version of the suite the run executed, when the evaluator knows it —
+    /// the held-out enforcement (EP-17-S03) relies on it to recognize a
+    /// version bump; when absent, that enforcement degrades with a warning.
+    /// `attribution` is the scaffold the evaluation ran against, rolled up
+    /// from the eval run's journal (EP-17-S04); `None` when the evaluator
+    /// cannot source it.
+    Pass {
+        run_id: String,
+        suite_version: Option<String>,
+        attribution: Option<ScaffoldAttribution>,
+    },
     /// The gate failed: the suite run produced failing cases.
     Fail {
         run_id: String,
@@ -256,6 +267,16 @@ pub(crate) enum GateEvaluationResult {
 pub(crate) struct GateDiagnostic {
     pub case_id: String,
     pub reason: String,
+}
+
+/// One regression-pack member that failed against the candidate: the
+/// previously-passing gate, the re-run's id, and the failing case
+/// diagnostics — the data a regression refusal names (EP-17-S02).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct RegressionFailure {
+    pub gate: String,
+    pub run_id: String,
+    pub diagnostics: Vec<GateDiagnostic>,
 }
 
 /// A gate evaluator that always fails closed when no evaluator is
@@ -313,6 +334,83 @@ pub(crate) trait SkillGateEvaluator: Send + Sync + std::fmt::Debug {
     ) -> Result<GateEvaluationResult, String>;
 }
 
+/// Evidence that a promotion candidate passed a suite other than the
+/// declared gate — the held-out transfer check (EP-17-S03).
+#[async_trait::async_trait]
+pub(crate) trait HeldOutEvidence: Send + Sync + std::fmt::Debug {
+    /// Whether `skill` at `content_hash` carries a passing run on any suite
+    /// other than `declared_gate`.
+    async fn has_held_out_pass(
+        &self,
+        skill: &str,
+        content_hash: &str,
+        declared_gate: &str,
+    ) -> Result<bool, String>;
+}
+
+/// Held-out evidence backed by the conformance run catalog (EP-12-S09):
+/// suite runs recorded through `POST /conformance-runs` are the queryable
+/// record, keyed by `target` = skill name and `target_version` = content
+/// hash — no new storage.
+pub(crate) struct CatalogHeldOutEvidence {
+    store: Arc<dyn crate::server_store::ServerStore>,
+    tenant: String,
+}
+
+impl std::fmt::Debug for CatalogHeldOutEvidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CatalogHeldOutEvidence")
+            .field("tenant", &self.tenant)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CatalogHeldOutEvidence {
+    pub(crate) fn new(store: Arc<dyn crate::server_store::ServerStore>, tenant: &str) -> Self {
+        Self {
+            store,
+            tenant: tenant.to_owned(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl HeldOutEvidence for CatalogHeldOutEvidence {
+    async fn has_held_out_pass(
+        &self,
+        skill: &str,
+        content_hash: &str,
+        declared_gate: &str,
+    ) -> Result<bool, String> {
+        let catalog = crate::evaluations::list_conformance_runs(&self.store, &self.tenant)
+            .await
+            .map_err(|e| format!("list conformance runs: {e}"))?;
+        for run in catalog.runs {
+            if run.target != skill
+                || run.target_version != content_hash
+                || run.suite_name == declared_gate
+                || !matches!(
+                    run.status,
+                    crate::evaluations::ConformanceRunStatus::Complete
+                )
+            {
+                continue;
+            }
+            // The summary says complete; the full record's report says passed.
+            let record =
+                crate::evaluations::get_conformance_run(&self.store, &self.tenant, &run.run_id)
+                    .await
+                    .map_err(|e| format!("load conformance run: {e}"))?;
+            if let Some(report) = record.and_then(|r| r.report) {
+                if report.passed {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
 /// Errors that can occur during promotion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PromotionError {
@@ -327,6 +425,14 @@ pub(crate) enum PromotionError {
         run_id: String,
         diagnostics: Vec<GateDiagnostic>,
     },
+    /// The regression pack blocked: evals a past promotion passed now fail
+    /// against the candidate (EP-17-S02).
+    RegressionBlocked { failures: Vec<RegressionFailure> },
+    /// The held-out requirement blocked: this skill already passed the
+    /// declared gate at this exact suite version, and the candidate shows
+    /// neither a passing held-out suite run nor a suite version bump
+    /// (EP-17-S03).
+    HeldOutRequired { gate: String, suite_version: String },
     /// An I/O error occurred persisting the promotion record.
     Io(String),
 }
@@ -340,12 +446,52 @@ impl std::fmt::Display for PromotionError {
             PromotionError::GateBlocked { run_id, .. } => {
                 write!(f, "gate blocked by run {run_id}")
             }
+            PromotionError::RegressionBlocked { failures } => {
+                let gates = failures
+                    .iter()
+                    .map(|failure| failure.gate.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "regression pack blocked by: {gates}")
+            }
+            PromotionError::HeldOutRequired {
+                gate,
+                suite_version,
+            } => write!(
+                f,
+                "held-out evidence required: gate `{gate}` at suite version {suite_version} \
+                 already authorized this skill; supply a passing held-out suite run or a \
+                 suite version bump"
+            ),
             PromotionError::Io(msg) => write!(f, "io error: {msg}"),
         }
     }
 }
 
 impl std::error::Error for PromotionError {}
+
+/// The regression pack for a promotion decision: every distinct gate a past
+/// promotion of this skill passed, in the order first passed, excluding the
+/// declared gate the current decision just ran. Derived from the promotion
+/// history — the canonical suite of previously-passing skill evals is data,
+/// not configuration (EP-17-S02). Trial records never passed and do not
+/// enter the pack; records written before gate names were tracked carry no
+/// `gate_name` and predate the pack.
+fn regression_pack(history: &[SkillPromotion], declared_gate: &str) -> Vec<String> {
+    let mut pack: Vec<String> = Vec::new();
+    for promotion in history {
+        if promotion.status != SkillPromotionStatus::Promoted {
+            continue;
+        }
+        let Some(gate) = promotion.gate_name.as_deref() else {
+            continue;
+        };
+        if gate != declared_gate && !pack.iter().any(|member| member == gate) {
+            pack.push(gate.to_owned());
+        }
+    }
+    pack
+}
 
 /// One promotion history record per (tenant, skill_name) stored as JSON.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -526,6 +672,20 @@ impl SkillPlane {
     /// replaces the skill's own declaration, and a reference that no
     /// longer resolves fails the promotion loudly ([`PromotionError::GateFailed`]),
     /// never an ungated one.
+    /// EP-17-S02: A passing declared gate is necessary but not sufficient —
+    /// every gate a past promotion passed (the regression pack, derived
+    /// from the promotion history) is re-run against the candidate, and a
+    /// regression blocks with a typed refusal naming the regressed cases.
+    /// EP-17-S03: A candidate promoting on a gate this skill already passed
+    /// at the same suite version has had tuning exposure to those cases; the
+    /// decision then requires a passing held-out suite run. A suite version
+    /// bump is fresh cases and exempts, pairing with the conformance
+    /// registry's version-bump invalidation (EP-12-S09).
+    /// EP-17-S04: The record carries the scaffold the evaluation ran against
+    /// (prompt tier hash, memory high-water mark, skill pack version, model
+    /// stamp — a rollup from the eval run's journal, reported by the
+    /// evaluator) plus the components that differ from the baseline
+    /// promotion, so an improvement claim names what changed.
     pub(crate) async fn promote(
         &self,
         tenant: &str,
@@ -534,6 +694,7 @@ impl SkillPlane {
         author: String,
         evaluator: &dyn SkillGateEvaluator,
         gate_override: Option<String>,
+        held_out: &dyn HeldOutEvidence,
     ) -> Result<SkillPromotion, PromotionError> {
         let tenants = self.tenants.lock().await;
         let version = tenants
@@ -575,16 +736,12 @@ impl SkillPlane {
             .await
             .map_err(PromotionError::GateFailed)?;
 
-        let promotion = match result {
-            GateEvaluationResult::Pass { run_id } => SkillPromotion {
-                name: name.to_owned(),
-                revision,
-                content_hash,
-                status: SkillPromotionStatus::Promoted,
-                gate_run_id: Some(run_id),
-                author,
-                created_at: chrono::Utc::now(),
-            },
+        let (run_id, suite_version, attribution) = match result {
+            GateEvaluationResult::Pass {
+                run_id,
+                suite_version,
+                attribution,
+            } => (run_id, suite_version, attribution),
             GateEvaluationResult::Fail {
                 run_id,
                 diagnostics,
@@ -596,6 +753,10 @@ impl SkillPlane {
                     content_hash,
                     status: SkillPromotionStatus::Trial,
                     gate_run_id: Some(run_id.clone()),
+                    gate_name: Some(gate_name.clone()),
+                    gate_version: None,
+                    attribution: None,
+                    changed_from_baseline: None,
                     author: author.clone(),
                     created_at: chrono::Utc::now(),
                 };
@@ -610,6 +771,166 @@ impl SkillPlane {
                     diagnostics,
                 });
             }
+        };
+
+        // EP-17-S04: diff the candidate's scaffold attribution against the
+        // baseline — the newest prior Promoted record. Computed once and
+        // carried on whatever record this decision persists. `None` when
+        // there is no baseline or either side's attribution is unknown; an
+        // empty list means the scaffold is unchanged.
+        let changed_from_baseline = match &attribution {
+            Some(candidate) => {
+                let promotions = self.promotions.lock().await;
+                let baseline = promotions
+                    .get(&(tenant.to_owned(), name.to_owned()))
+                    .and_then(|history| {
+                        history.iter().rev().find_map(|p| {
+                            (p.status == SkillPromotionStatus::Promoted)
+                                .then(|| p.attribution.clone())
+                                .flatten()
+                        })
+                    });
+                drop(promotions);
+                baseline.map(|b| attribution_diff(candidate, &b))
+            }
+            None => None,
+        };
+
+        // EP-17-S03: held-out transfer. When this skill already promoted on
+        // the declared gate at this exact suite version, the author has had
+        // tuning exposure to those cases, so this decision cannot rest on
+        // that suite alone: require a passing held-out run for the
+        // candidate. A version bump means fresh cases and exempts. An
+        // evaluator that reports no suite version leaves the version
+        // comparison unprovable; enforcement degrades with a warning.
+        if let Some(version) = suite_version.as_deref() {
+            let prior_same_version = {
+                let promotions = self.promotions.lock().await;
+                promotions
+                    .get(&(tenant.to_owned(), name.to_owned()))
+                    .map(|history| {
+                        history.iter().any(|p| {
+                            p.status == SkillPromotionStatus::Promoted
+                                && p.gate_name.as_deref() == Some(gate_name.as_str())
+                                && p.gate_version.as_deref() == Some(version)
+                        })
+                    })
+                    .unwrap_or(false)
+            };
+            if prior_same_version
+                && !held_out
+                    .has_held_out_pass(name, &content_hash, &gate_name)
+                    .await
+                    .map_err(PromotionError::GateFailed)?
+            {
+                let failed = SkillPromotion {
+                    name: name.to_owned(),
+                    revision,
+                    content_hash,
+                    status: SkillPromotionStatus::Trial,
+                    gate_run_id: Some(run_id.clone()),
+                    gate_name: Some(gate_name.clone()),
+                    gate_version: Some(version.to_owned()),
+                    attribution: attribution.clone(),
+                    changed_from_baseline: changed_from_baseline.clone(),
+                    author: author.clone(),
+                    created_at: chrono::Utc::now(),
+                };
+                persist_promotion(&self.root, tenant, name, &failed).await?;
+                let mut proms = self.promotions.lock().await;
+                proms
+                    .entry((tenant.to_owned(), name.to_owned()))
+                    .or_default()
+                    .push(failed);
+                return Err(PromotionError::HeldOutRequired {
+                    gate: gate_name.clone(),
+                    suite_version: version.to_owned(),
+                });
+            }
+        } else {
+            tracing::warn!(
+                skill = %name,
+                gate = %gate_name,
+                "gate run reported no suite version; held-out enforcement degraded"
+            );
+        }
+
+        // EP-17-S02: the declared gate passed. Before the promotion stands,
+        // re-run the regression pack — every gate a past promotion passed —
+        // against the candidate, so a change that regresses previously
+        // solved behavior is blocked even when its own gate passes.
+        let pack = {
+            let promotions = self.promotions.lock().await;
+            regression_pack(
+                promotions
+                    .get(&(tenant.to_owned(), name.to_owned()))
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                &gate_name,
+            )
+        };
+        let mut failures: Vec<RegressionFailure> = Vec::new();
+        for pack_gate in &pack {
+            match evaluator
+                .evaluate(name, revision, &content_hash, pack_gate)
+                .await
+            {
+                Ok(GateEvaluationResult::Pass { .. }) => {}
+                Ok(GateEvaluationResult::Fail {
+                    run_id,
+                    diagnostics,
+                }) => failures.push(RegressionFailure {
+                    gate: pack_gate.clone(),
+                    run_id,
+                    diagnostics,
+                }),
+                // A pack member that cannot run at all fails closed: the
+                // deployment cannot show the candidate still passes evals it
+                // previously passed.
+                Err(msg) => {
+                    return Err(PromotionError::GateFailed(format!(
+                        "regression pack gate `{pack_gate}`: {msg}"
+                    )));
+                }
+            }
+        }
+        if !failures.is_empty() {
+            // Record the blocked attempt as Trial, evidencing the first
+            // failing regression run; the refusal names every failure.
+            let failed = SkillPromotion {
+                name: name.to_owned(),
+                revision,
+                content_hash,
+                status: SkillPromotionStatus::Trial,
+                gate_run_id: Some(failures[0].run_id.clone()),
+                gate_name: Some(gate_name.clone()),
+                gate_version: suite_version.clone(),
+                attribution: attribution.clone(),
+                changed_from_baseline: changed_from_baseline.clone(),
+                author: author.clone(),
+                created_at: chrono::Utc::now(),
+            };
+            persist_promotion(&self.root, tenant, name, &failed).await?;
+            let mut proms = self.promotions.lock().await;
+            proms
+                .entry((tenant.to_owned(), name.to_owned()))
+                .or_default()
+                .push(failed);
+            return Err(PromotionError::RegressionBlocked { failures });
+        }
+
+        let promotion = SkillPromotion {
+            name: name.to_owned(),
+            revision,
+            content_hash,
+            status: SkillPromotionStatus::Promoted,
+            gate_run_id: Some(run_id),
+            gate_name: Some(gate_name),
+            gate_version: suite_version,
+            attribution,
+            changed_from_baseline,
+            author,
+            created_at: chrono::Utc::now(),
         };
 
         persist_promotion(&self.root, tenant, name, &promotion).await?;
@@ -644,6 +965,10 @@ impl SkillPlane {
             content_hash,
             status: SkillPromotionStatus::Trial,
             gate_run_id: None,
+            gate_name: None,
+            gate_version: None,
+            attribution: None,
+            changed_from_baseline: None,
             author,
             created_at: chrono::Utc::now(),
         };
@@ -1141,6 +1466,10 @@ pub(crate) async fn promote_skill(
         .map(|e| e as &dyn crate::skills::SkillGateEvaluator)
         .unwrap_or(&default_evaluator);
 
+    // Held-out evidence comes from the conformance run catalog (EP-17-S03).
+    let held_out =
+        crate::skills::CatalogHeldOutEvidence::new(state.server_store.clone(), tenant.tenant());
+
     match state
         .skills
         .promote(
@@ -1150,6 +1479,7 @@ pub(crate) async fn promote_skill(
             payload.author,
             evaluator,
             gate_override,
+            &held_out,
         )
         .await
     {
@@ -1160,6 +1490,8 @@ pub(crate) async fn promote_skill(
                 "content_hash": promotion.content_hash,
                 "status": promotion.status,
                 "gate_run_id": promotion.gate_run_id,
+                "attribution": promotion.attribution,
+                "changed_from_baseline": promotion.changed_from_baseline,
                 "author": promotion.author,
                 "created_at": promotion.created_at,
             });
@@ -1187,6 +1519,32 @@ pub(crate) async fn promote_skill(
                 "message": format!("gate blocked by run {run_id}"),
                 "run_id": run_id,
                 "diagnostics": diagnostics,
+            })),
+        )
+            .into_response(),
+        Err(PromotionError::RegressionBlocked { failures }) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "regression_blocked",
+                "message": "regression pack blocked: evals this skill previously passed now fail",
+                "failures": failures,
+            })),
+        )
+            .into_response(),
+        Err(PromotionError::HeldOutRequired {
+            gate,
+            suite_version,
+        }) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "held_out_required",
+                "message": format!(
+                    "gate `{gate}` at suite version {suite_version} already authorized this \
+                     skill; promotion requires a passing held-out suite run for the candidate \
+                     or a suite version bump"
+                ),
+                "gate": gate,
+                "suite_version": suite_version,
             })),
         )
             .into_response(),
@@ -1356,7 +1714,7 @@ pub(crate) async fn invalidate_skills(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_agent_runtime::skill::SkillPackage;
+    use rusty_agent_runtime::skill::{ScaffoldComponent, SkillPackage};
 
     fn store_root() -> PathBuf {
         std::env::temp_dir().join(format!("rusty-skills-test-{}", uuid::Uuid::new_v4()))
@@ -1370,6 +1728,29 @@ mod tests {
         SkillSource::LocalPath {
             path: "/skills/test".to_owned(),
         }
+    }
+
+    /// Held-out evidence double: each promotion test declares whether the
+    /// candidate carries a passing held-out run (EP-17-S03).
+    #[derive(Debug)]
+    struct ScriptedHeldOutEvidence {
+        held_out: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl HeldOutEvidence for ScriptedHeldOutEvidence {
+        async fn has_held_out_pass(
+            &self,
+            _skill: &str,
+            _content_hash: &str,
+            _declared_gate: &str,
+        ) -> Result<bool, String> {
+            Ok(self.held_out)
+        }
+    }
+
+    fn no_held_out() -> ScriptedHeldOutEvidence {
+        ScriptedHeldOutEvidence { held_out: false }
     }
 
     #[tokio::test]
@@ -1473,10 +1854,20 @@ mod tests {
         let evaluator = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
+                suite_version: None,
+                attribution: None,
             }),
         };
         let result = plane
-            .promote("default", "no-gate", 1, "op".to_string(), &evaluator, None)
+            .promote(
+                "default",
+                "no-gate",
+                1,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
             .await;
         assert_eq!(result, Err(PromotionError::NoGateDeclared));
         let _ = std::fs::remove_dir_all(root);
@@ -1504,7 +1895,15 @@ mod tests {
             }),
         };
         let result = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator, None)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
             .await;
         assert!(
             matches!(result, Err(PromotionError::GateBlocked { run_id, .. }) if run_id == "run-fail")
@@ -1531,10 +1930,20 @@ mod tests {
         let evaluator = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-pass".to_owned(),
+                suite_version: None,
+                attribution: None,
             }),
         };
         let promotion = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator, None)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
@@ -1562,10 +1971,20 @@ mod tests {
         let evaluator = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
+                suite_version: None,
+                attribution: None,
             }),
         };
         let first = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator, None)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_eq!(first.gate_run_id, Some("run-1".to_owned()));
@@ -1582,6 +2001,7 @@ mod tests {
                 "op".to_string(),
                 &evaluator_never_called,
                 None,
+                &no_held_out(),
             )
             .await
             .unwrap();
@@ -1604,10 +2024,20 @@ mod tests {
         let evaluator1 = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-1".to_owned(),
+                suite_version: None,
+                attribution: None,
             }),
         };
         let first = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1, None)
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
             .await
             .unwrap();
 
@@ -1623,14 +2053,1308 @@ mod tests {
         let evaluator2 = ScriptedSkillGateEvaluator {
             result: Ok(GateEvaluationResult::Pass {
                 run_id: "run-2".to_owned(),
+                suite_version: None,
+                attribution: None,
             }),
         };
         let second = plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator2, None)
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
             .await
             .unwrap();
         assert_ne!(first.content_hash, second.content_hash);
         assert_eq!(second.gate_run_id, Some("run-2".to_owned()));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // ----------------------------------------------------------------- //
+    // Regression packs (EP-17-S02)
+    // ----------------------------------------------------------------- //
+
+    /// A gate evaluator double that answers per gate name and records every
+    /// call, so regression-pack tests can assert which suites were re-run.
+    #[derive(Debug, Default)]
+    struct RecordingGateEvaluator {
+        results: std::collections::HashMap<String, Result<GateEvaluationResult, String>>,
+        calls: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingGateEvaluator {
+        fn pass(gate: &str, run_id: &str) -> (String, Result<GateEvaluationResult, String>) {
+            (
+                gate.to_owned(),
+                Ok(GateEvaluationResult::Pass {
+                    run_id: run_id.to_owned(),
+                    suite_version: None,
+                    attribution: None,
+                }),
+            )
+        }
+
+        fn pass_versioned(
+            gate: &str,
+            run_id: &str,
+            suite_version: &str,
+        ) -> (String, Result<GateEvaluationResult, String>) {
+            (
+                gate.to_owned(),
+                Ok(GateEvaluationResult::Pass {
+                    run_id: run_id.to_owned(),
+                    suite_version: Some(suite_version.to_owned()),
+                    attribution: None,
+                }),
+            )
+        }
+
+        fn pass_attributed(
+            gate: &str,
+            run_id: &str,
+            attribution: ScaffoldAttribution,
+        ) -> (String, Result<GateEvaluationResult, String>) {
+            (
+                gate.to_owned(),
+                Ok(GateEvaluationResult::Pass {
+                    run_id: run_id.to_owned(),
+                    suite_version: None,
+                    attribution: Some(attribution),
+                }),
+            )
+        }
+
+        fn fail(
+            gate: &str,
+            run_id: &str,
+            case_id: &str,
+        ) -> (String, Result<GateEvaluationResult, String>) {
+            (
+                gate.to_owned(),
+                Ok(GateEvaluationResult::Fail {
+                    run_id: run_id.to_owned(),
+                    diagnostics: vec![GateDiagnostic {
+                        case_id: case_id.to_owned(),
+                        reason: format!("{case_id} regressed"),
+                    }],
+                }),
+            )
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SkillGateEvaluator for RecordingGateEvaluator {
+        async fn evaluate(
+            &self,
+            _skill_name: &str,
+            _revision: u64,
+            _content_hash: &str,
+            gate_name: &str,
+        ) -> Result<GateEvaluationResult, String> {
+            self.calls.lock().unwrap().push(gate_name.to_owned());
+            self.results
+                .get(gate_name)
+                .cloned()
+                .unwrap_or_else(|| Err(format!("no scripted result for gate `{gate_name}`")))
+        }
+    }
+
+    #[tokio::test]
+    async fn regression_pack_empty_on_first_promotion() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        let evaluator = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-1")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        // No prior passing evals: the declared gate runs once, nothing else.
+        assert_eq!(evaluator.calls(), vec!["suite-a".to_owned()]);
+        assert_eq!(promotion.gate_name.as_deref(), Some("suite-a"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn regression_pack_reruns_previously_passing_gates() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-1")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // Revision 2 declares a different gate; the pack still re-runs the
+        // gate revision 1 passed.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-b"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [
+                RecordingGateEvaluator::pass("suite-b", "run-2"),
+                RecordingGateEvaluator::pass("suite-a", "run-2-regression"),
+            ]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(
+            evaluator2.calls(),
+            vec!["suite-b".to_owned(), "suite-a".to_owned()]
+        );
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].gate_name.as_deref(), Some("suite-b"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn regression_failure_blocks_with_typed_refusal() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-1")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-b"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        // The declared gate passes but the regression pack fails.
+        let evaluator2 = RecordingGateEvaluator {
+            results: [
+                RecordingGateEvaluator::pass("suite-b", "run-2"),
+                RecordingGateEvaluator::fail("suite-a", "run-2-regression", "case-7"),
+            ]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let result = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
+            .await;
+        match result {
+            Err(PromotionError::RegressionBlocked { failures }) => {
+                assert_eq!(failures.len(), 1);
+                assert_eq!(failures[0].gate, "suite-a");
+                assert_eq!(failures[0].run_id, "run-2-regression");
+                // The refusal names the regressed cases.
+                assert_eq!(failures[0].diagnostics[0].case_id, "case-7");
+            }
+            other => panic!("expected RegressionBlocked, got {other:?}"),
+        }
+        // The blocked attempt is recorded as Trial; nothing was promoted.
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].status, SkillPromotionStatus::Trial);
+        assert_eq!(history[1].gate_run_id.as_deref(), Some("run-2-regression"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn regression_block_names_every_regressed_case() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        // Build a two-member pack: revision 1 passes suite-a, revision 2
+        // passes suite-b (re-running suite-a as the pack).
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-1")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-b"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [
+                RecordingGateEvaluator::pass("suite-b", "run-2"),
+                RecordingGateEvaluator::pass("suite-a", "run-2-regression"),
+            ]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // Revision 3: both pack members regress; the refusal names both.
+        let pkg3 =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Version three.", "suite-c"))
+                .unwrap();
+        plane
+            .register("default", pkg3, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator3 = RecordingGateEvaluator {
+            results: [
+                RecordingGateEvaluator::pass("suite-c", "run-3"),
+                RecordingGateEvaluator::fail("suite-a", "run-3-reg-a", "case-a1"),
+                RecordingGateEvaluator::fail("suite-b", "run-3-reg-b", "case-b1"),
+            ]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let result = plane
+            .promote(
+                "default",
+                "gated",
+                3,
+                "op".to_string(),
+                &evaluator3,
+                None,
+                &no_held_out(),
+            )
+            .await;
+        match result {
+            Err(PromotionError::RegressionBlocked { failures }) => {
+                assert_eq!(failures.len(), 2);
+                // Pack order is the order the gates were first passed.
+                assert_eq!(failures[0].gate, "suite-a");
+                assert_eq!(failures[0].diagnostics[0].case_id, "case-a1");
+                assert_eq!(failures[1].gate, "suite-b");
+                assert_eq!(failures[1].diagnostics[0].case_id, "case-b1");
+            }
+            other => panic!("expected RegressionBlocked, got {other:?}"),
+        }
+        assert_eq!(
+            evaluator3.calls(),
+            vec![
+                "suite-c".to_owned(),
+                "suite-a".to_owned(),
+                "suite-b".to_owned()
+            ]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn stale_hash_reuse_skips_regression_pack() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-1")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // Unchanged content reuses the recorded decision — pack included —
+        // without calling the evaluator again.
+        let evaluator_never_called = ScriptedSkillGateEvaluator {
+            result: Err("should not be called".to_owned()),
+        };
+        let reused = plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator_never_called,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reused.status, SkillPromotionStatus::Promoted);
+        assert_eq!(reused.gate_run_id.as_deref(), Some("run-1"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn trial_records_do_not_enter_regression_pack() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        // A failed gate attempt records Trial, which is not a passing eval.
+        let failing = ScriptedSkillGateEvaluator {
+            result: Ok(GateEvaluationResult::Fail {
+                run_id: "run-fail".to_owned(),
+                diagnostics: vec![],
+            }),
+        };
+        let blocked = plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &failing,
+                None,
+                &no_held_out(),
+            )
+            .await;
+        assert!(matches!(blocked, Err(PromotionError::GateBlocked { .. })));
+
+        // Register changed content, then promote: the pack derives from
+        // Promoted records only, so nothing but the declared gate runs.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-2")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(evaluator.calls(), vec!["suite-a".to_owned()]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn regression_infra_error_fails_closed() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-1")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-b"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        // The declared gate passes; the pack member cannot run (suite
+        // retired, evaluator outage). The promotion must not proceed.
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-b", "run-2")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let result = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
+            .await;
+        match result {
+            Err(PromotionError::GateFailed(msg)) => {
+                assert!(msg.contains("regression pack gate `suite-a`"));
+            }
+            other => panic!("expected GateFailed, got {other:?}"),
+        }
+        // Nothing was recorded: an infra failure is not an attempted
+        // promotion verdict.
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn pre_pack_history_without_gate_name_loads_and_skips_pack() {
+        let root = store_root();
+        // A promotion history written before gate names were tracked.
+        let path = promotion_history_path(&root, "default", "legacy");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "promotions": [{
+                    "name": "legacy",
+                    "revision": 1,
+                    "content_hash": "old-hash",
+                    "status": "promoted",
+                    "gate_run_id": "run-0",
+                    "author": "op",
+                    "created_at": "2024-01-01T00:00:00Z"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let plane = SkillPlane::load(&root);
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("legacy", "Current body.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+
+        // The content hash differs from the recorded one, so the gate runs;
+        // the nameless record cannot join the pack, so only the declared
+        // gate is evaluated.
+        let evaluator = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-1")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let promotion = plane
+            .promote(
+                "default",
+                "legacy",
+                1,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(evaluator.calls(), vec!["suite-a".to_owned()]);
+        let history = plane.promotion_history("default", "legacy").await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].gate_name, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // ----------------------------------------------------------------- //
+    // Held-out split enforcement (EP-17-S03)
+    // ----------------------------------------------------------------- //
+
+    /// Records the identity the held-out check is queried with.
+    #[derive(Debug)]
+    struct RecordingHeldOutEvidence {
+        held_out: bool,
+        calls: std::sync::Mutex<Vec<(String, String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HeldOutEvidence for RecordingHeldOutEvidence {
+        async fn has_held_out_pass(
+            &self,
+            skill: &str,
+            content_hash: &str,
+            declared_gate: &str,
+        ) -> Result<bool, String> {
+            self.calls.lock().unwrap().push((
+                skill.to_owned(),
+                content_hash.to_owned(),
+                declared_gate.to_owned(),
+            ));
+            Ok(self.held_out)
+        }
+    }
+
+    #[tokio::test]
+    async fn repromotion_same_gate_same_version_requires_held_out() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // Revision 2 passes the same gate at the same suite version: the
+        // author has had tuning exposure to exactly those cases.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let result = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
+            .await;
+        assert_eq!(
+            result,
+            Err(PromotionError::HeldOutRequired {
+                gate: "suite-a".to_owned(),
+                suite_version: "1.0".to_owned(),
+            })
+        );
+        // The blocked attempt is recorded as Trial; revision 2 never promotes.
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].status, SkillPromotionStatus::Trial);
+        assert_eq!(history[1].gate_version.as_deref(), Some("1.0"));
+        assert_eq!(history[1].gate_run_id.as_deref(), Some("run-2"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn held_out_pass_satisfies_transfer_requirement() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        // A passing run on a held-out suite exists for this candidate.
+        let held_out = ScriptedHeldOutEvidence { held_out: true };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &held_out,
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(promotion.gate_version.as_deref(), Some("1.0"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn suite_version_bump_exempts_held_out() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // The suite bumped to 2.0: fresh cases the candidate could not have
+        // been tuned against, so the gate alone suffices.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "2.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(promotion.gate_version.as_deref(), Some("2.0"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn unversioned_gate_run_degrades_held_out_enforcement() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        // The evaluator reports no suite version for the fresh run: the
+        // same-version exposure is unprovable, so enforcement degrades (with
+        // a warning) rather than inventing a version.
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass("suite-a", "run-2")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let promotion = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        assert_eq!(promotion.gate_version, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn held_out_check_queries_with_candidate_identity() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let pkg1 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version one.", "suite-a"))
+            .unwrap();
+        plane
+            .register("default", pkg1, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator1 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-1", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                1,
+                "op".to_string(),
+                &evaluator1,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap();
+
+        let pkg2 = SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+            .unwrap();
+        let registration = plane
+            .register("default", pkg2, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let candidate_hash = registration.version.content_hash().to_owned();
+
+        let evaluator2 = RecordingGateEvaluator {
+            results: [RecordingGateEvaluator::pass_versioned(
+                "suite-a", "run-2", "1.0",
+            )]
+            .into_iter()
+            .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let held_out = RecordingHeldOutEvidence {
+            held_out: true,
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator2,
+                None,
+                &held_out,
+            )
+            .await
+            .unwrap();
+        // The check is keyed by skill name and candidate content hash, and
+        // excludes the declared gate from what counts as held-out.
+        let calls = held_out.calls.lock().unwrap().clone();
+        assert_eq!(
+            calls,
+            vec![("gated".to_owned(), candidate_hash, "suite-a".to_owned())]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // ----------------------------------------------------------------- //
+    // Scaffold attribution on eval artifacts (EP-17-S04)
+    // ----------------------------------------------------------------- //
+
+    fn scaffold(
+        prompt_tier_hash: &str,
+        memory_high_water: u64,
+        skill_pack_version: &str,
+        model_stamp: &str,
+    ) -> ScaffoldAttribution {
+        ScaffoldAttribution {
+            prompt_tier_hash: Some(prompt_tier_hash.to_owned()),
+            memory_high_water: Some(memory_high_water),
+            skill_pack_version: Some(skill_pack_version.to_owned()),
+            model_stamp: Some(model_stamp.to_owned()),
+        }
+    }
+
+    async fn register_and_promote(
+        plane: &SkillPlane,
+        body: &str,
+        revision: u64,
+        result: (String, Result<GateEvaluationResult, String>),
+    ) -> SkillPromotion {
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", body, "suite-a")).unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator = RecordingGateEvaluator {
+            results: [result].into_iter().collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        plane
+            .promote(
+                "default",
+                "gated",
+                revision,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn promotion_records_scaffold_attribution() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let promotion = register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
+        let attribution = promotion.attribution.expect("attribution recorded");
+        assert_eq!(attribution.prompt_tier_hash.as_deref(), Some("sha256:a"));
+        assert_eq!(attribution.memory_high_water, Some(7));
+        assert_eq!(attribution.skill_pack_version.as_deref(), Some("1.2.0"));
+        assert_eq!(attribution.model_stamp.as_deref(), Some("openai/gpt-4"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn first_promotion_has_no_baseline() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let promotion = register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.changed_from_baseline, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn changed_from_baseline_names_delta() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-2",
+                scaffold("sha256:b", 7, "1.2.0", "openai/gpt-4o"),
+            ),
+        )
+        .await;
+        assert_eq!(
+            promotion.changed_from_baseline,
+            Some(vec![
+                ScaffoldComponent::PromptTierHash,
+                ScaffoldComponent::ModelStamp,
+            ])
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn unchanged_scaffold_yields_empty_delta() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-2",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.changed_from_baseline, Some(vec![]));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn missing_attribution_degrades_delta() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                scaffold("sha256:a", 7, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        // The candidate's evaluator cannot source attribution: the delta
+        // degrades to unknown rather than reporting every component.
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass("suite-a", "run-2"),
+        )
+        .await;
+        assert_eq!(promotion.attribution, None);
+        assert_eq!(promotion.changed_from_baseline, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn one_sided_unknown_field_is_not_a_change() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-1",
+                ScaffoldAttribution {
+                    prompt_tier_hash: Some("sha256:a".to_owned()),
+                    memory_high_water: None,
+                    skill_pack_version: Some("1.2.0".to_owned()),
+                    model_stamp: Some("openai/gpt-4".to_owned()),
+                },
+            ),
+        )
+        .await;
+        // The baseline never recorded a high-water mark; the candidate's
+        // Some(9) is unprovable as a change, not evidence of one.
+        let promotion = register_and_promote(
+            &plane,
+            "Version two.",
+            2,
+            RecordingGateEvaluator::pass_attributed(
+                "suite-a",
+                "run-2",
+                scaffold("sha256:a", 9, "1.2.0", "openai/gpt-4"),
+            ),
+        )
+        .await;
+        assert_eq!(promotion.changed_from_baseline, Some(vec![]));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn blocked_trials_carry_attribution() {
+        let root = store_root();
+        let plane = SkillPlane::load(&root);
+        let attributed_versioned = |run_id: &str, prefix: &str| {
+            (
+                "suite-a".to_owned(),
+                Ok(GateEvaluationResult::Pass {
+                    run_id: run_id.to_owned(),
+                    suite_version: Some("1.0".to_owned()),
+                    attribution: Some(scaffold(prefix, 7, "1.2.0", "openai/gpt-4")),
+                }),
+            )
+        };
+        register_and_promote(
+            &plane,
+            "Version one.",
+            1,
+            attributed_versioned("run-1", "sha256:a"),
+        )
+        .await;
+
+        // Revision 2 passes the same gate at the same suite version with a
+        // changed scaffold; held-out enforcement blocks the promotion, and
+        // the Trial record still carries the attribution and its delta.
+        let package =
+            SkillPackage::from_markdown(&gated_skill_md("gated", "Version two.", "suite-a"))
+                .unwrap();
+        plane
+            .register("default", package, source(), "op".to_owned())
+            .await
+            .unwrap();
+        let evaluator = RecordingGateEvaluator {
+            results: [attributed_versioned("run-2", "sha256:b")]
+                .into_iter()
+                .collect(),
+            calls: std::sync::Mutex::new(vec![]),
+        };
+        let result = plane
+            .promote(
+                "default",
+                "gated",
+                2,
+                "op".to_string(),
+                &evaluator,
+                None,
+                &no_held_out(),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(PromotionError::HeldOutRequired { .. })
+        ));
+        let history = plane.promotion_history("default", "gated").await;
+        assert_eq!(history.len(), 2);
+        let trial = &history[1];
+        assert_eq!(trial.status, SkillPromotionStatus::Trial);
+        assert_eq!(
+            trial
+                .attribution
+                .as_ref()
+                .and_then(|a| a.prompt_tier_hash.as_deref()),
+            Some("sha256:b")
+        );
+        assert_eq!(
+            trial.changed_from_baseline,
+            Some(vec![ScaffoldComponent::PromptTierHash])
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }

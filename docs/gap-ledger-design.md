@@ -37,6 +37,8 @@ The ledger deliberately rides existing contracts rather than inventing parallels
 - **Snapshots** are plain serde values; a server wave persists them through the established store backends without a translation layer.
 - **Goldens** pin every wire shape under `rusty-core/tests/golden/gaps_*.json`, so contract drift fails CI the way every other plane's does.
 
+In the self-improvement survey's vocabulary (arXiv:2607.13104), that composition is a **generator / governed critic** split: filings, hunts, and induction generate proposals about what to learn, and the critic that decides them — the promotion gate — stays platform infrastructure, unchanged by anything the generator produces. The entries themselves are **durable updates** to the system's model of its own ignorance, journaled like every other durable update; the runtime signals that file them (escalations, corrections, zero-recall lookups) are transient until filed.
+
 ## 4. Wave plan
 
 - **W1 (this wave, landed):** core contracts, the ledger store, the status machine, probes and the frontier, closure + behavioral signal, rollback, snapshot roundtrip. 36 tests, 5 goldens.

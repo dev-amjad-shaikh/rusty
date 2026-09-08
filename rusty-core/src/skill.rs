@@ -1275,10 +1275,104 @@ pub struct SkillPromotion {
     /// The gate run id that authorized promotion, when applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_run_id: Option<String>,
+    /// The gate (eval suite) whose passing run authorized this promotion.
+    /// Recorded so a later promotion decision can re-run every
+    /// previously-passing gate as the regression pack (EP-17-S02); records
+    /// written before the pack existed carry no gate name and simply
+    /// predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_name: Option<String>,
+    /// The suite version of the gate run that authorized this promotion.
+    /// The held-out check (EP-17-S03) compares it against a later
+    /// decision's suite version to recognize a version bump; absent when
+    /// the evaluator did not report a version or the record predates the
+    /// check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_version: Option<String>,
+    /// The scaffold the gate evaluation ran against, rolled up from the
+    /// eval run's journal (EP-17-S04): prompt tier hash, memory high-water
+    /// mark, skill pack version, model stamp. `None` when the evaluator did
+    /// not report one or the record predates the rollup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<ScaffoldAttribution>,
+    /// The scaffold components whose attribution differs from the baseline
+    /// (the newest prior Promoted record of this skill). `None` when there
+    /// is no baseline or the candidate or baseline attribution is unknown;
+    /// an empty list means the evaluation ran on an unchanged scaffold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_from_baseline: Option<Vec<ScaffoldComponent>>,
     /// Who attempted or completed the promotion.
     pub author: String,
     /// When the record was created.
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The scaffold an evaluation ran against, rolled up from the eval run's
+/// journal (EP-17-S04). The journal already carries every input — this is
+/// a rollup on the eval artifact, not new instrumentation. Every field is
+/// optional: an evaluator that cannot source one reports `None` rather
+/// than inventing a value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScaffoldAttribution {
+    /// SHA-256 of the frozen prompt prefix the evaluation assembled
+    /// (`FrozenPrefixRecord::whole_prefix_sha256`, EP-02-S09).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tier_hash: Option<String>,
+    /// Memory consolidation high-water mark at evaluation time
+    /// (`ConsolidationState::high_water_mark`, EP-06-S08).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_high_water: Option<u64>,
+    /// The catalog package version the candidate shipped from
+    /// (`SkillSource::Package` version, EP-15-S08); `None` for locally
+    /// authored skills.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_pack_version: Option<String>,
+    /// The stamped model id the evaluation ran against, in prefix-routed
+    /// form (`openai/gpt-4`, EP-02-S10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_stamp: Option<String>,
+}
+
+/// One scaffold component whose attribution differs from the baseline
+/// promotion (EP-17-S04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScaffoldComponent {
+    /// `ScaffoldAttribution::prompt_tier_hash`.
+    PromptTierHash,
+    /// `ScaffoldAttribution::memory_high_water`.
+    MemoryHighWater,
+    /// `ScaffoldAttribution::skill_pack_version`.
+    SkillPackVersion,
+    /// `ScaffoldAttribution::model_stamp`.
+    ModelStamp,
+}
+
+/// The scaffold components whose values differ between a candidate's and
+/// the baseline's attribution, in declaration order (EP-17-S04). A field
+/// absent on either side is unprovable, not a change — only two known,
+/// different values count.
+pub fn attribution_diff(
+    candidate: &ScaffoldAttribution,
+    baseline: &ScaffoldAttribution,
+) -> Vec<ScaffoldComponent> {
+    fn differs<T: PartialEq>(candidate: &Option<T>, baseline: &Option<T>) -> bool {
+        matches!(candidate, Some(value) if baseline.as_ref().is_some_and(|other| value != other))
+    }
+    let mut changed = Vec::new();
+    if differs(&candidate.prompt_tier_hash, &baseline.prompt_tier_hash) {
+        changed.push(ScaffoldComponent::PromptTierHash);
+    }
+    if differs(&candidate.memory_high_water, &baseline.memory_high_water) {
+        changed.push(ScaffoldComponent::MemoryHighWater);
+    }
+    if differs(&candidate.skill_pack_version, &baseline.skill_pack_version) {
+        changed.push(ScaffoldComponent::SkillPackVersion);
+    }
+    if differs(&candidate.model_stamp, &baseline.model_stamp) {
+        changed.push(ScaffoldComponent::ModelStamp);
+    }
+    changed
 }
 
 /// One immutable, content-addressed skill version — the registered form of

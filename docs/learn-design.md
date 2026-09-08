@@ -88,6 +88,18 @@ Rusty Learn stands on established work, and says so:
   derived artifacts, not just the row. Our forgetting operation deletes
   records *and their dependents* (caches, dependent summaries) and journals a
   tombstone, rather than pretending a `DELETE` on one table is erasure.
+- **Self-improvement in agentic systems, surveyed** (arXiv:2607.13104; notes
+  in `docs/self-improving-agents-survey-notes.md`) — the taxonomy this
+  release's vocabulary comes from. In its terms: Rusty learns through the
+  **scaffold loop**, not the parametric loop — updates change the operational
+  scaffold (prompts, memory, tools, graph), never model weights. A correction
+  carried in one run's context is a **transient update**; anything that
+  persists is a **durable update**, and every durable update gates through
+  the candidate pipeline below. And the design keeps a strict **generator /
+  governed critic** split: distillers and induction propose candidates, while
+  the critics that decide promotion — replay, `rusty-eval`, the promotion
+  gate — are platform infrastructure, never learned components (the scope
+  decision is recorded in `docs/self-improvement-adr.md`).
 
 ## What Rusty does differently
 
