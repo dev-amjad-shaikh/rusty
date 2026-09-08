@@ -158,6 +158,10 @@ pub struct RegistryVersion {
     /// Pointer to eval evidence for this version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval_evidence_url: Option<String>,
+    /// Quality-gate evidence for this version (EP-15-S10). A version
+    /// without evidence was never gated and must not be indexed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_evidence: Option<crate::quality_gate::GateEvidence>,
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +204,65 @@ impl RegistryEntry {
     pub fn is_revoked(&self, version: &Version) -> Option<&str> {
         self.find_version(version)
             .and_then(|v| v.revoked.as_deref())
+    }
+
+    /// The certification status of a version against the current platform
+    /// contracts version (EP-15-S10 AC 5).
+    ///
+    /// `bump_at` is when the platform moved to `current_contracts_version`;
+    /// `skew_window` is how long stale evidence keeps the version
+    /// installable and visible. Versions without gate evidence — which the
+    /// gated indexing path refuses — are treated as expired.
+    pub fn certification_status(
+        &self,
+        version: &Version,
+        current_contracts_version: &str,
+        bump_at: chrono::DateTime<chrono::Utc>,
+        skew_window: chrono::Duration,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> crate::quality_gate::CertificationStatus {
+        use crate::quality_gate::CertificationStatus;
+        match self.find_version(version).and_then(|v| v.quality_evidence.as_ref()) {
+            Some(evidence) => crate::quality_gate::certification_status(
+                evidence,
+                current_contracts_version,
+                bump_at,
+                skew_window,
+                now,
+            ),
+            None => CertificationStatus::Expired {
+                certified_against: "none".to_string(),
+            },
+        }
+    }
+
+    /// The versions shown in the default index view: every version whose
+    /// certification has not expired against the current contracts version
+    /// (EP-15-S10 AC 5). Versions marked re-certification required remain
+    /// visible and installable for the skew window.
+    pub fn default_view_versions(
+        &self,
+        current_contracts_version: &str,
+        bump_at: chrono::DateTime<chrono::Utc>,
+        skew_window: chrono::Duration,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Vec<&RegistryVersion> {
+        use crate::quality_gate::CertificationStatus;
+        self.versions
+            .iter()
+            .filter(|v| {
+                !matches!(
+                    self.certification_status(
+                        &v.version,
+                        current_contracts_version,
+                        bump_at,
+                        skew_window,
+                        now,
+                    ),
+                    CertificationStatus::Expired { .. }
+                )
+            })
+            .collect()
     }
 }
 
@@ -292,6 +355,26 @@ impl RegistryIndex {
             }
         }
     }
+
+    /// Insert or replace an entry, refusing any version that lacks
+    /// quality-gate evidence (EP-15-S10).
+    ///
+    /// This is the structural enforcement of the quality bar: an item that
+    /// never passed the gate cannot be indexed, so "it's in the catalog" is
+    /// a quality statement. Revoked versions keep their slot regardless —
+    /// revocation metadata must propagate even for pre-gate listings.
+    pub fn insert_gated(&mut self, entry: RegistryEntry) -> Result<()> {
+        for version in &entry.versions {
+            if version.revoked.is_none() && version.quality_evidence.is_none() {
+                return Err(catalog_err(format!(
+                    "refusing to index {} {}: no quality-gate evidence — every catalog item must ship evals, docs, and conformance evidence (EP-15-S10)",
+                    entry.id, version.version
+                )));
+            }
+        }
+        self.entries.insert(entry.id.as_str().to_string(), entry);
+        Ok(())
+    }
 }
 
 /// The content view of a registry index: every field except `signature`.
@@ -353,6 +436,7 @@ mod tests {
                 capabilities: CapabilityDecl::default(),
                 revoked: None,
                 eval_evidence_url: None,
+                quality_evidence: None,
             }],
             docs_url: None,
             origin,
@@ -443,6 +527,7 @@ mod tests {
             capabilities: CapabilityDecl::default(),
             revoked: Some("security advisory CVE-2026-0001".to_string()),
             eval_evidence_url: None,
+            quality_evidence: None,
         });
         assert!(entry.is_revoked(&Version::new(1, 0, 1)).is_some());
         assert!(entry.is_revoked(&Version::new(1, 0, 0)).is_none());
@@ -461,6 +546,7 @@ mod tests {
                 capabilities: CapabilityDecl::default(),
                 revoked: Some("bad".to_string()),
                 eval_evidence_url: None,
+                quality_evidence: None,
             },
         );
         let safe = entry.latest_safe_version().unwrap();

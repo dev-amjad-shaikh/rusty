@@ -167,6 +167,7 @@ fn make_index_with_entry(privkey: &str, pubkey: &str) -> RegistryIndex {
             capabilities: Default::default(),
             revoked: None,
             eval_evidence_url: None,
+            quality_evidence: None,
         }],
         docs_url: None,
         origin: RegistryOrigin::Public,
