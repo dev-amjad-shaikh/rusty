@@ -166,7 +166,12 @@ mod tests {
         std::env::temp_dir().join(format!("rusty-pause-fork-test-{}", uuid::Uuid::new_v4()))
     }
 
-    async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+    async fn call(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(uri);
         let body = match body {
             Some(v) => {
@@ -211,11 +216,7 @@ mod tests {
         let mut registry = GraphRegistry::new();
         registry.register("pipeline", graph, spec);
         let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store_dir.clone());
-        let parts = build_router(
-            registry,
-            config,
-            tokio_util::sync::CancellationToken::new(),
-        );
+        let parts = build_router(registry, config, tokio_util::sync::CancellationToken::new());
         let app = parts.router;
 
         // A thread with a completed turn (two checkpoints to fork).
@@ -301,11 +302,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fork_obligations.len(), 2);
-        assert!(
-            fork_obligations
-                .iter()
-                .all(|o| o.status == ObligationStatus::Open)
-        );
+        assert!(fork_obligations
+            .iter()
+            .all(|o| o.status == ObligationStatus::Open));
         assert!(
             fork_obligations
                 .iter()
@@ -398,11 +397,7 @@ mod tests {
         let mut registry = GraphRegistry::new();
         registry.register("pipeline", graph, spec);
         let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store_dir.clone());
-        let parts = build_router(
-            registry,
-            config,
-            tokio_util::sync::CancellationToken::new(),
-        );
+        let parts = build_router(registry, config, tokio_util::sync::CancellationToken::new());
         let app = parts.router;
 
         let (status, v) = call(&app, "POST", "/threads", Some(json!({"graph": "pipeline"}))).await;
