@@ -519,6 +519,8 @@ pub(crate) fn build_router(
         .route("/runs/{run_id}/fixture", get(get_run_fixture))
         .route("/runs/replay", post(replay_run))
         .route("/runs/diff", get(diff_runs))
+        .route("/approvals", get(list_approvals))
+        .route("/approvals/sweep", post(sweep_approvals))
         // Signed run receipts (R0.9 wave 3): mint-on-read over the run's
         // reverified journal (then stored and served while its head
         // stands), caller-driven verification, and the deployment key
@@ -2558,6 +2560,32 @@ async fn cancel_run(
     if !tenant.owns(&info.thread_id) {
         return Err(ApiError::not_found(format!("run `{run_id}` not found")));
     }
+    // If the run is paused, cancel it through the manager first so the
+    // status transition is recorded live; then expire its obligations.
+    let was_paused = info.status == crate::runs::RunStatus::Paused;
+    if was_paused {
+        let _ = state.run_deps.manager.cancel_run(&run_id).await;
+        let obligations = state
+            .server_store
+            .get_obligations(&run_id)
+            .await
+            .map_err(internal_err)?;
+        for obligation in &obligations {
+            if matches!(
+                obligation.status,
+                rusty_agent_runtime::record::ObligationStatus::Open
+            ) {
+                let _ = state
+                    .server_store
+                    .update_obligation_status(
+                        &obligation.id,
+                        rusty_agent_runtime::record::ObligationStatus::Expired,
+                    )
+                    .await
+                    .map_err(internal_err)?;
+            }
+        }
+    }
     let outcome = state
         .server_store
         .cancel_run_tasks(tenant.tenant(), &run_id, Utc::now())
@@ -2565,10 +2593,64 @@ async fn cancel_run(
         .map_err(internal_err)?;
     let ids =
         |tasks: Vec<TaskRecord>| -> Vec<String> { tasks.into_iter().map(|t| t.task_id).collect() };
-    Ok(Json(json!({
+    let mut body = json!({
         "run_id": run_id,
         "cancelled": ids(outcome.cancelled),
         "signalled": ids(outcome.signalled),
+    });
+    if was_paused {
+        body["obligations_expired"] = serde_json::Value::Bool(true);
+    }
+    Ok(Json(body))
+}
+
+// --------------------------------------------------------------------- //
+// Approvals (EP-03-S11)
+// --------------------------------------------------------------------- //
+
+async fn list_approvals(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let run_id = params.get("run_id").map(|s| s.as_str());
+    let obligations = state
+        .server_store
+        .list_obligations(run_id)
+        .await
+        .map_err(internal_err)?;
+    let items: Vec<Value> = obligations
+        .into_iter()
+        .map(|o| {
+            json!({
+                "obligation_id": o.id,
+                "run_id": run_id.unwrap_or(""),
+                "status": match o.status {
+                    rusty_agent_runtime::record::ObligationStatus::Open => "open",
+                    rusty_agent_runtime::record::ObligationStatus::Satisfied => "satisfied",
+                    rusty_agent_runtime::record::ObligationStatus::Rejected => "rejected",
+                    rusty_agent_runtime::record::ObligationStatus::Expired => "expired",
+                },
+                "kind": o.kind,
+                "expires_at": o.expires_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "items": items })))
+}
+
+async fn sweep_approvals(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let (count, affected_runs) = state
+        .server_store
+        .sweep_expired_obligations(Utc::now())
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({
+        "expired": count,
+        "affected_runs": affected_runs,
     })))
 }
 
