@@ -276,6 +276,7 @@ pub mod journal;
 pub mod judge;
 pub mod knowledge;
 pub mod learn;
+pub mod learning;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
@@ -432,6 +433,10 @@ pub mod prelude {
         candidate_effect_key, derive_candidate_id, detect_policy_drift, distill_retry_parameters,
         distill_timeout_parameters, evaluation_effect_key, promotion_effect_id,
         promotion_effect_key, rollback_effect_key, surface_for_kind,
+    };
+    pub use crate::learning::{
+        FLOOR_MAX_HUNTS_PER_CYCLE, FLOOR_MAX_PROBES_PER_CYCLE, HuntingBudget, LearningPolicy,
+        LearningPolicyError, MAX_HUNTS_PER_CYCLE, PromotionGate,
     };
     pub use crate::llm::{
         ChatMessage, ChatModel, ChatResponse, ModelPricing, OpenAiCompatibleClient, Role,

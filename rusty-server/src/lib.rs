@@ -193,6 +193,7 @@ mod health;
 mod journals;
 mod knowledge;
 mod learn;
+mod learning;
 mod mcp_bridge;
 mod memory;
 pub mod oauth;

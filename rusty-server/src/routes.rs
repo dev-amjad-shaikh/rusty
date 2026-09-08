@@ -587,6 +587,10 @@ pub(crate) fn build_router(
             "/assistants/{assistant_id}/upgrades/{operation_id}",
             get(get_upgrade),
         )
+        .route(
+            "/assistants/{assistant_id}/learning-policy",
+            get(get_learning_policy),
+        )
         .route("/crons", post(create_cron).get(list_crons))
         .route("/crons/{cron_id}", delete(delete_cron))
         .route("/store/{namespace}", get(list_store_namespace))
@@ -3737,11 +3741,13 @@ async fn create_assistant(
     validate_client_id("assistant_id", &assistant_id)?;
 
     // Persist under the tenant's internal id; the wire shows the external id.
+    let config = payload.config.unwrap_or(Value::Null);
+    crate::learning::validate_policy_config(&config)?;
     let record = AssistantRecord::new(
         tenant.scope(&assistant_id),
         payload.name,
         payload.graph,
-        payload.config.unwrap_or(Value::Null),
+        config,
         payload.metadata.unwrap_or(Value::Null),
         Utc::now(),
     );
@@ -3907,11 +3913,13 @@ async fn create_assistant_version(
             payload.graph
         )));
     }
+    let config = payload.config.unwrap_or(Value::Null);
+    crate::learning::validate_policy_config(&config)?;
     let version = AssistantVersionRecord::new(
         Some(payload.base_version_id.clone()),
         payload.name,
         payload.graph,
-        payload.config.unwrap_or(Value::Null),
+        config,
         payload.metadata.unwrap_or(Value::Null),
         Utc::now(),
     );
@@ -4233,6 +4241,63 @@ async fn get_upgrade(
             ))
         })?;
     Ok(Json(upgrade_view(&operation)))
+}
+
+#[derive(Debug, Deserialize)]
+struct LearningPolicyQuery {
+    /// The session context the policy resolves under — the thread's pin
+    /// names the governing version, so the answer is the policy the
+    /// session's background loops actually read (EP-08-S07 AC 4).
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
+/// `GET /assistants/{id}/learning-policy` — the effective learning policy:
+/// the governing version's declaration (or the floor, named as such), with
+/// the current cycle's live budget consumption, so declared and actual are
+/// comparable at a glance (EP-08-S07 AC 5's platform read — the console
+/// renders it). `?thread_id=` resolves under that session's pin; without
+/// it, the serving version answers. The ledger carries no assistant
+/// attribution, so consumption is the tenant's live picture read against
+/// this assistant's declared budgets.
+async fn get_learning_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Query(query): Query<LearningPolicyQuery>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let pin = match &query.thread_id {
+        Some(thread_id) => {
+            validate_client_id("thread_id", thread_id)?;
+            match state.upgrades.pin_for(&tenant.scope(thread_id)) {
+                Some(pin) if pin.assistant_id != assistant_id => {
+                    return Err(ApiError::conflict(format!(
+                        "thread `{thread_id}` is pinned to assistant `{}`, not `{assistant_id}`",
+                        pin.assistant_id
+                    )));
+                }
+                pin => pin,
+            }
+        }
+        None => None,
+    };
+    let resolved = crate::learning::resolve(&record, pin.as_ref())?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let consumption = crate::learning::consumption(&ledger);
+    Ok(Json(json!({
+        "assistant_id": assistant_id,
+        "version_id": resolved.version_id,
+        "declared": resolved.declared,
+        "policy": resolved.policy,
+        "consumption": consumption,
+    })))
 }
 
 // --------------------------------------------------------------------- //
@@ -6305,31 +6370,90 @@ struct HuntCyclePayload {
     /// highest.
     #[serde(default)]
     max_hunts: Option<u32>,
+    /// The assistant whose declared learning policy governs this cycle
+    /// (EP-08-S07 AC 2): the blueprint's `hunting_budget` bounds the cycle
+    /// exactly — the caller may narrow it, never exceed it. Absent, the
+    /// caller's own bound decides (the pre-policy behavior).
+    #[serde(default)]
+    assistant_id: Option<String>,
+    /// The session context the policy resolves under: the thread's pin
+    /// names the governing version, so a policy change reaches the cycle
+    /// only after the session adopts the new version at a turn boundary —
+    /// never mid-cycle (AC 4). Meaningful only with `assistant_id`.
+    #[serde(default)]
+    thread_id: Option<String>,
 }
 
 /// `POST /hunts/cycle` — run one hunting cycle: move the work order's
 /// top entries into `hunting` and answer `200 {cycle_hunts, budget}`
 /// with the picks. An empty queue hunts nothing — no work is not an
-/// error.
+/// error. A cycle that stops with actionable work beyond its budget says
+/// so: `deferred` counts what the budget left, and the stoppage is logged
+/// (EP-08-S07 AC 2 — never silently exceeded).
 async fn hunt_cycle(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<HuntCyclePayload>,
 ) -> Result<Json<Value>, ApiError> {
-    let budget = payload.max_hunts.unwrap_or(1);
-    if budget == 0 {
+    if payload.thread_id.is_some() && payload.assistant_id.is_none() {
+        return Err(ApiError::bad_request(
+            "`thread_id` is meaningful only with `assistant_id`".to_string(),
+        ));
+    }
+    if payload.max_hunts == Some(0) {
         return Err(ApiError::bad_request(
             "`max_hunts` must be at least 1".to_string(),
         ));
     }
-    let budget = budget.min(MAX_HUNT_CYCLE_BUDGET);
+
+    // EP-08-S07: an assistant-scoped cycle resolves the effective learning
+    // policy — the pinned version's declaration exclusively — and spends
+    // its declared budget; an unscoped cycle keeps the caller's bound.
+    let (budget, governed) = match &payload.assistant_id {
+        Some(assistant_id) => {
+            validate_client_id("assistant_id", assistant_id)?;
+            let record = state
+                .server_store
+                .get_assistant(&tenant.scope(assistant_id))
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("assistant `{assistant_id}` not found"))
+                })?;
+            let pin = match &payload.thread_id {
+                Some(thread_id) => {
+                    validate_client_id("thread_id", thread_id)?;
+                    match state.upgrades.pin_for(&tenant.scope(thread_id)) {
+                        Some(pin) if pin.assistant_id != *assistant_id => {
+                            return Err(ApiError::conflict(format!(
+                                "thread `{thread_id}` is pinned to assistant `{}`, not `{assistant_id}`",
+                                pin.assistant_id
+                            )));
+                        }
+                        pin => pin,
+                    }
+                }
+                None => None,
+            };
+            let resolved = crate::learning::resolve(&record, pin.as_ref())?;
+            (
+                resolved.policy.hunt_budget(payload.max_hunts),
+                Some((assistant_id.clone(), resolved)),
+            )
+        }
+        None => (
+            payload.max_hunts.unwrap_or(1).min(MAX_HUNT_CYCLE_BUDGET),
+            None,
+        ),
+    };
     let now = Utc::now();
 
     let lock = gap_lock(&state, tenant.tenant()).await;
     let _guard = lock.lock().await;
     let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
-    let picks: Vec<String> = ledger
-        .work_order()
+    let order = ledger.work_order();
+    let deferred = order.len().saturating_sub(budget as usize);
+    let picks: Vec<String> = order
         .into_iter()
         .take(budget as usize)
         .map(|entry| entry.gap_id.clone())
@@ -6351,10 +6475,27 @@ async fn hunt_cycle(
         }));
     }
     persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
-    Ok(Json(json!({
+    if deferred > 0 {
+        tracing::info!(
+            budget,
+            deferred,
+            assistant = payload.assistant_id.as_deref().unwrap_or(""),
+            "hunting cycle stopped at its budget with work remaining"
+        );
+    }
+    let mut body = json!({
         "cycle_hunts": hunts,
         "budget": budget,
-    })))
+        "deferred": deferred,
+    });
+    if let Some((assistant_id, resolved)) = governed {
+        body["policy"] = json!({
+            "assistant_id": assistant_id,
+            "version_id": resolved.version_id,
+            "declared": resolved.declared,
+        });
+    }
+    Ok(Json(body))
 }
 
 #[derive(Debug, Deserialize)]

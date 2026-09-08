@@ -47,9 +47,10 @@ use crate::skill_retention::{RetentionBook, RetentionMutation};
 
 /// The operator-owned dials for one expansion cycle: when a domain counts
 /// as mastered, and how much one cycle may do. A plain value type, the
-/// `RetentionPolicy` precedent — the dials' deployment home (a blueprint
-/// `LearningPolicy`) is the platform's to choose; the cycle takes them as
-/// a parameter.
+/// `RetentionPolicy` precedent — the dials' deployment home is the
+/// blueprint's [`crate::learning::LearningPolicy`] (EP-08-S07): the hunting
+/// budget governs the probe dial, the frontier-specific dials keep their
+/// defaults until the policy grows vocabulary for them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpansionPolicy {
@@ -106,6 +107,22 @@ impl ExpansionPolicy {
             ));
         }
         Ok(())
+    }
+
+    /// The cycle dials under a blueprint learning policy (EP-08-S07 AC 2):
+    /// the declared hunting budget governs the probe dial exactly;
+    /// frontier-specific dials (the mastery gate, the stability window,
+    /// the per-cycle open bound) have no policy vocabulary yet and keep
+    /// this policy's own values.
+    pub fn with_learning_policy(mut self, policy: &crate::learning::LearningPolicy) -> Self {
+        self.max_probes_per_cycle = policy.hunting_budget.max_probes_per_cycle;
+        self
+    }
+
+    /// The default dials governed by a blueprint learning policy — the
+    /// construction every policy-homed frontier cycle makes.
+    pub fn from_learning_policy(policy: &crate::learning::LearningPolicy) -> Self {
+        Self::default().with_learning_policy(policy)
     }
 }
 
