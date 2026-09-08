@@ -189,6 +189,7 @@ mod error;
 mod evaluations;
 mod gaps;
 mod gate;
+pub mod gateway_schema;
 mod health;
 mod journals;
 mod knowledge;

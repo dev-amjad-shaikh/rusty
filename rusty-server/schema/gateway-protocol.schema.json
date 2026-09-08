@@ -1,0 +1,466 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "generator": "gateway_protocol_schema (schemars 0.8)",
+  "title": "rusty gateway protocol (contracts:gateway-protocol)",
+  "types": {
+    "AdmissionReason": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "The closed run-admission verdict (`contracts:gateway-protocol`): decided at the exact branch that blocks or admits the run and carried verbatim to clients — never reverse-engineered from errors. Deliberately enumeration-safe about private agents.",
+      "oneOf": [
+        {
+          "description": "Admitted to the session queue.",
+          "enum": [
+            "queued"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Coalesced into an existing queued turn.",
+          "enum": [
+            "coalesced"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Deferred by policy.",
+          "enum": [
+            "deferred"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The runtime is offline.",
+          "enum": [
+            "runtime_offline"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The runtime is present but unusable.",
+          "enum": [
+            "runtime_unusable"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The request needs an agent runtime it cannot reach.",
+          "enum": [
+            "agent_runtime_required"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Attribution requirements blocked the run.",
+          "enum": [
+            "attribution_blocked"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The session already has an active run.",
+          "enum": [
+            "already_active"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The run would trigger itself.",
+          "enum": [
+            "self_trigger_suppressed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Another run holds the turn lease.",
+          "enum": [
+            "lease_held"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The caller lacks the required scope or credential.",
+          "enum": [
+            "unauthorized"
+          ],
+          "type": "string"
+        }
+      ],
+      "title": "AdmissionReason"
+    },
+    "Frame": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "One wire frame: typed request/response/event with a mandatory idempotency key on side-effecting methods, snapshot-on-connect, and monotonic event sequencing (`contracts:gateway-protocol`).",
+      "oneOf": [
+        {
+          "description": "A client call. `method` names the protocol method; `params` is its argument object.",
+          "properties": {
+            "frame": {
+              "enum": [
+                "request"
+              ],
+              "type": "string"
+            },
+            "id": {
+              "description": "The caller-chosen correlation id its `Response` echoes.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "idempotency_key": {
+              "description": "Mandatory on side-effecting methods; checked against a dedupe cache so a retried webhook cannot double-execute a turn.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "method": {
+              "description": "The protocol method name.",
+              "type": "string"
+            },
+            "params": {
+              "description": "The method's arguments."
+            }
+          },
+          "required": [
+            "frame",
+            "id",
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The answer to a `Request`, by correlation id.",
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "The call succeeded; `result` is the method's return value.",
+              "properties": {
+                "ok": {
+                  "properties": {
+                    "result": {
+                      "description": "The method's return value."
+                    }
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "ok"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "The call failed; `error` carries the typed refusal.",
+              "properties": {
+                "err": {
+                  "properties": {
+                    "error": {
+                      "description": "The refusal payload."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "err"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "frame": {
+              "enum": [
+                "response"
+              ],
+              "type": "string"
+            },
+            "id": {
+              "description": "The request this answers.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A server-pushed event.",
+          "properties": {
+            "frame": {
+              "enum": [
+                "event"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "description": "The event name (run-boundary and connection-lifetime events are named here, never inferred from side effects).",
+              "type": "string"
+            },
+            "payload": {
+              "description": "The event payload."
+            },
+            "seq": {
+              "description": "Monotonic per connection; a client detecting a gap re-snapshots.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame",
+            "name",
+            "payload",
+            "seq"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "Frame"
+    },
+    "Pairing": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Device pairing: hello → challenge → signed response → paired (`contracts:gateway-protocol`). Loopback devices may auto-approve; remote devices always require operator approval. Tokens never travel in snapshots.",
+      "oneOf": [
+        {
+          "description": "The device introduces itself.",
+          "properties": {
+            "device_id": {
+              "description": "The device's stable id.",
+              "type": "string"
+            },
+            "platform": {
+              "description": "The device platform family.",
+              "type": "string"
+            },
+            "public_key": {
+              "description": "The device's public key (challenge answer signing).",
+              "type": "string"
+            },
+            "step": {
+              "enum": [
+                "hello"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "device_id",
+            "platform",
+            "public_key",
+            "step"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The gateway's challenge.",
+          "properties": {
+            "nonce": {
+              "description": "The nonce to sign.",
+              "type": "string"
+            },
+            "step": {
+              "enum": [
+                "challenge"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "nonce",
+            "step"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The device's answer. The signature binds nonce, platform, and device family.",
+          "properties": {
+            "device_id": {
+              "description": "The answering device's id.",
+              "type": "string"
+            },
+            "signature": {
+              "description": "The signature over the challenge.",
+              "type": "string"
+            },
+            "step": {
+              "enum": [
+                "answer"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "device_id",
+            "signature",
+            "step"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Pairing completed; the token is delivered once, here, and never appears in snapshots.",
+          "properties": {
+            "device_token": {
+              "description": "The device's bearer token.",
+              "type": "string"
+            },
+            "step": {
+              "enum": [
+                "paired"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "device_token",
+            "step"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Pairing refused.",
+          "properties": {
+            "reason": {
+              "description": "Why.",
+              "type": "string"
+            },
+            "step": {
+              "enum": [
+                "denied"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "step"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "Pairing"
+    },
+    "ResponseOutcome": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "The flattened payload of `Frame::Response`.\n\nThe contract names this type and fixes its `#[serde(flatten)]` placement but leaves its internals unspecified; this is the minimal honest shape — an ok result or an error, both arbitrary JSON until a contract revision pins them. Kept deliberately thin so the pinned revision lands as a compatible refinement, not a re-tagging.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The call succeeded; `result` is the method's return value.",
+          "properties": {
+            "ok": {
+              "properties": {
+                "result": {
+                  "description": "The method's return value."
+                }
+              },
+              "required": [
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ok"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The call failed; `error` carries the typed refusal.",
+          "properties": {
+            "err": {
+              "properties": {
+                "error": {
+                  "description": "The refusal payload."
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "err"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "ResponseOutcome"
+    },
+    "SteeringVerb": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Steering verbs (`contracts:gateway-protocol`). Drain semantics: `Steer` is drained at tool-launch boundaries only — before each sequential launch and once before a parallel batch's atomic launch; a running tool is never cancelled; skipped unstarted calls receive paired synthetic tool results. `Inject` waits silently until a waking message.",
+      "oneOf": [
+        {
+          "description": "Queue behind the current turn.",
+          "enum": [
+            "followup"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Redirect at the next drain boundary.",
+          "enum": [
+            "steer"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Stage until a waking message.",
+          "enum": [
+            "inject"
+          ],
+          "type": "string"
+        }
+      ],
+      "title": "SteeringVerb"
+    },
+    "TurnLease": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "The exclusive per resolved-session lock serializing load-history → run → flush (`contracts:gateway-protocol`). The lock key is the resolved session ID, never the routing key.",
+      "properties": {
+        "acquired_at": {
+          "description": "When the lease was acquired.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "expires_at": {
+          "description": "When the lease lapses.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "holder_run_id": {
+          "description": "The run holding the lease.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "The locked session.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "acquired_at",
+        "expires_at",
+        "holder_run_id",
+        "session_id"
+      ],
+      "title": "TurnLease",
+      "type": "object"
+    }
+  }
+}

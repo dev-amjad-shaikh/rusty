@@ -26,6 +26,13 @@ capsules = ["dep:cedar-policy", "rusty-agent-runtime/wasm"]
 
 [dependencies]
 rusty-agent-runtime = { path = "../rusty-core", version = "0.12" }
+# The gateway wire vocabulary (contracts:gateway-protocol): the protocol
+# types behind the schema-generation pipeline (`gateway_schema.rs`) are
+# defined once here and generate server validators and the TS client.
+rusty-api = { path = "../rusty-api" }
+# EP-04-S01 AC5: the protocol types schematize into the committed JSON
+# Schema bundle; the drift gate regenerates and diffs.
+schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 # Wave 4: the server-side candidate evaluator composes `rusty-eval`'s
 # experiment runner over live graph preparation plus a versioned dataset
 # source; `promote → evaluate` calls it through the learning gate.
@@ -84,7 +91,6 @@ tokio = { version = "1", features = ["full", "test-util"] }
 # Trigger tests sign webhook bodies the way an external sender would.
 hmac = "0.12"
 sha2 = "0.10"
-rusty-api = { path = "../rusty-api" }
 
 [[bin]]
 name = "rustyness"
