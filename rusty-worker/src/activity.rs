@@ -457,6 +457,9 @@ fn classify_error(error: &RustyError) -> (ErrorClass, bool) {
         RustyError::Checkpoint(_) => (ErrorClass::Unknown, false),
         RustyError::Replay(_) => (ErrorClass::Unknown, false),
         RustyError::Serialization(_) => (ErrorClass::Unknown, false),
+        // Gap-filing failures are internal store/journal faults, like
+        // `Checkpoint`: not a contract breach, not transient.
+        RustyError::Gap(_) => (ErrorClass::Unknown, false),
         RustyError::Interrupt { .. } => (ErrorClass::Cancelled, false),
         // A handler whose own inner run was drained propagates the
         // cancellation class: control flow, never retried.

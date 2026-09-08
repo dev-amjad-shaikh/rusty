@@ -285,7 +285,7 @@ pub async fn verify_log_file(
         }
     };
 
-    let store = artifacts_dir.map(|dir| rusty_agent_runtime::journal::FileArtifactStore::new(dir));
+    let store = artifacts_dir.map(rusty_agent_runtime::journal::FileArtifactStore::new);
 
     let report = if let Some(ref store) = store {
         verify_log_with_store(snapshot, Some(store)).await

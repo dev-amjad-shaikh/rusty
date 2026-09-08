@@ -686,6 +686,10 @@ impl SkillPlane {
     /// stamp — a rollup from the eval run's journal, reported by the
     /// evaluator) plus the components that differ from the baseline
     /// promotion, so an improvement claim names what changed.
+    // The gate evidence pair (declared/override gate + held-out evidence)
+    // is the promotion decision's full input set; bundling them into a
+    // struct would add a type without call-site clarity.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn promote(
         &self,
         tenant: &str,
