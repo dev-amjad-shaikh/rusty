@@ -1154,11 +1154,17 @@ pub enum SkillSource {
         /// The package version that shipped the skill.
         version: String,
     },
+    /// Authored by the agent's own learning loop (EP-07): `learned`. The
+    /// registering author (the review fork or curator session's id) and
+    /// the candidate's editorial provenance carry the attribution; this
+    /// marks the origin plane, so learned content is distinguishable from
+    /// shipped and hand-installed content at a glance.
+    Learned,
 }
 
 impl SkillSource {
     /// The canonical id string (`local:{path}` / `registry:{name}` /
-    /// `package:{id}@{version}`).
+    /// `package:{id}@{version}` / `learned`).
     pub fn as_id_string(&self) -> String {
         match self {
             SkillSource::LocalPath { path } => format!("local:{path}"),
@@ -1168,6 +1174,7 @@ impl SkillSource {
                 version,
                 ..
             } => format!("package:{package_id}@{version}"),
+            SkillSource::Learned => "learned".to_owned(),
         }
     }
 }

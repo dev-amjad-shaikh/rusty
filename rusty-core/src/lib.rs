@@ -298,6 +298,7 @@ pub mod remote;
 pub mod render_intent;
 pub mod repair;
 pub mod replay;
+pub mod review_fork;
 pub mod reviewer;
 pub mod sandbox;
 pub mod scope;
@@ -510,6 +511,14 @@ pub mod prelude {
         FixtureMetadata, JournalShadowSource, LogicalClockParams, RecordingChatModel,
         RecordingTool, ReplayFixture, ReplayOutcome, ReplayParams, ReplaySource,
         ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
+    };
+    pub use crate::review_fork::{
+        DEFAULT_DIGEST_MESSAGE_CHARS, DEFAULT_SUBSTANTIVE_ASSISTANT_CHARS, ForkSkillCommit,
+        ForkSkillWrite, ForkWriteError, ParentTurn, REVIEW_BOUNDARY_KIND, REVIEW_FORK_COMPONENT,
+        ReplayMaterial, ReviewBoundaryTool, ReviewForkConfig, ReviewForkPlan, Substance,
+        SubstanceRule, assess_substance, commit_skill_write, compact_digest,
+        confined_review_registry, fork_dispatch_registry, plan_review, prompt_prefix_hash,
+        review_tool_allowlist,
     };
     pub use crate::sandbox::{
         ContainerBackend, ContainerConfig, DEFAULT_LOCAL_OUTPUT_BYTES,
