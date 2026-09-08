@@ -1304,6 +1304,31 @@ async fn execute(deps: RunDeps, run_id: String) {
         // super-step boundary — a point where a checkpoint was just
         // persisted — instead of being torn down mid-step.
         .with_cancellation(snap.cancel.clone());
+    // Provenance stamping (EP-07-S12 AC1): the server mints the identity
+    // it honestly holds — the session is the wire thread, the turn is
+    // this run's execution of turn work, the traffic is main-line; the
+    // dispatcher re-attributes the per-call boundary and component.
+    // Background loops (EP-07) mint `TrafficClass::Side` on their own
+    // scheduling path when they land. A client-chosen non-uuid thread id
+    // carries no stamp — honest absence, never a fabricated identity.
+    if let Some(stamp) = uuid::Uuid::parse_str(&snap.wire_thread_id)
+        .ok()
+        .zip(uuid::Uuid::parse_str(&run_id).ok())
+        .map(
+            |(session_id, turn_id)| rusty_agent_runtime::prelude::TurnStamp {
+                session_id,
+                traffic: rusty_agent_runtime::prelude::TrafficClass::Main,
+                turn_id,
+                turn_boundary: rusty_agent_runtime::prelude::TurnBoundary::Start,
+                issued_by: rusty_agent_runtime::prelude::ComponentAttribution {
+                    component: String::new(),
+                    sub_id: None,
+                },
+            },
+        )
+    {
+        config = config.with_turn_stamp(stamp);
+    }
     // Registry admission (R0.11 wave 2): the binding resolved at schedule
     // time becomes evidence now, ahead of the run's own events — one
     // `config_resolved` per artifact (chained: each resolution's parent

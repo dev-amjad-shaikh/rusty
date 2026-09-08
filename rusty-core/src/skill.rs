@@ -1154,11 +1154,17 @@ pub enum SkillSource {
         /// The package version that shipped the skill.
         version: String,
     },
+    /// Authored by the agent's own learning loop (EP-07): `learned`. The
+    /// registering author (the review fork or curator session's id) and
+    /// the candidate's editorial provenance carry the attribution; this
+    /// marks the origin plane, so learned content is distinguishable from
+    /// shipped and hand-installed content at a glance.
+    Learned,
 }
 
 impl SkillSource {
     /// The canonical id string (`local:{path}` / `registry:{name}` /
-    /// `package:{id}@{version}`).
+    /// `package:{id}@{version}` / `learned`).
     pub fn as_id_string(&self) -> String {
         match self {
             SkillSource::LocalPath { path } => format!("local:{path}"),
@@ -1168,6 +1174,7 @@ impl SkillSource {
                 version,
                 ..
             } => format!("package:{package_id}@{version}"),
+            SkillSource::Learned => "learned".to_owned(),
         }
     }
 }
@@ -1244,6 +1251,14 @@ pub enum SkillPromotionStatus {
     Trial,
     /// Promoted: cleared its gate and may be bound into active skill sets.
     Promoted,
+    /// Cold: retention decayed below the cold threshold (EP-07-S03); out
+    /// of the prompt index until an operator restores it — the state
+    /// machine admits no traffic-driven way back.
+    Cold,
+    /// Archived: idle past the configured period while `Cold`, or
+    /// consolidated into an umbrella by the curator. Never deleted —
+    /// `Restore` by an operator returns it to `Promoted`.
+    Archived,
 }
 
 /// An immutable record of one promotion attempt.

@@ -46,13 +46,14 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use rusty_agent_runtime::connector::{
-    execute_check, extract_secrets, insert_masked_secrets, insert_opened_secrets, validate_config,
-    without_secrets, CheckRequest, CheckResponse, ConnectorInstance, ConnectorManifest,
-    ConnectorTransport, INSTANCE_ID_PREFIX,
+    CheckRequest, CheckResponse, ConnectorInstance, ConnectorManifest, ConnectorTransport,
+    INSTANCE_ID_PREFIX, execute_check, extract_secrets, insert_masked_secrets,
+    insert_opened_secrets, validate_config, without_secrets,
 };
+use rusty_agent_runtime::induction::{CoverageConfig, crawl_coverage, mine_intents};
 
 use crate::auth::TenantContext;
 use crate::error::ApiError;
@@ -428,8 +429,8 @@ impl ConnectorTransport for ReqwestConnectorTransport {
                             Ok(u) => u,
                             Err(e) => {
                                 return Err(rusty_agent_runtime::error::RustyError::Tool(format!(
-                                "egress: malformed relative redirect location `{location}`: {e}"
-                            )));
+                                    "egress: malformed relative redirect location `{location}`: {e}"
+                                )));
                             }
                         }
                     };
@@ -747,8 +748,7 @@ pub(crate) async fn check(
             ));
         }
     };
-    let policy = state.config.egress_policy.clone().map(std::sync::Arc::new);
-    let outcome = execute_check(&manifest, &config, &transport(policy)).await;
+    let outcome = execute_check(&manifest, &config, &*transport_for(&state)).await;
     Ok(Json(
         serde_json::to_value(outcome).expect("outcome serializes"),
     ))
@@ -779,4 +779,663 @@ pub(crate) async fn instance_catalog(
         "manifest_hash": instance.manifest_hash,
         "tools": tools,
     })))
+}
+
+// --------------------------------------------------------------------- //
+// Ingestion: connector → interaction events (EP-07-S05)
+// --------------------------------------------------------------------- //
+
+/// One journaled connector call. A receipt carries what an auditor needs
+/// to verify the call happened as declared — instance, operation, effect
+/// class, status, size, duration — and never the rendered URL or any
+/// auth material: a query-param credential would otherwise land on disk.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ConnectorCallReceipt {
+    /// Content address: `cr-<sha256>` over the canonical record minus
+    /// the id itself.
+    pub receipt_id: String,
+    /// The tenant-scoped instance that made the call.
+    pub instance_id: String,
+    /// The manifest hash the instance points at.
+    pub manifest_hash: String,
+    /// The executed operation's name.
+    pub operation: String,
+    /// The operation's declared wire effect class.
+    pub effect: rusty_agent_runtime::record::Effect,
+    /// The HTTP status the source returned.
+    pub status: u16,
+    /// Response body bytes as received (pre-parse).
+    pub response_bytes: usize,
+    /// Wall time of the exchange.
+    pub duration_ms: u64,
+    /// When the call completed.
+    at: chrono::DateTime<Utc>,
+}
+
+/// The wire-level facts of one exchange — everything after the address's
+/// identity triple (instance, manifest, operation).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct CallExchange {
+    /// The operation's declared wire effect class.
+    pub effect: rusty_agent_runtime::record::Effect,
+    /// The HTTP status the source returned (0 when no response arrived).
+    pub status: u16,
+    /// Response body bytes as received (pre-parse).
+    pub response_bytes: usize,
+    /// Wall time of the exchange.
+    pub duration_ms: u64,
+    /// When the call completed.
+    pub at: chrono::DateTime<Utc>,
+}
+
+impl ConnectorCallReceipt {
+    /// Derive the content address and stamp the record.
+    fn new(
+        instance_id: &str,
+        manifest_hash: &str,
+        operation: &str,
+        exchange: CallExchange,
+    ) -> Self {
+        let address = json!({
+            "instance_id": instance_id,
+            "manifest_hash": manifest_hash,
+            "operation": operation,
+            "effect": exchange.effect,
+            "status": exchange.status,
+            "response_bytes": exchange.response_bytes,
+            "duration_ms": exchange.duration_ms,
+            "at": exchange.at,
+        });
+        // serde_json maps serialize with sorted keys (no preserve_order
+        // feature in this workspace), so the plain bytes are the
+        // canonical form — the argument `canonical_json_hash` makes in
+        // the core connector module.
+        let bytes = serde_json::to_vec(&address).expect("a serde_json::Value always serializes");
+        Self {
+            receipt_id: format!("cr-{}", rusty_agent_runtime::record::sha256_hex(&bytes)),
+            instance_id: instance_id.to_owned(),
+            manifest_hash: manifest_hash.to_owned(),
+            operation: operation.to_owned(),
+            effect: exchange.effect,
+            status: exchange.status,
+            response_bytes: exchange.response_bytes,
+            duration_ms: exchange.duration_ms,
+            at: exchange.at,
+        }
+    }
+}
+
+fn receipts_dir(root: &Path) -> PathBuf {
+    dir(root).join("receipts")
+}
+
+/// Persist one receipt atomically under the tenant's scope (the plane's
+/// one-file-per-record convention).
+pub(crate) async fn persist_receipt(
+    root: &Path,
+    tenant: &str,
+    receipt: &ConnectorCallReceipt,
+) -> Result<(), String> {
+    let scoped = crate::auth::scope_id(tenant, &receipt.receipt_id);
+    persist_json(&receipts_dir(root), &scoped, receipt).await
+}
+
+/// Load every receipt under the plane (the audit read and tests).
+pub(crate) fn load_receipts(root: &Path) -> Vec<(String, ConnectorCallReceipt)> {
+    load_records(&receipts_dir(root))
+}
+
+/// The deployment's connector transport: the test-injected override when
+/// configured, otherwise the reqwest transport under the egress policy.
+/// Both the check gate and ingestion share it, so one stub drives both
+/// in tests.
+fn transport_for(state: &AppState) -> Arc<dyn rusty_agent_runtime::connector::ConnectorTransport> {
+    if let Some(override_transport) = &state.config.connector_transport {
+        return override_transport.clone();
+    }
+    Arc::new(transport(state.config.egress_policy.clone().map(Arc::new)))
+}
+
+/// The host-side [`OperationExecutor`] the tool wrapper and the
+/// ingestion route share: bound to one tenant's instance and one
+/// operation at construction. Every call opens the sealed secrets for
+/// that call only, executes over the deployment transport, and journals
+/// a [`ConnectorCallReceipt`] — connector traffic is logged like any
+/// tool traffic, and a receipt write failure fails the call (a call
+/// that cannot be receipted does not complete).
+///
+/// The manual `Debug` impl sidesteps `AppState` (a router-full of state
+/// that is not `Debug`); the identity fields are the useful part.
+pub(crate) struct ServerOperationExecutor {
+    state: Arc<AppState>,
+    tenant: String,
+    instance_id: String,
+    operation: String,
+    /// Receipt ids this executor has journaled, in call order.
+    receipts: std::sync::Mutex<Vec<String>>,
+}
+
+impl std::fmt::Debug for ServerOperationExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerOperationExecutor")
+            .field("tenant", &self.tenant)
+            .field("instance_id", &self.instance_id)
+            .field("operation", &self.operation)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ServerOperationExecutor {
+    pub(crate) fn new(
+        state: Arc<AppState>,
+        tenant: &str,
+        instance_id: &str,
+        operation: &str,
+    ) -> Self {
+        Self {
+            state,
+            tenant: tenant.to_owned(),
+            instance_id: instance_id.to_owned(),
+            operation: operation.to_owned(),
+            receipts: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The receipt ids of every call this executor completed or failed,
+    /// in order.
+    pub(crate) fn receipt_ids(&self) -> Vec<String> {
+        self.receipts.lock().unwrap().clone()
+    }
+
+    /// Journal one receipt and remember its id. A persist failure raises
+    /// — a call that cannot be receipted does not complete silently.
+    async fn journal_receipt(
+        &self,
+        receipt: ConnectorCallReceipt,
+    ) -> rusty_agent_runtime::error::Result<()> {
+        let id = receipt.receipt_id.clone();
+        persist_receipt(&self.state.config.store_path, &self.tenant, &receipt)
+            .await
+            .map_err(|e| {
+                rusty_agent_runtime::error::RustyError::Tool(format!(
+                    "connector: receipt write failed: {e}"
+                ))
+            })?;
+        self.receipts.lock().unwrap().push(id);
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl rusty_agent_runtime::connector::OperationExecutor for ServerOperationExecutor {
+    async fn execute(&self, params: Value) -> rusty_agent_runtime::error::Result<Value> {
+        use rusty_agent_runtime::connector::execute_operation;
+
+        let tool_err = |msg: String| rusty_agent_runtime::error::RustyError::Tool(msg);
+        let store_tool_err = |e: String| tool_err(format!("connector store: {e}"));
+        let instance = self
+            .state
+            .connectors
+            .get_instance(&self.tenant, &self.instance_id)
+            .await
+            .map_err(store_tool_err)?
+            .ok_or_else(|| {
+                tool_err(format!(
+                    "connector: unknown connector instance `{}`",
+                    self.instance_id
+                ))
+            })?;
+        let manifest = self
+            .state
+            .connectors
+            .get_manifest(&self.tenant, &instance.manifest_hash)
+            .await
+            .map_err(store_tool_err)?
+            .ok_or_else(|| {
+                tool_err(format!(
+                    "connector: unknown connector manifest `{}`",
+                    instance.manifest_hash
+                ))
+            })?;
+        let operation = manifest.operation(&self.operation).ok_or_else(|| {
+            tool_err(format!(
+                "connector: manifest `{}` declares no operation `{}`",
+                manifest.id, self.operation
+            ))
+        })?;
+        // Open the sealed secrets host-side, for this call only — the
+        // same discipline the check gate follows.
+        let scoped = crate::auth::scope_id(&self.tenant, &instance.instance_id);
+        let mut opened = Vec::with_capacity(instance.sealed.len());
+        for (path, envelope) in &instance.sealed {
+            let plaintext = self
+                .state
+                .broker
+                .open_connector_secret(&scoped, envelope)
+                .await
+                .map_err(store_tool_err)?;
+            let secret: Value = serde_json::from_slice(&plaintext)
+                .map_err(|e| tool_err(format!("connector: corrupt sealed secret: {e}")))?;
+            opened.push((path.clone(), secret));
+        }
+        let config = insert_opened_secrets(instance.config.clone(), &opened);
+        let transport = transport_for(&self.state);
+        let started = std::time::Instant::now();
+        match execute_operation(&manifest, operation, &config, &params, &*transport).await {
+            Ok(response) => {
+                self.journal_receipt(ConnectorCallReceipt::new(
+                    &instance.instance_id,
+                    &instance.manifest_hash,
+                    &operation.name,
+                    CallExchange {
+                        effect: operation.effect.wire_effect(),
+                        status: response.status,
+                        response_bytes: response.body_bytes,
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        at: Utc::now(),
+                    },
+                ))
+                .await?;
+                Ok(response.body)
+            }
+            Err(error) => {
+                // A failed exchange is still a call: receipt it with a
+                // zero status (no response arrived or the status could
+                // not be trusted), then raise.
+                self.journal_receipt(ConnectorCallReceipt::new(
+                    &instance.instance_id,
+                    &instance.manifest_hash,
+                    &operation.name,
+                    CallExchange {
+                        effect: operation.effect.wire_effect(),
+                        status: 0,
+                        response_bytes: 0,
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        at: Utc::now(),
+                    },
+                ))
+                .await?;
+                Err(error)
+            }
+        }
+    }
+}
+
+/// The ingestion payload: the read operation to pull the corpus with,
+/// the source class that normalizes it, and optional call arguments.
+#[derive(Deserialize)]
+pub(crate) struct IngestPayload {
+    /// The manifest operation that reads the corpus. Declaration-
+    /// validated to exist; its effect must be read-only or idempotent —
+    /// ingestion never issues a mutating call.
+    operation: String,
+    /// The source class (`servicenow` — the only mapped class today).
+    system: String,
+    /// Call arguments for the operation (schema-validated against the
+    /// operation's `params_schema`).
+    #[serde(default)]
+    params: Option<Value>,
+    /// The corpus's trust class (`trusted` default, `untrusted` for a
+    /// third-party feed — a vendor mailbox, a scraped page): markings
+    /// ride the ingested events, and filings derived from them land as
+    /// `untrusted_derived` downstream (EP-07-S09 AC5).
+    #[serde(default)]
+    origin_class: Option<String>,
+}
+
+/// `POST /connectors/instances/{id}/ingest` — pull the source corpus
+/// through the instance's declared read operation, normalize every
+/// record into an [`InteractionEvent`], and file the events into the
+/// tenant's gap ledger. Idempotent by the events' content addresses: a
+/// repeated window re-derives the same ids and converges. The batch is
+/// all-or-nothing on normalization — a record the mapping cannot
+/// honestly read fails the whole ingest with a typed 422 rather than
+/// silently dropping demand evidence.
+pub(crate) async fn ingest(
+    AxumState(state): AxumState<std::sync::Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    AxumPath(instance_id): AxumPath<String>,
+    Json(payload): Json<IngestPayload>,
+) -> Result<Json<Value>, ApiError> {
+    if payload.system != "servicenow" {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_source_class",
+            format!(
+                "source class `{}` has no normalization mapping (supported: `servicenow`)",
+                payload.system
+            ),
+        ));
+    }
+    // The operation must exist and be a read: ingestion pulls, never
+    // pushes.
+    let instance = state
+        .connectors
+        .get_instance(tenant.tenant(), &instance_id)
+        .await
+        .map_err(store_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
+    let manifest = manifest_for(&state, &tenant, &instance.manifest_hash).await?;
+    let operation = manifest.operation(&payload.operation).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "manifest `{}` declares no operation `{}`",
+            manifest.id, payload.operation
+        ))
+    })?;
+    match operation.effect {
+        rusty_agent_runtime::connector::OperationEffect::ReadOnly
+        | rusty_agent_runtime::connector::OperationEffect::Idempotent => {}
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "operation `{}` declares effect `{other:?}` — ingestion runs read operations only",
+                operation.name
+            )));
+        }
+    }
+
+    let executor = ServerOperationExecutor::new(
+        state.clone(),
+        tenant.tenant(),
+        &instance_id,
+        &payload.operation,
+    );
+    let body = rusty_agent_runtime::connector::OperationExecutor::execute(
+        &executor,
+        payload.params.clone().unwrap_or_else(|| json!({})),
+    )
+    .await
+    .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "ingest_failed", e.to_string()))?;
+
+    // The corpus: a bare array of records, or the ServiceNow table
+    // envelope's `result` array.
+    let records = match &body {
+        Value::Array(records) => records.clone(),
+        Value::Object(map) => match map.get("result").and_then(Value::as_array) {
+            Some(records) => records.clone(),
+            None => {
+                return Err(ApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "unexpected_corpus_shape",
+                    "the ingestion body is an object without a `result` array — expected \
+                     a record array or the table-API envelope"
+                        .to_owned(),
+                ));
+            }
+        },
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unexpected_corpus_shape",
+                "the ingestion body is not a record array".to_owned(),
+            ));
+        }
+    };
+    let origin_class = match payload.origin_class.as_deref() {
+        None | Some("trusted") => rusty_agent_runtime::gaps::OriginClass::Trusted,
+        Some("untrusted") => rusty_agent_runtime::gaps::OriginClass::Untrusted,
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "unknown origin class `{other}` (expected `trusted` or `untrusted`)"
+            )));
+        }
+    };
+    let events =
+        rusty_agent_runtime::connector::normalize_corpus(&payload.system, &records, origin_class)
+            .map_err(|e| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "normalization_failed",
+                e.to_string(),
+            )
+        })?;
+
+    // File into the tenant's ledger under its lock: idempotent by
+    // content address, so a repeated window converges.
+    let mut created = 0usize;
+    let mut duplicates = 0usize;
+    let mut event_ids = Vec::with_capacity(events.len());
+    let mut by_resolution_path: BTreeMap<String, u64> = BTreeMap::new();
+    let mut by_outcome: BTreeMap<String, u64> = BTreeMap::new();
+    {
+        let lock = crate::routes::gap_lock(&state, tenant.tenant()).await;
+        let _guard = lock.lock().await;
+        let mut ledger = crate::routes::load_gap_ledger(&state, tenant.tenant()).await?;
+        for event in events {
+            let existed = ledger.event(&event.event_id).is_some();
+            let path = serde_json::to_value(event.resolution_path)
+                .expect("variant serializes")
+                .as_str()
+                .expect("snake_case string")
+                .to_owned();
+            let outcome = serde_json::to_value(event.outcome)
+                .expect("variant serializes")
+                .as_str()
+                .expect("snake_case string")
+                .to_owned();
+            let event_id = ledger.record_event(event).map_err(|e| {
+                ApiError::new(StatusCode::CONFLICT, "event_conflict", e.to_string())
+            })?;
+            if existed {
+                duplicates += 1;
+            } else {
+                created += 1;
+                *by_resolution_path.entry(path).or_insert(0) += 1;
+                *by_outcome.entry(outcome).or_insert(0) += 1;
+            }
+            event_ids.push(event_id);
+        }
+        crate::routes::persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+    }
+
+    // The receipts this ingest's calls produced — the caller can verify
+    // every connector call left one.
+    let receipts = executor.receipt_ids();
+
+    Ok(Json(json!({
+        "instance_id": instance_id,
+        "operation": payload.operation,
+        "ingested": created,
+        "duplicates": duplicates,
+        "by_resolution_path": by_resolution_path,
+        "by_outcome": by_outcome,
+        "event_ids": event_ids,
+        "receipts": receipts,
+    })))
+}
+
+/// The crawl payload: the read operation to pull the knowledge corpus
+/// with, the source class, the artifact kind the stream holds, optional
+/// call arguments, and optional coverage-config overrides.
+#[derive(Deserialize)]
+pub(crate) struct CrawlPayload {
+    /// The manifest operation that reads the knowledge corpus. Same
+    /// rule as ingestion: read-only or idempotent, never a mutation.
+    operation: String,
+    /// The source class (`servicenow` — the only mapped class today).
+    system: String,
+    /// The artifact kind the stream holds (`kb_article`, `sop`,
+    /// `runbook`, `macro`, `catalog_item`, `skill`, `memory_block`) —
+    /// declared by the caller, because the table name alone does not
+    /// honestly say what a custom table contains.
+    kind: String,
+    /// Call arguments for the operation (schema-validated against the
+    /// operation's `params_schema`).
+    #[serde(default)]
+    params: Option<Value>,
+    /// Known-retired systems, overriding the coverage default (empty).
+    #[serde(default)]
+    retired_systems: Option<Vec<String>>,
+    /// Staleness horizon in days, overriding the coverage default.
+    #[serde(default)]
+    stale_after_days: Option<u32>,
+    /// Keyword-overlap threshold (per mille), overriding the default.
+    #[serde(default)]
+    keyword_threshold_millis: Option<u32>,
+}
+
+/// `POST /connectors/instances/{id}/crawl` — pull the reachable
+/// knowledge corpus through the instance's declared read operation,
+/// normalize every record into a [`rusty_agent_runtime::induction::SupplyArtifact`],
+/// and run the coverage crawl against the tenant's mined intent map.
+/// Every call is journaled as a receipt (EP-07-S05), so every coverage
+/// claim traces back to a governed exchange. The map is a projection,
+/// computed and answered, never stored. Normalization is all-or-nothing:
+/// one unmappable record fails the crawl with a typed 422 rather than
+/// overstating the gaps a silently narrowed supply would report.
+pub(crate) async fn crawl(
+    AxumState(state): AxumState<std::sync::Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    AxumPath(instance_id): AxumPath<String>,
+    Json(payload): Json<CrawlPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let kind = rusty_agent_runtime::connector::parse_artifact_kind(&payload.kind)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    if payload.system != "servicenow" {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_source_class",
+            format!(
+                "source class `{}` has no crawl mapping (supported: `servicenow`)",
+                payload.system
+            ),
+        ));
+    }
+    let instance = state
+        .connectors
+        .get_instance(tenant.tenant(), &instance_id)
+        .await
+        .map_err(store_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
+    let manifest = manifest_for(&state, &tenant, &instance.manifest_hash).await?;
+    let operation = manifest.operation(&payload.operation).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "manifest `{}` declares no operation `{}`",
+            manifest.id, payload.operation
+        ))
+    })?;
+    match operation.effect {
+        rusty_agent_runtime::connector::OperationEffect::ReadOnly
+        | rusty_agent_runtime::connector::OperationEffect::Idempotent => {}
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "operation `{}` declares effect `{other:?}` — the crawl runs read operations only",
+                operation.name
+            )));
+        }
+    }
+
+    let executor = ServerOperationExecutor::new(
+        state.clone(),
+        tenant.tenant(),
+        &instance_id,
+        &payload.operation,
+    );
+    let body = rusty_agent_runtime::connector::OperationExecutor::execute(
+        &executor,
+        payload.params.clone().unwrap_or_else(|| json!({})),
+    )
+    .await
+    .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "crawl_failed", e.to_string()))?;
+
+    // The corpus: a bare array of records, or the ServiceNow table
+    // envelope's `result` array — the ingestion contract's shape.
+    let records = match &body {
+        Value::Array(records) => records.clone(),
+        Value::Object(map) => match map.get("result").and_then(Value::as_array) {
+            Some(records) => records.clone(),
+            None => {
+                return Err(ApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "unexpected_corpus_shape",
+                    "the crawl body is an object without a `result` array — expected a record \
+                     array or the table-API envelope"
+                        .to_owned(),
+                ));
+            }
+        },
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unexpected_corpus_shape",
+                "the crawl body is not a record array".to_owned(),
+            ));
+        }
+    };
+    let artifacts = rusty_agent_runtime::connector::normalize_supply_corpus(kind, &records)
+        .map_err(|e| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "normalization_failed",
+                e.to_string(),
+            )
+        })?;
+
+    // Demand side: mine the tenant's recorded events into the intent
+    // projection the coverage map joins against.
+    let now = Utc::now();
+    let intent_map = {
+        let lock = crate::routes::gap_lock(&state, tenant.tenant()).await;
+        let _guard = lock.lock().await;
+        let ledger = crate::routes::load_gap_ledger(&state, tenant.tenant()).await?;
+        let events: Vec<_> = ledger.events().cloned().collect();
+        mine_intents(
+            &events,
+            &rusty_agent_runtime::induction::MiningConfig::default(),
+            state.config.embedding_index.as_deref(),
+            now,
+        )
+        .map_err(crate::routes::induction_err)?
+    };
+
+    let mut coverage_config = CoverageConfig::default();
+    if let Some(retired) = payload.retired_systems {
+        coverage_config.retired_systems = retired;
+    }
+    if let Some(days) = payload.stale_after_days {
+        coverage_config.stale_after_days = days;
+    }
+    if let Some(threshold) = payload.keyword_threshold_millis {
+        coverage_config.keyword_threshold_millis = threshold;
+    }
+    let coverage_map = crawl_coverage(&artifacts, &intent_map, &coverage_config, now)
+        .map_err(crate::routes::induction_err)?;
+
+    let receipts = executor.receipt_ids();
+    Ok(Json(json!({
+        "instance_id": instance_id,
+        "operation": payload.operation,
+        "kind": payload.kind,
+        "artifacts": artifacts.len(),
+        "coverage_map": coverage_map,
+        "receipts": receipts,
+    })))
+}
+
+/// `GET /connectors/instances/{id}/receipts` — the instance's journaled
+/// call receipts, oldest first: the audit read over the same records the
+/// ingest answer references.
+pub(crate) async fn instance_receipts(
+    AxumState(state): AxumState<std::sync::Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    AxumPath(instance_id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .connectors
+        .get_instance(tenant.tenant(), &instance_id)
+        .await
+        .map_err(store_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
+    let mut receipts: Vec<ConnectorCallReceipt> = load_receipts(&state.config.store_path)
+        .into_iter()
+        .map(|(_, receipt)| receipt)
+        .filter(|receipt| receipt.instance_id == instance_id)
+        .collect();
+    receipts.sort_by_key(|receipt| receipt.at);
+    Ok(Json(json!({ "receipts": receipts })))
 }

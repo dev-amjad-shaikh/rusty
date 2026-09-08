@@ -40,26 +40,36 @@ use crate::error::RustyError;
 
 pub mod check;
 pub mod config;
+pub mod crawl;
 pub mod curation;
+pub mod execute;
+pub mod ingest;
 pub mod instance;
 pub mod manifest;
 pub mod openapi;
 
 pub use check::{
-    execute_check, render_operation_request, CheckOutcome, CheckRequest, CheckResponse,
-    CheckStatus, ConnectorTransport, CHECK_ERROR_BODY_BYTES, DEFAULT_CHECK_TIMEOUT,
+    CHECK_ERROR_BODY_BYTES, CheckOutcome, CheckRequest, CheckResponse, CheckStatus,
+    ConnectorTransport, DEFAULT_CHECK_TIMEOUT, execute_check, render_operation_request,
 };
 pub use config::{
-    compile_spec, extract_secrets, insert_masked_secrets, insert_opened_secrets, validate_config,
-    without_secrets, SECRET_FLAG,
+    SECRET_FLAG, compile_spec, extract_secrets, insert_masked_secrets, insert_opened_secrets,
+    validate_config, without_secrets,
 };
-pub use curation::{curate, CuratedConnector, CuratedOperation, CurationRule};
+pub use crawl::{
+    CrawlError, normalize_supply_corpus, normalize_supply_record, parse_artifact_kind,
+};
+pub use curation::{CuratedConnector, CuratedOperation, CurationRule, curate};
+pub use execute::{
+    ConnectorOperationTool, OperationExecutor, OperationResponse, execute_operation,
+};
+pub use ingest::{IngestError, normalize_corpus, normalize_servicenow_record};
 pub use instance::{ConnectorInstance, INSTANCE_ID_PREFIX, MAX_INSTANCE_ID_LEN};
 pub use manifest::{
-    render_template, scan_placeholders, ConnectorManifest, ConnectorOperation, HttpMethod,
-    OperationAuth, OperationEffect,
+    ConnectorManifest, ConnectorOperation, HttpMethod, OperationAuth, OperationEffect,
+    render_template, scan_placeholders,
 };
-pub use openapi::{diff_imports, import_openapi, OpenApiImport, UnmappedOperation};
+pub use openapi::{OpenApiImport, UnmappedOperation, diff_imports, import_openapi};
 
 /// Build a [`RustyError::Tool`] with a `connector:` context prefix, the
 /// same convention `mcp:` uses for the MCP client.

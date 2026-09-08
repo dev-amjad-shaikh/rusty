@@ -360,7 +360,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 /// messages: lossy UTF-8, control characters flattened to spaces (a
 /// message must not smuggle terminal escapes), truncated at a char
 /// boundary with an explicit marker.
-fn sanitize_excerpt(body: &[u8], max_bytes: usize) -> String {
+pub(crate) fn sanitize_excerpt(body: &[u8], max_bytes: usize) -> String {
     let text: String = String::from_utf8_lossy(body)
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })

@@ -1,4 +1,335 @@
 pub mod rusty_api
+pub mod rusty_api::gateway_protocol
+pub enum rusty_api::gateway_protocol::AdmissionReason
+pub rusty_api::gateway_protocol::AdmissionReason::AgentRuntimeRequired
+pub rusty_api::gateway_protocol::AdmissionReason::AlreadyActive
+pub rusty_api::gateway_protocol::AdmissionReason::AttributionBlocked
+pub rusty_api::gateway_protocol::AdmissionReason::Coalesced
+pub rusty_api::gateway_protocol::AdmissionReason::Deferred
+pub rusty_api::gateway_protocol::AdmissionReason::LeaseHeld
+pub rusty_api::gateway_protocol::AdmissionReason::Queued
+pub rusty_api::gateway_protocol::AdmissionReason::RuntimeOffline
+pub rusty_api::gateway_protocol::AdmissionReason::RuntimeUnusable
+pub rusty_api::gateway_protocol::AdmissionReason::SelfTriggerSuppressed
+pub rusty_api::gateway_protocol::AdmissionReason::Unauthorized
+impl core::clone::Clone for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::clone(&self) -> rusty_api::gateway_protocol::AdmissionReason
+impl core::cmp::Eq for rusty_api::gateway_protocol::AdmissionReason
+impl core::cmp::PartialEq for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::eq(&self, &rusty_api::gateway_protocol::AdmissionReason) -> bool
+impl core::fmt::Debug for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for rusty_api::gateway_protocol::AdmissionReason
+impl core::marker::StructuralPartialEq for rusty_api::gateway_protocol::AdmissionReason
+impl schemars::JsonSchema for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::gateway_protocol::AdmissionReason::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::gateway_protocol::AdmissionReason::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::gateway_protocol::AdmissionReason
+impl core::marker::Send for rusty_api::gateway_protocol::AdmissionReason
+impl core::marker::Sync for rusty_api::gateway_protocol::AdmissionReason
+impl core::marker::Unpin for rusty_api::gateway_protocol::AdmissionReason
+impl core::marker::UnsafeUnpin for rusty_api::gateway_protocol::AdmissionReason
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::gateway_protocol::AdmissionReason
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::gateway_protocol::AdmissionReason
+impl<T, U> core::convert::Into<U> for rusty_api::gateway_protocol::AdmissionReason where U: core::convert::From<T>
+pub fn rusty_api::gateway_protocol::AdmissionReason::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::gateway_protocol::AdmissionReason where U: core::convert::Into<T>
+pub type rusty_api::gateway_protocol::AdmissionReason::Error = never
+pub fn rusty_api::gateway_protocol::AdmissionReason::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::gateway_protocol::AdmissionReason where U: core::convert::TryFrom<T>
+pub type rusty_api::gateway_protocol::AdmissionReason::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::gateway_protocol::AdmissionReason::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::gateway_protocol::AdmissionReason where T: core::clone::Clone
+pub type rusty_api::gateway_protocol::AdmissionReason::Owned = T
+pub fn rusty_api::gateway_protocol::AdmissionReason::clone_into(&self, &mut T)
+pub fn rusty_api::gateway_protocol::AdmissionReason::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::gateway_protocol::AdmissionReason where T: 'static + ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::AdmissionReason::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::gateway_protocol::AdmissionReason where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::AdmissionReason::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::gateway_protocol::AdmissionReason where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::AdmissionReason::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::gateway_protocol::AdmissionReason where T: core::clone::Clone
+pub unsafe fn rusty_api::gateway_protocol::AdmissionReason::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::gateway_protocol::AdmissionReason
+pub fn rusty_api::gateway_protocol::AdmissionReason::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::gateway_protocol::AdmissionReason where T: core::clone::Clone
+pub fn rusty_api::gateway_protocol::AdmissionReason::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::gateway_protocol::AdmissionReason where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::gateway_protocol::Frame
+pub rusty_api::gateway_protocol::Frame::Event
+pub rusty_api::gateway_protocol::Frame::Event::name: alloc::string::String
+pub rusty_api::gateway_protocol::Frame::Event::payload: serde_json::value::Value
+pub rusty_api::gateway_protocol::Frame::Event::seq: u64
+pub rusty_api::gateway_protocol::Frame::Request
+pub rusty_api::gateway_protocol::Frame::Request::id: u64
+pub rusty_api::gateway_protocol::Frame::Request::idempotency_key: core::option::Option<alloc::string::String>
+pub rusty_api::gateway_protocol::Frame::Request::method: alloc::string::String
+pub rusty_api::gateway_protocol::Frame::Request::params: serde_json::value::Value
+pub rusty_api::gateway_protocol::Frame::Response
+pub rusty_api::gateway_protocol::Frame::Response::id: u64
+pub rusty_api::gateway_protocol::Frame::Response::outcome: rusty_api::gateway_protocol::ResponseOutcome
+impl core::clone::Clone for rusty_api::gateway_protocol::Frame
+pub fn rusty_api::gateway_protocol::Frame::clone(&self) -> rusty_api::gateway_protocol::Frame
+impl core::fmt::Debug for rusty_api::gateway_protocol::Frame
+pub fn rusty_api::gateway_protocol::Frame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl schemars::JsonSchema for rusty_api::gateway_protocol::Frame
+pub fn rusty_api::gateway_protocol::Frame::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::gateway_protocol::Frame::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::gateway_protocol::Frame::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::gateway_protocol::Frame
+pub fn rusty_api::gateway_protocol::Frame::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::gateway_protocol::Frame
+pub fn rusty_api::gateway_protocol::Frame::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::gateway_protocol::Frame
+impl core::marker::Send for rusty_api::gateway_protocol::Frame
+impl core::marker::Sync for rusty_api::gateway_protocol::Frame
+impl core::marker::Unpin for rusty_api::gateway_protocol::Frame
+impl core::marker::UnsafeUnpin for rusty_api::gateway_protocol::Frame
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::gateway_protocol::Frame
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::gateway_protocol::Frame
+impl<T, U> core::convert::Into<U> for rusty_api::gateway_protocol::Frame where U: core::convert::From<T>
+pub fn rusty_api::gateway_protocol::Frame::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::gateway_protocol::Frame where U: core::convert::Into<T>
+pub type rusty_api::gateway_protocol::Frame::Error = never
+pub fn rusty_api::gateway_protocol::Frame::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::gateway_protocol::Frame where U: core::convert::TryFrom<T>
+pub type rusty_api::gateway_protocol::Frame::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::gateway_protocol::Frame::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::gateway_protocol::Frame where T: core::clone::Clone
+pub type rusty_api::gateway_protocol::Frame::Owned = T
+pub fn rusty_api::gateway_protocol::Frame::clone_into(&self, &mut T)
+pub fn rusty_api::gateway_protocol::Frame::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::gateway_protocol::Frame where T: 'static + ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::Frame::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::gateway_protocol::Frame where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::Frame::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::gateway_protocol::Frame where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::Frame::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::gateway_protocol::Frame where T: core::clone::Clone
+pub unsafe fn rusty_api::gateway_protocol::Frame::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::gateway_protocol::Frame
+pub fn rusty_api::gateway_protocol::Frame::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::gateway_protocol::Frame where T: core::clone::Clone
+pub fn rusty_api::gateway_protocol::Frame::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::gateway_protocol::Frame where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::gateway_protocol::Pairing
+pub rusty_api::gateway_protocol::Pairing::Answer
+pub rusty_api::gateway_protocol::Pairing::Answer::device_id: alloc::string::String
+pub rusty_api::gateway_protocol::Pairing::Answer::signature: alloc::string::String
+pub rusty_api::gateway_protocol::Pairing::Challenge
+pub rusty_api::gateway_protocol::Pairing::Challenge::nonce: alloc::string::String
+pub rusty_api::gateway_protocol::Pairing::Denied
+pub rusty_api::gateway_protocol::Pairing::Denied::reason: alloc::string::String
+pub rusty_api::gateway_protocol::Pairing::Hello
+pub rusty_api::gateway_protocol::Pairing::Hello::device_id: alloc::string::String
+pub rusty_api::gateway_protocol::Pairing::Hello::platform: alloc::string::String
+pub rusty_api::gateway_protocol::Pairing::Hello::public_key: alloc::string::String
+pub rusty_api::gateway_protocol::Pairing::Paired
+pub rusty_api::gateway_protocol::Pairing::Paired::device_token: alloc::string::String
+impl core::clone::Clone for rusty_api::gateway_protocol::Pairing
+pub fn rusty_api::gateway_protocol::Pairing::clone(&self) -> rusty_api::gateway_protocol::Pairing
+impl core::fmt::Debug for rusty_api::gateway_protocol::Pairing
+pub fn rusty_api::gateway_protocol::Pairing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl schemars::JsonSchema for rusty_api::gateway_protocol::Pairing
+pub fn rusty_api::gateway_protocol::Pairing::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::gateway_protocol::Pairing::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::gateway_protocol::Pairing::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::gateway_protocol::Pairing
+pub fn rusty_api::gateway_protocol::Pairing::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::gateway_protocol::Pairing
+pub fn rusty_api::gateway_protocol::Pairing::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::gateway_protocol::Pairing
+impl core::marker::Send for rusty_api::gateway_protocol::Pairing
+impl core::marker::Sync for rusty_api::gateway_protocol::Pairing
+impl core::marker::Unpin for rusty_api::gateway_protocol::Pairing
+impl core::marker::UnsafeUnpin for rusty_api::gateway_protocol::Pairing
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::gateway_protocol::Pairing
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::gateway_protocol::Pairing
+impl<T, U> core::convert::Into<U> for rusty_api::gateway_protocol::Pairing where U: core::convert::From<T>
+pub fn rusty_api::gateway_protocol::Pairing::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::gateway_protocol::Pairing where U: core::convert::Into<T>
+pub type rusty_api::gateway_protocol::Pairing::Error = never
+pub fn rusty_api::gateway_protocol::Pairing::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::gateway_protocol::Pairing where U: core::convert::TryFrom<T>
+pub type rusty_api::gateway_protocol::Pairing::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::gateway_protocol::Pairing::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::gateway_protocol::Pairing where T: core::clone::Clone
+pub type rusty_api::gateway_protocol::Pairing::Owned = T
+pub fn rusty_api::gateway_protocol::Pairing::clone_into(&self, &mut T)
+pub fn rusty_api::gateway_protocol::Pairing::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::gateway_protocol::Pairing where T: 'static + ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::Pairing::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::gateway_protocol::Pairing where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::Pairing::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::gateway_protocol::Pairing where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::Pairing::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::gateway_protocol::Pairing where T: core::clone::Clone
+pub unsafe fn rusty_api::gateway_protocol::Pairing::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::gateway_protocol::Pairing
+pub fn rusty_api::gateway_protocol::Pairing::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::gateway_protocol::Pairing where T: core::clone::Clone
+pub fn rusty_api::gateway_protocol::Pairing::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::gateway_protocol::Pairing where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::gateway_protocol::ResponseOutcome
+pub rusty_api::gateway_protocol::ResponseOutcome::Err
+pub rusty_api::gateway_protocol::ResponseOutcome::Err::error: serde_json::value::Value
+pub rusty_api::gateway_protocol::ResponseOutcome::Ok
+pub rusty_api::gateway_protocol::ResponseOutcome::Ok::result: serde_json::value::Value
+impl core::clone::Clone for rusty_api::gateway_protocol::ResponseOutcome
+pub fn rusty_api::gateway_protocol::ResponseOutcome::clone(&self) -> rusty_api::gateway_protocol::ResponseOutcome
+impl core::fmt::Debug for rusty_api::gateway_protocol::ResponseOutcome
+pub fn rusty_api::gateway_protocol::ResponseOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl schemars::JsonSchema for rusty_api::gateway_protocol::ResponseOutcome
+pub fn rusty_api::gateway_protocol::ResponseOutcome::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::gateway_protocol::ResponseOutcome::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::gateway_protocol::ResponseOutcome::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::gateway_protocol::ResponseOutcome
+pub fn rusty_api::gateway_protocol::ResponseOutcome::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::gateway_protocol::ResponseOutcome
+pub fn rusty_api::gateway_protocol::ResponseOutcome::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::gateway_protocol::ResponseOutcome
+impl core::marker::Send for rusty_api::gateway_protocol::ResponseOutcome
+impl core::marker::Sync for rusty_api::gateway_protocol::ResponseOutcome
+impl core::marker::Unpin for rusty_api::gateway_protocol::ResponseOutcome
+impl core::marker::UnsafeUnpin for rusty_api::gateway_protocol::ResponseOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::gateway_protocol::ResponseOutcome
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::gateway_protocol::ResponseOutcome
+impl<T, U> core::convert::Into<U> for rusty_api::gateway_protocol::ResponseOutcome where U: core::convert::From<T>
+pub fn rusty_api::gateway_protocol::ResponseOutcome::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::gateway_protocol::ResponseOutcome where U: core::convert::Into<T>
+pub type rusty_api::gateway_protocol::ResponseOutcome::Error = never
+pub fn rusty_api::gateway_protocol::ResponseOutcome::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::gateway_protocol::ResponseOutcome where U: core::convert::TryFrom<T>
+pub type rusty_api::gateway_protocol::ResponseOutcome::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::gateway_protocol::ResponseOutcome::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::gateway_protocol::ResponseOutcome where T: core::clone::Clone
+pub type rusty_api::gateway_protocol::ResponseOutcome::Owned = T
+pub fn rusty_api::gateway_protocol::ResponseOutcome::clone_into(&self, &mut T)
+pub fn rusty_api::gateway_protocol::ResponseOutcome::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::gateway_protocol::ResponseOutcome where T: 'static + ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::ResponseOutcome::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::gateway_protocol::ResponseOutcome where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::ResponseOutcome::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::gateway_protocol::ResponseOutcome where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::ResponseOutcome::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::gateway_protocol::ResponseOutcome where T: core::clone::Clone
+pub unsafe fn rusty_api::gateway_protocol::ResponseOutcome::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::gateway_protocol::ResponseOutcome
+pub fn rusty_api::gateway_protocol::ResponseOutcome::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::gateway_protocol::ResponseOutcome where T: core::clone::Clone
+pub fn rusty_api::gateway_protocol::ResponseOutcome::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::gateway_protocol::ResponseOutcome where T: for<'de> serde_core::de::Deserialize<'de>
+pub enum rusty_api::gateway_protocol::SteeringVerb
+pub rusty_api::gateway_protocol::SteeringVerb::Followup
+pub rusty_api::gateway_protocol::SteeringVerb::Inject
+pub rusty_api::gateway_protocol::SteeringVerb::Steer
+impl core::clone::Clone for rusty_api::gateway_protocol::SteeringVerb
+pub fn rusty_api::gateway_protocol::SteeringVerb::clone(&self) -> rusty_api::gateway_protocol::SteeringVerb
+impl core::cmp::Eq for rusty_api::gateway_protocol::SteeringVerb
+impl core::cmp::PartialEq for rusty_api::gateway_protocol::SteeringVerb
+pub fn rusty_api::gateway_protocol::SteeringVerb::eq(&self, &rusty_api::gateway_protocol::SteeringVerb) -> bool
+impl core::fmt::Debug for rusty_api::gateway_protocol::SteeringVerb
+pub fn rusty_api::gateway_protocol::SteeringVerb::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rusty_api::gateway_protocol::SteeringVerb
+impl core::marker::StructuralPartialEq for rusty_api::gateway_protocol::SteeringVerb
+impl schemars::JsonSchema for rusty_api::gateway_protocol::SteeringVerb
+pub fn rusty_api::gateway_protocol::SteeringVerb::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::gateway_protocol::SteeringVerb::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::gateway_protocol::SteeringVerb::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::gateway_protocol::SteeringVerb
+pub fn rusty_api::gateway_protocol::SteeringVerb::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::gateway_protocol::SteeringVerb
+pub fn rusty_api::gateway_protocol::SteeringVerb::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::gateway_protocol::SteeringVerb
+impl core::marker::Send for rusty_api::gateway_protocol::SteeringVerb
+impl core::marker::Sync for rusty_api::gateway_protocol::SteeringVerb
+impl core::marker::Unpin for rusty_api::gateway_protocol::SteeringVerb
+impl core::marker::UnsafeUnpin for rusty_api::gateway_protocol::SteeringVerb
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::gateway_protocol::SteeringVerb
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::gateway_protocol::SteeringVerb
+impl<T, U> core::convert::Into<U> for rusty_api::gateway_protocol::SteeringVerb where U: core::convert::From<T>
+pub fn rusty_api::gateway_protocol::SteeringVerb::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::gateway_protocol::SteeringVerb where U: core::convert::Into<T>
+pub type rusty_api::gateway_protocol::SteeringVerb::Error = never
+pub fn rusty_api::gateway_protocol::SteeringVerb::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::gateway_protocol::SteeringVerb where U: core::convert::TryFrom<T>
+pub type rusty_api::gateway_protocol::SteeringVerb::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::gateway_protocol::SteeringVerb::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::gateway_protocol::SteeringVerb where T: core::clone::Clone
+pub type rusty_api::gateway_protocol::SteeringVerb::Owned = T
+pub fn rusty_api::gateway_protocol::SteeringVerb::clone_into(&self, &mut T)
+pub fn rusty_api::gateway_protocol::SteeringVerb::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::gateway_protocol::SteeringVerb where T: 'static + ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::SteeringVerb::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::gateway_protocol::SteeringVerb where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::SteeringVerb::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::gateway_protocol::SteeringVerb where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::SteeringVerb::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::gateway_protocol::SteeringVerb where T: core::clone::Clone
+pub unsafe fn rusty_api::gateway_protocol::SteeringVerb::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::gateway_protocol::SteeringVerb
+pub fn rusty_api::gateway_protocol::SteeringVerb::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::gateway_protocol::SteeringVerb where T: core::clone::Clone
+pub fn rusty_api::gateway_protocol::SteeringVerb::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::gateway_protocol::SteeringVerb where T: for<'de> serde_core::de::Deserialize<'de>
+pub struct rusty_api::gateway_protocol::TurnLease
+pub rusty_api::gateway_protocol::TurnLease::acquired_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub rusty_api::gateway_protocol::TurnLease::expires_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub rusty_api::gateway_protocol::TurnLease::holder_run_id: uuid::Uuid
+pub rusty_api::gateway_protocol::TurnLease::session_id: uuid::Uuid
+impl core::clone::Clone for rusty_api::gateway_protocol::TurnLease
+pub fn rusty_api::gateway_protocol::TurnLease::clone(&self) -> rusty_api::gateway_protocol::TurnLease
+impl core::fmt::Debug for rusty_api::gateway_protocol::TurnLease
+pub fn rusty_api::gateway_protocol::TurnLease::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl schemars::JsonSchema for rusty_api::gateway_protocol::TurnLease
+pub fn rusty_api::gateway_protocol::TurnLease::json_schema(&mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema
+pub fn rusty_api::gateway_protocol::TurnLease::schema_id() -> alloc::borrow::Cow<'static, str>
+pub fn rusty_api::gateway_protocol::TurnLease::schema_name() -> alloc::string::String
+impl serde_core::ser::Serialize for rusty_api::gateway_protocol::TurnLease
+pub fn rusty_api::gateway_protocol::TurnLease::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for rusty_api::gateway_protocol::TurnLease
+pub fn rusty_api::gateway_protocol::TurnLease::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for rusty_api::gateway_protocol::TurnLease
+impl core::marker::Send for rusty_api::gateway_protocol::TurnLease
+impl core::marker::Sync for rusty_api::gateway_protocol::TurnLease
+impl core::marker::Unpin for rusty_api::gateway_protocol::TurnLease
+impl core::marker::UnsafeUnpin for rusty_api::gateway_protocol::TurnLease
+impl core::panic::unwind_safe::RefUnwindSafe for rusty_api::gateway_protocol::TurnLease
+impl core::panic::unwind_safe::UnwindSafe for rusty_api::gateway_protocol::TurnLease
+impl<T, U> core::convert::Into<U> for rusty_api::gateway_protocol::TurnLease where U: core::convert::From<T>
+pub fn rusty_api::gateway_protocol::TurnLease::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rusty_api::gateway_protocol::TurnLease where U: core::convert::Into<T>
+pub type rusty_api::gateway_protocol::TurnLease::Error = never
+pub fn rusty_api::gateway_protocol::TurnLease::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rusty_api::gateway_protocol::TurnLease where U: core::convert::TryFrom<T>
+pub type rusty_api::gateway_protocol::TurnLease::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rusty_api::gateway_protocol::TurnLease::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rusty_api::gateway_protocol::TurnLease where T: core::clone::Clone
+pub type rusty_api::gateway_protocol::TurnLease::Owned = T
+pub fn rusty_api::gateway_protocol::TurnLease::clone_into(&self, &mut T)
+pub fn rusty_api::gateway_protocol::TurnLease::to_owned(&self) -> T
+impl<T> core::any::Any for rusty_api::gateway_protocol::TurnLease where T: 'static + ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::TurnLease::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rusty_api::gateway_protocol::TurnLease where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::TurnLease::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rusty_api::gateway_protocol::TurnLease where T: ?core::marker::Sized
+pub fn rusty_api::gateway_protocol::TurnLease::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rusty_api::gateway_protocol::TurnLease where T: core::clone::Clone
+pub unsafe fn rusty_api::gateway_protocol::TurnLease::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for rusty_api::gateway_protocol::TurnLease
+pub fn rusty_api::gateway_protocol::TurnLease::from(T) -> T
+impl<T> dyn_clone::DynClone for rusty_api::gateway_protocol::TurnLease where T: core::clone::Clone
+pub fn rusty_api::gateway_protocol::TurnLease::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> serde_core::de::DeserializeOwned for rusty_api::gateway_protocol::TurnLease where T: for<'de> serde_core::de::Deserialize<'de>
+pub const rusty_api::gateway_protocol::PROTOCOL_TYPES: &[&str]
 pub enum rusty_api::Effect
 pub rusty_api::Effect::Compensatable
 pub rusty_api::Effect::Idempotent

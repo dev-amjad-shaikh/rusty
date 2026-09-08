@@ -263,6 +263,7 @@ pub mod effects;
 pub mod egress;
 pub mod error;
 pub mod executor;
+pub mod frontier;
 pub mod gaps;
 pub mod goals;
 pub mod graph;
@@ -272,12 +273,15 @@ pub mod induction;
 pub mod install;
 pub mod invariant;
 pub mod journal;
+pub mod judge;
 pub mod knowledge;
 pub mod learn;
+pub mod learning;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
 pub mod memory_tiers;
+pub mod memory_tools;
 pub mod meter;
 pub mod middleware;
 pub mod node;
@@ -294,6 +298,7 @@ pub mod remote;
 pub mod render_intent;
 pub mod repair;
 pub mod replay;
+pub mod review_fork;
 pub mod reviewer;
 pub mod sandbox;
 pub mod scope;
@@ -302,7 +307,9 @@ pub mod self_improve;
 pub mod session_query;
 pub mod skill;
 pub mod skill_distill;
+pub mod skill_editorial;
 pub mod skill_pack;
+pub mod skill_retention;
 pub mod skills;
 pub mod state;
 pub mod subagent;
@@ -410,7 +417,7 @@ pub mod prelude {
     };
     pub use crate::invariant::{
         AssertionRequest, CheckingChatModel, InvariantChecker, InvariantViolation,
-        RequestAssertion, derive_expected_messages,
+        RequestAssertion, TurnStampAssertion, derive_expected_messages,
     };
     pub use crate::journal::{
         Clock, EventDraft, Journal, JournalSnapshot, PARENT_EVENT_KEY, RngSource,
@@ -429,9 +436,13 @@ pub mod prelude {
         distill_timeout_parameters, evaluation_effect_key, promotion_effect_id,
         promotion_effect_key, rollback_effect_key, surface_for_kind,
     };
+    pub use crate::learning::{
+        FLOOR_MAX_HUNTS_PER_CYCLE, FLOOR_MAX_PROBES_PER_CYCLE, HuntingBudget, LearningPolicy,
+        LearningPolicyError, MAX_HUNTS_PER_CYCLE, PromotionGate,
+    };
     pub use crate::llm::{
-        ChatMessage, ChatModel, ChatResponse, ModelPricing, OpenAiCompatibleClient, Role, ToolCall,
-        Usage,
+        ChatMessage, ChatModel, ChatResponse, ModelPricing, OpenAiCompatibleClient, Role,
+        StampedChatModel, TURN_STAMP_KEY, ToolCall, Usage,
     };
     pub use crate::memory::{
         BudgetOverflow, ContextBudget, DEFAULT_TOKEN_MARGIN_PERCENT, InMemoryMemoryStore,
@@ -440,6 +451,10 @@ pub mod prelude {
         MemoryStore, ProvenanceAuthor, ScopeAddress, TOKEN_BYTES_PER_ESTIMATE, TokenAccounting,
         ValidityWindow, apply_query, assemble, derive_memory_id, estimated_tokens,
         memory_effect_key, memory_read_request,
+    };
+    pub use crate::memory_tools::{
+        DEFAULT_BLOCK_CHAR_LIMIT, MAX_IMPORTANCE, MEMORY_APPEND_ENTRY_TOOL,
+        MEMORY_REPLACE_BLOCK_TOOL, MemoryToolset, maintenance_names,
     };
     pub use crate::meter::{
         CostEstimate, ModelMeter, RunMeter, TokenTotals, ToolClassTotals, UNREPORTED_MODEL,
@@ -497,6 +512,14 @@ pub mod prelude {
         RecordingTool, ReplayFixture, ReplayOutcome, ReplayParams, ReplaySource,
         ReplayingChatModel, ReplayingTool, ServedEffect, StepDiff,
     };
+    pub use crate::review_fork::{
+        DEFAULT_DIGEST_MESSAGE_CHARS, DEFAULT_SUBSTANTIVE_ASSISTANT_CHARS, ForkSkillCommit,
+        ForkSkillWrite, ForkWriteError, ParentTurn, REVIEW_BOUNDARY_KIND, REVIEW_FORK_COMPONENT,
+        ReplayMaterial, ReviewBoundaryTool, ReviewForkConfig, ReviewForkPlan, Substance,
+        SubstanceRule, assess_substance, commit_skill_write, compact_digest,
+        confined_review_registry, fork_dispatch_registry, plan_review, prompt_prefix_hash,
+        review_tool_allowlist,
+    };
     pub use crate::sandbox::{
         ContainerBackend, ContainerConfig, DEFAULT_LOCAL_OUTPUT_BYTES,
         DEFAULT_LOCAL_TIMEOUT, EnforcementLevel, LocalProcessBackend,
@@ -550,4 +573,7 @@ pub mod prelude {
         StaticFloor, TWIN_FORK_POLICY_VERSION, TWIN_REPORT_BOUND, Twin, TwinMetrics, TwinOutcome,
         TwinPolicy, TwinReport, TwinRunConfig, TwinWorkItem, TwinWorld, UnevaluableCase,
     };
+    // Provenance stamping (EP-07-S12): the stamp types every scheduler
+    // mints and every stamped dispatcher carries.
+    pub use rusty_api::{ComponentAttribution, TrafficClass, TurnBoundary, TurnStamp};
 }

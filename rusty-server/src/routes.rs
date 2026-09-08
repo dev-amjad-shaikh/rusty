@@ -28,6 +28,7 @@ use rusty_agent_runtime::durable::{
     ResolvedRetryParameters, RetryDecision, resolve_retry_parameters, resolve_timeout_bound_ms,
     retry_decision_event, timeout_decision_event,
 };
+use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::gaps::{
     ActorRef, AdjacencySource, Citation, CitationKind, ClosureCriteria, ClosureEvidence,
     EventSource, GapError, GapLedger, GapOrigin, GapStatus, GapSubject, InteractionChannel,
@@ -35,11 +36,10 @@ use rusty_agent_runtime::gaps::{
     ResolutionPath,
 };
 use rusty_agent_runtime::induction::{
-    crawl_coverage, declared_blocks, join_maps, mine_intents, seed_ledger, CoverageConfig,
-    InductionError, MiningConfig, SupplyArtifact, DEFAULT_BLOCK_CHAR_LIMIT,
-    DEFAULT_FAILING_THRESHOLD_MILLIS,
+    CoverageConfig, DEFAULT_BLOCK_CHAR_LIMIT, DEFAULT_FAILING_THRESHOLD_MILLIS, InductionError,
+    MiningConfig, SupplyArtifact, crawl_coverage, declared_blocks, join_maps, mine_intents,
+    seed_ledger,
 };
-use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
     Candidate, CandidateContent, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
@@ -105,6 +105,11 @@ pub(crate) struct AppState {
     /// Postgres). Thread records live here — not in a route-local map — so
     /// they survive restarts alongside their checkpoints.
     pub server_store: Arc<dyn ServerStore>,
+    /// The fleet-upgrade plane (EP-08-S08): per-session assistant version
+    /// pins and upgrade operations, one JSON file per record under the
+    /// store root, loaded at router build. Adoption happens only at
+    /// run-admission turn boundaries.
+    pub upgrades: crate::upgrades::UpgradePlane,
     /// Per-thread locks serializing `update_state`'s read-modify-write:
     /// without one, two concurrent writes could mint the same `step`.
     pub state_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
@@ -294,6 +299,11 @@ fn build_scope_table() -> ScopeTable {
     // Skills.
     table.declare("POST", "/skills", Scope::parse("skills:create").unwrap());
     table.declare("GET", "/skills", Scope::parse("skills:read").unwrap());
+    table.declare(
+        "GET",
+        "/skills/editorial/rung-distribution",
+        Scope::parse("skills:read").unwrap(),
+    );
 
     // Test-only: a route that does not exist, used by the enumeration-safe
     // test to prove identical refusal responses for existing and nonexistent
@@ -403,6 +413,7 @@ pub(crate) fn build_router(
         checkpointer,
         run_deps,
         server_store,
+        upgrades: crate::upgrades::UpgradePlane::load(&config.store_path),
         state_locks: Mutex::new(HashMap::new()),
         gap_locks: Mutex::new(HashMap::new()),
         shutdown,
@@ -568,6 +579,18 @@ pub(crate) fn build_router(
             "/assistants/{assistant_id}/versions/{version_id}/activate",
             post(activate_assistant_version),
         )
+        .route(
+            "/assistants/{assistant_id}/upgrades",
+            post(initiate_upgrade).get(list_upgrades),
+        )
+        .route(
+            "/assistants/{assistant_id}/upgrades/{operation_id}",
+            get(get_upgrade),
+        )
+        .route(
+            "/assistants/{assistant_id}/learning-policy",
+            get(get_learning_policy),
+        )
         .route("/crons", post(create_cron).get(list_crons))
         .route("/crons/{cron_id}", delete(delete_cron))
         .route("/store/{namespace}", get(list_store_namespace))
@@ -655,6 +678,10 @@ pub(crate) fn build_router(
             post(crate::skills::register_skill).get(crate::skills::list_skills),
         )
         .route("/skills/{name}", get(crate::skills::get_skill))
+        .route(
+            "/skills/editorial/rung-distribution",
+            get(crate::skills::rung_distribution),
+        )
         .route("/skills/{name}/body", get(crate::skills::get_skill_body))
         .route(
             "/skills/{name}/history",
@@ -718,6 +745,27 @@ pub(crate) fn build_router(
         .route(
             "/connectors/instances/{instance_id}/catalog",
             get(crate::connectors::instance_catalog),
+        )
+        // Interaction-event ingestion (EP-07-S05): pull the source corpus
+        // through the instance's declared read operation, normalize every
+        // record, and file it into the tenant's gap ledger — idempotent
+        // by content address, receipted per call.
+        .route(
+            "/connectors/instances/{instance_id}/ingest",
+            post(crate::connectors::ingest),
+        )
+        .route(
+            "/connectors/instances/{instance_id}/receipts",
+            get(crate::connectors::instance_receipts),
+        )
+        // Supply-side coverage crawl (EP-07-S07): pull the knowledge
+        // corpus through the instance's declared read operation,
+        // normalize every record into a supply artifact, and run the
+        // coverage crawl over the tenant's mined intent map — receipted
+        // per call, so every claim traces to a journaled exchange.
+        .route(
+            "/connectors/instances/{instance_id}/crawl",
+            post(crate::connectors::crawl),
         )
         // Repair-record audit stream (EP-10-S01): query by component,
         // trigger class, outcome, time range, session, or attempt.
@@ -1780,12 +1828,96 @@ async fn schedule_for_thread(
                 assistant.graph, record.graph
             )));
         }
+        // Fleet upgrades (EP-08-S08): the thread's pin decides which
+        // immutable version this run governs by. The first assistant-bound
+        // run on a thread pins the version it admits under; an open
+        // upgrade operation covering the session adopts its target now —
+        // at the turn boundary, before the run is scheduled — so an
+        // in-flight turn always completes under its pinned version and no
+        // code path re-pins mid-turn. A target that no longer resolves
+        // fails that session on the operation record; the run proceeds
+        // under its prior version, still serviceable.
+        let governing_version = match state.upgrades.pin_for(&internal_id) {
+            Some(pin) if pin.assistant_id == *assistant_id => {
+                let mut version_id = pin.version_id.clone();
+                if let Some(operation) = state
+                    .upgrades
+                    .open_operation_for(&tenant.scope(assistant_id), &internal_id)
+                {
+                    if operation.target_version_id != version_id {
+                        match assistant.version(&operation.target_version_id) {
+                            Some(target) => {
+                                state
+                                    .upgrades
+                                    .set_pin(
+                                        &internal_id,
+                                        crate::upgrades::AssistantPin {
+                                            assistant_id: assistant_id.clone(),
+                                            version_id: target.version_id.clone(),
+                                        },
+                                    )
+                                    .map_err(internal_err)?;
+                                state.upgrades.record_adoption(
+                                    &operation.operation_id,
+                                    &internal_id,
+                                    Utc::now(),
+                                );
+                                tracing::info!(
+                                    thread = %thread_id,
+                                    assistant = %assistant_id,
+                                    from = %version_id,
+                                    to = %target.version_id,
+                                    operator = %operation.initiated_by,
+                                    "fleet upgrade adopted at turn boundary"
+                                );
+                                version_id = target.version_id;
+                            }
+                            None => {
+                                state.upgrades.record_failure(
+                                    &operation.operation_id,
+                                    &internal_id,
+                                    format!(
+                                        "target version `{}` no longer resolves for assistant `{assistant_id}`",
+                                        operation.target_version_id
+                                    ),
+                                    Utc::now(),
+                                );
+                            }
+                        }
+                    }
+                }
+                version_id
+            }
+            _ => {
+                // First touch (or a blueprint switch — a fresh binding on
+                // this thread): pin the version this run admits under.
+                let active = assistant.active_version_id();
+                state
+                    .upgrades
+                    .set_pin(
+                        &internal_id,
+                        crate::upgrades::AssistantPin {
+                            assistant_id: assistant_id.clone(),
+                            version_id: active.clone(),
+                        },
+                    )
+                    .map_err(internal_err)?;
+                active
+            }
+        };
+        // The governing version's config supplies the run's defaults:
+        // under a pin this is the pinned snapshot, not the assistant's
+        // active serving fields; unpinned legacy threads read the active
+        // version exactly as before (the serving fields mirror it).
+        let governing_config = assistant
+            .version(&governing_version)
+            .map(|version| version.config)
+            .unwrap_or_else(|| assistant.config.clone());
         // Assistant config supplies a default recursion limit; an explicit
         // `config.recursion_limit` on the payload wins.
         let payload_limit = payload.config.as_ref().and_then(|c| c.recursion_limit);
         if payload_limit.is_none() {
-            if let Some(limit) = assistant
-                .config
+            if let Some(limit) = governing_config
                 .get("recursion_limit")
                 .and_then(Value::as_u64)
             {
@@ -1804,7 +1936,7 @@ async fn schedule_for_thread(
             config.tool_allowlist.is_some() || config.capability_set.is_some()
         });
         if !declared {
-            if let Some(names) = assistant_tool_default(&assistant.config) {
+            if let Some(names) = assistant_tool_default(&governing_config) {
                 payload
                     .config
                     .get_or_insert_with(RunConfigPayload::default)
@@ -3609,11 +3741,13 @@ async fn create_assistant(
     validate_client_id("assistant_id", &assistant_id)?;
 
     // Persist under the tenant's internal id; the wire shows the external id.
+    let config = payload.config.unwrap_or(Value::Null);
+    crate::learning::validate_policy_config(&config)?;
     let record = AssistantRecord::new(
         tenant.scope(&assistant_id),
         payload.name,
         payload.graph,
-        payload.config.unwrap_or(Value::Null),
+        config,
         payload.metadata.unwrap_or(Value::Null),
         Utc::now(),
     );
@@ -3779,11 +3913,13 @@ async fn create_assistant_version(
             payload.graph
         )));
     }
+    let config = payload.config.unwrap_or(Value::Null);
+    crate::learning::validate_policy_config(&config)?;
     let version = AssistantVersionRecord::new(
         Some(payload.base_version_id.clone()),
         payload.name,
         payload.graph,
-        payload.config.unwrap_or(Value::Null),
+        config,
         payload.metadata.unwrap_or(Value::Null),
         Utc::now(),
     );
@@ -3962,6 +4098,205 @@ async fn activate_assistant_version(
     Ok(Json(json!({
         "assistant": record.view(assistant_id),
         "activated": activated,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// Fleet upgrades (EP-08-S08)
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct InitiateUpgradePayload {
+    /// The published version covered sessions adopt into.
+    target_version_id: String,
+    /// Mandatory idempotency key: the operation id derives from
+    /// `(tenant, assistant, key)`, so a replay converges by identity.
+    idempotency_key: String,
+}
+
+/// The operation's wire shape: sessions as a thread-sorted array, never
+/// the internal-id map (the internal key carries the tenant prefix).
+fn upgrade_view(operation: &crate::upgrades::UpgradeOperation) -> Value {
+    json!({
+        "operation_id": operation.operation_id,
+        "assistant_id": operation.assistant_id,
+        "target_version_id": operation.target_version_id,
+        "initiated_by": operation.initiated_by,
+        "idempotency_key": operation.idempotency_key,
+        "created_at": operation.created_at,
+        "open": operation.is_open(),
+        "sessions": operation
+            .sessions
+            .values()
+            .map(|session| json!({
+                "thread_id": session.thread_id,
+                "from_version_id": session.from_version_id,
+                "status": session.status,
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// `POST /assistants/{id}/upgrades` — open a fleet upgrade to a published
+/// version: every session pinned to an ancestor of the target joins as
+/// `awaiting_turn` and adopts at its next turn boundary → `201` with the
+/// operation. Replaying the same idempotency key answers `200` with the
+/// existing operation; the key spent on a different target is a `409`; a
+/// second operation while one is still open is a `409` — which operation
+/// a boundary adopts into must never be ambiguous.
+async fn initiate_upgrade(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<InitiateUpgradePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if payload.idempotency_key.is_empty() || payload.idempotency_key.len() > 256 {
+        return Err(ApiError::bad_request(
+            "`idempotency_key` must be 1 to 256 bytes".to_string(),
+        ));
+    }
+    if !valid_version_id(&payload.target_version_id) {
+        return Err(ApiError::bad_request(
+            "`target_version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    let assistant = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let outcome = state.upgrades.initiate(
+        &tenant,
+        &assistant,
+        &payload.target_version_id,
+        &payload.idempotency_key,
+        Utc::now(),
+    );
+    use crate::upgrades::InitiateOutcome::*;
+    match outcome {
+        Created(operation) => Ok((StatusCode::CREATED, Json(upgrade_view(&operation)))),
+        Existing(operation) => Ok((StatusCode::OK, Json(upgrade_view(&operation)))),
+        KeyConflict { existing } => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "upgrade_key_conflict",
+            format!(
+                "idempotency key already opened operation `{existing}` against a different target"
+            ),
+        )),
+        TargetUnknown => Err(ApiError::not_found(format!(
+            "assistant version `{}` not found for `{assistant_id}`",
+            payload.target_version_id
+        ))),
+        InProgress { operation_id } => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "upgrade_in_progress",
+            format!(
+                "operation `{operation_id}` still has sessions awaiting adoption; convergence completes it"
+            ),
+        )),
+    }
+}
+
+/// `GET /assistants/{id}/upgrades` — the assistant's operations, newest
+/// first, each with per-session status.
+async fn list_upgrades(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let mut operations = state.upgrades.list_for(&tenant.scope(&assistant_id));
+    operations.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.operation_id.cmp(&left.operation_id))
+    });
+    Ok(Json(json!({
+        "upgrades": operations.iter().map(upgrade_view).collect::<Vec<_>>(),
+    })))
+}
+
+/// `GET /assistants/{id}/upgrades/{op}` — one operation with per-session
+/// status. An operation of another assistant (or tenant) is a 404, never
+/// a leak.
+async fn get_upgrade(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, operation_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let operation = state
+        .upgrades
+        .get(&operation_id)
+        .filter(|operation| {
+            crate::auth::scope_id(&operation.tenant, &operation.assistant_id)
+                == tenant.scope(&assistant_id)
+        })
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "upgrade operation `{operation_id}` not found for `{assistant_id}`"
+            ))
+        })?;
+    Ok(Json(upgrade_view(&operation)))
+}
+
+#[derive(Debug, Deserialize)]
+struct LearningPolicyQuery {
+    /// The session context the policy resolves under — the thread's pin
+    /// names the governing version, so the answer is the policy the
+    /// session's background loops actually read (EP-08-S07 AC 4).
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
+/// `GET /assistants/{id}/learning-policy` — the effective learning policy:
+/// the governing version's declaration (or the floor, named as such), with
+/// the current cycle's live budget consumption, so declared and actual are
+/// comparable at a glance (EP-08-S07 AC 5's platform read — the console
+/// renders it). `?thread_id=` resolves under that session's pin; without
+/// it, the serving version answers. The ledger carries no assistant
+/// attribution, so consumption is the tenant's live picture read against
+/// this assistant's declared budgets.
+async fn get_learning_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Query(query): Query<LearningPolicyQuery>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let pin = match &query.thread_id {
+        Some(thread_id) => {
+            validate_client_id("thread_id", thread_id)?;
+            match state.upgrades.pin_for(&tenant.scope(thread_id)) {
+                Some(pin) if pin.assistant_id != assistant_id => {
+                    return Err(ApiError::conflict(format!(
+                        "thread `{thread_id}` is pinned to assistant `{}`, not `{assistant_id}`",
+                        pin.assistant_id
+                    )));
+                }
+                pin => pin,
+            }
+        }
+        None => None,
+    };
+    let resolved = crate::learning::resolve(&record, pin.as_ref())?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let consumption = crate::learning::consumption(&ledger);
+    Ok(Json(json!({
+        "assistant_id": assistant_id,
+        "version_id": resolved.version_id,
+        "declared": resolved.declared,
+        "policy": resolved.policy,
+        "consumption": consumption,
     })))
 }
 
@@ -5102,7 +5437,7 @@ async fn get_memory(
 
 /// The per-tenant lock serializing gap-ledger mutations (see
 /// [`AppState::gap_locks`]).
-async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
+pub(crate) async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
     state
         .gap_locks
         .lock()
@@ -5114,7 +5449,7 @@ async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
 
 /// Load the tenant's ledger, or an empty one — an unread tenant costs
 /// no store row; the first mutation persists.
-async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
+pub(crate) async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
     Ok(state
         .server_store
         .get_gap_ledger(tenant)
@@ -5124,7 +5459,7 @@ async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, Ap
 }
 
 /// Persist the tenant's snapshot after a mutation.
-async fn persist_gap_ledger(
+pub(crate) async fn persist_gap_ledger(
     state: &AppState,
     tenant: &str,
     ledger: &GapLedger,
@@ -5510,15 +5845,54 @@ async fn open_speculative_gap(
 
 /// `GET /gaps` — the hunting loop's standing work order: actionable
 /// entries (open or reopened, speculation validated) ranked by
-/// priority.
+/// priority. `?origin=<wire name>` filters to one provenance class —
+/// `untrusted_derived` is the governance read (EP-07-S09 AC5).
+#[derive(Debug, Deserialize)]
+struct WorkOrderQuery {
+    /// Restrict to one origin's wire name (the unit variants:
+    /// `induction`, `runtime_escalation`, `runtime_correction`,
+    /// `zero_recall`, `operator`, `untrusted_derived`).
+    #[serde(default)]
+    origin: Option<String>,
+}
+
 async fn work_order_gaps(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
+    axum::extract::Query(query): axum::extract::Query<WorkOrderQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    if let Some(origin) = &query.origin {
+        // Validate the filter against the origin vocabulary: a typo
+        // silently answering an empty list would read as "no
+        // untrusted-derived gaps" — the one read that must not lie.
+        let known = [
+            "induction",
+            "runtime_escalation",
+            "runtime_correction",
+            "zero_recall",
+            "operator",
+            "untrusted_derived",
+        ];
+        if !known.contains(&origin.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "unknown origin filter `{origin}` (expected one of: {})",
+                known.join(", ")
+            )));
+        }
+    }
     let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
     let work_order: Vec<Value> = ledger
         .work_order()
         .into_iter()
+        .filter(|entry| {
+            query.origin.as_deref().is_none_or(|origin| {
+                serde_json::to_value(entry.origin)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .as_deref()
+                    == Some(origin)
+            })
+        })
         .map(|entry| {
             json!({
                 "gap_id": entry.gap_id,
@@ -5722,8 +6096,17 @@ struct GapAnnotationPayload {
     /// The intent the turn was joined to (the miner's vocabulary).
     intent_id: String,
     /// The judge samples — at least one; the outcome is their majority
-    /// vote, a tie abstains to `neutral`.
+    /// vote, a tie abstains to `neutral`. Optional when `signal` is
+    /// given: the platform's configured judge sampler scores the signal
+    /// into votes.
+    #[serde(default)]
     judge_votes: Vec<JudgeVote>,
+    /// The turn's next state for the platform to score through its
+    /// configured judge sampler (EP-07-S12 AC2) — the following user
+    /// message or the downstream tool result. Exactly one of
+    /// `judge_votes` / `signal` must be present.
+    #[serde(default)]
+    signal: Option<rusty_agent_runtime::judge::OutcomeSignal>,
     /// When the score was produced (default: now — scorers should send
     /// the scoring run's own timestamp).
     #[serde(default)]
@@ -5744,13 +6127,38 @@ async fn record_gap_annotation(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let scored_at = payload.scored_at.unwrap_or_else(Utc::now);
     let intent_id = payload.intent_id.clone();
-    let annotation = OutcomeAnnotation::from_votes(
-        payload.turn_ref,
-        payload.intent_id,
-        payload.judge_votes,
-        scored_at,
-    )
-    .map_err(gap_err)?;
+    // Exactly one evidence path: caller-supplied votes, or the platform's
+    // configured judge sampler scoring the next-state signal (EP-07-S12
+    // AC2). Both-present is ambiguous; neither-present is an evidence-free
+    // annotation — both are caller errors, and an unconfigured sampler is
+    // a deployment error (422, the embedding-index precedent).
+    let judge_votes = match (payload.judge_votes.is_empty(), payload.signal) {
+        (false, None) => payload.judge_votes,
+        (true, Some(signal)) => {
+            let sampler = state.config.judge_sampler.as_ref().ok_or_else(|| {
+                ApiError::unprocessable(
+                    "no judge sampler is configured; send `judge_votes` explicitly".to_string(),
+                )
+            })?;
+            sampler
+                .sample(&signal)
+                .await
+                .map_err(|error| ApiError::internal(format!("judge sampling: {error}")))?
+        }
+        (false, Some(_)) => {
+            return Err(ApiError::bad_request(
+                "send exactly one of `judge_votes` or `signal`, never both".to_string(),
+            ));
+        }
+        (true, None) => {
+            return Err(ApiError::bad_request(
+                "an annotation needs evidence: `judge_votes` or a `signal` to score".to_string(),
+            ));
+        }
+    };
+    let annotation =
+        OutcomeAnnotation::from_votes(payload.turn_ref, payload.intent_id, judge_votes, scored_at)
+            .map_err(gap_err)?;
     let outcome = annotation.outcome;
     let now = Utc::now();
     let (recorded, existed) = mutate_gap_ledger(&state, &tenant, |ledger| {
@@ -5856,13 +6264,16 @@ fn default_failing_threshold() -> u64 {
 
 /// Map an induction refusal onto the wire, delegating ledger refusals
 /// to the gap mapping.
-fn induction_err(error: InductionError) -> ApiError {
+pub(crate) fn induction_err(error: InductionError) -> ApiError {
     match error {
         InductionError::EmptyField(_) | InductionError::FieldTooLong { .. } => {
             ApiError::bad_request(error.to_string())
         }
+        InductionError::VectorIndexUnavailable => ApiError::unprocessable(error.to_string()),
         InductionError::Gap(gap) => gap_err(gap),
-        InductionError::UnsupportedFormat(_) | InductionError::Serde(_) => internal_err(error),
+        InductionError::UnsupportedFormat(_)
+        | InductionError::VectorMismatch { .. }
+        | InductionError::Serde(_) => internal_err(error),
     }
 }
 
@@ -5896,7 +6307,13 @@ async fn induction_run(
     let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
 
     let events: Vec<InteractionEvent> = ledger.events().cloned().collect();
-    let intent_map = mine_intents(&events, &mining_config, now).map_err(induction_err)?;
+    let intent_map = mine_intents(
+        &events,
+        &mining_config,
+        state.config.embedding_index.as_deref(),
+        now,
+    )
+    .map_err(induction_err)?;
     // Later passes re-place events through appended versioned
     // reassignments, never in place (EP-07-S06 AC 5).
     let mut reassignments = 0u64;
@@ -5953,31 +6370,90 @@ struct HuntCyclePayload {
     /// highest.
     #[serde(default)]
     max_hunts: Option<u32>,
+    /// The assistant whose declared learning policy governs this cycle
+    /// (EP-08-S07 AC 2): the blueprint's `hunting_budget` bounds the cycle
+    /// exactly — the caller may narrow it, never exceed it. Absent, the
+    /// caller's own bound decides (the pre-policy behavior).
+    #[serde(default)]
+    assistant_id: Option<String>,
+    /// The session context the policy resolves under: the thread's pin
+    /// names the governing version, so a policy change reaches the cycle
+    /// only after the session adopts the new version at a turn boundary —
+    /// never mid-cycle (AC 4). Meaningful only with `assistant_id`.
+    #[serde(default)]
+    thread_id: Option<String>,
 }
 
 /// `POST /hunts/cycle` — run one hunting cycle: move the work order's
 /// top entries into `hunting` and answer `200 {cycle_hunts, budget}`
 /// with the picks. An empty queue hunts nothing — no work is not an
-/// error.
+/// error. A cycle that stops with actionable work beyond its budget says
+/// so: `deferred` counts what the budget left, and the stoppage is logged
+/// (EP-08-S07 AC 2 — never silently exceeded).
 async fn hunt_cycle(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
     Json(payload): Json<HuntCyclePayload>,
 ) -> Result<Json<Value>, ApiError> {
-    let budget = payload.max_hunts.unwrap_or(1);
-    if budget == 0 {
+    if payload.thread_id.is_some() && payload.assistant_id.is_none() {
+        return Err(ApiError::bad_request(
+            "`thread_id` is meaningful only with `assistant_id`".to_string(),
+        ));
+    }
+    if payload.max_hunts == Some(0) {
         return Err(ApiError::bad_request(
             "`max_hunts` must be at least 1".to_string(),
         ));
     }
-    let budget = budget.min(MAX_HUNT_CYCLE_BUDGET);
+
+    // EP-08-S07: an assistant-scoped cycle resolves the effective learning
+    // policy — the pinned version's declaration exclusively — and spends
+    // its declared budget; an unscoped cycle keeps the caller's bound.
+    let (budget, governed) = match &payload.assistant_id {
+        Some(assistant_id) => {
+            validate_client_id("assistant_id", assistant_id)?;
+            let record = state
+                .server_store
+                .get_assistant(&tenant.scope(assistant_id))
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("assistant `{assistant_id}` not found"))
+                })?;
+            let pin = match &payload.thread_id {
+                Some(thread_id) => {
+                    validate_client_id("thread_id", thread_id)?;
+                    match state.upgrades.pin_for(&tenant.scope(thread_id)) {
+                        Some(pin) if pin.assistant_id != *assistant_id => {
+                            return Err(ApiError::conflict(format!(
+                                "thread `{thread_id}` is pinned to assistant `{}`, not `{assistant_id}`",
+                                pin.assistant_id
+                            )));
+                        }
+                        pin => pin,
+                    }
+                }
+                None => None,
+            };
+            let resolved = crate::learning::resolve(&record, pin.as_ref())?;
+            (
+                resolved.policy.hunt_budget(payload.max_hunts),
+                Some((assistant_id.clone(), resolved)),
+            )
+        }
+        None => (
+            payload.max_hunts.unwrap_or(1).min(MAX_HUNT_CYCLE_BUDGET),
+            None,
+        ),
+    };
     let now = Utc::now();
 
     let lock = gap_lock(&state, tenant.tenant()).await;
     let _guard = lock.lock().await;
     let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
-    let picks: Vec<String> = ledger
-        .work_order()
+    let order = ledger.work_order();
+    let deferred = order.len().saturating_sub(budget as usize);
+    let picks: Vec<String> = order
         .into_iter()
         .take(budget as usize)
         .map(|entry| entry.gap_id.clone())
@@ -5999,10 +6475,27 @@ async fn hunt_cycle(
         }));
     }
     persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
-    Ok(Json(json!({
+    if deferred > 0 {
+        tracing::info!(
+            budget,
+            deferred,
+            assistant = payload.assistant_id.as_deref().unwrap_or(""),
+            "hunting cycle stopped at its budget with work remaining"
+        );
+    }
+    let mut body = json!({
         "cycle_hunts": hunts,
         "budget": budget,
-    })))
+        "deferred": deferred,
+    });
+    if let Some((assistant_id, resolved)) = governed {
+        body["policy"] = json!({
+            "assistant_id": assistant_id,
+            "version_id": resolved.version_id,
+            "declared": resolved.declared,
+        });
+    }
+    Ok(Json(body))
 }
 
 #[derive(Debug, Deserialize)]

@@ -471,6 +471,12 @@ pub struct SkillCatalogEntry {
     pub metadata: SkillMetadata,
     /// The run-facing binding.
     pub binding: SkillBinding,
+    /// The lifecycle state the retention book reports, when the caller
+    /// tracks retention (EP-07-S03). `Cold` and `Archived` entries leave
+    /// the prompt index here — excluded with a typed reason, never
+    /// half-shown. `None` means the caller has no retention information;
+    /// the entry is eligible, never guessed cold.
+    pub lifecycle: Option<crate::skill::SkillPromotionStatus>,
 }
 
 /// The features a selection runs against: the task's tags, and the tools
@@ -536,6 +542,15 @@ pub enum SkillExclusionReason {
         /// The missing tool names (sorted).
         missing: Vec<String>,
     },
+    /// The retention book reports the skill `Cold` or `Archived`
+    /// (EP-07-S03): it has left the prompt index until an operator
+    /// restores it. The exclusion is structural — a cooled skill is
+    /// never half-shown — and the status travels so the audit trail
+    /// names why.
+    LifecycleGated {
+        /// The lifecycle state that excluded the skill.
+        status: crate::skill::SkillPromotionStatus,
+    },
 }
 
 /// A catalog entry excluded from scoring, with its reason.
@@ -589,10 +604,31 @@ pub fn select_skills(
     catalog: &[SkillCatalogEntry],
     policy: &SkillSelectionPolicy,
 ) -> SkillSelection {
-    // Gate: declared tool availability after the run's narrowing.
+    // Gate: lifecycle first — a cooled or archived skill leaves the
+    // prompt index before any scoring question is asked (EP-07-S03);
+    // then declared tool availability after the run's narrowing.
     let mut excluded: Vec<ExcludedSkill> = Vec::new();
     let mut eligible: Vec<&SkillCatalogEntry> = Vec::new();
     for entry in catalog {
+        if matches!(
+            entry.lifecycle,
+            Some(
+                crate::skill::SkillPromotionStatus::Cold
+                    | crate::skill::SkillPromotionStatus::Archived,
+            )
+        ) {
+            excluded.push(ExcludedSkill {
+                name: entry.metadata.name.clone(),
+                revision: entry.metadata.revision,
+                content_hash: entry.metadata.content_hash.clone(),
+                reason: SkillExclusionReason::LifecycleGated {
+                    status: entry
+                        .lifecycle
+                        .expect("the matches! guard established Some"),
+                },
+            });
+            continue;
+        }
         let missing: Vec<String> = match &features.available_tools {
             Some(available) => entry
                 .binding
@@ -1122,6 +1158,7 @@ mod tests {
                 tools: tools.iter().map(|t| t.to_string()).collect(),
                 ..Default::default()
             },
+            lifecycle: None,
         }
     }
 
@@ -1232,6 +1269,7 @@ mod tests {
             SkillExclusionReason::UnavailableTools { missing } => {
                 assert_eq!(missing, &vec!["cloud.logs".to_string()]);
             }
+            other => panic!("expected an unavailable-tools exclusion, got {other:?}"),
         }
         // No narrowing information: the gate is skipped, never guessed.
         let open = SkillSelectionFeatures {

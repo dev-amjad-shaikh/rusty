@@ -189,10 +189,12 @@ mod error;
 mod evaluations;
 mod gaps;
 mod gate;
+pub mod gateway_schema;
 mod health;
 mod journals;
 mod knowledge;
 mod learn;
+mod learning;
 mod mcp_bridge;
 mod memory;
 pub mod oauth;
@@ -213,6 +215,7 @@ mod supervision;
 mod tasks;
 mod threads;
 mod triggers;
+mod upgrades;
 pub mod verify;
 
 use std::collections::HashMap;
@@ -683,6 +686,26 @@ pub struct ServerConfig {
     /// enforced — the deployment is open. See
     /// [`ServerConfig::with_egress_policy`].
     pub egress_policy: Option<rusty_agent_runtime::egress::EgressPolicy>,
+
+    /// The connector transport override (EP-07-S05): when set, every
+    /// connector operation execution — the check gate and ingestion
+    /// alike — sends through this transport instead of the reqwest
+    /// default. Exists so tests drive a scripted fixture without
+    /// sockets; production deployments leave it `None`. See
+    /// [`ServerConfig::with_connector_transport`].
+    pub connector_transport: Option<Arc<dyn rusty_agent_runtime::connector::ConnectorTransport>>,
+
+    /// The embedding index (EP-07-S06): when set, intent mining may run
+    /// in vector-index mode; when `None`, requesting that mode is a
+    /// typed 422 refusal rather than a silent downgrade to full-text
+    /// clustering. See [`ServerConfig::with_embedding_index`].
+    pub embedding_index: Option<Arc<dyn rusty_agent_runtime::induction::EmbeddingIndex>>,
+
+    /// The judge sampler (EP-07-S12): when set, `POST /gaps/annotations`
+    /// accepts a next-state `signal` the platform scores into judge
+    /// votes; when `None`, that path is a typed 422 refusal. See
+    /// [`ServerConfig::with_judge_sampler`].
+    pub judge_sampler: Option<Arc<dyn rusty_agent_runtime::judge::JudgeSampler>>,
 }
 
 impl Default for ServerConfig {
@@ -716,6 +739,9 @@ impl Default for ServerConfig {
             broker_sweep_interval: None,
             artifact_sweep_interval: None,
             egress_policy: None,
+            connector_transport: None,
+            embedding_index: None,
+            judge_sampler: None,
         }
     }
 }
@@ -1068,6 +1094,42 @@ impl ServerConfig {
     /// one the deployment is open: no egress rules are enforced.
     pub fn with_egress_policy(mut self, policy: rusty_agent_runtime::egress::EgressPolicy) -> Self {
         self.egress_policy = Some(policy);
+        self
+    }
+
+    /// Builder-style: override the connector transport (EP-07-S05). Every
+    /// connector operation execution — the check gate and ingestion
+    /// alike — sends through this transport. Tests inject a scripted
+    /// fixture here; production leaves it unset for the reqwest default.
+    pub fn with_connector_transport(
+        mut self,
+        transport: Arc<dyn rusty_agent_runtime::connector::ConnectorTransport>,
+    ) -> Self {
+        self.connector_transport = Some(transport);
+        self
+    }
+
+    /// Builder-style: configure the embedding index (EP-07-S06). With an
+    /// index set, intent mining may run in vector-index mode; without
+    /// one, that mode refuses typed. Tests inject a deterministic fake.
+    pub fn with_embedding_index(
+        mut self,
+        index: Arc<dyn rusty_agent_runtime::induction::EmbeddingIndex>,
+    ) -> Self {
+        self.embedding_index = Some(index);
+        self
+    }
+
+    /// Builder-style: configure the judge sampler (EP-07-S12). With a
+    /// sampler set, `POST /gaps/annotations` accepts a next-state `signal`
+    /// the platform scores into judge votes; without one, that path
+    /// refuses typed (`422`) and caller-supplied `judge_votes` remain the
+    /// evidence path. Tests inject the deterministic heuristic.
+    pub fn with_judge_sampler(
+        mut self,
+        sampler: Arc<dyn rusty_agent_runtime::judge::JudgeSampler>,
+    ) -> Self {
+        self.judge_sampler = Some(sampler);
         self
     }
 }

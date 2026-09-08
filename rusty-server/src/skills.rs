@@ -505,6 +505,11 @@ impl SkillPlane {
     /// AC 1: A skill with `eval_gate` requires a passing suite run.
     /// AC 5: If content hash unchanged, reuse newest passing run;
     ///        if changed, demand new evaluation.
+    /// EP-08-S07 AC 3: `gate_override` is the blueprint's declared
+    /// eval-suite reference — when the governing policy names one, it
+    /// replaces the skill's own declaration, and a reference that no
+    /// longer resolves fails the promotion loudly ([`PromotionError::GateFailed`]),
+    /// never an ungated one.
     pub(crate) async fn promote(
         &self,
         tenant: &str,
@@ -512,6 +517,7 @@ impl SkillPlane {
         revision: u64,
         author: String,
         evaluator: &dyn SkillGateEvaluator,
+        gate_override: Option<String>,
     ) -> Result<SkillPromotion, PromotionError> {
         let tenants = self.tenants.lock().await;
         let version = tenants
@@ -522,7 +528,9 @@ impl SkillPlane {
             .ok_or(PromotionError::NotFound)?;
 
         let eval_gate = version.metadata().eval_gate.clone();
-        let gate_name = eval_gate.ok_or(PromotionError::NoGateDeclared)?;
+        let gate_name = gate_override
+            .or(eval_gate)
+            .ok_or(PromotionError::NoGateDeclared)?;
         let content_hash = version.content_hash().to_owned();
         drop(tenants); // release lock before async evaluation
 
@@ -814,6 +822,69 @@ pub(crate) async fn list_skills(
     Json(json!({ "skills": skills }))
 }
 
+// --------------------------------------------------------------------- //
+// Editorial governance (EP-07-S03)
+// --------------------------------------------------------------------- //
+
+/// `GET /skills/editorial/rung-distribution` query: the window, both
+/// bounds optional RFC 3339 (`since` includes, `until` excludes).
+#[derive(Debug, Deserialize)]
+pub(crate) struct RungDistributionQuery {
+    since: Option<String>,
+    until: Option<String>,
+}
+
+/// Parse one optional RFC 3339 window bound; a malformed bound is a
+/// caller error (`400`), never a silently open window.
+fn parse_window_bound(
+    name: &str,
+    value: Option<String>,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
+    value
+        .map(|raw| {
+            chrono::DateTime::parse_from_rfc3339(&raw)
+                .map(|parsed| parsed.with_timezone(&chrono::Utc))
+                .map_err(|_| {
+                    ApiError::bad_request(format!(
+                        "`{name}` must be RFC 3339 (e.g. 2026-09-01T00:00:00Z)"
+                    ))
+                })
+        })
+        .transpose()
+}
+
+/// `GET /skills/editorial/rung-distribution` — the taxonomy's standing
+/// health metric: how many automated skill mutations landed on each
+/// patch-before-create rung over the window. The tenant's candidate store
+/// is the ledger read (a candidate's editorial provenance is the recorded
+/// rung; its `created_at` is the mutation instant); every rung reports,
+/// zero-filled. `400` on malformed or inverted windows.
+pub(crate) async fn rung_distribution(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    axum::extract::Query(query): axum::extract::Query<RungDistributionQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let window = rusty_agent_runtime::skill_editorial::DistributionWindow {
+        since: parse_window_bound("since", query.since)?,
+        until: parse_window_bound("until", query.until)?,
+    };
+    let records = state
+        .server_store
+        .list_candidates(tenant.tenant())
+        .await
+        .map_err(|error| ApiError::internal(format!("list candidates: {error}")))?;
+    let mutations = records.iter().filter_map(|record| {
+        record
+            .candidate
+            .editorial
+            .as_ref()
+            .map(|provenance| (record.candidate.created_at, provenance.rung))
+    });
+    let distribution = rusty_agent_runtime::skill_editorial::rung_distribution(mutations, &window)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(Json(json!(distribution)))
+}
+
 /// `GET /skills/{name}` — the latest version's receipt plus the revision
 /// count (`404` unknown/cross-tenant — the two are indistinguishable by
 /// design).
@@ -926,12 +997,28 @@ pub(crate) struct PromoteSkillPayload {
     revision: Option<u64>,
     /// Who is attempting the promotion.
     author: String,
+    /// The assistant whose blueprint promotion gate governs this attempt
+    /// (EP-08-S07 AC 3): the declared eval-suite reference overrides the
+    /// skill's own `eval_gate`, and the declared approval scope demands a
+    /// matching approval token. Absent, the skill's own declaration
+    /// governs (the pre-policy behavior).
+    #[serde(default)]
+    assistant_id: Option<String>,
+    /// The approval the policy's `approval_scope` demands, minted by that
+    /// scope. Ignored when no assistant context is named or the policy
+    /// declares no scope.
+    #[serde(default)]
+    approval: Option<rusty_agent_runtime::effects::ApprovalToken>,
 }
 
 /// `POST /skills/{name}/promote` — attempt promotion through the eval gate.
 /// Returns `200` with the promotion record on success, `404` if the skill
 /// or revision is unknown, `422` if no gate is declared, `403` if the gate
-/// blocks (with diagnostics).
+/// blocks (with diagnostics). With `assistant_id` the blueprint's declared
+/// promotion gate governs (EP-08-S07 AC 3): its eval-suite reference
+/// replaces the skill's own, its approval scope demands a token it minted
+/// (`403` naming the scope otherwise), and a suite reference that no longer
+/// resolves fails the promotion loudly — never an ungated promotion.
 pub(crate) async fn promote_skill(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
@@ -948,6 +1035,52 @@ pub(crate) async fn promote_skill(
         },
     };
 
+    // EP-08-S07 AC 3: an assistant-scoped promotion reads the governing
+    // version's declared promotion gate — the blueprint, not the artifact,
+    // decides what evidence and whose approval admits a behavior change.
+    let mut gate_override: Option<String> = None;
+    if let Some(assistant_id) = &payload.assistant_id {
+        let record = match state
+            .server_store
+            .get_assistant(&tenant.scope(assistant_id))
+            .await
+        {
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                return ApiError::not_found(format!("assistant `{assistant_id}` not found"))
+                    .into_response();
+            }
+            Err(error) => {
+                return ApiError::internal(format!("load assistant `{assistant_id}`: {error}"))
+                    .into_response();
+            }
+        };
+        let resolved = match crate::learning::resolve(&record, None) {
+            Ok(resolved) => resolved,
+            Err(error) => return error.into_response(),
+        };
+        let gate = &resolved.policy.skill_promotion;
+        if let Some(scope) = &gate.approval_scope {
+            let admitted = payload
+                .approval
+                .as_ref()
+                .is_some_and(|token| token.approved_by() == scope);
+            if !admitted {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "approval_required",
+                        "message": format!(
+                            "the blueprint's promotion gate requires an approval from scope `{scope}`"
+                        ),
+                    })),
+                )
+                    .into_response();
+            }
+        }
+        gate_override = gate.eval_suite_ref.clone();
+    }
+
     // Use a default evaluator that fails closed when not configured.
     let default_evaluator = crate::skills::UnconfiguredGateEvaluator;
     let evaluator: &dyn crate::skills::SkillGateEvaluator = state
@@ -958,7 +1091,14 @@ pub(crate) async fn promote_skill(
 
     match state
         .skills
-        .promote(tenant.tenant(), &name, revision, payload.author, evaluator)
+        .promote(
+            tenant.tenant(),
+            &name,
+            revision,
+            payload.author,
+            evaluator,
+            gate_override,
+        )
         .await
     {
         Ok(promotion) => {
@@ -1129,7 +1269,7 @@ mod tests {
             }),
         };
         let result = plane
-            .promote("default", "no-gate", 1, "op".to_string(), &evaluator)
+            .promote("default", "no-gate", 1, "op".to_string(), &evaluator, None)
             .await;
         assert_eq!(result, Err(PromotionError::NoGateDeclared));
         let _ = std::fs::remove_dir_all(root);
@@ -1157,7 +1297,7 @@ mod tests {
             }),
         };
         let result = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .promote("default", "gated", 1, "op".to_string(), &evaluator, None)
             .await;
         assert!(
             matches!(result, Err(PromotionError::GateBlocked { run_id, .. }) if run_id == "run-fail")
@@ -1187,7 +1327,7 @@ mod tests {
             }),
         };
         let promotion = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .promote("default", "gated", 1, "op".to_string(), &evaluator, None)
             .await
             .unwrap();
         assert_eq!(promotion.status, SkillPromotionStatus::Promoted);
@@ -1218,7 +1358,7 @@ mod tests {
             }),
         };
         let first = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator)
+            .promote("default", "gated", 1, "op".to_string(), &evaluator, None)
             .await
             .unwrap();
         assert_eq!(first.gate_run_id, Some("run-1".to_owned()));
@@ -1234,6 +1374,7 @@ mod tests {
                 1,
                 "op".to_string(),
                 &evaluator_never_called,
+                None,
             )
             .await
             .unwrap();
@@ -1259,7 +1400,7 @@ mod tests {
             }),
         };
         let first = plane
-            .promote("default", "gated", 1, "op".to_string(), &evaluator1)
+            .promote("default", "gated", 1, "op".to_string(), &evaluator1, None)
             .await
             .unwrap();
 
@@ -1278,7 +1419,7 @@ mod tests {
             }),
         };
         let second = plane
-            .promote("default", "gated", 2, "op".to_string(), &evaluator2)
+            .promote("default", "gated", 2, "op".to_string(), &evaluator2, None)
             .await
             .unwrap();
         assert_ne!(first.content_hash, second.content_hash);
