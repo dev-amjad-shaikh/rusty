@@ -296,6 +296,19 @@ fn build_scope_table() -> ScopeTable {
     table.declare("POST", "/runs/replay", Scope::parse("runs:replay").unwrap());
     table.declare("GET", "/runs/diff", Scope::parse("runs:read").unwrap());
 
+    // Repairs.
+    table.declare("GET", "/repairs", Scope::parse("repairs:read").unwrap());
+    table.declare(
+        "GET",
+        "/repairs/:record_id",
+        Scope::parse("repairs:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/repairs/knowledge",
+        Scope::parse("repairs:write").unwrap(),
+    );
+
     // Skills.
     table.declare("POST", "/skills", Scope::parse("skills:create").unwrap());
     table.declare("GET", "/skills", Scope::parse("skills:read").unwrap());
@@ -779,6 +792,7 @@ pub(crate) fn build_router(
         // trigger class, outcome, time range, session, or attempt.
         .route("/repairs", get(crate::repair::list_repairs))
         .route("/repairs/{record_id}", get(crate::repair::get_repair))
+        .route("/repairs/knowledge", post(crate::repair::file_knowledge))
         // The learning-candidate lifecycle (R0.8 wave 3): creation plus
         // the three journaled transitions, and the version-pointer
         // listing. Every transition requires `run_id` — the journal is
@@ -5561,7 +5575,7 @@ pub(crate) async fn persist_gap_ledger(
 /// `400`, unknown ids `404`, and every state-machine or gate refusal is
 /// a `409` conflict — a ledger that drives autonomous work never fails
 /// silently, and it never fails ambiguously.
-fn gap_err(error: GapError) -> ApiError {
+pub(crate) fn gap_err(error: GapError) -> ApiError {
     match &error {
         GapError::EmptyField(_) | GapError::FieldTooLong { .. } | GapError::EmptyEvidence => {
             ApiError::bad_request(error.to_string())
