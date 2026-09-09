@@ -59,6 +59,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # and SHA-256 payload hashes for the event log.
 hmac = "0.12"
 sha2 = "0.10"
+# Device pairing (EP-04-S03): Ed25519 challenge-answer verification. Same
+# pure-Rust, no-native-code crate and posture rusty-core already pins for
+# receipts and registry signatures.
+ed25519-dalek = "2"
 # The credential broker (R0.11 wave 3): XChaCha20-Poly1305 for the
 # envelope encryption of connection token material. RustCrypto's AEADs
 # are the established, externally audited (NCC Group) pure-Rust choice —
