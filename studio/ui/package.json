@@ -7,6 +7,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "tsc -b && vite build && node scripts/normalize-dist.mjs",
     "typecheck": "tsc -b --pretty false",
+    "generate:draft": "node scripts/agent-draft-schema.mjs",
     "test": "vitest run",
     "dev:ui": "vite"
   },
