@@ -789,6 +789,18 @@ impl PackageManifest {
         !self.hash.is_empty() && self.hash == self.compute_hash()
     }
 
+    /// The content hash of the manifest with no signature attached.
+    ///
+    /// This is what a publisher signs: the stored `hash` covers the
+    /// signature itself, binding it into the package identity, so
+    /// signature verification must run against the unsigned content hash
+    /// (EP-15-S01 AC 3).
+    pub fn unsigned_content_hash(&self) -> String {
+        let mut unsigned = self.clone();
+        unsigned.signature = None;
+        unsigned.compute_hash()
+    }
+
     /// The content-addressed identity of this manifest.
     pub fn content_hash(&self) -> &str {
         &self.hash

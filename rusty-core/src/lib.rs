@@ -289,6 +289,7 @@ pub mod package;
 pub mod plugin;
 #[cfg(feature = "genai")]
 pub mod provider_genai;
+pub mod quality_gate;
 pub mod react;
 pub mod receipt;
 pub mod record;
