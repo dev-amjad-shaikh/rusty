@@ -94,6 +94,13 @@ impl ApiError {
     pub fn shutting_down(message: String) -> Self {
         Self::new(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", message)
     }
+
+    /// Consume the error into its `{error, message}` body: the gateway WS
+    /// transport (`crate::gateway_ws`) renders the same envelope inside a
+    /// `Frame::Response`, where no HTTP status exists to carry it.
+    pub(crate) fn into_body(self) -> Value {
+        self.body
+    }
 }
 
 impl IntoResponse for ApiError {

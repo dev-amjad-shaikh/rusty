@@ -296,6 +296,13 @@ fn build_scope_table() -> ScopeTable {
     table.declare("POST", "/runs/replay", Scope::parse("runs:replay").unwrap());
     table.declare("GET", "/runs/diff", Scope::parse("runs:read").unwrap());
 
+    // The gateway WebSocket transport (EP-04-S01).
+    table.declare(
+        "GET",
+        "/gateway/ws",
+        Scope::parse("gateway:stream").unwrap(),
+    );
+
     // Repairs.
     table.declare("GET", "/repairs", Scope::parse("repairs:read").unwrap());
     table.declare(
@@ -411,6 +418,7 @@ pub(crate) fn build_router(
         shutdown: shutdown.clone(),
         default_environment_tag: config.default_environment_tag.clone(),
         default_obligation_ttl: config.default_obligation_ttl,
+        gateway: crate::gateway_ws::GatewayHub::new(),
     };
     let outbox_relay_interval = config.outbox_relay_interval;
     #[cfg(feature = "capsules")]
@@ -556,6 +564,10 @@ pub(crate) fn build_router(
         .route("/runs/{run_id}/fixture", get(get_run_fixture))
         .route("/runs/replay", post(replay_run))
         .route("/runs/diff", get(diff_runs))
+        // The gateway WebSocket transport (EP-04-S01): the schema-defined
+        // `Frame` protocol — validated before dispatch, snapshot-on-connect,
+        // per-connection monotonic event sequencing, named run boundaries.
+        .route("/gateway/ws", get(crate::gateway_ws::gateway_ws))
         .route("/approvals", get(list_approvals))
         .route("/approvals/sweep", post(sweep_approvals))
         // Signed run receipts (R0.9 wave 3): mint-on-read over the run's
@@ -1831,7 +1843,7 @@ fn validate_tool_allowlist(
     Ok(())
 }
 
-async fn schedule_for_thread(
+pub(crate) async fn schedule_for_thread(
     state: &Arc<AppState>,
     tenant: &TenantContext,
     thread_id: &str,
