@@ -19,9 +19,9 @@ use rusty_agent_runtime::package::{
 };
 use rusty_agent_runtime::quality_gate::{
     render_evidence_summary, CertificationStatus, ConformanceSuiteKind, ConformanceSuiteResult,
-    DocsBundle, EvalFixture, EvalSuiteDecl, FixtureFreshness, GateContext, GateEvalRun,
-    GateEvalRunner, GateFailure, GateConformanceRunner, GateWarning, ObservedBehavior,
-    PackageSubmission, QualityGate, RequiredDoc,
+    DocsBundle, EvalFixture, EvalSuiteDecl, FixtureFreshness, GateConformanceRunner, GateContext,
+    GateEvalRun, GateEvalRunner, GateFailure, GateWarning, ObservedBehavior, PackageSubmission,
+    QualityGate, RequiredDoc,
 };
 use rusty_agent_runtime::registry_index::{
     RegistryEntry, RegistryIndex, RegistryOrigin, RegistryVersion,
@@ -44,7 +44,8 @@ fn fixture_keypair() -> (String, String) {
         buf
     };
     let signing_key = SigningKey::from_bytes(&secret);
-    let pubkey_hex = rusty_agent_runtime::broker::hex_encode(signing_key.verifying_key().as_bytes());
+    let pubkey_hex =
+        rusty_agent_runtime::broker::hex_encode(signing_key.verifying_key().as_bytes());
     let privkey_hex = rusty_agent_runtime::broker::hex_encode(&signing_key.to_bytes());
     (privkey_hex, pubkey_hex)
 }
@@ -53,8 +54,7 @@ fn sign_hash(hash: &str, privkey_hex: &str, pubkey_hex: &str) -> PackageSignatur
     use ed25519_dalek::Signer;
 
     let key_bytes = rusty_agent_runtime::broker::hex_decode(privkey_hex).unwrap();
-    let signing_key =
-        ed25519_dalek::SigningKey::from_bytes(&key_bytes.try_into().unwrap());
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes.try_into().unwrap());
     let signature = signing_key.sign(hash.as_bytes());
     PackageSignature {
         sig_hex: rusty_agent_runtime::broker::hex_encode(&signature.to_bytes()),
@@ -266,14 +266,26 @@ async fn run_gate(
 async fn complete_package_passes_and_carries_evidence() {
     let (privkey, pubkey) = fixture_keypair();
     let submission = complete_submission(&privkey, &pubkey);
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
 
     assert!(report.passed(), "failures: {:?}", report.failures);
     let evidence = report.evidence.expect("passing gate yields evidence");
     assert_eq!(evidence.eval.suite_name, "connector-evals");
-    assert_eq!((evidence.eval.cases_passed, evidence.eval.cases_total), (4, 4));
     assert_eq!(
-        evidence.conformance.iter().map(|c| c.suite).collect::<Vec<_>>(),
+        (evidence.eval.cases_passed, evidence.eval.cases_total),
+        (4, 4)
+    );
+    assert_eq!(
+        evidence
+            .conformance
+            .iter()
+            .map(|c| c.suite)
+            .collect::<Vec<_>>(),
         vec![ConformanceSuiteKind::ToolPipeline]
     );
     assert_eq!(evidence.contracts_version, "2026.1");
@@ -285,7 +297,12 @@ async fn missing_docs_are_each_named() {
     let (privkey, pubkey) = fixture_keypair();
     let mut submission = complete_submission(&privkey, &pubkey);
     submission.docs = DocsBundle::default();
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
 
     assert!(!report.passed());
     for doc in [
@@ -384,7 +401,12 @@ async fn unsigned_package_is_refused() {
     // Strip the signature without recomputing the hash: both the hash check
     // and the signature check must fire.
     submission.manifest.signature = None;
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
 
     assert!(!report.passed());
     assert!(report.failures.contains(&GateFailure::SignatureMissing));
@@ -396,7 +418,12 @@ async fn tampered_manifest_is_refused() {
     let (privkey, pubkey) = fixture_keypair();
     let mut submission = complete_submission(&privkey, &pubkey);
     submission.manifest.name = "Tampered".to_string();
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
 
     assert!(!report.passed());
     assert!(report.failures.contains(&GateFailure::ManifestHashInvalid));
@@ -419,7 +446,9 @@ async fn undeclared_egress_during_eval_fails_the_gate() {
     let (privkey, pubkey) = fixture_keypair();
     let submission = complete_submission(&privkey, &pubkey);
     let mut run = passing_run();
-    run.observed.egress_hosts.push("telemetry.evil.net".to_string());
+    run.observed
+        .egress_hosts
+        .push("telemetry.evil.net".to_string());
     let report = run_gate(&submission, run, &ScriptedConformanceRunner::all_passing()).await;
 
     assert!(!report.passed());
@@ -487,9 +516,18 @@ async fn stale_fixtures_warn_without_blocking() {
             recorded_at: now() - Duration::days(120),
         }],
     });
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
 
-    assert!(report.passed(), "staleness must not block: {:?}", report.failures);
+    assert!(
+        report.passed(),
+        "staleness must not block: {:?}",
+        report.failures
+    );
     assert_eq!(
         report.warnings,
         vec![GateWarning::FixtureStale {
@@ -514,7 +552,12 @@ async fn stale_fixtures_warn_without_blocking() {
 async fn evidence_renders_at_the_point_of_install_decision() {
     let (privkey, pubkey) = fixture_keypair();
     let submission = complete_submission(&privkey, &pubkey);
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
     let evidence = report.evidence.unwrap();
 
     let rendered = render_evidence_summary(&evidence);
@@ -560,7 +603,10 @@ async fn indexing_is_refused_without_gate_evidence() {
     let err = index
         .insert_gated(entry_with_evidence("ungated-pack", None))
         .unwrap_err();
-    assert!(err.to_string().contains("no quality-gate evidence"), "got: {err}");
+    assert!(
+        err.to_string().contains("no quality-gate evidence"),
+        "got: {err}"
+    );
     assert!(index.entries.is_empty());
 }
 
@@ -568,7 +614,12 @@ async fn indexing_is_refused_without_gate_evidence() {
 async fn gate_passing_package_indexes_with_evidence() {
     let (privkey, pubkey) = fixture_keypair();
     let submission = complete_submission(&privkey, &pubkey);
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
     let evidence = report.evidence.unwrap();
 
     let mut index = RegistryIndex::new(1, NOW, vec![]);
@@ -577,7 +628,12 @@ async fn gate_passing_package_indexes_with_evidence() {
         .unwrap();
     let entry = index.get(&PackageId::new("fixture-pack").unwrap()).unwrap();
     assert_eq!(
-        entry.versions[0].quality_evidence.as_ref().unwrap().eval.cases_passed,
+        entry.versions[0]
+            .quality_evidence
+            .as_ref()
+            .unwrap()
+            .eval
+            .cases_passed,
         4
     );
 }
@@ -590,7 +646,12 @@ async fn gate_passing_package_indexes_with_evidence() {
 async fn contracts_bump_marks_recertification_then_drops_from_default_view() {
     let (privkey, pubkey) = fixture_keypair();
     let submission = complete_submission(&privkey, &pubkey);
-    let report = run_gate(&submission, passing_run(), &ScriptedConformanceRunner::all_passing()).await;
+    let report = run_gate(
+        &submission,
+        passing_run(),
+        &ScriptedConformanceRunner::all_passing(),
+    )
+    .await;
     let evidence = report.evidence.unwrap(); // certified against "2026.1" at NOW
     let entry = entry_with_evidence("fixture-pack", Some(evidence));
 
@@ -613,7 +674,9 @@ async fn contracts_bump_marks_recertification_then_drops_from_default_view() {
         }
     );
     assert_eq!(
-        entry.default_view_versions("2026.2", bump_at, skew, inside).len(),
+        entry
+            .default_view_versions("2026.2", bump_at, skew, inside)
+            .len(),
         1
     );
 

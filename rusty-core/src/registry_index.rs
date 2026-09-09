@@ -222,7 +222,10 @@ impl RegistryEntry {
         now: chrono::DateTime<chrono::Utc>,
     ) -> crate::quality_gate::CertificationStatus {
         use crate::quality_gate::CertificationStatus;
-        match self.find_version(version).and_then(|v| v.quality_evidence.as_ref()) {
+        match self
+            .find_version(version)
+            .and_then(|v| v.quality_evidence.as_ref())
+        {
             Some(evidence) => crate::quality_gate::certification_status(
                 evidence,
                 current_contracts_version,

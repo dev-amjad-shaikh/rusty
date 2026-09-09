@@ -81,11 +81,7 @@ impl DocsBundle {
         if self.setup.as_deref().is_none_or(str::is_empty) {
             missing.push(RequiredDoc::Setup);
         }
-        if self
-            .config_reference
-            .as_deref()
-            .is_none_or(str::is_empty)
-        {
+        if self.config_reference.as_deref().is_none_or(str::is_empty) {
             missing.push(RequiredDoc::ConfigReference);
         }
         if self.grant_summary.as_deref().is_none_or(str::is_empty) {
@@ -193,9 +189,7 @@ pub fn undeclared_behavior(
     let mut excess = Vec::new();
     for (tool, effect) in &observed.registrations {
         match manifest.capabilities.tools.iter().find(|t| &t.name == tool) {
-            None => excess.push(UndeclaredBehavior::UndeclaredRegistration {
-                tool: tool.clone(),
-            }),
+            None => excess.push(UndeclaredBehavior::UndeclaredRegistration { tool: tool.clone() }),
             Some(decl) if decl.effect != *effect => {
                 excess.push(UndeclaredBehavior::EffectClassExceedsDeclaration {
                     tool: tool.clone(),
@@ -209,8 +203,7 @@ pub fn undeclared_behavior(
     for host in &observed.egress_hosts {
         let declared = manifest.capabilities.egress.iter().any(|e| {
             e.host == *host
-                || e
-                    .host
+                || e.host
                     .strip_prefix("*.")
                     .is_some_and(|suffix| host.ends_with(suffix) && host.len() > suffix.len())
         });
@@ -413,7 +406,10 @@ pub fn render_evidence_summary(evidence: &GateEvidence) -> String {
             out.push('\n');
         }
     }
-    out.push_str(&format!("certified against contracts {}\n", evidence.contracts_version));
+    out.push_str(&format!(
+        "certified against contracts {}\n",
+        evidence.contracts_version
+    ));
     out
 }
 
@@ -519,7 +515,11 @@ impl std::fmt::Display for GateFailure {
                 write!(f, "conformance suite `{suite}` produced no result")
             }
             GateFailure::ConformanceFailed { suite, failures } => {
-                write!(f, "conformance suite `{suite}` failed: {}", failures.join(", "))
+                write!(
+                    f,
+                    "conformance suite `{suite}` failed: {}",
+                    failures.join(", ")
+                )
             }
             GateFailure::UndeclaredBehavior { behavior } => {
                 write!(f, "undeclared behavior: {behavior}")
@@ -684,8 +684,7 @@ impl<'a> QualityGate<'a> {
                         .iter()
                         .filter_map(|f| {
                             let age = ctx.now - f.recorded_at;
-                            (age > ctx.fixture_max_age)
-                                .then(|| (f.name.clone(), age.num_days()))
+                            (age > ctx.fixture_max_age).then(|| (f.name.clone(), age.num_days()))
                         })
                         .collect();
                     if !stale.is_empty() {
@@ -721,8 +720,8 @@ impl<'a> QualityGate<'a> {
         }
 
         let evidence = if failures.is_empty() {
-            let eval = eval_summary
-                .expect("a gate with no eval summary cannot reach zero failures");
+            let eval =
+                eval_summary.expect("a gate with no eval summary cannot reach zero failures");
             Some(GateEvidence {
                 eval,
                 conformance: conformance_passed,
@@ -752,7 +751,10 @@ mod tests {
         CapabilityDecl, EgressDestDecl, FileEntry, PackageId, PublisherId, ToolCapabilityDecl,
     };
 
-    fn manifest_with_caps(tools: Vec<(&str, DeclaredEffect)>, egress: Vec<&str>) -> PackageManifest {
+    fn manifest_with_caps(
+        tools: Vec<(&str, DeclaredEffect)>,
+        egress: Vec<&str>,
+    ) -> PackageManifest {
         PackageManifest::new(
             PackageId::new("gate-test").unwrap(),
             "Gate Test",
@@ -911,7 +913,10 @@ mod tests {
         adapter.capabilities.backends.push("postgres".to_string());
         assert_eq!(
             required_conformance_suites(&adapter),
-            vec![ConformanceSuiteKind::ChannelSeam, ConformanceSuiteKind::Storage]
+            vec![
+                ConformanceSuiteKind::ChannelSeam,
+                ConformanceSuiteKind::Storage
+            ]
         );
     }
 
