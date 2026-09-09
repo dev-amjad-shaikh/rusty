@@ -1,0 +1,255 @@
+/* Review — the convergence screen (handoff 03): changes column left, sticky
+   rail right with validation, assembled prompt, eval gate, publish, export. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-size: var(--text-page-title);
+  font-weight: 600;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rail {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cardTitle {
+  font-size: var(--text-nav);
+  font-weight: 600;
+  margin: 0;
+}
+
+.cardActions {
+  display: flex;
+  gap: 8px;
+}
+
+.meta {
+  font-size: var(--text-meta);
+  color: var(--ink3);
+  margin: 0;
+}
+
+.empty {
+  font-size: var(--text-body);
+  color: var(--ink3);
+}
+
+.diffList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diffRow {
+  display: grid;
+  grid-template-columns: 18px minmax(120px, max-content) 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--text-body);
+}
+
+.sign {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-align: center;
+}
+
+.signAdd {
+  color: var(--ok);
+}
+
+.signChange {
+  color: var(--warn);
+}
+
+.signRemove {
+  color: var(--err);
+}
+
+.diffField {
+  font-family: var(--font-mono);
+  font-size: var(--text-secondary);
+  color: var(--ink);
+}
+
+.diffValue {
+  color: var(--ink2);
+  overflow-wrap: anywhere;
+}
+
+.oldValue {
+  color: var(--ink3);
+  margin-right: 6px;
+}
+
+.violationList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.violation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--err-soft);
+  padding: 8px 10px;
+  font-size: var(--text-secondary);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.violationPath {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--err);
+}
+
+.violationFile {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--ink3);
+}
+
+.tiers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.tier {
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius-control);
+  background: var(--code);
+  font-family: var(--font-mono);
+  font-size: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.caseList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.caseRow {
+  display: grid;
+  grid-template-columns: 16px 1fr max-content;
+  gap: 8px;
+  font-size: var(--text-secondary);
+  align-items: baseline;
+}
+
+.caseName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notice {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--warn-soft);
+  color: var(--ink);
+  font-size: var(--text-secondary);
+}
+
+.publishBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.confirm {
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-control);
+  background: var(--warn-soft);
+  padding: 8px 10px;
+}
+
+.hints {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fleet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
