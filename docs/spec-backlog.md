@@ -12,14 +12,14 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**██████████████████████████░░░░░░░░ 75%** weighted complete (130 ✅ landed · 45 ◐ partial · 29 ○ not started, of 204 stories)
+**██████████████████████████░░░░░░░░ 75%** weighted complete (131 ✅ landed · 45 ◐ partial · 28 ○ not started, of 204 stories)
 
 > Integration 2026-09-08: merged to `main` — the thirteen-wave stack (`3cca541`, incl. EP-04-S01 schema pipeline, EP-06-S03, EP-07-S03/S04/S05/S06/S07/S09/S11/S12, EP-08-S07/S08), EP-03-S11 server infra (`58f2fe0`), EP-10-S08 (`a0948de`), EP-10-S09 (`c72b35d`), EP-13-S10 AC5 (`4a83150`), the EP-17 chain (`bfe5b84`, composed with EP-08-S07's `gate_override` promotion path). Rows citing `feat/*` branches from those waves are now on `main`. Skipped as superseded by `1c5e080` (already on main): `feat/ep-15-s01`, `feat/ep-15-s02`, `feat/toolset-combinators`.
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
-| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 10 | 1 | 0 | ███████████░ 95% |
+| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 11 | 0 | 0 | ████████████ 100% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
@@ -73,7 +73,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-03 — Durability, Checkpoints and Pause
 
-███████████░ 95% · 10 landed · 1 partial · 0 not started · milestone M1
+████████████ 100% · 11 landed · 0 partial · 0 not started · milestone M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
