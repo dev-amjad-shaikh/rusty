@@ -37,6 +37,7 @@
 //! | `POST /threads/{id}/runs/wait` | blocking run: terminal result as JSON |
 //! | `POST /threads/{id}/runs/stream` | run with SSE streaming (`updates`/`values`/`messages`/`metadata`/`error`/`end`); a fresh run starts a new frame sequence, so `Last-Event-ID` is ignored here |
 //! | `GET /runs/{id}/stream` | attach to an existing run's SSE stream: replay honoring `Last-Event-ID`, then live frames |
+//! | `GET /gateway/ws` | the gateway WebSocket transport (EP-04-S01): the schema-defined `Frame` protocol — inbound frames validated against the committed JSON Schema bundle before dispatch, snapshot-on-connect (sessions, run statuses, open obligations), per-connection monotonic event `seq` with a client-driven re-snapshot on a detected gap, and named run-boundary events (`run_admitted` / `run_started` / `run_ended`) |
 //! | `GET /runs/{id}/events` | Flight Recorder: the run's journaled `RunEvent`s as `{run_id, events, complete}` (snapshot flushed per checkpoint boundary and at run completion; persisted under `{store_path}/journals/` or the `server_journals` table; fetchable by run id even after the live run record is evicted or the process restarts) |
 //! | `GET /runs/{id}/fixture` | Flight Recorder: download the run as a portable `ReplayFixture` bundle (journal + graph topology hash + final checkpoint) for CI replay |
 //! | `POST /runs/replay` | Flight Recorder: re-drive a journaled run against its registered graph and verify the replayed evidence → `{run_id, verified, expected_events, actual_events, first_divergence}` (`422` when the graph is not registered in this process or the journal carries recorded effect calls) |
@@ -190,6 +191,7 @@ mod evaluations;
 mod gaps;
 mod gate;
 pub mod gateway_schema;
+mod gateway_ws;
 mod health;
 mod journals;
 mod knowledge;

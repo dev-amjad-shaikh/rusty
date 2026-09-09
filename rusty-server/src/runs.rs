@@ -314,6 +314,10 @@ pub(crate) struct FrameSink {
     last_checkpoint: Arc<StdMutex<String>>,
     last_step: Arc<AtomicU64>,
     capacity: usize,
+    /// The gateway tee (EP-04-S01): when set, every pushed frame also fans
+    /// out to gateway WebSocket connections as a `run_frame` event — the
+    /// same event source the SSE stream serves, never a parallel pipeline.
+    gateway: Option<crate::gateway_ws::GatewayTee>,
 }
 
 /// Lock a std mutex, recovering from poisoning. Every guard obtained
@@ -336,7 +340,15 @@ impl FrameSink {
             last_checkpoint: Arc::new(StdMutex::new("-".to_string())),
             last_step: Arc::new(AtomicU64::new(0)),
             capacity,
+            gateway: None,
         }
+    }
+
+    /// Attach the gateway hub tee (EP-04-S01): constructed at schedule
+    /// time, when the run's identity and tenant are known.
+    pub(crate) fn with_gateway(mut self, tee: crate::gateway_ws::GatewayTee) -> Self {
+        self.gateway = Some(tee);
+        self
     }
 
     /// Record and broadcast one frame.
@@ -356,6 +368,9 @@ impl FrameSink {
                 log.pop_front();
             }
             log.push_back(frame.clone());
+        }
+        if let Some(tee) = &self.gateway {
+            tee.forward(&frame);
         }
         // No live subscribers is normal (background runs); not an error.
         let _ = self.bcast.send(frame);
@@ -973,6 +988,10 @@ pub(crate) struct RunDeps {
     /// promotion target a registry-bound run resolves against when its
     /// binding names no environment (`None`: the untagged surface).
     pub default_environment_tag: Option<rusty_agent_runtime::learn::EnvironmentTag>,
+    /// The gateway event bus (EP-04-S01): run boundaries publish here and
+    /// each run's frame sink tees into it, feeding the WebSocket transport
+    /// (`crate::gateway_ws`).
+    pub gateway: crate::gateway_ws::GatewayHub,
 }
 
 /// The result of successfully scheduling a run: everything an endpoint
@@ -1023,7 +1042,14 @@ pub(crate) async fn schedule(
         created_at: chrono::Utc::now(),
         admission,
         deployment,
-        sink: FrameSink::new(deps.log_capacity, bcast_tx),
+        sink: FrameSink::new(deps.log_capacity, bcast_tx).with_gateway(
+            crate::gateway_ws::GatewayTee::new(
+                deps.gateway.clone(),
+                run_id.clone(),
+                wire_thread_id.to_string(),
+                crate::auth::tenant_of_internal(thread_id).to_string(),
+            ),
+        ),
         terminal: terminal_tx,
         checkpoint_ids: Arc::new(StdMutex::new(Vec::new())),
         // A child of the server drain token: the drain still stops every
@@ -1083,6 +1109,21 @@ pub(crate) async fn schedule(
             RunStatus::Pending
         }
     };
+
+    // AC4: the admission verdict publishes at the exact branch that
+    // admitted the run, carrying the contract's `AdmissionReason`
+    // vocabulary verbatim — never reverse-engineered downstream.
+    deps.gateway.publish(
+        crate::auth::tenant_of_internal(thread_id),
+        crate::gateway_ws::EVENT_RUN_ADMITTED,
+        json!({
+            "run_id": run_id,
+            "thread_id": wire_thread_id,
+            "graph": graph,
+            "status": status.as_str(),
+            "reason": rusty_api::gateway_protocol::AdmissionReason::Queued,
+        }),
+    );
 
     Ok(Scheduled {
         run_id,
@@ -1169,6 +1210,22 @@ pub(crate) async fn cancel_run(deps: &RunDeps, run_id: &str) -> RunCancel {
     let outcome = deps.manager.cancel_run(run_id).await;
     if outcome == RunCancel::CancelledQueued {
         clear_pending_record(&deps.server_store, run_id).await;
+    }
+    // A queued or paused run ends here, without `terminate` — publish its
+    // `run_ended` boundary at the branch that ended it (AC4). A signalled
+    // run's boundary publishes from `terminate` when the executor lands.
+    if matches!(outcome, RunCancel::CancelledQueued | RunCancel::CancelledPaused) {
+        if let Some(info) = deps.manager.info(run_id).await {
+            deps.gateway.publish(
+                crate::auth::tenant_of_internal(&info.thread_id),
+                crate::gateway_ws::EVENT_RUN_ENDED,
+                json!({
+                    "run_id": run_id,
+                    "thread_id": info.wire_thread_id,
+                    "status": RunStatus::Cancelled.as_str(),
+                }),
+            );
+        }
     }
     outcome
 }
@@ -1291,6 +1348,12 @@ async fn restore_one(deps: &RunDeps, record: PendingRunRecord, queue_cap: usize)
     };
     let (bcast_tx, _bcast_rx) = broadcast::channel(256);
     let (terminal_tx, _terminal_rx) = watch::channel(None);
+    let tee = crate::gateway_ws::GatewayTee::new(
+        deps.gateway.clone(),
+        run_id.clone(),
+        record.wire_thread_id.clone(),
+        record.tenant.clone(),
+    );
     let handle = RunHandle {
         run_id: run_id.clone(),
         thread_id: record.thread_id,
@@ -1302,7 +1365,7 @@ async fn restore_one(deps: &RunDeps, record: PendingRunRecord, queue_cap: usize)
         created_at: record.enqueued_at,
         admission,
         deployment,
-        sink: FrameSink::new(deps.log_capacity, bcast_tx),
+        sink: FrameSink::new(deps.log_capacity, bcast_tx).with_gateway(tee),
         terminal: terminal_tx,
         checkpoint_ids: Arc::new(StdMutex::new(Vec::new())),
         // A child of the server drain token, exactly as at schedule time:
@@ -1349,6 +1412,18 @@ async fn execute(deps: RunDeps, run_id: String) {
             "graph": snap.graph,
             "attempt": snap.attempt,
             "metadata": snap.payload.metadata,
+        }),
+    );
+    // AC4: the named `run_started` boundary publishes where execution
+    // actually begins — a client never infers it from the first frame.
+    deps.gateway.publish(
+        crate::auth::tenant_of_internal(&snap.thread_id),
+        crate::gateway_ws::EVENT_RUN_STARTED,
+        json!({
+            "run_id": run_id,
+            "thread_id": snap.wire_thread_id,
+            "graph": snap.graph,
+            "attempt": snap.attempt,
         }),
     );
 
@@ -1778,6 +1853,15 @@ fn spawn_execute(deps: RunDeps, run_id: String) {
 /// durable records, so the next process restores them.
 async fn terminate(deps: &RunDeps, run_id: &str, status: RunStatus, terminal: Value) {
     let draining = deps.shutdown.is_cancelled();
+    // The boundary event's identity is read before `finish` — the record
+    // survives the transition, but the exact branch that ends the run is
+    // here, so the named `run_ended` event (AC4) publishes from here with
+    // the terminal status as its reason.
+    let boundary = deps
+        .manager
+        .info(run_id)
+        .await
+        .map(|info| (info.thread_id, info.wire_thread_id));
     if let Some(next) = deps
         .manager
         .finish(run_id, status, terminal, draining)
@@ -1788,6 +1872,17 @@ async fn terminate(deps: &RunDeps, run_id: &str, status: RunStatus, terminal: Va
         // checkpoint log's job, like any active run's.
         clear_pending_record(&deps.server_store, &next).await;
         spawn_execute(deps.clone(), next);
+    }
+    if let Some((internal_thread, wire_thread)) = boundary {
+        deps.gateway.publish(
+            crate::auth::tenant_of_internal(&internal_thread),
+            crate::gateway_ws::EVENT_RUN_ENDED,
+            json!({
+                "run_id": run_id,
+                "thread_id": wire_thread,
+                "status": status.as_str(),
+            }),
+        );
     }
 }
 
@@ -1888,6 +1983,7 @@ mod tests {
             log_capacity: 64,
             shutdown: tokio_util::sync::CancellationToken::new(),
             default_environment_tag: None,
+            gateway: crate::gateway_ws::GatewayHub::new(),
         }
     }
 
