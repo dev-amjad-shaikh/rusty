@@ -191,6 +191,7 @@ mod evaluations;
 mod gaps;
 mod gate;
 pub mod gateway_schema;
+mod gateway_pairing;
 mod gateway_ws;
 mod health;
 mod journals;
@@ -531,6 +532,18 @@ pub struct ServerConfig {
     /// explicit entry receive the super-user scope `*:*:*`.
     pub api_key_scopes: HashMap<String, Vec<String>>,
 
+    /// Device pairing policy (EP-04-S03): when `true`, a device whose
+    /// challenge answer verifies from a **loopback** peer transitions
+    /// `pending → paired` immediately. Remote devices always require
+    /// operator approval regardless of this flag. Default `false` (fail
+    /// closed).
+    pub pairing_auto_approve_loopback: bool,
+
+    /// Device pairing challenge lifetime (EP-04-S03, default
+    /// [`gateway_pairing::DEFAULT_CHALLENGE_TTL`]): an answer arriving
+    /// after this window is denied `challenge_expired`.
+    pub pairing_challenge_ttl: std::time::Duration,
+
     /// Per-run SSE event-log capacity (frames retained for replay, default
     /// 1000).
     pub event_log_capacity: usize,
@@ -730,6 +743,8 @@ impl Default for ServerConfig {
             api_key: None,
             api_keys: Vec::new(),
             api_key_scopes: HashMap::new(),
+            pairing_auto_approve_loopback: false,
+            pairing_challenge_ttl: gateway_pairing::DEFAULT_CHALLENGE_TTL,
             event_log_capacity: 1000,
             outbox_relay_interval: crate::outbox::DEFAULT_RELAY_INTERVAL,
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
@@ -1252,7 +1267,13 @@ pub async fn serve_with_shutdown(
     let app = router_with_shutdown(registry, config, draining.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "rusty-server listening");
-    let server = axum::serve(listener, app).with_graceful_shutdown({
+    // ConnectInfo rides into the router: pairing policy keys on whether
+    // the peer is loopback (EP-04-S03 AC3).
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown({
         let draining = draining.clone();
         async move {
             shutdown.await;

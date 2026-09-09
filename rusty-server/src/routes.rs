@@ -125,6 +125,10 @@ pub(crate) struct AppState {
     /// [`crate::router`] wires a token that never fires;
     /// [`crate::serve_with_shutdown`] wires the real one.
     pub shutdown: tokio_util::sync::CancellationToken,
+    /// The device-pairing plane (EP-04-S03): challenge-nonce issuance and
+    /// verification, the `pending → paired → revoked` roster, the audit
+    /// trail, and the live-connection registry revocation closes over.
+    pub pairing: crate::gateway_pairing::PairingPlane,
     /// Per-trigger debounce buffers (in-memory): events received inside a
     /// trigger's `debounce_ms` window accumulate here and coalesce into one
     /// action carrying the array of payloads. Keyed by internal trigger id.
@@ -462,6 +466,11 @@ pub(crate) fn build_router(
         state_locks: Mutex::new(HashMap::new()),
         gap_locks: Mutex::new(HashMap::new()),
         shutdown,
+        pairing: crate::gateway_pairing::PairingPlane::new(
+            Arc::clone(&server_store),
+            config.pairing_auto_approve_loopback,
+            config.pairing_challenge_ttl,
+        ),
         trigger_debounce: Mutex::new(HashMap::new()),
         #[cfg(feature = "capsules")]
         capsule_plane,

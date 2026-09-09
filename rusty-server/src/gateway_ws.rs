@@ -40,22 +40,28 @@
 //! Method surface (deliberately thin; the registry of side-effecting
 //! methods lands with the stories that own them): `submit_turn` schedules
 //! a run through the same admission path as `POST /threads/{id}/runs`, and
-//! `resnapshot` is the AC3 control message. Pairing dispatch is EP-04-S03.
+//! `resnapshot` is the AC3 control message. The pairing methods
+//! (`pairing_hello` / `pairing_answer` / `pairing_approve` /
+//! `pairing_revoke` / `device_attach`) are EP-04-S03's device-pairing
+//! surface; [`crate::gateway_pairing`] owns the flow.
 
+use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Extension, State as AxumState};
+use axum::extract::{ConnectInfo, Extension, State as AxumState};
 use axum::response::Response;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
 
-use rusty_api::gateway_protocol::{Frame, ResponseOutcome};
+use rusty_api::gateway_protocol::{Frame, Pairing, ResponseOutcome};
 
 use crate::auth::TenantContext;
+use crate::gateway_pairing::{self, AnswerOutcome};
 use crate::routes::AppState;
 use crate::runs::SseFrame;
 
@@ -243,13 +249,34 @@ fn violation_message(value: &Value, error: &jsonschema::ValidationError) -> Stri
 
 /// `GET /gateway/ws` — upgrade to the gateway protocol transport. Mounted
 /// inside the authenticated router, so the API-key and scope middleware
-/// run before the upgrade exactly as for any other route.
+/// run before the upgrade exactly as for any other route. The peer address
+/// rides along: pairing policy keys on loopback vs remote (EP-04-S03 AC3).
 pub(crate) async fn gateway_ws(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    ws.on_upgrade(move |socket| serve_connection(state, tenant, socket))
+    let is_loopback = peer.ip().is_loopback();
+    ws.on_upgrade(move |socket| serve_connection(state, tenant, socket, is_loopback))
+}
+
+/// Per-connection context the pairing surface keys on: whether the peer
+/// is loopback (EP-04-S03 AC3) and the close handle revocation fires to
+/// end this socket (AC5). Attaching a paired device registers the close
+/// handle with the pairing plane.
+struct ConnContext {
+    is_loopback: bool,
+    conn_close: CancellationToken,
+}
+
+impl ConnContext {
+    fn new(is_loopback: bool) -> Self {
+        Self {
+            is_loopback,
+            conn_close: CancellationToken::new(),
+        }
+    }
 }
 
 /// Everything one connection can send. All outbound frames flow through a
@@ -270,7 +297,13 @@ enum Outbound {
     },
 }
 
-async fn serve_connection(state: Arc<AppState>, tenant: TenantContext, socket: WebSocket) {
+async fn serve_connection(
+    state: Arc<AppState>,
+    tenant: TenantContext,
+    socket: WebSocket,
+    is_loopback: bool,
+) {
+    let ctx = ConnContext::new(is_loopback);
     let (sink, stream) = socket.split();
     let (out_tx, out_rx) = mpsc::channel::<Outbound>(256);
     let writer = tokio::spawn(write_loop(sink, out_rx));
@@ -296,9 +329,14 @@ async fn serve_connection(state: Arc<AppState>, tenant: TenantContext, socket: W
         tenant.clone(),
         out_tx.clone(),
     ));
-    read_loop(&state, &tenant, stream, &out_tx).await;
+    read_loop(&state, &tenant, stream, &out_tx, &ctx).await;
     forwarder.abort();
-    writer.abort();
+    // Drain before teardown: queued frames (a revocation acknowledgement,
+    // above all) must reach the wire even when revocation itself ended
+    // the read loop. Dropping the last sender lets the writer finish its
+    // queue and exit; a broken socket ends it via send error as before.
+    drop(out_tx);
+    let _ = writer.await;
 }
 
 /// The connection's single writer: owns `seq`, serializes frames, drives
@@ -372,17 +410,29 @@ async fn forward_hub(state: Arc<AppState>, tenant: TenantContext, tx: mpsc::Send
     }
 }
 
-/// Read inbound frames until close or error. Axum answers pings itself;
-/// binary frames are not part of the protocol and earn a typed refusal.
+/// Read inbound frames until close, error, or revocation of the device
+/// this connection attached as (the close token fires; AC5). Axum answers
+/// pings itself; binary frames are not part of the protocol and earn a
+/// typed refusal.
 async fn read_loop(
     state: &Arc<AppState>,
     tenant: &TenantContext,
     mut stream: SplitStream<WebSocket>,
     tx: &mpsc::Sender<Outbound>,
+    ctx: &ConnContext,
 ) {
-    while let Some(message) = stream.next().await {
+    loop {
+        let message = tokio::select! {
+            () = ctx.conn_close.cancelled() => break,
+            message = stream.next() => match message {
+                Some(message) => message,
+                None => break,
+            },
+        };
         match message {
-            Ok(Message::Text(text)) => handle_text(state, tenant, &text, tx).await,
+            Ok(Message::Text(text)) => {
+                handle_text(state, tenant, &text, tx, ctx).await
+            }
             Ok(Message::Binary(_)) => {
                 send_error(
                     tx,
@@ -409,6 +459,7 @@ async fn handle_text(
     tenant: &TenantContext,
     text: &str,
     tx: &mpsc::Sender<Outbound>,
+    ctx: &ConnContext,
 ) {
     if text.len() > MAX_FRAME_BYTES {
         send_error(
@@ -458,7 +509,7 @@ async fn handle_text(
     match frame {
         Frame::Request {
             id, method, params, ..
-        } => dispatch(state, tenant, id, &method, params, tx).await,
+        } => dispatch(state, tenant, id, &method, params, tx, ctx).await,
         Frame::Response { id, .. } => {
             send_error(
                 tx,
@@ -489,6 +540,256 @@ struct SubmitTurnParams {
     payload: crate::runs::RunPayload,
 }
 
+/// `pairing_hello` params: the device's introduction (`Pairing::Hello`
+/// without the step tag).
+#[derive(Debug, Deserialize)]
+struct PairingHelloParams {
+    device_id: String,
+    public_key: String,
+    platform: String,
+}
+
+/// `pairing_answer` params: the signed challenge (`Pairing::Answer`
+/// without the step tag).
+#[derive(Debug, Deserialize)]
+struct PairingAnswerParams {
+    device_id: String,
+    signature: String,
+}
+
+/// `pairing_approve` / `pairing_revoke` params: the target device plus an
+/// optional actor label for the audit trail (default: the operator's
+/// tenant identity — the attribution the middleware can prove).
+#[derive(Debug, Deserialize)]
+struct PairingOperatorParams {
+    device_id: String,
+    actor: Option<String>,
+}
+
+/// `device_attach` params: a paired device authenticating this connection
+/// with its token (EP-04-S03 AC4).
+#[derive(Debug, Deserialize)]
+struct DeviceAttachParams {
+    device_id: String,
+    device_token: String,
+}
+
+/// Queue a pairing refusal: the error payload is the contract's
+/// `Pairing::Denied` shape verbatim.
+async fn send_denied(tx: &mpsc::Sender<Outbound>, id: u64, reason: &str) {
+    send_response(
+        tx,
+        id,
+        ResponseOutcome::Err {
+            error: gateway_pairing::denied_payload(reason),
+        },
+    )
+    .await;
+}
+
+/// The pairing method surface (EP-04-S03), dispatched from [`dispatch`].
+/// Returns `true` when the method was one of these.
+async fn dispatch_pairing(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    id: u64,
+    method: &str,
+    params: Value,
+    tx: &mpsc::Sender<Outbound>,
+    ctx: &ConnContext,
+) -> bool {
+    match method {
+        "pairing_hello" => match serde_json::from_value::<PairingHelloParams>(params) {
+            Ok(parsed) => {
+                match state
+                    .pairing
+                    .hello(
+                        tenant,
+                        &parsed.device_id,
+                        &parsed.public_key,
+                        &parsed.platform,
+                    )
+                    .await
+                {
+                    Ok(nonce) => {
+                        send_response(
+                            tx,
+                            id,
+                            ResponseOutcome::Ok {
+                                result: serde_json::to_value(Pairing::Challenge { nonce })
+                                    .expect("Pairing::Challenge serializes"),
+                            },
+                        )
+                        .await;
+                    }
+                    Err(reason) => send_denied(tx, id, &reason).await,
+                }
+            }
+            Err(error) => {
+                send_error(tx, id, "invalid_params", format!("pairing_hello: {error}")).await;
+            }
+        },
+        "pairing_answer" => match serde_json::from_value::<PairingAnswerParams>(params) {
+            Ok(parsed) => {
+                match state
+                    .pairing
+                    .answer(tenant, &parsed.device_id, &parsed.signature, ctx.is_loopback)
+                    .await
+                {
+                    Ok(AnswerOutcome::Paired(device_token)) => {
+                        send_response(
+                            tx,
+                            id,
+                            ResponseOutcome::Ok {
+                                result: serde_json::to_value(Pairing::Paired { device_token })
+                                    .expect("Pairing::Paired serializes"),
+                            },
+                        )
+                        .await;
+                    }
+                    Ok(AnswerOutcome::PendingApproval) => {
+                        send_response(
+                            tx,
+                            id,
+                            ResponseOutcome::Ok {
+                                result: json!({
+                                    "step": "answer",
+                                    "status": "pending_operator_approval",
+                                    "device_id": parsed.device_id,
+                                }),
+                            },
+                        )
+                        .await;
+                    }
+                    Ok(AnswerOutcome::Denied(reason)) => send_denied(tx, id, &reason).await,
+                    Err(reason) => send_denied(tx, id, &reason).await,
+                }
+            }
+            Err(error) => {
+                send_error(tx, id, "invalid_params", format!("pairing_answer: {error}")).await;
+            }
+        },
+        "pairing_approve" => match serde_json::from_value::<PairingOperatorParams>(params) {
+            Ok(parsed) => {
+                if !gateway_pairing::is_operator(tenant) {
+                    send_error(
+                        tx,
+                        id,
+                        "unauthorized",
+                        format!(
+                            "pairing_approve requires the `{}` scope",
+                            gateway_pairing::OPERATOR_SCOPE
+                        ),
+                    )
+                    .await;
+                    return true;
+                }
+                let actor = operator_actor(tenant, parsed.actor.as_deref());
+                match state
+                    .pairing
+                    .approve(tenant, &parsed.device_id, &actor)
+                    .await
+                {
+                    Ok(device_token) => {
+                        // The token is delivered once, to the approver's
+                        // surface; it never appears in snapshots or events.
+                        send_response(
+                            tx,
+                            id,
+                            ResponseOutcome::Ok {
+                                result: serde_json::to_value(Pairing::Paired { device_token })
+                                    .expect("Pairing::Paired serializes"),
+                            },
+                        )
+                        .await;
+                    }
+                    Err(reason) => send_denied(tx, id, &reason).await,
+                }
+            }
+            Err(error) => {
+                send_error(tx, id, "invalid_params", format!("pairing_approve: {error}")).await;
+            }
+        },
+        "pairing_revoke" => match serde_json::from_value::<PairingOperatorParams>(params) {
+            Ok(parsed) => {
+                if !gateway_pairing::is_operator(tenant) {
+                    send_error(
+                        tx,
+                        id,
+                        "unauthorized",
+                        format!(
+                            "pairing_revoke requires the `{}` scope",
+                            gateway_pairing::OPERATOR_SCOPE
+                        ),
+                    )
+                    .await;
+                    return true;
+                }
+                let actor = operator_actor(tenant, parsed.actor.as_deref());
+                match state
+                    .pairing
+                    .revoke(tenant, &parsed.device_id, &actor)
+                    .await
+                {
+                    Ok(()) => {
+                        send_response(
+                            tx,
+                            id,
+                            ResponseOutcome::Ok {
+                                result: json!({"revoked": parsed.device_id}),
+                            },
+                        )
+                        .await;
+                    }
+                    Err(reason) => send_denied(tx, id, &reason).await,
+                }
+            }
+            Err(error) => {
+                send_error(tx, id, "invalid_params", format!("pairing_revoke: {error}")).await;
+            }
+        },
+        "device_attach" => match serde_json::from_value::<DeviceAttachParams>(params) {
+            Ok(parsed) => {
+                match state
+                    .pairing
+                    .attach(
+                        tenant,
+                        &parsed.device_id,
+                        &parsed.device_token,
+                        ctx.conn_close.clone(),
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        send_response(
+                            tx,
+                            id,
+                            ResponseOutcome::Ok {
+                                result: json!({"attached": parsed.device_id}),
+                            },
+                        )
+                        .await;
+                    }
+                    Err(reason) => send_denied(tx, id, &reason).await,
+                }
+            }
+            Err(error) => {
+                send_error(tx, id, "invalid_params", format!("device_attach: {error}")).await;
+            }
+        },
+        _ => return false,
+    }
+    true
+}
+
+/// The actor label recorded for operator actions: the caller's explicit
+/// label, else the tenant identity the auth middleware resolved.
+fn operator_actor(tenant: &TenantContext, actor: Option<&str>) -> String {
+    actor
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("operator@{}", tenant.tenant()))
+}
+
 /// Route one validated request to its method.
 async fn dispatch(
     state: &Arc<AppState>,
@@ -497,7 +798,11 @@ async fn dispatch(
     method: &str,
     params: Value,
     tx: &mpsc::Sender<Outbound>,
+    ctx: &ConnContext,
 ) {
+    if dispatch_pairing(state, tenant, id, method, params.clone(), tx, ctx).await {
+        return;
+    }
     match method {
         "submit_turn" => match serde_json::from_value::<SubmitTurnParams>(params) {
             Ok(parsed) => {
