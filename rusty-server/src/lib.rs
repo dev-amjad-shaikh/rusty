@@ -200,6 +200,7 @@ mod memory;
 pub mod oauth;
 mod outbox;
 mod pause_fork;
+mod pause_sink;
 mod pending_runs;
 mod policy;
 mod receipts;
@@ -681,6 +682,14 @@ pub struct ServerConfig {
     /// to operator-triggered passes, never to unprotected pruning. See
     /// [`ServerConfig::with_artifact_sweep_interval`].
     pub artifact_sweep_interval: Option<std::time::Duration>,
+
+    /// The deployment's default obligation TTL (EP-03-S11 AC2), default
+    /// `None` (open-ended): stamped as `expires_at` onto every governed
+    /// pause obligation that declares no explicit expiry, at pause-commit
+    /// time. Rows already committed are never rewritten — changing this
+    /// default applies only to pauses committed after the change. See
+    /// [`ServerConfig::with_default_obligation_ttl`].
+    pub default_obligation_ttl: Option<std::time::Duration>,
     /// The layer-7 egress policy (EP-11-S03): deny-by-default rules
     /// governing every outbound request from connectors, tools, and
     /// sandbox processes. `None` (the default) means no policy is
@@ -739,6 +748,7 @@ impl Default for ServerConfig {
             broker_refresh_window: broker::DEFAULT_REFRESH_WINDOW,
             broker_sweep_interval: None,
             artifact_sweep_interval: None,
+            default_obligation_ttl: None,
             egress_policy: None,
             connector_transport: None,
             embedding_index: None,
@@ -1088,6 +1098,14 @@ impl ServerConfig {
     /// unprotected pruning.
     pub fn with_artifact_sweep_interval(mut self, interval: std::time::Duration) -> Self {
         self.artifact_sweep_interval = Some(interval);
+        self
+    }
+
+    /// Builder-style: the deployment's default obligation TTL (EP-03-S11
+    /// AC2). Pauses committed after this change carry the stamped expiry;
+    /// rows already committed are never mutated retroactively.
+    pub fn with_default_obligation_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.default_obligation_ttl = Some(ttl);
         self
     }
 

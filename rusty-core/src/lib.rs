@@ -286,6 +286,7 @@ pub mod meter;
 pub mod middleware;
 pub mod node;
 pub mod package;
+pub mod pause;
 pub mod plugin;
 #[cfg(feature = "genai")]
 pub mod provider_genai;
@@ -467,6 +468,9 @@ pub mod prelude {
         instantiate_composition,
     };
     pub use crate::node::{Command, Node, NodeConfig, NodeContext, NodeOutput};
+    pub use crate::pause::{
+        GOVERNED_PAUSE_KEY, PauseCommit, PauseSink, governed_interrupt, stamp_expiry_defaults,
+    };
     #[cfg(feature = "wasm")]
     pub use crate::plugin::CapsulePlugin;
     pub use crate::plugin::{
