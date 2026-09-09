@@ -5,8 +5,6 @@
 //! Driven in-process over the real HTTP surface via `tower::ServiceExt`;
 //! the only stub is the graph itself.
 
-use std::path::PathBuf;
-
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
