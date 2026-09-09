@@ -283,6 +283,20 @@ pub struct RunConfig {
     /// node ignores the key. `None` (the default) is byte-identical to
     /// prior behavior.
     pub turn_stamp: Option<rusty_api::TurnStamp>,
+
+    /// Governed pause (EP-03-S11): the run id pause envelopes and
+    /// obligations are committed under. Servers that mint their own run
+    /// ids set this so the committed rows key by the id the API serves;
+    /// `None` (the default) falls back to the journal's run id.
+    pub run_id: Option<String>,
+
+    /// Governed pause (EP-03-S11 AC2): the deployment's default obligation
+    /// TTL, stamped as `expires_at = now + ttl` at pause-commit time onto
+    /// every obligation that declares no explicit expiry. Obligations
+    /// already committed are never rewritten — a later change of this
+    /// default applies only to pauses committed after it. `None` (the
+    /// default) leaves undeclared obligations open-ended.
+    pub default_obligation_ttl: Option<chrono::Duration>,
 }
 
 impl Default for RunConfig {
@@ -317,6 +331,8 @@ impl RunConfig {
             tool_guards: Vec::new(),
             inbox: None,
             turn_stamp: None,
+            run_id: None,
+            default_obligation_ttl: None,
         }
     }
 
@@ -463,6 +479,22 @@ impl RunConfig {
         self
     }
 
+    /// Builder-style: name the run id governed pauses commit under
+    /// (EP-03-S11). Servers that mint run ids upstream of the executor set
+    /// this so obligation rows key by the id their API serves.
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
+        self
+    }
+
+    /// Builder-style: the deployment's default obligation TTL (EP-03-S11
+    /// AC2), stamped at pause-commit time onto governed obligations that
+    /// declare no explicit `expires_at`.
+    pub fn with_default_obligation_ttl(mut self, ttl: chrono::Duration) -> Self {
+        self.default_obligation_ttl = Some(ttl);
+        self
+    }
+
     /// A clone of the event sink sender, for wiring into nodes that stream
     /// [`GraphEvent::Token`] deltas (LangGraph's `messages` stream mode).
     ///
@@ -565,6 +597,10 @@ pub struct Executor {
     // thread id and approval tokens are combined with these rollback handlers
     // into an EffectAdmissionContext for each node invocation.
     effect_compensations: Option<CompensationRegistry>,
+    // EP-03-S11: the storage seam governed pauses commit obligations and
+    // pause envelopes through. `None` keeps every interrupt ungoverned —
+    // byte-identical to prior behavior.
+    pause_sink: Option<Arc<dyn crate::pause::PauseSink>>,
 }
 
 impl Executor {
@@ -581,6 +617,15 @@ impl Executor {
             checkpointer: Some(checkpointer),
             ..Self::default()
         }
+    }
+
+    /// Builder-style: the [`crate::pause::PauseSink`] governed pauses
+    /// commit through (EP-03-S11). Attached once per deployment; every run
+    /// this executor drives commits its governed interrupts — obligations
+    /// and pause envelope — through the sink at the suspension point.
+    pub fn with_pause_sink(mut self, sink: Arc<dyn crate::pause::PauseSink>) -> Self {
+        self.pause_sink = Some(sink);
+        self
     }
 
     /// Builder-style: attach a middleware layer (Middleware/Interceptor
@@ -1515,6 +1560,49 @@ impl Executor {
                         step,
                     },
                 );
+            }
+            // Governed pause (EP-03-S11): an interrupt carrying obligations
+            // commits them — plus the pause envelope — through the sink,
+            // after the suspension checkpoint is durable and before the
+            // outcome surfaces. The outcome then carries the clean payload,
+            // never the governance wrapper.
+            let mut value = value;
+            if let Some(sink) = &self.pause_sink {
+                if let Some(governed) = crate::pause::decode_governed(&value)? {
+                    if self.checkpointer.is_none() {
+                        return Err(RustyError::Checkpoint(format!(
+                            "node `{name}` raised a governed pause but the executor has no \
+                             checkpointer — a suspension that cannot resume must never \
+                             register obligations"
+                        )));
+                    }
+                    let now = recorder.clock.now();
+                    let run_id = config
+                        .run_id
+                        .clone()
+                        .unwrap_or_else(|| recorder.journal.run_id().to_string());
+                    let mut envelope = crate::record::PauseEnvelope::new(
+                        run_id,
+                        config.thread_id.clone(),
+                        recorder.journal.len() as u64,
+                        checkpoint_id.clone(),
+                    );
+                    let commit = crate::pause::prepare_commit(
+                        governed,
+                        &mut envelope,
+                        now,
+                        config.default_obligation_ttl,
+                    );
+                    let payload = commit.payload.clone();
+                    sink.commit_pause(commit).await?;
+                    tracing::info!(
+                        node = %name,
+                        step = step,
+                        obligations = envelope.obligations.len(),
+                        "governed pause committed: obligations and pause envelope registered"
+                    );
+                    value = payload;
+                }
             }
             return Ok(StepTransition::Finish(ExecutionOutcome::Interrupted {
                 value,

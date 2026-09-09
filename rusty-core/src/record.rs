@@ -2163,6 +2163,41 @@ pub struct RunObligation {
     pub member_run_id: Option<String>,
 }
 
+impl RunObligation {
+    /// A fresh `Open` obligation of `kind` with a minted id and no expiry.
+    /// The executor's governed-pause commit re-asserts `Open` and stamps
+    /// expiry defaults at commit time; see [`crate::pause`].
+    pub fn open(kind: ObligationKind) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            tool_call_id: None,
+            kind,
+            status: ObligationStatus::Open,
+            expires_at: None,
+            member_run_id: None,
+        }
+    }
+
+    /// Builder-style: tie the obligation to a tool call id.
+    pub fn with_tool_call(mut self, tool_call_id: impl Into<String>) -> Self {
+        self.tool_call_id = Some(tool_call_id.into());
+        self
+    }
+
+    /// Builder-style: declare an explicit expiry. The deployment's default
+    /// TTL never overwrites an explicit expiry.
+    pub fn with_expiry(mut self, expires_at: DateTime<Utc>) -> Self {
+        self.expires_at = Some(expires_at);
+        self
+    }
+
+    /// Builder-style: attribute the obligation to a nested member run.
+    pub fn for_member_run(mut self, member_run_id: impl Into<String>) -> Self {
+        self.member_run_id = Some(member_run_id.into());
+        self
+    }
+}
+
 /// A sticky approval record: an "always allow" or "always deny" decision
 /// persisted in the envelope so resumed runs honour it without re-asking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

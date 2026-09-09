@@ -218,6 +218,27 @@ impl NodeContext {
     pub fn interrupt(&self, value: Value) -> RustyError {
         RustyError::Interrupt { value }
     }
+
+    /// Build the interrupt error for a **governed** pause (EP-03-S11): the
+    /// same suspension semantics as [`NodeContext::interrupt`], but the run
+    /// registers `obligations` and a pause envelope through the executor's
+    /// [`crate::pause::PauseSink`] at the suspension point, so expiry,
+    /// cancellation, and the approval queue observe the pause as data.
+    /// Obligations are committed `Open` with the deployment's default TTL
+    /// stamped onto any that declare no explicit `expires_at`.
+    ///
+    /// A governed interrupt on an executor without a checkpointer fails
+    /// loudly instead of pausing: a suspension that cannot be resumed must
+    /// never register obligations.
+    pub fn interrupt_governed(
+        &self,
+        payload: Value,
+        obligations: Vec<crate::record::RunObligation>,
+    ) -> RustyError {
+        RustyError::Interrupt {
+            value: crate::pause::governed_interrupt(payload, obligations, Vec::new()),
+        }
+    }
 }
 
 /// The output of a node: partial state updates plus optional dynamic routing.

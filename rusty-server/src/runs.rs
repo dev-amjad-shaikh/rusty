@@ -973,6 +973,9 @@ pub(crate) struct RunDeps {
     /// promotion target a registry-bound run resolves against when its
     /// binding names no environment (`None`: the untagged surface).
     pub default_environment_tag: Option<rusty_agent_runtime::learn::EnvironmentTag>,
+    /// The deployment's default obligation TTL (EP-03-S11 AC2), forwarded
+    /// into every run's config so governed pauses stamp it at commit time.
+    pub default_obligation_ttl: Option<std::time::Duration>,
 }
 
 /// The result of successfully scheduling a run: everything an endpoint
@@ -1400,11 +1403,20 @@ async fn execute(deps: RunDeps, run_id: String) {
     let mut config = RunConfig::new(snap.thread_id.clone())
         .with_event_tx(evt_tx)
         .with_journal(journal.clone())
+        // Governed pause (EP-03-S11): obligations and the pause envelope
+        // commit under the server-minted run id, so the approval queue,
+        // the sweep, and cancellation key by the id the API serves.
+        .with_run_id(run_id.clone())
         // Cancellation hook: this run's own token (a child of the server
         // drain token). When either fires, the run stops at its next
         // super-step boundary — a point where a checkpoint was just
         // persisted — instead of being torn down mid-step.
         .with_cancellation(snap.cancel.clone());
+    if let Some(ttl) = deps.default_obligation_ttl {
+        if let Ok(ttl) = chrono::Duration::from_std(ttl) {
+            config = config.with_default_obligation_ttl(ttl);
+        }
+    }
     // Provenance stamping (EP-07-S12 AC1): the server mints the identity
     // it honestly holds — the session is the wire thread, the turn is
     // this run's execution of turn work, the traffic is main-line; the
@@ -1542,7 +1554,10 @@ async fn execute(deps: RunDeps, run_id: String) {
         .and_then(|v| State::from_value(v).ok())
         .unwrap_or_default();
 
-    let mut executor = Executor::with_checkpointer(Arc::clone(&deps.checkpointer));
+    let mut executor = Executor::with_checkpointer(Arc::clone(&deps.checkpointer))
+        .with_pause_sink(Arc::new(crate::pause_sink::ServerPauseSink::new(
+            Arc::clone(&deps.server_store),
+        )));
     // The resolved middleware chain (R0.11 wave 4) attaches in journaled
     // order — the same layers the manifest's `middleware` digest pins and
     // the admission resolution's `layers` field names. Attached after the
@@ -1584,20 +1599,64 @@ async fn execute(deps: RunDeps, run_id: String) {
             state,
             checkpoint_id,
         }) => {
-            sink.push(
-                "end",
-                step,
-                json!({"status": "interrupted", "interrupt": value}),
-            );
-            let terminal = json!({
-                "run_id": run_id,
-                "thread_id": snap.wire_thread_id,
-                "status": "interrupted",
-                "interrupt": value,
-                "checkpoint_id": checkpoint_id,
-                "state": state.to_value(),
-            });
-            (RunStatus::Interrupted, terminal)
+            // Governed pause (EP-03-S11): the executor's pause sink
+            // committed obligations and an envelope for this run id, so the
+            // suspension is governed — the run parks as `paused` and its
+            // obligations are live rows the sweep, the cancel route, and
+            // the approvals queue observe. An ungoverned interrupt keeps
+            // the legacy `interrupted` status.
+            let governed = deps
+                .server_store
+                .get_pause_envelope(&run_id)
+                .await
+                .ok()
+                .flatten();
+            match governed {
+                Some(envelope) => {
+                    let open = envelope
+                        .obligations
+                        .iter()
+                        .filter(|o| {
+                            matches!(
+                                o.status,
+                                rusty_agent_runtime::record::ObligationStatus::Open
+                            )
+                        })
+                        .count();
+                    tracing::info!(%run_id, open, "run paused on open obligations");
+                    sink.push(
+                        "end",
+                        step,
+                        json!({"status": "paused", "interrupt": value, "open_obligations": open}),
+                    );
+                    let terminal = json!({
+                        "run_id": run_id,
+                        "thread_id": snap.wire_thread_id,
+                        "status": "paused",
+                        "interrupt": value,
+                        "checkpoint_id": checkpoint_id,
+                        "open_obligations": open,
+                        "state": state.to_value(),
+                    });
+                    (RunStatus::Paused, terminal)
+                }
+                None => {
+                    sink.push(
+                        "end",
+                        step,
+                        json!({"status": "interrupted", "interrupt": value}),
+                    );
+                    let terminal = json!({
+                        "run_id": run_id,
+                        "thread_id": snap.wire_thread_id,
+                        "status": "interrupted",
+                        "interrupt": value,
+                        "checkpoint_id": checkpoint_id,
+                        "state": state.to_value(),
+                    });
+                    (RunStatus::Interrupted, terminal)
+                }
+            }
         }
         Err(error @ RustyError::Cancelled(_)) => {
             // Drain, not failure: the executor stopped at a super-step
@@ -1888,6 +1947,7 @@ mod tests {
             log_capacity: 64,
             shutdown: tokio_util::sync::CancellationToken::new(),
             default_environment_tag: None,
+            default_obligation_ttl: None,
         }
     }
 

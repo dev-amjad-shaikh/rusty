@@ -410,6 +410,7 @@ pub(crate) fn build_router(
         log_capacity: config.event_log_capacity.max(16),
         shutdown: shutdown.clone(),
         default_environment_tag: config.default_environment_tag.clone(),
+        default_obligation_ttl: config.default_obligation_ttl,
     };
     let outbox_relay_interval = config.outbox_relay_interval;
     #[cfg(feature = "capsules")]
