@@ -378,11 +378,28 @@ fn build_backends(config: &ServerConfig) -> (Arc<dyn Checkpointer>, Arc<dyn Serv
 /// broker it wired so [`crate::router_with_broker`] can hand the app's
 /// credential seam to in-process mediators (the release proof's runs
 /// connector-resolve against the same broker the HTTP surface drives).
+/// The pieces [`build_router`] assembles: the router plus the shared
+/// planes tests and in-process embedders drive alongside it.
+pub(crate) struct RouterParts {
+    /// The assembled HTTP surface.
+    pub router: Router,
+    /// The app's credential broker (R0.11 wave 4).
+    pub broker: Arc<crate::broker::Broker>,
+    /// The shared run registry. Read by in-crate tests staging pause
+    /// states the executor will one day commit itself (EP-03-S11).
+    #[allow(dead_code)]
+    pub run_manager: RunManager,
+    /// The platform store. Read by in-crate tests seeding and inspecting
+    /// pause obligations and envelopes.
+    #[allow(dead_code)]
+    pub server_store: Arc<dyn ServerStore>,
+}
+
 pub(crate) fn build_router(
     registry: GraphRegistry,
     config: ServerConfig,
     shutdown: tokio_util::sync::CancellationToken,
-) -> (Router, Arc<crate::broker::Broker>) {
+) -> RouterParts {
     let (checkpointer, server_store) = build_backends(&config);
     let run_deps = RunDeps {
         registry: registry.clone(),
@@ -425,12 +442,13 @@ pub(crate) fn build_router(
     let deployment = Arc::new(crate::deploy::DeploymentControl::new(Arc::clone(
         &server_store,
     )));
+    let run_manager = run_deps.manager.clone();
     let state = Arc::new(AppState {
         registry,
         config: config.clone(),
         checkpointer,
         run_deps,
-        server_store,
+        server_store: Arc::clone(&server_store),
         upgrades: crate::upgrades::UpgradePlane::load(&config.store_path),
         state_locks: Mutex::new(HashMap::new()),
         gap_locks: Mutex::new(HashMap::new()),
@@ -1112,7 +1130,12 @@ pub(crate) fn build_router(
         // deployments should replace this with a restrictive `CorsLayer`.
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state);
-    (app, broker)
+    RouterParts {
+        router: app,
+        broker,
+        run_manager,
+        server_store,
+    }
 }
 
 /// Build the full router with an explicit drain control (used by
@@ -1123,7 +1146,7 @@ pub(crate) fn router_with_shutdown(
     config: ServerConfig,
     shutdown: tokio_util::sync::CancellationToken,
 ) -> Router {
-    build_router(registry, config, shutdown).0
+    build_router(registry, config, shutdown).router
 }
 
 // --------------------------------------------------------------------- //
@@ -1347,6 +1370,11 @@ struct ForkThreadPayload {
 /// or up to `checkpoint_id`) into a new thread bound to the same graph, via
 /// [`Checkpointer::fork_thread`]. The fork is the safe time-travel target:
 /// replay it with `"checkpoint": {"checkpoint_id": …}` on run-create.
+///
+/// Pause state forks with the session (EP-03-S09 AC 5): when the source
+/// thread's latest run is paused, the response adds `paused: true`, the
+/// fork's own `pause_run_id`, and the count of open obligations carried —
+/// copies rebound under the fork's run id, independent of the parent's.
 async fn fork_thread(
     AxumState(state): AxumState<Arc<AppState>>,
     Extension(tenant): Extension<TenantContext>,
@@ -1417,14 +1445,34 @@ async fn fork_thread(
         )));
     }
 
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({
-            "thread_id": new_thread_id,
-            "checkpoints_copied": copied,
-            "seed_length": copied,
-        })),
-    ))
+    // Pause state forks with the session (EP-03-S09 AC 5): when the
+    // source thread's latest run is paused, the fork carries its own
+    // paused run with copies of the open obligations and the pause
+    // envelope, all rebound under the fork's run id.
+    let forked_pause = crate::pause_fork::fork_pause_state(
+        &state.server_store,
+        &state.run_deps.manager,
+        &src_internal,
+        &new_internal_id,
+        &new_thread_id,
+        state.run_deps.log_capacity,
+        &state.shutdown,
+    )
+    .await
+    .map_err(internal_err)?;
+
+    let mut body = json!({
+        "thread_id": new_thread_id,
+        "checkpoints_copied": copied,
+        "seed_length": copied,
+    });
+    if let Some(forked) = forked_pause {
+        body["paused"] = json!(true);
+        body["pause_run_id"] = json!(forked.run_id);
+        body["obligations_carried"] = json!(forked.obligations_carried);
+    }
+
+    Ok((StatusCode::CREATED, Json(body)))
 }
 
 // --------------------------------------------------------------------- //

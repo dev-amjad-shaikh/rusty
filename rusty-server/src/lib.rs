@@ -199,6 +199,7 @@ mod mcp_bridge;
 mod memory;
 pub mod oauth;
 mod outbox;
+mod pause_fork;
 mod pending_runs;
 mod policy;
 mod receipts;
@@ -1179,8 +1180,8 @@ pub fn router_with_broker(
     Router,
     Arc<dyn rusty_agent_runtime::broker::CredentialBroker>,
 ) {
-    let (router, broker) = routes::build_router(registry, config, CancellationToken::new());
-    (router, broker)
+    let parts = routes::build_router(registry, config, CancellationToken::new());
+    (parts.router, parts.broker)
 }
 
 /// Build the router and bind it to `config.bind_addr`. Blocks until the
