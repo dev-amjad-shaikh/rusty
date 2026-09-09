@@ -1,0 +1,352 @@
+/* Guided setup (handoff 03 "Guided"): header with back + step pills, the
+   template gallery, slot cards (grid 24px 1fr), the configure aside, and
+   the autonomy three-card step. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.back {
+  font: var(--text-body);
+  color: var(--ink2);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.back:hover {
+  color: var(--ink);
+}
+
+.title {
+  font: var(--text-page-title);
+  font-weight: 600;
+  margin: 0;
+}
+
+.steps {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.stepPill {
+  font: var(--text-secondary);
+  color: var(--ink2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.stepPill:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.stepPillActive {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+/* Step 1 — template gallery. Start blank first, dashed; then templates. */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.templateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  padding: 16px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.templateCard:hover {
+  border-color: var(--ink3);
+  background: var(--bg);
+}
+
+.blankCard {
+  composes: templateCard;
+  border-style: dashed;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.templateName {
+  font-size: var(--text-pane-title);
+  font-weight: 600;
+}
+
+.templateVersion {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--ink3);
+}
+
+.templateBlurb {
+  font-size: var(--text-body);
+  color: var(--ink2);
+  margin: 0;
+}
+
+.templateMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--text-secondary);
+  color: var(--ink3);
+}
+
+/* Step 2 — configure: slots/form + aside. */
+.configure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: 18px;
+  align-items: start;
+}
+
+.slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.slotRow {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.slotBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  font-size: var(--text-secondary);
+  color: var(--ink3);
+}
+
+.slotBadgeFilled {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.slotCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  padding: 14px 16px;
+}
+
+.slotHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.slotTitle {
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.slotPath {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--ink3);
+}
+
+.slotHelp {
+  font-size: var(--text-secondary);
+  color: var(--ink2);
+  margin: 0;
+}
+
+.slotProbe {
+  font-size: var(--text-meta);
+  color: var(--ink3);
+}
+
+.probeOk {
+  color: var(--ok);
+}
+
+.probeFailed {
+  color: var(--err);
+}
+
+.choiceRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 0;
+}
+
+.asideCard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.asideTitle {
+  font-size: var(--text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink3);
+  margin: 0;
+}
+
+.violationList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.violationItem {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--text-secondary);
+}
+
+.kindDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  flex: none;
+  align-self: center;
+}
+
+.kindSchema {
+  background: var(--err);
+}
+
+.kindCoherence {
+  background: var(--warn);
+}
+
+.kindSlot {
+  background: var(--ink3);
+}
+
+.violationPath {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--ink3);
+}
+
+.violationMessage {
+  color: var(--ink2);
+}
+
+.clean {
+  font-size: var(--text-secondary);
+  color: var(--ok);
+  margin: 0;
+}
+
+.summaryRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--text-secondary);
+  color: var(--ink2);
+}
+
+/* Step 3 — autonomy: three cards. */
+.autonomyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.autonomyCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-main);
+  background: var(--panel);
+  padding: 18px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.autonomyCard:hover {
+  border-color: var(--ink3);
+}
+
+.autonomyCardActive {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.autonomyName {
+  font-size: var(--text-pane-title);
+  font-weight: 600;
+}
+
+.autonomyDesc {
+  font-size: var(--text-body);
+  color: var(--ink2);
+  margin: 0;
+}
+
+.autonomyNote {
+  font-size: var(--text-secondary);
+  color: var(--err);
+  margin: 0;
+}
+
+.footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
