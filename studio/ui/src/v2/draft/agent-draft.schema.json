@@ -1,0 +1,309 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentDraft",
+  "description": "The studio-side draft document (handoff 04). One type shared by Guided, Compose, Chat, Import, and Improve (R-A1); the AgentDraftForm walks this schema, so a field added here appears in every entry path without per-path code. Regenerate the TypeScript with `npm run generate:draft`.",
+  "type": "object",
+  "x-sections": [
+    { "id": "identity", "label": "Identity" },
+    { "id": "goal", "label": "Goal & measures" },
+    { "id": "directive", "label": "Directive", "note": "Frozen at session start · three tiers" },
+    { "id": "tools", "label": "Connectors & tools" },
+    { "id": "skills", "label": "Skills" },
+    { "id": "memory", "label": "Memory blocks" },
+    { "id": "channel", "label": "Channel & triggers" },
+    { "id": "learning", "label": "Learning policy" }
+  ],
+  "required": [
+    "source",
+    "name",
+    "description",
+    "model",
+    "autonomy",
+    "goal",
+    "measures",
+    "stable",
+    "context",
+    "connectors",
+    "wrapped",
+    "rules",
+    "secrets",
+    "skills",
+    "memory",
+    "channelKind",
+    "channelTarget",
+    "triggers",
+    "reviewFork",
+    "cadence",
+    "gateSuite"
+  ],
+  "properties": {
+    "source": {
+      "description": "Which entry path created or last touched the draft.",
+      "enum": ["guided", "compose", "chat", "import", "improve", "test"],
+      "x-control": "hidden"
+    },
+    "agentId": {
+      "description": "Set when editing a published blueprint.",
+      "type": "string",
+      "x-control": "hidden"
+    },
+    "base": {
+      "description": "Snapshot of the published head this draft diffs against.",
+      "x-ts": "AgentDraft & { version: number }",
+      "x-control": "hidden"
+    },
+    "template": {
+      "description": "Template id the draft started from, if any.",
+      "type": ["string", "null"],
+      "x-control": "hidden"
+    },
+    "name": {
+      "description": "Agent name.",
+      "type": "string",
+      "x-control": "text",
+      "x-section": "identity",
+      "x-label": "Name",
+      "x-spec-file": "agent.md"
+    },
+    "model": {
+      "description": "Model ref, prefix-routed.",
+      "type": "string",
+      "x-control": "catalog-single:models",
+      "x-section": "identity",
+      "x-label": "Model",
+      "x-spec-file": "agent.md"
+    },
+    "description": {
+      "description": "What the agent is for, in one paragraph.",
+      "type": "string",
+      "x-control": "textarea",
+      "x-section": "identity",
+      "x-label": "Description",
+      "x-spec-file": "agent.md"
+    },
+    "autonomy": {
+      "description": "How much the agent may do without asking.",
+      "enum": ["read_only", "supervised", "full"],
+      "x-control": "enum",
+      "x-section": "identity",
+      "x-label": "Autonomy",
+      "x-enum-labels": {
+        "read_only": "Read only",
+        "supervised": "Supervised",
+        "full": "Full"
+      },
+      "x-spec-file": "agent.md"
+    },
+    "goal": {
+      "description": "The outcome the agent is judged on.",
+      "type": "string",
+      "x-control": "textarea",
+      "x-section": "goal",
+      "x-label": "Goal",
+      "x-spec-file": "goal.md"
+    },
+    "measures": {
+      "description": "Measures the agent is judged on; they enter the stable tier and drive Metrics (R-A10).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-name": "Measure",
+        "required": ["name", "source", "target", "window", "kind"],
+        "properties": {
+          "name": { "type": "string", "x-control": "text", "x-label": "Name" },
+          "source": {
+            "enum": ["outcome", "connector", "eval"],
+            "x-control": "enum",
+            "x-label": "Source",
+            "x-enum-labels": { "outcome": "outcome", "connector": "connector", "eval": "eval suite" }
+          },
+          "target": { "type": "string", "x-control": "text", "x-label": "Target" },
+          "window": { "type": "string", "x-control": "text", "x-label": "Window" },
+          "kind": {
+            "enum": ["target", "gate", "guardrail"],
+            "x-control": "enum",
+            "x-label": "Kind"
+          }
+        }
+      },
+      "x-control": "object-list",
+      "x-section": "goal",
+      "x-label": "Measures",
+      "x-add-label": "+ Measure",
+      "x-empty": "No measures. Add at least one so the agent knows what it is judged on.",
+      "x-spec-file": "goal.md"
+    },
+    "stable": {
+      "description": "Stable tier — identity and guidance.",
+      "type": "string",
+      "x-control": "textarea",
+      "x-section": "directive",
+      "x-label": "Stable · identity and guidance",
+      "x-spec-file": "directive/stable.md"
+    },
+    "context": {
+      "description": "Context tier — workspace facts.",
+      "type": "string",
+      "x-control": "textarea",
+      "x-section": "directive",
+      "x-label": "Context · workspace facts",
+      "x-spec-file": "directive/context.md"
+    },
+    "connectors": {
+      "description": "RegistryRef ids of mounted connectors; tools derive from connectors.",
+      "type": "array",
+      "items": { "type": "string" },
+      "x-control": "catalog-multi:connectors",
+      "x-section": "tools",
+      "x-label": "Connectors",
+      "x-spec-file": "agent.md"
+    },
+    "secrets": {
+      "description": "One SecretRef name per mounted connector — names only, never values.",
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "x-control": "connector-secrets",
+      "x-section": "tools",
+      "x-label": "Credentials",
+      "x-help": "Names only: rusty:secret:<store>:<key>",
+      "x-spec-file": "toolsets.md"
+    },
+    "wrapped": {
+      "description": "Mounted tool ids wrapped in approval_required(org_admins).",
+      "type": "array",
+      "items": { "type": "string" },
+      "x-control": "toolset",
+      "x-section": "tools",
+      "x-label": "Toolset",
+      "x-help": "Chips edit the ToolsetSpec directly",
+      "x-empty": "No tools mounted — pick a connector above.",
+      "x-spec-file": "toolsets.md"
+    },
+    "rules": {
+      "description": "Structured tool rules (R-A11): a tool or all, plus the rule text.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-name": "ToolRule",
+        "required": ["tool", "rule"],
+        "properties": {
+          "tool": { "type": "string", "x-control": "tool-ref", "x-label": "Tool" },
+          "rule": { "type": "string", "x-control": "text", "x-label": "Rule" }
+        }
+      },
+      "x-control": "object-list",
+      "x-section": "tools",
+      "x-label": "Tool rules",
+      "x-add-label": "+ Rule",
+      "x-empty": "No rules. Rules compile into the prompt and into the guard.",
+      "x-spec-file": "rules.md"
+    },
+    "skills": {
+      "description": "Skill ids; the index shows Promoted only at runtime.",
+      "type": "array",
+      "items": { "type": "string" },
+      "x-control": "catalog-multi:skills",
+      "x-section": "skills",
+      "x-label": "Skills",
+      "x-spec-file": "agent.md"
+    },
+    "memory": {
+      "description": "Memory blocks mounted on the agent.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-name": "MemoryBlock",
+        "required": ["label", "description", "limit", "scope"],
+        "properties": {
+          "label": { "type": "string", "x-control": "text", "x-label": "Label", "x-mono": true },
+          "description": { "type": "string", "x-control": "textarea", "x-label": "Description" },
+          "limit": { "type": "integer", "x-control": "number", "x-label": "Limit (ch)" },
+          "scope": {
+            "enum": ["agent", "user"],
+            "x-control": "enum",
+            "x-label": "Scope"
+          }
+        }
+      },
+      "x-control": "object-list",
+      "x-section": "memory",
+      "x-label": "Blocks",
+      "x-add-label": "+ Block",
+      "x-spec-file": "memory.md"
+    },
+    "channelKind": {
+      "description": "Primary channel kind; empty means unbound.",
+      "enum": ["", "slack", "teams", "email", "web"],
+      "x-control": "enum",
+      "x-section": "channel",
+      "x-label": "Channel",
+      "x-enum-labels": {
+        "": "Unbound",
+        "slack": "Slack",
+        "teams": "Microsoft Teams",
+        "email": "Email",
+        "web": "Web widget"
+      },
+      "x-spec-file": "agent.md"
+    },
+    "channelTarget": {
+      "description": "Channel target — a channel id, address, or route.",
+      "type": "string",
+      "x-control": "text",
+      "x-section": "channel",
+      "x-label": "Channel target",
+      "x-mono": true,
+      "x-spec-file": "agent.md"
+    },
+    "triggers": {
+      "description": "Schedules and connector events that run the agent without a message (R-A12).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-name": "Trigger",
+        "required": ["kind", "spec", "prompt"],
+        "properties": {
+          "kind": {
+            "enum": ["cron", "event"],
+            "x-control": "enum",
+            "x-label": "Kind",
+            "x-enum-labels": { "cron": "Schedule", "event": "Connector event" }
+          },
+          "spec": { "type": "string", "x-control": "trigger-spec", "x-label": "Spec", "x-mono": true },
+          "prompt": { "type": "string", "x-control": "textarea", "x-label": "Seed prompt" }
+        }
+      },
+      "x-control": "object-list",
+      "x-section": "channel",
+      "x-label": "Triggers",
+      "x-add-label": "+ Trigger",
+      "x-empty": "Runs only when messaged. Add a schedule or a connector event to run without one.",
+      "x-spec-file": "triggers.md"
+    },
+    "reviewFork": {
+      "description": "Run a post-turn review fork.",
+      "type": "boolean",
+      "x-control": "boolean",
+      "x-section": "learning",
+      "x-label": "Post-turn review fork",
+      "x-spec-file": "learning.md"
+    },
+    "cadence": {
+      "description": "Consolidation cadence (cron).",
+      "type": "string",
+      "x-control": "text",
+      "x-section": "learning",
+      "x-label": "Consolidation",
+      "x-mono": true,
+      "x-spec-file": "learning.md"
+    },
+    "gateSuite": {
+      "description": "Eval suite that gates promotion.",
+      "type": "string",
+      "x-control": "catalog-single:evalSuites",
+      "x-section": "learning",
+      "x-label": "Promotion gate",
+      "x-spec-file": "learning.md"
+    }
+  }
+}

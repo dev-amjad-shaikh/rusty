@@ -1,0 +1,143 @@
+/* AgentDraftForm layout over the v2 tokens (handoff 01). Sections stack;
+ * list items render as cards; violations anchor under their control. */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  font-family: var(--font-ui);
+  color: var(--ink);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.sectionTitle {
+  font: var(--text-pane-title);
+  margin: 0;
+}
+
+.sectionNote {
+  font: var(--text-meta);
+  color: var(--ink3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 560px;
+}
+
+.fieldLabel {
+  font: var(--text-secondary);
+  color: var(--ink2);
+}
+
+.fieldHelp {
+  font: var(--text-meta);
+  color: var(--ink3);
+  margin: 0;
+}
+
+.violations {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.violation {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font: var(--text-meta);
+  color: var(--err);
+}
+
+.violationFile {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink3);
+}
+
+.invalid input,
+.invalid textarea,
+.invalid select {
+  border-color: var(--err);
+}
+
+.pillRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toolChip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font: var(--text-meta);
+}
+
+.toolChipId {
+  font-family: var(--font-mono);
+}
+
+.toolChipEffect {
+  color: var(--ink3);
+}
+
+.connectorRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connectorName {
+  min-width: 140px;
+  font: var(--text-secondary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.listItem {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 12px;
+  background: var(--panel);
+}
+
+.listItemHeader {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.empty {
+  font: var(--text-meta);
+  color: var(--ink3);
+  margin: 0;
+}
