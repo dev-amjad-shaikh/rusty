@@ -12,14 +12,14 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## At a glance
 
-**█████████████████████████░░░░░░░░░ 73%** weighted complete (126 ✅ landed · 45 ◐ partial · 31 ○ not started, of 202 stories)
+**██████████████████████████░░░░░░░░ 75%** weighted complete (130 ✅ landed · 45 ◐ partial · 29 ○ not started, of 204 stories)
 
 > Integration 2026-09-08: merged to `main` — the thirteen-wave stack (`3cca541`, incl. EP-04-S01 schema pipeline, EP-06-S03, EP-07-S03/S04/S05/S06/S07/S09/S11/S12, EP-08-S07/S08), EP-03-S11 server infra (`58f2fe0`), EP-10-S08 (`a0948de`), EP-10-S09 (`c72b35d`), EP-13-S10 AC5 (`4a83150`), the EP-17 chain (`bfe5b84`, composed with EP-08-S07's `gate_override` promotion path). Rows citing `feat/*` branches from those waves are now on `main`. Skipped as superseded by `1c5e080` (already on main): `feat/ep-15-s01`, `feat/ep-15-s02`, `feat/toolset-combinators`.
 | Epic | Milestone | Stories | ✅ | ◐ | ○ | Progress |
 |---|---|---|---|---|---|---|
 | EP-01 Event Log and State Substrate | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
 | EP-02 Execution Kernel and ABI | M0–M1 | 11 | 11 | 0 | 0 | ███████████ 100% |
-| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 9 | 2 | 0 | ██████████░░ 91% |
+| EP-03 Durability, Checkpoints and Pause | M1 | 11 | 10 | 1 | 0 | ███████████░ 95% |
 | EP-04 Gateway, Sessions and Channels | M1 | 12 | 5 | 3 | 4 | ██████░░░░░░ 54% |
 | EP-05 Tool System and Sandboxing | M0–M2 | 12 | 11 | 1 | 0 | ██████████░░ 92% |
 | EP-06 Memory | M1–M2 | 12 | 8 | 2 | 2 | █████████░░░ 75% |
@@ -31,8 +31,8 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 | EP-12 Evals Framework | M2 | 12 | 12 | 0 | 0 | ████████████ 100% |
 | EP-13 Observability, Storage, and Operations | M0–M4 | 12 | 9 | 2 | 1 | ██████████░░ 83% |
 | EP-14 User Interfaces | M1–M4 | 18 | 8 | 9 | 1 | ████████░░░░ 69% |
-| EP-15 Out-of-the-Box Catalog | M4 | 12 | 8 | 1 | 3 | █████████░░░ 71% |
-| EP-16 Rustynome Studio v2 (design handoff) | M4–M5 | 16 | 0 | 0 | 16 | ░░░░░░░░░░░░░░░░ 0% |
+| EP-15 Out-of-the-Box Catalog | M4 | 12 | 9 | 1 | 2 | ██████████░░ 79% |
+| EP-16 Rustynome Studio v2 (design handoff) | M4–M5 | 16 | 1 | 0 | 15 | █░░░░░░░░░░░░░░░ 6% |
 | EP-17 Self-Improvement Measurement (survey fast-follows) | M2–M4 | 6 | 5 | 0 | 1 | █████░ 83% |
 
 ## EP-01 — Event Log and State Substrate
@@ -73,7 +73,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-03 — Durability, Checkpoints and Pause
 
-██████████░░ 91% · 9 landed · 2 partial · 0 not started · milestone M1
+███████████░ 95% · 10 landed · 1 partial · 0 not started · milestone M1
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -305,7 +305,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-15 — Out-of-the-Box Catalog
 
-█████████░░░ 71% · 8 landed · 1 partial · 3 not started · milestone M4
+██████████░░ 79% · 9 landed · 1 partial · 2 not started · milestone M4
 
 | Story | Title | P | Status | Evidence / what's open |
 |---|---|---|---|---|
@@ -324,7 +324,7 @@ Status is evidence-mapped: each row cites the module, route, or branch the judgm
 
 ## EP-16 — Rustynome Studio v2 (design handoff)
 
-░░░░░░░░░░░░░░░░ 0% · 0 landed · 0 partial · 16 not started · milestone M4–M5
+█░░░░░░░░░░░░░░░ 6% · 1 landed · 0 partial · 15 not started · milestone M4–M5
 
 Design source: `docs/studio-v2-design-handoff/` (owner-supplied, 2026-09-05 — high-fidelity; `01`–`07` specify tokens, IA, screens, data model, requirements R-*, API/events, build plan; `design/*.dc.html` are HTML reference prototypes). Governing principle: **the UI is a projection of the event log, never a second source of truth**; one `AgentDraft` type and one form across every authoring entry; capabilities hidden by scope, not disabled. Requirements R-A1..R-X5 live in `05-requirements.md` and are the acceptance vocabulary for these stories. The handoff covers most flows end to end; where it does not, the story row says so. Supersedes the studio-v4 line of designs where they conflict.
 
