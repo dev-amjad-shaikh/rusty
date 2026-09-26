@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ToolCall",
+  "description": "A tool call requested by the model.\n\nWire format is the OpenAI function-calling shape: `{\"id\": \"...\", \"type\": \"function\", \"function\": {\"name\": \"...\", \"arguments\": \"<json string>\"}}`. The `arguments` field is exposed as a parsed [`Value`]; serialization re-encodes it to the string form the API expects.",
+  "type": "object",
+  "required": [
+    "arguments",
+    "id",
+    "name"
+  ],
+  "properties": {
+    "arguments": {
+      "description": "Parsed arguments."
+    },
+    "id": {
+      "description": "Provider-assigned call id (echoed back in the tool-result message).",
+      "type": "string"
+    },
+    "name": {
+      "description": "Tool name.",
+      "type": "string"
+    }
+  }
+}

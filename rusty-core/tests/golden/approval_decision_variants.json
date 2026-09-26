@@ -1,0 +1,19 @@
+[
+  {
+    "decision": "approved_once",
+    "approved_by": "user-1"
+  },
+  {
+    "decision": "rejected",
+    "decided_by": "user-2",
+    "reason": "no"
+  },
+  {
+    "decision": "cancelled",
+    "reason": "timeout"
+  },
+  {
+    "decision": "unavailable",
+    "reason": "gate absent"
+  }
+]

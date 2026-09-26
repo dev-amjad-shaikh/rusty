@@ -1,0 +1,53 @@
+[
+  {
+    "reason": "unknown_handle",
+    "detail": "not a broker handle token"
+  },
+  {
+    "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handle_id": "hdl-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tenant": "acme",
+    "reason": "handle_expired",
+    "expires_at": "2027-01-15T08:08:20Z",
+    "detail": "handle `hdl-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb` expired at 2027-01-15 08:08:20 UTC — handles are short-lived; re-issue at the next use"
+  },
+  {
+    "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handle_id": "hdl-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tenant": "acme",
+    "reason": "scope_not_granted",
+    "missing": [
+      "drive.admin"
+    ],
+    "detail": "requested beyond the handle's narrowed set — missing scopes: drive.admin"
+  },
+  {
+    "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handle_id": "hdl-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tenant": "acme",
+    "reason": "connection_revoked",
+    "grant": [
+      "drive.readonly",
+      "drive.write"
+    ],
+    "detail": "connection `conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` is revoked — the grant [\"drive.readonly\",\"drive.write\"] no longer holds; the next use fails closed, not the next deploy"
+  },
+  {
+    "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handle_id": "hdl-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tenant": "acme",
+    "reason": "connection_needs_reauth",
+    "detail": "connection `conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` needs re-authentication — a human must record a new consent act"
+  },
+  {
+    "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handle_id": "hdl-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tenant": "acme",
+    "reason": "unknown_connection",
+    "detail": "connection `conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` is unknown to tenant `acme`"
+  },
+  {
+    "reason": "broker_unavailable",
+    "detail": "the store read failed"
+  }
+]

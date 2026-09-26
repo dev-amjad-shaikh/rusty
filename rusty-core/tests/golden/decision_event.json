@@ -1,0 +1,29 @@
+{
+  "id": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d:d0",
+  "run_id": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d",
+  "thread_id": "thread-42",
+  "seq": 0,
+  "family": "retry",
+  "features": {
+    "attempt": 1,
+    "failure_class": "timeout",
+    "p95_latency_ms": 840
+  },
+  "legal_actions": [
+    {
+      "action": "retry",
+      "attempt": 2
+    },
+    {
+      "action": "abort"
+    }
+  ],
+  "selected": {
+    "action": "retry",
+    "attempt": 2
+  },
+  "propensity": 0.8,
+  "policy_version": "static-v0",
+  "outcome": "success",
+  "decided_at": "2025-06-15T15:06:40Z"
+}

@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /rusty-core
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /rusty-server
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /rusty-worker
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /rusty-otel
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /sdks/python
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /sdks/typescript
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

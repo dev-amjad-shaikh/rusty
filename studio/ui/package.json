@@ -1,0 +1,46 @@
+{
+  "name": "@rusty-runtime/studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc -b && vite build && node scripts/normalize-dist.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "check:tiers": "node scripts/check-tiers.mjs",
+    "test": "vitest run",
+    "dev:ui": "vite"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/instrument-sans": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/outfit": "^5.2.8",
+    "@formatjs/icu-messageformat-parser": "^3.5.17",
+    "@tabler/icons-webfont": "^3.5.0",
+    "@tanstack/react-query": "5.101.4",
+    "@tanstack/react-router": "1.170.25",
+    "lossless-json": "4.3.1",
+    "marked": "^16.4.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-intl": "^10.1.25",
+    "zod": "4.4.3",
+    "zustand": "5.0.14"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.3",
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "axe-core": "4.13.0",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
+  }
+}

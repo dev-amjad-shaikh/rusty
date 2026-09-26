@@ -1,0 +1,31 @@
+{
+  "name": "web.search",
+  "description": "Searches the web.",
+  "parameters_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "maximum": 50,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "query": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  },
+  "effect": "read_only",
+  "tags": [
+    "web",
+    "research"
+  ],
+  "when_to_use": "For open questions needing current information.",
+  "cost_class": "medium",
+  "parallel_safe": true,
+  "batchable": true
+}

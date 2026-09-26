@@ -1,0 +1,17099 @@
+//! HTTP handlers and application state (Agent-Protocol subset, design doc §3).
+
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::extract::{Path, Query, State as AxumState};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, post, put};
+use axum::{Extension, Json, Router, middleware};
+use chrono::{DateTime, Utc};
+use futures::Stream;
+use rusty_agent_runtime::agents::{
+    AgentId, COORDINATION_RESULT_KIND, CapabilityManifest, CoordinationContract, DelegateContract,
+    FanOutContract, QuorumContract, RaceContract, StateScope,
+};
+#[cfg(feature = "capsules")]
+use rusty_agent_runtime::capsule::{CapsuleDenial, CapsuleOverlay, ResourceBudget};
+use rusty_agent_runtime::capsule::{CapsuleManifest, CapsuleResolution, derive_capsule_id};
+use rusty_agent_runtime::checkpoint::{
+    Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
+};
+use rusty_agent_runtime::durable::{
+    ResolvedRetryParameters, RetryDecision, resolve_retry_parameters, resolve_timeout_bound_ms,
+    retry_decision_event, timeout_decision_event,
+};
+use rusty_agent_runtime::effects::ApprovalToken;
+use rusty_agent_runtime::gaps::{
+    ActorRef, AdjacencySource, Citation, CitationKind, ClosureCriteria, ClosureEvidence,
+    EventSource, GapError, GapLedger, GapOrigin, GapStatus, GapSubject, InteractionChannel,
+    InteractionEvent, InteractionOutcome, JudgeVote, OutcomeAnnotation, OutcomeClass,
+    ResolutionPath,
+};
+use rusty_agent_runtime::induction::{
+    CoverageConfig, DEFAULT_BLOCK_CHAR_LIMIT, DEFAULT_FAILING_THRESHOLD_MILLIS, InductionError,
+    MiningConfig, SupplyArtifact, crawl_coverage, declared_blocks, join_maps, mine_intents,
+    seed_ledger,
+};
+use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
+use rusty_agent_runtime::learn::{
+    Candidate, CandidateContent, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
+    CandidateStatus, DriftBaseline, DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError,
+    PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer, admit_promotion,
+    candidate_effect_key, detect_policy_drift, evaluation_effect_key, promotion_effect_key,
+    rollback_effect_key, surface_for_kind,
+};
+use rusty_agent_runtime::llm::Usage;
+use rusty_agent_runtime::memory::{
+    Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason, MemoryEvidence,
+    MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord, MemoryScope,
+    MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow, assemble, detect_conflicts,
+    memory_effect_key, memory_forget_effect_key, memory_read_request, plan_forget,
+};
+use rusty_agent_runtime::record::{
+    CapsuleVersion, DecisionEvent, Effect, EffectReceipt, EventStatus, ExecutorPolicy, JournalRef,
+    PayloadRef, PolicyVersion, RunEvent, RunEventKind, derive_policy_version, sha256_hex,
+};
+use rusty_agent_runtime::registry::{ArtifactRecord, RegistryError, diff_candidates};
+use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
+use rusty_agent_runtime::scope::{Scope, ScopeTable};
+use rusty_agent_runtime::state::State;
+use rusty_agent_runtime::team_trace::TeamTrace;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use tokio::sync::Mutex;
+
+use crate::agents::{
+    self, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim, MailboxClaimScope,
+};
+use crate::assistants::{
+    ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT, ActivateVersionOutcome,
+    AssistantRecord, AssistantVersionRecord, AssistantVersionView, AssistantView,
+    CreateVersionOutcome, DeclineVersionOutcome, SetLifecycleOutcome, valid_version_id,
+};
+use crate::auth::TenantContext;
+use crate::capsules::{CapsuleRecord, CapsuleWrite};
+use crate::coordination;
+use crate::crons::{self, CronRecord, OnRunCompleted};
+use crate::error::ApiError;
+use crate::evaluations;
+use crate::learn::ServerMemoryStore;
+use crate::policy::{self, PolicyActivation, PolicyRecord, PolicySource, PolicyWrite};
+use crate::runs::{
+    self, MultitaskStrategy, RunConfigPayload, RunDeps, RunManager, RunPayload, RunStatus,
+};
+use crate::server_store::{ArtifactCommitOutcome, CandidateTransition, JsonFileStore, ServerStore};
+use crate::sse;
+use crate::supervision;
+use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
+use crate::threads::ThreadRecord;
+use crate::triggers;
+use crate::{GraphRegistry, RESERVED_NAMES, ServerConfig, store};
+
+/// Shared application state.
+pub(crate) struct AppState {
+    /// This process's identity, minted at construction. Work that lives
+    /// only in this process (a dataset evaluation's background task)
+    /// records it, so a record from an earlier process is known to be
+    /// orphaned rather than merely slow.
+    pub boot_id: String,
+    pub registry: GraphRegistry,
+    pub config: ServerConfig,
+    pub checkpointer: Arc<dyn Checkpointer>,
+    pub run_deps: RunDeps,
+    /// Assistants / crons / threads / KV persistence (JSON files or
+    /// Postgres). Thread records live here — not in a route-local map — so
+    /// they survive restarts alongside their checkpoints.
+    pub server_store: Arc<dyn ServerStore>,
+    /// Per-thread locks serializing `update_state`'s read-modify-write:
+    /// without one, two concurrent writes could mint the same `step`.
+    pub state_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Per-tenant locks serializing gap-ledger read-modify-write
+    /// (demand-side learning, wave 2): the ledger is one snapshot per
+    /// tenant, so every mutation is a load → mutate → persist cycle
+    /// that must not interleave with a sibling — `state_locks`' shape
+    /// and reasoning, one level up (tenant, not thread).
+    pub gap_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Consents in flight, keyed by the `state` a provider will hand back.
+    /// In memory on purpose: a consent that outlives a restart is a consent
+    /// nobody is still waiting on, and the window is minutes.
+    pub pending_grants: Mutex<HashMap<String, crate::connectors::PendingGrant>>,
+    /// The live cell `react_agent` sources connection tools from, refilled
+    /// whenever a connection is created, granted or refreshed.
+    pub connection_tools: Option<Arc<crate::connectors::ConnectionTools>>,
+    /// The model handle the graphs hold (`llm_providers.rs`), when configurable.
+    pub model_handle: Option<Arc<rusty_agent_runtime::llm::SwappableChatModel>>,
+    /// The live cell mounted MCP servers fill (`mcp_servers.rs`).
+    pub mcp_tools: Option<Arc<crate::mcp_servers::McpTools>>,
+    /// Verdicts on completed runs (`verify_outcome.rs`).
+    pub verifications: Arc<crate::verify_outcome::VerificationPlane>,
+    /// The person of each thread made before threads were stamped with
+    /// one — derived at boot from its earliest run, by wire thread id
+    /// ([`backfill_thread_persons`]). A thread stamped at creation needs
+    /// no entry; a thread a service made stays everyone's.
+    pub thread_persons: std::sync::RwLock<HashMap<String, String>>,
+    /// The listing row of each journaled run, by tenant and run, as it was
+    /// first computed in this process: a sealed run's thread, accepted
+    /// record and checkpoint ownership never change, so the list reads
+    /// them once rather than on every poll (`recall_runs_for`).
+    pub recalled_rows: Mutex<HashMap<String, Arc<RecalledRow>>>,
+    /// The estate: the store, its backups, this boot's restore (`estate.rs`).
+    pub estate: crate::estate::EstatePlane,
+    /// Worlds: stand-ins for connected systems that suites reset.
+    pub worlds: Arc<crate::worlds::WorldPlane>,
+    /// The person vault: one key per person; forgetting destroys it.
+    pub vault: Arc<crate::vault::PersonVault>,
+    /// OIDC sign-ins in flight, by state: the nonce and PKCE verifier the callback needs.
+    pub oidc_pending: Mutex<HashMap<String, crate::oidc::PendingSignIn>>,
+    /// Installed plugins, and the packs the deployment offers.
+    pub plugins: Arc<crate::plugins::PluginPlane>,
+    /// People, with passwords; and the sessions they hold.
+    pub users: Arc<crate::users::Users>,
+    pub sessions: Arc<crate::users::Sessions>,
+    /// Whether every request must be somebody. True with keys or principals
+    /// configured, or with any user on the store — a deployment that has
+    /// created its administrator is not open.
+    pub auth_required: bool,
+    /// The egress policy in force for connector calls: one endpoint per
+    /// configured connection's host plus whatever the operator allow-listed,
+    /// deny everything else, and private/loopback/link-local refused at
+    /// preflight. Refilled with the connection tools. `None` never — an
+    /// empty policy is "nothing is reachable", which is what a deployment
+    /// with no connections should mean.
+    pub egress: std::sync::RwLock<rusty_agent_runtime::egress::EgressPolicy>,
+    /// The operator's egress ceiling (`egress_ceiling`): what the policy
+    /// above may ever contain.
+    pub ceiling: crate::egress_ceiling::SharedCeiling,
+    /// The cooperative drain control (R0.6 wave 2c): cancelling it stops
+    /// the cron scheduler and the outbox relay, rejects new runs with 503,
+    /// and parks every in-flight run at its next checkpoint boundary.
+    /// [`crate::router`] wires a token that never fires;
+    /// [`crate::serve_with_shutdown`] wires the real one.
+    pub shutdown: tokio_util::sync::CancellationToken,
+    /// Per-trigger debounce buffers (in-memory): events received inside a
+    /// trigger's `debounce_ms` window accumulate here and coalesce into one
+    /// action carrying the array of payloads. Keyed by internal trigger id.
+    pub trigger_debounce: Mutex<HashMap<String, crate::triggers::DebounceBuffer>>,
+    /// The capsule authorization plane (R0.9 wave 2, feature `capsules`):
+    /// the per-tenant revocation cache holding each tenant's active Cedar
+    /// engine. Policy mutations refresh it eagerly; admission installs the
+    /// version it decided under; embedders building capsule hosts take a
+    /// rechecker from it ([`crate::capsule_policy::CapsulePolicyPlane::rechecker`])
+    /// so a revoked grant fails at its next use.
+    #[cfg(feature = "capsules")]
+    pub capsule_plane: Arc<crate::capsule_policy::CapsulePolicyPlane>,
+    /// The receipt signing keyring (R0.9 wave 3): the deployment's local
+    /// Ed25519 key, generated on first use under `{store_path}/keys/`
+    /// (secrets `0600`, never through the store abstraction) and rotated
+    /// through `POST /receipt_keys/rotate`; the key history both store
+    /// backends keep is what old receipts verify against.
+    pub receipt_keyring: Arc<crate::receipts::SigningKeyring>,
+    /// The credential broker (R0.11 wave 3): envelope-encrypted
+    /// connection custody over the same store, master keys beside the
+    /// receipt signing secrets under `{store_path}/keys/` (never through
+    /// the store abstraction — a Postgres dump holds ciphertext only),
+    /// and one deployment evidence chain
+    /// ([`crate::broker::BROKER_JOURNAL_RUN_ID`]) every registration,
+    /// consent, revocation, issuance, use, and denial appends to.
+    pub broker: Arc<crate::broker::Broker>,
+    /// The artifact retention plane (R0.12 wave 2): the sweeper and the
+    /// release act over the same store, with every retention act —
+    /// releases, prune intentions, and typed misses — journaled onto the
+    /// deployment's artifact evidence chain
+    /// ([`crate::artifacts::ARTIFACTS_JOURNAL_RUN_ID`]), never the
+    /// producing run's receipt-covered journal.
+    pub artifact_retention: Arc<crate::artifacts::ArtifactRetention>,
+    /// The deployment control plane (R0.12 wave 3): revisions,
+    /// environments, pointer moves, and environment-secret custody over
+    /// the same store, with every control-plane act journaled onto the
+    /// deployment's evidence chain
+    /// ([`crate::deploy::DEPLOYMENT_JOURNAL_RUN_ID`]) — the broker's
+    /// chain discipline lifted to deployments.
+    pub deployment: Arc<crate::deploy::DeploymentControl>,
+    /// The MCP bridge's in-flight `tools/call` map (R0.9 wave 4): request
+    /// id → run id, the lookup `notifications/cancelled` resolves. Lives
+    /// on the state (not inside the handler) so the cancellation
+    /// notification and the disconnect guard share one map.
+    pub mcp_bridge: crate::mcp_bridge::McpBridgeState,
+    /// Live A2A task-event fan-out (R0.9 wave 4): one broadcast sender per
+    /// streaming task, inserted by `message/stream` and fed by the task
+    /// lifecycle hooks; removed when the task goes terminal. In-memory by
+    /// design — a stream is a live attachment, and a reconnecting client
+    /// re-reads the durable task record instead of replaying events.
+    pub a2a_streams: Mutex<HashMap<String, tokio::sync::broadcast::Sender<Value>>>,
+    /// Per-run locks serializing A2A context journal access (R0.9 wave 4):
+    /// several tasks of one A2A context (one run journal) may execute
+    /// capsules concurrently, and each execution is a load → append →
+    /// persist cycle — without a per-context lock, a later persist would
+    /// clobber a sibling's freshly journaled events. Mirrors
+    /// `state_locks`' shape and reasoning.
+    pub journal_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Studio evaluation workbench state (Phase 3): tenant-isolated
+    /// dataset, experiment, and gate records persisted under
+    /// `{store_path}/evaluations/`.
+    pub evaluation_state: crate::evaluations::EvaluationState,
+    /// The skill plane (skill slice): one `SkillRegistry` per tenant over
+    /// the durable version files under `{store_path}/skills/` — file-backed
+    /// on either store backend, the receipt-keyring precedent.
+    pub skills: crate::skills::SkillPlane,
+    /// The places a builder can import skills from (`GET /skills/library`).
+    pub skill_library: Vec<crate::skills_import::SkillLibrarySource>,
+    /// The knowledge plane (capability-harness slice #4): governed sources,
+    /// chunk indexes, content-addressed bytes, and purge tombstones under
+    /// `{store_path}/knowledge/`, rebuilt from disk at boot. File-backed on
+    /// every deployment in this slice; per-tenant views come through
+    /// [`crate::knowledge::ServerKnowledgeStore`].
+    pub knowledge: Arc<crate::server_store::KnowledgePlane>,
+    /// The connector surface (schema-driven configuration): manifests and
+    /// instances under `{store_path}/connectors/`, rebuilt from disk at
+    /// boot. File-backed on every deployment in this slice; secrets seal
+    /// through [`crate::broker::Broker`] and persist as envelopes only.
+    pub connectors: Arc<crate::server_store::ConnectorPlane>,
+    /// The repair-record audit ledger (EP-10-S01): file-backed under
+    /// `{store_path}/repairs/`.
+    pub repair_ledger: Arc<rusty_agent_runtime::repair::FileRepairLedger>,
+    /// The RBAC scope table (EP-11-S10): maps every mounted route to the
+    /// [`Scope`] required to access it. Checked by [`require_scope`] before
+    /// handler logic runs.
+    pub scope_table: ScopeTable,
+}
+
+/// Build the RBAC scope table for the mounted REST surface.
+///
+/// Every route declared here is enforced by [`require_scope`]. A route with
+/// no declaration is **denied**, not waved through: an undeclared surface is
+/// an unreviewed one, and the census test in `tests/route_census.rs` fails the
+/// build before that can reach a deployment (G12).
+fn build_scope_table() -> ScopeTable {
+    let mut table = ScopeTable::new();
+
+    // Public by decision: the A2A agent card is a discovery document the
+    // protocol expects to be fetchable without credentials, and liveness must
+    // answer a load balancer that has none.
+    table.declare_public("GET", crate::a2a::AGENT_CARD_PATH);
+    table.declare_public("GET", "/health");
+    table.declare_public("GET", "/ok");
+
+    // Liveness & info.
+    table.declare("GET", "/ok", Scope::parse("system:read").unwrap());
+    table.declare("GET", "/info", Scope::parse("system:read").unwrap());
+
+    // Threads.
+    table.declare("POST", "/threads", Scope::parse("threads:create").unwrap());
+    table.declare(
+        "POST",
+        "/threads/:thread_id/fork",
+        Scope::parse("threads:fork").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/threads/:thread_id/state",
+        Scope::parse("threads:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/state",
+        Scope::parse("threads:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/history",
+        Scope::parse("threads:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/runs",
+        Scope::parse("runs:create").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/runs/wait",
+        Scope::parse("runs:create").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/:thread_id/runs/stream",
+        Scope::parse("runs:create").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/threads/:thread_id/runs/:run_id",
+        Scope::parse("runs:delete").unwrap(),
+    );
+
+    // Runs.
+    table.declare("GET", "/runs", Scope::parse("runs:read").unwrap());
+    table.declare("GET", "/approvals", Scope::parse("approvals:read").unwrap());
+    table.declare("GET", "/plugins", Scope::parse("plugins:read").unwrap());
+    table.declare(
+        "GET",
+        "/plugins/library",
+        Scope::parse("plugins:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/plugins/install",
+        Scope::parse("plugins:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/plugins/{plugin_id}",
+        Scope::parse("plugins:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/plugins/{plugin_id}/hosts/allow",
+        Scope::parse("policy:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/plugins/{plugin_id}/knowledge/load",
+        Scope::parse("plugins:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/approvals/{run_id}/decide",
+        Scope::parse("approvals:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/approvals/standing",
+        Scope::parse("approvals:read").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/approvals/standing/{id}",
+        Scope::parse("approvals:write").unwrap(),
+    );
+    table.declare("GET", "/runs/:run_id", Scope::parse("runs:read").unwrap());
+    table.declare(
+        "POST",
+        "/runs/:run_id/cancel",
+        Scope::parse("runs:cancel").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/:run_id/stream",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/:run_id/events",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/:run_id/fixture",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare("POST", "/runs/replay", Scope::parse("runs:replay").unwrap());
+    table.declare("GET", "/runs/diff", Scope::parse("runs:read").unwrap());
+
+    // Repairs.
+    table.declare("GET", "/repairs", Scope::parse("repairs:read").unwrap());
+    table.declare(
+        "GET",
+        "/repairs/:record_id",
+        Scope::parse("repairs:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/repairs/knowledge",
+        Scope::parse("repairs:write").unwrap(),
+    );
+
+    // Skills.
+    table.declare("POST", "/skills", Scope::parse("skills:create").unwrap());
+    table.declare("GET", "/skills", Scope::parse("skills:read").unwrap());
+    table.declare(
+        "POST",
+        "/skills/import",
+        Scope::parse("skills:create").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/library",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/skills/invalidate",
+        Scope::parse("skills:write").unwrap(),
+    );
+
+    // Test-only: a route that does not exist, used by the enumeration-safe
+    // test to prove identical refusal responses for existing and nonexistent
+    // targets.
+    table.declare(
+        "POST",
+        "/nonexistent/route",
+        Scope::parse("test:write").unwrap(),
+    );
+
+    // Every remaining mounted route, declared so the surface is closed. The
+    // census test in `tests/route_census.rs` fails the build when a newly
+    // mounted route has no declaration here (G12).
+    table.declare("GET", "/health", Scope::parse("health:read").unwrap());
+    table.declare(
+        "GET",
+        "/threads/{thread_id}",
+        Scope::parse("threads:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/threads/{thread_id}/regenerate",
+        Scope::parse("threads:regenerate").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/{run_id}/receipt",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/{run_id}/payloads/{sha256}",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/runs/{run_id}/review",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/runs/{run_id}/verdict/review",
+        Scope::parse("runs:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/verifier/evidence",
+        Scope::parse("runs:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/verifier/evaluations",
+        Scope::parse("runs:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/receipts/verify",
+        Scope::parse("receipts:verify").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/receipt_keys",
+        Scope::parse("receipt_keys:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/receipt_keys/rotate",
+        Scope::parse("receipt_keys:rotate").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/receipt_keys/journal",
+        Scope::parse("receipt_keys:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/connections/health",
+        Scope::parse("connections:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/broker/journal",
+        Scope::parse("broker:read").unwrap(),
+    );
+    table.declare_public("GET", "/me");
+    table.declare_public("POST", "/auth/login");
+    table.declare_public("POST", "/auth/logout");
+    // OIDC sign-in: what the sign-in page shows, the way out, the way back.
+    table.declare_public("GET", "/auth/oidc");
+    table.declare_public("GET", "/auth/oidc/start");
+    table.declare_public("GET", "/auth/oidc/callback");
+    table.declare(
+        "GET",
+        "/auth/oidc/provider",
+        Scope::parse("users:read").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/auth/oidc/provider",
+        Scope::parse("users:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/auth/oidc/provider",
+        Scope::parse("users:write").unwrap(),
+    );
+    // SCIM: the directory's side authenticates with its own bearer token,
+    // checked in the handlers; the administrator's side is users:*.
+    table.declare_public("GET", "/scim/v2/ServiceProviderConfig");
+    table.declare_public("GET", "/scim/v2/ResourceTypes");
+    table.declare_public("GET", "/scim/v2/Schemas");
+    table.declare_public("GET", "/scim/v2/Users");
+    table.declare_public("POST", "/scim/v2/Users");
+    table.declare_public("GET", "/scim/v2/Users/{id}");
+    table.declare_public("PUT", "/scim/v2/Users/{id}");
+    table.declare_public("PATCH", "/scim/v2/Users/{id}");
+    table.declare_public("DELETE", "/scim/v2/Users/{id}");
+    table.declare_public("GET", "/scim/v2/Groups");
+    table.declare_public("POST", "/scim/v2/Groups");
+    table.declare_public("GET", "/scim/v2/Groups/{id}");
+    table.declare_public("PATCH", "/scim/v2/Groups/{id}");
+    table.declare_public("DELETE", "/scim/v2/Groups/{id}");
+    table.declare("GET", "/auth/scim", Scope::parse("users:read").unwrap());
+    table.declare(
+        "POST",
+        "/auth/scim/token",
+        Scope::parse("users:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/auth/scim/token",
+        Scope::parse("users:write").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/auth/scim/group-roles",
+        Scope::parse("users:write").unwrap(),
+    );
+    // Anyone signed in may change their own password; the handler checks
+    // that they are somebody.
+    table.declare_public("POST", "/auth/password");
+    table.declare("GET", "/assignments", Scope::parse("tasks:read").unwrap());
+    table.declare("POST", "/assignments", Scope::parse("tasks:write").unwrap());
+    table.declare(
+        "GET",
+        "/assignments/{id}",
+        Scope::parse("tasks:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assignments/{id}/continue",
+        Scope::parse("tasks:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assignments/{id}/pause",
+        Scope::parse("tasks:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assignments/{id}/cancel",
+        Scope::parse("tasks:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assignments/{id}/done",
+        Scope::parse("tasks:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/egress/ceiling",
+        Scope::parse("policy:read").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/egress/ceiling",
+        Scope::parse("policy:write").unwrap(),
+    );
+    table.declare("GET", "/llm/providers", Scope::parse("llm:read").unwrap());
+    table.declare("PUT", "/llm/providers", Scope::parse("llm:write").unwrap());
+    table.declare(
+        "POST",
+        "/llm/providers/{id}/test",
+        Scope::parse("llm:write").unwrap(),
+    );
+    table.declare("GET", "/users", Scope::parse("users:read").unwrap());
+    table.declare("POST", "/users", Scope::parse("users:write").unwrap());
+    table.declare(
+        "DELETE",
+        "/users/{user_id}",
+        Scope::parse("users:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/users/{user_id}/forget",
+        Scope::parse("users:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/users/{user_id}/sessions/revoke",
+        Scope::parse("users:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants",
+        Scope::parse("assistants:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}",
+        Scope::parse("assistants:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}/memory/blocks",
+        Scope::parse("memory:read").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/assistants/{assistant_id}/memory/blocks/{label}",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}/memory/blocks/{label}/history",
+        Scope::parse("memory:read").unwrap(),
+    );
+    table.declare("POST", "/crons", Scope::parse("crons:write").unwrap());
+    table.declare("GET", "/crons", Scope::parse("crons:read").unwrap());
+    table.declare(
+        "DELETE",
+        "/crons/{cron_id}",
+        Scope::parse("crons:delete").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/store/{namespace}",
+        Scope::parse("store:read").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/store/{namespace}/{key}",
+        Scope::parse("store:write").unwrap(),
+    );
+    table.declare("POST", "/tasks", Scope::parse("tasks:write").unwrap());
+    table.declare("GET", "/tasks", Scope::parse("tasks:read").unwrap());
+    table.declare(
+        "POST",
+        "/tasks/outbox",
+        Scope::parse("tasks:write").unwrap(),
+    );
+    table.declare("POST", "/tasks/claim", Scope::parse("tasks:claim").unwrap());
+    table.declare("GET", "/tasks/metrics", Scope::parse("tasks:read").unwrap());
+    table.declare(
+        "GET",
+        "/tasks/{task_id}",
+        Scope::parse("tasks:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/tasks/{task_id}/heartbeat",
+        Scope::parse("tasks:heartbeat").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/tasks/{task_id}/complete",
+        Scope::parse("tasks:complete").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/tasks/{task_id}/fail",
+        Scope::parse("tasks:fail").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/tasks/{task_id}/cancel",
+        Scope::parse("tasks:cancel").unwrap(),
+    );
+    table.declare("POST", "/agents", Scope::parse("agents:write").unwrap());
+    table.declare("GET", "/agents", Scope::parse("agents:read").unwrap());
+    table.declare(
+        "GET",
+        "/agents/{agent_id}",
+        Scope::parse("agents:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/agents/{agent_id}/mailbox",
+        Scope::parse("agents:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/agents/{agent_id}/mailbox/next",
+        Scope::parse("agents:next").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/agents/{agent_id}/status",
+        Scope::parse("agents:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/agents/{agent_id}/cancel",
+        Scope::parse("agents:cancel").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/agents/{agent_id}/restart",
+        Scope::parse("agents:restart").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/agents/{agent_id}/supervision",
+        Scope::parse("agents:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/teams/{team_id}/cancel",
+        Scope::parse("teams:cancel").unwrap(),
+    );
+    table.declare("POST", "/memory", Scope::parse("memory:write").unwrap());
+    table.declare(
+        "POST",
+        "/memory/query",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/corrections",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/consolidate",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/conflicts",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/forget",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/forget_scope",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/memory/{memory_id}",
+        Scope::parse("memory:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/{memory_id}/accept",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/{memory_id}/confirm",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/memory/utility",
+        Scope::parse("memory:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/memory/utility/roll-up",
+        Scope::parse("memory:write").unwrap(),
+    );
+    table.declare("GET", "/gaps", Scope::parse("gaps:read").unwrap());
+    table.declare("POST", "/gaps/events", Scope::parse("gaps:write").unwrap());
+    table.declare("POST", "/gaps/file", Scope::parse("gaps:write").unwrap());
+    table.declare(
+        "POST",
+        "/gaps/file/escalation",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/file/correction",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/file/zero_recall",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/speculative",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/outcomes",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/annotations",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare("POST", "/gaps/sweep", Scope::parse("gaps:sweep").unwrap());
+    table.declare("GET", "/gaps/{gap_id}", Scope::parse("gaps:read").unwrap());
+    table.declare(
+        "POST",
+        "/gaps/{gap_id}/transition",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/{gap_id}/probe",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/{gap_id}/close",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/gaps/{gap_id}/rollback",
+        Scope::parse("gaps:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/induction/run",
+        Scope::parse("induction:write").unwrap(),
+    );
+    table.declare("POST", "/hunts/cycle", Scope::parse("hunts:write").unwrap());
+    table.declare(
+        "POST",
+        "/hunts/{gap_id}/draft",
+        Scope::parse("hunts:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/hunts/{gap_id}/blocked",
+        Scope::parse("hunts:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/skills/{name}",
+        Scope::parse("skills:create").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}/reference",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/skills/{name}/learn",
+        Scope::parse("skills:create").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}/freshness",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/skills/{name}/freshness",
+        Scope::parse("skills:create").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}/body",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/skills/{name}/promote",
+        Scope::parse("skills:promote").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}/evidence",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare("GET", "/estate", Scope::parse("estate:read").unwrap());
+    table.declare(
+        "GET",
+        "/estate/roster",
+        Scope::parse("estate:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/estate/spawned",
+        Scope::parse("estate:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/proposals",
+        Scope::parse("assistants:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/estate/spawned/retire",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/estate/spawned/settings",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare("GET", "/capacity", Scope::parse("system:read").unwrap());
+    table.declare(
+        "POST",
+        "/capacity/probe",
+        Scope::parse("runs:create").unwrap(),
+    );
+    table.declare("GET", "/campaign", Scope::parse("datasets:read").unwrap());
+    // Worlds are suite infrastructure: whoever keeps suites keeps them.
+    table.declare("GET", "/worlds", Scope::parse("datasets:read").unwrap());
+    table.declare(
+        "GET",
+        "/worlds/dialects",
+        Scope::parse("datasets:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/worlds/starter",
+        Scope::parse("datasets:read").unwrap(),
+    );
+    table.declare("POST", "/worlds", Scope::parse("datasets:write").unwrap());
+    table.declare(
+        "GET",
+        "/worlds/{id}",
+        Scope::parse("datasets:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/worlds/{id}/reset",
+        Scope::parse("datasets:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/worlds/{id}",
+        Scope::parse("datasets:write").unwrap(),
+    );
+    // Notices are the Inbox's: whoever reads tasks reads what they were told.
+    table.declare("GET", "/notices", Scope::parse("tasks:read").unwrap());
+    table.declare(
+        "POST",
+        "/notices/{id}/seen",
+        Scope::parse("tasks:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/estate/backups",
+        Scope::parse("estate:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/query",
+        Scope::parse("knowledge:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connectors/check",
+        Scope::parse("connectors:check").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/learn/candidates/{candidate_id}",
+        Scope::parse("learn:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/learn/versions",
+        Scope::parse("learn:read").unwrap(),
+    );
+    table.declare("POST", "/datasets", Scope::parse("datasets:write").unwrap());
+    table.declare(
+        "POST",
+        "/datasets/sweep",
+        Scope::parse("datasets:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/datasets/{name}",
+        Scope::parse("datasets:write").unwrap(),
+    );
+    table.declare("GET", "/datasets", Scope::parse("datasets:read").unwrap());
+    table.declare(
+        "GET",
+        "/datasets/{name}",
+        Scope::parse("datasets:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/experiments/{experiment_id}",
+        Scope::parse("experiments:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/experiments/compare",
+        Scope::parse("experiments:read").unwrap(),
+    );
+    table.declare("POST", "/gates", Scope::parse("gates:write").unwrap());
+    table.declare("GET", "/gates", Scope::parse("gates:read").unwrap());
+    table.declare(
+        "GET",
+        "/gates/{gate_name}",
+        Scope::parse("gates:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/conformance-runs/{run_id}",
+        Scope::parse("conformance_runs:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/conformance-checks",
+        Scope::parse("conformance_checks:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/registry/artifacts/{family}/{name}",
+        Scope::parse("registry:read").unwrap(),
+    );
+    table.declare("GET", "/artifacts", Scope::parse("artifacts:read").unwrap());
+    table.declare(
+        "POST",
+        "/artifacts/sweep",
+        Scope::parse("artifacts:sweep").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/deployments/shadows",
+        Scope::parse("deployments:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/policy/versions",
+        Scope::parse("policy:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/policy/versions",
+        Scope::parse("policy:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/policy/versions/{version}",
+        Scope::parse("policy:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/policy/activations",
+        Scope::parse("policy:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/policy/active",
+        Scope::parse("policy:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/policy/epochs",
+        Scope::parse("policy:read").unwrap(),
+    );
+    table.declare("GET", "/policy/drift", Scope::parse("policy:read").unwrap());
+    table.declare("POST", "/capsules", Scope::parse("capsules:write").unwrap());
+    table.declare("GET", "/capsules", Scope::parse("capsules:read").unwrap());
+    table.declare(
+        "GET",
+        "/capsules/{id}",
+        Scope::parse("capsules:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/capsules/resolve",
+        Scope::parse("capsules:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/capsules/overlays/{name}",
+        Scope::parse("capsules:read").unwrap(),
+    );
+    table.declare("POST", "/mcp", Scope::parse("mcp:write").unwrap());
+    table.declare("GET", "/mcp/servers", Scope::parse("mcp:read").unwrap());
+    table.declare("POST", "/mcp/servers", Scope::parse("mcp:admin").unwrap());
+    table.declare(
+        "POST",
+        "/mcp/servers/probe",
+        Scope::parse("mcp:admin").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/mcp/servers/{server_id}",
+        Scope::parse("mcp:admin").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/mcp/servers/{server_id}/remount",
+        Scope::parse("mcp:admin").unwrap(),
+    );
+    table.declare("POST", "/a2a", Scope::parse("a2a:write").unwrap());
+    table.declare(
+        "PUT",
+        "/capsules/{id}/blob",
+        Scope::parse("capsules:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/coordination/delegate",
+        Scope::parse("coordination:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/coordination/fan_out",
+        Scope::parse("coordination:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/coordination/race",
+        Scope::parse("coordination:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/coordination/quorum",
+        Scope::parse("coordination:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/coordination/{coordination_id}",
+        Scope::parse("coordination:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/agents/{agent_id}/activate",
+        Scope::parse("agents:activate").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/triggers/{trigger_id}",
+        Scope::parse("triggers:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/triggers/{trigger_id}/webhook",
+        Scope::parse("triggers:write").unwrap(),
+    );
+
+    table.declare(
+        "POST",
+        "/connections",
+        Scope::parse("connections:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/connections",
+        Scope::parse("connections:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/connections/{connection_id}",
+        Scope::parse("connections:read").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/connections/{connection_id}",
+        Scope::parse("connections:delete").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connections/{connection_id}/consent",
+        Scope::parse("connections:consent").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connections/{connection_id}/revoke",
+        Scope::parse("connections:revoke").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/connections/{connection_id}/health",
+        Scope::parse("connections:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants/{assistant_id}/archive",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants/{assistant_id}/restore",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants/{assistant_id}/versions",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}/versions",
+        Scope::parse("assistants:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}/versions/{version_id}",
+        Scope::parse("assistants:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants/{assistant_id}/versions/{version_id}/activate",
+        Scope::parse("assistants:activate").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants/{assistant_id}/versions/{version_id}/decline",
+        Scope::parse("assistants:activate").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}/versions/{version_id}/evidence",
+        Scope::parse("assistants:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}/goal",
+        Scope::parse("assistants:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants/{assistant_id}/versions/{version_id}/evidence",
+        Scope::parse("datasets:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/store/{namespace}/{key}",
+        Scope::parse("store:read").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/store/{namespace}/{key}",
+        Scope::parse("store:delete").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/gaps/intents/{intent_id}/outcomes",
+        Scope::parse("gaps:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}/history",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}/versions/{revision}",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/skills/{name}/files/{*path}",
+        Scope::parse("skills:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/sources",
+        Scope::parse("knowledge:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/knowledge/sources",
+        Scope::parse("knowledge:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/retention/plan",
+        Scope::parse("knowledge:plan").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/retention/apply",
+        Scope::parse("knowledge:apply").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/knowledge/sources/{source_id}",
+        Scope::parse("knowledge:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/sources/{source_id}/correct",
+        Scope::parse("knowledge:correct").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/sources/{source_id}/retire",
+        Scope::parse("knowledge:apply").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/knowledge/edits",
+        Scope::parse("knowledge:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/edits/{edit_id}/accept",
+        Scope::parse("knowledge:correct").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/edits/{edit_id}/decline",
+        Scope::parse("knowledge:correct").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/knowledge/conflicts",
+        Scope::parse("knowledge:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/fetch",
+        Scope::parse("knowledge:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/assistants/{assistant_id}/knowledge/unit",
+        Scope::parse("knowledge:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/assistants/{assistant_id}/knowledge/unit",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/assistants/{assistant_id}/knowledge/unit",
+        Scope::parse("assistants:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/conflicts",
+        Scope::parse("knowledge:correct").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/knowledge/conflicts/{conflict_id}/rule",
+        Scope::parse("knowledge:correct").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/knowledge/sources/{source_id}/chunks/{chunk_id}",
+        Scope::parse("knowledge:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connectors",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connectors/describe",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    // Reading a document into a draft writes nothing, but it is the authoring
+    // door — the same hands that register a connector.
+    table.declare(
+        "POST",
+        "/connectors/openapi",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connectors/instances/{instance_id}/authorize",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare_public("GET", "/connectors/oauth/callback");
+    table.declare(
+        "GET",
+        "/connectors",
+        Scope::parse("connectors:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connectors/instances",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/connectors/instances",
+        Scope::parse("connectors:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/connectors/instances/{instance_id}/catalog",
+        Scope::parse("connectors:read").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/connectors/instances/{instance_id}",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/connectors/{hash}/read-backs",
+        Scope::parse("connectors:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connectors/{hash}/read-backs",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/connectors/instances/{instance_id}/upgrade",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/connectors/instances/{instance_id}",
+        Scope::parse("connectors:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/learn/candidates",
+        Scope::parse("learn:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/learn/candidates",
+        Scope::parse("learn:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/learn/candidates/{candidate_id}/evaluate",
+        Scope::parse("learn:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/learn/candidates/{candidate_id}/promote",
+        Scope::parse("learn:promote").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/learn/candidates/{candidate_id}/rollback",
+        Scope::parse("learn:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/datasets/{name}/versions/{version}",
+        Scope::parse("datasets:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/datasets/{name}/versions/{version}/cases",
+        Scope::parse("datasets:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/datasets/{name}/versions/{version}/evaluations",
+        Scope::parse("datasets:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/datasets/{name}/versions/{version}/evaluations",
+        Scope::parse("datasets:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/experiments",
+        Scope::parse("experiments:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/experiments",
+        Scope::parse("experiments:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/experiments/{experiment_id}/cancel",
+        Scope::parse("experiments:cancel").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/experiments/{experiment_id}/report",
+        Scope::parse("experiments:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/conformance-suites",
+        Scope::parse("conformance_suites:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/conformance-suites",
+        Scope::parse("conformance_suites:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/conformance-suites/{name}/versions/{version}",
+        Scope::parse("conformance_suites:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/conformance-runs",
+        Scope::parse("conformance_runs:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/conformance-runs",
+        Scope::parse("conformance_runs:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/registry/artifacts",
+        Scope::parse("registry:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/registry/artifacts",
+        Scope::parse("registry:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/registry/artifacts/{family}/{name}/commits",
+        Scope::parse("registry:commits").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/registry/artifacts/{family}/{name}/commits",
+        Scope::parse("registry:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/registry/artifacts/{family}/{name}/diff",
+        Scope::parse("registry:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/artifacts/commits",
+        Scope::parse("artifacts:commits").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/artifacts/spills",
+        Scope::parse("artifacts:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/artifacts/names/{name}",
+        Scope::parse("artifacts:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/artifacts/names/{name}/versions",
+        Scope::parse("artifacts:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/artifacts/{artifact_id}",
+        Scope::parse("artifacts:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/artifacts/{artifact_id}/bytes",
+        Scope::parse("artifacts:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/artifacts/{artifact_id}/preview",
+        Scope::parse("artifacts:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/artifacts/{artifact_id}/release",
+        Scope::parse("artifacts:release").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/artifacts/journal",
+        Scope::parse("artifacts:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/deployments/revisions",
+        Scope::parse("deployments:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/revisions",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/revisions/{revision_id}",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/deployments/environments",
+        Scope::parse("deployments:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/environments",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/environments/{name}",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/deployments/environments/{name}/promote",
+        Scope::parse("deployments:promote").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/deployments/environments/{name}/rollback",
+        Scope::parse("deployments:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/environments/{name}/pointer",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/deployments/environments/{name}/canary",
+        Scope::parse("deployments:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/deployments/environments/{name}/canary",
+        Scope::parse("deployments:delete").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/health",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/journal",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "PUT",
+        "/deployments/secrets",
+        Scope::parse("deployments:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/deployments/secrets",
+        Scope::parse("deployments:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/deployments/secrets/resolve",
+        Scope::parse("deployments:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/deployments/secrets/{environment}/{name}",
+        Scope::parse("deployments:delete").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/capsule_policies/versions",
+        Scope::parse("capsule_policies:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/capsule_policies/versions",
+        Scope::parse("capsule_policies:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/capsule_policies/versions/{version}",
+        Scope::parse("capsule_policies:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/capsule_policies/active",
+        Scope::parse("capsule_policies:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/capsule_policies/active",
+        Scope::parse("capsule_policies:write").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/capsules/overlays",
+        Scope::parse("capsules:write").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/capsules/overlays",
+        Scope::parse("capsules:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/coordination/{coordination_id}/trace",
+        Scope::parse("coordination:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/agents/{agent_id}/activate/heartbeat",
+        Scope::parse("agents:heartbeat").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/agents/{agent_id}/activate/release",
+        Scope::parse("agents:release").unwrap(),
+    );
+    table.declare("POST", "/triggers", Scope::parse("triggers:write").unwrap());
+    table.declare("GET", "/triggers", Scope::parse("triggers:read").unwrap());
+    table.declare(
+        "PATCH",
+        "/triggers/{trigger_id}",
+        Scope::parse("triggers:write").unwrap(),
+    );
+    table.declare(
+        "DELETE",
+        "/triggers/{trigger_id}",
+        Scope::parse("triggers:delete").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/triggers/{trigger_id}/events",
+        Scope::parse("triggers:read").unwrap(),
+    );
+    table.declare(
+        "GET",
+        "/triggers/{trigger_id}/dead-letter",
+        Scope::parse("triggers:read").unwrap(),
+    );
+    table.declare(
+        "POST",
+        "/triggers/{trigger_id}/events/{event_id}/replay",
+        Scope::parse("triggers:replay").unwrap(),
+    );
+
+    table
+}
+
+/// Build the checkpointer + server-store backends for `config`. The default
+/// is JSON files under `store_path`; `ServerConfig::with_postgres(url)`
+/// (feature `postgres`) switches both to Postgres. Postgres connections are
+/// established lazily on first use, keeping this builder synchronous.
+///
+/// The checkpointer is always the wave-4 binding decorator
+/// ([`policy::PolicyBindingCheckpointer`]) over the concrete backend: it
+/// stamps the tenant's active policy version into every admission
+/// checkpoint's header and records the binding, so a run's policy pin is
+/// decided once, at the boundary that starts it.
+/// This process's boot-time restore outcome, for `GET /estate` (one boot,
+/// one store; a test building several apps reads the first).
+static RESTORE_OUTCOME: std::sync::OnceLock<crate::estate::RestoreOutcome> =
+    std::sync::OnceLock::new();
+
+fn build_backends(
+    config: &ServerConfig,
+) -> (
+    Arc<dyn Checkpointer>,
+    Arc<dyn ServerStore>,
+    Arc<crate::vault::PersonVault>,
+) {
+    #[cfg(feature = "postgres")]
+    if let Some(url) = &config.database_url {
+        let server_store: Arc<dyn ServerStore> =
+            Arc::new(crate::server_store::PostgresStore::new(url.clone()));
+        let checkpointer = policy::PolicyBindingCheckpointer::new(
+            Arc::new(crate::server_store::LazyPostgresCheckpointer::new(
+                url.clone(),
+            )),
+            Arc::clone(&server_store),
+        );
+        return (
+            Arc::new(checkpointer),
+            server_store,
+            Arc::new(crate::vault::PersonVault::new(&config.store_path)),
+        );
+    }
+    #[cfg(not(feature = "postgres"))]
+    assert!(
+        config.database_url.is_none(),
+        "`ServerConfig::database_url` requires the `postgres` feature \
+         (rebuild rusty-agent-server with `--features postgres`)"
+    );
+    // A restore fills an empty store before anything reads it.
+    let restore =
+        crate::estate::restore_if_asked(&config.store_path, config.restore_from.as_deref());
+    if let Some(outcome) = restore {
+        let _ = RESTORE_OUTCOME.set(outcome);
+    }
+    let file_store = JsonFileStore::load(&config.store_path);
+    let vault = file_store.vault();
+    let server_store: Arc<dyn ServerStore> = Arc::new(file_store);
+    let checkpointer = policy::PolicyBindingCheckpointer::new(
+        Arc::new(JsonFileCheckpointer::new(config.store_path.clone())),
+        Arc::clone(&server_store),
+    );
+    (Arc::new(checkpointer), server_store, vault)
+}
+
+/// Build the full router with an explicit drain control (used by
+/// [`crate::router`] with a never-fired token, and by
+/// [`crate::router_with_shutdown`] with the real one), returning the
+/// broker it wired so [`crate::router_with_broker`] can hand the app's
+/// credential seam to in-process mediators (the release proof's runs
+/// connector-resolve against the same broker the HTTP surface drives).
+pub(crate) fn build_router(
+    registry: GraphRegistry,
+    config: ServerConfig,
+    shutdown: tokio_util::sync::CancellationToken,
+) -> (Router, Arc<crate::broker::Broker>) {
+    let (checkpointer, server_store, vault) = build_backends(&config);
+    let repair_ledger = crate::repair::init_ledger(&config.store_path);
+    let verifications = Arc::new(crate::verify_outcome::VerificationPlane::new(
+        &config.store_path,
+    ));
+    let users = Arc::new(crate::users::Users::load(&config.store_path));
+    let assignments = crate::assignments::AssignmentPlane::new();
+    let run_deps = RunDeps {
+        users: Arc::clone(&users),
+        registry: registry.clone(),
+        checkpointer: Arc::clone(&checkpointer),
+        manager: RunManager::new(),
+        server_store: Arc::clone(&server_store),
+        queue_cap: config.max_concurrent_runs_per_thread.max(1),
+        log_capacity: config.event_log_capacity.max(16),
+        shutdown: shutdown.clone(),
+        default_environment_tag: config.default_environment_tag.clone(),
+        context_policy: config.context_policy.clone(),
+        repair_ledger: Arc::clone(&repair_ledger),
+        verifier: config.verifier.clone(),
+        verifications: Arc::clone(&verifications),
+        approvals: Arc::new(crate::approvals::ApprovalPlane::new(&config.store_path)),
+        connection_tools: config.connection_tools.clone(),
+        assignments: Some(Arc::clone(&assignments)),
+        after_verdict: Default::default(),
+    };
+    let outbox_relay_interval = config.outbox_relay_interval;
+    #[cfg(feature = "capsules")]
+    let capsule_plane = Arc::new(crate::capsule_policy::CapsulePolicyPlane::new());
+    let receipt_keyring = Arc::new(crate::receipts::SigningKeyring::new(
+        Arc::clone(&server_store),
+        config.store_path.clone(),
+    ));
+    let mut broker = crate::broker::Broker::new(
+        Arc::clone(&server_store),
+        config.store_path.clone(),
+        config.broker_handle_ttl,
+    );
+    // The OAuth lifecycle (R0.11 wave 4): plug the provider the config
+    // declares — resolution-time refresh, the sweeper, and the
+    // authorization-code exchange endpoints all read this pair.
+    if let Some(provider) = &config.oauth_provider {
+        broker = broker.with_oauth_provider(Arc::clone(provider), config.broker_refresh_window);
+    }
+    let broker = Arc::new(broker);
+    // The sweep interval only means something with a lifecycle plugged
+    // in; without a provider there is nothing to sweep.
+    let broker_sweep_interval = config
+        .broker_sweep_interval
+        .filter(|_| config.oauth_provider.is_some());
+    let artifact_sweep_interval = config.artifact_sweep_interval;
+    let artifact_retention = Arc::new(crate::artifacts::ArtifactRetention::new(Arc::clone(
+        &server_store,
+    )));
+    let deployment = Arc::new(crate::deploy::DeploymentControl::new(Arc::clone(
+        &server_store,
+    )));
+    // People. The store's users load now, synchronously; a product deployment
+    // with none gets its administrator right after boot. Either way a server
+    // that has, or is about to have, users requires everyone to be somebody
+    // from the first request — never a window where it is open.
+    let auth_required = config.auth_enabled() || config.bootstrap_admin || !users.is_empty();
+    let worlds = Arc::new(crate::worlds::WorldPlane::new(Arc::clone(&server_store)));
+    let state = Arc::new(AppState {
+        worlds,
+        vault: Arc::clone(&vault),
+        oidc_pending: Mutex::new(HashMap::new()),
+        model_handle: config.model_handle.clone(),
+        boot_id: uuid::Uuid::new_v4().to_string(),
+        users,
+        sessions: Arc::new(crate::users::Sessions::durable(Arc::clone(&server_store))),
+        auth_required,
+        registry,
+        config: config.clone(),
+        checkpointer,
+        run_deps,
+        server_store,
+        state_locks: Mutex::new(HashMap::new()),
+        gap_locks: Mutex::new(HashMap::new()),
+        pending_grants: Mutex::new(HashMap::new()),
+        connection_tools: config.connection_tools.clone(),
+        mcp_tools: config.mcp_tools.clone(),
+        verifications: Arc::clone(&verifications),
+        thread_persons: std::sync::RwLock::new(HashMap::new()),
+        recalled_rows: Mutex::new(HashMap::new()),
+        estate: crate::estate::EstatePlane::new(
+            &config.store_path,
+            config.backup_dir.as_deref(),
+            RESTORE_OUTCOME.get().cloned().filter(|o| match o {
+                crate::estate::RestoreOutcome::Restored { archive, .. }
+                | crate::estate::RestoreOutcome::Skipped { archive, .. }
+                | crate::estate::RestoreOutcome::Failed { archive, .. } => config
+                    .restore_from
+                    .as_ref()
+                    .is_some_and(|a| a.display().to_string() == *archive),
+            }),
+        ),
+        plugins: Arc::new(crate::plugins::PluginPlane::new(&config.store_path)),
+        egress: std::sync::RwLock::new(config.egress_policy.clone().unwrap_or(
+            rusty_agent_runtime::egress::EgressPolicy {
+                policies: Vec::new(),
+            },
+        )),
+        ceiling: {
+            let cell = config.egress_ceiling.clone().unwrap_or_default();
+            if let Ok(mut c) = cell.write() {
+                *c = crate::egress_ceiling::EgressCeiling::boot(config.egress_policy.as_ref());
+            }
+            cell
+        },
+        shutdown,
+        trigger_debounce: Mutex::new(HashMap::new()),
+        #[cfg(feature = "capsules")]
+        capsule_plane,
+        receipt_keyring,
+        broker: Arc::clone(&broker),
+        artifact_retention,
+        deployment,
+        mcp_bridge: crate::mcp_bridge::McpBridgeState::new(),
+        a2a_streams: Mutex::new(HashMap::new()),
+        journal_locks: Mutex::new(HashMap::new()),
+        evaluation_state: crate::evaluations::init_evaluation_state(),
+        skills: crate::skills::SkillPlane::load(&config.store_path),
+        skill_library: config.skill_library.clone(),
+        knowledge: Arc::new(crate::server_store::KnowledgePlane::load(
+            &config.store_path,
+        )),
+        connectors: Arc::new(crate::server_store::ConnectorPlane::load(
+            &config.store_path,
+        )),
+        repair_ledger,
+        scope_table: build_scope_table(),
+    });
+    if config.bootstrap_admin {
+        let users = Arc::clone(&state.users);
+        let store_root = state.config.store_path.clone();
+        tokio::spawn(async move {
+            match users.bootstrap_admin(&store_root).await {
+                Ok(Some(path)) => {
+                    tracing::warn!(handover = %path.display(), "first administrator created — its password is in the file named here; sign in and change it")
+                }
+                Ok(None) => {}
+                Err(error) => tracing::error!(%error, "could not create the first administrator"),
+            }
+        });
+    }
+    // The graph's `search_knowledge` reads the governed knowledge plane from
+    // the first request, at the tenant's scope.
+    if let Some(tool) = &config.knowledge_tool {
+        tool.bind(
+            Arc::clone(&state.knowledge),
+            Arc::clone(&state.server_store),
+            crate::auth::DEFAULT_TENANT,
+        );
+    }
+    // Connections already in the store are tools from the first request.
+    {
+        let state = Arc::clone(&state);
+        tokio::spawn(async move {
+            crate::egress_ceiling::restore(&state).await;
+            crate::connectors::restore_bindings(&state).await;
+            crate::connectors::refresh_connection_tools(&state).await
+        });
+    }
+    // Threads from before they were stamped with their person: whose each
+    // is, from its earliest run, so the read rule holds for them too.
+    {
+        let state = Arc::clone(&state);
+        tokio::spawn(async move { backfill_thread_persons(&state).await });
+    }
+    // Assignments: the driver that turns a round's end into the next, and
+    // the rounds a restart interrupted, continued.
+    crate::assignments::start_driver(Arc::clone(&state));
+    {
+        let state = Arc::clone(&state);
+        tokio::spawn(async move { crate::assignments::restore(&state).await });
+    }
+    // Registered MCP servers are spawned again — when the operator allows it.
+    {
+        let state = Arc::clone(&state);
+        tokio::spawn(async move { crate::mcp_servers::remount_all(&state).await });
+    }
+    // The forgotten stay forgotten across a restart: the vault's tombstones
+    // feed the refusal list, by account and by provider subject.
+    for tombstone in state.vault.forgotten() {
+        state.users.mark_forgotten(&tombstone.principal);
+        if let Some((issuer, subject)) = &tombstone.external {
+            state
+                .users
+                .mark_forgotten(&crate::users::external_key(issuer, subject));
+        }
+    }
+    // The platform's own doors, and the agent that builds with them.
+    // After every verdict: the post-run review, with the state it needs.
+    {
+        let weak = Arc::downgrade(&state);
+        let _ = state.run_deps.after_verdict.set(Arc::new(
+            move |input: crate::post_run_review::ReviewInput| {
+                if let Some(state) = weak.upgrade() {
+                    // The gaps this run claimed settle on its verdict first.
+                    tokio::spawn(crate::gaps::settle_claims(
+                        Arc::clone(&state),
+                        input.run_id.clone(),
+                        input.verdict.clone(),
+                    ));
+                    // The misses its recall answered close now.
+                    tokio::spawn(crate::memory_utility::close_hits_of_run(
+                        Arc::clone(&state),
+                        input.run_id.clone(),
+                    ));
+                    tokio::spawn(crate::post_run_review::review(state, input));
+                }
+            },
+        ));
+    }
+    if let Some(cell) = &config.platform_tools {
+        cell.fill(&state);
+        let state = Arc::clone(&state);
+        tokio::spawn(async move {
+            crate::platform_tools::seed_composer(&state).await;
+            crate::platform_tools::seed_coach(&state).await;
+            crate::platform_tools::seed_consolidator(&state).await;
+        });
+    }
+    // Shipped skill packs register now, under their author, content-addressed
+    // like a skill a person writes: the same text is the same revision.
+    if !config.skill_packs.is_empty() {
+        let state = Arc::clone(&state);
+        let packs = config.skill_packs.clone();
+        tokio::spawn(async move {
+            let mut registered = 0usize;
+            for pack in packs {
+                let package = match rusty_agent_runtime::skill::SkillPackage::from_files(pack.files)
+                {
+                    Ok(package) => package,
+                    Err(error) => {
+                        tracing::warn!(%error, "skill pack not registered");
+                        continue;
+                    }
+                };
+                let source = rusty_agent_runtime::skill::SkillSource::Registry {
+                    name: "shipped".to_owned(),
+                };
+                match state
+                    .skills
+                    .register(crate::auth::DEFAULT_TENANT, package, source, pack.author)
+                    .await
+                {
+                    Ok(_) => registered += 1,
+                    Err(error) => tracing::warn!(%error, "skill pack not registered"),
+                }
+            }
+            tracing::info!(registered, "skill packs registered");
+        });
+    }
+    // Shipped connector packs register now, content-addressed: the same
+    // manifest twice is the same record, a changed one is a new version.
+    if !config.connector_packs.is_empty() {
+        let state = Arc::clone(&state);
+        let packs = config.connector_packs.clone();
+        tokio::spawn(async move {
+            for manifest in packs {
+                let findings = rusty_agent_runtime::connector::lint_manifest(&manifest);
+                if !findings.is_empty() {
+                    for finding in &findings {
+                        tracing::warn!(id = %manifest.id, %finding, "connector pack not ready; skipped");
+                    }
+                    continue;
+                }
+                let manifest = if manifest.hash.is_empty() {
+                    match manifest.sealed() {
+                        Ok(sealed) => sealed,
+                        Err(error) => {
+                            tracing::warn!(%error, "connector pack not sealed; skipped");
+                            continue;
+                        }
+                    }
+                } else {
+                    manifest
+                };
+                match state
+                    .connectors
+                    .put_manifest(crate::auth::DEFAULT_TENANT, &manifest)
+                    .await
+                {
+                    Ok(true) => {
+                        tracing::info!(id = %manifest.id, hash = %manifest.hash, "connector pack registered")
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::warn!(id = %manifest.id, %error, "connector pack not registered")
+                    }
+                }
+            }
+        });
+    }
+    crons::spawn_scheduler(Arc::clone(&state));
+    crate::approvals::spawn_standing_decider(Arc::clone(&state));
+    crate::pool_worker::spawn(Arc::clone(&state));
+    crate::evaluations::spawn_sweeper(Arc::clone(&state));
+    crate::memory_utility::spawn_roll_up(Arc::clone(&state));
+    crate::llm_providers::restore(Arc::clone(&state));
+    // The durable pending-run queue's boot half: replay persisted queue
+    // entries back into the scheduler (R1.0 gate). Restored runs schedule
+    // in background, exactly as if just enqueued.
+    tokio::spawn(runs::restore_pending_runs(state.run_deps.clone()));
+    // Warm the capsule authorization plane (R0.9 wave 2): register any
+    // operator config-file policies (default tenant; registered, never
+    // activated), then preload every tenant's active engine into the
+    // revocation cache so a restarted process re-arms the recheck seam
+    // without waiting for the next mutation or admission. Best effort,
+    // and never blocking startup.
+    #[cfg(feature = "capsules")]
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        if !state.config.capsule_policy_files.is_empty() {
+            handle.spawn(crate::capsule_policy::load_config_policies(
+                Arc::clone(&state.server_store),
+                state.config.capsule_policy_files.clone(),
+            ));
+        }
+        handle.spawn(crate::capsule_policy::preload_active_policies(
+            Arc::clone(&state.server_store),
+            Arc::clone(&state.capsule_plane),
+        ));
+    }
+    // The outbox relay: publishes pending outbox rows into the task queue
+    // (R0.6 wave 2b). Also the crash-recovery path — rows pending at
+    // startup publish on its first tick.
+    crate::outbox::spawn_relay(
+        Arc::clone(&state.server_store),
+        outbox_relay_interval,
+        state.shutdown.clone(),
+    );
+    // The broker sweeper (R0.11 wave 4): the OAuth refresh lifecycle run
+    // over every connection on an interval. Off by default — resolution
+    // runs the same lifecycle, so no sweeper degrades to refresh-at-use,
+    // never to expiry.
+    if let Some(interval) = broker_sweep_interval {
+        crate::broker::spawn_sweeper(Arc::clone(&state.broker), interval, state.shutdown.clone());
+    }
+    // The artifact retention sweeper (R0.12 wave 2): retention evaluated
+    // over every artifact address on an interval. Off by default —
+    // `POST /artifacts/sweep` and the release act's prune tail run the
+    // same evaluation, so no sweeper degrades to operator-triggered
+    // passes, never to unprotected pruning.
+    if let Some(interval) = artifact_sweep_interval {
+        crate::artifacts::spawn_sweeper(
+            Arc::clone(&state.artifact_retention),
+            interval,
+            state.shutdown.clone(),
+        );
+    }
+
+    let authed = Router::new()
+        .route("/ok", get(ok))
+        .route("/health", get(crate::health::health_check))
+        .route("/info", get(info))
+        .route("/threads", post(create_thread))
+        .route("/threads/{thread_id}", get(get_thread))
+        .route("/threads/{thread_id}/fork", post(fork_thread))
+        .route("/threads/{thread_id}/regenerate", post(regenerate_thread))
+        .route(
+            "/threads/{thread_id}/state",
+            get(get_state).post(update_state),
+        )
+        .route("/threads/{thread_id}/history", post(history))
+        .route("/threads/{thread_id}/runs", post(create_run))
+        .route("/threads/{thread_id}/runs/wait", post(create_run_wait))
+        .route("/threads/{thread_id}/runs/stream", post(create_run_stream))
+        .route(
+            "/threads/{thread_id}/runs/{run_id}",
+            delete(delete_run_checkpoints),
+        )
+        .route("/runs", get(list_runs))
+        // A run that paused to ask before an irreversible effect, and the
+        // decision that resumes it.
+        // Plugins: a package of connectors and skills, installed whole.
+        .route("/plugins", get(crate::plugins::list_installed))
+        .route("/plugins/library", get(crate::plugins::list_library))
+        .route("/plugins/install", post(crate::plugins::install_plugin))
+        .route("/plugins/{plugin_id}", delete(crate::plugins::uninstall))
+        .route(
+            "/plugins/{plugin_id}/hosts/allow",
+            post(crate::plugins::allow_hosts),
+        )
+        .route(
+            "/plugins/{plugin_id}/knowledge/load",
+            post(crate::plugins::load_knowledge),
+        )
+        .route("/approvals", get(crate::approvals::list_approvals))
+        .route("/approvals/{run_id}/decide", post(crate::approvals::decide))
+        .route("/approvals/standing", get(crate::approvals::list_standing))
+        .route(
+            "/approvals/standing/{id}",
+            delete(crate::approvals::withdraw_standing),
+        )
+        .route("/runs/{run_id}", get(get_run))
+        .route("/runs/{run_id}/cancel", post(cancel_run))
+        .route("/runs/{run_id}/stream", get(get_run_stream))
+        .route("/runs/{run_id}/events", get(get_run_events))
+        .route("/runs/{run_id}/fixture", get(get_run_fixture))
+        .route("/runs/replay", post(replay_run))
+        .route("/runs/diff", get(diff_runs))
+        // Signed run receipts (R0.9 wave 3): mint-on-read over the run's
+        // reverified journal (then stored and served while its head
+        // stands), caller-driven verification, and the deployment key
+        // lifecycle — history, journaled rotation, and the lineage
+        // journal. Keys are deployment-wide, so the key routes carry no
+        // tenant scoping beyond authentication.
+        .route("/runs/{run_id}/receipt", get(get_run_receipt))
+        .route("/runs/{run_id}/payloads/{sha256}", get(get_run_payload))
+        .route("/runs/{run_id}/review", get(get_run_review))
+        .route(
+            "/runs/{run_id}/verdict/review",
+            post(crate::verifier_suite::review_verdict),
+        )
+        .route(
+            "/verifier/evidence",
+            get(crate::verifier_suite::get_evidence),
+        )
+        .route(
+            "/verifier/evaluations",
+            post(crate::verifier_suite::start_evaluation),
+        )
+        .route("/receipts/verify", post(verify_receipt_route))
+        .route("/receipt_keys", get(list_receipt_keys_route))
+        .route("/receipt_keys/rotate", post(rotate_receipt_key))
+        .route("/receipt_keys/journal", get(get_receipt_keys_journal))
+        // The credential/connection broker (R0.11 wave 3): connection
+        // custody and lifecycle — register, list, read, consent (the
+        // re-auth path), revoke, erase — plus health and the
+        // deployment's broker evidence chain. Reads serve metadata only;
+        // the sealed material never leaves the broker.
+        .route(
+            "/connections",
+            post(register_connection).get(list_connections),
+        )
+        .route("/connections/health", get(list_connections_health))
+        .route(
+            "/connections/{connection_id}",
+            get(get_connection).delete(delete_connection),
+        )
+        .route(
+            "/connections/{connection_id}/consent",
+            post(consent_connection),
+        )
+        .route(
+            "/connections/{connection_id}/revoke",
+            post(revoke_connection),
+        )
+        .route(
+            "/connections/{connection_id}/health",
+            get(get_connection_health),
+        )
+        .route("/broker/journal", get(get_broker_journal))
+        // Who am I. Answered from the resolved context, so it is true in
+        // open mode too — the developer principal, admin — and a caller
+        // with a key learns their roles and scopes without guessing.
+        .route("/me", get(whoami))
+        // Signing in and out, and the administrator's people.
+        .route("/auth/login", post(login))
+        .route("/auth/logout", post(logout))
+        .route("/auth/password", post(change_password))
+        .route("/auth/oidc", get(crate::oidc::get_public))
+        .route("/auth/oidc/start", get(crate::oidc::start))
+        .route("/auth/oidc/callback", get(crate::oidc::callback))
+        .route(
+            "/auth/oidc/provider",
+            get(crate::oidc::get_provider)
+                .put(crate::oidc::put_provider)
+                .delete(crate::oidc::delete_provider),
+        )
+        .route("/auth/scim", get(crate::scim::get_config))
+        .route(
+            "/auth/scim/token",
+            post(crate::scim::mint_token).delete(crate::scim::revoke_token),
+        )
+        .route("/auth/scim/group-roles", put(crate::scim::put_group_roles))
+        .route(
+            "/scim/v2/ServiceProviderConfig",
+            get(crate::scim::service_provider_config),
+        )
+        .route("/scim/v2/ResourceTypes", get(crate::scim::resource_types))
+        .route("/scim/v2/Schemas", get(crate::scim::schemas))
+        .route(
+            "/scim/v2/Users",
+            get(crate::scim::list_users).post(crate::scim::create_user),
+        )
+        .route(
+            "/scim/v2/Users/{id}",
+            get(crate::scim::get_user)
+                .put(crate::scim::replace_user)
+                .patch(crate::scim::patch_user)
+                .delete(crate::scim::delete_user),
+        )
+        .route(
+            "/scim/v2/Groups",
+            get(crate::scim::list_groups).post(crate::scim::create_group),
+        )
+        .route(
+            "/scim/v2/Groups/{id}",
+            get(crate::scim::get_group)
+                .patch(crate::scim::patch_group)
+                .delete(crate::scim::delete_group),
+        )
+        .route("/users", get(list_users).post(create_user))
+        .route("/users/{user_id}", delete(delete_user))
+        .route(
+            "/users/{user_id}/forget",
+            post(crate::forget::forget_person),
+        )
+        .route(
+            "/users/{user_id}/sessions/revoke",
+            post(revoke_user_sessions),
+        )
+        .route("/assistants", post(create_assistant).get(list_assistants))
+        .route("/assistants/{assistant_id}", get(get_assistant))
+        .route(
+            "/assistants/{assistant_id}/memory/blocks",
+            get(get_agent_blocks),
+        )
+        .route(
+            "/assistants/{assistant_id}/memory/blocks/{label}",
+            put(put_agent_block),
+        )
+        .route(
+            "/assistants/{assistant_id}/memory/blocks/{label}/history",
+            get(get_agent_block_history),
+        )
+        .route(
+            "/assistants/{assistant_id}/archive",
+            post(archive_assistant),
+        )
+        .route(
+            "/assistants/{assistant_id}/restore",
+            post(restore_assistant),
+        )
+        .route(
+            "/assistants/{assistant_id}/versions",
+            post(create_assistant_version).get(list_assistant_versions),
+        )
+        .route(
+            "/assistants/{assistant_id}/versions/{version_id}",
+            get(get_assistant_version),
+        )
+        .route(
+            "/assistants/{assistant_id}/versions/{version_id}/activate",
+            post(activate_assistant_version),
+        )
+        .route(
+            "/assistants/{assistant_id}/versions/{version_id}/decline",
+            post(decline_assistant_version),
+        )
+        .route(
+            "/assistants/{assistant_id}/versions/{version_id}/evidence",
+            get(crate::promotion::get_evidence).post(crate::promotion::judge_version),
+        )
+        .route(
+            "/assistants/{assistant_id}/goal",
+            get(crate::goal::get_measure),
+        )
+        .route(
+            "/assignments",
+            get(crate::assignments::list_assignments).post(crate::assignments::create_assignment),
+        )
+        .route("/assignments/{id}", get(crate::assignments::get_assignment))
+        .route(
+            "/assignments/{id}/continue",
+            post(crate::assignments::continue_assignment),
+        )
+        .route(
+            "/assignments/{id}/pause",
+            post(crate::assignments::pause_assignment),
+        )
+        .route(
+            "/assignments/{id}/cancel",
+            post(crate::assignments::cancel_assignment),
+        )
+        .route(
+            "/assignments/{id}/done",
+            post(crate::assignments::finish_assignment),
+        )
+        .route(
+            "/egress/ceiling",
+            get(crate::egress_ceiling::get_ceiling).put(crate::egress_ceiling::put_ceiling),
+        )
+        .route(
+            "/llm/providers",
+            get(crate::llm_providers::get_providers).put(crate::llm_providers::put_providers),
+        )
+        .route(
+            "/llm/providers/{id}/test",
+            post(crate::llm_providers::test_provider),
+        )
+        .route("/crons", post(create_cron).get(list_crons))
+        .route("/crons/{cron_id}", delete(delete_cron))
+        .route("/store/{namespace}", get(list_store_namespace))
+        .route(
+            "/store/{namespace}/{key}",
+            put(put_store_item)
+                .get(get_store_item)
+                .delete(delete_store_item),
+        )
+        .route("/tasks", post(enqueue_task).get(list_tasks))
+        .route("/tasks/outbox", post(enqueue_task_outbox))
+        .route("/tasks/claim", post(claim_task))
+        .route("/tasks/metrics", get(task_metrics))
+        .route("/tasks/{task_id}", get(get_task))
+        .route("/tasks/{task_id}/heartbeat", post(heartbeat_task))
+        .route("/tasks/{task_id}/complete", post(complete_task))
+        .route("/tasks/{task_id}/fail", post(fail_task))
+        .route("/tasks/{task_id}/cancel", post(cancel_task))
+        .route("/agents", post(create_agent).get(list_agents))
+        .route("/agents/{agent_id}", get(get_agent))
+        .route("/agents/{agent_id}/mailbox", post(send_agent_message))
+        .route("/agents/{agent_id}/mailbox/next", post(claim_agent_message))
+        .route("/agents/{agent_id}/status", get(get_agent_status))
+        .route("/agents/{agent_id}/cancel", post(cancel_agent))
+        .route("/agents/{agent_id}/restart", post(restart_agent))
+        .route("/agents/{agent_id}/supervision", get(get_agent_supervision))
+        .route("/teams/{team_id}/cancel", post(cancel_team))
+        .route("/memory", post(write_memory))
+        // The static segments win over `/memory/{memory_id}` — query,
+        // corrections, consolidation, conflicts, and forgetting are
+        // operations, not record addresses.
+        .route("/memory/query", post(query_memory))
+        .route("/memory/corrections", post(submit_correction))
+        .route("/memory/consolidate", post(enqueue_consolidation))
+        .route("/memory/conflicts", post(list_memory_conflicts))
+        .route("/memory/forget", post(forget_memory))
+        .route("/memory/forget_scope", post(forget_memory_scope))
+        .route(
+            "/memory/utility",
+            get(crate::memory_utility::get_memory_utility),
+        )
+        .route(
+            "/memory/utility/roll-up",
+            post(crate::memory_utility::post_memory_utility_roll_up),
+        )
+        .route("/memory/{memory_id}", get(get_memory))
+        .route("/memory/{memory_id}/accept", post(accept_memory))
+        .route("/memory/{memory_id}/confirm", post(confirm_memory))
+        // The demand-side gap ledger (wave 2): interaction-event
+        // ingestion, generic and runtime-shaped filing, the frontier's
+        // speculative entries, the hunting queue's work order, and the
+        // lifecycle verbs (transition / probe / close / rollback) plus
+        // the behavioral signal (outcomes, sweep). Static segments win
+        // over `/gaps/{gap_id}`, the `/memory` routing rule.
+        .route("/gaps", get(work_order_gaps))
+        .route("/gaps/events", post(record_gap_event))
+        .route("/gaps/file", post(file_gap))
+        .route("/gaps/file/escalation", post(file_gap_escalation))
+        .route("/gaps/file/correction", post(file_gap_correction))
+        .route("/gaps/file/zero_recall", post(file_gap_zero_recall))
+        .route("/gaps/speculative", post(open_speculative_gap))
+        .route("/gaps/outcomes", post(record_gap_outcome))
+        .route("/gaps/annotations", post(record_gap_annotation))
+        .route(
+            "/gaps/intents/{intent_id}/outcomes",
+            get(intent_outcome_curve),
+        )
+        .route("/gaps/sweep", post(sweep_gaps))
+        .route("/gaps/{gap_id}", get(get_gap))
+        .route("/gaps/{gap_id}/transition", post(transition_gap))
+        .route("/gaps/{gap_id}/probe", post(probe_gap))
+        .route("/gaps/{gap_id}/close", post(close_gap))
+        .route("/gaps/{gap_id}/rollback", post(rollback_gap))
+        // The induction surface (demand-side learning, wave 3): one
+        // composite pass — mine the tenant's event corpus into the
+        // intent map, invert the supplied artifacts into coverage, join
+        // the gap matrix, optionally seed the ledger. The maps are
+        // projections: answered, never stored.
+        .route("/induction/run", post(induction_run))
+        // The hunting loop (demand-side learning, wave 4): a bounded
+        // cycle takes the work order's top entries hunting; a drafted
+        // candidate moves one to trial; a contradiction parks one on
+        // the business with its evidence attached. Closure arrives
+        // through the promotion gate, not a hunt verb.
+        .route("/hunts/cycle", post(hunt_cycle))
+        .route("/hunts/{gap_id}/draft", post(hunt_draft))
+        .route("/hunts/{gap_id}/blocked", post(hunt_blocked))
+        // The skill plane (skill slice): governed `SKILL.md` packages —
+        // register (parse + scan + immutable version), the tier-1 metadata
+        // catalog, on-demand tier-2 body and tier-3 member files, pinned
+        // versions, and the append-only history. The static segments win
+        // over `/skills/{name}` the way they do over `/memory/{memory_id}`.
+        .route(
+            "/skills",
+            post(crate::skills::register_skill).get(crate::skills::list_skills),
+        )
+        // Importing from elsewhere: an archive URL, read over egress policy,
+        // every `SKILL.md` in it registered through the same path as above;
+        // and the library of places the deployment suggests.
+        .route("/skills/import", post(crate::skills_import::import_skills))
+        .route("/skills/library", get(crate::skills_import::list_library))
+        .route(
+            "/skills/{name}",
+            get(crate::skills::get_skill).delete(crate::skills::remove_skill),
+        )
+        .route("/skills/{name}/body", get(crate::skills::get_skill_body))
+        .route(
+            "/skills/{name}/learn",
+            post(crate::skill_learn::learn_skill),
+        )
+        .route(
+            "/skills/{name}/reference",
+            get(crate::skill_learn::get_skill_reference),
+        )
+        .route(
+            "/skills/{name}/freshness",
+            get(crate::freshness::get_freshness).post(crate::freshness::post_freshness),
+        )
+        .route(
+            "/skills/{name}/history",
+            get(crate::skills::get_skill_history),
+        )
+        .route(
+            "/skills/{name}/versions/{revision}",
+            get(crate::skills::get_skill_version),
+        )
+        .route("/skills/{name}/promote", post(crate::skills::promote_skill))
+        .route(
+            "/skills/{name}/evidence",
+            get(crate::skills::get_skill_evidence),
+        )
+        .route("/estate", get(crate::estate::get_estate))
+        .route("/estate/roster", get(crate::estate::get_roster))
+        .route("/estate/spawned", get(crate::spawned::get_spawned))
+        .route("/proposals", get(list_open_proposals))
+        .route("/estate/spawned/retire", post(crate::spawned::post_retire))
+        .route(
+            "/estate/spawned/settings",
+            put(crate::spawned::put_settings),
+        )
+        .route("/capacity", get(crate::capacity::get_capacity))
+        .route("/capacity/probe", post(crate::capacity::probe))
+        .route("/campaign", get(crate::campaign::get_campaign))
+        .route(
+            "/worlds",
+            get(crate::worlds::list_worlds).post(crate::worlds::create_world),
+        )
+        .route("/worlds/dialects", get(crate::worlds::list_dialects))
+        .route("/worlds/starter", get(crate::worlds::world_starter))
+        .route(
+            "/worlds/{id}",
+            get(crate::worlds::get_world).delete(crate::worlds::delete_world),
+        )
+        .route("/worlds/{id}/reset", post(crate::worlds::reset_world))
+        .route(
+            "/connectors/{hash}/read-backs",
+            get(crate::connectors::read_back_proposals).post(crate::connectors::adopt_read_backs),
+        )
+        .route("/notices", get(crate::notices::list_notices))
+        .route("/notices/{id}/seen", post(crate::notices::mark_seen))
+        .route("/estate/backups", post(crate::estate::post_backup))
+        .route("/skills/invalidate", post(crate::skills::invalidate_skills))
+        .route(
+            "/skills/{name}/files/{*path}",
+            get(crate::skills::get_skill_file),
+        )
+        // The knowledge plane (capability-harness slice #4): governed
+        // sources with deterministic ingestion, cited hybrid retrieval,
+        // corrections as superseding versions, and the retention sweep.
+        // Tenant-isolated at the storage layer — cross-tenant answers
+        // `404`, never `403`. The static segments (`query`, `retention`)
+        // win over `{source_id}`, the `/memory` routing rule.
+        .route(
+            "/knowledge/sources",
+            post(crate::knowledge::register_source).get(crate::knowledge::list_sources),
+        )
+        .route("/knowledge/query", post(crate::knowledge::query_knowledge))
+        .route(
+            "/knowledge/retention/plan",
+            post(crate::knowledge::retention_plan),
+        )
+        .route(
+            "/knowledge/retention/apply",
+            post(crate::knowledge::retention_apply),
+        )
+        .route(
+            "/knowledge/sources/{source_id}",
+            get(crate::knowledge::get_source),
+        )
+        .route(
+            "/knowledge/sources/{source_id}/correct",
+            post(crate::knowledge::correct_source),
+        )
+        .route(
+            "/knowledge/sources/{source_id}/retire",
+            post(crate::knowledge::retire_source),
+        )
+        .route("/knowledge/edits", get(crate::knowledge_edits::list_edits))
+        .route(
+            "/knowledge/edits/{edit_id}/accept",
+            post(crate::knowledge_edits::accept_edit),
+        )
+        .route(
+            "/knowledge/edits/{edit_id}/decline",
+            post(crate::knowledge_edits::decline_edit),
+        )
+        .route(
+            "/knowledge/conflicts",
+            get(crate::knowledge_conflicts::list_conflicts)
+                .post(crate::knowledge_conflicts::post_conflict),
+        )
+        .route(
+            "/knowledge/conflicts/{conflict_id}/rule",
+            post(crate::knowledge_conflicts::rule_conflict),
+        )
+        .route("/knowledge/fetch", post(crate::knowledge::fetch_for_source))
+        .route(
+            "/assistants/{assistant_id}/knowledge/unit",
+            get(crate::knowledge_units::get_unit)
+                .post(crate::knowledge_units::compile)
+                .delete(crate::knowledge_units::delete_unit),
+        )
+        .route(
+            "/knowledge/sources/{source_id}/chunks/{chunk_id}",
+            get(crate::knowledge::get_chunk),
+        )
+        // The connector surface (schema-driven configuration): content-
+        // addressed manifests, schema-validated instances with broker-
+        // sealed secrets, and the check gate. Tenant-isolated at the
+        // storage layer — cross-tenant answers `404`, never `403`. The
+        // static segments (`instances`, `check`) win over
+        // `{instance_id}`.
+        .route(
+            "/connectors",
+            post(crate::connectors::register_manifest).get(crate::connectors::list_manifests),
+        )
+        .route(
+            "/connectors/instances",
+            post(crate::connectors::register_instance).get(crate::connectors::list_instances),
+        )
+        .route("/connectors/check", post(crate::connectors::check))
+        // The generic path: an OpenAPI document becomes a draft manifest, so a
+        // connector the library does not ship is still a connector and not a
+        // special case. It is returned for review, never registered blind.
+        .route("/connectors/openapi", post(crate::connectors::from_openapi))
+        .route(
+            "/connectors/describe",
+            post(crate::connector_draft::describe),
+        )
+        // The grant: begin a consent, and the door the provider redirects
+        // back to. The callback is public — a provider's browser redirect
+        // carries no credential of ours, and the single-use `state` is what
+        // makes the answer trustworthy.
+        .route(
+            "/connectors/instances/{instance_id}/authorize",
+            post(crate::connectors::authorize),
+        )
+        .route(
+            "/connectors/oauth/callback",
+            get(crate::connectors::oauth_callback),
+        )
+        .route(
+            "/connectors/instances/{instance_id}/catalog",
+            get(crate::connectors::instance_catalog),
+        )
+        // The credential lifecycle (WI-160): rotate keeps the connection and
+        // changes what it calls with; revoke removes it, and with it every
+        // tool it derived.
+        .route(
+            "/connectors/instances/{instance_id}",
+            put(crate::connectors::rotate_instance).delete(crate::connectors::revoke_instance),
+        )
+        // A connection follows its connector to another version; nothing
+        // changes unless the system answers the new version's check.
+        .route(
+            "/connectors/instances/{instance_id}/upgrade",
+            post(crate::connectors::upgrade_instance),
+        )
+        // Repair-record audit stream (EP-10-S01): query by component,
+        // trigger class, outcome, time range, session, or attempt.
+        .route("/repairs", get(crate::repair::list_repairs))
+        .route("/repairs/{record_id}", get(crate::repair::get_repair))
+        .route("/repairs/knowledge", post(crate::repair::file_knowledge))
+        // The learning-candidate lifecycle (R0.8 wave 3): creation plus
+        // the three journaled transitions, and the version-pointer
+        // listing. Every transition requires `run_id` — the journal is
+        // the evidence, and a transition the journal cannot take does
+        // not reach the store.
+        .route(
+            "/learn/candidates",
+            post(create_candidate).get(list_candidates),
+        )
+        .route("/learn/candidates/{candidate_id}", get(get_candidate))
+        .route(
+            "/learn/candidates/{candidate_id}/evaluate",
+            post(evaluate_candidate),
+        )
+        .route(
+            "/learn/candidates/{candidate_id}/promote",
+            post(promote_candidate),
+        )
+        .route(
+            "/learn/candidates/{candidate_id}/rollback",
+            post(rollback_candidate),
+        )
+        .route("/learn/versions", get(list_version_pointers))
+        // Studio evaluation workbench (Phase 3): tenant-isolated durable
+        // datasets, experiments, comparisons, and gates. Canonicalization,
+        // comparison, and gate semantics remain in `rusty-eval`.
+        .route("/datasets", post(create_dataset).get(list_datasets))
+        .route("/datasets/sweep", post(sweep_datasets))
+        .route("/datasets/{name}", get(get_dataset).delete(delete_dataset))
+        .route(
+            "/datasets/{name}/versions/{version}",
+            get(get_dataset_version),
+        )
+        .route(
+            "/datasets/{name}/versions/{version}/cases",
+            get(list_dataset_cases),
+        )
+        .route(
+            "/datasets/{name}/versions/{version}/evaluations",
+            post(run_dataset).get(list_dataset_evaluations),
+        )
+        .route(
+            "/experiments",
+            post(create_experiment).get(list_experiments),
+        )
+        .route("/experiments/{experiment_id}", get(get_experiment))
+        .route(
+            "/experiments/{experiment_id}/cancel",
+            post(cancel_experiment),
+        )
+        .route(
+            "/experiments/{experiment_id}/report",
+            get(get_experiment_report),
+        )
+        .route("/experiments/compare", get(compare_experiments))
+        .route("/gates", post(create_gate).get(list_gates))
+        .route("/gates/{gate_name}", get(get_gate))
+        // Conformance suites and runs (EP-12-S09 server-side).
+        .route(
+            "/conformance-suites",
+            post(create_conformance_suite).get(list_conformance_suites),
+        )
+        .route(
+            "/conformance-suites/{name}/versions/{version}",
+            get(get_conformance_suite),
+        )
+        .route(
+            "/conformance-runs",
+            post(create_conformance_run).get(list_conformance_runs),
+        )
+        .route("/conformance-runs/{run_id}", get(get_conformance_run))
+        .route("/conformance-checks", get(check_conformance_status))
+        // The configuration registry (R0.11 wave 1): named, owned
+        // artifacts indexing the candidate pipeline (never a fork of it),
+        // the append-only commit history, and diff views computed on
+        // read. Promotion itself stays on the learn surface — with an
+        // optional environment tag, the pointer moves per tag through
+        // the unchanged machinery.
+        .route(
+            "/registry/artifacts",
+            post(declare_artifact).get(list_artifacts),
+        )
+        .route("/registry/artifacts/{family}/{name}", get(get_artifact))
+        .route(
+            "/registry/artifacts/{family}/{name}/commits",
+            post(commit_artifact).get(list_artifact_commits),
+        )
+        .route(
+            "/registry/artifacts/{family}/{name}/diff",
+            get(diff_artifact),
+        )
+        // The run artifact plane (R0.12 wave 1): run-produced outputs
+        // made operable — content-addressed, lineage-carrying,
+        // retainable. Deliberately distinct from `/registry/artifacts`
+        // (human-authored configuration): the route grammar says which
+        // concept a caller addresses. The static segments win over
+        // `/artifacts/{artifact_id}` — commits, spills, and the name
+        // index are operations, not record addresses.
+        .route("/artifacts", get(crate::artifacts::list_run_artifacts))
+        .route(
+            "/artifacts/commits",
+            post(crate::artifacts::commit_run_artifact),
+        )
+        .route(
+            "/artifacts/spills",
+            post(crate::artifacts::commit_spilled_artifact),
+        )
+        .route(
+            "/artifacts/names/{name}",
+            get(crate::artifacts::get_run_artifact_named),
+        )
+        .route(
+            "/artifacts/names/{name}/versions",
+            get(crate::artifacts::list_run_artifact_versions),
+        )
+        .route(
+            "/artifacts/{artifact_id}",
+            get(crate::artifacts::get_run_artifact),
+        )
+        .route(
+            "/artifacts/{artifact_id}/bytes",
+            get(crate::artifacts::get_run_artifact_bytes),
+        )
+        // Wave 2: previews, the release act, the operator-triggered
+        // sweep pass, and the deployment evidence chain read. The static
+        // segments (`sweep`, `journal`) win over the `{artifact_id}`
+        // parameter, the same routing rule `commits`/`spills`/`names`
+        // already rely on.
+        .route(
+            "/artifacts/{artifact_id}/preview",
+            get(crate::artifacts::get_run_artifact_preview),
+        )
+        .route(
+            "/artifacts/{artifact_id}/release",
+            post(crate::artifacts::release_run_artifact),
+        )
+        .route("/artifacts/sweep", post(crate::artifacts::sweep_artifacts))
+        .route(
+            "/artifacts/journal",
+            get(crate::artifacts::get_artifacts_journal),
+        )
+        // The deployment control plane (R0.12 Operations Plane, wave 3):
+        // content-addressed revisions, declared environments, pointer
+        // moves (promote / byte-exact rollback), and environment-scoped
+        // secret custody. Mutations journal first onto the deployment
+        // evidence chain; reads serve records and metadata only —
+        // plaintext secret material crosses just
+        // `POST /deployments/secrets/resolve`, inside its declared scope.
+        .route(
+            "/deployments/revisions",
+            post(crate::deploy::create_revision).get(crate::deploy::list_revisions),
+        )
+        .route(
+            "/deployments/revisions/{revision_id}",
+            get(crate::deploy::get_revision),
+        )
+        .route(
+            "/deployments/environments",
+            post(crate::deploy::declare_environment).get(crate::deploy::list_environments),
+        )
+        .route(
+            "/deployments/environments/{name}",
+            get(crate::deploy::get_environment),
+        )
+        .route(
+            "/deployments/environments/{name}/promote",
+            post(crate::deploy::promote_revision),
+        )
+        .route(
+            "/deployments/environments/{name}/rollback",
+            post(crate::deploy::rollback_revision),
+        )
+        .route(
+            "/deployments/environments/{name}/pointer",
+            get(crate::deploy::get_environment_pointer),
+        )
+        // Wave 4: the release gate (journaled ahead of every gated
+        // move), canary declare / clear on the same chain, shadow runs
+        // behind the shadow admission boundary, and the health board
+        // derived from journaled data alone.
+        .route(
+            "/deployments/environments/{name}/canary",
+            put(crate::deploy::declare_canary).delete(crate::deploy::clear_canary),
+        )
+        .route("/deployments/shadows", post(crate::deploy::create_shadow))
+        .route(
+            "/deployments/health",
+            get(crate::deploy::get_deployment_health),
+        )
+        .route(
+            "/deployments/journal",
+            get(crate::deploy::get_deployment_journal),
+        )
+        .route(
+            "/deployments/secrets",
+            put(crate::deploy::set_env_secret).get(crate::deploy::list_env_secrets),
+        )
+        .route(
+            "/deployments/secrets/resolve",
+            post(crate::deploy::resolve_env_secret),
+        )
+        .route(
+            "/deployments/secrets/{environment}/{name}",
+            delete(crate::deploy::revoke_env_secret),
+        )
+        // The executor-policy registry (R0.8 wave 4): versioned,
+        // immutable policy bodies; the append-only activation log moving
+        // the active-version pointer; the active read; and the derived
+        // epoch history. Admission binding itself happens inside the
+        // checkpointer decorator (`PolicyBindingCheckpointer`), not here.
+        .route("/policy/versions", post(register_policy).get(list_policies))
+        .route("/policy/versions/{version}", get(get_policy))
+        .route("/policy/activations", post(activate_policy))
+        .route("/policy/active", get(get_active_policy))
+        .route("/policy/epochs", get(list_policy_epochs))
+        // The drift check (R0.10 wave 4): the promoted version's production
+        // decisions measured against the twin baseline it was promoted on.
+        .route("/policy/drift", get(get_policy_drift))
+        // The capsule registry (R0.9 wave 1): immutable, content-addressed
+        // capsule manifests; the `(name, version)` pin resolution that
+        // journals one `CapsuleResolved` event per pin into the resolving
+        // run. Invocation itself is the runtime host's seam, not an HTTP
+        // route.
+        .route("/capsules", post(register_capsule).get(list_capsules))
+        .route("/capsules/{id}", get(get_capsule))
+        .route("/capsules/resolve", post(resolve_capsules))
+        // The capsule authorization plane (R0.9 wave 2): immutable Cedar
+        // policy bodies, the active-version pointer, and tenant overlay
+        // attach. Without the `capsules` feature every handler answers
+        // the typed `503 capsule_policy_unavailable` — the surface fails
+        // closed and says so.
+        .route(
+            "/capsule_policies/versions",
+            post(register_capsule_policy).get(list_capsule_policies),
+        )
+        .route(
+            "/capsule_policies/versions/{version}",
+            get(get_capsule_policy),
+        )
+        .route(
+            "/capsule_policies/active",
+            get(get_active_capsule_policy).post(activate_capsule_policy),
+        )
+        .route(
+            "/capsules/overlays",
+            post(attach_capsule_overlay).get(list_capsule_overlays),
+        )
+        .route("/capsules/overlays/{name}", get(get_capsule_overlay))
+        // The interop bridges (R0.9 wave 4): the MCP tool surface
+        // (every registered graph as one tool), the A2A agent card and
+        // JSON-RPC task surface, and the capsule component-blob upload
+        // the bridge executor executes from. All three are thin
+        // adaptations over the same run/journal/task machinery the
+        // native routes drive — no parallel execution path.
+        .route("/mcp", post(crate::mcp_bridge::handle))
+        // The other direction: MCP servers this server connects to, whose
+        // tools mount onto the graphs (`mcp_servers.rs`).
+        .route(
+            "/mcp/servers",
+            get(crate::mcp_servers::list_servers).post(crate::mcp_servers::create_server),
+        )
+        .route("/mcp/servers/probe", post(crate::mcp_servers::probe))
+        .route(
+            "/mcp/servers/{server_id}",
+            delete(crate::mcp_servers::delete_server),
+        )
+        .route(
+            "/mcp/servers/{server_id}/remount",
+            post(crate::mcp_servers::remount_server),
+        )
+        .route(
+            crate::a2a::AGENT_CARD_PATH,
+            get(crate::a2a::agent_card_route),
+        )
+        .route("/a2a", post(crate::a2a::handle))
+        .route("/capsules/{id}/blob", put(put_capsule_blob_route))
+        .route("/coordination/delegate", post(submit_delegate))
+        .route("/coordination/fan_out", post(submit_fan_out))
+        .route("/coordination/race", post(submit_race))
+        .route("/coordination/quorum", post(submit_quorum))
+        .route("/coordination/{coordination_id}", get(get_coordination))
+        .route(
+            "/coordination/{coordination_id}/trace",
+            get(get_coordination_trace),
+        )
+        .route("/agents/{agent_id}/activate", post(activate_agent))
+        .route(
+            "/agents/{agent_id}/activate/heartbeat",
+            post(heartbeat_activation),
+        )
+        .route(
+            "/agents/{agent_id}/activate/release",
+            post(release_activation),
+        )
+        .route(
+            "/triggers",
+            post(triggers::create_trigger).get(triggers::list_triggers),
+        )
+        .route(
+            "/triggers/{trigger_id}",
+            get(triggers::get_trigger)
+                .patch(triggers::update_trigger)
+                .delete(triggers::delete_trigger),
+        )
+        .route(
+            "/triggers/{trigger_id}/events",
+            get(triggers::list_trigger_events),
+        )
+        .route(
+            "/triggers/{trigger_id}/dead-letter",
+            get(triggers::list_dead_letter),
+        )
+        .route(
+            "/triggers/{trigger_id}/events/{event_id}/replay",
+            post(triggers::replay_event),
+        )
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            crate::auth::require_scope,
+        ))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            crate::auth::require_api_key,
+        ));
+
+    let app = Router::new()
+        // The trigger webhook authenticates by HMAC signature (per-trigger
+        // secret), not by API key: external senders (GitHub, Stripe, …)
+        // cannot present an `X-Api-Key`, so the signature is the credential
+        // — and it resolves the owning tenant among same-external-id
+        // triggers. Everything else stays behind the API-key layer.
+        .route("/triggers/{trigger_id}/webhook", post(triggers::webhook))
+        .merge(authed)
+        // Outermost layer: CORS. Dev answers any origin, so the Studio's
+        // dev proxy on another port works out of the box. Production is
+        // same-origin only unless the operator named origins — an open
+        // CORS layer on a production API is a decision nobody makes on
+        // purpose (G12). The studio may be served from another origin (the
+        // dev proxy on :4400); its session cookie only travels with
+        // credentials, and a mirror is used rather than a wildcard because
+        // a browser refuses credentials against a wildcard origin.
+        .layer(
+            if config.cors_allowed_origins.is_empty() && !config.production {
+                tower_http::cors::CorsLayer::new()
+                    .allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+                    .allow_credentials(true)
+                    .allow_methods(tower_http::cors::AllowMethods::mirror_request())
+                    .allow_headers(tower_http::cors::AllowHeaders::mirror_request())
+            } else if !config.cors_allowed_origins.is_empty() {
+                tower_http::cors::CorsLayer::new()
+                    .allow_origin(tower_http::cors::AllowOrigin::list(
+                        config.cors_allowed_origins.iter().map(|o| {
+                            o.parse().unwrap_or_else(|_| {
+                                unreachable!(
+                                    "with_cors_allowed_origin validates the origin at config time"
+                                )
+                            })
+                        }),
+                    ))
+                    .allow_credentials(true)
+                    .allow_methods([
+                        axum::http::Method::GET,
+                        axum::http::Method::POST,
+                        axum::http::Method::PUT,
+                        axum::http::Method::PATCH,
+                        axum::http::Method::DELETE,
+                        axum::http::Method::OPTIONS,
+                    ])
+                    .allow_headers(tower_http::cors::Any)
+            } else {
+                tower_http::cors::CorsLayer::new()
+            },
+        )
+        .with_state(state);
+    (app, broker)
+}
+
+/// Build the full router with an explicit drain control (used by
+/// [`crate::router`] with a never-fired token, and by
+/// [`crate::router_with_shutdown`] with the real one).
+pub(crate) fn router_with_shutdown(
+    registry: GraphRegistry,
+    config: ServerConfig,
+    shutdown: tokio_util::sync::CancellationToken,
+) -> Router {
+    build_router(registry, config, shutdown).0
+}
+
+// --------------------------------------------------------------------- //
+// Helpers
+// --------------------------------------------------------------------- //
+
+pub(crate) fn internal_err<E: std::fmt::Display>(e: E) -> ApiError {
+    ApiError::internal(e.to_string())
+}
+
+/// Fetch the caller's thread record by external id. Lookup happens under
+/// the tenant's internal id namespace, so another tenant's thread simply
+/// does not exist here — cross-tenant access answers 404 (never 403, to
+/// avoid leaking the thread's existence).
+async fn require_thread(
+    state: &AppState,
+    tenant: &TenantContext,
+    thread_id: &str,
+) -> Result<ThreadRecord, ApiError> {
+    // Another person's thread is absent (404, never 403 — the same
+    // indistinguishability as another tenant's).
+    state
+        .server_store
+        .get_thread(&tenant.scope(thread_id))
+        .await
+        .map_err(internal_err)?
+        .filter(|thread| thread_readable(state, tenant, thread_id, thread))
+        .ok_or_else(|| ApiError::not_found(format!("thread `{thread_id}` not found")))
+}
+
+/// The read rule for a thread: its stamp, else — for a thread from before
+/// the stamp — the person of its earliest run ([`backfill_thread_persons`]).
+fn thread_readable(
+    state: &AppState,
+    tenant: &TenantContext,
+    thread_id: &str,
+    thread: &ThreadRecord,
+) -> bool {
+    if thread.metadata.get("created_by").is_some() {
+        return run_readable(tenant, Some(&thread.metadata));
+    }
+    let legacy = state
+        .thread_persons
+        .read()
+        .ok()
+        .and_then(|persons| persons.get(thread_id).cloned());
+    legacy.is_none_or(|person| tenant.may_read_for(&person))
+}
+
+/// Validate a client-chosen resource id (thread / assistant / cron). Ids
+/// become path segments under the store root and carry a `{tenant}/`
+/// prefix internally, so they must be non-empty, bounded, and free of path
+/// separators; all-dots ids are rejected (parent-directory components), as
+/// are the reserved layout names in [`RESERVED_NAMES`] — an id of `crons`
+/// would otherwise write checkpoint files into the cron-records directory.
+pub(crate) fn validate_client_id(kind: &str, id: &str) -> Result<(), ApiError> {
+    let ok = !id.is_empty()
+        && id.len() <= 256
+        && !id.contains('/')
+        && !id.contains('\\')
+        && !id.chars().all(|c| c == '.')
+        && !RESERVED_NAMES.contains(&id);
+    if ok {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(format!(
+            "invalid {kind} `{id}` (must be non-empty, <= 256 chars, no path separators, not a reserved name)"
+        )))
+    }
+}
+
+/// The per-thread lock serializing `update_state` (see
+/// [`AppState::state_locks`]).
+async fn state_lock(state: &AppState, internal_id: &str) -> Arc<Mutex<()>> {
+    state
+        .state_locks
+        .lock()
+        .await
+        .entry(internal_id.to_string())
+        .or_default()
+        .clone()
+}
+
+fn checkpoint_ref(cp: &Checkpoint, tenant: &TenantContext) -> Value {
+    json!({
+        "checkpoint_id": cp.id,
+        // Checkpoints persist the internal (tenant-scoped) thread id; the
+        // wire always shows the external one.
+        "thread_id": tenant.unscope(&cp.thread_id).unwrap_or(&cp.thread_id),
+        "step": cp.step,
+        "created_at": cp.created_at,
+        // The policy version this checkpoint bound (R0.8 wave 4): stamped
+        // at admission, inherited across resume — the header is the
+        // authoritative record of the pin.
+        "policy_version": cp.header.policy_version,
+    })
+}
+
+// --------------------------------------------------------------------- //
+// Liveness & info
+// --------------------------------------------------------------------- //
+
+async fn ok() -> Json<Value> {
+    Json(json!({ "ok": true }))
+}
+
+/// One registered graph as reported by `GET /info`.
+#[derive(Debug, Serialize)]
+struct InfoGraph {
+    name: String,
+    channels: Vec<String>,
+    tools: Vec<rusty_agent_runtime::tool::ToolCapability>,
+}
+
+/// The `GET /info` response — the SDK compatibility handshake.
+///
+/// `version` carries the server crate version and `api_protocol_version`
+/// carries [`crate::API_PROTOCOL_VERSION`]; an SDK gates on the pair before
+/// trusting the rest of the surface. Within an API protocol version this
+/// shape is additive-only: new fields may appear in minor releases,
+/// existing fields never move, get renamed, or change meaning.
+#[derive(Debug, Serialize)]
+struct InfoResponse {
+    service: &'static str,
+    version: &'static str,
+    api_protocol_version: u32,
+    checkpointer: &'static str,
+    server_store: &'static str,
+    store_path: PathBuf,
+    /// The daily sweep of every suite, as `HH:MM` UTC, when the server runs one.
+    sweep_at: Option<String>,
+    /// The models behind the graphs: primary, fallback, what is active.
+    llm: Value,
+    /// The deployment's context policy in the two numbers a builder can
+    /// set per agent — the window and what compaction keeps — or `null`
+    /// when every model call goes raw.
+    context: Option<Value>,
+    graphs: Vec<InfoGraph>,
+}
+
+async fn info(AxumState(state): AxumState<Arc<AppState>>) -> Json<InfoResponse> {
+    let graphs = state
+        .registry
+        .names()
+        .into_iter()
+        .map(|name| InfoGraph {
+            channels: state.registry.channel_names(&name),
+            tools: state.registry.tool_capabilities(&name),
+            name,
+        })
+        .collect();
+    let persistence = if state.config.database_url.is_some() {
+        "postgres"
+    } else {
+        "json_file"
+    };
+    Json(InfoResponse {
+        service: "rusty-server",
+        version: env!("CARGO_PKG_VERSION"),
+        api_protocol_version: crate::API_PROTOCOL_VERSION,
+        checkpointer: persistence,
+        server_store: persistence,
+        store_path: state.config.store_path.clone(),
+        sweep_at: state.config.sweep_at.map(|(h, m)| format!("{h:02}:{m:02}")),
+        llm: crate::llm_providers::info(&state).await,
+        context: state.run_deps.context_policy.as_ref().map(|p| {
+            json!({
+                "budget_tokens": p.budget.max_tokens,
+                "keep_recent_messages": p.compaction.as_ref().map(|c| c.keep_recent_messages),
+                "memory": p.memory.is_some(),
+            })
+        }),
+        graphs,
+    })
+}
+
+// --------------------------------------------------------------------- //
+// Threads
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct CreateThreadPayload {
+    /// Registered graph name this thread binds to.
+    graph: String,
+    #[serde(default)]
+    metadata: Option<Value>,
+    /// Client-chosen thread id (a UUID v4 is generated when omitted).
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
+async fn create_thread(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CreateThreadPayload>,
+) -> Result<(StatusCode, Json<ThreadRecord>), ApiError> {
+    if !state.registry.contains(&payload.graph) {
+        return Err(ApiError::bad_request(format!(
+            "unknown graph `{}` (see GET /info for registered graphs)",
+            payload.graph
+        )));
+    }
+    let thread_id = payload
+        .thread_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("thread_id", &thread_id)?;
+
+    let internal_id = tenant.scope(&thread_id);
+    let record = ThreadRecord {
+        thread_id: thread_id.clone(),
+        tenant: tenant.tenant().to_string(),
+        graph: payload.graph,
+        // Whose conversation this is: the signed-in person, stamped by the
+        // server (a client's `created_by` is replaced).
+        metadata: attributed(payload.metadata, &tenant),
+        forked_from: None,
+        seed_length: None,
+        created_at: Utc::now(),
+    };
+    // Check-and-insert in the store (durable, so pre-restart checkpoints
+    // stay reachable through the API).
+    let created = state
+        .server_store
+        .create_thread(&internal_id, &record)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        return Err(ApiError::conflict(format!(
+            "thread `{thread_id}` already exists"
+        )));
+    }
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+/// `GET /threads/{id}` — fetch the thread record.
+async fn get_thread(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<ThreadRecord>, ApiError> {
+    let record = require_thread(&state, &tenant, &thread_id).await?;
+    Ok(Json(record))
+}
+
+// --------------------------------------------------------------------- //
+// Thread fork (time travel)
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct ForkThreadPayload {
+    /// Client-chosen id for the fork (a UUID v4 is generated when omitted).
+    #[serde(default)]
+    new_thread_id: Option<String>,
+    /// Fork from this checkpoint: only checkpoints up to and including it
+    /// are copied. Omit to copy the full history.
+    #[serde(default)]
+    checkpoint_id: Option<String>,
+}
+
+/// `POST /threads/{id}/fork` — copy the thread's checkpoint history (full,
+/// or up to `checkpoint_id`) into a new thread bound to the same graph, via
+/// [`Checkpointer::fork_thread`]. The fork is the safe time-travel target:
+/// replay it with `"checkpoint": {"checkpoint_id": …}` on run-create.
+async fn fork_thread(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<ForkThreadPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let record = require_thread(&state, &tenant, &thread_id).await?;
+    let new_thread_id = payload
+        .new_thread_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("new_thread_id", &new_thread_id)?;
+
+    let new_internal_id = tenant.scope(&new_thread_id);
+    if state
+        .server_store
+        .get_thread(&new_internal_id)
+        .await
+        .map_err(internal_err)?
+        .is_some()
+    {
+        return Err(ApiError::conflict(format!(
+            "thread `{new_thread_id}` already exists"
+        )));
+    }
+
+    // Fork inside the tenant's checkpoint namespace.
+    let src_internal = tenant.scope(&thread_id);
+    let copied = state
+        .checkpointer
+        .fork_thread(
+            &src_internal,
+            &new_internal_id,
+            payload.checkpoint_id.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            let message = e.to_string();
+            if message.contains("unknown checkpoint id") {
+                ApiError::not_found(message)
+            } else {
+                // No checkpoints to fork, or src == dst id collision.
+                ApiError::bad_request(message)
+            }
+        })?;
+
+    // Seed length is the count of checkpoints copied from the parent.
+    let fork = ThreadRecord {
+        thread_id: new_thread_id.clone(),
+        tenant: tenant.tenant().to_string(),
+        graph: record.graph,
+        metadata: json!({}),
+        forked_from: Some(thread_id.clone()),
+        seed_length: Some(copied),
+        created_at: Utc::now(),
+    };
+    // A create that loses a same-id race answers 409 (the existence check
+    // above is only the fast path; the store's check-and-insert is
+    // authoritative).
+    let created = state
+        .server_store
+        .create_thread(&new_internal_id, &fork)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        return Err(ApiError::conflict(format!(
+            "thread `{new_thread_id}` already exists"
+        )));
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "thread_id": new_thread_id,
+            "checkpoints_copied": copied,
+            "seed_length": copied,
+        })),
+    ))
+}
+
+// --------------------------------------------------------------------- //
+// Regenerate (fork + immediate turn)
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct RegeneratePayload {
+    /// Client-chosen id for the regenerated thread (a UUID v4 is generated when omitted).
+    #[serde(default)]
+    new_thread_id: Option<String>,
+    /// Regenerate from this checkpoint. Omit to use the latest checkpoint.
+    #[serde(default)]
+    checkpoint_id: Option<String>,
+    /// Input to the regenerated turn (defaults to empty object).
+    #[serde(default)]
+    input: Option<Value>,
+}
+
+/// `POST /threads/{id}/regenerate` — fork the thread at a checkpoint and
+/// immediately run one turn on the fork, so the original transcript is never
+/// mutated and the two generations are comparable side by side.
+async fn regenerate_thread(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<RegeneratePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    // 1. Fork first (reuses the fork handler logic inline).
+    let record = require_thread(&state, &tenant, &thread_id).await?;
+    let new_thread_id = payload
+        .new_thread_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("new_thread_id", &new_thread_id)?;
+
+    let new_internal_id = tenant.scope(&new_thread_id);
+    if state
+        .server_store
+        .get_thread(&new_internal_id)
+        .await
+        .map_err(internal_err)?
+        .is_some()
+    {
+        return Err(ApiError::conflict(format!(
+            "thread `{new_thread_id}` already exists"
+        )));
+    }
+
+    let src_internal = tenant.scope(&thread_id);
+    let copied = state
+        .checkpointer
+        .fork_thread(
+            &src_internal,
+            &new_internal_id,
+            payload.checkpoint_id.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            let message = e.to_string();
+            if message.contains("unknown checkpoint id") {
+                ApiError::not_found(message)
+            } else {
+                ApiError::bad_request(message)
+            }
+        })?;
+
+    let seed_length = if let Some(id) = &payload.checkpoint_id {
+        state
+            .checkpointer
+            .get_by_id(&src_internal, id)
+            .await
+            .map_err(internal_err)?
+            .map(|cp| cp.step)
+    } else {
+        state
+            .checkpointer
+            .list(&src_internal)
+            .await
+            .map_err(internal_err)?
+            .last()
+            .map(|cp| cp.step)
+    };
+
+    let fork = ThreadRecord {
+        thread_id: new_thread_id.clone(),
+        tenant: tenant.tenant().to_string(),
+        graph: record.graph.clone(),
+        metadata: json!({}),
+        forked_from: Some(thread_id.clone()),
+        seed_length,
+        created_at: Utc::now(),
+    };
+    let created = state
+        .server_store
+        .create_thread(&new_internal_id, &fork)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        return Err(ApiError::conflict(format!(
+            "thread `{new_thread_id}` already exists"
+        )));
+    }
+
+    // 2. Immediately schedule a run on the fork.
+    let run_payload = RunPayload {
+        input: payload.input.or_else(|| Some(json!({}))),
+        ..Default::default()
+    };
+    let scheduled = schedule_for_thread(
+        &state,
+        &tenant,
+        &new_thread_id,
+        run_payload,
+        Admission::Client,
+    )
+    .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "thread_id": new_thread_id,
+            "checkpoints_copied": copied,
+            "seed_length": seed_length,
+            "run_id": scheduled.run_id,
+        })),
+    ))
+}
+
+// --------------------------------------------------------------------- //
+// Thread state & history
+// --------------------------------------------------------------------- //
+
+async fn get_state(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    require_thread(&state, &tenant, &thread_id).await?;
+    let latest = state
+        .checkpointer
+        .get_latest(&tenant.scope(&thread_id))
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(match latest {
+        None => json!({ "values": {}, "next": [], "checkpoint": null }),
+        Some(cp) => json!({
+            "values": cp.state.to_value(),
+            "next": cp.next_nodes,
+            "checkpoint": checkpoint_ref(&cp, &tenant),
+        }),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateStatePayload {
+    /// The full new state (JSON object).
+    values: Value,
+    /// Recorded for API compatibility with LangGraph's `update_state`;
+    /// checkpoints do not carry per-node metadata in v0.1.
+    #[serde(default)]
+    as_node: Option<String>,
+    /// Override for the next-node set (defaults to the previous value).
+    #[serde(default)]
+    next_nodes: Option<Vec<String>>,
+    /// Tasks to enqueue atomically with this checkpoint through the
+    /// transactional outbox (R0.6 wave 2b): every entry is validated
+    /// before anything is written, and with the Postgres backend the
+    /// checkpoint write and outbox enqueue commit in one transaction, so
+    /// a crash can never leave a checkpoint whose effects silently
+    /// vanished. The tasks become claimable when the relay publishes
+    /// them; the response returns after the durable outbox write.
+    #[serde(default)]
+    enqueue: Option<Vec<EnqueueTaskPayload>>,
+}
+
+async fn update_state(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<UpdateStatePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    require_thread(&state, &tenant, &thread_id).await?;
+    let UpdateStatePayload {
+        values,
+        as_node,
+        next_nodes,
+        enqueue,
+    } = payload;
+    let _ = as_node;
+
+    // Validate every enqueued task before any write: a malformed entry
+    // fails the whole request with nothing persisted, matching the
+    // all-or-nothing contract the Postgres transaction enforces.
+    let outbox_tasks = enqueue
+        .map(|payloads| {
+            payloads
+                .into_iter()
+                .map(|p| build_task_record(p, &tenant))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    // The quota gate runs before any write, like validation: over quota
+    // fails the whole request — checkpoint included — preserving the
+    // all-or-nothing contract the Postgres transaction enforces.
+    if let Some(tasks) = &outbox_tasks {
+        if !tasks.is_empty() {
+            enforce_task_quota(&state, &tenant, tasks.len()).await?;
+        }
+    }
+
+    let internal_id = tenant.scope(&thread_id);
+    let new_state = State::from_value(values)
+        .map_err(|e| ApiError::bad_request(format!("`values` must be a JSON object: {e}")))?;
+    // Serialize the read-modify-write per thread: two concurrent
+    // `update_state` calls must not mint two checkpoints with the same
+    // `step`. (Held across the checkpointer IO on purpose — this is a
+    // per-thread serializer, not a global lock.)
+    let lock = state_lock(&state, &internal_id).await;
+    let _guard = lock.lock().await;
+    let latest = state
+        .checkpointer
+        .get_latest(&internal_id)
+        .await
+        .map_err(internal_err)?;
+    let (step, prev_next) = latest
+        .map(|cp| (cp.step + 1, cp.next_nodes))
+        .unwrap_or((0, Vec::new()));
+
+    let cp = Checkpoint::new(
+        &internal_id,
+        step,
+        new_state,
+        next_nodes.unwrap_or(prev_next),
+    );
+    match &outbox_tasks {
+        // Checkpoint + outbox enqueue as one durable unit (a single
+        // transaction on Postgres; outbox-first ordering on the file
+        // backend — see `ServerStore::checkpoint_and_enqueue`).
+        Some(tasks) => state
+            .server_store
+            .checkpoint_and_enqueue(&cp, tasks)
+            .await
+            .map_err(internal_err)?,
+        None => state
+            .checkpointer
+            .put(cp.clone())
+            .await
+            .map_err(internal_err)?,
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "values": cp.state.to_value(),
+            "next": cp.next_nodes,
+            "checkpoint": checkpoint_ref(&cp, &tenant),
+        })),
+    ))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct HistoryPayload {
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Return only checkpoints older than this checkpoint id.
+    #[serde(default)]
+    before: Option<String>,
+}
+
+async fn history(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<HistoryPayload>,
+) -> Result<Json<Value>, ApiError> {
+    require_thread(&state, &tenant, &thread_id).await?;
+    let mut checkpoints = state
+        .checkpointer
+        .list(&tenant.scope(&thread_id))
+        .await
+        .map_err(internal_err)?;
+    checkpoints.reverse(); // newest first
+
+    if let Some(before) = &payload.before {
+        match checkpoints.iter().position(|cp| &cp.id == before) {
+            Some(pos) => {
+                checkpoints.drain(..=pos);
+            }
+            // A cursor that silently resets to the full history sends
+            // paginating clients into infinite loops — answer 400 instead.
+            None => {
+                return Err(ApiError::bad_request(format!(
+                    "unknown `before` checkpoint `{before}`"
+                )));
+            }
+        }
+    }
+    if let Some(limit) = payload.limit {
+        checkpoints.truncate(limit);
+    }
+
+    let items: Vec<Value> = checkpoints
+        .iter()
+        .map(|cp| {
+            json!({
+                "values": cp.state.to_value(),
+                "next": cp.next_nodes,
+                "checkpoint": checkpoint_ref(cp, &tenant),
+            })
+        })
+        .collect();
+    Ok(Json(Value::Array(items)))
+}
+
+// --------------------------------------------------------------------- //
+// Runs
+// --------------------------------------------------------------------- //
+
+/// The tool names an assistant version declares in its reviewed Studio
+/// intent (`config.studio_intent.tools[*].name`).
+///
+/// Only the exact reviewed shape supplies a default: an intent without a
+/// `tools` array — legacy versions, opaque vendor formats — answers `None`
+/// and the run stays unrestricted, byte-identical to prior behavior. The
+/// names are validated against the graph's catalog at admission like any
+/// other allowlist.
+/// What an assistant supplies to a run through it: a default recursion
+/// limit, its charter as the thread's first message, its reviewed tools as
+/// the allowlist, the skills it follows. One function, so a run started from
+/// the API, a schedule and a webhook are the same run — an agent fired by a
+/// cron without this is a bare graph wearing the agent's name.
+/// A run that names its skills and its tool notes on the payload — a draft
+/// tried from the builder before any agent exists — takes the same doors an
+/// agent's would: the skills ride in as the context's skills section (with
+/// `skills.read` allowed), the notes as the tools' selection overlays. An
+/// explicit `skills` or `tool_overlays` on the payload wins.
+pub(crate) async fn apply_draft_config(state: &AppState, tenant: &str, payload: &mut RunPayload) {
+    let Some(config) = payload.config.as_mut() else {
+        return;
+    };
+    if let Some(names) = config.skill_names.take() {
+        if config.skills.is_none() && !names.is_empty() {
+            let entries = crate::platform_tools::skill_entries(state, tenant, &names).await;
+            let mut skills = serde_json::to_value(entries).unwrap_or(Value::Null);
+            if let Some(values) = config.variables.as_ref().filter(|v| !v.is_empty()) {
+                crate::variables::render_variables_in(&mut skills, values);
+            }
+            config.skills = Some(skills);
+            if let Some(allowlist) = config.tool_allowlist.as_mut() {
+                if !allowlist
+                    .iter()
+                    .any(|t| t == crate::platform_tools::SKILLS_READ)
+                {
+                    allowlist.push(crate::platform_tools::SKILLS_READ.to_owned());
+                }
+            }
+        }
+    }
+    // The working copy's long-term memory switch: off means no memory
+    // section, no memory store, and no memory tools on this run.
+    if let Some(access) = config.memory_access.take() {
+        if access.trim().eq_ignore_ascii_case("none") {
+            config.context.get_or_insert_with(Default::default).memory = Some(false);
+            if let Some(list) = config.tool_allowlist.as_mut() {
+                list.retain(|name| {
+                    name != crate::platform_tools::MEMORY_REMEMBER
+                        && name != crate::platform_tools::MEMORY_RECALL
+                });
+            }
+        }
+    }
+    if let Some(notes) = config.tool_notes.take() {
+        if config.tool_overlays.is_none() && !notes.is_empty() {
+            let as_intent = json!({ "studio_intent": { "tools": notes.iter().map(|(name, when)| json!({"name": name, "when": when})).collect::<Vec<_>>() } });
+            let allowed = config.tool_allowlist.clone();
+            let overlays = assistant_tool_overlays(&as_intent, allowed.as_deref());
+            if !overlays.is_empty() {
+                config.tool_overlays = Some(serde_json::to_value(overlays).unwrap_or(Value::Null));
+            }
+        }
+    }
+    // A draft's charter arrives as the turn's first system message (the
+    // builder puts it there, having no agent to take it from); its
+    // `{{variables}}` are rendered the way an agent's are at admission.
+    let values = payload
+        .config
+        .as_ref()
+        .and_then(|c| c.variables.clone())
+        .filter(|v| !v.is_empty());
+    if let Some(values) = values {
+        if let Some(text) = payload
+            .config
+            .as_mut()
+            .and_then(|c| c.instructions.as_mut())
+        {
+            *text = crate::variables::render_variables(text, &values);
+        }
+        let first = payload
+            .input
+            .as_mut()
+            .and_then(|i| i.get_mut("messages"))
+            .and_then(Value::as_array_mut)
+            .and_then(|m| m.first_mut());
+        if let Some(first) = first {
+            if first.get("role").and_then(Value::as_str) == Some("system") {
+                if let Some(content) = first.get_mut("content") {
+                    crate::variables::render_variables_in(content, &values);
+                }
+            }
+        }
+    }
+}
+
+/// The Goal card as words for the agent: the objective, and how it is
+/// measured. `None` when no goal is set or the objective is empty.
+pub(crate) fn studio_goal_text(metadata: &Value) -> Option<String> {
+    let goal = metadata.get("studio")?.get("goal")?;
+    let objective = goal
+        .get("objective")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    let metric = goal
+        .get("metric")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let target = goal.get("target").and_then(Value::as_f64);
+    let lower = goal
+        .get("lowerIsBetter")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let measured = match (metric, target) {
+        (Some(m), Some(t)) => format!(
+            "\nMeasured as: {m} {} {}% of runs over the last seven days.",
+            if lower { "at most" } else { "at least" },
+            t.round() as i64
+        ),
+        (Some(m), None) => format!("\nMeasured as: {m}."),
+        _ => String::new(),
+    };
+    Some(format!(
+        "## Goal\n{objective}{measured}\nBefore you answer, check the reply against this goal; when it is not met, say so and say why."
+    ))
+}
+
+pub(crate) async fn apply_assistant_defaults(
+    state: &AppState,
+    tenant: &str,
+    internal_thread_id: &str,
+    assistant: &crate::assistants::AssistantRecord,
+    payload: &mut RunPayload,
+) {
+    // Assistant config supplies a default recursion limit; an explicit
+    // `config.recursion_limit` on the payload wins.
+    let payload_limit = payload.config.as_ref().and_then(|c| c.recursion_limit);
+    if payload_limit.is_none() {
+        if let Some(limit) = assistant
+            .config
+            .get("recursion_limit")
+            .and_then(Value::as_u64)
+        {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .recursion_limit = Some(limit as usize);
+        }
+    }
+    // The assistant's charter is its standing instructions — what it is
+    // for, and how it should answer. Without this every assistant on a
+    // graph behaves identically and a name is all that distinguishes
+    // them. An explicit `config.instructions` on the payload wins.
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.instructions.as_ref())
+        .is_none()
+    {
+        if let Some(text) = assistant_instructions(&assistant.config) {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .instructions = Some(text);
+        }
+    }
+    // The agent's goal — the objective a person wrote on the Goal card and the
+    // number it is measured on — rides with the charter, so the agent works
+    // toward what it is scored on instead of learning the score afterwards.
+    // Stated once with the charter (the thread's first turn), inside the
+    // pinned identity section, and journaled like every other byte the model
+    // sees. Before this the goal reached only the studio's seven-day chart.
+    if let Some(goal) = studio_goal_text(&assistant.metadata) {
+        let config = payload.config.get_or_insert_with(RunConfigPayload::default);
+        match config.instructions.as_mut() {
+            Some(text) if !text.contains("\n## Goal\n") => {
+                text.push_str("\n\n");
+                text.push_str(&goal);
+            }
+            Some(_) => {}
+            None => config.instructions = Some(goal),
+        }
+    }
+    // The agent's compiled knowledge unit, when a person compiled one: in
+    // the first turn beside the charter and goal, so it sits in the cached
+    // prefix; a conflict filed on its sources since is named at its head.
+    if let Some(unit) = crate::knowledge_units::unit_text(
+        state,
+        tenant,
+        crate::platform_tools::agent_id_of(tenant, &assistant.assistant_id),
+    )
+    .await
+    {
+        let config = payload.config.get_or_insert_with(RunConfigPayload::default);
+        match config.instructions.as_mut() {
+            Some(text) if !text.contains("\n## Knowledge unit") => {
+                text.push_str("\n\n");
+                text.push_str(&unit);
+            }
+            Some(_) => {}
+            None => config.instructions = Some(unit),
+        }
+    }
+    // The agent's curated memory blocks — declared with a label, a
+    // description and a character limit; each one's value is the newest live
+    // note under `block.<label>` in the agent's scope — rendered once per run
+    // for the situation section. An empty declared block renders as such:
+    // a visible commitment to know something, not a skipped line.
+    if !assistant_context(&assistant.config).is_some_and(|c| c.memory_off()) {
+        let declared = crate::platform_tools::declared_blocks_for_run(
+            &assistant.config,
+            payload
+                .config
+                .as_ref()
+                .and_then(|c| c.memory_blocks_declared.as_ref()),
+        );
+        if let Some(rendered) =
+            crate::platform_tools::memory_blocks_text(state, tenant, assistant, declared).await
+        {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .memory_blocks = Some(rendered);
+        }
+    }
+    // The charter's `{{variables}}`: the agent's own settings, under what
+    // the run brought (a trigger's event fields, the Test panel's values).
+    // Rendered before the charter enters the conversation, so the journal
+    // holds what the model read.
+    let variables = crate::variables::run_variables(
+        &assistant.config,
+        payload.config.as_ref().and_then(|c| c.variables.as_ref()),
+    );
+    if !variables.is_empty() {
+        if let Some(config) = payload.config.as_mut() {
+            if let Some(text) = config.instructions.as_mut() {
+                *text = crate::variables::render_variables(text, &variables);
+            }
+        }
+    }
+    // The agent's own model, when it names one of the deployment's
+    // providers; an explicit `config.model` on the payload wins.
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.model.as_ref())
+        .is_none()
+    {
+        if let Some(model) = assistant_model(&assistant.config) {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .model = Some(model);
+        }
+    }
+    // …its own sampling temperature, when it set one…
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.temperature)
+        .is_none()
+    {
+        if let Some(t) = assistant
+            .config
+            .pointer("/studio_intent/temperature")
+            .and_then(Value::as_f64)
+            .filter(|t| t.is_finite() && (0.0..=2.0).contains(t))
+        {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .temperature = Some(t);
+        }
+    }
+    // …and its own fallback, the same way.
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.fallback_model.as_ref())
+        .is_none()
+    {
+        if let Some(model) = provider_id_at(&assistant.config, "/studio_intent/fallback_model") {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .fallback_model = Some(model);
+        }
+    }
+    // …and it enters the conversation as its first message, where the
+    // journal records it like any other. Injecting it inside the agent
+    // node instead trips the model-visible-means-logged invariant —
+    // `unlogged content at message 0` — which is the platform being
+    // right: a run's evidence must reconstruct every byte the model saw.
+    // Only on a thread's first turn, so a charter is stated once and not
+    // re-stated on every reply.
+    // …and only on the thread's first turn. The thread keeps its history
+    // across turns, so a charter prepended again would be said twice
+    // and journaled twice. A thread with a checkpoint has already heard it.
+    if let Some(text) = payload.config.as_ref().and_then(|c| c.instructions.clone()) {
+        let heard_already = state
+            .checkpointer
+            .get_latest(internal_thread_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !heard_already {
+            prepend_charter(&mut payload.input, &text);
+        }
+    }
+    // The assistant version's reviewed tool selection
+    // (`config.studio_intent.tools`) is the run's default allowlist; an
+    // explicit run-level `tool_allowlist` or `capability_set` wins.
+    // Legacy or opaque intent shapes supply no default, preserving
+    // their pre-existing unrestricted behavior.
+    let declared = payload
+        .config
+        .as_ref()
+        .is_some_and(|config| config.tool_allowlist.is_some() || config.capability_set.is_some());
+    if !declared {
+        if let Some(names) = assistant_tool_default(&assistant.config) {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .tool_allowlist = Some(names);
+        }
+    }
+    // Long-term memory off: the memory tools are withheld from the run, so
+    // "off" means off — not a section removed while the tools still write.
+    if assistant_context(&assistant.config).is_some_and(|c| c.memory_off()) {
+        if let Some(list) = payload
+            .config
+            .as_mut()
+            .and_then(|c| c.tool_allowlist.as_mut())
+        {
+            list.retain(|name| {
+                name != crate::platform_tools::MEMORY_REMEMBER
+                    && name != crate::platform_tools::MEMORY_RECALL
+            });
+        }
+    }
+    // What the agent may spend per run (`studio_intent.budget`): tokens,
+    // and cost when the model prices itself. An explicit payload budget wins.
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.budget.as_ref())
+        .is_none()
+    {
+        if let Some(budget) = assistant_budget(&assistant.config) {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .budget = Some(budget);
+        }
+    }
+    // The context the agent works with (`studio_intent.context`): its
+    // window and what compaction keeps. An explicit payload context wins.
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.context.as_ref())
+        .is_none()
+    {
+        if let Some(context) = assistant_context(&assistant.config) {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .context = Some(context);
+        }
+    }
+    // The builder's word on *when* each tool is for (`studio_intent.tools[].when`)
+    // rides in as that tool's selection overlay, so the model reads it on
+    // the tool itself and the shortlist ranks with it. Only for tools the
+    // run may call; an explicit `tool_overlays` on the payload wins.
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.tool_overlays.as_ref())
+        .is_none()
+    {
+        let allowed = payload
+            .config
+            .as_ref()
+            .and_then(|c| c.tool_allowlist.clone());
+        let overlays = assistant_tool_overlays(&assistant.config, allowed.as_deref());
+        if !overlays.is_empty() {
+            payload
+                .config
+                .get_or_insert_with(RunConfigPayload::default)
+                .tool_overlays = Some(serde_json::to_value(overlays).unwrap_or(Value::Null));
+        }
+    }
+    // The skills it follows ride in as the context's skills section, and
+    // the door to read any other skill on demand comes with them.
+    if payload
+        .config
+        .as_ref()
+        .and_then(|c| c.skills.as_ref())
+        .is_none()
+    {
+        let names = assistant_skills(&assistant.config);
+        if !names.is_empty() {
+            let entries = crate::platform_tools::skill_entries(state, tenant, &names).await;
+            let config = payload.config.get_or_insert_with(RunConfigPayload::default);
+            config.skills = Some(serde_json::to_value(entries).unwrap_or(Value::Null));
+            let offers_read = state
+                .registry
+                .tool_capabilities(&assistant.graph)
+                .iter()
+                .any(|c| c.name == crate::platform_tools::SKILLS_READ);
+            if offers_read {
+                if let Some(allowlist) = config.tool_allowlist.as_mut() {
+                    if !allowlist
+                        .iter()
+                        .any(|t| t == crate::platform_tools::SKILLS_READ)
+                    {
+                        allowlist.push(crate::platform_tools::SKILLS_READ.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    // A skill's procedure names the same variables the charter does.
+    if !variables.is_empty() {
+        if let Some(skills) = payload.config.as_mut().and_then(|c| c.skills.as_mut()) {
+            crate::variables::render_variables_in(skills, &variables);
+        }
+    }
+}
+
+/// Put the agent's charter at the head of this turn's messages, unless the
+/// turn already opens with a system message. The charter is what the model is
+/// told before anything else; making it message zero is what lets the journal
+/// account for it.
+fn prepend_charter(input: &mut Option<Value>, instructions: &str) {
+    let Some(messages) = input
+        .as_mut()
+        .and_then(|value| value.get_mut("messages"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    let already = messages
+        .first()
+        .and_then(|first| first.get("role"))
+        .and_then(Value::as_str)
+        == Some("system");
+    if already {
+        return;
+    }
+    messages.insert(
+        0,
+        serde_json::json!({"role": "system", "content": instructions}),
+    );
+}
+
+/// The assistant's standing instructions, from the reviewed studio intent or
+/// from the config's own `instructions`. Both shapes are read because the
+/// first is what Studio writes and the second is what anyone writing an
+/// assistant by hand would reach for.
+pub(crate) fn assistant_instructions(config: &Value) -> Option<String> {
+    let text = config
+        .get("studio_intent")
+        .and_then(|intent| intent.get("instructions"))
+        .or_else(|| config.get("instructions"))?
+        .as_str()?
+        .trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// The provider an assistant calls: `config.studio_intent.model`, a provider id.
+pub(crate) fn assistant_model(config: &Value) -> Option<String> {
+    let id = config
+        .pointer("/studio_intent/model")
+        .or_else(|| config.get("model"))?
+        .as_str()?
+        .trim();
+    (!id.is_empty()).then(|| id.to_owned())
+}
+
+/// A provider id at `pointer` in an assistant's config, when it names one.
+fn provider_id_at(config: &Value, pointer: &str) -> Option<String> {
+    let id = config.pointer(pointer)?.as_str()?.trim();
+    (!id.is_empty()).then(|| id.to_owned())
+}
+
+/// The skills an assistant follows: `config.studio_intent.skills`, names.
+pub(crate) fn assistant_skills(config: &Value) -> Vec<String> {
+    config
+        .pointer("/studio_intent/skills")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The intent's per-run budget, when it names one: `max_tokens` and
+/// `max_cost_usd`, each a number or a numeric string (the studio's older
+/// intent shape wrote strings). Zero or a non-number is no bound.
+fn assistant_budget(config: &Value) -> Option<rusty_agent_runtime::meter::RunBudget> {
+    let budget = config.pointer("/studio_intent/budget")?;
+    fn number(value: Option<&Value>) -> Option<f64> {
+        match value? {
+            Value::Number(n) => n.as_f64(),
+            Value::String(text) => text
+                .trim()
+                .trim_start_matches('$')
+                .replace(',', "")
+                .parse()
+                .ok(),
+            _ => None,
+        }
+        .filter(|n| n.is_finite() && *n > 0.0)
+    }
+    let out = rusty_agent_runtime::meter::RunBudget {
+        max_tokens: number(budget.get("max_tokens")).map(|n| n as u64),
+        max_cost_usd: number(budget.get("max_cost_usd")),
+    };
+    (!out.is_empty()).then_some(out)
+}
+
+/// The agent's context settings (`studio_intent.context`), numbers or
+/// numeric strings as the form sends them; absent when nothing is set.
+fn assistant_context(config: &Value) -> Option<crate::runs::ContextOverride> {
+    // The builder's long-term memory switch (`studio_intent.memory.access`):
+    // `none` turns memory off for the agent's runs.
+    let memory_off = config
+        .pointer("/studio_intent/memory/access")
+        .and_then(Value::as_str)
+        .is_some_and(|access| access.trim().eq_ignore_ascii_case("none"));
+    let empty = Value::Null;
+    let context = config.pointer("/studio_intent/context").unwrap_or(&empty);
+    fn number(value: Option<&Value>) -> Option<u64> {
+        match value? {
+            Value::Number(n) => n.as_u64(),
+            Value::String(text) => text.trim().replace(',', "").parse().ok(),
+            _ => None,
+        }
+        .filter(|n| *n > 0)
+    }
+    let out = crate::runs::ContextOverride {
+        budget_tokens: number(context.get("budget_tokens")).map(|n| n.min(u32::MAX as u64) as u32),
+        keep_recent_messages: number(context.get("keep_recent_messages")).map(|n| n as usize),
+        memory: memory_off.then_some(false),
+    };
+    (!out.is_empty()).then_some(out)
+}
+
+/// One selection overlay per intent tool that carries a `when` note,
+/// restricted to `allowed` when the run has an allowlist. The note is the
+/// builder's sentence, not a contract: it is trimmed and cut at the
+/// overlay's bound rather than refused.
+fn assistant_tool_overlays(
+    config: &Value,
+    allowed: Option<&[String]>,
+) -> std::collections::BTreeMap<String, rusty_agent_runtime::tool_select::ToolSelectionOverlay> {
+    use rusty_agent_runtime::tool_select::{MAX_WHEN_TO_USE_BYTES, ToolSelectionOverlay};
+    let mut overlays = std::collections::BTreeMap::new();
+    let Some(tools) = config
+        .pointer("/studio_intent/tools")
+        .and_then(Value::as_array)
+    else {
+        return overlays;
+    };
+    for tool in tools {
+        let Some(name) = tool.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        if allowed.is_some_and(|list| !list.iter().any(|t| t == name)) {
+            continue;
+        }
+        let Some(note) = tool
+            .get("when")
+            .and_then(Value::as_str)
+            .map(|n| n.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|n| !n.is_empty())
+        else {
+            continue;
+        };
+        let mut bounded = String::new();
+        for ch in note.chars() {
+            if bounded.len() + ch.len_utf8() > MAX_WHEN_TO_USE_BYTES {
+                break;
+            }
+            bounded.push(ch);
+        }
+        let overlay = ToolSelectionOverlay {
+            when_to_use: Some(bounded),
+            ..Default::default()
+        };
+        if overlay.validate().is_ok() {
+            overlays.insert(name.to_owned(), overlay);
+        }
+    }
+    overlays
+}
+
+fn assistant_tool_default(config: &Value) -> Option<Vec<String>> {
+    let tools = config.get("studio_intent")?.get("tools")?.as_array()?;
+    let mut names = Vec::with_capacity(tools.len());
+    for tool in tools {
+        names.push(tool.get("name")?.as_str()?.to_string());
+    }
+    Some(names)
+}
+
+/// Fail-closed admission check for a tool allowlist against the graph's
+/// executable catalog: duplicates and unknown names are structured 400s,
+/// never a silently narrowed or broadened run.
+fn validate_tool_allowlist(
+    allowlist: &[String],
+    graph: &str,
+    catalog: &[rusty_agent_runtime::tool::ToolCapability],
+) -> Result<(), ApiError> {
+    let mut sorted = allowlist.to_vec();
+    sorted.sort_unstable();
+    for pair in sorted.windows(2) {
+        if pair[0] == pair[1] {
+            return Err(ApiError::bad_request(format!(
+                "`tool_allowlist` contains duplicate `{}`",
+                pair[0]
+            )));
+        }
+    }
+    for name in allowlist {
+        if !catalog.iter().any(|tool| &tool.name == name) {
+            return Err(ApiError::bad_request(format!(
+                "`tool_allowlist` names `{name}`, which graph `{graph}` does not register"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Who is admitting a run: a client over HTTP, whose metadata is free-form
+/// and carries no authority; or the server itself — a resumed approval, a
+/// schedule, a delegation — which sets the run's authority from what it
+/// holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Admission {
+    /// A client's request: reserved keys in its metadata are refused.
+    Client,
+    /// The server's own admission, through the named path.
+    Server(&'static str),
+}
+
+/// The metadata keys that decide whose run this is and how it is treated.
+/// Only the server writes them; a client that sends one is refused, with
+/// the key named — the run runs as the signed-in person, not as anyone
+/// their metadata names.
+pub(crate) const AUTHORITY_KEYS: [&str; 15] = [
+    "created_by",
+    "on_behalf_of",
+    "acting_for",
+    "counterpart",
+    "execution",
+    "attribution",
+    "delegation",
+    "delegated_from",
+    "channel",
+    "trigger",
+    "cron_id",
+    "trigger_id",
+    "task_id",
+    "pool",
+    "tenant",
+];
+
+fn refuse_authority_keys(metadata: Option<&Value>) -> Result<(), ApiError> {
+    let Some(Value::Object(map)) = metadata else {
+        return Ok(());
+    };
+    let sent: Vec<&str> = AUTHORITY_KEYS
+        .iter()
+        .copied()
+        .filter(|k| map.contains_key(*k))
+        .collect();
+    if sent.is_empty() {
+        return Ok(());
+    }
+    Err(ApiError::bad_request(format!(
+        "metadata carries authority the server sets, not the client: {}. Leave it out — the run runs as you, and as nobody your metadata names.",
+        sent.iter()
+            .map(|k| format!("`{k}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )))
+}
+
+pub(crate) async fn schedule_for_thread(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    thread_id: &str,
+    mut payload: RunPayload,
+    admission: Admission,
+) -> Result<runs::Scheduled, ApiError> {
+    let record = require_thread(state, tenant, thread_id).await?;
+    let internal_id = tenant.scope(thread_id);
+    // Every run says who started it. Stored with the run's metadata, served
+    // wherever the run is, and the server's word rather than the client's:
+    // a client's metadata may not name anyone, and the server's execution
+    // block says who admitted the run, for whom, through which path.
+    if admission == Admission::Client {
+        refuse_authority_keys(payload.metadata.as_ref())?;
+    }
+    // Resumed or re-admitted work rechecks the person it acts for: someone
+    // the deployment no longer holds may not have work done in their name.
+    if let Admission::Server(via) = admission {
+        let acts_for = payload
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("on_behalf_of").or_else(|| m.get("created_by")))
+            .cloned();
+        if let Some(who) = acts_for {
+            if !state.users.still_present(&who) {
+                return Err(ApiError::forbidden(format!(
+                    "this {via} acts for a person the deployment no longer holds ({}); it will not run",
+                    who.get("principal_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("?")
+                )));
+            }
+        }
+    }
+    payload.metadata = Some(admitted(payload.metadata.take(), tenant, admission));
+    if let Some(input) = &payload.input {
+        if !input.is_object() {
+            return Err(ApiError::bad_request(
+                "`input` must be a JSON object".to_string(),
+            ));
+        }
+    }
+    // A run put in a world names it by id or by name, as a person would; it
+    // is admitted under the world's id, and only if the tenant holds the
+    // world. A world nobody holds is refused here rather than answered by
+    // the wire: a run meant for a stand-in must never reach the live system.
+    // Several worlds — one per system the run touches — resolve the same
+    // way; `world` becomes the first of them, so every reader of one world
+    // (the approval record, the evaluation, the studio) sees one.
+    let mut named_worlds: Vec<String> = Vec::new();
+    if let Some(one) = payload.config.as_ref().and_then(|c| c.world.clone()) {
+        named_worlds.push(one);
+    }
+    for more in payload
+        .config
+        .as_ref()
+        .and_then(|c| c.worlds.clone())
+        .unwrap_or_default()
+    {
+        if !named_worlds.iter().any(|w| w.trim() == more.trim()) {
+            named_worlds.push(more);
+        }
+    }
+    let mut world_ids: Vec<String> = Vec::new();
+    for named in &named_worlds {
+        match state.worlds.find(tenant.tenant(), named.trim()).await {
+            Ok(Some(world)) => {
+                if !world_ids.contains(&world.world_id) {
+                    world_ids.push(world.world_id);
+                }
+            }
+            Ok(None) => {
+                return Err(ApiError::unprocessable(format!(
+                    "unknown world `{named}`: the run was not started, so nothing reached the live system; make the world under Evals → Worlds or leave the world empty"
+                )));
+            }
+            Err(error) => return Err(ApiError::internal(error)),
+        }
+    }
+    if let (Some(config), Some(first)) = (payload.config.as_mut(), world_ids.first().cloned()) {
+        config.world = Some(first);
+        config.worlds = if world_ids.len() > 1 {
+            Some(world_ids)
+        } else {
+            None
+        };
+    }
+    if payload.expected_active_version_id.is_some() && payload.assistant_id.is_none() {
+        return Err(ApiError::bad_request(
+            "`expected_active_version_id` requires `assistant_id`".to_string(),
+        ));
+    }
+    if let Some(assistant_id) = &payload.assistant_id {
+        // The id arrives in a JSON body, not a path segment, so it must be
+        // validated here like every other client-chosen id: the default
+        // tenant's `scope()` is the identity function, and an unvalidated
+        // `"tenant/id"` value would resolve (and run) another tenant's
+        // assistant record.
+        validate_client_id("assistant_id", assistant_id)?;
+        // Assistants are tenant-scoped: another tenant's assistant id
+        // resolves to nothing here → 404.
+        let assistant = state
+            .server_store
+            .get_assistant(&tenant.scope(assistant_id))
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+        if let Some(expected) = &payload.expected_active_version_id {
+            if !valid_version_id(expected) {
+                return Err(ApiError::bad_request(
+                    "`expected_active_version_id` must be an exact assistant version id"
+                        .to_string(),
+                ));
+            }
+            let active = assistant.active_version_id();
+            if active != *expected {
+                return Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "assistant_version_changed",
+                    format!(
+                        "assistant `{assistant_id}` now serves version `{active}`; review the active version before starting work"
+                    ),
+                ));
+            }
+        }
+        if assistant.archived_at.is_some() {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "assistant_archived",
+                format!(
+                    "assistant `{assistant_id}` is archived; restore it before starting new work"
+                ),
+            ));
+        }
+        if assistant.graph != record.graph {
+            return Err(ApiError::bad_request(format!(
+                "assistant `{assistant_id}` is bound to graph `{}` but thread `{thread_id}` uses `{}`",
+                assistant.graph, record.graph
+            )));
+        }
+        let internal_thread = tenant.scope(thread_id);
+        apply_assistant_defaults(
+            state,
+            tenant.tenant(),
+            &internal_thread,
+            &assistant,
+            &mut payload,
+        )
+        .await;
+    }
+    apply_draft_config(state, tenant.tenant(), &mut payload).await;
+    // Capability admission, shared by every run endpoint: the selection is
+    // validated against the graph's executable catalog now, so an unknown
+    // or ambiguous selection never reaches a running executor. Absent is
+    // byte-identical prior behavior; `[]` is a deliberately tool-free run.
+    if let Some(config) = &payload.config {
+        if config.tool_allowlist.is_some() && config.capability_set.is_some() {
+            return Err(ApiError::bad_request(
+                "`config` declares both `tool_allowlist` and `capability_set`; name exactly one"
+                    .to_string(),
+            ));
+        }
+        let catalog = state.registry.tool_capabilities(&record.graph);
+        if let Some(allowlist) = &config.tool_allowlist {
+            validate_tool_allowlist(allowlist, &record.graph, &catalog)?;
+        }
+        // A budget is positive and finite, or it is not a budget.
+        if let Some(budget) = &config.budget {
+            if budget.max_tokens == Some(0) {
+                return Err(ApiError::bad_request(
+                    "`budget.max_tokens` is 0 — leave it out for no bound".to_owned(),
+                ));
+            }
+            if budget
+                .max_cost_usd
+                .is_some_and(|c| !c.is_finite() || c <= 0.0)
+            {
+                return Err(ApiError::bad_request(
+                    "`budget.max_cost_usd` must be a positive amount".to_owned(),
+                ));
+            }
+        }
+        // Overlays name tools the run may call, and validate as overlays —
+        // refused here in words, never as a node error mid-run.
+        if let Some(value) = &config.tool_overlays {
+            let overlays: std::collections::BTreeMap<
+                String,
+                rusty_agent_runtime::tool_select::ToolSelectionOverlay,
+            > = serde_json::from_value(value.clone()).map_err(|error| {
+                ApiError::bad_request(format!("`tool_overlays` does not parse: {error}"))
+            })?;
+            for (name, overlay) in &overlays {
+                let callable = match &config.tool_allowlist {
+                    Some(list) => list.iter().any(|t| t == name),
+                    None => catalog.iter().any(|tool| &tool.name == name),
+                };
+                if !callable {
+                    return Err(ApiError::bad_request(format!(
+                        "`tool_overlays` names `{name}`, which this run cannot call"
+                    )));
+                }
+                overlay.validate().map_err(|error| {
+                    ApiError::bad_request(format!("`tool_overlays.{name}`: {error}"))
+                })?;
+            }
+        }
+        if let Some(set) = &config.capability_set {
+            let refs = set.refs().map_err(|error| {
+                ApiError::bad_request(format!("invalid `capability_set`: {error}"))
+            })?;
+            rusty_agent_runtime::capability::CapabilitySet::compose(&set.tools, &refs, &catalog)
+                .map_err(|error| {
+                    ApiError::bad_request(format!(
+                        "invalid `capability_set` for graph `{}`: {error}",
+                        record.graph
+                    ))
+                })?;
+        }
+    }
+    if let Some(checkpoint) = &payload.checkpoint {
+        // Time travel: the checkpoint must exist on this thread, or the
+        // replay would fail deep inside the executor — answer 404 up front.
+        let found = state
+            .checkpointer
+            .get_by_id(&internal_id, &checkpoint.checkpoint_id)
+            .await
+            .map_err(internal_err)?;
+        if found.is_none() {
+            return Err(ApiError::not_found(format!(
+                "thread `{thread_id}` has no checkpoint `{}`",
+                checkpoint.checkpoint_id
+            )));
+        }
+    }
+    let strategy = MultitaskStrategy::parse(payload.multitask_strategy.as_deref())
+        .map_err(ApiError::bad_request)?;
+    // The skills this run follows, by name: what they declare they need is
+    // checked against what the platform has once the run is admitted.
+    let skill_names: Vec<String> = payload
+        .config
+        .as_ref()
+        .and_then(|c| c.skills.as_ref())
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|e| e.get("name").and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let scheduled = runs::schedule(
+        &state.run_deps,
+        &internal_id,
+        thread_id,
+        &record.graph,
+        payload,
+        strategy,
+    )
+    .await?;
+    if !skill_names.is_empty() {
+        let state = Arc::clone(state);
+        let tenant = tenant.clone();
+        let run_id = scheduled.run_id.clone();
+        tokio::spawn(
+            async move { file_dependency_gaps(&state, &tenant, &run_id, &skill_names).await },
+        );
+    }
+    Ok(scheduled)
+}
+
+/// The gaps a run's skills declare by themselves: a `connector:<id>` or
+/// `tool:<name>` dependency the platform does not have is filed as a gap
+/// by the platform — one per connector, closing when any of its operations
+/// arrives — with no model involved. Every run that assumes it re-files
+/// it; within the hour that is one observation, so the count is demand,
+/// not chatter.
+pub(crate) async fn file_dependency_gaps(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    skill_names: &[String],
+) {
+    use rusty_agent_runtime::gaps::{
+        Citation, CitationKind, ClosureCriteria, GapOrigin, GapSubject, tool_available,
+    };
+    use rusty_agent_runtime::skill::DependencyDecl;
+    let available = available_tool_names(state);
+    let mut wanted: Vec<(String, String, String)> = Vec::new(); // (subject, tool, statement)
+    for name in skill_names {
+        let Some(version) = state.skills.resolve(tenant.tenant(), name).await else {
+            continue;
+        };
+        let metadata = version.metadata();
+        // The connectors the skill's own tool list names, `connector.op`
+        // by `connector.op`: what the library picker counts as "needs",
+        // so the picker and the platform's gaps say the same thing.
+        for tool in &metadata.allowed_tools {
+            let Some((connector, op)) = tool.split_once('.') else {
+                continue;
+            };
+            if connector.is_empty() || op.is_empty() || op.contains('.') {
+                continue;
+            }
+            let subject = format!("connector:{connector}");
+            let pattern = format!("{connector}.*");
+            if tool_available(&pattern, &available) || wanted.iter().any(|(s, _, _)| s == &subject)
+            {
+                continue;
+            }
+            wanted.push((subject, pattern, format!("No connection to `{connector}` exists on this platform, and the skills that run here assume one.")));
+        }
+        for dependency in &metadata.dependencies {
+            let (subject, tool, statement) = match dependency {
+                DependencyDecl::Connector { id } => (
+                    format!("connector:{id}"),
+                    format!("{id}.*"),
+                    format!(
+                        "No connection to `{id}` exists on this platform, and the skills that run here assume one."
+                    ),
+                ),
+                DependencyDecl::Tool { name: tool } => (
+                    format!("tool:{tool}"),
+                    tool.clone(),
+                    format!(
+                        "The `{name}` skill assumes the tool `{tool}`, and this platform does not have it."
+                    ),
+                ),
+                _ => continue,
+            };
+            if tool_available(&tool, &available) || wanted.iter().any(|(s, _, _)| s == &subject) {
+                continue;
+            }
+            wanted.push((subject, tool, statement));
+        }
+    }
+    if wanted.is_empty() {
+        return;
+    }
+    let now = Utc::now();
+    let filed = mutate_gap_ledger(state, tenant, |ledger| {
+        let mut ids = Vec::new();
+        for (subject, tool, statement) in &wanted {
+            let id = ledger.file_gap(
+                GapSubject::QuestionShape {
+                    text: subject.clone(),
+                },
+                statement.clone(),
+                vec![Citation {
+                    kind: CitationKind::RunReceipt,
+                    id: run_id.to_owned(),
+                    note: Some(format!(
+                        "the run whose skills assume it ({})",
+                        skill_names.join(", ")
+                    )),
+                }],
+                GapOrigin::Platform,
+                ClosureCriteria::CapabilityPresent { tool: tool.clone() },
+                1,
+                0,
+                "platform:dependency-check",
+                now,
+            )?;
+            ids.push(id);
+        }
+        Ok(ids)
+    })
+    .await;
+    match filed {
+        Ok(ids) => {
+            tracing::info!(run = %run_id, gaps = ids.len(), "dependency gaps filed by the platform")
+        }
+        Err(error) => tracing::warn!(run = %run_id, ?error, "dependency gaps not filed"),
+    }
+}
+
+/// `POST /threads/{id}/runs` — background run: `202 + run_id`.
+async fn create_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<RunPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let scheduled =
+        schedule_for_thread(&state, &tenant, &thread_id, payload, Admission::Client).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "run_id": scheduled.run_id,
+            "thread_id": thread_id,
+            "status": scheduled.status.as_str(),
+        })),
+    ))
+}
+
+/// Server-side ceiling for the blocking wait endpoint: a graph that never
+/// terminates must not pin the handler task forever. The run itself keeps
+/// executing — only the wait is bounded.
+const MAX_RUN_WAIT: Duration = Duration::from_secs(3600);
+
+/// `POST /threads/{id}/runs/wait` — blocking run: terminal result as JSON.
+async fn create_run_wait(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<RunPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let scheduled =
+        schedule_for_thread(&state, &tenant, &thread_id, payload, Admission::Client).await?;
+    let mut terminal = scheduled.terminal;
+    let result = tokio::time::timeout(MAX_RUN_WAIT, terminal.wait_for(|v| v.is_some()))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::GATEWAY_TIMEOUT,
+                "timeout",
+                format!(
+                    "run did not reach a terminal state within {}s",
+                    MAX_RUN_WAIT.as_secs()
+                ),
+            )
+        })?
+        .map_err(|_| ApiError::internal("run ended without a terminal result".to_string()))?;
+    let value = result.clone().expect("wait_for predicate guarantees Some");
+    Ok(Json(value))
+}
+
+/// Shared SSE response assembly for the two streaming endpoints.
+fn sse_response(
+    replay: Vec<runs::SseFrame>,
+    broadcast: tokio::sync::broadcast::Receiver<runs::SseFrame>,
+    skip_through_seq: u64,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    Sse::new(sse::frame_stream(replay, broadcast, skip_through_seq)).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
+}
+
+/// `POST /threads/{id}/runs/stream` — run with SSE streaming. A fresh run
+/// starts a new frame sequence, so `Last-Event-ID` is deliberately ignored
+/// here (a stale value from a previous run would silently drop the new
+/// run's first frames); replay lives on `GET /runs/{id}/stream`.
+async fn create_run_stream(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<RunPayload>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let scheduled =
+        schedule_for_thread(&state, &tenant, &thread_id, payload, Admission::Client).await?;
+    Ok(sse_response(scheduled.replay, scheduled.broadcast, 0))
+}
+
+/// `GET /runs/{id}/stream` — attach to an existing run's SSE stream:
+/// replays the event log (honoring `Last-Event-ID`, so a reconnecting
+/// client skips frames it has already seen) and then follows live frames.
+/// Cross-tenant runs answer 404, like `GET /runs/{id}`.
+async fn get_run_stream(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let (replay, broadcast, internal_thread_id) = state
+        .run_deps
+        .manager
+        .stream_parts(&run_id)
+        .await
+        .ok_or_else(|| ApiError::not_found(format!("run `{run_id}` not found")))?;
+    if !tenant.owns(&internal_thread_id) {
+        return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+    }
+    let last_seen =
+        sse::parse_last_event_id(headers.get("last-event-id").and_then(|v| v.to_str().ok()));
+    Ok(sse_response(replay, broadcast, last_seen))
+}
+
+/// `DELETE /threads/{id}/runs/{run_id}` — rollback: delete the checkpoints a
+/// finished run created, re-anchoring the thread to the pre-run checkpoint.
+///
+/// The `Checkpointer` trait has no delete operation, so removal goes
+/// through the JSON-file layout directly; on the Postgres backend the
+/// endpoint answers 409 rather than silently deleting nothing.
+///
+/// Reachability: the in-memory run record is the fast path; a run lost to
+/// a restart (or evicted past the retention cap) resolves through its
+/// persisted journal ([`run_evidence`]) — terminal by construction once no
+/// live writer remains, with its checkpoint ids recovered from the
+/// journaled `checkpoint_written` events — so rollback answers 409 (or
+/// applies, on the file backend) instead of 404ing on process-local state.
+async fn delete_run_checkpoints(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((thread_id, run_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    require_thread(&state, &tenant, &thread_id).await?;
+    let (wire_thread_id, checkpoint_ids) = match state.run_deps.manager.info(&run_id).await {
+        Some(info) => {
+            // Cross-tenant and other people's runs are invisible (404, not 403).
+            if !tenant.owns(&info.thread_id) || !run_readable(&tenant, info.metadata.as_ref()) {
+                return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+            }
+            if matches!(info.status, RunStatus::Pending | RunStatus::Running) {
+                return Err(ApiError::conflict(
+                    "run is still active; rollback applies to finished runs".to_string(),
+                ));
+            }
+            (
+                info.wire_thread_id,
+                runs::lock_recover(&info.checkpoint_ids).clone(),
+            )
+        }
+        None => {
+            let evidence = run_evidence(&state, &tenant, &run_id).await?;
+            (evidence.wire_thread_id, evidence.checkpoint_ids)
+        }
+    };
+    if wire_thread_id != thread_id {
+        return Err(ApiError::bad_request(format!(
+            "run `{run_id}` does not belong to thread `{thread_id}`"
+        )));
+    }
+    if state.config.database_url.is_some() {
+        return Err(ApiError::conflict(
+            "rollback is not supported with the Postgres checkpointer".to_string(),
+        ));
+    }
+
+    let internal_id = tenant.scope(&thread_id);
+    // Mutual exclusion with scheduling: a queued or newly-started run
+    // could be executing from the very checkpoints this endpoint deletes.
+    if state.run_deps.manager.thread_busy(&internal_id).await {
+        return Err(ApiError::conflict(
+            "thread has an active or queued run; rollback applies to idle threads".to_string(),
+        ));
+    }
+
+    let ids = checkpoint_ids;
+    // Rollback is only well-defined when the run's checkpoints are the
+    // tail of the current history: deleting mid-history checkpoints would
+    // punch holes while the endpoint claims to re-anchor the thread to
+    // the pre-run checkpoint.
+    let history = state
+        .checkpointer
+        .list(&internal_id)
+        .await
+        .map_err(internal_err)?;
+    let is_suffix = history.len() >= ids.len()
+        && history[history.len() - ids.len()..]
+            .iter()
+            .map(|cp| cp.id.as_str())
+            .eq(ids.iter().map(String::as_str));
+    if !is_suffix {
+        return Err(ApiError::conflict(
+            "the run's checkpoints are not the latest on this thread; \
+             rollback would punch holes mid-history"
+                .to_string(),
+        ));
+    }
+
+    let dir = state.config.store_path.join(&internal_id);
+    let mut deleted = 0usize;
+    for id in &ids {
+        let path = dir.join(format!("{id}.json"));
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => deleted += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(ApiError::internal(format!(
+                    "failed to delete `{}`: {e}",
+                    path.display()
+                )));
+            }
+        }
+    }
+
+    // Re-anchor the latest pointer to the newest remaining checkpoint,
+    // with the same atomic temp+rename discipline the checkpointer itself
+    // uses (a crash mid-write must not leave a truncated pointer).
+    let remaining = state
+        .checkpointer
+        .list(&internal_id)
+        .await
+        .map_err(internal_err)?;
+    let latest_path = dir.join("latest");
+    match remaining.last() {
+        Some(cp) => atomic_write(&latest_path, cp.id.as_bytes())
+            .await
+            .map_err(internal_err)?,
+        None => match tokio::fs::remove_file(&latest_path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(path = %latest_path.display(), %e, "failed to remove latest pointer")
+            }
+        },
+    }
+
+    Ok(Json(json!({
+        "run_id": run_id,
+        "thread_id": thread_id,
+        "deleted_checkpoints": deleted,
+        "remaining_checkpoints": remaining.len(),
+    })))
+}
+
+/// Write `bytes` to `path` atomically (temp file + rename), mirroring the
+/// checkpointer's durability discipline for its `latest` pointer.
+async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    tokio::fs::write(&tmp, bytes).await?;
+    tokio::fs::rename(&tmp, path).await
+}
+
+// --------------------------------------------------------------------- //
+// Run status polling
+// --------------------------------------------------------------------- //
+
+/// `GET /runs/{run_id}` — poll a run's lifecycle status; once terminal, the
+/// response carries the run's `output` / `error` / `interrupt` fields.
+/// `capability_tools` reports the tool selection admitted with the run
+/// (the explicit allowlist or the capability set's tool members; `null`
+/// for an unrestricted run) — the same declaration the replay endpoint
+/// re-validates. Runs are tenant-scoped through their thread: a run whose
+/// thread belongs to another tenant answers 404.
+/// A run as this server knows it: held in this process, or — after a
+/// restart — recovered from its accepted record and its journal. `None`
+/// when the run is unknown, another tenant's, or left no journal (a run
+/// that never recorded anything is not recoverable as fact). A recovered
+/// run carries no terminal payload and no checkpoint list; its status is
+/// the journal's verdict ([`journal_status`]).
+pub(crate) async fn recall_run(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+) -> Result<Option<crate::runs::RunInfo>, ApiError> {
+    if let Some(info) = state.run_deps.manager.info(run_id).await {
+        let readable = tenant.owns(&info.thread_id) && run_readable(tenant, info.metadata.as_ref());
+        return Ok(readable.then_some(info));
+    }
+    let Some(record) = state
+        .server_store
+        .get_accepted_run(run_id)
+        .await
+        .map_err(internal_err)?
+    else {
+        return Ok(None);
+    };
+    // Another tenant's run, and another person's, are absent alike.
+    if !tenant.owns(&record.thread_id) || !run_readable(tenant, record.payload.metadata.as_ref()) {
+        return Ok(None);
+    }
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(internal_err)?
+    else {
+        return Ok(None);
+    };
+    if snapshot.events.is_empty()
+        || Journal::from_snapshot(snapshot.clone(), Clock::System).is_err()
+    {
+        return Ok(None);
+    }
+    let status = match journal_status(&snapshot.events) {
+        "cancelled" => RunStatus::Cancelled,
+        "interrupted" => RunStatus::Interrupted,
+        "error" => RunStatus::Error,
+        _ => RunStatus::Success,
+    };
+    let payload = record.payload;
+    Ok(Some(crate::runs::RunInfo {
+        thread_id: record.thread_id,
+        wire_thread_id: record.wire_thread_id,
+        graph: record.graph,
+        assistant_id: payload.assistant_id,
+        metadata: payload.metadata,
+        input: payload.input,
+        capability_tools: payload.config.as_ref().and_then(|config| {
+            config
+                .capability_set
+                .as_ref()
+                .map(|set| set.tools.clone())
+                .or_else(|| config.tool_allowlist.clone())
+        }),
+        worlds: crate::runs::worlds_of(payload.config.as_ref()),
+        created_at: record.accepted_at,
+        attempt: 0,
+        status,
+        terminal: None,
+        checkpoint_ids: Default::default(),
+    }))
+}
+
+async fn get_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let info = recall_run(&state, &tenant, &run_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("run `{run_id}` not found")))?;
+    let mut body = json!({
+        "run_id": run_id,
+        "thread_id": info.wire_thread_id,
+        "graph": info.graph,
+        "assistant_id": info.assistant_id,
+        "metadata": info.metadata,
+        // The exact accepted input, so a case derived from this run binds
+        // to what the run really received (`create_dataset` checks it).
+        "input": info.input,
+        "attempt": info.attempt,
+        "status": info.status.as_str(),
+        "capability_tools": info.capability_tools,
+        // The worlds it acts in, by id and name — one per system when it
+        // touches several; a listing or a page says *in world …* from this.
+        "worlds": world_names(&state, tenant.tenant(), &info.worlds).await,
+        // The connections its tool calls went through, named from the
+        // binding history — still named after a connection is revoked.
+        "connections": crate::connectors::run_connections(&state, &tenant, &run_id).await,
+        // What its model calls cost in tokens, and how much of the prompt
+        // the provider served from its cache (the frozen prefix's measure).
+        "usage": crate::llm_providers::run_usage(&state, &run_id).await,
+        // Where the run is — or ended up: the tool calls so far, the last
+        // one, and the plan as the agent last wrote it, step by step. Read
+        // from the journal, so a running run's page says what it is doing
+        // and a finished run's says how it got there.
+        "progress": run_evidence(&state, &tenant, &run_id).await.ok().and_then(|e| e.journal).map(|s| run_progress(&s.events)).unwrap_or(Value::Null),
+    });
+    // A paused run that was decided says so, as a listed one does: a page
+    // waiting on it — the Test panel, a decision taken in Notifications —
+    // learns the run went on, and where.
+    if info.status.as_str() == "interrupted" {
+        if let (Some(body), Some(a)) = (
+            body.as_object_mut(),
+            state
+                .run_deps
+                .approvals
+                .load(&run_id)
+                .filter(|a| a.status != "pending"),
+        ) {
+            body.insert("decision".to_owned(), json!({ "status": a.status, "resumed_run_id": a.resumed_run_id, "decided_at": a.decided_at }));
+        }
+    }
+    match info.terminal {
+        Some(terminal) => {
+            if let (Some(body), Some(terminal)) = (body.as_object_mut(), terminal.as_object()) {
+                for (key, value) in terminal {
+                    body.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        // Recalled from its journal after a restart: the run still has a
+        // thread — its last checkpoint — and a verdict, where one was kept.
+        None => {
+            if let Some(body) = body.as_object_mut() {
+                if let Some(verification) = state.verifications.load(&run_id) {
+                    body.insert("verification".to_owned(), verification);
+                }
+                if let Some(output) = recalled_output(&state, &info.thread_id, &run_id).await {
+                    body.insert("output".to_owned(), output);
+                }
+            }
+        }
+    }
+    Ok(Json(body))
+}
+
+/// The state a run left behind: the checkpoint its journal wrote last, read
+/// back from the thread's checkpoint log. None when the run wrote none or
+/// the checkpoint is gone.
+async fn recalled_output(state: &AppState, thread_id: &str, run_id: &str) -> Option<Value> {
+    let snapshot = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .ok()
+        .flatten()?;
+    let checkpoint_id = snapshot
+        .events
+        .iter()
+        .rev()
+        .filter_map(|event| serde_json::to_value(event).ok())
+        .find(|event| event.get("kind").and_then(Value::as_str) == Some("checkpoint_written"))
+        .and_then(|event| {
+            event
+                .pointer("/output/value/checkpoint_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })?;
+    state
+        .run_deps
+        .checkpointer
+        .get_by_id(thread_id, &checkpoint_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|cp| cp.state.to_value())
+}
+
+/// Cap on the `metadata.studio.objective` excerpt a recalled run carries:
+/// the list is a board, not the record — the full metadata stays on
+/// `GET /runs/{id}`.
+const RECALLED_OBJECTIVE_CHARS: usize = 500;
+
+#[derive(Debug, Deserialize)]
+struct ListRunsQuery {
+    /// Cap on returned runs (default 25, max 100).
+    limit: Option<usize>,
+    /// One agent's runs only. Without it the caller filters client-side over
+    /// whatever the cap returned, so a busy deployment — one agent per
+    /// article, each running nightly — hides a quiet agent's runs behind
+    /// its neighbours'. The server looks far enough back to fill the cap.
+    assistant_id: Option<String>,
+}
+
+/// A journaled run's listing row as first computed, with the admitted
+/// metadata its read rule is decided from: kept per process so a poll
+/// re-reads no sealed run (`AppState::recalled_rows`). The verdict and
+/// the gate decision are not kept — a person can change either.
+pub(crate) struct RecalledRow {
+    admitted: Option<Value>,
+    row: RecalledRun,
+}
+
+/// Rows kept before the cache is emptied and rebuilt: a bound, not a
+/// working set — a box lists a few thousand runs.
+const RECALLED_ROWS_KEPT: usize = 20_000;
+
+/// One recalled run, pre-serialization: the sort key rides alongside the
+/// wire fields so entries without evidence of a start time sort last
+/// instead of borrowing one.
+#[derive(Clone)]
+pub(crate) struct RecalledRun {
+    run_id: String,
+    wire_thread_id: String,
+    graph: String,
+    assistant_id: Option<String>,
+    objective: Option<String>,
+    /// Who started it, as the server stamped it.
+    created_by: Option<Value>,
+    /// How it was started when no person called: the schedule or the
+    /// webhook that fired it (`cron_id` / `channel`, `trigger_id` /
+    /// `trigger`), so a channel's page can find its runs in the list.
+    channel: serde_json::Map<String, Value>,
+    status: String,
+    pub(crate) created_at: Option<DateTime<Utc>>,
+    /// For a run that paused at the gate: the decision, once made —
+    /// `{status, resumed_run_id, decided_at}` — so a list says *continued*
+    /// or *denied*, not *needs you*, for a run nobody waits on any more.
+    decision: Option<Value>,
+    /// The outcome verdict, when the run was verified.
+    verification: Option<Value>,
+    /// What the run was asked: the person's first message, as a line.
+    asked: Option<String>,
+    /// The worlds it acts in, by id and name.
+    worlds: Vec<Value>,
+}
+
+/// The keys that say which channel fired a run, lifted from its metadata.
+fn channel_keys(metadata: Option<&Value>) -> serde_json::Map<String, Value> {
+    let mut keys = serde_json::Map::new();
+    if let Some(map) = metadata.and_then(Value::as_object) {
+        for key in ["channel", "cron_id", "trigger", "trigger_id", "approval_of"] {
+            if let Some(value) = map.get(key) {
+                keys.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    keys
+}
+
+impl RecalledRun {
+    pub(crate) fn into_wire(self) -> Value {
+        let mut body = json!({
+            "run_id": self.run_id,
+            "thread_id": self.wire_thread_id,
+            "graph": self.graph,
+            "status": self.status,
+        });
+        if let Some(body) = body.as_object_mut() {
+            if let Some(verification) = self.verification {
+                body.insert("verification".to_string(), verification);
+            }
+            if let Some(assistant_id) = self.assistant_id {
+                body.insert("assistant_id".to_string(), json!(assistant_id));
+            }
+            if let Some(created_at) = self.created_at {
+                body.insert("created_at".to_string(), json!(created_at));
+            }
+            if let Some(decision) = self.decision {
+                body.insert("decision".to_string(), decision);
+            }
+            if let Some(asked) = self.asked {
+                body.insert("asked".to_string(), json!(asked));
+            }
+            if !self.worlds.is_empty() {
+                body.insert("worlds".to_string(), Value::Array(self.worlds));
+            }
+            // The metadata a list item carries: the studio's objective
+            // excerpt, and who started the run. Both live under `metadata`
+            // on the wire, where the run view puts the whole object.
+            let mut metadata = serde_json::Map::new();
+            if let Some(objective) = self.objective {
+                metadata.insert("studio".to_owned(), json!({ "objective": objective }));
+            }
+            metadata.extend(self.channel);
+            if let Some(created_by) = self.created_by {
+                metadata.insert("created_by".to_owned(), created_by);
+            }
+            if !metadata.is_empty() {
+                body.insert("metadata".to_string(), Value::Object(metadata));
+            }
+        }
+        body
+    }
+}
+
+/// `GET /runs?limit=` — bounded recall of the tenant's recent runs, newest
+/// first: every run this process still holds (live and retained terminal),
+/// plus every run readable only through its persisted journal — so work
+/// started by any client (curl, an SDK, a cron, another browser) stays
+/// visible after the live record is evicted or the process restarts. One
+/// entry per run id: the live record wins the dedupe, being both fresher
+/// and richer (it still has the accepted payload).
+///
+/// A journal joins the list only through an ownership proof: its wire
+/// thread id, scoped to the caller's tenant, must resolve to a thread
+/// record — which also names the graph the run executed. Because journals
+/// record the *wire* thread id and wire ids collide across tenants by
+/// design, the thread record alone only proves a same-named thread exists;
+/// so a journal that journaled checkpoints must also name one the caller's
+/// namespace actually holds ([`journal_owned`]) — checkpoint ids are
+/// server-minted, never shared across tenants. Journals written before
+/// their run's first checkpoint boundary carry no checkpoint to verify and
+/// stand on the thread proof alone. Non-run journals (the deployment
+/// chain, the broker's, shadow runs) and other tenants' runs fail the
+/// proof and are skipped, as is a journal that fails its integrity check —
+/// unchecked evidence is absent, never served (the health board's rule).
+/// An empty journal carries no evidence at all and is skipped too.
+///
+/// Item shape: `{run_id, thread_id, graph, status}` always; `assistant_id`
+/// and `metadata.studio.objective` (excerpt, bounded by
+/// [`RECALLED_OBJECTIVE_CHARS`]) when the accepted payload is still held —
+/// persisted journals record neither, so recalled-after-restart entries
+/// omit them rather than reconstruct them; `created_at` when real evidence
+/// exists — the live record's acceptance time, else the journal's earliest
+/// `recorded_at`. A field with no evidence is omitted, never fabricated.
+///
+/// A persisted run's `status` is what its journal proves
+/// ([`journal_status`]): the journal is the run's final write on every
+/// completed outcome, so the one dishonest case is a process kill between
+/// checkpoint boundaries, whose truncated journal reads as `success`.
+async fn list_runs(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<ListRunsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let limit = query.limit.unwrap_or(25).min(100);
+    let wanted = query
+        .assistant_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    // The filter rides into the walk, so an agent's runs are found however
+    // many other agents' runs are newer: recalling a wider window and
+    // filtering after was both slow (a thousand heads) and still blind past
+    // the window's edge.
+    let recalled = recall_runs_for(&state, &tenant, limit, wanted).await?;
+    Ok(Json(json!(
+        recalled
+            .into_iter()
+            .map(RecalledRun::into_wire)
+            .collect::<Vec<_>>()
+    )))
+}
+
+/// The caller's runs, newest first, at most `limit`: the live registry's
+/// plus every journaled run it no longer holds (the `GET /runs` rule, kept
+/// here so a platform tool reads the same list a person does).
+pub(crate) async fn recall_runs(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    limit: usize,
+) -> Result<Vec<RecalledRun>, ApiError> {
+    recall_runs_for(state, tenant, limit, None).await
+}
+
+/// [`recall_runs`] narrowed to one agent's runs when `wanted` names one —
+/// decided per run before it counts toward `limit`, from the cheapest
+/// evidence in hand (the head's declared config, then the accepted record),
+/// so no journal is read to skip a run that is not the agent's.
+pub(crate) async fn recall_runs_for(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    limit: usize,
+    wanted: Option<&str>,
+) -> Result<Vec<RecalledRun>, ApiError> {
+    let mut recalled: Vec<RecalledRun> = Vec::new();
+    let mut held: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (run_id, info) in state.run_deps.manager.list().await {
+        if let Some(id) = wanted {
+            if info.assistant_id.as_deref() != Some(id) {
+                continue;
+            }
+        }
+        // Cross-tenant runs are invisible (the `GET /runs/{id}` rule), and
+        // so are the runs that acted for someone else.
+        if !tenant.owns(&info.thread_id) || !run_readable(tenant, info.metadata.as_ref()) {
+            continue;
+        }
+        held.insert(run_id.clone());
+        let verification = state.verifications.load(&run_id);
+        let asked = state
+            .server_store
+            .get_accepted_run(&run_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|a| a.payload.input.as_ref().and_then(crate::journals::asked_in));
+        let worlds = world_names(state, tenant.tenant(), &info.worlds).await;
+        recalled.push(RecalledRun {
+            verification,
+            asked,
+            worlds,
+            run_id,
+            wire_thread_id: info.wire_thread_id,
+            graph: info.graph,
+            assistant_id: info.assistant_id,
+            objective: info.metadata.as_ref().and_then(studio_objective),
+            created_by: info
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("created_by").cloned()),
+            channel: channel_keys(info.metadata.as_ref()),
+            status: info.status.as_str().to_owned(),
+            created_at: Some(info.created_at),
+            decision: None,
+        });
+    }
+    // The journaled runs, from their heads — newest first, and only as
+    // many as the listing can show: no journal is read to list a run.
+    let mut heads = state
+        .server_store
+        .list_journal_heads()
+        .await
+        .map_err(internal_err)?;
+    heads.retain(|head| !held.contains(&head.run_id) && head.verified && head.events > 0);
+    heads.sort_by(|a, b| {
+        b.first_at
+            .cmp(&a.first_at)
+            .then_with(|| a.run_id.cmp(&b.run_id))
+    });
+    // A quiet agent's runs are few, so a filtered walk would otherwise read
+    // every head on the box to be sure it found them all. No run predates
+    // its agent: the walk stops at the agent's creation.
+    let born = match wanted {
+        Some(id) => state
+            .server_store
+            .get_assistant(&tenant.scope(id))
+            .await
+            .map_err(internal_err)?
+            .map(|a| a.created_at),
+        None => None,
+    };
+    let mut listed = 0usize;
+    // The tenant's worlds, read once for every row computed this call.
+    let mut held_worlds: Option<Vec<crate::worlds::WorldRecord>> = None;
+    for head in heads {
+        if listed >= limit {
+            break;
+        }
+        if let (Some(born), Some(first)) = (born, head.first_at) {
+            if first < born {
+                break;
+            }
+        }
+        let run_id = head.run_id.clone();
+        let cache_key = format!("{}:{run_id}", tenant.tenant());
+        let cached = state.recalled_rows.lock().await.get(&cache_key).cloned();
+        let recalled_row = match cached {
+            Some(row) => row,
+            None => {
+                let internal_thread_id = tenant.scope(&head.thread_id);
+                let Some(thread) = state
+                    .server_store
+                    .get_thread(&internal_thread_id)
+                    .await
+                    .map_err(internal_err)?
+                else {
+                    continue;
+                };
+                if !journal_owned(state, &internal_thread_id, &head.checkpoint_ids)
+                    .await
+                    .map_err(internal_err)?
+                {
+                    continue;
+                }
+                let held_worlds = match held_worlds.as_ref() {
+                    Some(held) => held,
+                    None => held_worlds
+                        .insert(state.worlds.list(tenant.tenant()).await.unwrap_or_default()),
+                };
+                let row = Arc::new(recalled_row_of(&head, thread, held_worlds, state).await?);
+                let mut rows = state.recalled_rows.lock().await;
+                if rows.len() >= RECALLED_ROWS_KEPT {
+                    rows.clear();
+                }
+                rows.insert(cache_key, Arc::clone(&row));
+                row
+            }
+        };
+        if !run_readable(tenant, recalled_row.admitted.as_ref()) {
+            continue;
+        }
+        if let Some(id) = wanted {
+            if recalled_row.row.assistant_id.as_deref() != Some(id) {
+                continue;
+            }
+        }
+        listed += 1;
+        let mut row = recalled_row.row.clone();
+        row.verification = state.verifications.load(&run_id);
+        recalled.push(row);
+    }
+    // A paused run that was decided is not waiting on anyone: say so.
+    let decided: std::collections::HashMap<String, Value> = state
+        .run_deps
+        .approvals
+        .list()
+        .into_iter()
+        .filter(|a| a.status != "pending")
+        .map(|a| (a.run_id.clone(), json!({ "status": a.status, "resumed_run_id": a.resumed_run_id, "decided_at": a.decided_at })))
+        .collect();
+    for run in recalled.iter_mut() {
+        if run.status == "interrupted" {
+            run.decision = decided.get(&run.run_id).cloned();
+        }
+    }
+    // Newest first; runs without evidence of a start time sort last, then
+    // by run id for a stable listing.
+    recalled.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.run_id.cmp(&b.run_id))
+    });
+    recalled.truncate(limit);
+    Ok(recalled)
+}
+
+/// A journaled run's listing row from its head, its thread and its
+/// accepted record — the reads a poll repeats for nothing, done once.
+async fn recalled_row_of(
+    head: &crate::journals::JournalHead,
+    thread: ThreadRecord,
+    held_worlds: &[crate::worlds::WorldRecord],
+    state: &Arc<AppState>,
+) -> Result<RecalledRow, ApiError> {
+    let run_id = head.run_id.clone();
+    let wire_thread_id = head.thread_id.clone();
+    // The accepted record (kept since records were introduced) is the
+    // first word on a recovered run's agent, objective, and start.
+    let accepted = state
+        .server_store
+        .get_accepted_run(&run_id)
+        .await
+        .map_err(internal_err)?;
+
+    // The declared config is the one event an older recovered run keeps
+    // about who started it and which agent it was of.
+    let declared_field = |field: &str| {
+        head.declared
+            .as_ref()
+            .and_then(|declared| declared.get(field).cloned())
+            .filter(|v| !v.is_null())
+    };
+    let admitted = accepted
+        .as_ref()
+        .and_then(|a| a.payload.metadata.clone())
+        .or_else(|| {
+            declared_field("attribution")
+                .filter(Value::is_object)
+                .map(|who| json!({ "created_by": who }))
+        });
+    let run_agent: Option<String> = accepted
+        .as_ref()
+        .and_then(|a| a.payload.assistant_id.clone())
+        .or_else(|| declared_field("agent_id").and_then(|v| v.as_str().map(str::to_owned)));
+    let asked = head.asked.clone().filter(|a| !a.is_empty()).or_else(|| {
+        accepted
+            .as_ref()
+            .and_then(|a| a.payload.input.as_ref().and_then(crate::journals::asked_in))
+    });
+    let worlds = world_names_among(
+        held_worlds,
+        &accepted
+            .as_ref()
+            .map(|a| crate::runs::worlds_of(a.payload.config.as_ref()))
+            .unwrap_or_default(),
+    );
+    let row = RecalledRun {
+        verification: None,
+        asked,
+        worlds,
+        run_id,
+        wire_thread_id,
+        graph: thread.graph,
+        assistant_id: run_agent,
+        objective: accepted
+            .as_ref()
+            .and_then(|a| a.payload.metadata.as_ref())
+            .and_then(studio_objective),
+        created_by: accepted
+            .as_ref()
+            .and_then(|a| a.payload.metadata.as_ref())
+            .and_then(|m| m.get("created_by").cloned())
+            .or_else(|| declared_field("attribution")),
+        // A recovered run's channel is on its thread: a cron-fired or
+        // webhook-fired thread records which one made it.
+        channel: {
+            let mut keys = serde_json::Map::new();
+            if let Some(id) = thread.metadata.get("cron_id") {
+                keys.insert("cron_id".to_owned(), id.clone());
+                keys.insert("channel".to_owned(), json!("schedule"));
+            }
+            if let Some(id) = thread.metadata.get("trigger_id") {
+                keys.insert("trigger_id".to_owned(), id.clone());
+                keys.insert("trigger".to_owned(), json!("webhook"));
+            }
+            // A run one agent asked of another: the thread says so, and
+            // names the run and agent that asked. Without this the list
+            // read "Manual", because the person behind the lead is stamped
+            // on the delegated run too.
+            if thread.metadata.get("trigger").and_then(Value::as_str) == Some("delegation") {
+                keys.insert("channel".to_owned(), json!("delegation"));
+                if let Some(from) = thread.metadata.get("delegated_from") {
+                    keys.insert("delegated_from".to_owned(), from.clone());
+                }
+            }
+            keys
+        },
+        status: head.status.clone(),
+        created_at: accepted.as_ref().map(|a| a.accepted_at).or(head.first_at),
+        decision: None,
+    };
+    Ok(RecalledRow { admitted, row })
+}
+
+/// The `RunStatus` a persisted journal proves, in the same wire vocabulary
+/// the live registry reports. The terminal markers are unambiguous because
+/// each one ends the run it is recorded in: a `run_cancelled` event means
+/// cancelled, an `interrupt` event means suspended (a resume is a new run),
+/// and a run whose *last* recorded event ended in `error` unwound with that
+/// failure — mid-run failures a retry absorbed are always followed by the
+/// events of the step that continued. Anything else reached its final
+/// journal write without a failure marker: `success`.
+pub(crate) fn journal_status(events: &[RunEvent]) -> &'static str {
+    if events
+        .iter()
+        .any(|event| event.kind == RunEventKind::RunCancelled)
+    {
+        return RunStatus::Cancelled.as_str();
+    }
+    if events.iter().any(|event| {
+        event.kind == RunEventKind::Interrupt && event.status == EventStatus::Interrupted
+    }) {
+        return RunStatus::Interrupted.as_str();
+    }
+    if events
+        .iter()
+        .max_by_key(|event| event.seq)
+        .is_some_and(|event| event.status == EventStatus::Error)
+    {
+        return RunStatus::Error.as_str();
+    }
+    RunStatus::Success.as_str()
+}
+
+/// The checkpoint half of a persisted journal's ownership proof
+/// (`GET /runs`): the journal must name a checkpoint the caller's tenant
+/// namespace actually holds. Checkpoint ids are server-minted UUIDs keyed
+/// under the internal (tenant-scoped) thread id, so another tenant's
+/// same-named thread cannot satisfy this — the wire thread id recorded in
+/// the journal is not itself proof of ownership. A journal with no
+/// checkpoint events (its run ended before the first boundary) has nothing
+/// to verify against and answers `true`, standing on the caller's
+/// thread-record lookup alone.
+async fn journal_owned(
+    state: &AppState,
+    internal_thread_id: &str,
+    checkpoint_ids: &[String],
+) -> rusty_agent_runtime::error::Result<bool> {
+    // No journaled checkpoint: the run ended before its first boundary, so
+    // there is nothing to verify against — the caller's thread-record
+    // lookup stands alone.
+    if checkpoint_ids.is_empty() {
+        return Ok(true);
+    }
+    for checkpoint_id in checkpoint_ids {
+        if state
+            .checkpointer
+            .get_by_id(internal_thread_id, checkpoint_id)
+            .await?
+            .is_some()
+        {
+            return Ok(true);
+        }
+    }
+    // Journaled but unresolvable here: the run's state is not in this
+    // tenant's namespace — not this tenant's run. (A run whose checkpoints
+    // were rolled back after completion also reads as unowned: rolled-back
+    // work asked to be forgotten.)
+    Ok(false)
+}
+
+/// Studio's declared objective out of an accepted run payload's metadata,
+/// excerpted to [`RECALLED_OBJECTIVE_CHARS`] — the board shows the start of
+/// the objective; the run view shows the whole.
+/// Worlds by id and name, in order; an id nobody holds any more keeps its
+/// id as its name, so a run in a deleted world still says where it was.
+async fn world_names(state: &AppState, tenant: &str, ids: &[String]) -> Vec<Value> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let held = state.worlds.list(tenant).await.unwrap_or_default();
+    world_names_among(&held, ids)
+}
+
+/// [`world_names`] against worlds already listed: a run listing names
+/// the worlds of every run from one read, not one read per run.
+fn world_names_among(held: &[crate::worlds::WorldRecord], ids: &[String]) -> Vec<Value> {
+    ids.iter()
+        .map(|id| match held.iter().find(|w| &w.world_id == id) {
+            Some(world) => json!({"world_id": id, "name": world.name}),
+            // Deleted since: the run still acted there, so it is named as gone.
+            None => json!({"world_id": id, "name": id, "gone": true}),
+        })
+        .collect()
+}
+
+fn studio_objective(metadata: &Value) -> Option<String> {
+    let objective = metadata.get("studio")?.get("objective")?.as_str()?;
+    Some(objective.chars().take(RECALLED_OBJECTIVE_CHARS).collect())
+}
+
+/// `POST /runs/{run_id}/cancel` — propagate cancellation into the run's
+/// outstanding durable tasks: every non-terminal task enqueued with this
+/// `run_id` in the caller's tenant. Queued and retry-scheduled tasks move
+/// to the terminal `cancelled` state (reported under `cancelled`); leased
+/// tasks keep their leases with `cancel_requested` set so their holders
+/// abort and report (`signalled`). Run resolution and tenant scoping
+/// follow `GET /runs/{id}` — unknown or cross-tenant runs answer 404.
+///
+/// Scope note: this wave wires run cancellation to the *queue*. Stopping
+/// the run's in-process executor is the drain half of wave 2; a task
+/// enqueued after this call is not retroactively cancelled.
+async fn cancel_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let info = state
+        .run_deps
+        .manager
+        .info(&run_id)
+        .await
+        .ok_or_else(|| ApiError::not_found(format!("run `{run_id}` not found")))?;
+    if !tenant.owns(&info.thread_id) {
+        return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+    }
+    let outcome = state
+        .server_store
+        .cancel_run_tasks(tenant.tenant(), &run_id, Utc::now())
+        .await
+        .map_err(internal_err)?;
+    // The run itself: its cancellation token ends the graph at the next
+    // super-step boundary with the boundary checkpoint kept (a queued run
+    // is dequeued instead). Before this the route cancelled the run's
+    // ledger tasks and nothing else, and answered 200 while the agent
+    // kept going.
+    let run = match runs::cancel_run(&state.run_deps, &run_id).await {
+        runs::RunCancel::Signalled => "stopping",
+        runs::RunCancel::CancelledQueued => "cancelled",
+        runs::RunCancel::Terminal => "finished",
+        runs::RunCancel::Unknown => "unknown",
+    };
+    let ids =
+        |tasks: Vec<TaskRecord>| -> Vec<String> { tasks.into_iter().map(|t| t.task_id).collect() };
+    Ok(Json(json!({
+        "run_id": run_id,
+        "run": run,
+        "note": match run {
+            "stopping" => "the run stops at its next step; its checkpoint is kept, so the thread can be run again",
+            "cancelled" => "the run was queued and never started",
+            "finished" => "the run had already ended; nothing to stop",
+            _ => "no run under that id is known to this server; only ledger tasks were cancelled",
+        },
+        "cancelled": ids(outcome.cancelled),
+        "signalled": ids(outcome.signalled),
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// Flight Recorder
+// --------------------------------------------------------------------- //
+
+/// A run's Flight Recorder evidence plus the metadata the read endpoints
+/// need, resolved from the live run manager while the run lives in this
+/// process and from the durable store otherwise.
+pub(crate) struct RunEvidence {
+    /// The graph the run executed (manager record, or the thread's binding).
+    pub(crate) graph: String,
+    /// Internal (tenant-scoped) thread id, for checkpoint read-backs.
+    pub(crate) internal_thread_id: String,
+    /// External thread id — the only form that may appear on the wire.
+    pub(crate) wire_thread_id: String,
+    /// The run's persisted journal, integrity re-verified on read. `None`
+    /// when the run is known but nothing was persisted yet (queued, or
+    /// before its first checkpoint boundary).
+    pub(crate) journal: Option<JournalSnapshot>,
+    /// Ids of the checkpoints the run wrote, in write order (from the
+    /// manager's bookkeeping, or recovered from the journal's
+    /// `checkpoint_written` events on the store path).
+    pub(crate) checkpoint_ids: Vec<String>,
+    /// `true` when the served journal is final: the run is terminal per the
+    /// manager, or the manager no longer knows the run at all — evicted after
+    /// termination or lost with a process restart; either way no live writer
+    /// remains, so the persisted snapshot cannot grow.
+    pub(crate) complete: bool,
+    /// The run's declared tool selection, when the manager still holds the
+    /// accepted payload (fast path only; the store fallback has no payload
+    /// to read). Replay re-validates it against the current catalog.
+    pub(crate) capability_tools: Option<Vec<String>>,
+}
+
+/// Re-verify a stored snapshot's chained head hash before it is served or
+/// replayed (via [`Journal::from_snapshot`]): tampered or corrupt evidence
+/// answers 500 rather than being served as fact.
+fn reverify_journal(run_id: &str, snapshot: JournalSnapshot) -> Result<JournalSnapshot, ApiError> {
+    Journal::from_snapshot(snapshot.clone(), Clock::System).map_err(|e| {
+        ApiError::internal(format!(
+            "stored journal for run `{run_id}` failed its integrity check: {e}"
+        ))
+    })?;
+    Ok(snapshot)
+}
+
+/// Resolve a run's evidence for the Flight Recorder endpoints.
+///
+/// Fast path: the in-memory run manager, authoritative while the run lives in
+/// this process. Fallback: the server store — journals persist per run id, so
+/// the evidence stays fetchable after the run's record was evicted or the
+/// process restarted. The fallback's tenant check goes through the journal's
+/// external thread id: looking the thread record up under the caller's tenant
+/// scope doubles as the ownership proof (a cross-tenant id resolves to
+/// nothing → 404, never 403) and yields the graph the run executed. A run
+/// known to neither answers 404.
+pub(crate) async fn run_evidence(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+) -> Result<RunEvidence, ApiError> {
+    if let Some(info) = state.run_deps.manager.info(run_id).await {
+        // Cross-tenant and other people's runs are invisible (404, not 403).
+        if !tenant.owns(&info.thread_id) || !run_readable(tenant, info.metadata.as_ref()) {
+            return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+        }
+        let journal = state
+            .server_store
+            .get_journal(run_id)
+            .await
+            .map_err(internal_err)?
+            .map(|snapshot| reverify_journal(run_id, snapshot))
+            .transpose()?;
+        return Ok(RunEvidence {
+            graph: info.graph,
+            internal_thread_id: info.thread_id,
+            wire_thread_id: info.wire_thread_id,
+            journal,
+            checkpoint_ids: runs::lock_recover(&info.checkpoint_ids).clone(),
+            complete: info.status.is_terminal(),
+            capability_tools: info.capability_tools,
+        });
+    }
+
+    // Store fallback: the run is unknown to this process. A persisted journal
+    // is the proof it existed — and the only handle on its ownership.
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(internal_err)?
+    else {
+        return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+    };
+    let internal_thread_id = tenant.scope(&snapshot.thread_id);
+    let thread = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("run `{run_id}` not found")))?;
+    if !run_readable(
+        tenant,
+        person_of_run(state, run_id, Some(&snapshot)).await.as_ref(),
+    ) {
+        return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+    }
+    let journal = reverify_journal(run_id, snapshot)?;
+    let checkpoint_ids = journal
+        .events
+        .iter()
+        .filter(|event| event.kind == RunEventKind::CheckpointWritten)
+        .filter_map(|event| crate::replay::resolve(&journal, event.output.as_ref()))
+        .filter_map(|output| output.get("checkpoint_id")?.as_str().map(str::to_owned))
+        .collect();
+    Ok(RunEvidence {
+        graph: thread.graph,
+        internal_thread_id,
+        wire_thread_id: journal.thread_id.clone(),
+        journal: Some(journal),
+        checkpoint_ids,
+        complete: true,
+        // The store fallback has no accepted payload to read; the replay
+        // guard simply does not apply to evidence this old.
+        capability_tools: None,
+    })
+}
+
+/// `GET /runs/{run_id}/events` — the run's journaled evidence (Flight
+/// Recorder), as `{run_id, events, complete}`. `events` are core's
+/// `RunEvent`s in `seq` order, in the exact golden-pinned wire shape
+/// (`rusty-core/tests/golden/run_event.json`).
+///
+/// `complete` is `true` once the run is terminal, i.e. the served snapshot
+/// is the run's final journal; while the run is active the snapshot trails
+/// the live journal by at most one checkpoint boundary (it is flushed per
+/// `CheckpointSaved` and at completion), and a queued run serves an empty
+/// event list. Unknown and cross-tenant runs answer 404, exactly like
+/// `GET /runs/{id}`.
+///
+/// Reachability ([`run_evidence`]): once the live run record is gone —
+/// evicted past the retention cap, or lost with a restart — the events stay
+/// fetchable from the persisted journal for as long as the store holds it,
+/// served as `complete` (no live writer remains). The stored snapshot's
+/// chained head hash is re-verified on every read: tampered or corrupt
+/// evidence answers 500 rather than being served as fact.
+/// A run's progress record, from its journal: the tool calls so far, the
+/// last of them, and the plan the agent last wrote (`plan`), with how many
+/// steps are done and open — the record the assignment's `Progress` keeps
+/// per round, here for every run.
+pub(crate) fn run_progress(events: &[RunEvent]) -> Value {
+    let calls: Vec<(&RunEvent, String)> = events
+        .iter()
+        .filter(|e| e.kind == RunEventKind::ToolCall)
+        .filter_map(|e| match &e.input {
+            Some(rusty_agent_runtime::record::PayloadRef::Inline(v)) => v
+                .get("tool")
+                .and_then(Value::as_str)
+                .map(|t| (e, t.to_owned())),
+            _ => None,
+        })
+        .collect();
+    let plan = calls
+        .iter()
+        .rev()
+        .find(|(_, tool)| tool == rusty_agent_runtime::react::PLAN_TOOL)
+        .and_then(|(e, _)| match &e.input {
+            Some(rusty_agent_runtime::record::PayloadRef::Inline(v)) => v.get("arguments").and_then(rusty_agent_runtime::react::Plan::parse),
+            _ => None,
+        })
+        .map(|plan| json!({
+            "steps": plan.steps.iter().map(|s| json!({"text": s.text, "status": s.status, "note": s.note})).collect::<Vec<_>>(),
+            "done": plan.done(),
+            "open": plan.open().len(),
+        }));
+    json!({
+        "tool_calls": calls.len(),
+        "last_tool": calls.last().map(|(_, t)| t.clone()),
+        "plan": plan,
+        "updated_at": events.last().map(|e| e.recorded_at),
+    })
+}
+
+async fn get_run_events(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let evidence = run_evidence(&state, &tenant, &run_id).await?;
+    let events = evidence
+        .journal
+        .map(|snapshot| snapshot.events)
+        .unwrap_or_default();
+    Ok(Json(json!({
+        "run_id": run_id,
+        "events": events,
+        "complete": evidence.complete,
+    })))
+}
+
+/// `GET /runs/{run_id}/review` — what the post-run review found and wrote
+/// for a run: the facts and preferences kept, the gaps filed. 404 when no
+/// review ran (an unverified run, a rehearsal, a run before the review).
+async fn get_run_review(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    crate::post_run_review::load(&state, &run_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("no review ran for run `{run_id}`")))
+}
+
+/// `GET /runs/{run_id}/payloads/{sha256}` — one journaled payload by its
+/// content address: the assembled request of a model call, a long tool
+/// result, a summary — whatever an event carries as an artifact reference
+/// instead of inline because it was too large. Read from the run's own
+/// journal snapshot, the same integrity-verified evidence
+/// `GET /runs/{id}/events` serves, so the bytes are exactly what the
+/// event named. 404 when the run or the address is unknown to it.
+async fn get_run_payload(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((run_id, sha256)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let evidence = run_evidence(&state, &tenant, &run_id).await?;
+    let Some(snapshot) = evidence.journal else {
+        return Err(ApiError::not_found(format!(
+            "run `{run_id}` has no journal to read a payload from"
+        )));
+    };
+    match snapshot.artifacts.get(&sha256) {
+        Some(payload) => Ok(Json(
+            json!({ "run_id": run_id, "sha256": sha256, "payload": payload }),
+        )),
+        None => Err(ApiError::not_found(format!(
+            "run `{run_id}` names no payload `{sha256}`"
+        ))),
+    }
+}
+
+/// `GET /runs/{run_id}/fixture` — download the run as a portable
+/// [`ReplayFixture`]: the recorded journal (integrity-verified before
+/// serving), the graph's topology hash, the run's final checkpoint, and
+/// provenance metadata. CI replays the bundle with
+/// `ReplayFixture::import`.
+///
+/// Same 404 / tenant-isolation semantics as `GET /runs/{id}`, and the same
+/// store fallback as `GET /runs/{id}/events` ([`run_evidence`]): after run
+/// eviction or a restart the fixture stays downloadable, with the final
+/// checkpoint recovered from the journal's last `checkpoint_written` event.
+/// A run with no persisted journal yet (still queued, or before its first
+/// checkpoint boundary) answers `409` — the fixture would be empty evidence.
+/// Server runs record under the system clock and OS entropy, so the fixture
+/// carries no logical-clock / RNG-seed parameters: `exact_replay` sessions
+/// work, byte-identical CI replay requires runs recorded with determinism
+/// seams (a later wave's concern).
+///
+/// The served checkpoint's `thread_id` is rewritten to the external id —
+/// the internal tenant-scoped id stored by the checkpointer must never
+/// appear in a downloaded fixture.
+async fn get_run_fixture(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<ReplayFixture>, ApiError> {
+    let evidence = run_evidence(&state, &tenant, &run_id).await?;
+    let snapshot = evidence.journal.ok_or_else(|| {
+        ApiError::conflict(format!(
+            "run `{run_id}` has no persisted journal yet (queued or pre-checkpoint)"
+        ))
+    })?;
+    let (graph, _spec) = state.registry.get(&evidence.graph).ok_or_else(|| {
+        ApiError::conflict(format!(
+            "graph `{}` is no longer registered; cannot capture a fixture for run `{run_id}`",
+            evidence.graph
+        ))
+    })?;
+
+    let final_checkpoint = match evidence.checkpoint_ids.last() {
+        Some(id) => state
+            .checkpointer
+            .get_by_id(&evidence.internal_thread_id, id)
+            .await
+            .map_err(internal_err)?
+            .map(|mut cp| {
+                cp.thread_id = evidence.wire_thread_id.clone();
+                cp
+            }),
+        None => None,
+    };
+
+    let fixture = ReplayFixture::capture(
+        format!("{} run {run_id}", evidence.graph),
+        &graph,
+        "unversioned",
+        snapshot,
+        final_checkpoint,
+        None,
+        None,
+    );
+    Ok(Json(fixture))
+}
+
+/// The effect kinds server-side replay cannot re-drive: journaled outbound
+/// calls (model, tool, remote, WASM). Exact replay serves them from the
+/// journal in CI via the replaying wrappers; re-executing the registered
+/// graph would issue them live, breaking the zero-outbound guarantee.
+fn carries_servable_effects(snapshot: &JournalSnapshot) -> bool {
+    snapshot.events.iter().any(|event| {
+        matches!(
+            event.kind,
+            RunEventKind::ModelCall
+                | RunEventKind::ToolCall
+                | RunEventKind::RemoteCall
+                | RunEventKind::WasmCall
+        )
+    })
+}
+
+// --------------------------------------------------------------------- //
+// Signed run receipts (R0.9 wave 3)
+// --------------------------------------------------------------------- //
+
+/// `GET /runs/{run_id}/receipt` — the run's signed [`RunReceipt`].
+///
+/// Mint semantics, chosen and stated: the receipt is **minted on first
+/// request** over the run's current persisted journal (integrity
+/// re-verified by [`run_evidence`] before anything is signed), then
+/// stored and served while the journal's head stands; a run whose journal
+/// has since advanced gets a fresh mint. The alternative — minting once
+/// at run completion — was rejected: it would put signing in the runner's
+/// hot path for runs nobody ever audits, and "the receipt" would need a
+/// completion hook the store contract does not have. Mint-on-read keeps
+/// every served receipt derived from reverified evidence, and the head's
+/// event count says exactly which journal state the signature covers — a
+/// receipt over an in-flight run is a statement about the run so far, not
+/// a lie about the whole.
+///
+/// The manifest and executor policy — the two components the journal does
+/// not hold — are read back from the run's last checkpoint header, the
+/// same source the checkpoint wrote them to. `409` when nothing is
+/// persisted yet (queued or pre-checkpoint, the `/fixture` rule); `404`
+/// unknown or cross-tenant.
+async fn get_run_receipt(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<rusty_agent_runtime::receipt::RunReceipt>, ApiError> {
+    let evidence = run_evidence(&state, &tenant, &run_id).await?;
+    let snapshot = evidence.journal.ok_or_else(|| {
+        ApiError::conflict(format!(
+            "run `{run_id}` has no persisted journal yet (queued or pre-checkpoint)"
+        ))
+    })?;
+    let head = JournalRef {
+        events: snapshot.events.len() as u64,
+        sha256: snapshot.head_hash.clone(),
+    };
+    if let Some(stored) = state
+        .server_store
+        .get_run_receipt(&run_id)
+        .await
+        .map_err(internal_err)?
+    {
+        // The stored receipt still names the current head: serve it
+        // verbatim rather than minting a twin (Ed25519 is deterministic,
+        // but the store's copy is the one already witnessed).
+        if stored.run_id == run_id && stored.journal_head == head {
+            return Ok(Json(stored));
+        }
+    }
+    let (manifest, executor_policy) = match evidence.checkpoint_ids.last() {
+        Some(checkpoint_id) => state
+            .checkpointer
+            .get_by_id(&evidence.internal_thread_id, checkpoint_id)
+            .await
+            .map_err(internal_err)?
+            .map(|checkpoint| {
+                (
+                    checkpoint.header.manifest,
+                    Some(checkpoint.header.policy_version),
+                )
+            })
+            .unwrap_or((None, None)),
+        None => (None, None),
+    };
+    let signing_key = state
+        .receipt_keyring
+        .active_key()
+        .await
+        .map_err(ApiError::internal)?;
+    let receipt = rusty_agent_runtime::receipt::mint_receipt(
+        &snapshot,
+        manifest,
+        executor_policy,
+        &signing_key,
+    )
+    .map_err(internal_err)?;
+    state
+        .server_store
+        .put_run_receipt(&run_id, &receipt)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(receipt))
+}
+
+#[derive(Debug, Deserialize)]
+struct VerifyReceiptPayload {
+    /// The exported journal the receipt claims to cover.
+    snapshot: JournalSnapshot,
+    /// The receipt under test.
+    receipt: rusty_agent_runtime::receipt::RunReceipt,
+    /// The key id to verify against; defaults to the receipt's `signer`
+    /// (the common case — old receipts verify against the history).
+    key_id: Option<String>,
+}
+
+/// `POST /receipts/verify` — verify caller-supplied evidence: a journal
+/// snapshot plus a receipt over it. Body: `{snapshot, receipt, key_id?}`.
+///
+/// Answers `200` with the typed [`VerifiedRun`] summary, or `422
+/// receipt_verification_failed` whose message names the mismatched
+/// component — never a bare `false`. The public key resolves from the
+/// deployment's key history by `key_id` (default: the receipt's
+/// `signer`); an id the history does not hold is `404`, distinct from a
+/// verification failure.
+///
+/// Tenant posture: any authenticated caller may verify — the evidence is
+/// caller-supplied, so nothing crosses a tenancy boundary the caller did
+/// not already hold. The endpoint reads only the key history (public
+/// material); no tenant state is touched.
+async fn verify_receipt_route(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+    Json(payload): Json<VerifyReceiptPayload>,
+) -> Result<Json<rusty_agent_runtime::receipt::VerifiedRun>, ApiError> {
+    let key_id = payload
+        .key_id
+        .unwrap_or_else(|| payload.receipt.signer.clone());
+    let record = state
+        .server_store
+        .get_receipt_key(&key_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "signing key `{key_id}` is not in this deployment's key history"
+            ))
+        })?;
+    let public_key = rusty_agent_runtime::receipt::PublicKey::from_hex(&record.public_key)
+        .map_err(internal_err)?;
+    match rusty_agent_runtime::receipt::verify_receipt(
+        &payload.snapshot,
+        &payload.receipt,
+        &public_key,
+    ) {
+        Ok(verified) => Ok(Json(verified)),
+        Err(rejection) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "receipt_verification_failed",
+            format!("{}: {rejection}", rejection.component()),
+        )),
+    }
+}
+
+/// `GET /receipt_keys` — the deployment's signing-key history (public
+/// keys with registration and retirement instants, sorted by
+/// registration) plus the active key id: everything an auditor needs to
+/// resolve signers offline. Secret material is never served — it never
+/// enters the store abstraction at all.
+async fn list_receipt_keys_route(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut keys = state
+        .server_store
+        .list_receipt_keys()
+        .await
+        .map_err(internal_err)?;
+    keys.sort_by_key(|record| record.registered_at);
+    let active = state
+        .receipt_keyring
+        .active_key()
+        .await
+        .map_err(ApiError::internal)?
+        .key_id();
+    Ok(Json(json!({
+        "keys": keys,
+        "active": active,
+    })))
+}
+
+/// `POST /receipt_keys/rotate` — rotate the deployment's signing key:
+/// generate a successor, retire the current key in the history, journal
+/// the new key id as a `signing_key_rotated` event in the receipts
+/// journal, and sign with the successor from here on. `201` with
+/// `{previous_key_id, key_id, public_key, event_id}`.
+///
+/// Receipts signed by the retired key keep verifying — verification
+/// resolves signers from the history, and retirement is an annotation,
+/// never a deletion. Tenant posture: any authenticated caller may rotate
+/// (v1's single-operator stance — the journaled rotation makes the act
+/// attributable; fleet-scale key governance is the R1.0 KMS work).
+async fn rotate_receipt_key(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let outcome = state
+        .receipt_keyring
+        .rotate()
+        .await
+        .map_err(ApiError::internal)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "previous_key_id": outcome.previous_key_id,
+            "key_id": outcome.new_key_id,
+            "public_key": outcome.public_key,
+            "event_id": outcome.event_id,
+        })),
+    ))
+}
+
+/// `GET /receipt_keys/journal` — the deployment's key-lineage journal:
+/// the chained `signing_key_rotated` events (genesis first), integrity
+/// re-verified on read like every journal this server serves. Empty until
+/// the first key registration.
+async fn get_receipt_keys_journal(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let events = match state
+        .server_store
+        .get_journal(crate::receipts::RECEIPTS_JOURNAL_RUN_ID)
+        .await
+        .map_err(internal_err)?
+    {
+        Some(snapshot) => {
+            reverify_journal(crate::receipts::RECEIPTS_JOURNAL_RUN_ID, snapshot)?.events
+        }
+        None => Vec::new(),
+    };
+    Ok(Json(json!({
+        "run_id": crate::receipts::RECEIPTS_JOURNAL_RUN_ID,
+        "events": events,
+        // The lineage never completes — it grows with every rotation.
+        "complete": false,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// The credential/connection broker (R0.11 wave 3)
+// --------------------------------------------------------------------- //
+
+/// `POST /connections` body: the provider, the consent ceiling, and the
+/// credential — either the token material to seal, or an authorization
+/// code to exchange through the deployment's OAuth provider (R0.11
+/// wave 4). Exactly one is required. The material (or the exchanged
+/// grant) crosses this boundary exactly once — route to broker to
+/// envelope — and is never journaled, stored, or served in the clear.
+#[derive(Debug, Deserialize)]
+struct RegisterConnectionPayload {
+    /// The provider kind (`openai`, `anthropic`, …).
+    provider: rusty_agent_runtime::broker::ConnectionProvider,
+    /// The per-user binding; absent for service-level connections.
+    #[serde(default)]
+    subject: Option<String>,
+    /// The consented scope set, in provider semantics — the issuance
+    /// ceiling.
+    #[serde(default)]
+    scopes: std::collections::BTreeSet<String>,
+    /// The token material to seal (a client-credentials registration
+    /// carries its `client_secret` here alongside the initial access
+    /// token).
+    #[serde(default)]
+    token: Option<rusty_agent_runtime::broker::TokenMaterial>,
+    /// The authorization code to exchange for the initial grant — the
+    /// back half of the human's consent act at the provider (R0.11
+    /// wave 4).
+    #[serde(default)]
+    authorization_code: Option<String>,
+    /// The resource-owner password grant to exchange for the initial
+    /// grant (provider `oauth2_password`). Exchanged through the
+    /// deployment's OAuth provider at registration; the grant inputs are
+    /// sealed with the minted tokens so the refresh lifecycle can
+    /// re-mint without a human.
+    #[serde(default)]
+    password_grant: Option<rusty_agent_runtime::broker::PasswordGrant>,
+}
+
+/// `POST /connections/{id}/consent` body. All fields optional, one
+/// required: `scopes` re-records the consent ceiling (journaled
+/// `connection_consented`), `token` replaces the sealed material,
+/// `authorization_code` (R0.11 wave 4) exchanges a fresh grant through
+/// the OAuth provider and seals that — both material paths journal
+/// `connection_refreshed` when the ceiling stands, and the reseal keeps
+/// the envelope's identity. `password_grant` re-exchanges an
+/// `oauth2_password` connection's credentials — the re-auth path out of
+/// `needs_reauth` for the password flow. The material paths are mutually
+/// exclusive.
+#[derive(Debug, Deserialize)]
+struct ConsentConnectionPayload {
+    #[serde(default)]
+    scopes: Option<std::collections::BTreeSet<String>>,
+    #[serde(default)]
+    token: Option<rusty_agent_runtime::broker::TokenMaterial>,
+    #[serde(default)]
+    authorization_code: Option<String>,
+    #[serde(default)]
+    password_grant: Option<rusty_agent_runtime::broker::PasswordGrant>,
+}
+
+/// `POST /connections/{id}/revoke` body (an empty object revokes without
+/// a recorded reason).
+#[derive(Debug, Deserialize)]
+struct RevokeConnectionPayload {
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// The 422 for input the connection contract refuses — validation
+/// happens before the broker call, so a store error is never a client
+/// error and a client error never reaches the store.
+fn invalid_connection_input(e: impl std::fmt::Display) -> ApiError {
+    ApiError::unprocessable(e.to_string())
+}
+
+/// Exchange an authorization code through the deployment's OAuth provider
+/// (R0.11 wave 4) — the back half of the human's consent act at the
+/// provider. The code and the grant cross this boundary exactly once —
+/// route to provider to envelope — and are never journaled, stored, or
+/// served in the clear. `409` when no provider is configured (the
+/// evaluator-absent precedent: the deployment cannot honor the flow it
+/// was asked to run); the provider's terminal refusal (`invalid_grant`
+/// and kin) is the client's `422`, a transient failure a `500`.
+async fn exchange_authorization_code(
+    state: &AppState,
+    code: &str,
+    scopes: &std::collections::BTreeSet<String>,
+) -> Result<rusty_agent_runtime::broker::TokenMaterial, ApiError> {
+    if code.is_empty() {
+        return Err(ApiError::unprocessable(
+            "authorization_code must not be empty".to_owned(),
+        ));
+    }
+    let Some((provider, _)) = state.broker.oauth() else {
+        return Err(ApiError::conflict(
+            "no OAuth provider is configured on this server — an authorization-code exchange \
+             requires one (`ServerConfig::with_oauth_provider`)"
+                .to_owned(),
+        ));
+    };
+    let grant = provider
+        .exchange_code(code, scopes)
+        .await
+        .map_err(|failure| {
+            if failure.permanent {
+                ApiError::unprocessable(format!("the authorization code was refused: {failure}"))
+            } else {
+                ApiError::internal(format!("the authorization code exchange failed: {failure}"))
+            }
+        })?;
+    Ok(rusty_agent_runtime::broker::TokenMaterial {
+        access_token: grant.access_token,
+        refresh_token: grant.refresh_token,
+        client_secret: None,
+        client_id: None,
+        username: None,
+        password: None,
+        token_url: None,
+        expires_at: grant.expires_at,
+    })
+}
+
+/// Exchange a resource-owner password grant through the deployment's OAuth
+/// provider — the registration (and re-auth) act of an `oauth2_password`
+/// connection. The sealed material keeps the grant inputs alongside the
+/// minted tokens: the password grant's whole point is that the refresh
+/// lifecycle can re-mint access tokens without a human, so the password,
+/// client credentials, and token endpoint persist as custody (the
+/// `client_secret` precedent, extended to the full presentation set).
+/// `409` when no provider is configured; the provider's terminal refusal
+/// is the client's `422`, a transient failure a `500`.
+async fn exchange_password_grant(
+    state: &AppState,
+    grant: &rusty_agent_runtime::broker::PasswordGrant,
+) -> Result<rusty_agent_runtime::broker::TokenMaterial, ApiError> {
+    grant.validate().map_err(invalid_connection_input)?;
+    let Some((provider, _)) = state.broker.oauth() else {
+        return Err(ApiError::conflict(
+            "no OAuth provider is configured on this server — a password-grant exchange \
+             requires one (`ServerConfig::with_oauth_provider`)"
+                .to_owned(),
+        ));
+    };
+    let minted = provider.exchange_password(grant).await.map_err(|failure| {
+        if failure.permanent {
+            ApiError::unprocessable(format!("the password grant was refused: {failure}"))
+        } else {
+            ApiError::internal(format!("the password grant exchange failed: {failure}"))
+        }
+    })?;
+    Ok(rusty_agent_runtime::broker::TokenMaterial {
+        access_token: minted.access_token,
+        refresh_token: minted.refresh_token,
+        client_secret: Some(grant.client_secret.clone()),
+        client_id: Some(grant.client_id.clone()),
+        username: Some(grant.username.clone()),
+        password: Some(grant.password.clone()),
+        token_url: Some(grant.token_url.clone()),
+        expires_at: minted.expires_at,
+    })
+}
+
+/// `POST /connections` — register a connection: validate, seal the
+/// material under a fresh per-connection data key, journal the
+/// registration, persist. `201 {connection}` with the public record —
+/// the material is not part of any answer, ever.
+async fn register_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterConnectionPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let paths = payload.token.is_some() as u8
+        + payload.authorization_code.is_some() as u8
+        + payload.password_grant.is_some() as u8;
+    if paths != 1 {
+        return Err(ApiError::unprocessable(
+            "exactly one of `token`, `authorization_code`, or `password_grant` registers a \
+             connection — the material is sealed verbatim, the code or the grant is exchanged \
+             through the deployment's OAuth provider; never more than one, never neither"
+                .to_owned(),
+        ));
+    }
+    let token = match (
+        &payload.token,
+        &payload.authorization_code,
+        &payload.password_grant,
+    ) {
+        (Some(token), None, None) => {
+            if token.access_token.is_empty() {
+                return Err(ApiError::unprocessable(
+                    "token.access_token must not be empty".to_owned(),
+                ));
+            }
+            token.clone()
+        }
+        (None, Some(code), None) => {
+            exchange_authorization_code(&state, code, &payload.scopes).await?
+        }
+        (None, None, Some(grant)) => {
+            if payload.provider != rusty_agent_runtime::broker::ConnectionProvider::Oauth2Password {
+                return Err(ApiError::unprocessable(
+                    "password_grant registers an `oauth2_password` connection — the provider \
+                     field must say so"
+                        .to_owned(),
+                ));
+            }
+            exchange_password_grant(&state, grant).await?
+        }
+        _ => unreachable!("the exclusivity gate passed"),
+    };
+    rusty_agent_runtime::broker::validate_connection_fields(
+        payload.subject.as_deref(),
+        &payload.scopes,
+    )
+    .map_err(invalid_connection_input)?;
+    // A subject names whose connection this is. A person registers their
+    // own; a service-level connection has none and is the tenant's.
+    if let Some(subject) = payload.subject.as_deref() {
+        if !tenant.may_act_for(subject) {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                format!(
+                    "subject `{subject}` is not you (you are `{}`) — a connection with a subject \
+                     is that person's: register it as yourself, leave the subject out for a \
+                     service-level connection, or ask an administrator",
+                    tenant.principal().id
+                ),
+            ));
+        }
+    }
+    let record = state
+        .broker
+        .register(
+            tenant.tenant(),
+            payload.provider,
+            payload.subject,
+            payload.scopes,
+            &token,
+        )
+        .await
+        .map_err(internal_err)?;
+    Ok((StatusCode::CREATED, Json(json!({ "connection": record }))))
+}
+
+/// `GET /connections` — the tenant's connection records, sorted by id.
+/// Metadata only: `ConnectionRecord` carries no material, sealed or
+/// otherwise — that is why it is safe to serve whole.
+async fn list_connections(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .broker
+        .list(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    records.retain(|record| connection_visible(record, &tenant));
+    records.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
+    Ok(Json(json!({ "connections": records })))
+}
+
+/// Whether a connection is the caller's to see: every service-level
+/// connection, and a person's own.
+fn connection_visible(
+    record: &rusty_agent_runtime::broker::ConnectionRecord,
+    tenant: &TenantContext,
+) -> bool {
+    match record.subject.as_deref() {
+        Some(subject) => tenant.may_act_for(subject),
+        None => true,
+    }
+}
+
+/// The connection, when it is the caller's to see; another person's reads
+/// as absent, the way a record outside the tenant does.
+async fn connection_for_caller(
+    state: &AppState,
+    tenant: &TenantContext,
+    connection_id: &str,
+) -> Result<rusty_agent_runtime::broker::ConnectionRecord, ApiError> {
+    state
+        .broker
+        .get(tenant.tenant(), connection_id)
+        .await
+        .map_err(internal_err)?
+        .filter(|record| connection_visible(record, tenant))
+        .ok_or_else(|| ApiError::not_found(format!("connection `{connection_id}` not found")))
+}
+
+/// `GET /connections/{connection_id}` — one record; `404` for unknown
+/// and cross-tenant ids alike (the store's indistinguishability rule).
+async fn get_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = connection_for_caller(&state, &tenant, &connection_id).await?;
+    Ok(Json(json!({ "connection": record })))
+}
+
+/// `POST /connections/{id}/consent` — record a consent act. The human's
+/// grant is executed at the provider; this endpoint records it — the
+/// only way a consented set changes — journals the act, and re-activates
+/// a `needs_reauth` connection (this is the re-auth path). The material
+/// path is `token` verbatim or `authorization_code` exchanged through
+/// the OAuth provider (R0.11 wave 4). `200 {connection, journaled}`;
+/// re-recording the same fact converges (`journaled: null`) without a
+/// second event.
+async fn consent_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+    Json(payload): Json<ConsentConnectionPayload>,
+) -> Result<Json<Value>, ApiError> {
+    connection_for_caller(&state, &tenant, &connection_id).await?;
+    if payload.scopes.is_none()
+        && payload.token.is_none()
+        && payload.authorization_code.is_none()
+        && payload.password_grant.is_none()
+    {
+        return Err(ApiError::unprocessable(
+            "a consent act needs `scopes`, `token`, `authorization_code`, and/or `password_grant`"
+                .to_owned(),
+        ));
+    }
+    let material_paths = payload.token.is_some() as u8
+        + payload.authorization_code.is_some() as u8
+        + payload.password_grant.is_some() as u8;
+    if material_paths > 1 {
+        return Err(ApiError::unprocessable(
+            "`token`, `authorization_code`, and `password_grant` are mutually exclusive — the \
+             material is sealed verbatim, or the code or grant is exchanged through the \
+             deployment's OAuth provider; never more than one"
+                .to_owned(),
+        ));
+    }
+    if let Some(scopes) = &payload.scopes {
+        rusty_agent_runtime::broker::validate_connection_fields(None, scopes)
+            .map_err(invalid_connection_input)?;
+    }
+    let token = match (
+        &payload.token,
+        &payload.authorization_code,
+        &payload.password_grant,
+    ) {
+        (None, None, None) => None,
+        (Some(token), None, None) => {
+            if token.access_token.is_empty() {
+                return Err(ApiError::unprocessable(
+                    "token.access_token must not be empty".to_owned(),
+                ));
+            }
+            Some(token.clone())
+        }
+        (None, Some(code), None) => {
+            // The exchange's scope set is the act's new ceiling when the
+            // act declares one, else the connection's standing set — the
+            // provider answers for the same set the consent records.
+            let scopes = match &payload.scopes {
+                Some(scopes) => scopes.clone(),
+                None => {
+                    state
+                        .broker
+                        .get(tenant.tenant(), &connection_id)
+                        .await
+                        .map_err(internal_err)?
+                        .ok_or_else(|| {
+                            ApiError::not_found(format!("connection `{connection_id}` not found"))
+                        })?
+                        .scopes
+                }
+            };
+            Some(exchange_authorization_code(&state, code, &scopes).await?)
+        }
+        (None, None, Some(grant)) => Some(exchange_password_grant(&state, grant).await?),
+        _ => unreachable!("the exclusivity gate passed"),
+    };
+    match state
+        .broker
+        .record_consent(
+            tenant.tenant(),
+            &connection_id,
+            payload.scopes,
+            token.as_ref(),
+        )
+        .await
+        .map_err(internal_err)?
+    {
+        crate::broker::ConsentOutcome::Applied { record, journaled } => Ok(Json(
+            json!({ "connection": record, "journaled": journaled }),
+        )),
+        crate::broker::ConsentOutcome::Converged(record) => Ok(Json(
+            json!({ "connection": record, "journaled": Value::Null }),
+        )),
+        crate::broker::ConsentOutcome::Unknown => Err(ApiError::not_found(format!(
+            "connection `{connection_id}` not found"
+        ))),
+        crate::broker::ConsentOutcome::Conflict => Err(ApiError::conflict(format!(
+            "connection `{connection_id}` changed under the consent; retry"
+        ))),
+    }
+}
+
+/// `POST /connections/{id}/revoke` — revoke the grant. The status flip
+/// and its journaled event commit together, and outstanding handles fail
+/// at their next use — resolution reads live state, so revocation bites
+/// at the next call, never the next deploy. `200 {connection, event_id}`;
+/// re-revocation converges without an `event_id` (the fact journaled
+/// once already).
+async fn revoke_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+    Json(payload): Json<RevokeConnectionPayload>,
+) -> Result<Json<Value>, ApiError> {
+    connection_for_caller(&state, &tenant, &connection_id).await?;
+    match state
+        .broker
+        .revoke(tenant.tenant(), &connection_id, payload.reason)
+        .await
+        .map_err(internal_err)?
+    {
+        crate::broker::RevokeOutcome::Applied { record, event_id } => {
+            Ok(Json(json!({ "connection": record, "event_id": event_id })))
+        }
+        crate::broker::RevokeOutcome::Converged(record) => {
+            Ok(Json(json!({ "connection": record })))
+        }
+        crate::broker::RevokeOutcome::Unknown => Err(ApiError::not_found(format!(
+            "connection `{connection_id}` not found"
+        ))),
+        crate::broker::RevokeOutcome::Conflict => Err(ApiError::conflict(format!(
+            "connection `{connection_id}` changed under the revocation; retry"
+        ))),
+    }
+}
+
+/// `DELETE /connections/{id}` — revoke-then-erase: the evidence trail
+/// first (a deleted connection's grant stopped holding *here*, journaled
+/// when still live), then real deletion of the stored record, sealed
+/// material included. Resolution fails closed `unknown_connection`
+/// thereafter, exactly as for a revocation.
+async fn delete_connection(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    connection_for_caller(&state, &tenant, &connection_id).await?;
+    let deleted = state
+        .broker
+        .delete(tenant.tenant(), &connection_id)
+        .await
+        .map_err(internal_err)?;
+    if !deleted {
+        return Err(ApiError::not_found(format!(
+            "connection `{connection_id}` not found"
+        )));
+    }
+    Ok(Json(json!({ "deleted": true })))
+}
+
+/// `GET /connections/{id}/health` — the lifecycle status and the health
+/// counters (last failure class, consecutive failures, last refresh).
+/// Metadata by construction; `404` unknown/cross-tenant.
+async fn get_connection_health(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(connection_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = connection_for_caller(&state, &tenant, &connection_id).await?;
+    Ok(Json(json!({
+        "connection_id": record.connection_id,
+        "status": record.status,
+        "health": record.health,
+    })))
+}
+
+/// `GET /connections/health` — every connection the tenant holds with
+/// its lifecycle status and health counters, sorted by id (R0.11
+/// wave 4): the tenant-wide board the per-connection health endpoint
+/// zooms into. Metadata by construction — sealed material never leaves
+/// the broker.
+async fn list_connections_health(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .broker
+        .list(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    records.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
+    let connections = records
+        .iter()
+        .map(|record| {
+            json!({
+                "connection_id": record.connection_id,
+                "provider": record.provider,
+                "status": record.status,
+                "health": record.health,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(json!({ "connections": connections })))
+}
+
+/// `GET /broker/journal` — the deployment's broker evidence chain:
+/// registrations, consents, refreshes, revocations, issuances, uses, and
+/// denials, integrity re-verified on read like every journal this server
+/// serves (the `receipt_keys/journal` precedent applied to the second
+/// control plane). Empty until the first broker act. Uses and denials
+/// name the connection, the handle, and the grant — never the bytes.
+async fn get_broker_journal(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let events = match state
+        .server_store
+        .get_journal(crate::broker::BROKER_JOURNAL_RUN_ID)
+        .await
+        .map_err(internal_err)?
+    {
+        Some(snapshot) => reverify_journal(crate::broker::BROKER_JOURNAL_RUN_ID, snapshot)?.events,
+        None => Vec::new(),
+    };
+    Ok(Json(json!({
+        "run_id": crate::broker::BROKER_JOURNAL_RUN_ID,
+        "events": events,
+        // The chain never completes — it grows with every broker act.
+        "complete": false,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ReplayRunPayload {
+    /// The run to re-drive and verify.
+    run_id: String,
+}
+
+/// `POST /runs/replay` — re-drive a journaled run server-side and verify the
+/// replayed evidence against the recorded journal. Body: `{"run_id": "…"}`.
+///
+/// The replay runs the graph code registered in this process (not a
+/// downloaded copy) against a throwaway in-memory checkpointer — the shared
+/// checkpoint log is never touched — and answers exactly:
+///
+/// ```json
+/// { "run_id": "…", "verified": true, "expected_events": 12,
+///   "actual_events": 12, "first_divergence": null }
+/// ```
+///
+/// `verified` is the evidence comparison of [`crate::replay`]: same event
+/// kinds, nodes, sequences, effect classes, statuses, and payloads, with
+/// per-run minted identity (checkpoint ids) and wall-clock measurements
+/// excluded. `first_divergence` is the `seq` of the first disagreeing event
+/// (or of the first recorded event the replay never produced).
+///
+/// Statuses: `404` unknown or cross-tenant run; `409` no persisted journal
+/// yet (same as `/fixture`), or the run is still executing — replay verifies
+/// a final journal; `422` when the run's graph is not registered in this
+/// process, when the journal carries recorded model/tool/remote/WASM calls
+/// (server-side replay cannot serve them — export the fixture and replay in
+/// CI), when the run resumed from a checkpoint (core's [`ExactReplay`]
+/// rejects mid-run evidence), or when the run pinned a tool selection the
+/// current catalog no longer resolves (replay never widens or narrows it).
+async fn replay_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ReplayRunPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let run_id = payload.run_id;
+    let evidence = run_evidence(&state, &tenant, &run_id).await?;
+    let snapshot = evidence.journal.ok_or_else(|| {
+        ApiError::conflict(format!(
+            "run `{run_id}` has no persisted journal yet (queued or pre-checkpoint)"
+        ))
+    })?;
+    if !evidence.complete {
+        return Err(ApiError::conflict(format!(
+            "run `{run_id}` is still executing; replay verifies a run's final journal"
+        )));
+    }
+    let (graph, spec) = state.registry.get(&evidence.graph).ok_or_else(|| {
+        ApiError::unprocessable(format!(
+            "graph `{}` is not registered in this server process; cannot replay run `{run_id}`",
+            evidence.graph
+        ))
+    })?;
+    // Capability replay binding: a run admitted with a tool selection must
+    // re-resolve the same members against the current catalog. A member the
+    // catalog no longer contains fails typed (422, matching the other
+    // replay refusals) — replay never silently widens or narrows the set.
+    // Evidence old enough to have no accepted payload (store fallback)
+    // carries no selection to guard.
+    if let Some(tools) = &evidence.capability_tools {
+        let set = rusty_agent_runtime::capability::CapabilitySet::from_members(tools, &[])
+            .map_err(|error| {
+                ApiError::internal(format!("stored tool selection is malformed: {error}"))
+            })?;
+        set.replay_guard_catalog(&state.registry.tool_capabilities(&evidence.graph))
+            .map_err(|error| {
+                ApiError::unprocessable(format!(
+                    "run `{run_id}` pinned a tool selection that no longer resolves: {error}"
+                ))
+            })?;
+    }
+    if carries_servable_effects(&snapshot) {
+        return Err(ApiError::unprocessable(format!(
+            "run `{run_id}` journaled model/tool/remote/WASM calls; server-side replay \
+             re-executes node code and cannot serve recorded effects — download the fixture \
+             (GET /runs/{run_id}/fixture) and replay it in CI with ReplayFixture"
+        )));
+    }
+    // Pre-check the boundary ExactReplay::new enforces, so unreplayable
+    // evidence answers 422 (client-actionable), not a 500.
+    if snapshot
+        .events
+        .first()
+        .is_some_and(|event| event.kind == RunEventKind::Resume)
+    {
+        return Err(ApiError::unprocessable(format!(
+            "run `{run_id}` resumed from a checkpoint; its journal begins mid-run against \
+             state it does not carry — replay the original run's journal instead"
+        )));
+    }
+    let replay = ExactReplay::new(snapshot.clone()).map_err(|e| {
+        ApiError::internal(format!(
+            "stored journal for run `{run_id}` failed its integrity check: {e}"
+        ))
+    })?;
+
+    let initial = crate::replay::initial_state_from(&snapshot);
+    let journal = replay.fresh_journal(Clock::System);
+    let params = ReplayParams::new(journal.clone(), RngSource::default())
+        .with_checkpointer(Arc::new(InMemoryCheckpointer::new()));
+    // A replay error (graph code changed and now fails, a reducer rejects an
+    // update, …) is divergence evidence, not an HTTP error: whatever the
+    // replay journaled before stopping is compared below.
+    let _ = replay.run(&graph, &spec, initial, params).await;
+    let replayed = journal.snapshot();
+    let report = crate::replay::compare_journals(&snapshot, &replayed);
+    Ok(Json(json!({
+        "run_id": run_id,
+        "verified": report.verified,
+        "expected_events": snapshot.events.len(),
+        "actual_events": replayed.events.len(),
+        "first_divergence": report.first_divergence,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct DiffQuery {
+    /// Base run id (the branch is diffed against it).
+    base: String,
+    /// Branch run id.
+    branch: String,
+}
+
+/// The run's persisted journal for the diff/replay endpoints: 409 when the
+/// run is known but nothing was persisted yet.
+async fn require_journal(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+) -> Result<JournalSnapshot, ApiError> {
+    let evidence = run_evidence(state, tenant, run_id).await?;
+    evidence.journal.ok_or_else(|| {
+        ApiError::conflict(format!(
+            "run `{run_id}` has no persisted journal yet (queued or pre-checkpoint)"
+        ))
+    })
+}
+
+/// `GET /runs/diff?base=<run_id>&branch=<run_id>` — the structural diff of
+/// two runs' journals, in core's [`BranchDiff`] serde shape as-is:
+/// `first_divergent_seq`, the events `added` (branch) and `removed` (base)
+/// at and after the divergence point, per-super-step state-channel
+/// `step_diffs`, and token/cost `base_totals` / `branch_totals`. Events
+/// compare logically — identity and timing fields excluded — so two branches
+/// of one fork show their shared prefix as equal.
+///
+/// 404 semantics are the usual ones (unknown or cross-tenant run on either
+/// side, via [`run_evidence`] — including the post-eviction / post-restart
+/// store fallback); `409` when either run has no persisted journal yet.
+async fn diff_runs(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<DiffQuery>,
+) -> Result<Json<BranchDiff>, ApiError> {
+    let base = require_journal(&state, &tenant, &query.base).await?;
+    let branch = require_journal(&state, &tenant, &query.branch).await?;
+    Ok(Json(BranchDiff::between(&base, &branch)))
+}
+
+// --------------------------------------------------------------------- //
+// Assistants
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct CreateAssistantPayload {
+    /// Human-readable name (need not be unique).
+    name: String,
+    /// Registered graph this assistant runs.
+    graph: String,
+    /// Client-chosen assistant id (a UUID v4 is generated when omitted).
+    #[serde(default)]
+    assistant_id: Option<String>,
+    /// Free-form config metadata; `recursion_limit` is honored as a run
+    /// default.
+    #[serde(default)]
+    config: Option<Value>,
+    #[serde(default)]
+    metadata: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct LoginPayload {
+    username: String,
+    password: String,
+}
+
+pub(crate) fn session_cookie_header(token: &str, expires: Option<chrono::DateTime<Utc>>) -> String {
+    match expires {
+        Some(until) => format!(
+            "{}={token}; Path=/; HttpOnly; SameSite=Lax; Expires={}",
+            crate::users::SESSION_COOKIE,
+            until.format("%a, %d %b %Y %H:%M:%S GMT")
+        ),
+        None => format!(
+            "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+            crate::users::SESSION_COOKIE
+        ),
+    }
+}
+
+/// `POST /auth/login` — a person signs in. The answer is who they are, and
+/// the session rides back as an `HttpOnly` cookie the browser will present
+/// from now on. A wrong name and a wrong password are the same refusal.
+async fn login(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Json(payload): Json<LoginPayload>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<Value>), ApiError> {
+    let Some(user) = state
+        .users
+        .verify(&payload.username, &payload.password)
+        .await
+    else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "sign_in_refused",
+            "that sign-in name and password were not accepted".to_owned(),
+        ));
+    };
+    let principal = user.principal();
+    let (token, expires) = state
+        .sessions
+        .open(principal.clone(), user.security_epoch)
+        .await;
+    Ok((
+        [(
+            axum::http::header::SET_COOKIE,
+            session_cookie_header(&token, Some(expires)),
+        )],
+        Json(json!({
+            "principal": principal,
+            "tenant": crate::auth::DEFAULT_TENANT,
+            "roles": principal.roles,
+            "scopes": rusty_agent_runtime::scope::scope_set_to_strings(&crate::auth::scopes_for_roles(&principal.roles)),
+        })),
+    ))
+}
+
+/// `POST /auth/logout` — the session ends here and in the browser.
+async fn logout(
+    AxumState(state): AxumState<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> ([(axum::http::HeaderName, String); 1], StatusCode) {
+    if let Some(token) = crate::users::session_cookie(&headers) {
+        state.sessions.close(&token).await;
+    }
+    (
+        [(
+            axum::http::header::SET_COOKIE,
+            session_cookie_header("", None),
+        )],
+        StatusCode::NO_CONTENT,
+    )
+}
+
+#[derive(Deserialize)]
+struct PasswordPayload {
+    current: String,
+    new: String,
+}
+
+/// `POST /auth/password` — the signed-in person changes their own password,
+/// proving the current one first.
+async fn change_password(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<PasswordPayload>,
+) -> Result<StatusCode, ApiError> {
+    let me = tenant.principal();
+    if me.kind != crate::auth::PrincipalKind::User || me.id == "dev" {
+        return Err(ApiError::bad_request(
+            "only a signed-in user has a password to change".to_owned(),
+        ));
+    }
+    if state.users.verify(&me.id, &payload.current).await.is_none() {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "sign_in_refused",
+            "the current password was not accepted".to_owned(),
+        ));
+    }
+    state
+        .users
+        .set_password(&me.id, &payload.new)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn serve_user(u: &crate::users::UserRecord) -> Value {
+    json!({"id": u.id, "name": u.name, "roles": u.roles, "created_at": u.created_at, "active": u.active, "external": u.external, "external_id": u.external_id, "updated_at": u.updated_at})
+}
+
+/// `GET /users` — who can sign in, and as what. Never the digests.
+async fn list_users(AxumState(state): AxumState<Arc<AppState>>) -> Json<Value> {
+    let users: Vec<Value> = state.users.list().await.iter().map(serve_user).collect();
+    Json(json!({"users": users}))
+}
+
+#[derive(Deserialize)]
+struct CreateUserPayload {
+    username: String,
+    #[serde(default)]
+    name: String,
+    roles: Vec<crate::auth::Role>,
+    password: String,
+}
+
+/// `POST /users` — an administrator adds a person with roles.
+async fn create_user(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Json(payload): Json<CreateUserPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let user = state
+        .users
+        .create(
+            &payload.username,
+            &payload.name,
+            payload.roles,
+            &payload.password,
+        )
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok((StatusCode::CREATED, Json(serve_user(&user))))
+}
+
+/// `DELETE /users/{id}` — a person can no longer sign in. Their past runs
+/// keep their name; attribution is history, not access.
+/// `POST /users/{id}/sessions/revoke` — end every session of a user: their
+/// security epoch moves on, and any session issued before it is refused on
+/// its next request, on every replica that reads the store.
+async fn revoke_user_sessions(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(_tenant): Extension<TenantContext>,
+    Path(user_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let found = state
+        .users
+        .revoke_sessions(&user_id)
+        .await
+        .map_err(ApiError::internal)?;
+    if !found {
+        return Err(ApiError::not_found(format!("no user `{user_id}`")));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_user(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(user_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    if tenant.principal().id == user_id {
+        return Err(ApiError::bad_request(
+            "you cannot delete the account you are signed in as".to_owned(),
+        ));
+    }
+    let removed = state
+        .users
+        .delete(&user_id)
+        .await
+        .map_err(ApiError::bad_request)?;
+    if !removed {
+        return Err(ApiError::not_found(format!("no user `{user_id}`")));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /me` — the caller, as the server resolved them. Nobody is a 401:
+/// that is what tells a browser to show the sign-in.
+async fn whoami(Extension(tenant): Extension<TenantContext>) -> Result<Json<Value>, ApiError> {
+    if tenant.principal().id == "anonymous" {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "not_signed_in",
+            "nobody is signed in".to_owned(),
+        ));
+    }
+    Ok(Json(json!({
+        "principal": tenant.principal(),
+        "tenant": tenant.tenant(),
+        "roles": tenant.principal().roles,
+        "scopes": rusty_agent_runtime::scope::scope_set_to_strings(tenant.scopes()),
+    })))
+}
+
+/// Stamp who made this onto a metadata object. The server's word, not the
+/// client's: `created_by` is the signed-in principal, and `execution` is
+/// the run's authority — the tenant, the actor who admitted it, the subject
+/// it acts for (the server's `on_behalf_of` when a server path set one,
+/// else the actor), the path, the time. A client's `created_by` is
+/// replaced; a client's `execution` never arrives (refused at admission).
+fn attributed(metadata: Option<Value>, tenant: &TenantContext) -> Value {
+    let mut metadata = match metadata {
+        Some(Value::Object(map)) => Value::Object(map),
+        _ => json!({}),
+    };
+    if let Some(map) = metadata.as_object_mut() {
+        map.insert("created_by".to_owned(), tenant.attribution());
+    }
+    metadata
+}
+
+/// The person a run (or a thread) acts for, as its admission stamped it:
+/// the execution subject, else whom it was on behalf of, else who created
+/// it — a *person*, never a service (a scheduler's run is nobody's in
+/// particular, tenant-wide as before people existed).
+pub(crate) fn run_person(metadata: Option<&Value>) -> Option<&str> {
+    let metadata = metadata?;
+    ["/execution/subject", "/on_behalf_of", "/created_by"]
+        .iter()
+        .filter_map(|path| metadata.pointer(path))
+        .find(|who| who.get("kind").and_then(Value::as_str) == Some("user"))
+        .and_then(|who| who.get("principal_id").and_then(Value::as_str))
+}
+
+/// Whether the caller may read a run or thread with this metadata: one
+/// that acted for a person is that person's (an administrator's, an
+/// auditor's); one that acted for nobody is everyone's in the tenant.
+pub(crate) fn run_readable(tenant: &TenantContext, metadata: Option<&Value>) -> bool {
+    run_person(metadata).is_none_or(|person| tenant.may_read_for(person))
+}
+
+/// The admitted metadata of a run the process no longer holds — its
+/// accepted record, else what its journal declared (runs from before
+/// records existed) — for the read rule above.
+pub(crate) async fn person_of_run(
+    state: &AppState,
+    run_id: &str,
+    snapshot: Option<&JournalSnapshot>,
+) -> Option<Value> {
+    if let Some(record) = state
+        .server_store
+        .get_accepted_run(run_id)
+        .await
+        .ok()
+        .flatten()
+    {
+        if let Some(metadata) = record.payload.metadata {
+            return Some(metadata);
+        }
+    }
+    snapshot
+        .and_then(declared_attribution)
+        .map(|who| json!({ "created_by": who }))
+}
+
+/// The attribution an older run declared in its journal (`run_config_declared`
+/// → `value.attribution`): who started it, from before accepted records.
+pub(crate) fn declared_attribution(snapshot: &JournalSnapshot) -> Option<Value> {
+    snapshot
+        .events
+        .iter()
+        .find(|event| {
+            serde_json::to_value(event.kind)
+                .ok()
+                .and_then(|k| k.as_str().map(str::to_owned))
+                == Some("run_config_declared".to_owned())
+        })
+        .and_then(|event| serde_json::to_value(&event.output).ok())
+        .and_then(|output| output.pointer("/value/attribution").cloned())
+        .filter(Value::is_object)
+}
+
+/// At boot: whose each thread from before threads were stamped is — the
+/// person of its earliest run (a run with a record orders by its
+/// acceptance; one without is older than any with). Threads stamped at
+/// creation, and threads a service made, are not looked up here.
+pub(crate) async fn backfill_thread_persons(state: &Arc<AppState>) {
+    let Ok(journals) = state.server_store.list_journals().await else {
+        return;
+    };
+    let mut earliest: HashMap<String, (DateTime<Utc>, String)> = HashMap::new();
+    for snapshot in journals {
+        let record = state
+            .server_store
+            .get_accepted_run(&snapshot.run_id)
+            .await
+            .ok()
+            .flatten();
+        let at = record
+            .as_ref()
+            .map(|r| r.accepted_at)
+            .unwrap_or(DateTime::<Utc>::MIN_UTC);
+        let metadata = match record {
+            Some(record) => record.payload.metadata,
+            None => declared_attribution(&snapshot).map(|who| json!({ "created_by": who })),
+        };
+        let Some(person) = run_person(metadata.as_ref()).map(str::to_owned) else {
+            continue;
+        };
+        match earliest.get(&snapshot.thread_id) {
+            Some((seen, _)) if *seen <= at => {}
+            _ => {
+                earliest.insert(snapshot.thread_id.clone(), (at, person));
+            }
+        }
+    }
+    let count = earliest.len();
+    if let Ok(mut persons) = state.thread_persons.write() {
+        *persons = earliest
+            .into_iter()
+            .map(|(thread, (_, person))| (thread, person))
+            .collect();
+    }
+    tracing::info!(
+        threads = count,
+        "thread persons derived for threads from before the stamp"
+    );
+}
+
+/// A run's metadata as admission leaves it: `created_by` the signed-in
+/// principal, and `execution` the run's authority (see [`attributed`] for
+/// the stamp alone, used on records that are not runs).
+fn admitted(metadata: Option<Value>, tenant: &TenantContext, admission: Admission) -> Value {
+    let mut metadata = match metadata {
+        Some(Value::Object(map)) => Value::Object(map),
+        _ => json!({}),
+    };
+    if let Some(map) = metadata.as_object_mut() {
+        let actor = tenant.attribution();
+        let subject = match admission {
+            Admission::Server(_) => map
+                .get("on_behalf_of")
+                .cloned()
+                .filter(|v| v.is_object())
+                .unwrap_or_else(|| actor.clone()),
+            Admission::Client => actor.clone(),
+        };
+        map.insert("created_by".to_owned(), actor.clone());
+        map.insert(
+            "execution".to_owned(),
+            json!({
+                "tenant": tenant.tenant(),
+                "actor": actor,
+                "subject": subject,
+                "via": match admission { Admission::Client => "http", Admission::Server(via) => via },
+                "admitted_at": Utc::now(),
+            }),
+        );
+    }
+    metadata
+}
+
+async fn create_assistant(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CreateAssistantPayload>,
+) -> Result<(StatusCode, Json<AssistantView>), ApiError> {
+    if payload.name.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "`name` must not be empty".to_string(),
+        ));
+    }
+    if !state.registry.contains(&payload.graph) {
+        return Err(ApiError::bad_request(format!(
+            "unknown graph `{}` (see GET /info for registered graphs)",
+            payload.graph
+        )));
+    }
+    let assistant_id = payload
+        .assistant_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("assistant_id", &assistant_id)?;
+
+    // Persist under the tenant's internal id; the wire shows the external id.
+    let record = AssistantRecord::new(
+        tenant.scope(&assistant_id),
+        payload.name,
+        payload.graph,
+        payload.config.unwrap_or(Value::Null),
+        attributed(payload.metadata, &tenant),
+        Utc::now(),
+    );
+    if record.versions[0].storage_size() > ASSISTANT_VERSION_BYTES_LIMIT
+        || record.lineage_storage_size() > ASSISTANT_LINEAGE_BYTES_LIMIT
+    {
+        return Err(ApiError::unprocessable(format!(
+            "assistant configuration exceeds the {} KiB version boundary",
+            ASSISTANT_VERSION_BYTES_LIMIT / 1024
+        )));
+    }
+    let created = state
+        .server_store
+        .create_assistant(&record)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        return Err(ApiError::conflict(format!(
+            "assistant `{assistant_id}` already exists"
+        )));
+    }
+    Ok((StatusCode::CREATED, Json(record.view(assistant_id))))
+}
+
+async fn list_assistants(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let records = state
+        .server_store
+        .list_assistants()
+        .await
+        .map_err(internal_err)?;
+    // Only this tenant's assistants, reported with their external ids.
+    let mut records: Vec<AssistantView> = records
+        .into_iter()
+        .filter_map(|mut record| {
+            let external = tenant.unscope(&record.assistant_id)?.to_string();
+            record.assistant_id = external;
+            Some(record)
+        })
+        .collect();
+    records.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.assistant_id.cmp(&b.assistant_id))
+    });
+    Ok(Json(json!(records)))
+}
+
+/// `GET /assistants/{id}/memory/blocks` — the agent's curated memory
+/// blocks as its runs see them: each declared block with its description,
+/// its limit, and its current text (the newest live note under
+/// `block.<label>`, whoever wrote it).
+async fn get_agent_blocks(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let mut blocks = Vec::new();
+    for block in crate::platform_tools::declared_blocks(&record.config) {
+        let current = crate::platform_tools::block_record(
+            &state,
+            tenant.tenant(),
+            &assistant_id,
+            &block.label,
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        blocks.push(json!({
+            "label": block.label,
+            "description": block.description,
+            "char_limit": block.char_limit,
+            "text": current.as_ref().map(crate::platform_tools::block_value).unwrap_or_default(),
+            "version": current.as_ref().map(|r| r.memory_id.clone()),
+            "author": current.as_ref().map(|r| r.provenance.author.clone()),
+            "updated_at": current.as_ref().map(|r| r.created_at),
+        }));
+    }
+    // Blocks a working copy declared and wrote before publishing: they hold
+    // a value under `block.<label>` with no declaration on the record.
+    let known: Vec<String> = blocks
+        .iter()
+        .filter_map(|b| b["label"].as_str().map(str::to_owned))
+        .collect();
+    for record in crate::platform_tools::block_records(&state, tenant.tenant(), &assistant_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+    {
+        let Some(label) = record
+            .key
+            .as_deref()
+            .and_then(|k| k.strip_prefix("block."))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if known.contains(&label) {
+            continue;
+        }
+        blocks.push(json!({
+            "label": label,
+            "description": "",
+            "char_limit": crate::platform_tools::DEFAULT_BLOCK_CHAR_LIMIT,
+            "declared": false,
+            "text": crate::platform_tools::block_value(&record),
+            "version": record.memory_id,
+            "author": record.provenance.author,
+            "updated_at": record.created_at,
+        }));
+    }
+    Ok(Json(
+        json!({ "assistant_id": assistant_id, "blocks": blocks }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct PutBlockPayload {
+    text: String,
+    /// The limit of a block the working copy declares and the published
+    /// agent does not yet: the person's declaration rides with the write.
+    #[serde(default)]
+    char_limit: Option<usize>,
+}
+
+/// `GET /assistants/{id}/memory/blocks/{label}/history` — every version
+/// a block has had, newest first: who wrote it (the agent's edit tool, a
+/// person, the platform's erasure), when, and the text — the superseded
+/// records under `block.<label>`, which the store keeps as evidence. A
+/// person restores an older version by saving its text again.
+async fn get_agent_block_history(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, label)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    use rusty_agent_runtime::memory::{MemoryQuery, MemoryScope, ScopeAddress};
+    if !crate::platform_tools::block_label_ok(&label) {
+        return Err(ApiError::bad_request(format!(
+            "`{label}` is not a block label"
+        )));
+    }
+    let mut versions = state
+        .server_store
+        .query_memory(
+            tenant.tenant(),
+            &MemoryQuery {
+                scope: Some(ScopeAddress::new(MemoryScope::Agent, &assistant_id)),
+                key: Some(format!("block.{label}")),
+                include_superseded: true,
+                include_expired: true,
+                ..Default::default()
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    versions.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.memory_id.cmp(&a.memory_id))
+    });
+    let current = versions.first().map(|r| r.memory_id.clone());
+    let listed: Vec<Value> = versions
+        .iter()
+        .map(|r| {
+            let text = crate::platform_tools::block_value(r);
+            json!({
+                "version": r.memory_id,
+                "author": r.provenance.author.as_id_string(),
+                "written_at": r.created_at,
+                "chars": text.chars().count(),
+                "lines": text.lines().filter(|l| !l.trim().is_empty()).count(),
+                "text": text,
+                "supersedes": r.supersedes,
+                "current": Some(&r.memory_id) == current.as_ref(),
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "label": label, "versions": listed })))
+}
+
+/// `PUT /assistants/{id}/memory/blocks/{label}` — a person sets a block's
+/// text: the same record the agent's `memory.block_edit` writes, authored
+/// by the person, superseding the current one, held to the block's limit
+/// (`422` past it). Shows in the agent's prompt from its next run.
+async fn put_agent_block(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, label)): Path<(String, String)>,
+    Json(payload): Json<PutBlockPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let label = label.trim().to_lowercase();
+    let block = match crate::platform_tools::declared_blocks(&record.config)
+        .into_iter()
+        .find(|b| b.label == label)
+    {
+        Some(b) => b,
+        None => match payload.char_limit {
+            Some(limit) if crate::platform_tools::block_label_ok(&label) => {
+                crate::platform_tools::DeclaredBlock {
+                    label: label.clone(),
+                    description: String::new(),
+                    char_limit: limit.clamp(100, 8_000),
+                }
+            }
+            _ => {
+                return Err(ApiError::not_found(format!(
+                    "assistant `{assistant_id}` declares no block `{label}` — a working copy that declares one sends its limit with the write"
+                )));
+            }
+        },
+    };
+    let lines: Vec<String> = payload
+        .text
+        .lines()
+        .map(|l| l.trim().to_owned())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let value = lines.join("\n");
+    if let Some(what) = rusty_agent_runtime::memory::looks_like_secret(&value) {
+        return Err(ApiError::unprocessable(format!(
+            "not saved: the block carries {what}. Credentials live in connections, never in memory — keep the fact and leave out the value"
+        )));
+    }
+    if value.chars().count() > block.char_limit {
+        return Err(ApiError::unprocessable(format!(
+            "the block would hold {} characters and its limit is {}; shorten it first",
+            value.chars().count(),
+            block.char_limit
+        )));
+    }
+    let previous =
+        crate::platform_tools::block_record(&state, tenant.tenant(), &assistant_id, &label)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+    let author = rusty_agent_runtime::memory::ProvenanceAuthor::Human {
+        human_id: tenant.principal().id.clone(),
+    };
+    let written = crate::platform_tools::write_block(
+        &state,
+        tenant.tenant(),
+        &assistant_id,
+        &label,
+        &value,
+        author,
+        previous.as_ref(),
+        false,
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(json!({
+        "label": label,
+        "text": value,
+        "chars": value.chars().count(),
+        "limit": block.char_limit,
+        "version": written.memory_id,
+        "supersedes": previous.map(|p| p.memory_id),
+        "note": "durable now; the agent sees it from its next run",
+    })))
+}
+
+async fn get_assistant(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+) -> Result<Json<AssistantView>, ApiError> {
+    state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .map(|record| Json(record.view(assistant_id.clone())))
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct AssistantLifecyclePayload {
+    expected_active_version_id: String,
+}
+
+async fn archive_assistant(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<AssistantLifecyclePayload>,
+) -> Result<Json<Value>, ApiError> {
+    set_assistant_lifecycle(state, tenant, assistant_id, payload, true).await
+}
+
+async fn restore_assistant(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<AssistantLifecyclePayload>,
+) -> Result<Json<Value>, ApiError> {
+    set_assistant_lifecycle(state, tenant, assistant_id, payload, false).await
+}
+
+async fn set_assistant_lifecycle(
+    state: Arc<AppState>,
+    tenant: TenantContext,
+    assistant_id: String,
+    payload: AssistantLifecyclePayload,
+    archived: bool,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&payload.expected_active_version_id) {
+        return Err(ApiError::bad_request(
+            "`expected_active_version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    let outcome = state
+        .server_store
+        .set_assistant_archived(
+            &tenant.scope(&assistant_id),
+            &payload.expected_active_version_id,
+            archived,
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    let (changed, record) = match outcome {
+        SetLifecycleOutcome::Changed { record } => (true, record),
+        SetLifecycleOutcome::Already { record } => (false, record),
+        SetLifecycleOutcome::AssistantNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant `{assistant_id}` not found"
+            )));
+        }
+        SetLifecycleOutcome::Stale { active_version_id } => {
+            return Err(ApiError::conflict(format!(
+                "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before changing lifecycle"
+            )));
+        }
+    };
+    Ok(Json(json!({
+        "assistant": record.view(assistant_id),
+        "changed": changed,
+        "lifecycle": if archived { "archived" } else { "active" },
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateAssistantVersionPayload {
+    base_version_id: String,
+    name: String,
+    graph: String,
+    #[serde(default)]
+    config: Option<Value>,
+    #[serde(default)]
+    metadata: Option<Value>,
+}
+
+async fn create_assistant_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+    Json(payload): Json<CreateAssistantVersionPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&payload.base_version_id) {
+        return Err(ApiError::bad_request(
+            "`base_version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    if payload.name.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "`name` must not be empty".to_string(),
+        ));
+    }
+    if !state.registry.contains(&payload.graph) {
+        return Err(ApiError::bad_request(format!(
+            "unknown graph `{}` (see GET /info for registered graphs)",
+            payload.graph
+        )));
+    }
+    let version = AssistantVersionRecord::new(
+        Some(payload.base_version_id.clone()),
+        payload.name,
+        payload.graph,
+        payload.config.unwrap_or(Value::Null),
+        attributed(payload.metadata, &tenant),
+        Utc::now(),
+    );
+    let scoped_id = tenant.scope(&assistant_id);
+    let outcome = state
+        .server_store
+        .create_assistant_version(&scoped_id, &payload.base_version_id, &version)
+        .await
+        .map_err(internal_err)?;
+    let (created, mut record, stored) = match outcome {
+        CreateVersionOutcome::Created { record, version } => (true, record, version),
+        CreateVersionOutcome::Existing { record, version } => (false, record, version),
+        CreateVersionOutcome::AssistantNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant `{assistant_id}` not found"
+            )));
+        }
+        CreateVersionOutcome::Stale { active_version_id } => {
+            return Err(ApiError::conflict(format!(
+                "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before creating a version"
+            )));
+        }
+        CreateVersionOutcome::LimitReached => {
+            return Err(ApiError::unprocessable(
+                "assistant version history reached its 256-version limit".to_string(),
+            ));
+        }
+        CreateVersionOutcome::SizeLimitReached => {
+            return Err(ApiError::unprocessable(format!(
+                "assistant version exceeds the {} KiB per-version or {} KiB lineage boundary",
+                ASSISTANT_VERSION_BYTES_LIMIT / 1024,
+                ASSISTANT_LINEAGE_BYTES_LIMIT / 1024
+            )));
+        }
+    };
+    // Versions are content-addressed: a working copy edited back to what an
+    // earlier version held lands on that version. When that version had been
+    // declined as superseded — the studio's own mark when a later edit made
+    // it stale — it is the working copy again, and the mark comes off; a
+    // person's decline of a proposal stays, a fact the next proposal is
+    // written against.
+    let mut revived = false;
+    if !created {
+        if let Some(decline) = record.decline_of(&stored.version_id) {
+            if decline.reason.starts_with("superseded") {
+                revived = state
+                    .server_store
+                    .revive_assistant_version(&scoped_id, &stored.version_id)
+                    .await
+                    .map_err(internal_err)?;
+                if revived {
+                    if let Ok(Some(fresh)) = state.server_store.get_assistant(&scoped_id).await {
+                        record = fresh;
+                    }
+                }
+            }
+        }
+    }
+    let active_id = record.active_version_id();
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(json!({
+            "assistant_id": assistant_id,
+            "created": created,
+            "revived": revived,
+            "active_version_id": active_id,
+            "version": AssistantVersionView {
+                active: stored.version_id == active_id,
+                declined: record.decline_of(&stored.version_id),
+                version: stored,
+            },
+        })),
+    ))
+}
+
+/// `GET /proposals` — every open proposal across the tenant's agents, newest
+/// first: a version above the agent's active one that the Coach, a gap or
+/// the post-run review filed and nobody declined — so the inbox shows what
+/// waits for a person without opening every agent.
+async fn list_open_proposals(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut out: Vec<Value> = Vec::new();
+    for view in state
+        .server_store
+        .list_assistants()
+        .await
+        .map_err(internal_err)?
+    {
+        let Some(external) = tenant.unscope(&view.assistant_id).map(str::to_owned) else {
+            continue;
+        };
+        if view.archived_at.is_some() {
+            continue;
+        }
+        let Some(record) = state
+            .server_store
+            .get_assistant(&view.assistant_id)
+            .await
+            .map_err(internal_err)?
+        else {
+            continue;
+        };
+        let active = record.active_version_id();
+        let active_at = record
+            .versions
+            .iter()
+            .find(|v| v.version_id == active)
+            .map(|v| v.created_at);
+        for version in &record.versions {
+            let Some(by) = version
+                .metadata
+                .get("proposed_by")
+                .filter(|p| p.is_object())
+            else {
+                continue;
+            };
+            if version.version_id == active
+                || record.decline_of(&version.version_id).is_some()
+                || active_at.is_some_and(|at| version.created_at <= at)
+            {
+                continue;
+            }
+            let why = version
+                .metadata
+                .get("why")
+                .and_then(Value::as_str)
+                .filter(|w| !w.trim().is_empty())
+                .or_else(|| by.get("reason").and_then(Value::as_str))
+                .unwrap_or("")
+                .chars()
+                .take(400)
+                .collect::<String>();
+            out.push(json!({
+                "assistant_id": external,
+                "agent_name": view.name,
+                "version_id": version.version_id,
+                "proposed_by": by.get("name").and_then(Value::as_str).unwrap_or("a proposer"),
+                "kind": by.get("kind"),
+                "why": why,
+                "created_at": version.created_at,
+            }));
+        }
+    }
+    out.sort_by(|a, b| b["created_at"].as_str().cmp(&a["created_at"].as_str()));
+    Ok(Json(json!({ "proposals": out })))
+}
+
+async fn list_assistant_versions(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(assistant_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let active_id = record.active_version_id();
+    let assistant = record.view(assistant_id.clone());
+    if record.versions.len() > crate::assistants::ASSISTANT_VERSION_LIMIT {
+        return Err(ApiError::internal(
+            "assistant version history exceeds the supported limit".to_string(),
+        ));
+    }
+    let views = record.version_summaries();
+    Ok(Json(json!({
+        "assistant_id": assistant_id,
+        "active_version_id": active_id,
+        "assistant": assistant,
+        "versions": views,
+    })))
+}
+
+async fn get_assistant_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, version_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&version_id) {
+        return Err(ApiError::bad_request(
+            "`version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    let record = state
+        .server_store
+        .get_assistant(&tenant.scope(&assistant_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let active_id = record.active_version_id();
+    let version = record.version(&version_id).ok_or_else(|| {
+        ApiError::not_found(format!(
+            "assistant version `{version_id}` not found for `{assistant_id}`"
+        ))
+    })?;
+    Ok(Json(json!({
+        "assistant_id": assistant_id,
+        "active_version_id": active_id,
+        "version": AssistantVersionView {
+            active: version.version_id == active_id,
+            declined: record.decline_of(&version.version_id),
+            version,
+        },
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivateAssistantVersionPayload {
+    expected_active_version_id: String,
+    /// An admin's word past the gate: kept with the evidence it overrode.
+    #[serde(default)]
+    override_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeclineAssistantVersionPayload {
+    /// Why this version is not the one to run — a fact for whoever files
+    /// the next.
+    reason: String,
+}
+
+/// `POST /assistants/{id}/versions/{version_id}/decline` — a person says no
+/// to a version filed for them. It stays in the lineage; the decline sits
+/// beside it with who, why and when, and shows on the version from now on.
+/// The version that runs cannot be declined.
+async fn decline_assistant_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, version_id)): Path<(String, String)>,
+    Json(payload): Json<DeclineAssistantVersionPayload>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&version_id) {
+        return Err(ApiError::bad_request(
+            "`version_id` must be an exact assistant version id".to_string(),
+        ));
+    }
+    let reason = payload.reason.trim().to_owned();
+    if reason.is_empty() {
+        return Err(ApiError::bad_request(
+            "say why: the reason is what the next proposal is written against".to_string(),
+        ));
+    }
+    if reason.len() > 2000 {
+        return Err(ApiError::bad_request(
+            "the reason is limited to 2000 characters".to_string(),
+        ));
+    }
+    let decline = crate::assistants::VersionDecline {
+        version_id: version_id.clone(),
+        by: tenant.attribution(),
+        reason,
+        at: Utc::now(),
+    };
+    let outcome = state
+        .server_store
+        .decline_assistant_version(&tenant.scope(&assistant_id), &decline)
+        .await
+        .map_err(internal_err)?;
+    let (declined, record) = match outcome {
+        DeclineVersionOutcome::Declined { record } => (true, record),
+        DeclineVersionOutcome::Already { record } => (false, record),
+        DeclineVersionOutcome::AssistantNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant `{assistant_id}` not found"
+            )));
+        }
+        DeclineVersionOutcome::VersionNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant version `{version_id}` not found for `{assistant_id}`"
+            )));
+        }
+        DeclineVersionOutcome::Active => {
+            return Err(ApiError::conflict(format!(
+                "assistant version `{version_id}` is the one that runs; activate another before declining it"
+            )));
+        }
+    };
+    let active_id = record.active_version_id();
+    let version = record.version(&version_id).ok_or_else(|| {
+        ApiError::not_found(format!(
+            "assistant version `{version_id}` not found for `{assistant_id}`"
+        ))
+    })?;
+    Ok(Json(json!({
+        "assistant_id": assistant_id,
+        "declined": declined,
+        "active_version_id": active_id,
+        "version": AssistantVersionView {
+            active: version.version_id == active_id,
+            declined: record.decline_of(&version_id),
+            version,
+        },
+    })))
+}
+
+async fn activate_assistant_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((assistant_id, version_id)): Path<(String, String)>,
+    Json(payload): Json<ActivateAssistantVersionPayload>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("assistant_id", &assistant_id)?;
+    if !valid_version_id(&version_id) || !valid_version_id(&payload.expected_active_version_id) {
+        return Err(ApiError::bad_request(
+            "version ids must be exact assistant version ids".to_string(),
+        ));
+    }
+    let scoped_id = tenant.scope(&assistant_id);
+    let record = state
+        .server_store
+        .get_assistant(&scoped_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("assistant `{assistant_id}` not found")))?;
+    let target = record.version(&version_id).ok_or_else(|| {
+        ApiError::not_found(format!(
+            "assistant version `{version_id}` not found for `{assistant_id}`"
+        ))
+    })?;
+    if !state.registry.contains(&target.graph) {
+        return Err(ApiError::unprocessable(format!(
+            "assistant version `{version_id}` requires graph `{}`, which is not registered on this server",
+            target.graph
+        )));
+    }
+    // The promotion gate: current evidence on every suite bound to this
+    // agent, or an admin's recorded word.
+    let evidence = crate::promotion::evidence_for(
+        &state,
+        &tenant,
+        &record,
+        &version_id,
+        Some(payload.expected_active_version_id.as_str()),
+    )
+    .await?;
+    let override_reason = payload
+        .override_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(str::to_owned);
+    if !evidence.ok && override_reason.is_none() {
+        let missing: Vec<String> = evidence
+            .suites
+            .iter()
+            .filter(|s| s.state != "passed")
+            .map(|s| format!("{} ({})", s.name, s.state))
+            .collect();
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "evidence_required",
+            format!(
+                "version `{version_id}` has no current passing evidence on {}: evaluate it against each suite (POST /datasets/{{name}}/versions/{{version}}/evaluations with version_id), or activate with an override_reason",
+                missing.join(", ")
+            ),
+        )
+        .with("evidence", serde_json::to_value(&evidence).unwrap_or(Value::Null)));
+    }
+    let outcome = state
+        .server_store
+        .activate_assistant_version(&scoped_id, &version_id, &payload.expected_active_version_id)
+        .await
+        .map_err(internal_err)?;
+    let (activated, record) = match outcome {
+        ActivateVersionOutcome::Activated { record } => (true, record),
+        ActivateVersionOutcome::AlreadyActive { record } => (false, record),
+        ActivateVersionOutcome::AssistantNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant `{assistant_id}` not found"
+            )));
+        }
+        ActivateVersionOutcome::VersionNotFound => {
+            return Err(ApiError::not_found(format!(
+                "assistant version `{version_id}` not found for `{assistant_id}`"
+            )));
+        }
+        ActivateVersionOutcome::Stale { active_version_id } => {
+            return Err(ApiError::conflict(format!(
+                "assistant `{assistant_id}` now serves version `{active_version_id}`; refresh before activation"
+            )));
+        }
+    };
+    if activated {
+        // A gap the agent filed for a tool this version carries closes now.
+        let _ = crate::gaps::capability_pass(&state, &tenant, Utc::now()).await;
+        crate::promotion::record_promotion(
+            &state,
+            tenant.tenant(),
+            &assistant_id,
+            crate::promotion::Promotion {
+                version_id: version_id.clone(),
+                by: tenant.attribution(),
+                at: Utc::now(),
+                evidence: evidence.clone(),
+                override_reason,
+            },
+        )
+        .await;
+    }
+    Ok(Json(json!({
+        "assistant": record.view(assistant_id),
+        "activated": activated,
+        "evidence": evidence,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// Crons
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct CreateCronPayload {
+    /// Registered graph the fired runs execute. Optional when `assistant_id`
+    /// names the agent — the agent's graph is the graph.
+    #[serde(default)]
+    graph: Option<String>,
+    /// The agent the fired runs go through (charter, tools, skills). The
+    /// fired runs carry it like a run started from the API does.
+    #[serde(default)]
+    assistant_id: Option<String>,
+    /// Fixed-interval schedule in seconds (XOR `cron_expr`).
+    #[serde(default)]
+    interval_secs: Option<u64>,
+    /// 5-field cron expression, UTC (XOR `interval_secs`).
+    #[serde(default)]
+    cron_expr: Option<String>,
+    /// Initial state for fired runs (must be a JSON object when present).
+    #[serde(default)]
+    input: Option<Value>,
+    /// Client-chosen cron id (a UUID v4 is generated when omitted).
+    #[serde(default)]
+    cron_id: Option<String>,
+    #[serde(default)]
+    metadata: Option<Value>,
+    /// `"keep"` (default) or `"delete"` (remove the cron after its first
+    /// run reaches a terminal state).
+    #[serde(default)]
+    on_run_completed: Option<String>,
+    /// A world (by name or id) every fired run acts in — standing work
+    /// rehearsed in the stand-in. Refused when the tenant holds no such world.
+    #[serde(default)]
+    world: Option<String>,
+    /// Several worlds, one per system the agent touches; `world` is the first.
+    #[serde(default)]
+    worlds: Vec<String>,
+    /// The most runs the schedule may ever fire; absent is no cap.
+    #[serde(default)]
+    max_runs: Option<u64>,
+    /// The most tokens its runs may spend, all told; absent is no cap.
+    #[serde(default)]
+    max_tokens: Option<u64>,
+}
+
+async fn create_cron(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CreateCronPayload>,
+) -> Result<(StatusCode, Json<CronRecord>), ApiError> {
+    // The agent decides the graph; a graph named alongside it has to agree.
+    let graph = match (&payload.assistant_id, &payload.graph) {
+        (Some(assistant_id), named) => {
+            validate_client_id("assistant_id", assistant_id)?;
+            let assistant = state
+                .server_store
+                .get_assistant(&tenant.scope(assistant_id))
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("assistant `{assistant_id}` not found"))
+                })?;
+            if assistant.archived_at.is_some() {
+                return Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "assistant_archived",
+                    format!(
+                        "assistant `{assistant_id}` is archived; restore it before scheduling it"
+                    ),
+                ));
+            }
+            if let Some(named) = named {
+                if *named != assistant.graph {
+                    return Err(ApiError::bad_request(format!(
+                        "assistant `{assistant_id}` runs on graph `{}`, not `{named}`",
+                        assistant.graph
+                    )));
+                }
+            }
+            assistant.graph.clone()
+        }
+        (None, Some(graph)) => graph.clone(),
+        (None, None) => {
+            return Err(ApiError::bad_request(
+                "name the agent to schedule (`assistant_id`) or a graph".to_string(),
+            ));
+        }
+    };
+    if !state.registry.contains(&graph) {
+        return Err(ApiError::bad_request(format!(
+            "unknown graph `{graph}` (see GET /info for registered graphs)"
+        )));
+    }
+    crons::validate_schedule(payload.interval_secs, payload.cron_expr.as_deref())
+        .map_err(ApiError::bad_request)?;
+    if let Some(input) = &payload.input {
+        if !input.is_object() {
+            return Err(ApiError::bad_request(
+                "`input` must be a JSON object".to_string(),
+            ));
+        }
+    }
+    let on_run_completed = OnRunCompleted::parse(payload.on_run_completed.as_deref())
+        .map_err(ApiError::bad_request)?;
+    let cron_id = payload
+        .cron_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("cron_id", &cron_id)?;
+
+    // Persist under the tenant's internal id (same scoping as assistants);
+    // the wire shows the external id and the scheduler derives the owning
+    // tenant back from the prefix.
+    let resolved = crate::worlds::resolve_worlds(
+        &state,
+        tenant.tenant(),
+        payload.world.as_deref(),
+        &payload.worlds,
+        "the schedule",
+    )
+    .await?;
+    let world = resolved.first().map(|w| w.world_id.clone());
+    let world_name = resolved.first().map(|w| w.name.clone());
+    let (worlds, world_names): (Vec<String>, Vec<String>) = if resolved.len() > 1 {
+        resolved
+            .iter()
+            .map(|w| (w.world_id.clone(), w.name.clone()))
+            .unzip()
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let record = CronRecord {
+        cron_id: tenant.scope(&cron_id),
+        graph,
+        interval_secs: payload.interval_secs,
+        cron_expr: payload.cron_expr,
+        input: payload.input,
+        assistant_id: payload.assistant_id,
+        created_by: Some(tenant.attribution()),
+        metadata: payload.metadata.unwrap_or(Value::Null),
+        on_run_completed,
+        created_at: Utc::now(),
+        last_run_at: None,
+        runs_fired: 0,
+        held: None,
+        stalled: None,
+        max_runs: payload.max_runs.filter(|n| *n > 0),
+        max_tokens: payload.max_tokens.filter(|n| *n > 0),
+        tokens_spent: 0,
+        world,
+        world_name,
+        worlds,
+        world_names,
+    };
+    let created = state
+        .server_store
+        .create_cron(&record)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        return Err(ApiError::conflict(format!(
+            "cron `{cron_id}` already exists"
+        )));
+    }
+    let mut wire = record;
+    wire.cron_id = cron_id;
+    Ok((StatusCode::CREATED, Json(wire)))
+}
+
+async fn list_crons(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let records = state
+        .server_store
+        .list_crons()
+        .await
+        .map_err(internal_err)?;
+    // Only this tenant's crons, reported with their external ids.
+    let mut records: Vec<CronRecord> = records
+        .into_iter()
+        .filter_map(|mut record| {
+            let external = tenant.unscope(&record.cron_id)?.to_string();
+            record.cron_id = external;
+            Some(record)
+        })
+        .collect();
+    records.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.cron_id.cmp(&b.cron_id))
+    });
+    Ok(Json(json!(records)))
+}
+
+async fn delete_cron(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(cron_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if state
+        .server_store
+        .delete_cron(&tenant.scope(&cron_id))
+        .await
+        .map_err(internal_err)?
+    {
+        Ok(Json(json!({ "cron_id": cron_id, "deleted": true })))
+    } else {
+        Err(ApiError::not_found(format!("cron `{cron_id}` not found")))
+    }
+}
+
+// --------------------------------------------------------------------- //
+// Store (cross-thread KV)
+// --------------------------------------------------------------------- //
+
+async fn put_store_item(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((namespace, key)): Path<(String, String)>,
+    Json(value): Json<Value>,
+) -> Result<(StatusCode, Json<store::StoreItem>), ApiError> {
+    store::validate_segment("namespace", &namespace)?;
+    store::validate_segment("key", &key)?;
+    // KV namespaces are tenant-scoped: the internal namespace carries the
+    // `{tenant}/` prefix, the wire item reports the external namespace.
+    let (mut item, created) = state
+        .server_store
+        .kv_put(&tenant.scope(&namespace), &key, value)
+        .await
+        .map_err(internal_err)?;
+    item.namespace = namespace;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(item)))
+}
+
+async fn get_store_item(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((namespace, key)): Path<(String, String)>,
+) -> Result<Json<store::StoreItem>, ApiError> {
+    store::validate_segment("namespace", &namespace)?;
+    store::validate_segment("key", &key)?;
+    state
+        .server_store
+        .kv_get(&tenant.scope(&namespace), &key)
+        .await
+        .map_err(internal_err)?
+        .map(|mut item| {
+            item.namespace = namespace.clone();
+            Json(item)
+        })
+        .ok_or_else(|| ApiError::not_found(format!("no store item at `{namespace}/{key}`")))
+}
+
+async fn delete_store_item(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((namespace, key)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    store::validate_segment("namespace", &namespace)?;
+    store::validate_segment("key", &key)?;
+    if state
+        .server_store
+        .kv_delete(&tenant.scope(&namespace), &key)
+        .await
+        .map_err(internal_err)?
+    {
+        Ok(Json(
+            json!({ "namespace": namespace, "key": key, "deleted": true }),
+        ))
+    } else {
+        Err(ApiError::not_found(format!(
+            "no store item at `{namespace}/{key}`"
+        )))
+    }
+}
+
+async fn list_store_namespace(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(namespace): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    store::validate_segment("namespace", &namespace)?;
+    let items = state
+        .server_store
+        .kv_list(&tenant.scope(&namespace))
+        .await
+        .map_err(internal_err)?;
+    let items: Vec<store::StoreItem> = items
+        .into_iter()
+        .map(|mut item| {
+            item.namespace = namespace.clone();
+            item
+        })
+        .collect();
+    Ok(Json(json!(items)))
+}
+
+// --------------------------------------------------------------------- //
+// Durable task queue (R0.6)
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct EnqueueTaskPayload {
+    /// Work classification the worker fleet dispatches on (free-form).
+    pub(crate) kind: String,
+    /// Work payload: any JSON value, stored verbatim.
+    pub(crate) payload: Value,
+    /// Named pool (default `default`); workers claim from named pools.
+    #[serde(default)]
+    pub(crate) pool: Option<String>,
+    /// Attempt ceiling before dead-lettering (default 3, max 100).
+    #[serde(default)]
+    pub(crate) max_attempts: Option<u32>,
+    /// Dedup key, unique per tenant across live tasks: re-enqueueing with
+    /// the same key returns the existing task (`deduplicated: true`).
+    #[serde(default)]
+    pub(crate) idempotency_key: Option<String>,
+    /// Declared effect classification of the work (`pure` / `read_only` /
+    /// `idempotent` / `compensatable` / `non_idempotent`, the Flight
+    /// Recorder taxonomy). The retry policy's effect gate: a declared
+    /// non-repeatable effect is never silently retried. Optional — when
+    /// absent, the worker's per-attempt `retryable` flag decides.
+    #[serde(default)]
+    pub(crate) effect: Option<String>,
+    /// Run linkage: the run this task belongs to.
+    /// `POST /runs/{run_id}/cancel` cancels every non-terminal task
+    /// carrying its run id — the run-level half of cancellation
+    /// propagation. Optional; the outbox wave sets this from the run
+    /// itself.
+    #[serde(default)]
+    pub(crate) run_id: Option<String>,
+    /// Thread linkage (companion to `run_id`).
+    #[serde(default)]
+    pub(crate) thread_id: Option<String>,
+    /// Whole-task deadline (RFC 3339), across attempts. Past it the claim
+    /// path finalizes the task as cancelled instead of leasing it, and a
+    /// worker that sees it pass mid-attempt reports the attempt cancelled.
+    #[serde(default)]
+    pub(crate) deadline: Option<String>,
+    /// Version pin (R0.6 wave 3): the exact worker version string this task
+    /// may be leased to — a run stamps its tasks with the version it started
+    /// against, so a mid-run deploy never changes semantics under an
+    /// in-flight execution. Exact match only; absent = unpinned, any worker.
+    #[serde(default)]
+    pub(crate) worker_version: Option<String>,
+    /// Mailbox recipient (R0.7 Agent Fabric, wave 1): when set, the task is
+    /// a message addressed to one agent (`agent:{id}`) and drains only
+    /// through the turn-serialized `POST /agents/{id}/mailbox/next` claim —
+    /// pool claims never hand it out. Pool capacity and worker-version pins
+    /// do not apply to mailbox traffic. `POST /agents/{id}/mailbox` is the
+    /// manifest-validating front door; this field is the direct-queue
+    /// equivalent for embedders.
+    #[serde(default)]
+    pub(crate) recipient: Option<String>,
+    /// Causal parentage (R0.7 wave 3): the journal event id this task is
+    /// submitted under, stitched into the team's trace by TeamTrace.
+    /// Optional — coordination member tasks carry it (the runtime sets it,
+    /// not the member); ordinary submissions leave it absent.
+    #[serde(default)]
+    pub(crate) parent: Option<String>,
+    /// Parent task id for stage-barrier grouping (EP-09-S05).
+    #[serde(default)]
+    pub(crate) parent_task_id: Option<String>,
+    /// Stage ordinal for barrier grouping (EP-09-S05); 0 = unstaged.
+    #[serde(default)]
+    pub(crate) stage: Option<u32>,
+    /// Status category for barrier semantics (EP-09-S05).
+    #[serde(default)]
+    pub(crate) status_category: Option<String>,
+}
+
+/// Validate an enqueue payload and build the fresh [`TaskRecord`] it
+/// describes (server-minted id, caller's tenant). Shared by `POST /tasks`,
+/// `POST /tasks/outbox`, and `update_state`'s atomic `enqueue` list — one
+/// validation surface, so the three submission paths can never drift apart.
+pub(crate) fn build_task_record(
+    payload: EnqueueTaskPayload,
+    tenant: &TenantContext,
+) -> Result<TaskRecord, ApiError> {
+    tasks::validate_label("kind", &payload.kind, 256).map_err(ApiError::bad_request)?;
+    let pool = payload
+        .pool
+        .unwrap_or_else(|| tasks::DEFAULT_POOL.to_string());
+    tasks::validate_pool(&pool).map_err(ApiError::bad_request)?;
+    let max_attempts = payload.max_attempts.unwrap_or(tasks::DEFAULT_MAX_ATTEMPTS);
+    if !(1..=tasks::MAX_ATTEMPTS_LIMIT).contains(&max_attempts) {
+        return Err(ApiError::bad_request(format!(
+            "`max_attempts` must be within 1..={}",
+            tasks::MAX_ATTEMPTS_LIMIT
+        )));
+    }
+    if let Some(key) = &payload.idempotency_key {
+        tasks::validate_label("idempotency_key", key, 256).map_err(ApiError::bad_request)?;
+    }
+    let effect = payload
+        .effect
+        .as_deref()
+        .map(tasks::parse_effect)
+        .transpose()
+        .map_err(ApiError::bad_request)?;
+    if let Some(run_id) = &payload.run_id {
+        tasks::validate_label("run_id", run_id, 256).map_err(ApiError::bad_request)?;
+    }
+    if let Some(thread_id) = &payload.thread_id {
+        tasks::validate_label("thread_id", thread_id, 256).map_err(ApiError::bad_request)?;
+    }
+    let deadline = payload
+        .deadline
+        .as_deref()
+        .map(|raw| {
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|_| {
+                    ApiError::bad_request(format!(
+                        "`deadline` must be an RFC 3339 timestamp (got `{raw}`)"
+                    ))
+                })
+        })
+        .transpose()?;
+    if let Some(version) = &payload.worker_version {
+        tasks::validate_label("worker_version", version, 256).map_err(ApiError::bad_request)?;
+    }
+    if let Some(recipient) = &payload.recipient {
+        agents::validate_recipient(recipient).map_err(ApiError::bad_request)?;
+    }
+    if let Some(parent) = &payload.parent {
+        tasks::validate_label("parent", parent, 512).map_err(ApiError::bad_request)?;
+    }
+    if let Some(parent_task_id) = &payload.parent_task_id {
+        tasks::validate_label("parent_task_id", parent_task_id, 512)
+            .map_err(ApiError::bad_request)?;
+    }
+    let status_category = match payload.status_category.as_deref() {
+        Some("backlog") => tasks::StatusCategory::Backlog,
+        Some("todo") | None => tasks::StatusCategory::Todo,
+        Some("in_progress") => tasks::StatusCategory::InProgress,
+        Some("in_review") => tasks::StatusCategory::InReview,
+        Some("done") => tasks::StatusCategory::Done,
+        Some("cancelled") => tasks::StatusCategory::Cancelled,
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "unknown `status_category` `{other}` (expected backlog|todo|in_progress|in_review|done|cancelled)"
+            )));
+        }
+    };
+
+    Ok(TaskRecord::new(
+        tasks::NewTask {
+            task_id: uuid::Uuid::new_v4().to_string(),
+            tenant: tenant.tenant().to_string(),
+            kind: payload.kind,
+            payload: payload.payload,
+            pool,
+            max_attempts,
+            idempotency_key: payload.idempotency_key,
+            effect,
+            run_id: payload.run_id,
+            thread_id: payload.thread_id,
+            deadline,
+            worker_version: payload.worker_version,
+            recipient: payload.recipient,
+            parent: payload.parent,
+            parent_task_id: payload.parent_task_id,
+            stage: payload.stage.unwrap_or(0),
+            status_category,
+        },
+        Utc::now(),
+    ))
+}
+
+/// The wave-3 tenant quota gate, shared by every task submission surface
+/// (`POST /tasks`, `POST /tasks/outbox`, `update_state`'s atomic `enqueue`
+/// list) — one enforcement point, so the paths can never drift apart the
+/// way [`build_task_record`] keeps validation singular. Runs **before any
+/// write**: over quota answers `429 quota_exceeded` and nothing persists
+/// (the update_state path keeps its all-or-nothing shape).
+///
+/// Semantics per gauge (see [`crate::tasks::TaskUsage`] for the counts):
+/// `max_queued` counts the `additional` would-be tasks against the backlog;
+/// `max_in_flight` and `max_dlq` are pure backpressure — already at/over
+/// the cap rejects, since a submission adds neither. A submission that
+/// would have deduplicated on its idempotency key can also answer 429
+/// under pressure: safe (the pre-existing task is untouched) and simpler
+/// than reaching inside the store's dedup decision.
+pub(crate) async fn enforce_task_quota(
+    state: &AppState,
+    tenant: &TenantContext,
+    additional: usize,
+) -> Result<(), ApiError> {
+    let quota = state.config.quota_for(tenant.tenant());
+    if quota.is_unlimited() {
+        return Ok(());
+    }
+    let usage = state
+        .server_store
+        .task_usage(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    if let Some(max) = quota.max_queued {
+        if usage.queued as usize + additional > max {
+            return Err(ApiError::too_many_requests(format!(
+                "tenant task quota exceeded: {} tasks queued (+{additional} submitted) would pass the limit of {max} — let workers drain the queue or raise the quota",
+                usage.queued
+            )));
+        }
+    }
+    if let Some(max) = quota.max_in_flight {
+        if usage.in_flight as usize >= max {
+            return Err(ApiError::too_many_requests(format!(
+                "tenant task quota exceeded: {} tasks in flight at the limit of {max} — wait for workers to settle or raise the quota",
+                usage.in_flight
+            )));
+        }
+    }
+    if let Some(max) = quota.max_dlq {
+        if usage.dlq as usize >= max {
+            return Err(ApiError::too_many_requests(format!(
+                "tenant task quota exceeded: DLQ depth {} at the limit of {max} — inspect and re-drive the dead-letter queue before submitting more work",
+                usage.dlq
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The A2A bridge's submission path (R0.9 wave 4), sharing the quota gate
+/// and the store's idempotent enqueue with `POST /tasks`: the bridge must
+/// not become a quota bypass, and a redelivered A2A message dedups on its
+/// `messageId`-derived idempotency key the way a retried `POST /tasks`
+/// dedups on its own key. Returns the stored record plus the dedup flag.
+pub(crate) async fn a2a_enqueue(
+    state: &AppState,
+    tenant: &TenantContext,
+    record: &TaskRecord,
+) -> Result<(TaskRecord, bool), ApiError> {
+    enforce_task_quota(state, tenant, 1).await?;
+    state
+        .server_store
+        .enqueue_task(record)
+        .await
+        .map_err(internal_err)
+}
+/// false}` on creation, `200 {task_id, deduplicated: true}` when the
+/// idempotency key already names a live task in this tenant. `429` when the
+/// tenant is over its configured task quota (R0.6 wave 3).
+async fn enqueue_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<EnqueueTaskPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let mut record = build_task_record(payload, &tenant)?;
+    // Who queued it rides with the work (the payload is the worker's
+    // contract, stored verbatim): the run that works it is attributed to
+    // them, and when it pauses for a decision, they are the one told.
+    if record.payload.is_object() && record.payload.get("enqueued_by").is_none() {
+        record.payload["enqueued_by"] = tenant.attribution();
+    }
+    // A task that names a world in its payload (`world`, by name or id) is
+    // worked in that world: the pool worker puts the agent's run there.
+    // Resolved to the world's id here, refused when the tenant holds no
+    // such world — a task meant for a stand-in never reaches the live
+    // system by a typo.
+    let one = record
+        .payload
+        .get("world")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let more: Vec<String> = record
+        .payload
+        .get("worlds")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    if one.is_some() || !more.is_empty() {
+        let resolved = crate::worlds::resolve_worlds(
+            &state,
+            tenant.tenant(),
+            one.as_deref(),
+            &more,
+            "the task",
+        )
+        .await?;
+        if let Some(first) = resolved.first() {
+            record.payload["world"] = json!(first.world_id);
+            record.payload["world_name"] = json!(first.name);
+        }
+        if resolved.len() > 1 {
+            record.payload["worlds"] = json!(
+                resolved
+                    .iter()
+                    .map(|w| w.world_id.clone())
+                    .collect::<Vec<_>>()
+            );
+            record.payload["world_names"] =
+                json!(resolved.iter().map(|w| w.name.clone()).collect::<Vec<_>>());
+        } else if let Some(obj) = record.payload.as_object_mut() {
+            obj.remove("worlds");
+            obj.remove("world_names");
+        }
+    }
+    enforce_task_quota(&state, &tenant, 1).await?;
+    let (task, deduplicated) = state
+        .server_store
+        .enqueue_task(&record)
+        .await
+        .map_err(internal_err)?;
+    let status = if deduplicated {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((
+        status,
+        Json(json!({
+            "task_id": task.task_id,
+            "deduplicated": deduplicated,
+        })),
+    ))
+}
+
+/// `POST /tasks/outbox` — enqueue through the transactional outbox (R0.6
+/// wave 2b): the same payload as `POST /tasks`, but the task is written to
+/// the outbox and becomes claimable only when the relay publishes it into
+/// the queue (within one poll interval). `202 {task_id, deduplicated}` —
+/// accepted, not yet queued. Delivery is at-least-once: the relay publishes
+/// pending rows on every poll and on startup, deduped on the task's
+/// idempotency key, so a crash anywhere in the pipe neither loses nor
+/// doubles the task. Use this (or `update_state`'s `enqueue`) when the
+/// submission must commit atomically with a state change.
+async fn enqueue_task_outbox(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<EnqueueTaskPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let record = build_task_record(payload, &tenant)?;
+    // Same quota gate as direct enqueue: a pending outbox row counts
+    // against the tenant's backlog, so the outbox is not a quota bypass.
+    enforce_task_quota(&state, &tenant, 1).await?;
+    let (task, deduplicated) = state
+        .server_store
+        .outbox_enqueue(&record)
+        .await
+        .map_err(internal_err)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "task_id": task.task_id,
+            "deduplicated": deduplicated,
+        })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaimTaskPayload {
+    /// Stable worker identity; only this id may heartbeat/settle the lease.
+    worker_id: String,
+    /// Pools to claim from (default `["default"]`); an explicit empty list
+    /// is a 400 — it could never match a task.
+    #[serde(default)]
+    pools: Option<Vec<String>>,
+    /// The worker's version (R0.6 wave 3), matched exactly against a task's
+    /// `worker_version` pin: versioned workers take pinned and unpinned
+    /// work they match; a claim without a version takes unpinned work only.
+    #[serde(default)]
+    worker_version: Option<String>,
+    /// Visibility timeout in milliseconds (100..=3_600_000).
+    lease_ms: u64,
+}
+
+/// `POST /tasks/claim` — take the oldest claimable task: `200 {"task": {…}}`
+/// with a fresh lease, or `204` (empty body) when nothing is claimable.
+/// Claimable means queued, failed past its backoff schedule, or leased past
+/// its visibility timeout (safe reassignment after worker loss) — and, since
+/// wave 3, in a pool below its configured concurrency limit
+/// ([`ServerConfig::with_pool_limit`]) and matched by the worker's
+/// advertised `worker_version` when the task is pinned.
+async fn claim_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ClaimTaskPayload>,
+) -> Result<Response, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    tasks::validate_lease_ms(payload.lease_ms).map_err(ApiError::bad_request)?;
+    if let Some(version) = &payload.worker_version {
+        tasks::validate_label("worker_version", version, 256).map_err(ApiError::bad_request)?;
+    }
+    let pools = payload
+        .pools
+        .unwrap_or_else(|| vec![tasks::DEFAULT_POOL.to_string()]);
+    if pools.is_empty() {
+        return Err(ApiError::bad_request(
+            "`pools` must name at least one pool".to_string(),
+        ));
+    }
+    for pool in &pools {
+        tasks::validate_pool(pool).map_err(ApiError::bad_request)?;
+    }
+
+    // R0.10 wave 4: the claim path's lease bound follows the tenant's
+    // active policy — queue scheduling is deployment-scoped, so a run's
+    // admission pin does not govern queue timing here (the fail path's
+    // retry decision does honor it — see `fail_task`). A resolution failure
+    // fails closed to the static floor: no bound, the pre-wave-4 lease.
+    let timeout_record = policy::active_policy_record(&state.server_store, tenant.tenant())
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "active policy unreadable; claiming on the static floor");
+            policy::static_floor_record()
+        });
+    let now = Utc::now();
+    let claimed = state
+        .server_store
+        .claim_task(
+            tenant.tenant(),
+            &payload.worker_id,
+            &tasks::ClaimScope {
+                pools: &pools,
+                pool_limits: &state.config.task_pool_limits,
+                worker_version: payload.worker_version.as_deref(),
+                timeout_policy: &timeout_record.policy,
+            },
+            payload.lease_ms,
+            now,
+        )
+        .await
+        .map_err(internal_err)?;
+    Ok(match claimed {
+        Some(task) => {
+            journal_timeout_decision(&state, &tenant, &task, &timeout_record, now).await;
+            Json(json!({ "task": task.wire() })).into_response()
+        }
+        None => StatusCode::NO_CONTENT.into_response(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct HeartbeatTaskPayload {
+    worker_id: String,
+    /// New visibility timeout in milliseconds, from now.
+    lease_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompleteTaskPayload {
+    worker_id: String,
+    /// The task's result: any JSON value, stored on the record.
+    result: Value,
+    /// The effect receipt (R0.6 wave 2b): the provider's confirmation of an
+    /// idempotent effect performed by this task, journaled into the task's
+    /// run as an `effect_receipt` event when the task carries run linkage.
+    #[serde(default)]
+    receipt: Option<EffectReceipt>,
+    /// Settlement cost evidence (R0.7 wave 3): the token usage this task
+    /// consumed, reported at completion. Stored on the record, where the
+    /// coordination runtime's waste accounting reads it.
+    #[serde(default)]
+    tokens: Option<Usage>,
+    /// See `tokens`.
+    #[serde(default)]
+    cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FailTaskPayload {
+    worker_id: String,
+    /// Free-form error classification (`timeout`, `rate_limit`, `bug`, …),
+    /// stored for DLQ triage.
+    error_class: String,
+    /// The failure message, stored as the task's `last_error`.
+    message: String,
+    /// The worker's permanence judgment: `false` dead-letters immediately,
+    /// regardless of remaining attempts.
+    retryable: bool,
+    /// Settlement cost evidence (R0.7 wave 3): what the failed attempt
+    /// consumed, when the worker knows. A race loser's reported waste
+    /// survives on the record.
+    #[serde(default)]
+    tokens: Option<Usage>,
+    /// See `tokens`.
+    #[serde(default)]
+    cost_usd: Option<f64>,
+}
+
+/// Shared 404/409 mapping for the lease-guarded mutations: 404 when the task
+/// is unknown to this tenant, 409 when it exists but the caller does not
+/// hold its lease (never leased, already settled, or reclaimed by another
+/// worker after the visibility timeout expired).
+fn lease_outcome(
+    outcome: MutationOutcome,
+    task_id: &str,
+    worker_id: &str,
+) -> Result<TaskRecord, ApiError> {
+    match outcome {
+        MutationOutcome::Applied(task) => Ok(*task),
+        MutationOutcome::LeaseLost => Err(ApiError::conflict(format!(
+            "task `{task_id}` is not leased to worker `{worker_id}` (lost, expired and reclaimed, or already settled)"
+        ))),
+        MutationOutcome::Unknown => Err(ApiError::not_found(format!("task `{task_id}` not found"))),
+    }
+}
+
+/// `POST /tasks/{id}/heartbeat` — extend the held lease → `200
+/// {"lease_expires_at": "…", "cancel_requested": bool}`; `409` when the
+/// lease is lost. `cancel_requested` is the cancellation hint: the holder
+/// should abort the attempt and report it as `cancelled` through the fail
+/// path (a holder that never asks is finalized by the claim path once its
+/// lease lapses).
+async fn heartbeat_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(task_id): Path<String>,
+    Json(payload): Json<HeartbeatTaskPayload>,
+) -> Result<Json<Value>, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    tasks::validate_lease_ms(payload.lease_ms).map_err(ApiError::bad_request)?;
+    let outcome = state
+        .server_store
+        .heartbeat_task(
+            tenant.tenant(),
+            &task_id,
+            &payload.worker_id,
+            payload.lease_ms,
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    let task = lease_outcome(outcome, &task_id, &payload.worker_id)?;
+    let expires_at = task.lease.as_ref().map(|lease| lease.expires_at);
+    Ok(Json(json!({
+        "lease_expires_at": expires_at,
+        "cancel_requested": task.cancel_requested,
+    })))
+}
+
+/// `POST /tasks/{id}/complete` — settle the held lease successfully, storing
+/// `result` → `200` with the updated task record; `409` when the lease is
+/// lost. A `receipt` in the payload is stored on the record and journaled
+/// into the task's run (see [`journal_effect_receipt`]); its idempotency key
+/// must match the task's — a receipt under a different key is evidence of a
+/// wiring bug, answered `400`.
+async fn complete_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(task_id): Path<String>,
+    Json(payload): Json<CompleteTaskPayload>,
+) -> Result<Json<Value>, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    if let Some(receipt) = &payload.receipt {
+        // The receipt claims to confirm *this* task's effect; a key
+        // mismatch means the worker confirmed something else. Checked
+        // against the stored record before settling (an unknown task skips
+        // the check — the lease protocol's 404/409 decides instead).
+        if let Some(task) = state
+            .server_store
+            .get_task(tenant.tenant(), &task_id)
+            .await
+            .map_err(internal_err)?
+        {
+            if task.idempotency_key.as_ref() != Some(&receipt.idempotency_key) {
+                return Err(ApiError::bad_request(format!(
+                    "`receipt.idempotency_key` `{}` does not match the task's idempotency key `{:?}`",
+                    receipt.idempotency_key, task.idempotency_key
+                )));
+            }
+        }
+    }
+    let outcome = state
+        .server_store
+        .complete_task(
+            tenant.tenant(),
+            &task_id,
+            &payload.worker_id,
+            tasks::CompletionReport {
+                result: payload.result,
+                receipt: payload.receipt,
+                cost: tasks::SettlementCost {
+                    tokens: payload.tokens,
+                    cost_usd: payload.cost_usd,
+                },
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    let task = lease_outcome(outcome, &task_id, &payload.worker_id)?;
+    journal_effect_receipt(&state, &tenant, &task).await;
+    // Coordination trigger (R0.7 wave 3): a settled member task drives its
+    // pattern forward. The settlement is already durable; the drive
+    // composes after it, never inside the lease guard (the supervision
+    // precedent).
+    coordination::on_task_settled(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        &tenant,
+        &task,
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
+    // A2A bridge (R0.9 wave 4): fan the settlement out to any live
+    // `message/stream` attachment. A no-op for non-A2A tasks.
+    crate::a2a::publish_task_update(&state, &task).await;
+    Ok(Json(task.wire()))
+}
+
+/// Journal a completed task's effect receipt into its run's persisted
+/// Flight Recorder journal (R0.6 wave 2b): an `effect_receipt` RunEvent
+/// whose causal parent is the journal's current head — the honest parent
+/// while task lifecycle events (submission, lease, completion) are not yet
+/// journaled; once they are, the receipt's parent becomes the task's
+/// completion event. Exact replay's receipt lookup
+/// (`JournalSnapshot::find_effect_receipt`) then serves the receipt instead
+/// of re-sending the effect.
+///
+/// Deliberately best-effort: the receipt is already durable on the task
+/// record, so a journaling failure (a live run whose journal is not yet
+/// persisted, a cross-tenant run linkage, a store error) is logged, never
+/// surfaced as a request failure. One honest gap, by design: while the run
+/// is still live, its next checkpoint-boundary journal flush rewrites the
+/// stored snapshot and would drop an appended receipt — the durable fix is
+/// the run-side wiring (the run journaling its task lifecycle itself), the
+/// documented integration point for a later wave.
+async fn journal_effect_receipt(state: &AppState, tenant: &TenantContext, task: &TaskRecord) {
+    let (Some(receipt), Some(run_id)) = (&task.receipt, &task.run_id) else {
+        return;
+    };
+    if let Err(error) = try_journal_effect_receipt(state, tenant, receipt, run_id).await {
+        tracing::warn!(
+            task_id = %task.task_id,
+            %run_id,
+            %error,
+            "effect receipt stays on the task record; journaling skipped"
+        );
+    }
+}
+
+/// The fallible body of [`journal_effect_receipt`], split out so the caller
+/// owns the logging decision.
+async fn try_journal_effect_receipt(
+    state: &AppState,
+    tenant: &TenantContext,
+    receipt: &EffectReceipt,
+    run_id: &str,
+) -> Result<(), String> {
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(|e| format!("load journal: {e}"))?
+    else {
+        return Err("run has no persisted journal yet".to_string());
+    };
+    // Ownership proof, the same shape as the run-evidence fallback: the
+    // journal's wire thread id scoped to this tenant must resolve, or the
+    // task's run linkage names another tenant's run and journaling into it
+    // would leak evidence across the isolation boundary.
+    let internal_thread_id = tenant.scope(&snapshot.thread_id);
+    let owned = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(|e| format!("resolve thread: {e}"))?
+        .is_some();
+    if !owned
+        || !run_readable(
+            tenant,
+            person_of_run(state, run_id, Some(&snapshot)).await.as_ref(),
+        )
+    {
+        return Err("run does not resolve in this tenant, or for this person".to_string());
+    }
+    let journal = Journal::from_snapshot(snapshot, Clock::System)
+        .map_err(|e| format!("journal failed its integrity check: {e}"))?;
+    let parent = journal.events().last().map(|event| event.id.clone());
+    journal.record_effect_receipt(receipt, parent);
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(|e| format!("persist journal: {e}"))
+}
+
+// --------------------------------------------------------------------- //
+// Governed memory (R0.8 Rusty Learn, wave 1)
+//
+// The write/read surface over core's memory contracts (`docs/learn-
+// design.md`, wave 1): content-addressed, immutable, scoped, attributed
+// records; structured retrieval with an optional token-bounded
+// deterministic assembly. Scope authorization is enforced here, at the
+// write gate — the store trusts what the route admitted.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct WriteMemoryPayload {
+    /// What the record is.
+    kind: MemoryKind,
+    /// Whose memory it is: `{scope, id}` (`run` scope is rejected — the
+    /// runtime writes run-scoped memory on a run's behalf).
+    scope: ScopeAddress,
+    /// The record body. Inline at or below the journal's payload
+    /// threshold; above it the body spills, content-addressed, into the
+    /// artifact store and reads re-inline it — the served record is
+    /// always self-contained.
+    content: Value,
+    /// Who writes it (`agent:{id}` / `human:{id}` / `distiller:{name}` /
+    /// `system`). Provenance is mandatory: a record that cannot name its
+    /// origin cannot be audited.
+    author: ProvenanceAuthor,
+    /// The writer-declared lookup key, when the record answers a named
+    /// question.
+    #[serde(default)]
+    key: Option<String>,
+    /// Writer-declared tags (retrieval matches by equality).
+    #[serde(default)]
+    tags: Vec<String>,
+    /// The assembly rank's first input (default 0).
+    #[serde(default)]
+    priority: i64,
+    /// What the record was derived from.
+    #[serde(default)]
+    evidence: Option<MemoryEvidence>,
+    /// The writer-declared confidence in `(0, 1]`. Optional for human
+    /// authors (defaults to 1.0 — the claim is the person's, stated
+    /// plainly); required for every other author.
+    #[serde(default)]
+    confidence: Option<f64>,
+    /// When the system learned it (default: now). Part of the content
+    /// address — provenance is identity — so an importer (or a retried
+    /// submission naming the same learning instant) converges on one
+    /// record, while two genuinely different learnings of the same
+    /// content stay distinct records.
+    #[serde(default)]
+    written_at: Option<DateTime<Utc>>,
+    /// Inclusive start of the claimed-true interval (default: now).
+    #[serde(default)]
+    valid_from: Option<DateTime<Utc>>,
+    /// Exclusive end of the claimed-true interval (default: open-ended).
+    #[serde(default)]
+    valid_until: Option<DateTime<Utc>>,
+    /// Optional TTL — expiration is a retrieval filter, not a reaper.
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+    /// The (bare) content address this record replaces, when it does.
+    #[serde(default)]
+    supersedes: Option<String>,
+    /// Journal the write into this run's Flight Recorder journal as a
+    /// `memory_write` event (best-effort — the write is durable in the
+    /// memory store either way), with `parent` as its causal parent.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id for the journaled write
+    /// (default: the journal's current head, the receipt precedent).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// The scope-authorization write gate (the design's gates), shared by
+/// `POST /memory` and the wave-2 correction/consolidation surfaces so the
+/// paths can never drift apart:
+/// - `run` scope → `400` unless `allow_run`: the runtime writes
+///   run-scoped memory on a run's behalf, and the correction loop is the
+///   one governed client path that may join it (a run-scope correction is
+///   adopted directly — it affects only the run that produced it).
+/// - `agent` scope → the agent must be registered in this tenant (`404`)
+///   and its manifest must declare `StateScope::Private` (`403`) — agent
+///   memory is the agent's own, and the manifest is what grants it.
+/// - `tenant` scope → the scope id must be the caller's own tenant
+///   (`403`): tenant isolation is not a scope a caller can cross.
+/// - `user` scope → the person's own: a person-bound caller may only name
+///   their own principal id (`403` otherwise); an administrator or a
+///   service key may name anyone's.
+/// - `team` scope rides tenant namespacing unchanged.
+async fn check_memory_scope_gate(
+    state: &AppState,
+    tenant: &TenantContext,
+    scope: &ScopeAddress,
+    allow_run: bool,
+) -> Result<(), ApiError> {
+    tasks::validate_label("scope.id", &scope.id, 256).map_err(ApiError::bad_request)?;
+    match scope.scope {
+        MemoryScope::Run if !allow_run => Err(ApiError::bad_request(
+            "`run`-scoped memory is runtime-only: the runtime writes it on a run's \
+             behalf — the API accepts `agent`, `team`, `user`, and `tenant` scopes"
+                .to_string(),
+        )),
+        MemoryScope::Run => Ok(()),
+        MemoryScope::Agent => {
+            let scoped_agent = tenant.scope(&scope.id);
+            let agent = state
+                .server_store
+                .get_agent(&scoped_agent)
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| ApiError::not_found(format!("agent `{}` not found", scope.id)))?;
+            if !agent.manifest.scopes.contains(&StateScope::Private) {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    format!(
+                        "agent `{}` does not declare the `private` state scope in its manifest \
+                         — agent-scoped memory is the agent's own, and the manifest is what \
+                         grants it",
+                        scope.id
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        MemoryScope::Tenant => {
+            if scope.id != tenant.tenant() {
+                return Err(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    format!(
+                        "tenant-scoped memory id `{}` is not the caller's tenant `{}` — \
+                         tenant isolation is not a scope a caller can cross",
+                        scope.id,
+                        tenant.tenant()
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        MemoryScope::User => {
+            if !tenant.may_act_for(&scope.id) {
+                return Err(not_your_memory(&scope.id, tenant));
+            }
+            Ok(())
+        }
+        MemoryScope::Team => Ok(()),
+    }
+}
+
+/// The refusal for another person's memory: a person's `user`-scoped
+/// memory is their own; only an administrator acts on someone else's.
+fn not_your_memory(id: &str, tenant: &TenantContext) -> ApiError {
+    ApiError::new(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        format!(
+            "user-scoped memory `{id}` is not yours (you are `{}`) — a person's memory is their \
+             own; an administrator may act on another's",
+            tenant.principal().id
+        ),
+    )
+}
+
+/// Whether a record is visible to the caller: everything but another
+/// person's `user`-scoped memory.
+fn memory_visible(record: &MemoryRecord, tenant: &TenantContext) -> bool {
+    record.scope.scope != MemoryScope::User || tenant.may_act_for(&record.scope.id)
+}
+
+/// `POST /memory/{memory_id}/accept` — a person accepts a note an agent
+/// (or the post-run review) proposed about them: the pending candidate
+/// is superseded by an adopted record of the same content in the person's
+/// name, and from then on it is recalled. Only the person the note is
+/// about — or whoever may act for them — accepts; a note that is not a
+/// pending candidate is refused, as is one already accepted.
+async fn accept_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(memory_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let tenant_id = tenant.tenant().to_owned();
+    let proposal = state
+        .server_store
+        .get_memory(&tenant_id, &memory_id)
+        .await
+        .map_err(internal_err)?
+        .filter(|record| memory_visible(record, &tenant))
+        .ok_or_else(|| ApiError::not_found(format!("memory `{memory_id}` not found")))?;
+    if proposal.candidacy.is_none() {
+        return Err(ApiError::conflict(format!(
+            "memory `{memory_id}` is not waiting for anyone — it is already kept"
+        )));
+    }
+    if proposal.scope.scope != MemoryScope::User {
+        return Err(ApiError::conflict(format!(
+            "memory `{memory_id}` is not a note about a person; a candidate at `{}` is adopted by evaluation",
+            proposal.scope.as_address()
+        )));
+    }
+    if !tenant.may_act_for(&proposal.scope.id) {
+        return Err(ApiError::forbidden(format!(
+            "only `{}` accepts a note about them",
+            proposal.scope.id
+        )));
+    }
+    let now = Utc::now();
+    let universe = memory_universe(&state, &tenant).await?;
+    if universe
+        .iter()
+        .any(|r| r.supersedes.as_deref() == Some(memory_id.as_str()) && r.candidacy.is_none())
+    {
+        return Err(ApiError::conflict(format!(
+            "memory `{memory_id}` was already accepted"
+        )));
+    }
+    let content = match &proposal.content {
+        rusty_agent_runtime::record::PayloadRef::Inline(value) => value.clone(),
+        rusty_agent_runtime::record::PayloadRef::Artifact(_) => {
+            return Err(ApiError::unprocessable(format!(
+                "memory `{memory_id}` keeps its body as an artifact; accept it by writing it again"
+            )));
+        }
+    };
+    let proposer = proposal.provenance.author.as_id_string();
+    let mut accepted = MemoryRecord::new(
+        proposal.kind,
+        proposal.scope.clone(),
+        rusty_agent_runtime::memory::MemoryProvenance {
+            author: rusty_agent_runtime::memory::ProvenanceAuthor::Human {
+                human_id: tenant.principal().id.clone(),
+            },
+            evidence: proposal.provenance.evidence.clone(),
+            written_at: now,
+        },
+        proposal.confidence,
+        rusty_agent_runtime::memory::ValidityWindow {
+            valid_from: now,
+            valid_until: proposal.validity.valid_until,
+        },
+        now,
+        content.clone(),
+    )
+    .map_err(|e| ApiError::unprocessable(e.to_string()))?
+    .with_priority(proposal.priority)
+    .with_tags(proposal.tags.iter().map(String::as_str))
+    .with_supersedes(proposal.memory_id.clone());
+    if let Some(key) = &proposal.key {
+        accepted = accepted.with_key(key.clone());
+    }
+    let created = state
+        .server_store
+        .put_memory(&tenant_id, &accepted, &content)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({
+        "accepted": accepted.memory_id,
+        "proposal": memory_id,
+        "proposed_by": proposer,
+        "created": created,
+        "record": accepted,
+    })))
+}
+
+/// `POST /memory/{memory_id}/confirm` — a person vouches for a note the
+/// runtime marked as learned from outside content: a record of the same
+/// content in the person's name, without the mark, supersedes it, and the
+/// agent reads it as confirmed from the next run. Only a marked note is
+/// confirmed; a note about a person is confirmed by that person, or
+/// whoever may act for them.
+async fn confirm_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(memory_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let tenant_id = tenant.tenant().to_owned();
+    let marked = state
+        .server_store
+        .get_memory(&tenant_id, &memory_id)
+        .await
+        .map_err(internal_err)?
+        .filter(|record| memory_visible(record, &tenant))
+        .ok_or_else(|| ApiError::not_found(format!("memory `{memory_id}` not found")))?;
+    if !rusty_agent_runtime::memory::is_untrusted(&marked) {
+        return Err(ApiError::conflict(format!(
+            "memory `{memory_id}` is not marked as learned from outside content — there is nothing to confirm"
+        )));
+    }
+    if marked.scope.scope == MemoryScope::User && !tenant.may_act_for(&marked.scope.id) {
+        return Err(ApiError::forbidden(format!(
+            "only `{}` confirms a note about them",
+            marked.scope.id
+        )));
+    }
+    let universe = memory_universe(&state, &tenant).await?;
+    if universe
+        .iter()
+        .any(|r| r.supersedes.as_deref() == Some(memory_id.as_str()))
+    {
+        return Err(ApiError::conflict(format!(
+            "memory `{memory_id}` was already superseded — confirm the newer note"
+        )));
+    }
+    let content = match &marked.content {
+        rusty_agent_runtime::record::PayloadRef::Inline(value) => value.clone(),
+        rusty_agent_runtime::record::PayloadRef::Artifact(_) => {
+            return Err(ApiError::unprocessable(format!(
+                "memory `{memory_id}` keeps its body as an artifact; confirm it by writing it again"
+            )));
+        }
+    };
+    let now = Utc::now();
+    let mut confirmed = MemoryRecord::new(
+        marked.kind,
+        marked.scope.clone(),
+        rusty_agent_runtime::memory::MemoryProvenance {
+            author: rusty_agent_runtime::memory::ProvenanceAuthor::Human {
+                human_id: tenant.principal().id.clone(),
+            },
+            evidence: marked.provenance.evidence.clone(),
+            written_at: now,
+        },
+        1.0,
+        rusty_agent_runtime::memory::ValidityWindow {
+            valid_from: now,
+            valid_until: marked.validity.valid_until,
+        },
+        now,
+        content.clone(),
+    )
+    .map_err(|e| ApiError::unprocessable(e.to_string()))?
+    .with_priority(marked.priority)
+    .with_tags(
+        marked
+            .tags
+            .iter()
+            .filter(|t| t.as_str() != rusty_agent_runtime::memory::ORIGIN_UNTRUSTED_TAG)
+            .map(String::as_str),
+    )
+    .with_supersedes(marked.memory_id.clone());
+    if let Some(key) = &marked.key {
+        confirmed = confirmed.with_key(key.clone());
+    }
+    // The person a proposed note is about accepts it by confirming it;
+    // a candidate elsewhere stays one, adopted by evaluation as before.
+    if marked.candidacy.is_some() && marked.scope.scope != MemoryScope::User {
+        confirmed = confirmed.with_candidacy(rusty_agent_runtime::memory::Candidacy::Pending);
+    }
+    let created = state
+        .server_store
+        .put_memory(&tenant_id, &confirmed, &content)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({
+        "confirmed": confirmed.memory_id,
+        "supersedes": memory_id,
+        "created": created,
+        "record": confirmed,
+    })))
+}
+
+/// `POST /memory` — write a governed memory record → `201 {memory_id,
+/// created, record}`; `200` + `created: false` when the content address
+/// is already stored (content addressing makes the write idempotent by
+/// construction — the `Effect::Idempotent` write converges).
+///
+/// The write gates (the design's scope authorization):
+/// - `run` scope → `400`: runtime-only, never client-written.
+/// - `agent` scope → the agent must be registered in this tenant (`404`)
+///   and its manifest must declare `StateScope::Private` (`403`) — agent
+///   memory is the agent's own, and the manifest is what grants it.
+/// - `tenant` scope → the scope id must be the caller's own tenant
+///   (`403`): tenant isolation is not a scope a caller can cross.
+/// - `team` / `user` scopes ride tenant namespacing unchanged.
+async fn write_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<WriteMemoryPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    check_memory_scope_gate(&state, &tenant, &payload.scope, false).await?;
+    // A credential is never stored as memory, whoever writes it.
+    if let Some(what) = payload
+        .content
+        .get("text")
+        .and_then(Value::as_str)
+        .and_then(rusty_agent_runtime::memory::looks_like_secret)
+    {
+        return Err(ApiError::unprocessable(format!(
+            "the note carries {what}; credentials live in connections, never in memory"
+        )));
+    }
+    let confidence = match (payload.confidence, &payload.author) {
+        (Some(confidence), _) => confidence,
+        (None, ProvenanceAuthor::Human { .. }) => 1.0,
+        (None, _) => {
+            return Err(ApiError::bad_request(
+                "`confidence` is required for non-human authors — human-authored records \
+                 default to 1.0 (the claim is the person's); every other author must declare \
+                 its confidence explicitly"
+                    .to_string(),
+            ));
+        }
+    };
+    if let Some(key) = &payload.key {
+        tasks::validate_label("key", key, 256).map_err(ApiError::bad_request)?;
+    }
+    let now = Utc::now();
+    let written_at = payload.written_at.unwrap_or(now);
+    let provenance = MemoryProvenance {
+        author: payload.author,
+        evidence: payload.evidence.unwrap_or_default(),
+        written_at,
+    };
+    let validity = ValidityWindow {
+        valid_from: payload.valid_from.unwrap_or(now),
+        valid_until: payload.valid_until,
+    };
+    let mut record = MemoryRecord::new(
+        payload.kind,
+        payload.scope,
+        provenance,
+        confidence,
+        validity,
+        // `created_at` duplicates `provenance.written_at` deliberately
+        // (the record stays self-contained when a consumer summarizes
+        // provenance away) — so it follows an explicit `written_at`.
+        written_at,
+        payload.content.clone(),
+    )
+    .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    if let Some(key) = payload.key {
+        record = record.with_key(key);
+    }
+    if !payload.tags.is_empty() {
+        record = record.with_tags(payload.tags);
+    }
+    if payload.priority != 0 {
+        record = record.with_priority(payload.priority);
+    }
+    if let Some(expires_at) = payload.expires_at {
+        record = record.with_expires_at(expires_at);
+    }
+    if let Some(supersedes) = payload.supersedes {
+        record = record.with_supersedes(supersedes);
+    }
+
+    let created = state
+        .server_store
+        .put_memory(tenant.tenant(), &record, &payload.content)
+        .await
+        .map_err(internal_err)?;
+    if let Some(run_id) = &payload.run_id {
+        journal_memory_write(&state, &tenant, run_id, &record, payload.parent).await;
+    }
+    // Serve the *stored* record, re-read through the store: artifact-
+    // spilled bodies come back re-inlined (self-contained), and on a
+    // dedupe the caller sees the record that is actually stored — the
+    // content address covers content + provenance only, so a re-write
+    // with different tags or priority does not update them, and the
+    // response must not pretend it did.
+    let stored = state
+        .server_store
+        .get_memory(tenant.tenant(), &record.memory_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::internal("memory record missing immediately after write".to_string())
+        })?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(json!({
+            "memory_id": stored.memory_id,
+            "created": created,
+            "record": stored,
+        })),
+    ))
+}
+
+/// `GET /memory/{memory_id}` — fetch one record by content address
+/// (`404` unknown/cross-tenant — the two are indistinguishable by
+/// design). Artifact-spilled bodies are re-inlined by the store, so the
+/// served record is self-contained.
+async fn get_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(memory_id): Path<String>,
+) -> Result<Json<MemoryRecord>, ApiError> {
+    state
+        .server_store
+        .get_memory(tenant.tenant(), &memory_id)
+        .await
+        .map_err(internal_err)?
+        .filter(|record| memory_visible(record, &tenant))
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("memory `{memory_id}` not found")))
+}
+
+// --------------------------------------------------------------------- //
+// The demand-side gap ledger (wave 2)
+//
+// The HTTP surface over core's `gaps` contracts (`docs/gap-ledger-
+// design.md`): one ledger per tenant, persisted as a whole snapshot
+// after every mutation. Every mutating handler runs the same cycle —
+// per-tenant lock, load-or-empty, mutate through core's validated API,
+// persist — so the store backends never merge and the mutation chains
+// inside the snapshot stay the store of record. Core's purity rule is
+// kept at the edge: timestamps are injected here (`Utc::now`), never
+// taken from a clock inside the ledger.
+// --------------------------------------------------------------------- //
+
+/// The per-tenant lock serializing gap-ledger mutations (see
+/// [`AppState::gap_locks`]).
+async fn gap_lock(state: &AppState, tenant: &str) -> Arc<Mutex<()>> {
+    state
+        .gap_locks
+        .lock()
+        .await
+        .entry(tenant.to_string())
+        .or_default()
+        .clone()
+}
+
+/// Load the tenant's ledger, or an empty one — an unread tenant costs
+/// no store row; the first mutation persists.
+pub(crate) async fn load_gap_ledger(state: &AppState, tenant: &str) -> Result<GapLedger, ApiError> {
+    Ok(state
+        .server_store
+        .get_gap_ledger(tenant)
+        .await
+        .map_err(internal_err)?
+        .unwrap_or_default())
+}
+
+/// Persist the tenant's snapshot after a mutation.
+pub(crate) async fn persist_gap_ledger(
+    state: &AppState,
+    tenant: &str,
+    ledger: &GapLedger,
+) -> Result<(), ApiError> {
+    state
+        .server_store
+        .put_gap_ledger(tenant, ledger)
+        .await
+        .map_err(internal_err)
+}
+
+/// Map a core ledger refusal onto the wire: schema violations are
+/// `400`, unknown ids `404`, and every state-machine or gate refusal is
+/// a `409` conflict — a ledger that drives autonomous work never fails
+/// silently, and it never fails ambiguously.
+pub(crate) fn gap_err(error: GapError) -> ApiError {
+    match &error {
+        GapError::EmptyField(_) | GapError::FieldTooLong { .. } | GapError::EmptyEvidence => {
+            ApiError::bad_request(error.to_string())
+        }
+        GapError::EmptyVotes => ApiError::bad_request(error.to_string()),
+        GapError::UnknownEvent(_) | GapError::UnknownGap(_) | GapError::UnknownMutation { .. } => {
+            ApiError::not_found(error.to_string())
+        }
+        GapError::EventExists(_)
+        | GapError::AnnotationExists(_)
+        | GapError::IllegalTransition { .. }
+        | GapError::UnvalidatedSpeculation(_)
+        | GapError::NotSpeculative(_)
+        | GapError::ProbeOnObserved(_)
+        | GapError::ClosureUnsatisfied { .. } => {
+            ApiError::new(StatusCode::CONFLICT, "conflict", error.to_string())
+        }
+        GapError::UnsupportedFormat(_) | GapError::Serde(_) => internal_err(error),
+    }
+}
+
+/// Whether a gap id was minted by the filing that just returned it
+/// (chain length 1 = `Filed` only) or reinforced an existing entry —
+/// the `201`/`200` distinction the memory write surface already makes.
+fn gap_created(ledger: &GapLedger, gap_id: &str) -> bool {
+    ledger
+        .chain(gap_id)
+        .map(|chain| chain.len() == 1)
+        .unwrap_or(false)
+}
+
+/// Run one locked mutation cycle and answer from its result.
+pub(crate) async fn mutate_gap_ledger<T>(
+    state: &AppState,
+    tenant: &TenantContext,
+    mutate: impl FnOnce(&mut GapLedger) -> Result<T, GapError>,
+) -> Result<T, ApiError> {
+    let lock = gap_lock(state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(state, tenant.tenant()).await?;
+    let result = mutate(&mut ledger).map_err(gap_err)?;
+    persist_gap_ledger(state, tenant.tenant(), &ledger).await?;
+    Ok(result)
+}
+
+#[derive(Debug, Deserialize)]
+struct GapEventPayload {
+    /// The citation anchor back into the source system.
+    source: EventSource,
+    /// Who acted (role-typed, pseudonymizable).
+    actor: ActorRef,
+    /// The channel the interaction arrived on.
+    channel: InteractionChannel,
+    /// The expressed need: query text, message, or short description.
+    utterance: String,
+    /// How it was resolved.
+    resolution_path: ResolutionPath,
+    /// What happened in the end — the failure variants are the
+    /// highest-value records.
+    outcome: InteractionOutcome,
+    /// When the interaction occurred (default: now — connectors should
+    /// always send the source row's own timestamp).
+    #[serde(default)]
+    occurred_at: Option<DateTime<Utc>>,
+    /// When it resolved, if it did.
+    #[serde(default)]
+    resolved_at: Option<DateTime<Utc>>,
+    /// Related event ids (journeys are data, not inference).
+    #[serde(default)]
+    links: Vec<String>,
+    /// Optionally assign an intent in the same call (the assignment is
+    /// versioned; `assigner` defaults to `api`).
+    #[serde(default)]
+    intent_id: Option<String>,
+    /// See `intent_id`.
+    #[serde(default)]
+    assigner: Option<String>,
+}
+
+/// `POST /gaps/events` — record an interaction event → `201 {event_id,
+/// created: true}`; `200` + `created: false` when the content address
+/// is already recorded (re-ingesting one source row converges — a
+/// re-run connector cannot double-count demand).
+async fn record_gap_event(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<GapEventPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let occurred_at = payload.occurred_at.unwrap_or(now);
+    let event = InteractionEvent::new(
+        payload.source,
+        payload.actor,
+        payload.channel,
+        payload.utterance,
+        payload.resolution_path,
+        payload.outcome,
+        occurred_at,
+        payload.resolved_at,
+        payload.links,
+    )
+    .map_err(gap_err)?;
+    let assigner = payload.assigner.unwrap_or_else(|| "api".to_string());
+    let (existed, event_id) = {
+        let lock = gap_lock(&state, tenant.tenant()).await;
+        let _guard = lock.lock().await;
+        let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+        let existed = ledger.event(&event.event_id).is_some();
+        let event_id = ledger.record_event(event).map_err(gap_err)?;
+        if let Some(intent_id) = payload.intent_id {
+            ledger
+                .assign_intent(&event_id, intent_id, assigner, now)
+                .map_err(gap_err)?;
+        }
+        persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+        (existed, event_id)
+    };
+    Ok((
+        if existed {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        },
+        Json(json!({ "event_id": event_id, "created": !existed })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct FileGapPayload {
+    /// What the gap is about (a mined intent or a free question shape).
+    subject: GapSubject,
+    /// What the agent does not know, in one sentence.
+    statement: String,
+    /// The citations justifying the gap — non-empty by schema.
+    evidence: Vec<Citation>,
+    /// Who files it: `operator`, `induction`, or `untrusted_derived`.
+    /// The runtime origins belong to the runtime-shaped endpoints
+    /// (`/gaps/file/escalation`, `/gaps/file/correction`,
+    /// `/gaps/file/zero_recall`), and `speculative` belongs to
+    /// `/gaps/speculative` — provenance classes are structurally
+    /// distinct because the ledger drives autonomous work.
+    origin: GapOrigin,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+    /// Observed demand volume behind the filing (default 1).
+    #[serde(default = "one")]
+    volume: u64,
+    /// The failure-cost estimate in milli-units (default 0).
+    #[serde(default)]
+    failure_cost_millis: u64,
+}
+
+fn one() -> u64 {
+    1
+}
+
+/// `POST /gaps/file` — file a gap → `201 {gap_id, created: true}`;
+/// `200` + `created: false` when the filing reinforced an existing
+/// entry (dedupe is reinforcement, not duplication). Filing against a
+/// closed entry reopens it — the ledger never forgets a gap closed on
+/// paper but not in practice.
+async fn file_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<FileGapPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    match payload.origin {
+        GapOrigin::Operator | GapOrigin::Induction | GapOrigin::UntrustedDerived => {}
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "origin `{other:?}` is not client-fileable: runtime origins belong to the \
+                 /gaps/file/* endpoints, speculative to /gaps/speculative — provenance \
+                 classes are structurally distinct"
+            )));
+        }
+    }
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_gap(
+            payload.subject,
+            payload.statement,
+            payload.evidence,
+            payload.origin,
+            payload.closure_criteria,
+            payload.volume,
+            payload.failure_cost_millis,
+            "api",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+/// The shared body of the runtime-shaped filing endpoints: an event
+/// citation plus the filing's own statement and closure criteria.
+#[derive(Debug, Deserialize)]
+struct RuntimeFilingPayload {
+    /// The interaction event behind the filing.
+    event_id: String,
+    /// What the agent does not know, in one sentence.
+    statement: String,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+    /// The failure-cost estimate in milli-units (default 0).
+    #[serde(default)]
+    failure_cost_millis: u64,
+}
+
+/// `POST /gaps/file/escalation` — file from an escalation event: a
+/// human had to resolve what the agent could not, and the entry closes
+/// only when the loop has extracted what the human did.
+async fn file_gap_escalation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RuntimeFilingPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_escalation(
+            &payload.event_id,
+            payload.statement,
+            payload.closure_criteria,
+            payload.failure_cost_millis,
+            "api:escalation",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+/// `POST /gaps/file/correction` — file from an operator or user
+/// correction, citing the event that produced it.
+async fn file_gap_correction(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RuntimeFilingPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_correction(
+            &payload.event_id,
+            payload.statement,
+            payload.closure_criteria,
+            payload.failure_cost_millis,
+            "api:correction",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ZeroRecallPayload {
+    /// The query recall returned nothing for.
+    query: String,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+    /// The failure-cost estimate in milli-units (default 0).
+    #[serde(default)]
+    failure_cost_millis: u64,
+}
+
+/// `POST /gaps/file/zero_recall` — file from a memory recall that
+/// returned nothing: a miss is evidence of a question the declared
+/// schema did not anticipate.
+async fn file_gap_zero_recall(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ZeroRecallPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.file_zero_recall(
+            &payload.query,
+            payload.closure_criteria,
+            payload.failure_cost_millis,
+            "api:zero-recall",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let created = gap_created(&ledger, &gap_id);
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({ "gap_id": gap_id, "created": created })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct SpeculativeGapPayload {
+    /// What the gap is about.
+    subject: GapSubject,
+    /// What the agent does not know, in one sentence.
+    statement: String,
+    /// The adjacency the expansion walked (structural / statistical /
+    /// model-prior, in descending order of trust).
+    adjacency: AdjacencySource,
+    /// The citation for the adjacency edge that justified the widening
+    /// — which source spoke, and which edge, stays in the record.
+    edge_citation: Citation,
+    /// The observable closure conditions.
+    closure_criteria: ClosureCriteria,
+}
+
+/// `POST /gaps/speculative` — file a frontier-expansion entry.
+/// Speculation cannot cite itself as evidence: the entry cannot hunt
+/// and never appears in the work order until a demand probe validates
+/// it (`/gaps/{gap_id}/probe`).
+async fn open_speculative_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SpeculativeGapPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let now = Utc::now();
+    let gap_id = mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.open_speculative(
+            payload.subject,
+            payload.statement,
+            payload.adjacency,
+            payload.edge_citation,
+            payload.closure_criteria,
+            "frontier:api",
+            now,
+        )
+    })
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "gap_id": gap_id, "created": true, "observed": false })),
+    ))
+}
+
+/// `GET /gaps` — the hunting loop's standing work order: actionable
+/// entries (open or reopened, speculation validated) ranked by
+/// priority.
+async fn work_order_gaps(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let row = |entry: &rusty_agent_runtime::gaps::GapLedgerEntry| {
+        json!({
+            "gap_id": entry.gap_id,
+            "subject": entry.subject,
+            "statement": entry.statement,
+            "origin": entry.origin,
+            "status": entry.status,
+            "volume": entry.volume,
+            "failure_cost_millis": entry.failure_cost_millis,
+            "priority_score": entry.priority_score(),
+            "filed_at": entry.filed_at,
+            "updated_at": entry.updated_at,
+            "closure_criteria": entry.closure_criteria,
+            "closes_on_tools": entry.closes_on_tools(),
+            "evidence": entry.evidence,
+            "resolution": entry.resolution,
+            // Who filed it — an agent's id when an agent did — so the
+            // backlog can be narrowed to one agent's gaps.
+            "filer": ledger.filer(&entry.gap_id),
+        })
+    };
+    let work_order: Vec<Value> = ledger.work_order().into_iter().map(row).collect();
+    // Beside the queue: gaps a run has claimed and waits on its verdict,
+    // and the newest closed ones with what closed them — so a gap that
+    // leaves the queue is seen to leave, not lost.
+    use rusty_agent_runtime::gaps::GapStatus;
+    let claimed: Vec<Value> = ledger
+        .entries()
+        .filter(|e| matches!(e.status, GapStatus::Hunting | GapStatus::TrialPending))
+        .map(row)
+        .collect();
+    let mut closed_entries: Vec<&rusty_agent_runtime::gaps::GapLedgerEntry> = ledger
+        .entries()
+        .filter(|e| e.status == GapStatus::Closed)
+        .collect();
+    closed_entries.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
+    let closed: Vec<Value> = closed_entries.into_iter().take(50).map(row).collect();
+    Ok(Json(
+        json!({ "work_order": work_order, "claimed": claimed, "closed": closed }),
+    ))
+}
+
+/// `GET /gaps/{gap_id}` — one entry with its full mutation chain (the
+/// chain is the store of record; the entry is its fold).
+async fn get_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({
+        "entry": entry,
+        "chain": ledger.chain(&gap_id),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct TransitionGapPayload {
+    /// The target status. Closure goes through `/gaps/{gap_id}/close`
+    /// — a bare transition to `closed` would be closure without
+    /// criteria, and core refuses it.
+    to: GapStatus,
+}
+
+/// `POST /gaps/{gap_id}/transition` — move an entry through the
+/// validated status machine (`409` on an illegal edge, on parking an
+/// observed gap, or on sending unvalidated speculation hunting).
+async fn transition_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<TransitionGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.transition(&gap_id, payload.to, "api", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProbeGapPayload {
+    /// Matching demand found in the event store.
+    demand_hits: u64,
+    /// Whether reachable supply already covers the intent.
+    supply_covered: bool,
+}
+
+/// `POST /gaps/{gap_id}/probe` — record a demand/supply probe against
+/// a speculative entry. Demand found validates the entry into the
+/// ordinary queue (the probe becomes a citation); an empty probe parks
+/// the entry under the decay clock.
+async fn probe_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<ProbeGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.record_probe(
+            &gap_id,
+            payload.demand_hits,
+            payload.supply_covered,
+            "probe:api",
+            now,
+        )
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct CloseGapPayload {
+    /// The evidence the closure check runs against — it must match the
+    /// entry's typed criteria or the close refuses (`409`).
+    evidence: ClosureEvidence,
+}
+
+/// `POST /gaps/{gap_id}/close` — mechanical closure: the ledger checks
+/// the entry's typed criteria against the supplied evidence and closes
+/// with a resolution link, or refuses.
+async fn close_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<CloseGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.evaluate_closure(&gap_id, &payload.evidence, "api", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct RollbackGapPayload {
+    /// The mutation id to restore state to. The restore re-folds the
+    /// chain prefix ending at the target — exact, never a
+    /// reconstruction.
+    to_mutation_id: String,
+}
+
+/// `POST /gaps/{gap_id}/rollback` — roll a gap back to a prior
+/// mutation, appending a `RolledBack` link (rollback is additive,
+/// never destructive: the chain keeps the full history).
+async fn rollback_gap(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<RollbackGapPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        ledger.rollback(&gap_id, &payload.to_mutation_id, "api", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GapOutcomePayload {
+    /// The intent the served turn belonged to.
+    intent_id: String,
+    /// The outcome class — a redo or correction is negative signal even
+    /// when it reads as a polite new instruction.
+    outcome: OutcomeClass,
+    /// How many outcomes of this class to record (default 1).
+    #[serde(default = "one")]
+    count: u64,
+}
+
+/// `POST /gaps/outcomes` — score served turns against their intent
+/// (the behavioral signal). Answers the intent's current failure rate
+/// per mille (`null` when unscored — an unmeasured intent is not a
+/// passing intent).
+async fn record_gap_outcome(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<GapOutcomePayload>,
+) -> Result<Json<Value>, ApiError> {
+    if payload.count == 0 {
+        return Err(ApiError::bad_request(
+            "`count` must be at least 1 — recording zero outcomes records nothing".to_string(),
+        ));
+    }
+    let lock = gap_lock(&state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    for _ in 0..payload.count {
+        ledger.record_outcome(&payload.intent_id, payload.outcome);
+    }
+    let failure_rate_millis = ledger.failure_rate_millis(&payload.intent_id);
+    persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+    Ok(Json(json!({
+        "intent_id": payload.intent_id,
+        "failure_rate_millis": failure_rate_millis,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GapAnnotationPayload {
+    /// The scored turn's anchor back into the log.
+    turn_ref: String,
+    /// The intent the turn was joined to (the miner's vocabulary).
+    intent_id: String,
+    /// The judge samples — at least one; the outcome is their majority
+    /// vote, a tie abstains to `neutral`.
+    judge_votes: Vec<JudgeVote>,
+    /// When the score was produced (default: now — scorers should send
+    /// the scoring run's own timestamp).
+    #[serde(default)]
+    scored_at: Option<DateTime<Utc>>,
+}
+
+/// `POST /gaps/annotations` — record a scored turn with its judge
+/// votes (the provenance-rich behavioral signal) → `201 {annotation_id,
+/// outcome, failure_rate_millis, closed_gap_ids}`. Re-recording the
+/// same annotation answers `200` by identity; a colliding id with
+/// different content is a `409`. A measurement that moves an intent's
+/// failure rate below an entry's threshold closes that entry in the
+/// same call — closure needs no human bookkeeping.
+async fn record_gap_annotation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<GapAnnotationPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let scored_at = payload.scored_at.unwrap_or_else(Utc::now);
+    let intent_id = payload.intent_id.clone();
+    let annotation = OutcomeAnnotation::from_votes(
+        payload.turn_ref,
+        payload.intent_id,
+        payload.judge_votes,
+        scored_at,
+    )
+    .map_err(gap_err)?;
+    let outcome = annotation.outcome;
+    let now = Utc::now();
+    let (recorded, existed) = mutate_gap_ledger(&state, &tenant, |ledger| {
+        let existed = ledger.annotation(&annotation.annotation_id).is_some();
+        ledger
+            .record_annotation(annotation, "api", now)
+            .map(|recorded| (recorded, existed))
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let status = if existed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((
+        status,
+        Json(json!({
+            "annotation_id": recorded.annotation_id,
+            "outcome": outcome,
+            "failure_rate_millis": ledger.failure_rate_millis(&intent_id),
+            "closed_gap_ids": recorded.closed_gap_ids,
+        })),
+    ))
+}
+
+/// `GET /gaps/intents/{intent_id}/outcomes` — the intent's per-turn
+/// efficacy record: the tally, the measured failure rate, and every
+/// annotation oldest first. "This skill cut this intent's correction
+/// rate" renders from this alone.
+async fn intent_outcome_curve(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(intent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let curve: Vec<&OutcomeAnnotation> = ledger.outcome_curve(&intent_id);
+    Ok(Json(json!({
+        "intent_id": intent_id,
+        "tally": ledger.tally(&intent_id),
+        "failure_rate_millis": ledger.failure_rate_millis(&intent_id),
+        "curve": curve,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct SweepGapsPayload {
+    /// The per-mille failure rate at or above which a closed gap
+    /// reopens.
+    threshold_millis: u32,
+}
+
+/// `POST /gaps/sweep` — the self-honesty pass: reopen closed gaps
+/// whose measured failure rate says the closure did not hold, and
+/// expire parked speculative entries whose decay clock ran out.
+async fn sweep_gaps(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SweepGapsPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    let (reopened, expired) = mutate_gap_ledger(&state, &tenant, |ledger| {
+        let reopened = ledger.sweep_reopens(payload.threshold_millis, "behavioral-signal", now)?;
+        let expired = ledger.expire_parked(now, "decay-clock")?;
+        Ok((reopened, expired))
+    })
+    .await?;
+    // A gap that names a tool: closed for the agent that can call it now,
+    // proposed on the agent that cannot while the platform has it.
+    let capability = crate::gaps::capability_pass(&state, &tenant, now).await;
+    // Claims whose runs never came back: settled on a late verdict, or
+    // released so the gap is back in the queue.
+    let claims = crate::gaps::release_stale_claims(&state, tenant.tenant(), now).await;
+    // Recall misses a later run answered: closed now, not at the nightly roll-up.
+    let recall_answered = crate::memory_utility::close_answered_misses(&state).await;
+    Ok(Json(json!({
+        "reopened": reopened,
+        "expired": expired,
+        "closed_on_capability": capability.get("closed").cloned().unwrap_or(json!([])),
+        "proposed_on_capability": capability.get("proposed").cloned().unwrap_or(json!([])),
+        "claims": claims,
+        "recall_answered": recall_answered,
+    })))
+}
+
+/// Every tool name an agent could be given right now: the connections'
+/// operations and the built-ins. What a gap that names a tool closes on.
+pub(crate) fn available_tool_names(state: &AppState) -> Vec<String> {
+    use rusty_agent_runtime::tool::ToolSource as _;
+    // What catalog.tools lists: every graph's registry (built-ins, the
+    // platform's own, the connections' operations), plus the live
+    // connection cell for an operation bound since the registry was read.
+    let mut names: Vec<String> = state
+        .registry
+        .names()
+        .iter()
+        .flat_map(|graph| state.registry.tool_capabilities(graph))
+        .map(|c| c.name)
+        .collect();
+    if let Some(cell) = &state.connection_tools {
+        names.extend(cell.tools().iter().map(|t| t.name().to_owned()));
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Close the gaps the platform's current tools satisfy — run when a
+/// connection lands, so a gap an agent filed on a missing operation
+/// closes the moment the connector is connected.
+pub(crate) async fn close_gaps_on_capabilities(state: &AppState) -> Vec<(String, String)> {
+    let tenant = TenantContext::new(crate::auth::DEFAULT_TENANT.to_owned(), Vec::new());
+    let available = available_tool_names(state);
+    let now = Utc::now();
+    match mutate_gap_ledger(state, &tenant, |ledger| {
+        ledger.close_on_capabilities(&available, "connection", now)
+    })
+    .await
+    {
+        Ok(closed) => {
+            if !closed.is_empty() {
+                tracing::info!(count = closed.len(), "gaps closed on capability");
+            }
+            closed
+        }
+        Err(error) => {
+            tracing::warn!(?error, "gaps not closed on capability");
+            Vec::new()
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct InductionRunPayload {
+    /// The reachable supply to invert (KB articles, runbooks, skills).
+    /// Empty is valid: every intent lands in the learn-now cell.
+    #[serde(default)]
+    artifacts: Vec<SupplyArtifact>,
+    /// Mining configuration (default: FTS+taxonomy, 400‰ Jaccard).
+    #[serde(default)]
+    mining_config: Option<MiningConfig>,
+    /// Coverage configuration (retired systems, staleness window,
+    /// keyword threshold).
+    #[serde(default)]
+    coverage_config: Option<CoverageConfig>,
+    /// The per-mille failure rate at or above which covered supply
+    /// counts as failing (default 200).
+    #[serde(default = "default_failing_threshold")]
+    failing_threshold_millis: u64,
+    /// Seed the ledger from the learn-now and failing-supply cells
+    /// (default false: a dry run renders the matrix only).
+    #[serde(default)]
+    seed: bool,
+    /// Emit declared-block specs for the top N intents (default 0).
+    #[serde(default)]
+    declared_blocks_top_n: usize,
+}
+
+fn default_failing_threshold() -> u64 {
+    DEFAULT_FAILING_THRESHOLD_MILLIS
+}
+
+/// Map an induction refusal onto the wire, delegating ledger refusals
+/// to the gap mapping.
+fn induction_err(error: InductionError) -> ApiError {
+    match error {
+        InductionError::EmptyField(_) | InductionError::FieldTooLong { .. } => {
+            ApiError::bad_request(error.to_string())
+        }
+        InductionError::Gap(gap) => gap_err(gap),
+        InductionError::UnsupportedFormat(_) | InductionError::Serde(_) => internal_err(error),
+    }
+}
+
+/// `POST /induction/run` — one composite induction pass: mine the
+/// tenant's recorded events into the intent map (appending versioned
+/// intent reassignments for events the new pass placed differently —
+/// never an in-place edit), invert the supplied artifacts into the
+/// coverage map, join the gap matrix, and optionally seed the ledger
+/// and emit declared blocks. The maps are projections: computed from
+/// the ledger's events and the caller's artifacts, answered, never
+/// stored.
+async fn induction_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<InductionRunPayload>,
+) -> Result<Json<Value>, ApiError> {
+    if payload.failing_threshold_millis > 1000 {
+        return Err(ApiError::bad_request(
+            "`failing_threshold_millis` is a per-mille rate: 0–1000".to_string(),
+        ));
+    }
+    let now = Utc::now();
+    let mining_config = payload.mining_config.unwrap_or_default();
+    let coverage_config = payload.coverage_config.unwrap_or_default();
+    let threshold = payload.failing_threshold_millis;
+    let seed = payload.seed;
+    let top_n = payload.declared_blocks_top_n;
+
+    let lock = gap_lock(&state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+
+    let events: Vec<InteractionEvent> = ledger.events().cloned().collect();
+    let intent_map = mine_intents(&events, &mining_config, now).map_err(induction_err)?;
+    // Later passes re-place events through appended versioned
+    // reassignments, never in place (EP-07-S06 AC 5).
+    let mut reassignments = 0u64;
+    for intent in &intent_map.intents {
+        for event_id in &intent.event_ids {
+            if ledger.current_intent(event_id) != Some(intent.intent_id.as_str()) {
+                ledger
+                    .assign_intent(event_id, intent.intent_id.clone(), "induction", now)
+                    .map_err(gap_err)?;
+                reassignments += 1;
+            }
+        }
+    }
+    let coverage_map = crawl_coverage(&payload.artifacts, &intent_map, &coverage_config, now)
+        .map_err(induction_err)?;
+    let matrix = join_maps(&intent_map, &coverage_map, threshold, now);
+    let seeded = if seed {
+        seed_ledger(&mut ledger, &matrix, &intent_map, now, threshold as u32)
+            .map_err(induction_err)?
+    } else {
+        Vec::new()
+    };
+    let blocks = declared_blocks(&matrix, &intent_map, top_n, DEFAULT_BLOCK_CHAR_LIMIT);
+
+    persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+    Ok(Json(json!({
+        "intent_map": intent_map,
+        "coverage_map": coverage_map,
+        "matrix": matrix,
+        "reassignments": reassignments,
+        "seeded_gap_ids": seeded,
+        "declared_blocks": blocks,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// The hunting loop (demand-side learning, wave 4): a bounded cycle
+// spends its budget on the work order's top entries, a drafted learning
+// candidate moves a hunted gap to trial, and a contradiction parks one
+// on the business with the evidence attached. Closure is not a hunt
+// verb — it arrives through the learning gate, when the candidate the
+// gap names is promoted (see `close_gaps_on_promotion`).
+// --------------------------------------------------------------------- //
+
+/// The most gaps one cycle may hunt. The budget is bounded so a
+/// misconfigured caller cannot drain the queue in one call.
+const MAX_HUNT_CYCLE_BUDGET: u32 = 64;
+
+#[derive(Debug, Deserialize)]
+struct HuntCyclePayload {
+    /// How many gaps this cycle hunts (default 1, capped at
+    /// [`MAX_HUNT_CYCLE_BUDGET`]). The cycle takes the work order's top
+    /// entries, so the budget is always spent where priority is
+    /// highest.
+    #[serde(default)]
+    max_hunts: Option<u32>,
+}
+
+/// `POST /hunts/cycle` — run one hunting cycle: move the work order's
+/// top entries into `hunting` and answer `200 {cycle_hunts, budget}`
+/// with the picks. An empty queue hunts nothing — no work is not an
+/// error.
+async fn hunt_cycle(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<HuntCyclePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let budget = payload.max_hunts.unwrap_or(1);
+    if budget == 0 {
+        return Err(ApiError::bad_request(
+            "`max_hunts` must be at least 1".to_string(),
+        ));
+    }
+    let budget = budget.min(MAX_HUNT_CYCLE_BUDGET);
+    let now = Utc::now();
+
+    let lock = gap_lock(&state, tenant.tenant()).await;
+    let _guard = lock.lock().await;
+    let mut ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let picks: Vec<String> = ledger
+        .work_order()
+        .into_iter()
+        .take(budget as usize)
+        .map(|entry| entry.gap_id.clone())
+        .collect();
+    let mut hunts = Vec::with_capacity(picks.len());
+    for gap_id in picks {
+        ledger
+            .transition(&gap_id, GapStatus::Hunting, "hunt-cycle", now)
+            .map_err(gap_err)?;
+        let entry = ledger
+            .entry(&gap_id)
+            .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+        hunts.push(json!({
+            "gap_id": entry.gap_id,
+            "subject": entry.subject,
+            "statement": entry.statement,
+            "status": entry.status,
+            "priority_score": entry.priority_score(),
+        }));
+    }
+    persist_gap_ledger(&state, tenant.tenant(), &ledger).await?;
+    Ok(Json(json!({
+        "cycle_hunts": hunts,
+        "budget": budget,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct HuntDraftPayload {
+    /// The learning candidate drafted to close the gap. It must already
+    /// exist in the store — a hunt's output is a real candidate
+    /// (journaled, evaluable), never a name.
+    candidate_id: String,
+}
+
+/// `POST /hunts/{gap_id}/draft` — attach the hunt's drafted candidate
+/// and move the gap `hunting → trial_pending` → `200 {entry}`; `404`
+/// unknown gap or candidate, `409` when the gap is not hunting (the
+/// cycle must pick it first — drafting against an open gap skips the
+/// queue's priority discipline).
+async fn hunt_draft(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<HuntDraftPayload>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .get_candidate(tenant.tenant(), &payload.candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("candidate `{}` not found", payload.candidate_id))
+        })?;
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        let entry = ledger
+            .entry(&gap_id)
+            .ok_or_else(|| GapError::UnknownGap(gap_id.clone()))?;
+        if entry.status != GapStatus::Hunting {
+            return Err(GapError::IllegalTransition {
+                from: entry.status,
+                to: GapStatus::TrialPending,
+            });
+        }
+        ledger.transition(&gap_id, GapStatus::TrialPending, "hunt:draft", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+#[derive(Debug, Deserialize)]
+struct HuntBlockedPayload {
+    /// What the hunt found that contradicts closing this gap as filed —
+    /// the reason the business must decide.
+    contradiction: String,
+    /// Where the contradiction lives (the deliverable the hunt
+    /// produced: a report, a run, a record id).
+    deliverable_ref: String,
+}
+
+/// `POST /hunts/{gap_id}/blocked` — document the contradiction on the
+/// entry (a citation, so the ledger stays the one place that knows why)
+/// and park the gap `→ blocked_on_business` → `200 {entry}`; `404`
+/// unknown gap, `409` on an illegal status edge. A blocked entry leaves
+/// the work order until the business reopens it.
+async fn hunt_blocked(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(gap_id): Path<String>,
+    Json(payload): Json<HuntBlockedPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    mutate_gap_ledger(&state, &tenant, |ledger| {
+        let citation = Citation::new(
+            CitationKind::CoverageEdge,
+            payload.deliverable_ref.clone(),
+            Some(payload.contradiction.clone()),
+        )?;
+        ledger.add_evidence(&gap_id, vec![citation], "hunt:blocked", now)?;
+        ledger.transition(&gap_id, GapStatus::BlockedOnBusiness, "hunt:blocked", now)
+    })
+    .await?;
+    let ledger = load_gap_ledger(&state, tenant.tenant()).await?;
+    let entry = ledger
+        .entry(&gap_id)
+        .ok_or_else(|| ApiError::not_found(format!("gap `{gap_id}` not found")))?;
+    Ok(Json(json!({ "entry": entry })))
+}
+
+/// Promotion-closure sweep (demand-side learning, wave 4): a candidate
+/// promoted through the learning gate is closure evidence for every gap
+/// whose criteria name it. Best-effort, the journaled-events
+/// discipline — the promotion has already committed, so a sweep failure
+/// is logged, never surfaced, and one entry's refusal does not stop the
+/// others.
+async fn close_gaps_on_promotion(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    candidate_id: &str,
+) {
+    let now = Utc::now();
+    let result: Result<(), ApiError> = async {
+        let lock = gap_lock(state, tenant.tenant()).await;
+        let _guard = lock.lock().await;
+        let mut ledger = load_gap_ledger(state, tenant.tenant()).await?;
+        let targets: Vec<String> = ledger
+            .entries()
+            .filter(|entry| entry.status != GapStatus::Closed)
+            .filter(|entry| {
+                matches!(
+                    &entry.closure_criteria,
+                    ClosureCriteria::ArtifactPromoted { candidate_id: named }
+                    if named == candidate_id
+                )
+            })
+            .map(|entry| entry.gap_id.clone())
+            .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        for gap_id in targets {
+            let evidence = ClosureEvidence::ArtifactPromoted {
+                candidate_id: candidate_id.to_string(),
+            };
+            if let Err(error) = ledger.evaluate_closure(&gap_id, &evidence, "promotion-gate", now) {
+                tracing::warn!(%error, %gap_id, "gap closure evaluation failed");
+            }
+        }
+        persist_gap_ledger(state, tenant.tenant(), &ledger).await
+    }
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, %candidate_id, "promotion gap-closure sweep failed");
+    }
+}
+
+/// The demand question a zero-recall query asked, when it asked one: an
+/// explicit key, else the tag conjunction. An unfiltered browse that
+/// finds nothing is not a learning signal.
+fn zero_recall_question(query: &MemoryQuery) -> Option<String> {
+    if let Some(key) = &query.key {
+        return Some(key.clone());
+    }
+    if !query.tags.is_empty() {
+        return Some(query.tags.join(", "));
+    }
+    None
+}
+
+/// Zero-recall filing (demand-side learning, wave 2): a named-question
+/// miss files a gap against the question shape — evidence of a question
+/// the declared schema did not anticipate. Best-effort, the
+/// journaled-events discipline: the read is already served, so a filing
+/// failure is logged, never surfaced.
+async fn file_zero_recall_gap(state: &Arc<AppState>, tenant: &TenantContext, query: &MemoryQuery) {
+    let Some(question) = zero_recall_question(query) else {
+        return;
+    };
+    let now = Utc::now();
+    let result = mutate_gap_ledger(state, tenant, |ledger| {
+        ledger.file_zero_recall(
+            &question,
+            ClosureCriteria::BlockFilled {
+                block_label: question.clone(),
+            },
+            0,
+            "runtime:zero-recall",
+            now,
+        )
+    })
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, %question, "zero-recall gap filing failed");
+    }
+}
+
+/// The other half of a zero-recall gap: a later recall that answers the
+/// same named question closes it — the block the gap said was empty is
+/// filled. Best-effort, like the filing. Says which gaps closed.
+pub(crate) async fn close_zero_recall_gaps(
+    state: &AppState,
+    tenant: &TenantContext,
+    question: &str,
+) -> Vec<String> {
+    use rusty_agent_runtime::gaps::{ClosureEvidence, GapOrigin, GapStatus, GapSubject};
+    let Ok(subject) = GapSubject::question_shape(question) else {
+        return Vec::new();
+    };
+    let now = Utc::now();
+    mutate_gap_ledger(state, tenant, |ledger| {
+        let open: Vec<(String, String)> = ledger
+            .entries()
+            .filter(|e| {
+                e.origin == GapOrigin::ZeroRecall
+                    && matches!(e.status, GapStatus::Open | GapStatus::Reopened)
+                    && e.subject == subject
+            })
+            .filter_map(|e| match &e.closure_criteria {
+                ClosureCriteria::BlockFilled { block_label } => {
+                    Some((e.gap_id.clone(), block_label.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let mut closed = Vec::new();
+        for (gap_id, block_label) in open {
+            if ledger
+                .evaluate_closure(
+                    &gap_id,
+                    &ClosureEvidence::BlockFilled { block_label },
+                    "runtime:recall-answered",
+                    now,
+                )
+                .is_ok()
+            {
+                closed.push(gap_id);
+            }
+        }
+        Ok(closed)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Correction filing (demand-side learning, wave 2): an operator
+/// correction is evidence the recalled knowledge was wrong, not merely
+/// missing. The subject is the corrected record's key when it has one,
+/// else the correction itself; the citation anchors to the derived
+/// record so the gap traces back to the write that proved it.
+/// Best-effort — the correction is already stored.
+async fn file_correction_gap(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    correction: &Correction,
+    key: Option<&str>,
+    derived_memory_id: &str,
+) {
+    let question = match key {
+        Some(key) => key.to_string(),
+        None => format!("correction:{}", correction.correction_id),
+    };
+    let subject = match GapSubject::question_shape(&question) {
+        Ok(subject) => subject,
+        Err(error) => {
+            tracing::warn!(%error, %question, "correction gap subject failed to build");
+            return;
+        }
+    };
+    let citation = match Citation::new(
+        CitationKind::MemoryRecord,
+        derived_memory_id,
+        Some(format!("correction:{}", correction.correction_id)),
+    ) {
+        Ok(citation) => citation,
+        Err(error) => {
+            tracing::warn!(%error, %question, "correction gap citation failed to build");
+            return;
+        }
+    };
+    let statement =
+        format!("Knowledge answering `{question}` was wrong, not missing: a correction rewrote it");
+    let now = Utc::now();
+    let result = mutate_gap_ledger(state, tenant, |ledger| {
+        ledger.file_gap(
+            subject,
+            statement,
+            vec![citation],
+            GapOrigin::RuntimeCorrection,
+            ClosureCriteria::BlockFilled {
+                block_label: question.clone(),
+            },
+            1,
+            0,
+            "runtime:correction",
+            now,
+        )
+    })
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, %question, "correction gap filing failed");
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct QueryMemoryPayload {
+    /// The structured filters (all optional; an empty query matches the
+    /// whole tenant namespace, minus expired and superseded records —
+    /// the two defaults core's `MemoryQuery` declares).
+    #[serde(flatten)]
+    query: MemoryQuery,
+    /// Pack the matches into a token-bounded deterministic assembly.
+    /// Required when `run_id` is set: journaled reads are budgeted
+    /// reads — the journaled request is the resolved query plus the
+    /// budget it was assembled under (core's `memory_read_request`
+    /// shape).
+    #[serde(default)]
+    budget: Option<ContextBudget>,
+    /// Journal the read into this run's journal as a `memory_read`
+    /// event (best-effort), with `parent` as its causal parent.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's
+    /// current head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /memory/query` — structured retrieval (deliberately not
+/// semantic: R0.8 has no similarity search, so writers key and tag
+/// deliberately and absence of a hit is absence of a key, not absence
+/// of a fact). `as_of` resolves at read time when unset. With `budget`,
+/// answers the deterministic token-bounded `MemoryAssembly` (`422` when
+/// a hard budget overflows); without, the rank-ordered records — ranked
+/// through the assembly's total order, so the two read shapes agree on
+/// ordering by construction.
+/// Resolve the store a memory query reads through: the live namespace,
+/// or — when the query names a scope whose surface has an active
+/// `memory_set` candidate — the candidate's overlay over it. This is how
+/// new traffic sees a promotion without a store migration, and how a
+/// rollback restores base behavior: the pointer moved, the lens follows.
+/// Any miss (no pointer, no active candidate, a candidate record that
+/// vanished, a candidate that does not apply as an overlay) falls back to
+/// the live namespace with a warning, never an error: a read must not
+/// fail because governance state is mid-flight.
+async fn memory_read_store(
+    state: &AppState,
+    tenant: &TenantContext,
+    query: &MemoryQuery,
+) -> Result<Arc<dyn MemoryStore>, ApiError> {
+    let base: Arc<dyn MemoryStore> = Arc::new(ServerMemoryStore::new(
+        Arc::clone(&state.server_store),
+        tenant.tenant(),
+    ));
+    let Some(scope) = &query.scope else {
+        return Ok(base);
+    };
+    let surface = format!("memory:{}", scope.as_address());
+    let pointer = state
+        .server_store
+        .get_version_pointer(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?;
+    let Some(active) = pointer.and_then(|pointer| pointer.active) else {
+        return Ok(base);
+    };
+    let record = state
+        .server_store
+        .get_candidate(tenant.tenant(), active.as_str())
+        .await
+        .map_err(internal_err)?;
+    let Some(record) = record else {
+        tracing::warn!(
+            candidate = %active,
+            %surface,
+            "version pointer names a candidate that is gone; reading the live namespace"
+        );
+        return Ok(base);
+    };
+    match CandidateOverlay::new(base.clone(), &record.candidate) {
+        Ok(overlay) => Ok(Arc::new(overlay)),
+        Err(error) => {
+            tracing::warn!(
+                candidate = %active,
+                %surface,
+                %error,
+                "candidate on a memory surface does not apply as an overlay; reading the \
+                 live namespace"
+            );
+            Ok(base)
+        }
+    }
+}
+
+async fn query_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<QueryMemoryPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut query = payload.query;
+    let as_of = query.as_of.unwrap_or_else(Utc::now);
+    query.as_of = Some(as_of);
+    if payload.run_id.is_some() && payload.budget.is_none() {
+        return Err(ApiError::bad_request(
+            "`budget` is required with `run_id`: a journaled memory read is a budgeted \
+             read — the journaled request is the resolved query plus the budget it was \
+             assembled under"
+                .to_string(),
+        ));
+    }
+    if let Some(scope) = &query.scope {
+        if scope.scope == MemoryScope::User && !tenant.may_act_for(&scope.id) {
+            return Err(not_your_memory(&scope.id, &tenant));
+        }
+    }
+    let store = memory_read_store(&state, &tenant, &query).await?;
+    let mut records = store.query(&query, as_of).await.map_err(internal_err)?;
+    // Another person's memory never leaves the store on a read that did
+    // not name a scope: the namespace is the tenant's, the records are
+    // each person's.
+    records.retain(|record| memory_visible(record, &tenant));
+    // Zero-recall filing (demand-side learning, wave 2): a named-question
+    // miss is evidence of a question the declared schema did not
+    // anticipate. Best-effort, the journaled-events discipline — the read
+    // is already served, so a filing failure is logged, never surfaced.
+    if records.is_empty() {
+        file_zero_recall_gap(&state, &tenant, &query).await;
+    } else if let Some(question) = zero_recall_question(&query) {
+        // The same named question, answered now: the gap it filed closes.
+        let closed = close_zero_recall_gaps(&state, &tenant, &question).await;
+        if !closed.is_empty() {
+            tracing::info!(%question, gaps = closed.len(), "zero-recall gaps closed by a recall that answered");
+        }
+    }
+    match payload.budget {
+        Some(budget) => {
+            let assembly = rusty_agent_runtime::memory::assemble_for(
+                records,
+                &query,
+                as_of,
+                &budget,
+                crate::memory_utility::cached_bps,
+            )
+            .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+            if let Some(run_id) = &payload.run_id {
+                journal_memory_read(
+                    &state,
+                    &tenant,
+                    run_id,
+                    &query,
+                    &budget,
+                    &assembly,
+                    payload.parent,
+                )
+                .await;
+            }
+            serde_json::to_value(&assembly)
+                .map(Json)
+                .map_err(internal_err)
+        }
+        None => {
+            // An unbounded budget packs everything, so `assemble` doubles
+            // as the ranking definition — the two read shapes can never
+            // drift apart on ordering.
+            let ranked = assemble(records, &ContextBudget::new(u32::MAX)).map_err(internal_err)?;
+            Ok(Json(json!({ "records": ranked.records })))
+        }
+    }
+}
+
+/// Journal a memory write into the given run's persisted Flight
+/// Recorder journal — the same best-effort discipline as
+/// [`journal_effect_receipt`]: the write is already durable in the
+/// memory store, so a journaling failure (a live run whose journal is
+/// not yet persisted, a cross-tenant run linkage, a store error) is
+/// logged, never surfaced as a request failure. The event shape mirrors
+/// core's `JournaledMemory::write` exactly, so a route-journaled write
+/// is indistinguishable from a runtime-journaled one.
+async fn journal_memory_write(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    record: &MemoryRecord,
+    parent: Option<String>,
+) {
+    let draft = EventDraft::new(RunEventKind::MemoryWrite, Effect::Idempotent).input(json!({
+        "effect_key": memory_effect_key(&record.scope, &record.memory_id),
+        "memory_id": record.memory_id,
+    }));
+    let draft = match serde_json::to_value(record) {
+        Ok(output) => draft.output(output),
+        Err(error) => {
+            tracing::warn!(%run_id, %error, "memory record failed to serialize; journaling skipped");
+            return;
+        }
+    };
+    if let Err(error) = try_journal_memory_event(state, tenant, run_id, parent, draft).await {
+        tracing::warn!(
+            %run_id,
+            memory_id = %record.memory_id,
+            %error,
+            "memory write is durable in the store; journaling skipped"
+        );
+    }
+}
+
+/// Journal a memory read into the given run's persisted journal —
+/// best-effort, the [`journal_memory_write`] discipline. The event
+/// shape mirrors core's `JournaledMemory::read`: the request is the
+/// resolved query plus budget (`memory_read_request`), the output the
+/// served assembly.
+async fn journal_memory_read(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    query: &MemoryQuery,
+    budget: &ContextBudget,
+    assembly: &rusty_agent_runtime::memory::MemoryAssembly,
+    parent: Option<String>,
+) {
+    let draft = EventDraft::new(RunEventKind::MemoryRead, Effect::ReadOnly)
+        .input(memory_read_request(query, budget));
+    let draft = match serde_json::to_value(assembly) {
+        Ok(output) => draft.output(output),
+        Err(error) => {
+            tracing::warn!(%run_id, %error, "memory assembly failed to serialize; journaling skipped");
+            return;
+        }
+    };
+    if let Err(error) = try_journal_memory_event(state, tenant, run_id, parent, draft).await {
+        tracing::warn!(
+            %run_id,
+            %error,
+            "memory read answered from the store; journaling skipped"
+        );
+    }
+}
+
+/// The fallible body shared by the memory journalers, mirroring
+/// [`try_journal_effect_receipt`]: ownership proof first (the journal's
+/// thread must resolve in this tenant — journaling into another
+/// tenant's run would leak evidence across the isolation boundary),
+/// integrity re-check on load, append, persist. `parent` defaults to
+/// the journal's current head (the receipt precedent).
+///
+/// The receipt journaler's documented gap applies unchanged, with one
+/// addition to name honestly: appending to a *completed* run's journal
+/// adds evidence the run's execution never produced, so that journal no
+/// longer exactly replays — the appended event has no issuing node.
+/// These events are post-hoc attribution evidence (the memory operation
+/// naming the run it belongs to), not execution evidence; runs whose
+/// replay must stay exact take the runtime's own journaled seam.
+async fn try_journal_memory_event(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    parent: Option<String>,
+    draft: EventDraft,
+) -> Result<(), String> {
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(|e| format!("load journal: {e}"))?
+    else {
+        return Err("run has no persisted journal yet".to_string());
+    };
+    let internal_thread_id = tenant.scope(&snapshot.thread_id);
+    let owned = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(|e| format!("resolve thread: {e}"))?
+        .is_some();
+    if !owned
+        || !run_readable(
+            tenant,
+            person_of_run(state, run_id, Some(&snapshot)).await.as_ref(),
+        )
+    {
+        return Err("run does not resolve in this tenant, or for this person".to_string());
+    }
+    let journal = Journal::from_snapshot(snapshot, Clock::System)
+        .map_err(|e| format!("journal failed its integrity check: {e}"))?;
+    let parent = parent.or_else(|| journal.events().last().map(|event| event.id.clone()));
+    let draft = match parent {
+        Some(parent) => draft.parent(parent),
+        None => draft,
+    };
+    journal.record(draft);
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(|e| format!("persist journal: {e}"))
+}
+
+/// Journal one executor retry decision (R0.8 wave 4) into the owning
+/// run's persisted journal — best-effort, the [`journal_memory_write`]
+/// discipline: the settlement is already durable in the task record, so
+/// a journaling failure (no run linkage, a live run whose journal is not
+/// yet persisted, a cross-tenant linkage) is logged, never surfaced as a
+/// request failure. The receipt journaler's documented live-flush caveat
+/// applies unchanged: a run in flight may flush its own journal over
+/// this append, so decision evidence for in-flight runs can be lost —
+/// the durable record is the task settlement itself.
+async fn journal_policy_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    task: &TaskRecord,
+    error_class: rusty_agent_runtime::durable::ErrorClass,
+    retryable: bool,
+    max_attempts: u32,
+    decided_at: DateTime<Utc>,
+) {
+    let Some(run_id) = task.run_id.clone() else {
+        return;
+    };
+    if let Err(error) = try_journal_policy_decision(
+        state,
+        tenant,
+        &run_id,
+        task,
+        error_class,
+        retryable,
+        max_attempts,
+        decided_at,
+    )
+    .await
+    {
+        tracing::warn!(
+            %run_id,
+            task_id = %task.task_id,
+            %error,
+            "retry decision is settled in the task record; journaling skipped"
+        );
+    }
+}
+
+/// The fallible body of [`journal_policy_decision`], mirroring
+/// [`try_journal_memory_event`]: ownership proof first, integrity
+/// re-check on load, append, persist. The decision is *reconstructed*
+/// from the settled record — `failed` with a scheduled next attempt →
+/// `retry` (delay = schedule − decision time), `dead` → `dead`, terminal
+/// `failed` without a schedule → `fail` — so the event is evidence of
+/// the decision that was made, never a new decision. The declared
+/// effect defaults from the worker's `retryable` flag the way the gate
+/// itself does (`retryable: true` asserts idempotency). `max_attempts` is
+/// the *effective* budget the acting policy resolved to (R0.10 wave 4) —
+/// the dead-letter boundary the decision actually applied, so drift
+/// detection reads the same boundary the classifier enforced. Under the
+/// floor it equals the task's declared budget, byte-for-byte the pre-wave-4
+/// features.
+#[allow(clippy::too_many_arguments)]
+async fn try_journal_policy_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    task: &TaskRecord,
+    error_class: rusty_agent_runtime::durable::ErrorClass,
+    retryable: bool,
+    max_attempts: u32,
+    decided_at: DateTime<Utc>,
+) -> Result<(), String> {
+    let decision = match (&task.status, task.next_attempt_at) {
+        (TaskStatus::Failed, Some(next)) => RetryDecision::Retry {
+            after_ms: (next - decided_at).num_milliseconds().max(0) as u64,
+        },
+        (TaskStatus::Dead, _) => RetryDecision::Dead,
+        _ => RetryDecision::Fail,
+    };
+    let effect = task.effect.unwrap_or(if retryable {
+        Effect::Idempotent
+    } else {
+        Effect::NonIdempotent
+    });
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(|e| format!("load journal: {e}"))?
+    else {
+        return Err("run has no persisted journal yet".to_string());
+    };
+    let thread_id = snapshot.thread_id.clone();
+    let internal_thread_id = tenant.scope(&thread_id);
+    let owned = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(|e| format!("resolve thread: {e}"))?
+        .is_some();
+    if !owned
+        || !run_readable(
+            tenant,
+            person_of_run(state, run_id, Some(&snapshot)).await.as_ref(),
+        )
+    {
+        return Err("run does not resolve in this tenant, or for this person".to_string());
+    }
+    let journal = Journal::from_snapshot(snapshot, Clock::System)
+        .map_err(|e| format!("journal failed its integrity check: {e}"))?;
+    // The version the run bound at admission — the latest checkpoint's
+    // header; a run with no checkpoint yet records the floor, matching
+    // what its first admission checkpoint will bind.
+    let policy_version = state
+        .checkpointer
+        .get_latest(&internal_thread_id)
+        .await
+        .map_err(|e| format!("load checkpoint: {e}"))?
+        .map(|checkpoint| checkpoint.header.policy_version)
+        .unwrap_or_default();
+    let seq = journal
+        .events()
+        .iter()
+        .filter(|event| event.kind == RunEventKind::PolicyDecision)
+        .count() as u64;
+    let event = retry_decision_event(
+        run_id,
+        thread_id,
+        seq,
+        effect,
+        error_class,
+        task.attempt,
+        max_attempts,
+        None,
+        &decision,
+        &policy_version,
+        decided_at,
+    );
+    let draft = EventDraft::new(RunEventKind::PolicyDecision, Effect::Pure).output(
+        serde_json::to_value(&event).map_err(|e| format!("serialize decision event: {e}"))?,
+    );
+    let parent = journal.events().last().map(|event| event.id.clone());
+    let draft = match parent {
+        Some(parent) => draft.parent(parent),
+        None => draft,
+    };
+    journal.record(draft);
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(|e| format!("persist journal: {e}"))
+}
+
+/// Resolve the executor policy a task settlement acts under (R0.10 wave
+/// 4).
+///
+/// Run-linked tasks honor the version the owning run bound at admission —
+/// the same checkpoint-header lookup [`try_journal_policy_decision`]
+/// records — so a mid-run policy activation never retcons an in-flight
+/// run's decisions. Unlinked tasks (plain queue work) follow the tenant's
+/// active policy: queue scheduling is deployment-scoped, and the claim
+/// path's lease bound does the same. Every failure to resolve — no
+/// checkpoint yet, an unregistered version, a registry read error — fails
+/// closed to the static floor, byte-for-byte the pre-wave-4 behavior.
+async fn acting_executor_policy(
+    state: &AppState,
+    tenant: &TenantContext,
+    task: &TaskRecord,
+) -> ExecutorPolicy {
+    if let Some(run_id) = &task.run_id {
+        // The thread the run belongs to: the task's own linkage when the
+        // enqueuer supplied it, else resolved through the run's persisted
+        // journal — the same resolution the decision journaler performs.
+        let thread_id = match task.thread_id.clone() {
+            Some(thread_id) => Some(thread_id),
+            None => state
+                .server_store
+                .get_journal(run_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|snapshot| snapshot.thread_id),
+        };
+        let version = match thread_id {
+            Some(thread_id) => state
+                .checkpointer
+                .get_latest(&tenant.scope(&thread_id))
+                .await
+                .ok()
+                .flatten()
+                .map(|checkpoint| checkpoint.header.policy_version)
+                .unwrap_or_default(),
+            // Run-linked but the run's pin is not resolvable (a live run
+            // whose journal is not yet persisted): fail closed to the
+            // floor, matching what the journaler records in that case.
+            None => return ExecutorPolicy::static_v0(),
+        };
+        if version.as_str() == PolicyVersion::STATIC_V0 {
+            return ExecutorPolicy::static_v0();
+        }
+        return match state
+            .server_store
+            .get_policy(tenant.tenant(), version.as_str())
+            .await
+        {
+            Ok(Some(record)) => record.policy,
+            Ok(None) => {
+                tracing::warn!(
+                    version = %version.as_str(),
+                    "acting policy version is not registered; acting on the static floor"
+                );
+                ExecutorPolicy::static_v0()
+            }
+            Err(error) => {
+                tracing::warn!(%error, "policy registry read failed; acting on the static floor");
+                ExecutorPolicy::static_v0()
+            }
+        };
+    }
+    match policy::active_policy_record(&state.server_store, tenant.tenant()).await {
+        Ok(record) => record.policy,
+        Err(error) => {
+            tracing::warn!(%error, "active policy unreadable; acting on the static floor");
+            ExecutorPolicy::static_v0()
+        }
+    }
+}
+
+/// Timeout decision evidence (R0.10 wave 4): when the acting policy
+/// declared a bound for the claimed task's kind — the bound the store
+/// narrowed the lease to — that decision is journaled into the task's run
+/// as a `policy_decision` event, best-effort, the
+/// [`journal_policy_decision`] discipline. The static floor declares no
+/// bound, so floor claims journal nothing — exactly the pre-wave-4
+/// evidence shape.
+async fn journal_timeout_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    task: &TaskRecord,
+    record: &PolicyRecord,
+    decided_at: DateTime<Utc>,
+) {
+    let Some(run_id) = task.run_id.clone() else {
+        return;
+    };
+    let Some(bound) = resolve_timeout_bound_ms(&record.policy, Some(&task.kind)) else {
+        return;
+    };
+    if let Err(error) = try_journal_timeout_decision(
+        state,
+        tenant,
+        &run_id,
+        task,
+        bound,
+        &record.version,
+        decided_at,
+    )
+    .await
+    {
+        tracing::warn!(
+            %run_id,
+            task_id = %task.task_id,
+            %error,
+            "timeout decision is settled in the lease; journaling skipped"
+        );
+    }
+}
+
+/// The fallible body of [`journal_timeout_decision`], mirroring
+/// [`try_journal_policy_decision`]: ownership proof first, integrity
+/// re-check on load, append, persist. The recorded bound is the one the
+/// claim just applied — evidence of the decision that was made, never a
+/// new decision. The declared effect defaults to the conservative
+/// non-idempotent spelling: at claim time the worker has made no re-drive
+/// judgment yet.
+async fn try_journal_timeout_decision(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    task: &TaskRecord,
+    bound: u64,
+    policy_version: &PolicyVersion,
+    decided_at: DateTime<Utc>,
+) -> Result<(), String> {
+    let Some(snapshot) = state
+        .server_store
+        .get_journal(run_id)
+        .await
+        .map_err(|e| format!("load journal: {e}"))?
+    else {
+        return Err("run has no persisted journal yet".to_string());
+    };
+    let thread_id = snapshot.thread_id.clone();
+    let internal_thread_id = tenant.scope(&thread_id);
+    let owned = state
+        .server_store
+        .get_thread(&internal_thread_id)
+        .await
+        .map_err(|e| format!("resolve thread: {e}"))?
+        .is_some();
+    if !owned
+        || !run_readable(
+            tenant,
+            person_of_run(state, run_id, Some(&snapshot)).await.as_ref(),
+        )
+    {
+        return Err("run does not resolve in this tenant, or for this person".to_string());
+    }
+    let journal = Journal::from_snapshot(snapshot, Clock::System)
+        .map_err(|e| format!("journal failed its integrity check: {e}"))?;
+    let seq = journal
+        .events()
+        .iter()
+        .filter(|event| event.kind == RunEventKind::PolicyDecision)
+        .count() as u64;
+    let event = timeout_decision_event(
+        run_id,
+        thread_id,
+        seq,
+        Some(&task.kind),
+        task.effect.unwrap_or(Effect::NonIdempotent),
+        task.attempt,
+        None,
+        Some(bound),
+        &rusty_agent_runtime::twin::DEFAULT_TIMEOUT_LADDER,
+        policy_version,
+        decided_at,
+    );
+    let draft = EventDraft::new(RunEventKind::PolicyDecision, Effect::Pure).output(
+        serde_json::to_value(&event).map_err(|e| format!("serialize decision event: {e}"))?,
+    );
+    let parent = journal.events().last().map(|event| event.id.clone());
+    let draft = match parent {
+        Some(parent) => draft.parent(parent),
+        None => draft,
+    };
+    journal.record(draft);
+    state
+        .server_store
+        .put_journal(&journal.snapshot())
+        .await
+        .map_err(|e| format!("persist journal: {e}"))
+}
+
+// --------------------------------------------------------------------- //
+// The correction loop and memory operations (R0.8 Rusty Learn, wave 2)
+//
+// The correction loop's record-plane half (`docs/learn-design.md`, "The
+// correction loop"): a correction becomes an attributed candidate memory
+// or example — never an in-place rewrite of what it corrects. The memory
+// operations — consolidation, conflict detection, forgetting — are
+// journaled transitions over the store, never background daemons.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct CorrectionPayload {
+    /// The correction contract (core's `Correction`, golden-pinned).
+    /// Author attribution is validated at deserialization — an
+    /// unattributed correction never reaches this handler.
+    #[serde(flatten)]
+    correction: Correction,
+    /// Journal the derived writes into this run's journal as
+    /// `memory_write` events (best-effort, the wave-1 discipline).
+    /// Defaults to the corrected run when the target is a journaled run
+    /// event — the correction names the run it belongs to.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// The input a journaled run event saw, resolved from the snapshot:
+/// artifact-referenced payloads re-inline from the snapshot's artifact map
+/// (the same resolution `MemoryReplaySource` applies). `None` when the
+/// event carries no input payload — the example then records null, the
+/// honest shape of "the event had no input".
+fn correction_event_input(
+    event: &rusty_agent_runtime::record::RunEvent,
+    snapshot: &JournalSnapshot,
+) -> Option<Value> {
+    match event.input.as_ref()? {
+        PayloadRef::Inline(value) => Some(value.clone()),
+        PayloadRef::Artifact(reference) => snapshot.artifacts.get(&reference.sha256).cloned(),
+    }
+}
+
+/// `POST /memory/corrections` — submit a human correction → `201
+/// {correction_id, attribution, candidate, memory_id, created, record,
+/// superseded, example_id}` (`200` + `created: false` when this tenant
+/// already holds a record derived from the same correction id — the id
+/// rides the derived records' provenance evidence, so a retried
+/// submission resolves what the first attempt wrote rather than minting
+/// a second record with a new learning instant).
+///
+/// The three rules (`docs/learn-design.md`):
+///
+/// 1. **Attribution travels with the derived record**: `human:{author}`
+///    provenance with the correction id in evidence, confidence 1.0 — the
+///    claim is the person's, stated plainly.
+/// 2. **Scope decides the path**: run scope is adopted directly (the one
+///    place the API admits run scope, exactly because adoption affects
+///    only the run that produced it); agent scope or wider becomes a
+///    candidate — `candidacy: pending`, queryable via `candidates_only` —
+///    because a wrong human correction at tenant scope is a production
+///    incident with a name attached.
+/// 3. **Corrections enter evaluation as examples**: a target of
+///    `{type: run_event}` additionally yields an `example`-kind record —
+///    the input the run saw (read from the journaled event, never re-asked
+///    of the world) plus the corrected behavior.
+///
+/// A correction targeting a memory record inherits the target's key, and
+/// a same-key correction-sourced write auto-supersedes the prior record
+/// (open question 5: corrections are trusted because they are
+/// attributed). There is no correction event kind: the derived writes
+/// journal through the memory-write seam with the correction's
+/// attribution in their provenance.
+async fn submit_correction(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CorrectionPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let correction = payload.correction;
+    tasks::validate_label("correction_id", &correction.correction_id, 256)
+        .map_err(ApiError::bad_request)?;
+    tasks::validate_label("author", &correction.author, 256).map_err(ApiError::bad_request)?;
+    if let Some(what) = rusty_agent_runtime::memory::secret_in(&correction.corrected) {
+        return Err(ApiError::unprocessable(format!(
+            "not kept: the correction carries {what}. Credentials live in connections, never in memory — correct the fact and leave out the value"
+        )));
+    }
+    // The shared gate, with the correction loop's one exception.
+    check_memory_scope_gate(&state, &tenant, &correction.scope, true).await?;
+
+    // Retry convergence on the correction id: it rides the derived
+    // records' provenance evidence, so a resubmission resolves what the
+    // first attempt wrote instead of minting a second record with a new
+    // `written_at` (hence a new content address). The search spans
+    // superseded and expired records — a retried submission must
+    // converge even after a later correction superseded the first's
+    // record.
+    let prior = state
+        .server_store
+        .query_memory(
+            tenant.tenant(),
+            &MemoryQuery {
+                scope: Some(correction.scope.clone()),
+                include_expired: true,
+                include_superseded: true,
+                include_candidates: true,
+                ..MemoryQuery::default()
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    let names_correction = |record: &MemoryRecord| {
+        record.provenance.evidence.correction_id.as_deref()
+            == Some(correction.correction_id.as_str())
+    };
+    if let Some(prior_memory) = prior
+        .iter()
+        .find(|record| record.kind == MemoryKind::Fact && names_correction(record))
+    {
+        let example_id = prior
+            .iter()
+            .find(|record| record.kind == MemoryKind::Example && names_correction(record))
+            .map(|record| record.memory_id.clone());
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "correction_id": correction.correction_id,
+                "attribution": correction.attribution(),
+                "candidate": prior_memory.candidacy.is_some(),
+                "memory_id": prior_memory.memory_id,
+                "created": false,
+                "record": prior_memory,
+                "superseded": prior_memory.supersedes,
+                "example_id": example_id,
+            })),
+        ));
+    }
+
+    let now = Utc::now();
+    let mut key = None;
+    let mut example_input = None;
+    let mut journal_run_id = payload.run_id.clone();
+    match &correction.target {
+        CorrectionTarget::Memory { memory_id } => {
+            // The target must resolve (unknown or cross-tenant → 404, the
+            // two indistinguishable by design): the derived record
+            // inherits its key, which is what fires the same-key
+            // auto-supersession below.
+            let target = state
+                .server_store
+                .get_memory(tenant.tenant(), memory_id)
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("correction target memory `{memory_id}` not found"))
+                })?;
+            key = target.key;
+        }
+        CorrectionTarget::RunEvent { run_id, event_id } => {
+            let snapshot = state
+                .server_store
+                .get_journal(run_id)
+                .await
+                .map_err(internal_err)?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!(
+                        "correction target run `{run_id}` has no persisted journal"
+                    ))
+                })?;
+            // Ownership, the journalers' rule: correcting another
+            // tenant's run answers 404, never 403.
+            let internal_thread_id = tenant.scope(&snapshot.thread_id);
+            let owned = state
+                .server_store
+                .get_thread(&internal_thread_id)
+                .await
+                .map_err(internal_err)?
+                .is_some();
+            if !owned
+                || !run_readable(
+                    &tenant,
+                    person_of_run(&state, run_id, Some(&snapshot))
+                        .await
+                        .as_ref(),
+                )
+            {
+                return Err(ApiError::not_found(format!("run `{run_id}` not found")));
+            }
+            let event = snapshot
+                .events
+                .iter()
+                .find(|event| &event.id == event_id)
+                .ok_or_else(|| {
+                    ApiError::not_found(format!(
+                        "run `{run_id}` has no journaled event `{event_id}`"
+                    ))
+                })?;
+            example_input = Some(correction_event_input(event, &snapshot).unwrap_or(Value::Null));
+            journal_run_id = journal_run_id.or(Some(run_id.clone()));
+        }
+        CorrectionTarget::Prompt { .. } => {}
+    }
+
+    // Same-key correction-sourced writes auto-supersede the prior record
+    // (open question 5). The current truth at the key is the top-ranked
+    // live record — the assembly's total order, unbounded. A second live
+    // record at the key, when one exists, is conflict evidence, and this
+    // endpoint leaves it for the review listing.
+    let mut supersedes = None;
+    if let Some(key) = &key {
+        let live = state
+            .server_store
+            .query_memory(
+                tenant.tenant(),
+                &MemoryQuery {
+                    scope: Some(correction.scope.clone()),
+                    key: Some(key.clone()),
+                    ..MemoryQuery::default()
+                },
+                now,
+            )
+            .await
+            .map_err(internal_err)?;
+        supersedes = assemble(live, &ContextBudget::new(u32::MAX))
+            .map_err(internal_err)?
+            .records
+            .into_iter()
+            .next()
+            .map(|record| record.memory_id);
+    }
+
+    let candidacy = correction.is_candidate().then_some(Candidacy::Pending);
+    let provenance = MemoryProvenance {
+        author: correction.author_as_provenance(),
+        evidence: correction.evidence(),
+        written_at: now,
+    };
+    let build = |kind: MemoryKind, content: Value| -> Result<MemoryRecord, ApiError> {
+        let mut record = MemoryRecord::new(
+            kind,
+            correction.scope.clone(),
+            provenance.clone(),
+            1.0,
+            ValidityWindow::starting(now),
+            now,
+            content,
+        )
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+        if let Some(key) = &key {
+            record = record.with_key(key.clone());
+        }
+        if let Some(supersedes) = &supersedes {
+            record = record.with_supersedes(supersedes.clone());
+        }
+        if let Some(candidacy) = candidacy {
+            record = record.with_candidacy(candidacy);
+        }
+        Ok(record)
+    };
+
+    // The candidate (or, at run scope, the adopted) memory: the corrected
+    // content asserted at the target scope.
+    let memory = build(MemoryKind::Fact, correction.corrected.clone())?;
+    let created = state
+        .server_store
+        .put_memory(tenant.tenant(), &memory, &correction.corrected)
+        .await
+        .map_err(internal_err)?;
+    if let Some(run_id) = &journal_run_id {
+        journal_memory_write(&state, &tenant, run_id, &memory, payload.parent.clone()).await;
+    }
+
+    // The dataset-example half of the exit criterion: a correction whose
+    // target is a journaled run event also yields an `example`-kind
+    // record. (Run-event targets carry no inherited key, so the example
+    // never joins the supersession chain — it is dataset evidence, not a
+    // contender for the key.)
+    let mut example_id = None;
+    if let Some(input) = example_input {
+        let content = json!({
+            "input": input,
+            "corrected": correction.corrected,
+        });
+        let example = build(MemoryKind::Example, content.clone())?;
+        example_id = Some(example.memory_id.clone());
+        state
+            .server_store
+            .put_memory(tenant.tenant(), &example, &content)
+            .await
+            .map_err(internal_err)?;
+        if let Some(run_id) = &journal_run_id {
+            journal_memory_write(&state, &tenant, run_id, &example, payload.parent.clone()).await;
+        }
+    }
+
+    // Serve the stored record, re-read (the write_memory rule: spilled
+    // bodies re-inline, and a dedupe must show what is actually stored).
+    let stored = state
+        .server_store
+        .get_memory(tenant.tenant(), &memory.memory_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::internal(
+                "correction-derived record missing immediately after write".to_string(),
+            )
+        })?;
+    // Correction filing (demand-side learning, wave 2): the correction
+    // is evidence the recalled knowledge was wrong, not missing. Filed
+    // on the write path only — the retry-convergence return above does
+    // not re-file, so a retried submission cannot double-count demand.
+    // Best-effort: the correction is already stored.
+    file_correction_gap(
+        &state,
+        &tenant,
+        &correction,
+        key.as_deref(),
+        &memory.memory_id,
+    )
+    .await;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(json!({
+            "correction_id": correction.correction_id,
+            "attribution": correction.attribution(),
+            "candidate": candidacy.is_some(),
+            "memory_id": stored.memory_id,
+            "created": created,
+            "record": stored,
+            "superseded": memory.supersedes,
+            "example_id": example_id,
+        })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ConsolidatePayload {
+    /// The scope every named record must live at: one scope per
+    /// consolidation — a summary spans scopes never.
+    scope: ScopeAddress,
+    /// Exactly the records the task reads (explicit ids, the auditable
+    /// selector), in any order; sorted and deduped at enqueue.
+    memory_ids: Vec<String>,
+    /// The distiller's name, recorded on the summary's provenance.
+    distiller: String,
+    /// The summary's lookup key, when it answers a named question.
+    #[serde(default)]
+    key: Option<String>,
+    /// The summary's tags.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// The summary's explicit priority (default 0).
+    #[serde(default)]
+    priority: i64,
+    /// The queue pool the task lands in (default `default`).
+    #[serde(default)]
+    pool: Option<String>,
+    /// Run linkage for the task record; the executing worker passes it
+    /// through to the summary write to journal it.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// Causal parentage for the task record.
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /memory/consolidate` — enqueue a consolidation as a durable task
+/// (`memory_consolidation`, R0.6 machinery: leased, retried under the
+/// shared `ErrorClass` taxonomy, dead-lettered with evidence,
+/// quota-counted) → `201 {task_id, deduplicated, kind}` (`200` +
+/// `deduplicated: true` when the same scope + source set already names a
+/// live task — the derived idempotency key makes retried submissions
+/// converge).
+///
+/// Orchestration is the runtime's; the distillation semantics are the
+/// claiming worker's (the distiller boundary): the worker claims the
+/// task, reads the named records, and writes its summary through the
+/// governed write path (`kind: summary`, the distiller author, the source
+/// ids in `evidence.source_memory_ids`, the task payload's `written_at`
+/// as `written_at` — minted once at enqueue, so a retried execution names
+/// the same learning instant and its content-addressed write converges).
+/// The summary's source naming supersedes the sources in default
+/// retrieval; execution settles the task through the unchanged
+/// heartbeat/complete/fail protocol.
+///
+/// `400` when `memory_ids` is empty or names a record outside the
+/// declared scope; `404` when a named record does not resolve in this
+/// tenant — a task that cannot read its inputs must not queue.
+async fn enqueue_consolidation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ConsolidatePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if payload.memory_ids.is_empty() {
+        return Err(ApiError::bad_request(
+            "`memory_ids` must name at least one record — a summary that names no \
+             sources is not a consolidation"
+                .to_string(),
+        ));
+    }
+    tasks::validate_label("distiller", &payload.distiller, 256).map_err(ApiError::bad_request)?;
+    if let Some(key) = &payload.key {
+        tasks::validate_label("key", key, 256).map_err(ApiError::bad_request)?;
+    }
+    // The shared gate, without the correction loop's run-scope exception:
+    // consolidation produces an ordinary governed write, and run scope
+    // stays runtime-only.
+    check_memory_scope_gate(&state, &tenant, &payload.scope, false).await?;
+    // Fail fast: every named record must resolve in this tenant and live
+    // at the declared scope. A record forgotten between enqueue and
+    // execution surfaces at claim time as an `invalid_input` failure.
+    let mut sorted_ids = payload.memory_ids.clone();
+    sorted_ids.sort();
+    sorted_ids.dedup();
+    for memory_id in &sorted_ids {
+        let record = state
+            .server_store
+            .get_memory(tenant.tenant(), memory_id)
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| ApiError::not_found(format!("memory `{memory_id}` not found")))?;
+        if record.scope != payload.scope {
+            return Err(ApiError::bad_request(format!(
+                "memory `{memory_id}` lives at `{}`, not the declared scope `{}` — a \
+                 consolidation spans scopes never",
+                record.scope.as_address(),
+                payload.scope.as_address()
+            )));
+        }
+    }
+    // The idempotency key names the exact work — one scope, one sorted
+    // source set — so retried submissions converge on the live task.
+    let idempotency_key = format!(
+        "memory_consolidation:{}:{}",
+        payload.scope.as_address(),
+        sha256_hex(sorted_ids.join(",").as_bytes())
+    );
+    let now = Utc::now();
+    let record = build_task_record(
+        EnqueueTaskPayload {
+            kind: tasks::MEMORY_CONSOLIDATION_KIND.to_string(),
+            payload: json!({
+                "scope": payload.scope,
+                "memory_ids": sorted_ids,
+                "distiller": payload.distiller,
+                "key": payload.key,
+                "tags": payload.tags,
+                "priority": payload.priority,
+                "written_at": now,
+                "run_id": payload.run_id,
+                "parent": payload.parent,
+            }),
+            pool: payload.pool,
+            max_attempts: None,
+            idempotency_key: Some(idempotency_key),
+            effect: None,
+            run_id: payload.run_id,
+            thread_id: None,
+            deadline: None,
+            worker_version: None,
+            recipient: None,
+            parent: payload.parent,
+            parent_task_id: None,
+            stage: None,
+            status_category: None,
+        },
+        &tenant,
+    )?;
+    enforce_task_quota(&state, &tenant, 1).await?;
+    let (task, deduplicated) = state
+        .server_store
+        .enqueue_task(&record)
+        .await
+        .map_err(internal_err)?;
+    let status = if deduplicated {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((
+        status,
+        Json(json!({
+            "task_id": task.task_id,
+            "deduplicated": deduplicated,
+            "kind": tasks::MEMORY_CONSOLIDATION_KIND,
+        })),
+    ))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ConflictsPayload {
+    /// Restrict the review listing to one scope address.
+    #[serde(default)]
+    scope: Option<ScopeAddress>,
+}
+
+/// `POST /memory/conflicts` — the conflict review listing: live records
+/// sharing a key with overlapping validity windows and contradictory
+/// content, flagged. Detection is evidence and resolution is governance
+/// (the design's rule; open question 5's distiller half): this endpoint
+/// changes nothing, and nothing anywhere in the runtime resolves the
+/// pairs it returns.
+async fn list_memory_conflicts(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ConflictsPayload>,
+) -> Result<Json<Value>, ApiError> {
+    if let Some(scope) = &payload.scope {
+        if scope.scope == MemoryScope::User && !tenant.may_act_for(&scope.id) {
+            return Err(not_your_memory(&scope.id, &tenant));
+        }
+    }
+    let universe = memory_universe(&state, &tenant).await?;
+    let mut conflicts = detect_conflicts(&universe, Utc::now());
+    conflicts.retain(|conflict| {
+        conflict.scope.scope != MemoryScope::User || tenant.may_act_for(&conflict.scope.id)
+    });
+    if let Some(scope) = &payload.scope {
+        conflicts.retain(|conflict| &conflict.scope == scope);
+    }
+    Ok(Json(json!({ "conflicts": conflicts })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ForgetPayload {
+    /// The record to erase (bare content address).
+    memory_id: String,
+    /// Why it is forgotten — carried on the tombstone.
+    reason: ForgetReason,
+    /// Journal the tombstone into this run's journal (best-effort, the
+    /// wave-1 discipline): the deletion is durable either way; the
+    /// journaled tombstone is the auditable receipt.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// The tenant's whole memory namespace — expired and superseded records
+/// included: the universe forget planning and conflict detection run
+/// over. Both walk relationships (source naming, supersession), and a
+/// relationship does not stop existing because a record aged out of
+/// default retrieval.
+pub(crate) async fn memory_universe(
+    state: &AppState,
+    tenant: &TenantContext,
+) -> Result<Vec<MemoryRecord>, ApiError> {
+    state
+        .server_store
+        .query_memory(
+            tenant.tenant(),
+            &MemoryQuery {
+                include_expired: true,
+                include_superseded: true,
+                include_candidates: true,
+                ..MemoryQuery::default()
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)
+}
+
+/// `POST /memory/forget` — erase one record → `200 {forgotten,
+/// invalidated, tombstone}`. Real deletion from the store (derived state
+/// is erasable; run journals are hash-chained evidence and are not —
+/// open question 4), invalidation of the dependent summaries by walking
+/// the source naming in reverse, transitively (they are deleted with it:
+/// a summary built on erased evidence that keeps serving content
+/// distilled from the forgotten record is not forgetting), and a
+/// journaled `memory_forget` tombstone carrying metadata only — the id,
+/// scope, reason, and dependent invalidations, never the forgotten
+/// content: the tombstone struct has no content field to leak through.
+/// `404` for unknown or cross-tenant addresses.
+async fn forget_memory(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ForgetPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_memory(tenant.tenant(), &payload.memory_id)
+        .await
+        .map_err(internal_err)?
+        .filter(|record| memory_visible(record, &tenant))
+        .ok_or_else(|| ApiError::not_found(format!("memory `{}` not found", payload.memory_id)))?;
+    let universe = memory_universe(&state, &tenant).await?;
+    let plan = plan_forget(&universe, std::slice::from_ref(&payload.memory_id));
+    for memory_id in plan.forgotten.iter().chain(plan.invalidated.iter()) {
+        state
+            .server_store
+            .delete_memory(tenant.tenant(), memory_id)
+            .await
+            .map_err(internal_err)?;
+    }
+    let tombstone = MemoryForgetTombstone {
+        memory_id: payload.memory_id.clone(),
+        scope: record.scope.clone(),
+        reason: payload.reason,
+        invalidated: plan.invalidated,
+    };
+    if let Some(run_id) = &payload.run_id {
+        journal_memory_forget(&state, &tenant, run_id, &tombstone, payload.parent).await;
+    }
+    Ok(Json(json!({
+        "forgotten": plan.forgotten,
+        "invalidated": tombstone.invalidated,
+        "tombstone": tombstone,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ForgetScopePayload {
+    /// The scope address to erase wholesale (erasure requests).
+    scope: ScopeAddress,
+    /// Why the scope is forgotten — carried on every tombstone.
+    reason: ForgetReason,
+    /// Journal the tombstones into this run's journal (best-effort; one
+    /// `memory_forget` event per forgotten record — the tombstone
+    /// contract names a single id).
+    #[serde(default)]
+    run_id: Option<String>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /memory/forget_scope` — erase every record at a scope address
+/// (erasure requests) → `200 {forgotten, invalidated, tombstones}`. Same
+/// semantics as [`forget_memory`], scaled to the scope: each forgotten
+/// record gets its own tombstone carrying the dependents attributable to
+/// its own erasure, and summaries anywhere in the namespace that named a
+/// forgotten record are invalidated with it.
+///
+/// Idempotent by construction: an empty scope answers `200` with empty
+/// lists. Tenant scope requires the caller's own tenant (`403`); the
+/// agent-manifest check deliberately does not apply — an erasure request
+/// must not depend on the agent still being registered.
+async fn forget_memory_scope(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ForgetScopePayload>,
+) -> Result<Json<Value>, ApiError> {
+    tasks::validate_label("scope.id", &payload.scope.id, 256).map_err(ApiError::bad_request)?;
+    if payload.scope.scope == MemoryScope::User && !tenant.may_act_for(&payload.scope.id) {
+        return Err(not_your_memory(&payload.scope.id, &tenant));
+    }
+    if payload.scope.scope == MemoryScope::Tenant && payload.scope.id != tenant.tenant() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            format!(
+                "tenant-scoped erasure id `{}` is not the caller's tenant `{}` — \
+                 tenant isolation is not a scope a caller can cross",
+                payload.scope.id,
+                tenant.tenant()
+            ),
+        ));
+    }
+    let universe = memory_universe(&state, &tenant).await?;
+    let targets: Vec<String> = universe
+        .iter()
+        .filter(|record| record.scope == payload.scope)
+        .map(|record| record.memory_id.clone())
+        .collect();
+    if targets.is_empty() {
+        return Ok(Json(json!({
+            "forgotten": [],
+            "invalidated": [],
+            "tombstones": 0,
+        })));
+    }
+    let scopes: HashMap<&str, ScopeAddress> = universe
+        .iter()
+        .map(|record| (record.memory_id.as_str(), record.scope.clone()))
+        .collect();
+    let plan = plan_forget(&universe, &targets);
+    for memory_id in plan.forgotten.iter().chain(plan.invalidated.iter()) {
+        state
+            .server_store
+            .delete_memory(tenant.tenant(), memory_id)
+            .await
+            .map_err(internal_err)?;
+    }
+    // One tombstone per forgotten record, each naming the dependents
+    // attributable to its own erasure (the single-target plan against
+    // the pre-deletion universe).
+    let mut tombstones = Vec::with_capacity(plan.forgotten.len());
+    for memory_id in &plan.forgotten {
+        let single = plan_forget(&universe, std::slice::from_ref(memory_id));
+        let scope = scopes
+            .get(memory_id.as_str())
+            .expect("forgotten ids come from the universe")
+            .clone();
+        tombstones.push(MemoryForgetTombstone {
+            memory_id: memory_id.clone(),
+            scope,
+            reason: payload.reason,
+            invalidated: single.invalidated,
+        });
+    }
+    if let Some(run_id) = &payload.run_id {
+        for tombstone in &tombstones {
+            journal_memory_forget(&state, &tenant, run_id, tombstone, payload.parent.clone()).await;
+        }
+    }
+    Ok(Json(json!({
+        "forgotten": plan.forgotten,
+        "invalidated": plan.invalidated,
+        "tombstones": tombstones.len(),
+    })))
+}
+
+/// Journal a forgetting tombstone into the given run's persisted journal
+/// — best-effort, the [`journal_memory_write`] discipline: the deletion
+/// is already durable in the store, so a journaling failure is logged,
+/// never surfaced as a request failure. The event is an
+/// [`Effect::Idempotent`] effect under the derived
+/// `memory_forget:{scope}:{memory_id}` key (retried erasures converge);
+/// the tombstone is metadata-only by construction — no content field
+/// exists to serialize.
+async fn journal_memory_forget(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+    tombstone: &MemoryForgetTombstone,
+    parent: Option<String>,
+) {
+    let draft = EventDraft::new(RunEventKind::MemoryForget, Effect::Idempotent).input(json!({
+        "effect_key": memory_forget_effect_key(&tombstone.scope, &tombstone.memory_id),
+        "memory_id": tombstone.memory_id,
+    }));
+    let draft = match serde_json::to_value(tombstone) {
+        Ok(output) => draft.output(output),
+        Err(error) => {
+            tracing::warn!(%run_id, %error, "memory tombstone failed to serialize; journaling skipped");
+            return;
+        }
+    };
+    if let Err(error) = try_journal_memory_event(state, tenant, run_id, parent, draft).await {
+        tracing::warn!(
+            %run_id,
+            memory_id = %tombstone.memory_id,
+            %error,
+            "forgetting is durable in the store; tombstone journaling skipped"
+        );
+    }
+}
+
+// --------------------------------------------------------------------- //
+// The candidate lifecycle and promotion gate (R0.8 Rusty Learn, wave 3)
+//
+// Candidates are content-addressed, immutable proposals; the lifecycle —
+// created → evaluated → promoted → rolled back — is four journaled
+// transitions over the store, never background daemons. Two disciplines
+// distinguish this surface from the memory routes:
+//
+// - **Journaling is hard-fail, not best-effort.** Every transition is in
+//   the journal (the wave's exit criterion): `run_id` is required on
+//   every lifecycle payload, and a run that cannot take the event stops
+//   the request (`404` when the run does not resolve in this tenant —
+//   the linkage the caller named does not exist; `422` otherwise).
+//   Nothing reaches the store that the journal did not record first.
+// - **The gate runs at promotion, in the handler.** `admit_promotion`
+//   evaluates the deployment's declared envelope against the journaled
+//   evaluation; out-of-envelope promotion needs an approval token
+//   scoped to the candidate's promotion effect id. Refusal is a typed
+//   `PromotionRefusal` mapped to `403`/`422` — never a silent no-op.
+// --------------------------------------------------------------------- //
+
+/// The wire name of a lifecycle status, so error messages read like the
+/// API's JSON.
+fn status_wire(status: CandidateStatus) -> String {
+    serde_json::to_value(status)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("{status:?}"))
+}
+
+/// Map a gate refusal to its HTTP status: approval failures are `403`
+/// (the caller holds neither the standing nor the presented approval),
+/// evidence failures are `422` (the request is well-formed; the
+/// evidence does not clear the bar).
+fn refusal_error(refusal: &PromotionRefusal) -> ApiError {
+    match refusal {
+        PromotionRefusal::RequiresApproval { .. } | PromotionRefusal::ApprovalMismatch { .. } => {
+            ApiError::new(StatusCode::FORBIDDEN, "forbidden", refusal.to_string())
+        }
+        _ => ApiError::unprocessable(refusal.to_string()),
+    }
+}
+
+/// Map a lifecycle error: a refused promotion through [`refusal_error`],
+/// a state-machine violation to `409` (a concurrent transition, or an
+/// action out of order — retry reads the settled state), everything
+/// else (address and receipt mismatches) to `422`.
+fn learn_error(error: &LearnError) -> ApiError {
+    match error {
+        LearnError::InvalidTransition { .. } => ApiError::conflict(error.to_string()),
+        LearnError::Refused(refusal) => refusal_error(refusal),
+        _ => ApiError::unprocessable(error.to_string()),
+    }
+}
+
+/// The learn lifecycle's journaling gate (hard-fail — see the section
+/// header): an unresolvable run is a `404`, any other append failure a
+/// `422`.
+fn journal_gate_error(error: String) -> ApiError {
+    if error.contains("no persisted journal") || error.contains("does not resolve") {
+        ApiError::not_found(error)
+    } else {
+        ApiError::unprocessable(error)
+    }
+}
+
+/// Map the store's transition outcome to the route's statuses, with the
+/// settled record on `Applied`.
+fn transition_outcome(outcome: CandidateTransition, candidate_id: &str) -> Result<(), ApiError> {
+    match outcome {
+        CandidateTransition::Applied => Ok(()),
+        CandidateTransition::Unknown => Err(ApiError::not_found(format!(
+            "candidate `{candidate_id}` not found"
+        ))),
+        CandidateTransition::Conflict(live) => Err(ApiError::conflict(format!(
+            "candidate `{candidate_id}` is `{}` — a concurrent transition won the race; \
+             retry against the settled state",
+            status_wire(live)
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateCandidatePayload {
+    /// The candidate. Its content address must verify (`422`) — the
+    /// store holds only well-addressed candidates, so every served
+    /// record re-derives its id.
+    candidate: Candidate,
+    /// The run whose journal the creation event joins. Required —
+    /// every lifecycle transition is journaled (the wave's exit
+    /// criterion), and creation is the first one.
+    run_id: String,
+    /// The causal parent journal-event id (default: the journal's
+    /// current head, the receipt precedent).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates` — register a distilled candidate → `201
+/// {candidate_id, created, record}`; `200` + `created: false` when the
+/// candidate id is already stored (content addressing makes the create
+/// converge — the `Effect::Idempotent` creation). The address is
+/// verified on the way in (`422`): the store holds only well-addressed
+/// candidates. The `candidate_created` event is journaled into
+/// `run_id`'s journal before the store write — hard-fail (see the
+/// section header).
+async fn create_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CreateCandidatePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    payload
+        .candidate
+        .verify_address()
+        .map_err(|e| learn_error(&e))?;
+    let candidate_id = payload.candidate.candidate_id.to_string();
+    // Retry convergence on the candidate id (the memory write's rule):
+    // a re-posted create returns the stored record without re-journaling.
+    if let Some(existing) = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+    {
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "candidate_id": candidate_id,
+                "created": false,
+                "record": existing,
+            })),
+        ));
+    }
+    let draft = EventDraft::new(RunEventKind::CandidateCreated, Effect::Idempotent)
+        .input(json!({
+            "effect_key": candidate_effect_key(&payload.candidate.candidate_id),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&payload.candidate)
+                .map_err(|e| ApiError::internal(format!("serialize candidate: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    let record = CandidateRecord::new(payload.candidate);
+    state
+        .server_store
+        .put_candidate(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "candidate_id": candidate_id,
+            "created": true,
+            "record": record,
+        })),
+    ))
+}
+
+/// `GET /learn/candidates` — the tenant's candidates, sorted by
+/// candidate id for a deterministic listing.
+async fn list_candidates(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .server_store
+        .list_candidates(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    records.sort_by(|a, b| a.candidate.candidate_id.cmp(&b.candidate.candidate_id));
+    Ok(Json(json!({ "candidates": records })))
+}
+
+/// `GET /learn/candidates/{candidate_id}` — fetch one candidate record
+/// (`404` unknown/cross-tenant — the two are indistinguishable by
+/// design).
+async fn get_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+) -> Result<Json<CandidateRecord>, ApiError> {
+    state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct EvaluateCandidatePayload {
+    /// What to evaluate against: the dataset version, target metric,
+    /// thresholds, and replay evidence.
+    request: EvaluationRequest,
+    /// The run whose journal the evaluation event joins (required — the
+    /// evaluation is the evidence the gate reads; it must be journaled).
+    run_id: String,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates/{candidate_id}/evaluate` — drive the
+/// configured [`CandidateEvaluator`](rusty_agent_runtime::learn::CandidateEvaluator)
+/// over the candidate and record the evaluation → `200 {candidate_id,
+/// status, evaluation}`; `404` unknown/cross-tenant; `409` when no
+/// evaluator is configured (a deployment without one can hold and
+/// inspect candidates but cannot produce evidence) or the lifecycle
+/// forbids re-evaluation; `422` when the evaluation fails or violates
+/// the seam contract (it must name this candidate and the request's
+/// dataset version — mismatches the gate would refuse at promotion are
+/// caught here, at the first transition they would poison).
+async fn evaluate_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+    Json(payload): Json<EvaluateCandidatePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut record = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))?;
+    let expect = record.status;
+    let Some(evaluator) = state.config.candidate_evaluator.clone() else {
+        return Err(ApiError::conflict(
+            "no candidate evaluator is configured on this server — promotion is gated on \
+             evidence, and evidence requires an evaluator \
+             (`ServerConfig::with_candidate_evaluator`)"
+                .to_string(),
+        ));
+    };
+    let evaluation = evaluator
+        .evaluate(&record.candidate, &payload.request)
+        .await
+        .map_err(|e| ApiError::unprocessable(format!("candidate evaluation failed: {e}")))?;
+    if evaluation.candidate_id != record.candidate.candidate_id
+        || evaluation.dataset_version != payload.request.dataset_version
+    {
+        return Err(ApiError::unprocessable(
+            "the evaluator returned an evaluation naming a different candidate or dataset \
+             version — the CandidateEvaluator contract requires both to match the request"
+                .to_string(),
+        ));
+    }
+    record
+        .apply_evaluation(evaluation.clone())
+        .map_err(|e| learn_error(&e))?;
+    let draft = EventDraft::new(RunEventKind::CandidateEvaluated, Effect::Idempotent)
+        .input(json!({
+            "effect_key": evaluation_effect_key(
+                &record.candidate.candidate_id,
+                &evaluation.dataset_version,
+            ),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&evaluation)
+                .map_err(|e| ApiError::internal(format!("serialize evaluation: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    transition_outcome(
+        state
+            .server_store
+            .transition_candidate(tenant.tenant(), &candidate_id, expect, &record, None)
+            .await
+            .map_err(internal_err)?,
+        &candidate_id,
+    )?;
+    Ok(Json(json!({
+        "candidate_id": candidate_id,
+        "status": status_wire(record.status),
+        "evaluation": evaluation,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct PromoteCandidatePayload {
+    /// The run whose journal the promotion event joins (required — the
+    /// promotion receipt is the gate's positive decision, and it must
+    /// be journaled).
+    run_id: String,
+    /// The approval token for out-of-envelope promotions, scoped to the
+    /// candidate's promotion effect id (an approval for one candidate
+    /// does not transfer to another). In-envelope promotions ignore it;
+    /// approval-ruled promotions fail `403` without it.
+    #[serde(default)]
+    approval: Option<ApprovalToken>,
+    /// The environment tag the promotion targets (R0.11 wave 1): with a
+    /// tag, the pointer moves on the tagged surface
+    /// (`prompt:system@prod`) instead of the base one — one deployment
+    /// serving "the prod prompt" and "the staging prompt" from one
+    /// registry, through the unchanged pointer machinery. Absent is the
+    /// untagged surface, the pre-R0.11 behavior.
+    #[serde(default)]
+    tag: Option<EnvironmentTag>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates/{candidate_id}/promote` — run the promotion
+/// gate and, on admission, move the surface's version pointer → `200
+/// {candidate_id, status, receipt, pointer}`. The gate
+/// (`admit_promotion`) reads the deployment's declared envelope against
+/// the journaled evaluation: `403` on approval failures, `422` on
+/// evidence failures, `409` when the candidate is not `evaluated`. The
+/// status flip and the pointer move are one store transition (one
+/// transaction on Postgres, one lock pair on the file backend).
+async fn promote_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+    Json(payload): Json<PromoteCandidatePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut record = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))?;
+    let decision = admit_promotion(
+        &state.config.promotion_envelope,
+        &record.candidate,
+        record.evaluation.as_ref(),
+        payload.approval.as_ref(),
+    )
+    .map_err(|e| learn_error(&e))?;
+    let surface = match &payload.tag {
+        Some(tag) => record.candidate.surface().tagged(tag),
+        None => record.candidate.surface(),
+    };
+    let pointer = state
+        .server_store
+        .get_version_pointer(tenant.tenant(), surface.as_str())
+        .await
+        .map_err(internal_err)?
+        .unwrap_or_else(|| VersionPointer::new(surface.clone()));
+    let receipt = PromotionReceipt {
+        candidate_id: record.candidate.candidate_id.clone(),
+        surface: surface.clone(),
+        previous: pointer.active.clone(),
+        decision,
+        promoted_at: Utc::now(),
+    };
+    record
+        .apply_promotion(receipt.clone())
+        .map_err(|e| learn_error(&e))?;
+    let moved = pointer.promoted(&receipt);
+    let draft = EventDraft::new(RunEventKind::CandidatePromoted, Effect::Idempotent)
+        .input(json!({
+            "effect_key": promotion_effect_key(&record.candidate.candidate_id),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&receipt)
+                .map_err(|e| ApiError::internal(format!("serialize promotion receipt: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    transition_outcome(
+        state
+            .server_store
+            .transition_candidate(
+                tenant.tenant(),
+                &candidate_id,
+                CandidateStatus::Evaluated,
+                &record,
+                Some(&moved),
+            )
+            .await
+            .map_err(internal_err)?,
+        &candidate_id,
+    )?;
+    // Demand-side learning (wave 4): the promotion is closure evidence
+    // for every gap whose criteria name this candidate — the hunt that
+    // drafted it is done. Best-effort: the promotion has committed.
+    close_gaps_on_promotion(&state, &tenant, &candidate_id).await;
+    // Wave 4: a full-traffic policy promotion becomes an active executor
+    // policy — the pointer move alone only names the surface winner; the
+    // registry activation is what the admission decorator reads. Canary
+    // promotions register nothing (policy canary bindings do not steer
+    // admission in v1). R0.11: a tagged promotion targets one
+    // environment's surface, so it moves only the pointer — the executor-
+    // policy registry activation stays an untagged operation.
+    if payload.tag.is_none() && receipt.decision.canary.is_none() {
+        if let CandidateContent::Policy { family, parameters } = &record.candidate.content {
+            activate_policy_from_candidate(
+                &state,
+                &tenant,
+                &candidate_id,
+                *family,
+                parameters.clone(),
+            )
+            .await?;
+        }
+    }
+    Ok(Json(json!({
+        "candidate_id": candidate_id,
+        "status": status_wire(record.status),
+        "receipt": receipt,
+        "pointer": moved,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct RollbackCandidatePayload {
+    /// The run whose journal the rollback event joins (required).
+    run_id: String,
+    /// Why the rollback happened — the drift monitor's verdict, the
+    /// operator's note. Journaled on the receipt.
+    cause: String,
+    /// The environment tag whose surface rolls back (R0.11 wave 1) — the
+    /// same rule as promotion: tagged rolls back the tagged surface's
+    /// pointer, absent rolls back the untagged one.
+    #[serde(default)]
+    tag: Option<EnvironmentTag>,
+    /// The causal parent journal-event id (default: the journal's head).
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// `POST /learn/candidates/{candidate_id}/rollback` — re-point the
+/// surface to the version the promotion displaced → `200 {candidate_id,
+/// status, receipt, pointer}`; `404` unknown/cross-tenant; `409` when
+/// the candidate is not `promoted`, or the surface's pointer no longer
+/// serves it (roll back what serves, not a superseded experiment).
+/// Rollback is byte-exact: the pointer's `to` is the promotion's
+/// recorded `previous`, and candidates are content-addressed — the
+/// restored version is the version that served, not a reconstruction.
+async fn rollback_candidate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(candidate_id): Path<String>,
+    Json(payload): Json<RollbackCandidatePayload>,
+) -> Result<Json<Value>, ApiError> {
+    let mut record = state
+        .server_store
+        .get_candidate(tenant.tenant(), &candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{candidate_id}` not found")))?;
+    if record.status != CandidateStatus::Promoted {
+        return Err(ApiError::conflict(format!(
+            "candidate `{candidate_id}` is `{}` — only a promoted candidate can roll back",
+            status_wire(record.status)
+        )));
+    }
+    let surface = match &payload.tag {
+        Some(tag) => record.candidate.surface().tagged(tag),
+        None => record.candidate.surface(),
+    };
+    let pointer = state
+        .server_store
+        .get_version_pointer(tenant.tenant(), surface.as_str())
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::conflict(format!(
+                "surface `{surface}` has no version pointer — the candidate is not serving"
+            ))
+        })?;
+    let serves_active = pointer.active.as_ref() == Some(record.candidate_id());
+    let serves_canary = pointer
+        .canary
+        .as_ref()
+        .is_some_and(|binding| &binding.candidate_id == record.candidate_id());
+    if !serves_active && !serves_canary {
+        return Err(ApiError::conflict(format!(
+            "candidate `{candidate_id}` is marked promoted but surface `{surface}` does not \
+             serve it — the pointer moved on; roll back what serves"
+        )));
+    }
+    // Re-point to the promotion's recorded `previous` (full-traffic
+    // rollback) or clear the binding (canary rollback — the static or
+    // active version keeps serving).
+    let to = if serves_active {
+        record
+            .promotion
+            .as_ref()
+            .and_then(|receipt| receipt.previous.clone())
+    } else {
+        None
+    };
+    let receipt = RollbackReceipt {
+        surface: surface.clone(),
+        from: record.candidate.candidate_id.clone(),
+        to,
+        cause: payload.cause,
+        rolled_back_at: Utc::now(),
+    };
+    record
+        .apply_rollback(receipt.clone())
+        .map_err(|e| learn_error(&e))?;
+    let moved = pointer.rolled_back(&receipt);
+    let draft = EventDraft::new(RunEventKind::CandidateRolledBack, Effect::Idempotent)
+        .input(json!({
+            "effect_key": rollback_effect_key(&surface, &record.candidate.candidate_id),
+            "candidate_id": candidate_id,
+        }))
+        .output(
+            serde_json::to_value(&receipt)
+                .map_err(|e| ApiError::internal(format!("serialize rollback receipt: {e}")))?,
+        );
+    try_journal_memory_event(&state, &tenant, &payload.run_id, payload.parent, draft)
+        .await
+        .map_err(journal_gate_error)?;
+    transition_outcome(
+        state
+            .server_store
+            .transition_candidate(
+                tenant.tenant(),
+                &candidate_id,
+                CandidateStatus::Promoted,
+                &record,
+                Some(&moved),
+            )
+            .await
+            .map_err(internal_err)?,
+        &candidate_id,
+    )?;
+    // Wave 4: rolling back a serving policy candidate reverts the active
+    // executor policy to what the promotion displaced. Canary bindings
+    // never activated anything, so a canary rollback leaves the registry
+    // untouched. R0.11: a tagged rollback pairs with a tagged promotion,
+    // which never activated — same rule.
+    if payload.tag.is_none() && serves_active {
+        if let CandidateContent::Policy { .. } = &record.candidate.content {
+            revert_policy_from_rollback(&state, &tenant, &receipt).await?;
+        }
+    }
+    Ok(Json(json!({
+        "candidate_id": candidate_id,
+        "status": status_wire(record.status),
+        "receipt": receipt,
+        "pointer": moved,
+    })))
+}
+
+/// `GET /learn/versions` — the tenant's version pointers, sorted by
+/// surface for a deterministic listing.
+async fn list_version_pointers(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut pointers = state
+        .server_store
+        .list_version_pointers(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    pointers.sort_by(|a, b| a.surface.as_str().cmp(b.surface.as_str()));
+    Ok(Json(json!({ "versions": pointers })))
+}
+
+// --------------------------------------------------------------------- //
+// The configuration registry (R0.11 Extension Plane, wave 1)
+//
+// Named, owned artifacts indexing the candidate pipeline: a commit *is*
+// a candidate, so these routes never mint lifecycle evidence of their
+// own — the candidates an artifact names journaled their own creation
+// through the learn surface, and the artifact record is the store-level
+// index over them (its durability rule is the store's, not the journal's;
+// nothing here is a lifecycle transition). Promotion stays on the learn
+// routes, tagged per environment through the pointer machinery.
+// --------------------------------------------------------------------- //
+
+/// Map a registry refusal to its HTTP status: naming-rule and commit-rule
+/// violations are `422` (the request is well-formed; the contract refuses
+/// it), a content failure is `500` (unreachable for well-formed content).
+fn registry_error(error: &RegistryError) -> ApiError {
+    match error {
+        RegistryError::UndiffableContent(_) => ApiError::internal(error.to_string()),
+        _ => ApiError::unprocessable(error.to_string()),
+    }
+}
+
+/// Parse the `{family}` path segment as a candidate kind — `400` on an
+/// unknown wire name (the path is malformed, not the request body).
+fn parse_family(family: &str) -> Result<CandidateKind, ApiError> {
+    serde_json::from_value(Value::String(family.to_owned())).map_err(|_| {
+        ApiError::bad_request(format!(
+            "unknown registry family `{family}` — expected one of `prompt`, `policy`, \
+             `memory_set`, `tool_permission`, `tool_contract`, `model_settings`, \
+             `memory_configuration`, `middleware_composition`"
+        ))
+    })
+}
+
+/// The artifact key for a route's `{family}/{name}` pair: the untagged
+/// surface, built by the same rule the candidate's own surface uses.
+fn artifact_surface(family: &str, name: &str) -> Result<(CandidateKind, String), ApiError> {
+    let family = parse_family(family)?;
+    Ok((family, surface_for_kind(family, name).to_string()))
+}
+
+#[derive(Debug, Deserialize)]
+struct DeclareArtifactPayload {
+    /// The registry family (the candidate kind the artifact indexes).
+    family: CandidateKind,
+    /// The artifact's name — validated at declaration (`422`): the
+    /// naming rules keep names route-addressable and unambiguous under
+    /// tagging and tenant prefixing.
+    name: String,
+    /// The owner: review routing and attribution, not an ACL.
+    owner: ProvenanceAuthor,
+}
+
+/// `POST /registry/artifacts` — declare an artifact `{family, name,
+/// owner}` → `201 {surface, created, artifact}`; `200` + `created: false`
+/// when the same declaration is re-posted (artifact identity is
+/// immutable, so an identical re-declaration is the same fact); `409`
+/// when the surface is taken under a different family or owner; `422` on
+/// a name outside the naming rules.
+async fn declare_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<DeclareArtifactPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let record = ArtifactRecord::new(payload.family, payload.name, payload.owner, Utc::now())
+        .map_err(|e| registry_error(&e))?;
+    let surface = record.surface.to_string();
+    if state
+        .server_store
+        .put_artifact(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?
+    {
+        return Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "surface": surface,
+                "created": true,
+                "artifact": record,
+            })),
+        ));
+    }
+    // The surface is taken: an identical re-declaration converges,
+    // anything else conflicts — the policy registry's immutability rule
+    // applied to artifact identity.
+    let existing = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::internal("artifact declared but not readable".to_string()))?;
+    if existing.family == record.family && existing.owner == record.owner {
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "surface": surface,
+                "created": false,
+                "artifact": existing,
+            })),
+        ));
+    }
+    Err(ApiError::conflict(format!(
+        "surface `{surface}` is already declared as a `{}` artifact owned by `{}` — artifact \
+         identity is immutable; a different artifact needs a different name",
+        existing.family,
+        existing.owner.as_id_string()
+    )))
+}
+
+#[derive(Debug, Deserialize)]
+struct ListArtifactsQuery {
+    /// Restrict to one family's wire name (`prompt`, `tool_contract`, …).
+    family: Option<String>,
+}
+
+/// `GET /registry/artifacts?family=` — the tenant's artifacts (optionally
+/// one family's), sorted by surface for a deterministic listing.
+async fn list_artifacts(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<ListArtifactsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let mut records = state
+        .server_store
+        .list_artifacts(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    if let Some(family) = &query.family {
+        let family = parse_family(family)?;
+        records.retain(|record| record.family == family);
+    }
+    records.sort_by(|a, b| a.surface.as_str().cmp(b.surface.as_str()));
+    Ok(Json(json!({ "artifacts": records })))
+}
+
+/// `GET /registry/artifacts/{family}/{name}` — fetch one artifact (`404`
+/// unknown/cross-tenant — the two are indistinguishable by design).
+async fn get_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+) -> Result<Json<ArtifactRecord>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct CommitArtifactPayload {
+    /// The candidate joining the artifact's history.
+    candidate_id: String,
+    /// When the commit happened (default: now). Explicit for callers
+    /// reproducing a recorded history; the instant is metadata, never
+    /// identity.
+    #[serde(default)]
+    committed_at: Option<DateTime<Utc>>,
+}
+
+/// `POST /registry/artifacts/{family}/{name}/commits` — commit a
+/// candidate to the artifact → `200 {surface, committed, commit,
+/// commits}`; `200` + `committed: false` when the candidate is already in
+/// the history (a re-commit is the same fact); `404` unknown artifact or
+/// candidate; `422` when the candidate is not this artifact's family or
+/// surface (a `prompt:other` candidate has no business in
+/// `prompt:system`'s history); `409` when a concurrent commit won the
+/// race — retry against the settled history.
+async fn commit_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+    Json(payload): Json<CommitArtifactPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    let artifact = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))?;
+    let candidate = state
+        .server_store
+        .get_candidate(tenant.tenant(), &payload.candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("candidate `{}` not found", payload.candidate_id))
+        })?;
+    if artifact
+        .find_commit(&candidate.candidate.candidate_id)
+        .is_some()
+    {
+        return Ok(Json(json!({
+            "surface": surface,
+            "committed": false,
+            "commits": artifact.commits.len(),
+        })));
+    }
+    let commit = artifact
+        .admit_commit(
+            &candidate.candidate,
+            payload.committed_at.unwrap_or_else(Utc::now),
+        )
+        .map_err(|e| registry_error(&e))?;
+    match state
+        .server_store
+        .commit_artifact(tenant.tenant(), &surface, artifact.commits.len(), &commit)
+        .await
+        .map_err(internal_err)?
+    {
+        ArtifactCommitOutcome::Applied => Ok(Json(json!({
+            "surface": surface,
+            "committed": true,
+            "commit": commit,
+            "commits": artifact.commits.len() + 1,
+        }))),
+        ArtifactCommitOutcome::Unknown => Err(ApiError::not_found(format!(
+            "artifact `{surface}` not found"
+        ))),
+        ArtifactCommitOutcome::Conflict(live) => Err(ApiError::conflict(format!(
+            "artifact `{surface}` has {live} commits, not {} — a concurrent commit won the \
+             race; retry against the settled history",
+            artifact.commits.len()
+        ))),
+    }
+}
+
+/// `GET /registry/artifacts/{family}/{name}/commits` — the history walk:
+/// every commit oldest first, joined with its candidate's lifecycle
+/// status and author, so a reviewer reads the artifact's lineage without
+/// a second round trip per entry.
+async fn list_artifact_commits(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    let artifact = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))?;
+    let mut commits = Vec::with_capacity(artifact.commits.len());
+    for commit in &artifact.commits {
+        // Candidates are never deleted, so a missing record is store
+        // corruption — but the walk degrades to a null join rather than
+        // failing the whole history on one bad entry.
+        let candidate = state
+            .server_store
+            .get_candidate(tenant.tenant(), commit.candidate_id.as_str())
+            .await
+            .map_err(internal_err)?;
+        commits.push(json!({
+            "candidate_id": commit.candidate_id,
+            "committed_at": commit.committed_at,
+            "author": candidate.as_ref().map(|record| &record.candidate.distilled_by),
+            "status": candidate.as_ref().map(|record| status_wire(record.status)),
+        }));
+    }
+    Ok(Json(json!({
+        "surface": artifact.surface,
+        "family": artifact.family,
+        "owner": artifact.owner,
+        "commits": commits,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ArtifactDiffQuery {
+    /// The base version's candidate id.
+    from: String,
+    /// The target version's candidate id.
+    to: String,
+}
+
+/// `GET /registry/artifacts/{family}/{name}/diff?from=&to=` — the diff
+/// view between two committed versions, computed on read (never stored):
+/// a line diff for prompts, a structural canonical-JSON diff for the
+/// JSON families. `404` unknown artifact; `422` when either candidate is
+/// not in this artifact's history — a diff views two committed versions
+/// of one artifact, nothing wider.
+async fn diff_artifact(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path((family, name)): Path<(String, String)>,
+    Query(query): Query<ArtifactDiffQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let (_, surface) = artifact_surface(&family, &name)?;
+    let artifact = state
+        .server_store
+        .get_artifact(tenant.tenant(), &surface)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("artifact `{surface}` not found")))?;
+    for id in [&query.from, &query.to] {
+        if artifact
+            .find_commit(&CandidateId::from(id.clone()))
+            .is_none()
+        {
+            return Err(registry_error(&RegistryError::NotCommitted {
+                candidate_id: CandidateId::from(id.clone()),
+            }));
+        }
+    }
+    let load = |id: &str| {
+        let state = state.clone();
+        let tenant = tenant.clone();
+        let id = id.to_owned();
+        async move { state.server_store.get_candidate(tenant.tenant(), &id).await }
+    };
+    let from = load(&query.from)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{}` not found", query.from)))?;
+    let to = load(&query.to)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("candidate `{}` not found", query.to)))?;
+    let diff = diff_candidates(&from.candidate, &to.candidate).map_err(|e| registry_error(&e))?;
+    Ok(Json(json!({
+        "surface": surface,
+        "from": query.from,
+        "to": query.to,
+        "diff": diff,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// The executor-policy registry (R0.8 Rusty Learn, wave 4)
+//
+// Versioned, immutable policy bodies; the append-only activation log
+// moving the active-version pointer; the derived epoch history. The
+// binding itself happens inside the checkpointer decorator
+// (`policy::PolicyBindingCheckpointer`) at run admission — these routes
+// are the registry's operator face, plus the promotion/rollback hooks
+// below that keep the registry honest when *learned* policy arrives.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct RegisterPolicyPayload {
+    /// Operator-chosen version name. `None` mints the content-derived
+    /// `policy-{hash12}` name — the same addressing the promotion hook
+    /// uses, so a hand-authored body and a learned body with identical
+    /// parameters converge on one record.
+    #[serde(default)]
+    version: Option<String>,
+    /// The parameter bundle.
+    policy: ExecutorPolicy,
+}
+
+/// `POST /policy/versions` — register an immutable policy body → `201
+/// {version, record}`; `200` when the version already names exactly this
+/// body (the idempotent create); `409` when it names a different one;
+/// `400` for an invalid version name. The reserved `static-v0` floor is
+/// never registerable — it predates the registry.
+async fn register_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterPolicyPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let version = match &payload.version {
+        Some(version) => {
+            policy::validate_policy_version(version).map_err(ApiError::bad_request)?;
+            PolicyVersion::new(version.clone())
+        }
+        None => derive_policy_version(&payload.policy).map_err(internal_err)?,
+    };
+    let record = PolicyRecord {
+        version,
+        policy: payload.policy,
+        source: PolicySource::Api,
+        registered_at: Utc::now(),
+    };
+    let write = state
+        .server_store
+        .put_policy(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    match write {
+        PolicyWrite::Created => Ok((
+            StatusCode::CREATED,
+            Json(json!({ "version": record.version, "record": record })),
+        )),
+        PolicyWrite::Converged => Ok((
+            StatusCode::OK,
+            Json(json!({ "version": record.version, "record": record })),
+        )),
+        PolicyWrite::Conflict => Err(ApiError::conflict(format!(
+            "policy version `{}` already names a different body — versions are immutable; \
+             register the changed body under a new (or its derived) version",
+            record.version.as_str()
+        ))),
+    }
+}
+
+/// `GET /policy/versions` — the tenant's registered policy bodies, sorted
+/// by version for a deterministic listing. The floor is never listed: it
+/// is not registered, it is synthesized on demand.
+async fn list_policies(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut policies = state
+        .server_store
+        .list_policies(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    policies.sort_by(|a, b| a.version.as_str().cmp(b.version.as_str()));
+    Ok(Json(json!({ "policies": policies })))
+}
+
+/// `GET /policy/versions/{version}` — fetch one registered body (`404`
+/// unknown/cross-tenant). The floor resolves as its synthetic record.
+async fn get_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(version): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if version == PolicyVersion::STATIC_V0 {
+        return Ok(Json(
+            json!({ "version": version, "record": policy::static_floor_record() }),
+        ));
+    }
+    let record = state
+        .server_store
+        .get_policy(tenant.tenant(), &version)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("policy version `{version}` not found")))?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivatePolicyPayload {
+    /// The version that becomes active for new-run admission.
+    version: String,
+}
+
+/// `POST /policy/activations` — append one move of the active-version
+/// pointer → `200 {version, active}` with the activated body; `422` when
+/// the version is not registered. Activating `static-v0` is always legal
+/// — reverting to pre-learning behavior needs no candidate.
+async fn activate_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ActivatePolicyPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let record = if payload.version == PolicyVersion::STATIC_V0 {
+        policy::static_floor_record()
+    } else {
+        state
+            .server_store
+            .get_policy(tenant.tenant(), &payload.version)
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::unprocessable(format!(
+                    "policy version `{}` is not registered — only registered bodies (and the \
+                     static floor) can be activated",
+                    payload.version
+                ))
+            })?
+    };
+    let activation = PolicyActivation {
+        version: record.version.clone(),
+        activated_at: Utc::now(),
+    };
+    state
+        .server_store
+        .append_policy_activation(tenant.tenant(), &activation)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(
+        json!({ "version": activation.version, "active": record }),
+    ))
+}
+
+/// `GET /policy/active` — the tenant's active policy: the last
+/// activation's registered body, or the floor when the registry never
+/// moved.
+async fn get_active_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let record = policy::active_policy_record(&state.server_store, tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+/// `GET /policy/epochs` — the epoch history: each activation's reign
+/// window plus the admission bindings recorded inside it, with the
+/// implicit floor epoch covering pre-activation bindings. Empty while
+/// the registry has never moved.
+async fn list_policy_epochs(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let activations = state
+        .server_store
+        .list_policy_activations(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    let bindings = state
+        .server_store
+        .list_policy_bindings(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    let epochs = policy::derive_epochs(activations, bindings);
+    Ok(Json(json!({ "epochs": epochs })))
+}
+
+#[derive(Debug, Deserialize)]
+struct PolicyDriftQuery {
+    /// The version to check; the tenant's active version when absent.
+    version: Option<String>,
+}
+
+/// `GET /policy/drift` — the drift check (R0.10 wave 4): the promoted
+/// version's production decision evidence measured against the twin
+/// baseline it was promoted on, answered by core's
+/// [`detect_policy_drift`] under the default thresholds. The baseline is
+/// promotion provenance, so it exists only for candidate-derived versions:
+/// the static floor (`422` — never promoted, nothing to drift from),
+/// API-registered bodies (`422` — no twin evaluation), and versions whose
+/// candidate evaluation predates twin reports (`422`) have no baseline to
+/// measure against. Decisions are gathered from the journals of every run
+/// the tenant's tasks link to; `detect_policy_drift` itself filters to the
+/// version's acting decisions.
+async fn get_policy_drift(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<PolicyDriftQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let version = match query.version {
+        Some(version) => {
+            // The floor check comes first: an explicit `static-v0` earns the
+            // same 422 the resolved floor does, not the validator's
+            // reserved-name 400.
+            if version != PolicyVersion::STATIC_V0 {
+                policy::validate_policy_version(&version).map_err(ApiError::bad_request)?;
+            }
+            PolicyVersion::new(version)
+        }
+        None => state
+            .server_store
+            .list_policy_activations(tenant.tenant())
+            .await
+            .map_err(internal_err)?
+            .last()
+            .map(|activation| activation.version.clone())
+            .unwrap_or_default(),
+    };
+    if version.as_str() == PolicyVersion::STATIC_V0 {
+        return Err(ApiError::unprocessable(
+            "the static floor was never promoted; there is no promotion baseline to drift from"
+                .to_string(),
+        ));
+    }
+    let record = state
+        .server_store
+        .get_policy(tenant.tenant(), version.as_str())
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "policy version `{}` is not registered",
+                version.as_str()
+            ))
+        })?;
+    let PolicySource::Candidate { candidate_id } = &record.source else {
+        return Err(ApiError::unprocessable(format!(
+            "policy version `{}` was registered through the API; only candidate-derived \
+             versions carry a promotion baseline",
+            version.as_str()
+        )));
+    };
+    let baseline = state
+        .server_store
+        .get_candidate(tenant.tenant(), candidate_id)
+        .await
+        .map_err(internal_err)?
+        .and_then(|record| record.evaluation)
+        .and_then(|evaluation| DriftBaseline::from_twin_report(&evaluation.baseline_report))
+        .ok_or_else(|| {
+            ApiError::unprocessable(format!(
+                "policy version `{}` carries no twin baseline — its candidate was never \
+                 twin-evaluated",
+                version.as_str()
+            ))
+        })?;
+    // The evidence sweep: every run a tenant task links to contributes its
+    // journaled `policy_decision` events. Runs without a persisted journal
+    // yet simply have no evidence to contribute.
+    let tasks = state
+        .server_store
+        .list_tasks(tenant.tenant(), None)
+        .await
+        .map_err(internal_err)?;
+    let mut run_ids: Vec<String> = tasks
+        .iter()
+        .filter_map(|task| task.run_id.clone())
+        .collect();
+    run_ids.sort();
+    run_ids.dedup();
+    let mut decisions = Vec::new();
+    for run_id in run_ids {
+        let Some(snapshot) = state
+            .server_store
+            .get_journal(&run_id)
+            .await
+            .map_err(internal_err)?
+        else {
+            continue;
+        };
+        for event in &snapshot.events {
+            if event.kind != RunEventKind::PolicyDecision {
+                continue;
+            }
+            let Some(PayloadRef::Inline(value)) = &event.output else {
+                continue;
+            };
+            match serde_json::from_value::<DecisionEvent>(value.clone()) {
+                Ok(decision) => decisions.push(decision),
+                // A hand-edited or future-shaped event is skipped, never
+                // fatal — the same posture as the journal's own replay
+                // lookups.
+                Err(error) => {
+                    tracing::warn!(%run_id, %error, "skipping undecodable policy decision event")
+                }
+            }
+        }
+    }
+    let report = detect_policy_drift(&decisions, &version, &baseline, &DriftThresholds::default());
+    Ok(Json(json!({ "report": report })))
+}
+
+// --------------------------------------------------------------------- //
+// The capsule registry (R0.9 Rusty Capsules, wave 1)
+//
+// Immutable, content-addressed capsule manifests; the `(name, version)`
+// pin resolution that links a run's version pins to the addresses the
+// capability host will admit. Invocation is the runtime's seam
+// (`rusty_agent_runtime::capsule_host`, feature `wasm`); these routes are
+// the registry's operator face — registration, reads, and journaled
+// resolution.
+// --------------------------------------------------------------------- //
+
+#[derive(Debug, Deserialize)]
+struct RegisterCapsulePayload {
+    /// The capsule's declaration. Validated on the way in (`422`), and
+    /// the content address is derived — callers never mint ids.
+    manifest: CapsuleManifest,
+}
+
+/// `POST /capsules` — register an immutable capsule manifest → `201
+/// {capsule_id, record}`; `200` when the derived address already names
+/// exactly this manifest (the idempotent create); `409` when the
+/// `(name, version)` pin is claimed by a different address (registry
+/// immutability) or the address collides with a different manifest;
+/// `422` when the manifest fails validation.
+async fn register_capsule(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterCapsulePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    payload
+        .manifest
+        .validate()
+        .map_err(|e| ApiError::unprocessable(format!("invalid capsule manifest: {e}")))?;
+    let capsule_id = derive_capsule_id(&payload.manifest).map_err(internal_err)?;
+    // The authorization gate (R0.9 wave 2, feature `capsules`): under an
+    // active policy, a manifest Cedar refuses — by identity or by
+    // declared grant — never reaches the registry (`403`; registration
+    // has no run context, so the refusal journals nothing).
+    #[cfg(feature = "capsules")]
+    crate::capsule_policy::authorize_registration(
+        &state.server_store,
+        &state.capsule_plane,
+        tenant.tenant(),
+        &crate::capsule_policy::prospective_record(capsule_id.clone(), &payload.manifest),
+    )
+    .await
+    .map_err(admission_refusal_error)?;
+    let record = CapsuleRecord {
+        capsule_id,
+        manifest: payload.manifest,
+        registered_at: Utc::now(),
+    };
+    let write = state
+        .server_store
+        .put_capsule(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    match write {
+        CapsuleWrite::Created => Ok((
+            StatusCode::CREATED,
+            Json(json!({ "capsule_id": record.capsule_id, "record": record })),
+        )),
+        CapsuleWrite::Converged => Ok((
+            StatusCode::OK,
+            Json(json!({ "capsule_id": record.capsule_id, "record": record })),
+        )),
+        CapsuleWrite::Conflict => Err(ApiError::conflict(format!(
+            "capsule `{}` version `{}` is already registered under a different content address \
+             (or the address collides with a different manifest) — versions are immutable; \
+             register the changed declaration under a new version",
+            record.manifest.identity.name, record.manifest.version
+        ))),
+    }
+}
+
+/// `GET /capsules` — the tenant's registered capsule manifests, sorted
+/// by content address for a deterministic listing.
+async fn list_capsules(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut capsules = state
+        .server_store
+        .list_capsules(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    capsules.sort_by(|a, b| a.capsule_id.as_str().cmp(b.capsule_id.as_str()));
+    Ok(Json(json!({ "capsules": capsules })))
+}
+
+/// `GET /capsules/{id}` — fetch one registered manifest by content
+/// address (`404` unknown/cross-tenant).
+async fn get_capsule(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(capsule_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_capsule(tenant.tenant(), &capsule_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule `{capsule_id}` not found")))?;
+    Ok(Json(
+        json!({ "capsule_id": record.capsule_id, "record": record }),
+    ))
+}
+
+/// `PUT /capsules/{id}/blob` — upload the component bytes a registered
+/// manifest commits to (R0.9 wave 4). Raw body, not JSON: a wasm
+/// component is megabytes of binary. The route is the digest checkpoint —
+/// the store keeps bytes, not policy, so the `sha256` of the body is
+/// verified against the manifest's `build_digest` here (`422` on
+/// mismatch); a different-bytes re-upload under the same address is the
+/// store's immutability conflict (`409`). `201 {capsule_id, sha256,
+/// bytes}` on success.
+async fn put_capsule_blob_route(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(capsule_id): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let record = state
+        .server_store
+        .get_capsule(tenant.tenant(), &capsule_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule `{capsule_id}` not found")))?;
+    let digest = sha256_hex(&body);
+    if digest != record.manifest.build_digest {
+        return Err(ApiError::unprocessable(format!(
+            "blob digest `{digest}` does not match the manifest's build_digest `{}` — \
+             the registry stores only the bytes the manifest commits to",
+            record.manifest.build_digest
+        )));
+    }
+    let len = body.len();
+    state
+        .server_store
+        .put_capsule_blob(tenant.tenant(), &capsule_id, &body)
+        .await
+        .map_err(|e| {
+            if e.starts_with("capsule blob conflict") {
+                ApiError::conflict(e)
+            } else {
+                internal_err(e)
+            }
+        })?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "capsule_id": capsule_id,
+            "sha256": digest,
+            "bytes": len,
+        })),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ResolveCapsulesPayload {
+    /// The run's capsule pins: name → version (the
+    /// `RunManifest::capsules` map, wire-shaped).
+    pins: std::collections::BTreeMap<String, String>,
+    /// The run whose journal the resolutions join. Required — every
+    /// resolution is journaled (the wave's exit criterion: the journaled
+    /// resolution is what lets a checkpoint's version *string* pin reach
+    /// the content *address*).
+    run_id: String,
+    /// The causal parent journal-event id (default: the journal's
+    /// current head, the receipt precedent).
+    #[serde(default)]
+    parent: Option<String>,
+    /// The run's own budget (R0.9 wave 2, feature `capsules`): one of
+    /// the enclosing layers every capsule's declared budget composes
+    /// under. Absent on wave-1 payloads — the field is additive, and old
+    /// callers resolve exactly as before.
+    #[cfg(feature = "capsules")]
+    #[serde(default)]
+    budget: Option<ResourceBudget>,
+}
+
+/// `POST /capsules/resolve` — resolve a run's capsule pins against the
+/// registry → `200 {resolutions}` with one `CapsuleResolution` per pin
+/// (name, version, content address, build digest), sorted by pin name.
+/// Every stored manifest re-derives its content address before
+/// answering: a record whose recomputed address no longer matches its
+/// key is tampered evidence and fails closed (`422`); an unknown pin is
+/// `404`. One `capsule_resolved` event per pin is journaled into
+/// `run_id`'s journal (read-only evidence: resolution decides nothing
+/// about what will run) — hard-fail, the candidate-lifecycle discipline:
+/// an unresolvable run stops the request (`404`).
+///
+/// With the `capsules` feature (R0.9 wave 2) resolution is also the
+/// admission composition: Cedar decides the admission and each declared
+/// grant under the tenant's active policy (`403` on refusal, with one
+/// journaled `capsule_denied` per forbidden grant pinned to the deciding
+/// version), applicable overlays intersect the effective grants, and the
+/// declared budget composes under the run's budget and the tenant
+/// ceiling (clamped fields journal their clamp; a token or cost
+/// overspend refuses `422`).
+async fn resolve_capsules(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ResolveCapsulesPayload>,
+) -> Result<Json<Value>, ApiError> {
+    // Validate every pin before journaling any: a failed resolution
+    // leaves no partial evidence. The records themselves are kept only
+    // for the wave-2 admission composition (feature `capsules`).
+    #[cfg(feature = "capsules")]
+    let mut records = Vec::with_capacity(payload.pins.len());
+    let mut resolutions = Vec::with_capacity(payload.pins.len());
+    for (name, version) in &payload.pins {
+        let record = state
+            .server_store
+            .get_capsule_by_version(tenant.tenant(), name, version)
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "capsule pin `{name}` version `{version}` is not registered"
+                ))
+            })?;
+        let recomputed = derive_capsule_id(&record.manifest).map_err(internal_err)?;
+        if recomputed != record.capsule_id {
+            return Err(ApiError::unprocessable(format!(
+                "capsule `{}` (pin `{name}` version `{version}`) fails its integrity check: \
+                 the stored manifest re-derives to {recomputed} — the registry record is \
+                 corrupt; re-register the manifest",
+                record.capsule_id
+            )));
+        }
+        resolutions.push(CapsuleResolution {
+            name: name.clone(),
+            version: CapsuleVersion::new(version.clone()),
+            capsule_id: record.capsule_id.clone(),
+            build_digest: record.manifest.build_digest.clone(),
+            policy_version: None,
+            overlays: None,
+            effective_grants: None,
+            clamped_budget: None,
+        });
+        #[cfg(feature = "capsules")]
+        records.push(record);
+    }
+    // The admission composition (R0.9 wave 2, feature `capsules`),
+    // before any resolution journals: a refused admission stops the
+    // request with its evidence journaled and nothing admitted.
+    #[cfg(feature = "capsules")]
+    for (record, resolution) in records.iter().zip(resolutions.iter_mut()) {
+        match crate::capsule_policy::compose_admission(
+            &state.server_store,
+            &state.capsule_plane,
+            tenant.tenant(),
+            record,
+            payload.budget.as_ref(),
+            state.config.capsule_budget_ceiling.as_ref(),
+        )
+        .await
+        {
+            Ok(outcome) => {
+                resolution.policy_version = outcome.policy_version;
+                resolution.overlays = outcome.overlays;
+                resolution.effective_grants = outcome.effective_grants;
+                resolution.clamped_budget = outcome.clamped_budget;
+            }
+            Err(crate::capsule_policy::AdmissionRefusal::Policy {
+                version,
+                forbidden,
+                detail,
+            }) => {
+                // Evidence for the refusal: one journaled denial per
+                // forbidden grant, pinned to the deciding version —
+                // hard-fail like the resolutions themselves. A pure
+                // decision-1 refusal is not capability-shaped; its
+                // detail alone answers the `403`.
+                for grant in &forbidden {
+                    let denial = CapsuleDenial {
+                        capsule_id: record.capsule_id.clone(),
+                        capability: grant.capability_kind(),
+                        absent_grant: grant.clone(),
+                        detail: detail.clone(),
+                        policy_version: Some(version.clone()),
+                    };
+                    let draft = EventDraft::new(RunEventKind::CapsuleDenied, Effect::Pure).output(
+                        serde_json::to_value(&denial)
+                            .map_err(|e| ApiError::internal(format!("serialize denial: {e}")))?,
+                    );
+                    try_journal_memory_event(
+                        &state,
+                        &tenant,
+                        &payload.run_id,
+                        payload.parent.clone(),
+                        draft,
+                    )
+                    .await
+                    .map_err(journal_gate_error)?;
+                }
+                return Err(ApiError::forbidden(detail));
+            }
+            Err(refusal) => return Err(admission_refusal_error(refusal)),
+        }
+    }
+    for resolution in &resolutions {
+        let draft = EventDraft::new(RunEventKind::CapsuleResolved, Effect::ReadOnly).output(
+            serde_json::to_value(resolution)
+                .map_err(|e| ApiError::internal(format!("serialize resolution: {e}")))?,
+        );
+        try_journal_memory_event(
+            &state,
+            &tenant,
+            &payload.run_id,
+            payload.parent.clone(),
+            draft,
+        )
+        .await
+        .map_err(journal_gate_error)?;
+    }
+    Ok(Json(json!({ "resolutions": resolutions })))
+}
+
+// --------------------------------------------------------------------- //
+// The capsule authorization plane (R0.9 Rusty Capsules, wave 2)
+//
+// Immutable Cedar policy bodies, the per-tenant active-version pointer,
+// and tenant overlay attach. Every handler has two shapes: with the
+// `capsules` feature the real handler; without it, the typed
+// `503 capsule_policy_unavailable` — a server without the feature is a
+// complete server with a smaller surface, and the missing half says so
+// honestly.
+// --------------------------------------------------------------------- //
+
+/// Map an admission refusal to its wire status: a policy refusal is
+/// `403` (authorization, not syntax), a budget overspend `422` (the
+/// declaration and its enclosing bounds disagree about money), an
+/// internal failure `500`.
+#[cfg(feature = "capsules")]
+fn admission_refusal_error(refusal: crate::capsule_policy::AdmissionRefusal) -> ApiError {
+    match refusal {
+        crate::capsule_policy::AdmissionRefusal::Policy { detail, .. } => {
+            ApiError::forbidden(detail)
+        }
+        crate::capsule_policy::AdmissionRefusal::Budget {
+            field,
+            declared,
+            bound,
+        } => ApiError::unprocessable(format!(
+            "capsule budget field `{field}` declares {declared}, exceeding the tightest \
+             enclosing bound {bound} — token and cost bounds cannot be retrofitted mid-run; \
+             declare within the bound or raise it"
+        )),
+        crate::capsule_policy::AdmissionRefusal::Internal(detail) => ApiError::internal(detail),
+    }
+}
+
+#[cfg(feature = "capsules")]
+#[derive(Debug, Deserialize)]
+struct RegisterCapsulePolicyPayload {
+    /// The Cedar source text. Parse-checked before anything persists
+    /// (`422`) — the registry holds only bodies the engine can read.
+    policy_text: String,
+    /// The operator-chosen version to register under (default: the
+    /// content-derived `cedar-{sha256[..12]}`). Path-safe, validated —
+    /// a version becomes a store file name.
+    #[serde(default)]
+    version: Option<String>,
+}
+
+/// `POST /capsule_policies/versions` — register an immutable Cedar
+/// policy body → `201 {version, record}`; `200` when the version already
+/// names exactly this text (the idempotent create); `409` when it names
+/// different text (registry immutability); `422` when the text does not
+/// parse or the version is not path-safe. Registration never activates —
+/// moving the pointer is the explicit `POST /capsule_policies/active`.
+#[cfg(feature = "capsules")]
+async fn register_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<RegisterCapsulePolicyPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    crate::capsule_policy::CedarEngine::parse(&payload.policy_text)
+        .map_err(|e| ApiError::unprocessable(format!("capsule policy does not parse: {e}")))?;
+    let version = match &payload.version {
+        Some(version) => {
+            crate::capsule_policy::validate_capsule_policy_version(version)
+                .map_err(|e| ApiError::unprocessable(format!("invalid policy version: {e}")))?;
+            version.clone()
+        }
+        None => crate::capsule_policy::derive_capsule_policy_version(&payload.policy_text),
+    };
+    let record = crate::capsule_policy::CapsulePolicyRecord {
+        version: version.clone(),
+        policy_text: payload.policy_text,
+        registered_at: Utc::now(),
+    };
+    match state
+        .server_store
+        .put_capsule_policy(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?
+    {
+        crate::capsule_policy::CapsulePolicyWrite::Created => Ok((
+            StatusCode::CREATED,
+            Json(json!({ "version": version, "record": record })),
+        )),
+        crate::capsule_policy::CapsulePolicyWrite::Converged => Ok((
+            StatusCode::OK,
+            Json(json!({ "version": version, "record": record })),
+        )),
+        crate::capsule_policy::CapsulePolicyWrite::Conflict => Err(ApiError::conflict(format!(
+            "capsule policy version `{version}` is already registered under a different body — \
+             versions are immutable; register the changed policy under a new version"
+        ))),
+    }
+}
+
+/// `POST /capsule_policies/versions` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn register_capsule_policy() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsule_policies/versions` — the tenant's registered policy
+/// bodies, sorted by version for a deterministic listing.
+#[cfg(feature = "capsules")]
+async fn list_capsule_policies(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut policies = state
+        .server_store
+        .list_capsule_policies(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    policies.sort_by(|a, b| a.version.cmp(&b.version));
+    Ok(Json(json!({ "policies": policies })))
+}
+
+/// `GET /capsule_policies/versions` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn list_capsule_policies() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsule_policies/versions/{version}` — fetch one registered
+/// policy body (`404` unknown/cross-tenant).
+#[cfg(feature = "capsules")]
+async fn get_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(version): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_capsule_policy(tenant.tenant(), &version)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule policy `{version}` not found")))?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+/// `GET /capsule_policies/versions/{version}` without the feature.
+#[cfg(not(feature = "capsules"))]
+async fn get_capsule_policy(Path(_version): Path<String>) -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsule_policies/active` — the tenant's active policy body
+/// (`404` when the pointer never moved: the unconfigured posture, where
+/// admission runs the wave-1 way and says so).
+#[cfg(feature = "capsules")]
+async fn get_active_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .active_capsule_policy(tenant.tenant())
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "tenant `{}` has no active capsule policy — admission is unenforced until the \
+                 first activation",
+                tenant.tenant()
+            ))
+        })?;
+    Ok(Json(json!({ "version": record.version, "record": record })))
+}
+
+/// `GET /capsule_policies/active` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn get_active_capsule_policy() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+#[cfg(feature = "capsules")]
+#[derive(Debug, Deserialize)]
+struct ActivateCapsulePolicyPayload {
+    /// The registered version to move the tenant's pointer to.
+    version: String,
+}
+
+/// `POST /capsule_policies/active` — move the tenant's active-version
+/// pointer → `200 {active}`; `422` when the version is not registered
+/// (only registered bodies serve, so a mistyped activation can never
+/// silently un-arm the plane). The move refreshes the revocation cache
+/// eagerly: from the response on, rechecks serve the new version.
+#[cfg(feature = "capsules")]
+async fn activate_capsule_policy(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<ActivateCapsulePolicyPayload>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .activate_capsule_policy(
+            tenant.tenant(),
+            &crate::capsule_policy::activation(&payload.version),
+        )
+        .await
+        .map_err(|e| {
+            if e.contains("not registered") {
+                ApiError::unprocessable(e)
+            } else {
+                internal_err(e)
+            }
+        })?;
+    state
+        .capsule_plane
+        .refresh(&state.server_store, tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({ "active": payload.version })))
+}
+
+/// `POST /capsule_policies/active` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn activate_capsule_policy() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+#[cfg(feature = "capsules")]
+#[derive(Debug, Deserialize)]
+struct AttachCapsuleOverlayPayload {
+    /// The overlay to attach (name, optional targets, grant ceiling).
+    /// Validated on the way in (`422`), and Cedar-checked against every
+    /// capsule it would narrow when a policy is active (`403` on a
+    /// widening attach).
+    overlay: CapsuleOverlay,
+}
+
+/// `POST /capsules/overlays` — attach (or replace) a tenant overlay →
+/// `201 {overlay}` when the name is new, `200` when the ceiling was
+/// replaced (overlays are operator configuration, not immutable registry
+/// entries); `403` when the active policy refuses the attach; `422` when
+/// the overlay fails validation. The intersection arithmetic applies
+/// regardless: an overlay can only ever narrow a capsule's effective
+/// grants.
+#[cfg(feature = "capsules")]
+async fn attach_capsule_overlay(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<AttachCapsuleOverlayPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    payload
+        .overlay
+        .validate()
+        .map_err(|e| ApiError::unprocessable(format!("invalid capsule overlay: {e}")))?;
+    crate::capsule_policy::authorize_overlay_attach(
+        &state.server_store,
+        tenant.tenant(),
+        &payload.overlay,
+    )
+    .await
+    .map_err(admission_refusal_error)?;
+    let record = crate::capsule_policy::CapsuleOverlayRecord {
+        overlay: payload.overlay,
+        // Server-side provenance: the authenticated tenant authored this
+        // attach; a crafted body cannot claim another tenant's authorship.
+        author: tenant.tenant().to_string(),
+        attached_at: Utc::now(),
+    };
+    let created = state
+        .server_store
+        .put_capsule_overlay(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(json!({ "overlay": record }))))
+}
+
+/// `POST /capsules/overlays` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn attach_capsule_overlay() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsules/overlays` — the tenant's attached overlays, sorted by
+/// name for a deterministic listing.
+#[cfg(feature = "capsules")]
+async fn list_capsule_overlays(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut overlays = state
+        .server_store
+        .list_capsule_overlays(tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    overlays.sort_by(|a, b| a.overlay.name.cmp(&b.overlay.name));
+    Ok(Json(json!({ "overlays": overlays })))
+}
+
+/// `GET /capsules/overlays` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn list_capsule_overlays() -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// `GET /capsules/overlays/{name}` — fetch one attached overlay by name
+/// (`404` unknown/cross-tenant).
+#[cfg(feature = "capsules")]
+async fn get_capsule_overlay(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = state
+        .server_store
+        .get_capsule_overlay(tenant.tenant(), &name)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("capsule overlay `{name}` not found")))?;
+    Ok(Json(json!({ "overlay": record })))
+}
+
+/// `GET /capsules/overlays/{name}` without the feature: the typed 503.
+#[cfg(not(feature = "capsules"))]
+async fn get_capsule_overlay(Path(_name): Path<String>) -> Result<Json<Value>, ApiError> {
+    Err(crate::capsule_policy::plane_unavailable())
+}
+
+/// The wave-4 promotion hook: a full-traffic policy promotion overlays
+/// the candidate's family parameters onto the currently active policy,
+/// registers the result under its derived content version (provenance:
+/// [`PolicySource::Candidate`]), and activates it — so the next admitted
+/// run binds the learned parameters. The overlay (not a wholesale
+/// adoption) is deliberate: a candidate declares one family's parameters,
+/// and the families it does not declare keep serving as they were.
+async fn activate_policy_from_candidate(
+    state: &AppState,
+    tenant: &TenantContext,
+    candidate_id: &str,
+    family: rusty_agent_runtime::record::DecisionFamily,
+    parameters: Value,
+) -> Result<(), ApiError> {
+    let base = policy::active_policy_record(&state.server_store, tenant.tenant())
+        .await
+        .map_err(internal_err)?;
+    let policy = base
+        .policy
+        .with_family_parameters(family, parameters)
+        .map_err(|e| {
+            ApiError::unprocessable(format!(
+                "policy candidate `{candidate_id}` does not apply to the active policy: {e}"
+            ))
+        })?;
+    let version = derive_policy_version(&policy).map_err(internal_err)?;
+    let record = PolicyRecord {
+        version: version.clone(),
+        policy,
+        source: PolicySource::Candidate {
+            candidate_id: candidate_id.to_string(),
+        },
+        registered_at: Utc::now(),
+    };
+    match state
+        .server_store
+        .put_policy(tenant.tenant(), &record)
+        .await
+        .map_err(internal_err)?
+    {
+        PolicyWrite::Created | PolicyWrite::Converged => {}
+        PolicyWrite::Conflict => {
+            // Impossible by construction — the version is derived from
+            // this exact body — but the registry's immutability refusal
+            // is answered honestly rather than assumed away.
+            return Err(ApiError::conflict(format!(
+                "derived policy version `{}` already names a different body",
+                version.as_str()
+            )));
+        }
+    }
+    let activation = PolicyActivation {
+        version,
+        activated_at: Utc::now(),
+    };
+    state
+        .server_store
+        .append_policy_activation(tenant.tenant(), &activation)
+        .await
+        .map_err(internal_err)
+}
+
+/// The wave-4 rollback hook: a full-traffic policy rollback moves the
+/// active version back — to the displaced candidate's derived version
+/// when its record is still registered (byte-exact: the registry body is
+/// the promotion's policy, not a reconstruction), to the static floor
+/// when the promotion displaced the floor or the predecessor's record is
+/// gone (the floor is always resolvable; a missing predecessor is logged,
+/// never guessed around).
+async fn revert_policy_from_rollback(
+    state: &AppState,
+    tenant: &TenantContext,
+    receipt: &RollbackReceipt,
+) -> Result<(), ApiError> {
+    let version = match &receipt.to {
+        Some(previous_id) => {
+            let policies = state
+                .server_store
+                .list_policies(tenant.tenant())
+                .await
+                .map_err(internal_err)?;
+            let found = policies
+                .into_iter()
+                .find_map(|record| match &record.source {
+                    PolicySource::Candidate { candidate_id }
+                        if candidate_id == previous_id.as_str() =>
+                    {
+                        Some(record.version)
+                    }
+                    _ => None,
+                });
+            match found {
+                Some(version) => version,
+                None => {
+                    tracing::warn!(
+                        candidate = %previous_id,
+                        "policy rollback: the displaced candidate's policy record is gone; \
+                         reverting to the static floor"
+                    );
+                    PolicyVersion::default()
+                }
+            }
+        }
+        None => PolicyVersion::default(),
+    };
+    let activation = PolicyActivation {
+        version,
+        activated_at: Utc::now(),
+    };
+    state
+        .server_store
+        .append_policy_activation(tenant.tenant(), &activation)
+        .await
+        .map_err(internal_err)
+}
+
+/// `POST /tasks/{id}/fail` — record a failed attempt → `200 {requeued,
+/// next_attempt_at, dead}`. The decision is core's shared `classify_retry`
+/// policy: a retryable failure with attempts left requeues with exponential
+/// backoff + full jitter (cap 5 min, scheduled at `next_attempt_at`);
+/// exhausting the attempt budget dead-letters; a non-retryable class — or
+/// work not safe to re-drive (the worker's `retryable: false`, or a declared
+/// non-repeatable `effect` on the task) — fails outright (terminal, *not*
+/// dead-lettered: `requeued: false, dead: false, next_attempt_at: null`).
+/// `400` for an `error_class` outside the shared taxonomy; `409` when the
+/// lease is lost.
+async fn fail_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(task_id): Path<String>,
+    Json(payload): Json<FailTaskPayload>,
+) -> Result<Json<Value>, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    let error_class =
+        tasks::parse_error_class(&payload.error_class).map_err(ApiError::bad_request)?;
+    tasks::validate_label("message", &payload.message, 4096).map_err(ApiError::bad_request)?;
+    let now = Utc::now();
+    // R0.10 wave 4: the acting policy's retry parameters for this failure
+    // class are resolved here — the registry and the run's admission pin
+    // live at this layer — and the store applies them verbatim. Run-linked
+    // tasks honor the version the run bound at admission; unlinked tasks
+    // follow the tenant's active policy; every resolution failure fails
+    // closed to the static floor, byte-for-byte the pre-wave-4 decision.
+    let resolved = match state.server_store.get_task(tenant.tenant(), &task_id).await {
+        Ok(Some(task)) => {
+            let policy = acting_executor_policy(&state, &tenant, &task).await;
+            resolve_retry_parameters(&policy, error_class, task.max_attempts)
+        }
+        // Unused — the store answers unknown-task/lease-lost below without
+        // consulting the parameters.
+        _ => ResolvedRetryParameters::floor(0),
+    };
+    let outcome = state
+        .server_store
+        .fail_task(
+            tenant.tenant(),
+            &task_id,
+            &payload.worker_id,
+            tasks::FailureReport {
+                error_class,
+                message: payload.message,
+                retryable: payload.retryable,
+                cost: tasks::SettlementCost {
+                    tokens: payload.tokens,
+                    cost_usd: payload.cost_usd,
+                },
+                retry: resolved,
+            },
+            now,
+        )
+        .await
+        .map_err(internal_err)?;
+    let task = lease_outcome(outcome, &task_id, &payload.worker_id)?;
+    // Policy decision evidence (R0.8 wave 4): the retry decision the
+    // settled record implies — legal set, selected action, features, and
+    // the policy version the owning run bound at admission — is journaled
+    // into that run as a `policy_decision` event (best-effort, the
+    // memory-journaler discipline). Cancellation is control flow, not a
+    // policy decision, so it journals nothing.
+    if error_class != rusty_agent_runtime::durable::ErrorClass::Cancelled {
+        journal_policy_decision(
+            &state,
+            &tenant,
+            &task,
+            error_class,
+            payload.retryable,
+            resolved.max_attempts,
+            now,
+        )
+        .await;
+    }
+    // Supervision trigger (R0.7 wave 2): a failed mailbox turn is a
+    // supervision signal — the declared policy decides restart vs
+    // escalate, journaled. Cancellation-class failures are control flow
+    // (the cancellation tree's business, not a crash), and failures on
+    // ordinary pool tasks or unregistered recipients take no supervision
+    // path. The settlement is already durable at this point; supervision
+    // composes after it, never inside the lease guard.
+    let mut escalation = None;
+    if error_class != rusty_agent_runtime::durable::ErrorClass::Cancelled {
+        if let Some(agent_external) = task
+            .recipient
+            .as_deref()
+            .and_then(rusty_agent_runtime::agents::agent_id_from_recipient)
+        {
+            if let Some(agent) = state
+                .server_store
+                .get_agent(&tenant.scope(agent_external))
+                .await
+                .map_err(internal_err)?
+            {
+                let outcome = supervision::supervise(
+                    &state.server_store,
+                    &tenant,
+                    agent_external,
+                    agent,
+                    supervision::Trigger::TurnFailed {
+                        error_class,
+                        message: task
+                            .last_error
+                            .clone()
+                            .unwrap_or_else(|| "turn failed".to_string()),
+                        task_id: task.task_id.clone(),
+                    },
+                    Utc::now(),
+                )
+                .await
+                .map_err(internal_err)?;
+                // The failure report's caller is the turn's holder; when
+                // that report tipped the agent over its restart intensity,
+                // the response carries where the escalation landed — the
+                // same evidence the supervision journal holds.
+                escalation = outcome.delivery.map(|delivery| match delivery {
+                    supervision::EscalationDelivery::Mailbox {
+                        task_id,
+                        deduplicated,
+                    } => json!({
+                        "kind": "mailbox",
+                        "task_id": task_id,
+                        "deduplicated": deduplicated,
+                    }),
+                    supervision::EscalationDelivery::DeadLetter { task_id } => json!({
+                        "kind": "dead_letter",
+                        "task_id": task_id,
+                    }),
+                });
+            }
+        }
+    }
+    // Coordination trigger (R0.7 wave 3): a *terminally* settled member
+    // task drives its pattern forward — a retry-scheduled failure is not a
+    // settlement, so non-terminal failures take no coordination path. The
+    // drive composes after supervision, after durability.
+    if task.is_terminal() {
+        coordination::on_task_settled(
+            &state.server_store,
+            state.config.quota_for(tenant.tenant()),
+            &tenant,
+            &task,
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    }
+    // A2A bridge (R0.9 wave 4): fan the settlement out to any live
+    // `message/stream` attachment. A no-op for non-A2A tasks.
+    crate::a2a::publish_task_update(&state, &task).await;
+    Ok(Json(json!({
+        // A retry is outstanding exactly when a next attempt is scheduled;
+        // a `failed` task with a null schedule failed outright.
+        "requeued": task.status == TaskStatus::Failed && task.next_attempt_at.is_some(),
+        "next_attempt_at": task.next_attempt_at,
+        "dead": task.status == TaskStatus::Dead,
+        "escalation": escalation,
+    })))
+}
+
+/// `POST /tasks/{id}/cancel` — cancel a non-terminal task → `200` with the
+/// updated record. Queued and retry-scheduled tasks move to the terminal
+/// `cancelled` state immediately (never retried, never dead-lettered,
+/// never re-queued); a leased task keeps its lease with
+/// `cancel_requested` set, so the holder learns on its next heartbeat and
+/// reports the attempt as `cancelled` through the fail path. Cancellation
+/// is a hint for promptness — lease expiry stays the correctness
+/// mechanism: a holder that never asks is finalized as cancelled by the
+/// claim path once its lease lapses. `409` when the task is already
+/// terminal, `404` for unknown or cross-tenant ids.
+async fn cancel_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(task_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let outcome = state
+        .server_store
+        .cancel_task(tenant.tenant(), &task_id, Utc::now())
+        .await
+        .map_err(internal_err)?;
+    match outcome {
+        CancelOutcome::Applied(task) => {
+            // Coordination trigger (R0.7 wave 3): an immediately-cancelled
+            // member task is a terminal settlement — drive its pattern. A
+            // signalled (leased) task is not settled yet; its holder's
+            // report lands the drive later.
+            if task.is_terminal() {
+                coordination::on_task_settled(
+                    &state.server_store,
+                    state.config.quota_for(tenant.tenant()),
+                    &tenant,
+                    &task,
+                    Utc::now(),
+                )
+                .await
+                .map_err(internal_err)?;
+            }
+            // A2A bridge (R0.9 wave 4): fan the cancellation out to any
+            // live `message/stream` attachment. A no-op for non-A2A tasks.
+            crate::a2a::publish_task_update(&state, &task).await;
+            Ok(Json(task.wire()))
+        }
+        CancelOutcome::Terminal(status) => Err(ApiError::conflict(format!(
+            "task `{task_id}` is already terminal ({}) and cannot be cancelled",
+            status.as_str()
+        ))),
+        CancelOutcome::Unknown => Err(ApiError::not_found(format!("task `{task_id}` not found"))),
+    }
+}
+
+/// `GET /tasks/metrics` — the wave-3 autoscaling signals, tenant-scoped:
+/// per-pool queue depth, live leases, lease saturation against the
+/// configured concurrency limit, and the age of the oldest task a claim
+/// would hand out right now. These are **signals, not a mechanism**: Rusty
+/// publishes the numbers an external autoscaler (HPA, KEDA, a script)
+/// scales worker deployments on; the scaling decision stays with the
+/// operator — there is no built-in autoscaler, by design.
+///
+/// Shape: `{ "pools": [{ "pool", "queue_depth", "leased",
+/// "concurrency_limit", "lease_saturation", "oldest_visible_task_age_ms"
+/// }…], "now" }`. `concurrency_limit` / `lease_saturation` are null for
+/// uncapped pools (saturation is undefined without a limit, never
+/// invented); `oldest_visible_task_age_ms` is null when nothing is
+/// visible. Saturation may exceed 1.0 transiently (claims racing the
+/// Postgres commit window, or a limit lowered below the current load) —
+/// see the `ServerStore::claim_task` contract. Pools with a configured
+/// limit but no tasks report zeros: an autoscaler scaling to zero needs
+/// the zero, not an absent entry.
+async fn task_metrics(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let now = Utc::now();
+    let stats = state
+        .server_store
+        .task_pool_stats(tenant.tenant(), now)
+        .await
+        .map_err(internal_err)?;
+    let mut pools: Vec<Value> = stats
+        .iter()
+        .map(|stat| {
+            let limit = state.config.task_pool_limits.get(&stat.pool).copied();
+            pool_metrics_json(stat, limit, now)
+        })
+        .collect();
+    for (pool, &limit) in &state.config.task_pool_limits {
+        if !stats.iter().any(|s| &s.pool == pool) {
+            pools.push(pool_metrics_json(
+                &tasks::PoolStat {
+                    pool: pool.clone(),
+                    queue_depth: 0,
+                    leased: 0,
+                    oldest_visible_at: None,
+                },
+                Some(limit),
+                now,
+            ));
+        }
+    }
+    pools.sort_by(|a, b| a["pool"].as_str().cmp(&b["pool"].as_str()));
+    Ok(Json(json!({ "pools": pools, "now": now })))
+}
+
+/// One pool's entry in the `GET /tasks/metrics` body (see [`task_metrics`]
+/// for the field semantics).
+fn pool_metrics_json(
+    stat: &tasks::PoolStat,
+    limit: Option<usize>,
+    now: chrono::DateTime<Utc>,
+) -> Value {
+    let oldest_age_ms = stat
+        .oldest_visible_at
+        .map(|at| (now - at).num_milliseconds().max(0));
+    json!({
+        "pool": stat.pool,
+        "queue_depth": stat.queue_depth,
+        "leased": stat.leased,
+        "concurrency_limit": limit,
+        // `limit.max(1)`: a zero cap (paused pool) would divide by zero;
+        // its saturation is 0 while paused and empty.
+        "lease_saturation": limit.map(|max| stat.leased as f64 / max.max(1) as f64),
+        "oldest_visible_task_age_ms": oldest_age_ms,
+    })
+}
+
+/// `GET /tasks/{id}` — the task record (tenant-scoped; unknown or
+/// cross-tenant ids answer 404).
+async fn get_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(task_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .get_task(tenant.tenant(), &task_id)
+        .await
+        .map_err(internal_err)?
+        .map(|task| Json(task.wire()))
+        .ok_or_else(|| ApiError::not_found(format!("task `{task_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct ListTasksQuery {
+    /// Filter to one lifecycle status; `status=dead` is the DLQ listing.
+    #[serde(default)]
+    status: Option<String>,
+}
+
+/// `GET /tasks?status=…` — the tenant's tasks, oldest first, optionally
+/// filtered by status. An unknown status answers 400 rather than silently
+/// returning everything.
+async fn list_tasks(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Query(query): Query<ListTasksQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let status = query
+        .status
+        .as_deref()
+        .map(|s| {
+            TaskStatus::parse(s).ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "unknown task status `{s}` (expected queued|leased|failed|completed|dead|cancelled)"
+                ))
+            })
+        })
+        .transpose()?;
+    let tasks = state
+        .server_store
+        .list_tasks(tenant.tenant(), status)
+        .await
+        .map_err(internal_err)?;
+    let mut wire: Vec<Value> = tasks.iter().map(TaskRecord::wire).collect();
+    // A leased task whose run — or a run it delegated to — paused at the
+    // gate is waiting on a person, not on the worker: say so on the task,
+    // so the board can point at the decision.
+    let pending: Vec<crate::approvals::ApprovalRecord> = state
+        .run_deps
+        .approvals
+        .list()
+        .into_iter()
+        .filter(|a| a.status == "pending")
+        .collect();
+    if !pending.is_empty() {
+        // The task a paused run belongs to: a pool run names it in its
+        // metadata from the start (the task's own `run_id` is only stamped
+        // at settlement); a run it delegated to names the parent, and the
+        // parent names the task.
+        let mut task_of: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for a in &pending {
+            let Ok(Some(accepted)) = state.server_store.get_accepted_run(&a.run_id).await else {
+                continue;
+            };
+            let task_id = |meta: Option<&Value>| {
+                meta.and_then(|m| m.get("task_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            };
+            let mut found = task_id(accepted.payload.metadata.as_ref());
+            if found.is_none() {
+                if let Some(from) = accepted
+                    .payload
+                    .metadata
+                    .as_ref()
+                    .and_then(|m| m.pointer("/delegation/from_run"))
+                    .and_then(Value::as_str)
+                {
+                    if let Ok(Some(parent)) = state.server_store.get_accepted_run(from).await {
+                        found = task_id(parent.payload.metadata.as_ref());
+                    }
+                }
+            }
+            if let Some(t) = found {
+                task_of.insert(a.run_id.clone(), t);
+            }
+        }
+        for (task, item) in tasks.iter().zip(wire.iter_mut()) {
+            if !matches!(task.status, TaskStatus::Leased) {
+                continue;
+            }
+            let waiting = pending.iter().find(|a| {
+                task_of.get(&a.run_id) == Some(&task.task_id)
+                    || task.run_id.as_deref() == Some(a.run_id.as_str())
+            });
+            if let (Some(a), Some(obj)) = (waiting, item.as_object_mut()) {
+                let tools: Vec<String> = a
+                    .requests
+                    .iter()
+                    .filter_map(|r| r.get("tool").and_then(Value::as_str).map(str::to_owned))
+                    .collect();
+                let agent = match &a.assistant_id {
+                    Some(id) => state
+                        .server_store
+                        .get_assistant(&crate::auth::scope_id(tenant.tenant(), id))
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|x| x.name)
+                        .unwrap_or_else(|| id.clone()),
+                    None => a.graph.clone(),
+                };
+                obj.insert("waiting_on".to_owned(), json!({ "run_id": a.run_id, "agent": agent, "tools": tools, "since": a.requested_at }));
+            }
+        }
+    }
+    Ok(Json(json!(wire)))
+}
+
+// --------------------------------------------------------------------- //
+// Agent Fabric (R0.7, wave 1): registry, activation, mailboxes
+// --------------------------------------------------------------------- //
+//
+// The HTTP face of the agent fabric contracts landed in core (`rusty_agent_runtime::agents`).
+// Wave 1 is single-activation only: one active host per agent, turn-serialized
+// mailbox draining, no supervision tree and no coordination sessions yet
+// (those are waves 2+ — see `docs/agent-fabric-design.md`).
+
+#[derive(Debug, Deserialize)]
+struct CreateAgentPayload {
+    /// Client-chosen agent id (a UUID v4 is generated when omitted).
+    #[serde(default)]
+    agent_id: Option<String>,
+    /// The agent's capability manifest — core's `CapabilityManifest` shape
+    /// (`agent_kind`, `manifest_version`, `accepts`, optional `scopes` /
+    /// `budget`). Unknown fields are tolerated (the manifest is
+    /// forward-compatible across waves); missing required fields are a 400.
+    manifest: Value,
+    /// The team this agent belongs to (R0.7 wave 2): a declared label
+    /// `POST /teams/{team_id}/cancel` addresses — see
+    /// [`agents::AgentRecord::team_id`].
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(default)]
+    metadata: Option<Value>,
+}
+
+/// The activation lease as the wire shows it: external (unscoped) agent id,
+/// RFC 3339 timestamps — the same conventions as the task wire.
+fn activation_wire(agent_id: &str, lease: &agents::ActivationLease) -> Value {
+    json!({
+        "agent_id": agent_id,
+        "owner": lease.owner,
+        "fencing": lease.fencing,
+        "lease_expires_at": lease.expires_at,
+        "acquired_at": lease.acquired_at,
+    })
+}
+
+/// `POST /agents` — register an agent: `201` with the record, `409` when
+/// the id is taken, `400` when the manifest does not parse as a
+/// `CapabilityManifest` (the registration is the one place manifest shape
+/// is enforced; wave 1 stores `accepts` contracts without validating
+/// message payloads against their schemas — that is a later wave).
+async fn create_agent(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<CreateAgentPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let manifest: CapabilityManifest = serde_json::from_value(payload.manifest)
+        .map_err(|e| ApiError::bad_request(format!("invalid `manifest`: {e}")))?;
+    tasks::validate_label("agent_kind", &manifest.agent_kind, 256)
+        .map_err(ApiError::bad_request)?;
+    tasks::validate_label("manifest_version", &manifest.manifest_version, 256)
+        .map_err(ApiError::bad_request)?;
+    let agent_id = payload
+        .agent_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("agent_id", &agent_id)?;
+    if let Some(team_id) = &payload.team_id {
+        tasks::validate_pool(team_id)
+            .map_err(|e| ApiError::bad_request(e.replace("`pool`", "`team_id`")))?;
+    }
+
+    // Persist under the tenant's internal id; the wire shows the external id.
+    let record = AgentRecord {
+        agent_id: tenant.scope(&agent_id),
+        manifest,
+        team_id: payload.team_id,
+        metadata: payload.metadata.unwrap_or(Value::Null),
+        created_at: Utc::now(),
+        supervision: agents::AgentSupervision::default(),
+    };
+    let created = state
+        .server_store
+        .create_agent(&record)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        return Err(ApiError::conflict(format!(
+            "agent `{agent_id}` already exists"
+        )));
+    }
+    let mut wire = record;
+    wire.agent_id = agent_id;
+    Ok((StatusCode::CREATED, Json(wire.wire())))
+}
+
+/// `GET /agents` — the tenant's registered agents, oldest first.
+async fn list_agents(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let records = state
+        .server_store
+        .list_agents()
+        .await
+        .map_err(internal_err)?;
+    // Only this tenant's agents, reported with their external ids.
+    let mut records: Vec<AgentRecord> = records
+        .into_iter()
+        .filter_map(|mut record| {
+            let external = tenant.unscope(&record.agent_id)?.to_string();
+            record.agent_id = external;
+            Some(record)
+        })
+        .collect();
+    records.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.agent_id.cmp(&b.agent_id))
+    });
+    let wire: Vec<Value> = records.iter().map(AgentRecord::wire).collect();
+    Ok(Json(json!(wire)))
+}
+
+/// `GET /agents/{id}` — one registration (404 unknown/cross-tenant).
+async fn get_agent(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .map(|mut record| {
+            record.agent_id = agent_id.clone();
+            Json(record.wire())
+        })
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct SendAgentMessagePayload {
+    /// Message kind; the agent's manifest must declare it in `accepts`.
+    kind: String,
+    /// Message payload: any JSON value, stored verbatim. Wave 1 does not
+    /// validate it against the contract's `schema` (later wave).
+    payload: Value,
+    /// Attempt ceiling before dead-lettering (default 3, max 100).
+    #[serde(default)]
+    max_attempts: Option<u32>,
+    /// Dedup key, unique per tenant across live tasks: re-sending with the
+    /// same key returns the existing message (`deduplicated: true`).
+    #[serde(default)]
+    idempotency_key: Option<String>,
+    /// Declared effect classification of the work (`pure` / `read_only` /
+    /// `idempotent` / `compensatable` / `non_idempotent`) — the retry
+    /// policy's effect gate, exactly as for pool tasks.
+    #[serde(default)]
+    effect: Option<String>,
+    /// Whole-message deadline (RFC 3339), across attempts.
+    #[serde(default)]
+    deadline: Option<String>,
+}
+
+/// `POST /agents/{id}/mailbox` — send a message into the agent's mailbox.
+/// The message is a durable task addressed to the agent (`recipient` set),
+/// so it inherits the queue's idempotency, retry, and deadline machinery;
+/// `400` when the manifest does not declare the kind in `accepts`, `404`
+/// for an unknown agent. Answers `201 {task_id, deduplicated: false}` /
+/// `200 {…, deduplicated: true}`, and `429` over the tenant's task quota.
+async fn send_agent_message(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+    Json(payload): Json<SendAgentMessagePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let agent = state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    tasks::validate_label("kind", &payload.kind, 256).map_err(ApiError::bad_request)?;
+    if agent.manifest.accepts_kind(&payload.kind).is_none() {
+        let declared: Vec<&str> = agent.manifest.accepts.keys().map(String::as_str).collect();
+        return Err(ApiError::bad_request(format!(
+            "agent `{agent_id}` does not accept kind `{}` (manifest declares: {})",
+            payload.kind,
+            declared.join(", ")
+        )));
+    }
+    // The shared validation surface (`build_task_record`) keeps the mailbox
+    // path from drifting from direct enqueue; pool and worker-version pins
+    // are forced to their defaults — they do not apply to agent claims.
+    let mut record = build_task_record(
+        EnqueueTaskPayload {
+            kind: payload.kind,
+            payload: payload.payload,
+            pool: None,
+            max_attempts: payload.max_attempts,
+            idempotency_key: payload.idempotency_key,
+            effect: payload.effect,
+            run_id: None,
+            thread_id: None,
+            deadline: payload.deadline,
+            worker_version: None,
+            recipient: Some(AgentId::new(agent_id.as_str()).mailbox_recipient()),
+            parent: None,
+            parent_task_id: None,
+            stage: None,
+            status_category: None,
+        },
+        &tenant,
+    )?;
+    // The agent-level whole-activity deadline (R0.7 wave 2) composes into
+    // R0.6's task deadline — the earlier bound wins. Expiry is then
+    // cancellation by clock through the ordinary claim-path finalization,
+    // and the breach is a supervision signal (see `claim_agent_message`).
+    if let Some(agent_deadline) = agent.manifest.budget.as_ref().and_then(|b| b.deadline) {
+        record.deadline = Some(
+            record
+                .deadline
+                .map_or(agent_deadline, |d| d.min(agent_deadline)),
+        );
+    }
+    // Same quota gate as every other submission surface.
+    enforce_task_quota(&state, &tenant, 1).await?;
+    let (task, deduplicated) = state
+        .server_store
+        .enqueue_task(&record)
+        .await
+        .map_err(internal_err)?;
+    let status = if deduplicated {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((
+        status,
+        Json(json!({
+            "task_id": task.task_id,
+            "deduplicated": deduplicated,
+        })),
+    ))
+}
+
+/// `GET /agents/{id}/status` — the agent's activation lease (or `null`)
+/// plus mailbox gauges. `queued` counts messages waiting for a turn
+/// (including failed ones awaiting their retry schedule and expired leases
+/// back in visibility); `in_flight` counts the live-leased turn in progress
+/// (never more than one — turn serialization); `dead` is the mailbox's DLQ
+/// depth.
+async fn get_agent_status(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let scoped = tenant.scope(&agent_id);
+    state
+        .server_store
+        .get_agent(&scoped)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let lease = state
+        .server_store
+        .get_activation(&scoped)
+        .await
+        .map_err(internal_err)?;
+    let recipient = AgentId::new(agent_id.as_str()).mailbox_recipient();
+    let tasks = state
+        .server_store
+        .list_tasks(tenant.tenant(), None)
+        .await
+        .map_err(internal_err)?;
+    let now = Utc::now();
+    let (mut queued, mut in_flight, mut dead) = (0u64, 0u64, 0u64);
+    for task in tasks
+        .iter()
+        .filter(|t| t.recipient.as_deref() == Some(recipient.as_str()))
+    {
+        match task.status {
+            // `Failed` is awaiting its backoff — still pending work. An
+            // expired lease is visible again, so it counts as queued too.
+            TaskStatus::Queued | TaskStatus::Failed => queued += 1,
+            TaskStatus::Leased => {
+                if task.lease.as_ref().is_some_and(|l| l.expires_at > now) {
+                    in_flight += 1;
+                } else {
+                    queued += 1;
+                }
+            }
+            TaskStatus::Dead => dead += 1,
+            // Completed / cancelled messages are settled history.
+            _ => {}
+        }
+    }
+    Ok(Json(json!({
+        "agent_id": agent_id,
+        "activation": lease
+            .as_ref()
+            .map(|l| activation_wire(&agent_id, l))
+            .unwrap_or(Value::Null),
+        "mailbox": {
+            "queued": queued,
+            "in_flight": in_flight,
+            "dead": dead,
+        },
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivateAgentPayload {
+    /// Stable worker identity claiming the activation.
+    worker_id: String,
+    /// Lease duration in milliseconds (100..=3_600_000).
+    lease_ms: u64,
+}
+
+/// `POST /agents/{id}/activate` — claim the agent's single activation
+/// lease: `200 {owner, fencing, lease_expires_at, …}` when claimed (a
+/// fresh claim, or a steal of an expired lease with the fencing ordinal
+/// bumped); `409` when another host holds a live lease — the body names
+/// the current holder so the loser can back off until expiry.
+async fn activate_agent(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+    Json(payload): Json<ActivateAgentPayload>,
+) -> Result<Response, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    tasks::validate_lease_ms(payload.lease_ms).map_err(ApiError::bad_request)?;
+    let scoped = tenant.scope(&agent_id);
+    // Activation requires a registered agent: a lease for an id nobody
+    // registered would strand mailbox traffic behind a phantom host.
+    state
+        .server_store
+        .get_agent(&scoped)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let outcome = state
+        .server_store
+        .claim_activation(&scoped, &payload.worker_id, payload.lease_ms, Utc::now())
+        .await
+        .map_err(internal_err)?;
+    Ok(match outcome {
+        ActivationOutcome::Claimed(lease) => {
+            Json(activation_wire(&agent_id, &lease)).into_response()
+        }
+        ActivationOutcome::Held(lease) => ApiError::conflict(format!(
+            "agent `{agent_id}` activation is held by `{}` (fencing {}, lease expires {})",
+            lease.owner,
+            lease.fencing,
+            lease.expires_at.to_rfc3339()
+        ))
+        .into_response(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivationHeartbeatPayload {
+    worker_id: String,
+    /// The fencing ordinal the activate call granted — the stale-holder
+    /// guard: a host that lost the activation to a steal can never renew.
+    fencing: u64,
+    lease_ms: u64,
+}
+
+/// `POST /agents/{id}/activate/heartbeat` — renew the held activation:
+/// `200` with the refreshed lease, `409` when the owner + fencing pair no
+/// longer holds it (stolen or expired — the host must re-activate), `404`
+/// when no lease exists at all.
+async fn heartbeat_activation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+    Json(payload): Json<ActivationHeartbeatPayload>,
+) -> Result<Response, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    tasks::validate_lease_ms(payload.lease_ms).map_err(ApiError::bad_request)?;
+    let outcome = state
+        .server_store
+        .renew_activation(
+            &tenant.scope(&agent_id),
+            &payload.worker_id,
+            payload.fencing,
+            payload.lease_ms,
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    Ok(match outcome {
+        ActivationMutation::Applied(lease) => {
+            Json(activation_wire(&agent_id, &lease)).into_response()
+        }
+        ActivationMutation::FencingLost => ApiError::conflict(format!(
+            "activation for agent `{agent_id}` is no longer held by this owner + fencing pair"
+        ))
+        .into_response(),
+        ActivationMutation::Unknown => {
+            ApiError::not_found(format!("no activation lease for agent `{agent_id}`"))
+                .into_response()
+        }
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivationReleasePayload {
+    worker_id: String,
+    fencing: u64,
+}
+
+/// `POST /agents/{id}/activate/release` — drop the held activation so a
+/// draining host's replacement can activate promptly instead of waiting
+/// out the expiry. Same owner + fencing guard as the heartbeat: `200
+/// {released: true}`, `409` on fencing loss, `404` when no lease exists.
+async fn release_activation(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+    Json(payload): Json<ActivationReleasePayload>,
+) -> Result<Response, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    let outcome = state
+        .server_store
+        .release_activation(
+            &tenant.scope(&agent_id),
+            &payload.worker_id,
+            payload.fencing,
+            Utc::now(),
+        )
+        .await
+        .map_err(internal_err)?;
+    Ok(match outcome {
+        ActivationMutation::Applied(_) => {
+            Json(json!({ "released": true, "agent_id": agent_id })).into_response()
+        }
+        ActivationMutation::FencingLost => ApiError::conflict(format!(
+            "activation for agent `{agent_id}` is no longer held by this owner + fencing pair"
+        ))
+        .into_response(),
+        ActivationMutation::Unknown => {
+            ApiError::not_found(format!("no activation lease for agent `{agent_id}`"))
+                .into_response()
+        }
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaimAgentMessagePayload {
+    worker_id: String,
+    /// The activation fencing ordinal this claim runs under.
+    fencing: u64,
+    /// Task lease for the claimed turn, in milliseconds.
+    lease_ms: u64,
+}
+
+/// `POST /agents/{id}/mailbox/next` — claim the oldest queued mailbox
+/// message as one turn of work: `200 {task}` with a fresh task lease, `204`
+/// when the mailbox is empty **or a turn is already in flight** (one
+/// message at a time per agent is server-enforced), `409` when the caller
+/// does not hold the activation lease. The claimed turn settles through the
+/// unchanged `/tasks/{id}/heartbeat|complete|fail` protocol.
+async fn claim_agent_message(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+    Json(payload): Json<ClaimAgentMessagePayload>,
+) -> Result<Response, ApiError> {
+    tasks::validate_label("worker_id", &payload.worker_id, 256).map_err(ApiError::bad_request)?;
+    tasks::validate_lease_ms(payload.lease_ms).map_err(ApiError::bad_request)?;
+    let scoped = tenant.scope(&agent_id);
+    let agent = state
+        .server_store
+        .get_agent(&scoped)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let now = Utc::now();
+    // Agent-level deadline (R0.7 wave 2): past the whole-activity bound,
+    // the claim triggers the breach path once (latched) — outstanding
+    // mailbox traffic is cancelled (children before parent), and the
+    // declared policy decides restart vs escalate, journaled. The claim
+    // itself then proceeds normally: the cancellation finalization makes
+    // it answer empty.
+    if !agent.supervision.deadline_breached
+        && agent
+            .manifest
+            .budget
+            .as_ref()
+            .and_then(|b| b.deadline)
+            .is_some_and(|deadline| deadline <= now)
+    {
+        supervision::on_deadline_breach(&state.server_store, &tenant, &agent_id, agent, now)
+            .await
+            .map_err(internal_err)?;
+    }
+    let recipient = AgentId::new(agent_id.as_str()).mailbox_recipient();
+    let claimed = state
+        .server_store
+        .claim_agent_task(
+            tenant.tenant(),
+            &MailboxClaimScope {
+                agent_id: &scoped,
+                recipient: &recipient,
+                owner: &payload.worker_id,
+                fencing: payload.fencing,
+            },
+            payload.lease_ms,
+            now,
+        )
+        .await
+        .map_err(internal_err)?;
+    Ok(match claimed {
+        MailboxClaim::Claimed(task) => Json(json!({ "task": task.wire() })).into_response(),
+        MailboxClaim::Empty => StatusCode::NO_CONTENT.into_response(),
+        MailboxClaim::ActivationLost => ApiError::conflict(format!(
+            "activation for agent `{agent_id}` is not held by this owner + fencing pair"
+        ))
+        .into_response(),
+    })
+}
+
+// --------------------------------------------------------------------- //
+// Supervision and the cancellation tree (R0.7 Agent Fabric, wave 2)
+// --------------------------------------------------------------------- //
+
+/// Cancel one agent: its outstanding mailbox traffic first, then its live
+/// runs — the cancellation tree's per-member rule (children before
+/// parent), shared by `POST /agents/{id}/cancel` and
+/// `POST /teams/{team_id}/cancel` so a member's cancellation is
+/// self-contained and the two endpoints can never drift apart.
+///
+/// Mailbox traffic goes through the R0.6 semantics, agent-id scoped:
+/// queued and retry-scheduled messages go terminal-`cancelled`
+/// immediately; a leased turn keeps its lease with `cancel_requested` set
+/// (a hint for promptness — lease expiry stays the correctness mechanism).
+/// Runs go through `RunConfig::cancellation`: the executor observes the
+/// token at a super-step boundary, after the boundary checkpoint has
+/// landed, ending terminal-`cancelled` and resumable by re-running the
+/// thread. The exit is journaled as an `AgentExit` in the agent's
+/// supervision journal — only when the cancellation actually touched
+/// something.
+async fn cancel_one_agent(
+    state: &AppState,
+    tenant: &TenantContext,
+    agent_external: &str,
+) -> Result<Value, ApiError> {
+    let now = Utc::now();
+    let recipient = AgentId::new(agent_external).mailbox_recipient();
+    let outcome = state
+        .server_store
+        .cancel_agent_tasks(tenant.tenant(), &recipient, now)
+        .await
+        .map_err(internal_err)?;
+    // The agent's thread convention, internally scoped — the manager keys
+    // runs by internal thread id.
+    let thread = tenant.scope(&AgentId::new(agent_external).thread_id());
+    let run_outcome = runs::cancel_thread_runs(&state.run_deps, &thread).await;
+    let ids =
+        |tasks: Vec<TaskRecord>| -> Vec<String> { tasks.into_iter().map(|t| t.task_id).collect() };
+    let cancelled = ids(outcome.cancelled);
+    let signalled = ids(outcome.signalled);
+    let mut exit_event = Value::Null;
+    if !cancelled.is_empty() || !signalled.is_empty() || !run_outcome.is_empty() {
+        exit_event = json!(
+            supervision::journal_agent_exit(
+                &state.server_store,
+                tenant,
+                agent_external,
+                "cancelled",
+                json!({
+                    "cancelled_messages": cancelled,
+                    "signalled_messages": signalled,
+                    "signalled_runs": run_outcome.signalled,
+                    "cancelled_runs": run_outcome.cancelled,
+                }),
+            )
+            .await
+            .map_err(internal_err)?
+        );
+    }
+    Ok(json!({
+        "agent_id": agent_external,
+        "cancelled": cancelled,
+        "signalled": signalled,
+        "runs": {
+            "signalled": run_outcome.signalled,
+            "cancelled": run_outcome.cancelled,
+        },
+        "exit_event": exit_event,
+    }))
+}
+
+/// `POST /agents/{id}/cancel` — cancel one agent (R0.7 wave 2): its
+/// outstanding mailbox traffic (agent-id-scoped `cancel_run_tasks`
+/// composition) and its live runs (`RunConfig::cancellation`), journaled
+/// as an `AgentExit`. Idempotent: a repeated cancel of a quiescent agent
+/// answers `200` with empty lists and journals nothing. `404` for unknown
+/// or cross-tenant ids.
+async fn cancel_agent(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    Ok(Json(cancel_one_agent(&state, &tenant, &agent_id).await?))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RestartAgentPayload {
+    /// The operator's reason, recorded as the attempt's message.
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// `POST /agents/{id}/restart` — the manual supervision action (R0.7 wave
+/// 2): the operator's "I've fixed the child" reset. Records the restart
+/// (journaled `SupervisionEvent`, ordinal from the attempt history), and
+/// clears the escalation and deadline-breach latches so supervision
+/// resumes. Works with or without a declared policy — the operator
+/// outranks the declaration.
+///
+/// The restart itself — a new run on the agent's thread restoring the
+/// latest checkpoint — is the agent host's integration point: the mailbox
+/// is untouched, so the next claimed turn re-drives the thread from its
+/// latest checkpoint (the W1b machinery, unmodified). This endpoint is
+/// the server-side half: the journaled decision and the latch reset.
+async fn restart_agent(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+    body: Option<Json<RestartAgentPayload>>,
+) -> Result<Json<Value>, ApiError> {
+    let agent = state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let reason = body
+        .and_then(|Json(payload)| payload.reason)
+        .unwrap_or_else(|| "manual restart".to_string());
+    let outcome = supervision::supervise(
+        &state.server_store,
+        &tenant,
+        &agent_id,
+        agent,
+        supervision::Trigger::ManualRestart { reason },
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
+    let ordinal = match outcome.decision {
+        supervision::Decision::Restart { ordinal } => ordinal,
+        // `supervise` maps the manual trigger to a restart by construction.
+        _ => unreachable!("a manual restart trigger always decides restart"),
+    };
+    Ok(Json(json!({
+        "agent_id": agent_id,
+        "restarted": true,
+        "restart_ordinal": ordinal,
+        "event": outcome.event_id,
+    })))
+}
+
+/// `GET /agents/{id}/supervision` — the agent's supervision evidence
+/// (R0.7 wave 2): the declared policy, the latches, the full attempt
+/// history, and the journaled `SupervisionEvent` / `AgentExit` events of
+/// the agent's supervision journal — integrity re-verified on read,
+/// exactly like the Flight Recorder endpoints. `404` for unknown or
+/// cross-tenant ids.
+async fn get_agent_supervision(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let agent = state
+        .server_store
+        .get_agent(&tenant.scope(&agent_id))
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent_id}` not found")))?;
+    let events = supervision::supervision_events(&state.server_store, &tenant, &agent_id)
+        .await
+        .map_err(internal_err)?;
+    Ok(Json(json!({
+        "agent_id": agent_id,
+        "policy": agent.manifest.supervision,
+        "escalated": agent.supervision.escalated,
+        "deadline_breached": agent.supervision.deadline_breached,
+        "suppressed_failures": agent.supervision.suppressed_failures,
+        "attempts": agent.supervision.attempts,
+        "journal_run_id": supervision::supervision_journal_run_id(tenant.tenant(), &agent_id),
+        "events": events,
+    })))
+}
+
+/// `POST /teams/{team_id}/cancel` — cancel a whole team (R0.7 wave 2):
+/// every registered agent carrying the `team_id` label is cancelled by
+/// the per-member rule ([`cancel_one_agent`]) — each member's
+/// cancellation is self-contained, so the order across members does not
+/// matter. `404` when no agent in this tenant declares the team (an empty
+/// team is indistinguishable from an unknown one, the cross-tenant rule
+/// applied to the label).
+async fn cancel_team(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(team_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    tasks::validate_pool(&team_id)
+        .map_err(|e| ApiError::bad_request(e.replace("`pool`", "`team_id`")))?;
+    let members: Vec<String> = state
+        .server_store
+        .list_agents()
+        .await
+        .map_err(internal_err)?
+        .into_iter()
+        .filter(|record| record.team_id.as_deref() == Some(team_id.as_str()))
+        // Tenant isolation rides the id prefix, as on every agent read:
+        // another tenant's same-labelled team resolves to nothing here.
+        .filter_map(|record| tenant.unscope(&record.agent_id).map(str::to_owned))
+        .collect();
+    if members.is_empty() {
+        return Err(ApiError::not_found(format!(
+            "no agents registered for team `{team_id}`"
+        )));
+    }
+    let mut cancelled = Vec::with_capacity(members.len());
+    for agent_external in members {
+        cancelled.push(cancel_one_agent(&state, &tenant, &agent_external).await?);
+    }
+    Ok(Json(json!({
+        "team_id": team_id,
+        "members": cancelled,
+    })))
+}
+
+// --------------------------------------------------------------------- //
+// Coordination patterns (R0.7 wave 3)
+// --------------------------------------------------------------------- //
+
+/// Member names the runtime reserves for its own derived task ids
+/// (`{tenant}--{cid}--outcome`, `{tenant}--{cid}--race-dlq`): a member
+/// carrying one would collide with the pattern's own outcome / DLQ tasks.
+const RESERVED_MEMBER_NAMES: &[&str] = &["outcome", "race-dlq"];
+
+#[derive(Debug, Deserialize)]
+struct SubmitDelegatePayload {
+    /// Caller-supplied id for convergent retries (minted when absent):
+    /// re-submitting with the same id returns the existing pattern
+    /// (`deduplicated: true`) instead of starting a second one.
+    #[serde(default)]
+    coordination_id: Option<String>,
+    /// The delegating agent (external id). The outcome is delivered to its
+    /// mailbox as a `coordination_result` message — its manifest must
+    /// declare that kind, checked here (400), or the pattern it starts
+    /// would be stranded. Absent = control-plane submission observed
+    /// through `GET /coordination/{id}` alone.
+    #[serde(default)]
+    delegator: Option<String>,
+    /// Causal parent event id, when the pattern is spawned by a journaled
+    /// step (an outer pattern's event, a delegator's turn event).
+    #[serde(default)]
+    parent: Option<String>,
+    /// The delegate contract.
+    delegate: DelegateContract,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitFanOutPayload {
+    #[serde(default)]
+    coordination_id: Option<String>,
+    #[serde(default)]
+    delegator: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+    fan_out: FanOutContract,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitRacePayload {
+    #[serde(default)]
+    coordination_id: Option<String>,
+    #[serde(default)]
+    delegator: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+    race: RaceContract,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitQuorumPayload {
+    #[serde(default)]
+    coordination_id: Option<String>,
+    #[serde(default)]
+    delegator: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+    quorum: QuorumContract,
+}
+
+/// `POST /coordination/delegate` — submit a delegate pattern → `201
+/// {coordination_id, start_event, submitted}`.
+async fn submit_delegate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitDelegatePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::Delegate(Box::new(payload.delegate)),
+    )
+    .await
+}
+
+/// `POST /coordination/fan_out` — submit a fan-out pattern → `201`.
+async fn submit_fan_out(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitFanOutPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::FanOut(payload.fan_out),
+    )
+    .await
+}
+
+/// `POST /coordination/race` — submit a race → `201`; `400` when any
+/// candidate's declared effect is not freely repeatable (the effect gate:
+/// a race loser is cancel-signalled at an arbitrary point, so every
+/// candidate must be safe to abandon).
+async fn submit_race(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitRacePayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::Race(payload.race),
+    )
+    .await
+}
+
+/// `POST /coordination/quorum` — submit a quorum → `201`; `400` for a
+/// threshold outside `1..=members`, duplicate member names, or a custom
+/// resolver (a pinned wire shape wave 3 does not honor).
+async fn submit_quorum(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Json(payload): Json<SubmitQuorumPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    submit_coordination(
+        &state,
+        &tenant,
+        payload.coordination_id,
+        payload.delegator,
+        payload.parent,
+        CoordinationContract::Quorum(payload.quorum),
+    )
+    .await
+}
+
+/// The shared submission pipeline for all four patterns: validate
+/// everything against the registry **before any write**, create the
+/// record, quota-gate, then run the first drive (which journals
+/// `CoordinationStart` and submits the initial window). One surface, so
+/// the patterns can never drift apart in what they accept — the
+/// `build_task_record` discipline.
+async fn submit_coordination(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    coordination_id: Option<String>,
+    delegator: Option<String>,
+    parent: Option<String>,
+    contract: CoordinationContract,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    // Structural validation first: the pattern's own rules (the race
+    // effect gate, quorum bounds, the fan-out window) before any registry
+    // lookup, and before any write.
+    contract
+        .validate()
+        .map_err(|violation| ApiError::bad_request(violation.to_string()))?;
+
+    let coordination_id = coordination_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    validate_client_id("coordination_id", &coordination_id)?;
+    if let Some(parent) = &parent {
+        tasks::validate_label("parent", parent, 512).map_err(ApiError::bad_request)?;
+    }
+
+    // Every member: the target agent must be registered at the exact
+    // pinned manifest version and must accept the delegation's kind. An
+    // exact-version pin is the agent-level form of R0.6's worker version
+    // pinning — a redeploy never changes a pattern's semantics
+    // mid-flight.
+    for delegation in contract.members() {
+        coordination::validate_member_label("member", &delegation.member)
+            .map_err(ApiError::bad_request)?;
+        if RESERVED_MEMBER_NAMES.contains(&delegation.member.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "member name `{}` is reserved (it would collide with the pattern's own derived tasks)",
+                delegation.member
+            )));
+        }
+        tasks::validate_label("agent_id", &delegation.agent_id, 256)
+            .map_err(ApiError::bad_request)?;
+        let agent = state
+            .server_store
+            .get_agent(&tenant.scope(&delegation.agent_id))
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "member `{}` target agent `{}` is not registered",
+                    delegation.member, delegation.agent_id
+                ))
+            })?;
+        if agent.manifest.manifest_version != delegation.manifest_version {
+            return Err(ApiError::bad_request(format!(
+                "member `{}` pins manifest version `{}` but agent `{}` is registered at `{}` — the pin must match exactly",
+                delegation.member,
+                delegation.manifest_version,
+                delegation.agent_id,
+                agent.manifest.manifest_version
+            )));
+        }
+        if agent.manifest.accepts_kind(&delegation.kind).is_none() {
+            let declared: Vec<&str> = agent.manifest.accepts.keys().map(String::as_str).collect();
+            return Err(ApiError::bad_request(format!(
+                "member `{}` kind `{}` is not accepted by agent `{}` (manifest declares: {})",
+                delegation.member,
+                delegation.kind,
+                delegation.agent_id,
+                declared.join(", ")
+            )));
+        }
+        // The delegate's context grant may only narrow the target's
+        // declared scopes — a delegation is never a privilege escalation.
+        if let CoordinationContract::Delegate(delegate_contract) = &contract {
+            if let Some(grant) = &delegate_contract.context {
+                if !grant.narrows(&agent.manifest.scopes) {
+                    return Err(ApiError::bad_request(format!(
+                        "context grant widens agent `{}`'s declared scopes ({:?}) — grants may only narrow",
+                        delegation.agent_id, agent.manifest.scopes
+                    )));
+                }
+            }
+        }
+    }
+
+    // The delegator must be able to receive the outcome — the reserved
+    // kind check at the door (see `COORDINATION_RESULT_KIND`).
+    if let Some(delegator) = &delegator {
+        tasks::validate_label("delegator", delegator, 256).map_err(ApiError::bad_request)?;
+        let agent = state
+            .server_store
+            .get_agent(&tenant.scope(delegator))
+            .await
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                ApiError::bad_request(format!("delegator agent `{delegator}` is not registered"))
+            })?;
+        if agent
+            .manifest
+            .accepts_kind(COORDINATION_RESULT_KIND)
+            .is_none()
+        {
+            return Err(ApiError::bad_request(format!(
+                "delegator `{delegator}` does not accept `{COORDINATION_RESULT_KIND}` (its manifest must declare the reserved kind — a delegator that cannot receive the outcome would strand every pattern it starts)"
+            )));
+        }
+    }
+
+    let now = Utc::now();
+    let record = coordination::CoordinationRecord {
+        coordination_id: tenant.scope(&coordination_id),
+        delegator,
+        parent,
+        members: contract
+            .members()
+            .into_iter()
+            .map(|delegation| coordination::MemberRecord {
+                member: delegation.member.clone(),
+                agent_id: delegation.agent_id.clone(),
+                manifest_version: delegation.manifest_version.clone(),
+                task_id: coordination::member_task_id(
+                    tenant.tenant(),
+                    &coordination_id,
+                    &delegation.member,
+                ),
+                submitted: false,
+            })
+            .collect(),
+        contract,
+        settled: false,
+        outcome: None,
+        outcome_delivered: false,
+        dlq_written: false,
+        created_at: now,
+        updated_at: now,
+    };
+    let created = state
+        .server_store
+        .create_coordination(&record)
+        .await
+        .map_err(internal_err)?;
+    if !created {
+        // Convergent retry of a caller-supplied id: the existing pattern
+        // stands, the caller learns it was deduplicated — the enqueue
+        // idempotency-key discipline applied to whole patterns.
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "coordination_id": coordination_id,
+                "deduplicated": true,
+            })),
+        ));
+    }
+
+    // The submission quota applies to the pattern's initial window —
+    // member work is real queue pressure from the first drive on. Later
+    // windows are gated inside the drive itself.
+    let initial_window = match &record.contract {
+        CoordinationContract::FanOut(contract) => {
+            (contract.max_in_flight as usize).min(contract.members.len())
+        }
+        _ => record.members.len(),
+    };
+    enforce_task_quota(state, tenant, initial_window).await?;
+
+    let driven = coordination::drive(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        tenant,
+        record,
+        now,
+    )
+    .await
+    .map_err(internal_err)?;
+
+    let start_event = coordination::load_journal(&state.server_store, tenant, &coordination_id)
+        .await
+        .map_err(internal_err)?
+        .and_then(|journal| journal.events().first().map(|event| event.id.clone()));
+    let submitted: Vec<Value> = driven
+        .record
+        .members
+        .iter()
+        .filter(|member| member.submitted)
+        .map(|member| json!({"member": member.member, "task_id": member.task_id}))
+        .collect();
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "coordination_id": coordination_id,
+            "start_event": start_event,
+            "submitted": submitted,
+        })),
+    ))
+}
+
+/// `GET /coordination/{coordination_id}` — the pattern's record, current
+/// member dispositions, settled outcome (when done), and its journal
+/// events (integrity-verified).
+///
+/// Deliberately impure: the read **drives** the pattern first
+/// (reconcile-on-read). Claim-path finalizations — a member's deadline
+/// expiring unclaimed, an unanswered cancel — have no route hook, so
+/// without this drive a pattern whose member died silently would look
+/// open forever. The drive is convergent: a read that changes nothing
+/// writes nothing.
+async fn get_coordination(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(coordination_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("coordination_id", &coordination_id)?;
+    let Some(record) = state
+        .server_store
+        .get_coordination(&tenant.scope(&coordination_id))
+        .await
+        .map_err(internal_err)?
+    else {
+        return Err(ApiError::not_found(format!(
+            "coordination `{coordination_id}` not found"
+        )));
+    };
+    let driven = coordination::drive(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        &tenant,
+        record,
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
+    let journal = coordination::load_journal(&state.server_store, &tenant, &coordination_id)
+        .await
+        .map_err(internal_err)?;
+    let members: Vec<Value> = driven
+        .record
+        .members
+        .iter()
+        .map(|member| {
+            let disposition = driven
+                .dispositions
+                .iter()
+                .find(|d| d.member == member.member);
+            json!({
+                "member": member.member,
+                "agent_id": member.agent_id,
+                "manifest_version": member.manifest_version,
+                "task_id": member.task_id,
+                "submitted": member.submitted,
+                "disposition": disposition,
+            })
+        })
+        .collect();
+    let journal_wire = journal.map(|journal| {
+        json!({
+            "run_id": coordination::coordination_journal_run_id(tenant.tenant(), &coordination_id),
+            "events": journal.events(),
+        })
+    });
+    Ok(Json(json!({
+        "coordination_id": coordination_id,
+        "delegator": driven.record.delegator,
+        "parent": driven.record.parent,
+        "contract": driven.record.contract,
+        "members": members,
+        "settled": driven.record.settled,
+        "outcome": driven.record.outcome,
+        "journal": journal_wire,
+        "created_at": driven.record.created_at,
+        "updated_at": driven.record.updated_at,
+    })))
+}
+
+/// `GET /coordination/{coordination_id}/trace` — the TeamTrace: one
+/// connected causal tree across the pattern's journal and any member-task
+/// run journals. Member *supervision* journals are deliberately excluded:
+/// they carry no parent links into the pattern's tree, so including them
+/// would manufacture detached roots and break the connectivity signal.
+async fn get_coordination_trace(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(coordination_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    validate_client_id("coordination_id", &coordination_id)?;
+    let Some(record) = state
+        .server_store
+        .get_coordination(&tenant.scope(&coordination_id))
+        .await
+        .map_err(internal_err)?
+    else {
+        return Err(ApiError::not_found(format!(
+            "coordination `{coordination_id}` not found"
+        )));
+    };
+    // Reconcile first (the get_coordination rationale) so the trace
+    // reflects the latest evidence, then assemble from verified snapshots.
+    let driven = coordination::drive(
+        &state.server_store,
+        state.config.quota_for(tenant.tenant()),
+        &tenant,
+        record,
+        Utc::now(),
+    )
+    .await
+    .map_err(internal_err)?;
+    let mut snapshots = Vec::new();
+    if let Some(journal) =
+        coordination::load_journal(&state.server_store, &tenant, &coordination_id)
+            .await
+            .map_err(internal_err)?
+    {
+        snapshots.push(journal.snapshot());
+    }
+    for member in &driven.record.members {
+        let Some(task) = state
+            .server_store
+            .get_task(tenant.tenant(), &member.task_id)
+            .await
+            .map_err(internal_err)?
+        else {
+            continue;
+        };
+        let Some(run_id) = &task.run_id else {
+            continue;
+        };
+        if let Some(snapshot) = state
+            .server_store
+            .get_journal(run_id)
+            .await
+            .map_err(internal_err)?
+        {
+            snapshots.push(snapshot);
+        }
+    }
+    let trace = TeamTrace::assemble(&snapshots);
+    Ok(Json(json!({
+        "coordination_id": coordination_id,
+        "connected": trace.is_connected(),
+        "trace": trace,
+    })))
+}
+
+// ------------------------------------------------------------------
+// Studio evaluation workbench (Phase 3): datasets, experiments,
+// comparisons, gates. Canonical evaluation/comparison/gate semantics
+// live in `rusty-eval`; these routes store the Studio-facing records.
+// ------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CreateDatasetPayload {
+    name: String,
+    version: String,
+    cases: Vec<evaluations::PublishedEvalCase>,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateDatasetResponse {
+    name: String,
+    version: String,
+    created: bool,
+    case_count: usize,
+    digest: String,
+}
+
+/// Every case any stored version of the dataset `name` holds.
+async fn known_dataset_cases(
+    state: &AppState,
+    tenant: &str,
+    name: &str,
+) -> Result<Vec<evaluations::PublishedEvalCase>, ApiError> {
+    let mut known = Vec::new();
+    for record in evaluations::list_datasets(&state.server_store, tenant)
+        .await?
+        .datasets
+        .into_iter()
+        .filter(|record| record.name == name)
+    {
+        known.extend(
+            evaluations::load_dataset_cases(&state.server_store, tenant, name, &record.version)
+                .await?,
+        );
+    }
+    Ok(known)
+}
+
+async fn create_dataset(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(mut payload): Json<CreateDatasetPayload>,
+) -> Result<(StatusCode, Json<CreateDatasetResponse>), ApiError> {
+    // A case a stored version of this dataset already holds, unchanged, was
+    // proven against its run when it was first published and is trusted as
+    // it stands — its run may since have left every server that held it —
+    // so a dataset keeps growing after its earliest evidence is gone.
+    let known = known_dataset_cases(&state, tenant.tenant(), &payload.name).await?;
+    for case in &mut payload.cases {
+        if known.iter().any(|held| held == case) {
+            continue;
+        }
+        let source = &mut case.source;
+        // Held in this process or recovered after a restart — either way
+        // the run's exact acceptance is what the case binds to.
+        let info = recall_run(&state, &tenant, &source.run_id)
+            .await?
+            .ok_or_else(|| {
+                ApiError::not_found(format!("source run `{}` not found", source.run_id))
+            })?;
+        if info.wire_thread_id != source.thread_id
+            || info.assistant_id.as_deref() != Some(source.agent_id.as_str())
+            || info.input.as_ref() != Some(&case.case.input)
+        {
+            return Err(ApiError::bad_request(format!(
+                "case `{}` source does not match the run's exact thread, assistant, and input",
+                case.case.id
+            )));
+        }
+        if !info.status.is_terminal() {
+            return Err(ApiError::conflict(format!(
+                "case `{}` source run is not complete",
+                case.case.id
+            )));
+        }
+        // Capture time is server evidence, never a client assertion.
+        source.captured_at = info.created_at;
+    }
+    let (record, created) = evaluations::persist_dataset(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &payload.name,
+        &payload.version,
+        payload.cases,
+    )
+    .await?;
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(CreateDatasetResponse {
+            name: record.name,
+            version: record.version,
+            created,
+            case_count: record.case_count,
+            digest: record.digest,
+        }),
+    ))
+}
+
+async fn list_datasets(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog = evaluations::list_datasets(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "datasets": catalog.datasets, "truncated": catalog.truncated }),
+    ))
+}
+
+async fn get_dataset(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let versions =
+        evaluations::get_dataset_versions(&state.server_store, tenant.tenant(), &name).await?;
+    if versions.is_empty() {
+        return Err(ApiError::not_found(format!("dataset `{name}` not found")));
+    }
+    Ok(Json(json!({ "name": name, "versions": versions })))
+}
+
+/// `DELETE /datasets/{name}` — every version, its cases and its
+/// evaluations; refused while an evaluation of it is running.
+async fn delete_dataset(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let versions = evaluations::delete_dataset(&state, tenant.tenant(), &name).await?;
+    Ok(Json(
+        json!({ "deleted": true, "name": name, "versions": versions }),
+    ))
+}
+
+async fn get_dataset_version(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let dataset =
+        evaluations::load_dataset(&state.server_store, tenant.tenant(), &name, &version).await?;
+    Ok(Json(json!({
+        "name": dataset.name(),
+        "version": dataset.version(),
+        "case_count": dataset.cases().len(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct RunDatasetPayload {
+    assistant_id: String,
+    /// Run the cases under this version of the agent instead of the
+    /// active one — the evidence a promotion needs.
+    #[serde(default)]
+    version_id: Option<String>,
+    /// Run the cases with the agent following this revision of one of its
+    /// skills instead of the current one — the before of a before/after,
+    /// the way a learning is measured.
+    #[serde(default)]
+    skill: Option<crate::dataset_runs::SkillPin>,
+}
+
+/// `POST /datasets/sweep` — every suite at once: for each dataset, its
+/// newest version, against the agent its cases were recorded from. The
+/// regression pass after a change to something every agent shares — the
+/// verifier, the runtime, a pack — and what a nightly gate would run.
+/// Answers at once with what started; the verdicts arrive on each
+/// dataset's evaluations as the cases finish.
+async fn sweep_datasets(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let started = evaluations::sweep_all(
+        &state,
+        &tenant,
+        json!({"kind": "sweep", "by": tenant.attribution()}),
+    )
+    .await?;
+    // The verdicts arrive later; the administrators hear of any suite
+    // that did not pass in full, in the Inbox, the way the nightly one tells.
+    evaluations::spawn_sweep_report(
+        Arc::clone(&state),
+        tenant.tenant().to_owned(),
+        started.clone(),
+        false,
+    );
+    Ok((StatusCode::ACCEPTED, Json(json!({ "started": started }))))
+}
+
+/// Run a dataset version against an agent: every case becomes a real run
+/// of the agent on a fresh thread, judged against the case's expectation.
+/// Answers at once with the running record; the verdicts arrive on the
+/// listing as each case finishes.
+async fn run_dataset(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+    Json(payload): Json<RunDatasetPayload>,
+) -> Result<(StatusCode, Json<crate::dataset_runs::DatasetEvaluation>), ApiError> {
+    let cases =
+        evaluations::load_dataset_cases(&state.server_store, tenant.tenant(), &name, &version)
+            .await?;
+    let assistant = state
+        .server_store
+        .get_assistant(&tenant.scope(&payload.assistant_id))
+        .await
+        .map_err(internal_err)?
+        .filter(|assistant| assistant.archived_at.is_none())
+        .ok_or_else(|| {
+            ApiError::not_found(format!("assistant `{}` not found", payload.assistant_id))
+        })?;
+    let assistant = match &payload.version_id {
+        Some(version_id) => assistant.at_version(version_id).ok_or_else(|| {
+            ApiError::not_found(format!(
+                "assistant version `{version_id}` not found for `{}`",
+                payload.assistant_id
+            ))
+        })?,
+        None => assistant,
+    };
+    // A pinned skill revision must be one the agent follows and one the
+    // plane holds; a pin that silently ran the current revision would be
+    // a comparison of nothing.
+    if let Some(pin) = &payload.skill {
+        if !assistant_skills(&assistant.config)
+            .iter()
+            .any(|s| s == &pin.name)
+        {
+            return Err(ApiError::bad_request(format!(
+                "agent `{}` does not follow skill `{}`",
+                payload.assistant_id, pin.name
+            )));
+        }
+        let held = state
+            .skills
+            .get_version(
+                tenant.tenant(),
+                &pin.name,
+                rusty_agent_runtime::skill::SkillVersionSelector::Revision(pin.revision),
+            )
+            .await;
+        if held.is_none() {
+            return Err(ApiError::not_found(format!(
+                "skill `{}` has no revision {}",
+                pin.name, pin.revision
+            )));
+        }
+    }
+    let started = crate::dataset_runs::start(
+        Arc::clone(&state),
+        tenant.tenant().to_owned(),
+        name,
+        version,
+        assistant,
+        cases,
+        Some(tenant.attribution()).filter(|who| !who.is_null()),
+        payload.skill,
+    )
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(started)))
+}
+
+async fn list_dataset_evaluations(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let evaluations = crate::dataset_runs::list(&state, tenant.tenant(), &name, &version).await?;
+    Ok(Json(json!({ "evaluations": evaluations })))
+}
+
+async fn list_dataset_cases(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let cases =
+        evaluations::load_dataset_cases(&state.server_store, tenant.tenant(), &name, &version)
+            .await?;
+    Ok(Json(json!({ "cases": cases })))
+}
+
+// Experiment records store configuration, status, and any captured
+// evaluation report. The actual evaluation currently reuses the existing
+// `/learn/candidates/{candidate_id}/evaluate` path; these routes keep the
+// Studio workbench state durable and tenant-isolated.
+
+#[derive(Debug, Deserialize)]
+struct CreateExperimentPayload {
+    #[serde(default)]
+    experiment_id: Option<String>,
+    candidate_id: String,
+    dataset_name: String,
+    dataset_version: String,
+    #[serde(default = "default_runs_per_case")]
+    runs_per_case: usize,
+    #[serde(default = "default_experiment_concurrency")]
+    max_concurrency: usize,
+    target_metric: String,
+    thresholds: rusty_eval::CompareThresholds,
+}
+
+fn default_runs_per_case() -> usize {
+    1
+}
+fn default_experiment_concurrency() -> usize {
+    1
+}
+
+fn bounded_experiment_failure(reason: String) -> String {
+    const MAX_BYTES: usize = 4 * 1024;
+    if reason.len() <= MAX_BYTES {
+        return reason;
+    }
+    let mut end = MAX_BYTES;
+    while !reason.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}… (failure detail truncated)", &reason[..end])
+}
+
+async fn create_experiment(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateExperimentPayload>,
+) -> Result<(StatusCode, Json<evaluations::ExperimentSummary>), ApiError> {
+    let id = payload
+        .experiment_id
+        .unwrap_or_else(|| format!("exp-{}", uuid::Uuid::new_v4()));
+    validate_client_id("experiment_id", &id)?;
+    if !(1..=20).contains(&payload.runs_per_case) {
+        return Err(ApiError::bad_request(
+            "runs_per_case must be between 1 and 20".to_owned(),
+        ));
+    }
+    if !(1..=16).contains(&payload.max_concurrency) {
+        return Err(ApiError::bad_request(
+            "max_concurrency must be between 1 and 16".to_owned(),
+        ));
+    }
+    if payload.target_metric.trim().is_empty() || payload.target_metric.len() > 256 {
+        return Err(ApiError::bad_request(
+            "target_metric must be between 1 and 256 bytes".to_owned(),
+        ));
+    }
+    if !payload.thresholds.max_pass_rate_drop.is_finite()
+        || !(0.0..=1.0).contains(&payload.thresholds.max_pass_rate_drop)
+        || !payload.thresholds.max_latency_p95_ratio.is_finite()
+        || payload.thresholds.max_latency_p95_ratio < 0.0
+    {
+        return Err(ApiError::bad_request(
+            "experiment thresholds must be finite and non-negative; pass-rate drop cannot exceed 1"
+                .to_owned(),
+        ));
+    }
+    let dataset = evaluations::load_dataset(
+        &state.server_store,
+        tenant.tenant(),
+        &payload.dataset_name,
+        &payload.dataset_version,
+    )
+    .await?;
+    let candidate = state
+        .server_store
+        .get_candidate(tenant.tenant(), &payload.candidate_id)
+        .await
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            ApiError::not_found(format!("candidate `{}` not found", payload.candidate_id))
+        })?
+        .candidate;
+    let evaluator = state.config.studio_experiment_evaluator.clone().ok_or_else(|| {
+        ApiError::conflict(
+            "this server has no Studio experiment evaluator configured; datasets remain available, but experiments cannot run".to_owned(),
+        )
+    })?;
+    let now = Utc::now();
+    let config = evaluations::ExperimentConfig {
+        runs_per_case: payload.runs_per_case,
+        max_concurrency: payload.max_concurrency,
+        target_metric: payload.target_metric,
+        thresholds: payload.thresholds,
+    };
+    let record = evaluations::ExperimentRecord {
+        experiment_id: id.clone(),
+        dataset_name: payload.dataset_name,
+        dataset_version: payload.dataset_version,
+        candidate_id: payload.candidate_id,
+        config: config.clone(),
+        status: evaluations::ExperimentStatus::Queued,
+        created_at: now,
+        updated_at: now,
+        baseline_report: None,
+        candidate_report: None,
+        comparison: None,
+        execution: Some(evaluations::execution_lease(&state.evaluation_state)),
+    };
+    let created = evaluations::put_experiment(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &record,
+        true,
+    )
+    .await?;
+    if created {
+        let state_for_run = Arc::clone(&state);
+        let tenant_id = tenant.tenant().to_owned();
+        let cancellation =
+            evaluations::register_cancellation(&state.evaluation_state, tenant.tenant(), &id).await;
+        let mut running = record.clone();
+        let id_for_run = id.clone();
+        tokio::spawn(async move {
+            running.status = evaluations::ExperimentStatus::Running {
+                completed_runs: 0,
+                total_runs: dataset.cases().len().saturating_mul(config.runs_per_case),
+            };
+            running.updated_at = Utc::now();
+            evaluations::renew_execution_lease(&state_for_run.evaluation_state, &mut running);
+            if let Err(error) = evaluations::put_experiment(
+                &state_for_run.evaluation_state,
+                &state_for_run.server_store,
+                &tenant_id,
+                &running,
+                false,
+            )
+            .await
+            {
+                tracing::error!(experiment_id = %id_for_run, %error, "failed to mark experiment running");
+                evaluations::clear_cancellation(
+                    &state_for_run.evaluation_state,
+                    &tenant_id,
+                    &id_for_run,
+                )
+                .await;
+                return;
+            }
+            let evaluation = evaluator.evaluate(&candidate, &dataset, &config);
+            tokio::pin!(evaluation);
+            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+            heartbeat.tick().await;
+            let result = loop {
+                tokio::select! {
+                    () = cancellation.cancelled() => break None,
+                    outcome = &mut evaluation => break Some(outcome),
+                    _ = heartbeat.tick() => {
+                        if running.execution.as_ref().is_none_or(|lease| lease.expires_at <= Utc::now()) {
+                            break Some(Err("Rusty lost experiment ownership before evaluation settled; start a new experiment with a new identity".to_owned()));
+                        }
+                        evaluations::renew_execution_lease(&state_for_run.evaluation_state, &mut running);
+                        if let Err(error) = evaluations::put_experiment(
+                            &state_for_run.evaluation_state,
+                            &state_for_run.server_store,
+                            &tenant_id,
+                            &running,
+                            false,
+                        ).await {
+                            tracing::error!(experiment_id = %id_for_run, %error, "failed to renew experiment lease");
+                            break Some(Err("Rusty could not preserve experiment ownership; refresh before retrying".to_owned()));
+                        }
+                    }
+                }
+            };
+            let mut settled = running;
+            settled.updated_at = Utc::now();
+            settled.execution = None;
+            match result {
+                None => settled.status = evaluations::ExperimentStatus::Cancelled,
+                Some(Err(reason)) => {
+                    settled.status = evaluations::ExperimentStatus::Failed {
+                        reason: bounded_experiment_failure(reason),
+                    }
+                }
+                Some(Ok(outcome)) => {
+                    let expected_cases: std::collections::BTreeSet<String> =
+                        dataset.cases().iter().map(|case| case.id.clone()).collect();
+                    let expected_tags: std::collections::BTreeMap<String, Vec<String>> = dataset
+                        .cases()
+                        .iter()
+                        .map(|case| (case.id.clone(), case.tags.clone()))
+                        .collect();
+                    let report_cases = |report: &rusty_eval::ExperimentReport| {
+                        report
+                            .cases
+                            .iter()
+                            .map(|case| case.case_id.clone())
+                            .collect::<std::collections::BTreeSet<String>>()
+                    };
+                    let report_tags = |report: &rusty_eval::ExperimentReport| {
+                        report
+                            .cases
+                            .iter()
+                            .map(|case| (case.case_id.clone(), case.tags.clone()))
+                            .collect::<std::collections::BTreeMap<String, Vec<String>>>()
+                    };
+                    let exact = rusty_eval::experiment::validate_report(&outcome.baseline_report)
+                        .is_ok()
+                        && rusty_eval::experiment::validate_report(&outcome.candidate_report)
+                            .is_ok()
+                        && outcome.baseline_report.dataset_name == settled.dataset_name
+                        && outcome.baseline_report.dataset_version == settled.dataset_version
+                        && outcome.candidate_report.dataset_name == settled.dataset_name
+                        && outcome.candidate_report.dataset_version == settled.dataset_version
+                        && outcome.baseline_report.runs_per_case == config.runs_per_case
+                        && outcome.candidate_report.runs_per_case == config.runs_per_case
+                        && outcome.baseline_report.max_concurrency == config.max_concurrency
+                        && outcome.candidate_report.max_concurrency == config.max_concurrency
+                        && report_cases(&outcome.baseline_report) == expected_cases
+                        && report_cases(&outcome.candidate_report) == expected_cases
+                        && report_tags(&outcome.baseline_report) == expected_tags
+                        && report_tags(&outcome.candidate_report) == expected_tags;
+                    if exact {
+                        settled.comparison = Some(rusty_eval::compare(
+                            &outcome.baseline_report,
+                            &outcome.candidate_report,
+                            &config.thresholds,
+                        ));
+                        settled.baseline_report = Some(outcome.baseline_report);
+                        settled.candidate_report = Some(outcome.candidate_report);
+                        settled.status = evaluations::ExperimentStatus::Complete;
+                        if let Err(reason) = evaluations::ensure_experiment_storage_bound(&settled)
+                        {
+                            settled.baseline_report = None;
+                            settled.candidate_report = None;
+                            settled.comparison = None;
+                            settled.status = evaluations::ExperimentStatus::Failed {
+                                reason: bounded_experiment_failure(reason),
+                            };
+                        }
+                    } else {
+                        settled.status = evaluations::ExperimentStatus::Failed {
+                            reason: "the evaluator returned reports for a different dataset or repetition plan".to_owned(),
+                        };
+                    }
+                }
+            }
+            if let Err(error) = evaluations::put_experiment(
+                &state_for_run.evaluation_state,
+                &state_for_run.server_store,
+                &tenant_id,
+                &settled,
+                false,
+            )
+            .await
+            {
+                tracing::error!(experiment_id = %id_for_run, %error, "failed to persist experiment outcome");
+            }
+            evaluations::clear_cancellation(
+                &state_for_run.evaluation_state,
+                &tenant_id,
+                &id_for_run,
+            )
+            .await;
+        });
+    }
+    let receipt = if created {
+        record
+    } else {
+        evaluations::get_experiment(
+            &state.evaluation_state,
+            &state.server_store,
+            tenant.tenant(),
+            &id,
+        )
+        .await?
+        .ok_or_else(|| ApiError::internal(format!("converged experiment `{id}` disappeared")))?
+    };
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(evaluations::ExperimentSummary::from(&receipt)),
+    ))
+}
+
+async fn list_experiments(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog = evaluations::list_experiments(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+    )
+    .await?;
+    Ok(Json(
+        json!({ "experiments": catalog.experiments, "truncated": catalog.truncated }),
+    ))
+}
+
+async fn get_experiment(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(experiment_id): Path<String>,
+) -> Result<Json<evaluations::ExperimentRecord>, ApiError> {
+    evaluations::get_experiment(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &experiment_id,
+    )
+    .await?
+    .map(evaluations::public_experiment)
+    .map(Json)
+    .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))
+}
+
+async fn get_experiment_report(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(experiment_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = evaluations::get_experiment(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &experiment_id,
+    )
+    .await?
+    .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))?;
+    match (
+        &record.baseline_report,
+        &record.candidate_report,
+        &record.comparison,
+    ) {
+        (Some(baseline), Some(candidate), Some(comparison)) => Ok(Json(json!({
+            "baseline_report": baseline,
+            "candidate_report": candidate,
+            "comparison": comparison,
+        }))),
+        _ => Err(ApiError::not_found(format!(
+            "experiment `{experiment_id}` has no report yet"
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CompareExperimentsQuery {
+    baseline: String,
+    candidate: String,
+    #[serde(default = "default_max_pass_rate_drop")]
+    max_pass_rate_drop: f64,
+    #[serde(default = "default_max_latency_ratio")]
+    max_latency_p95_ratio: f64,
+}
+
+fn default_max_pass_rate_drop() -> f64 {
+    0.05
+}
+fn default_max_latency_ratio() -> f64 {
+    1.25
+}
+
+async fn compare_experiments(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Query(query): Query<CompareExperimentsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    if !query.max_pass_rate_drop.is_finite()
+        || !(0.0..=1.0).contains(&query.max_pass_rate_drop)
+        || !query.max_latency_p95_ratio.is_finite()
+        || query.max_latency_p95_ratio < 0.0
+    {
+        return Err(ApiError::bad_request(
+            "comparison thresholds must be finite and non-negative; pass-rate drop cannot exceed 1"
+                .to_owned(),
+        ));
+    }
+    let report = evaluations::compare_records(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &query.baseline,
+        &query.candidate,
+        rusty_eval::CompareThresholds {
+            max_pass_rate_drop: query.max_pass_rate_drop,
+            max_latency_p95_ratio: query.max_latency_p95_ratio,
+        },
+    )
+    .await?;
+    Ok(Json(json!({ "comparison": report })))
+}
+
+async fn cancel_experiment(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(experiment_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let record = evaluations::get_experiment(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &experiment_id,
+    )
+    .await?
+    .ok_or_else(|| ApiError::not_found(format!("experiment `{experiment_id}` not found")))?;
+    if !matches!(
+        record.status,
+        evaluations::ExperimentStatus::Queued | evaluations::ExperimentStatus::Running { .. }
+    ) {
+        return Err(ApiError::conflict(format!(
+            "experiment `{experiment_id}` is already settled"
+        )));
+    }
+    if !evaluations::cancel(&state.evaluation_state, tenant.tenant(), &experiment_id).await {
+        return Err(ApiError::conflict(
+            "experiment execution is not active on this server; refresh its durable status before retrying".to_owned(),
+        ));
+    }
+    Ok(Json(
+        json!({ "experiment_id": experiment_id, "cancellation_requested": true }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateGatePayload {
+    name: String,
+    blocked_target: String,
+    experiment_id: String,
+    policy: Value,
+    acknowledged: bool,
+}
+
+async fn create_gate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateGatePayload>,
+) -> Result<(StatusCode, Json<evaluations::GateRecord>), ApiError> {
+    if !payload.acknowledged {
+        return Err(ApiError::bad_request(
+            "acknowledged must be true after reviewing the complete policy and experiment evidence"
+                .to_owned(),
+        ));
+    }
+    let policy = rusty_eval::GatePolicy::from_json(
+        &serde_json::to_string(&payload.policy).map_err(internal_err)?,
+    )
+    .map_err(|error| ApiError::bad_request(format!("invalid gate policy: {error}")))?;
+    if policy.name() != payload.name {
+        return Err(ApiError::bad_request(
+            "gate policy name must match the requested gate name".to_owned(),
+        ));
+    }
+    let record = evaluations::build_gate(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        payload.name,
+        payload.blocked_target,
+        payload.experiment_id,
+        policy,
+    )
+    .await?;
+    let (receipt, created) = evaluations::persist_gate(
+        &state.evaluation_state,
+        &state.server_store,
+        tenant.tenant(),
+        &record,
+    )
+    .await?;
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(receipt),
+    ))
+}
+
+async fn list_gates(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog = evaluations::list_gates(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "gates": catalog.gates, "truncated": catalog.truncated }),
+    ))
+}
+
+async fn get_gate(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(gate_name): Path<String>,
+) -> Result<Json<evaluations::GateRecord>, ApiError> {
+    evaluations::get_gate(&state.server_store, tenant.tenant(), &gate_name)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("gate `{gate_name}` not found")))
+}
+
+// ------------------------------------------------------------------
+// Conformance suites and runs (EP-12-S09 server-side)
+// ------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CreateConformanceSuitePayload {
+    name: String,
+    version: String,
+    suite_json: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateConformanceSuiteResponse {
+    name: String,
+    version: String,
+    created: bool,
+}
+
+async fn create_conformance_suite(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateConformanceSuitePayload>,
+) -> Result<(StatusCode, Json<CreateConformanceSuiteResponse>), ApiError> {
+    validate_client_id("suite name", &payload.name)?;
+    validate_client_id("suite version", &payload.version)?;
+    let now = Utc::now();
+    let record = evaluations::ConformanceSuiteRecord {
+        name: payload.name.clone(),
+        version: payload.version.clone(),
+        suite_json: payload.suite_json,
+        created_at: now,
+    };
+    let created =
+        evaluations::persist_conformance_suite(&state.server_store, tenant.tenant(), &record)
+            .await?;
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(CreateConformanceSuiteResponse {
+            name: payload.name,
+            version: payload.version,
+            created,
+        }),
+    ))
+}
+
+async fn list_conformance_suites(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog =
+        evaluations::list_conformance_suites(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "suites": catalog.suites, "truncated": catalog.truncated }),
+    ))
+}
+
+async fn get_conformance_suite(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Json<evaluations::ConformanceSuiteRecord>, ApiError> {
+    evaluations::get_conformance_suite(&state.server_store, tenant.tenant(), &name, &version)
+        .await?
+        .map(Json)
+        .ok_or_else(|| {
+            ApiError::not_found(format!("conformance suite `{name}@{version}` not found"))
+        })
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateConformanceRunPayload {
+    suite_name: String,
+    suite_version: String,
+    target: String,
+    target_version: String,
+}
+
+async fn create_conformance_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Json(payload): Json<CreateConformanceRunPayload>,
+) -> Result<(StatusCode, Json<evaluations::ConformanceRunRecord>), ApiError> {
+    let suite = evaluations::get_conformance_suite(
+        &state.server_store,
+        tenant.tenant(),
+        &payload.suite_name,
+        &payload.suite_version,
+    )
+    .await?
+    .ok_or_else(|| {
+        ApiError::not_found(format!(
+            "suite `{}@{}` not found",
+            payload.suite_name, payload.suite_version
+        ))
+    })?;
+    let suite_value: rusty_eval::ConformanceSuite = serde_json::from_str(&suite.suite_json)
+        .map_err(|error| ApiError::internal(format!("stored suite is invalid: {error}")))?;
+    let run_id = format!("conf-{}", uuid::Uuid::new_v4());
+    let now = Utc::now();
+    let mut record = evaluations::ConformanceRunRecord {
+        run_id: run_id.clone(),
+        suite_name: payload.suite_name.clone(),
+        suite_version: payload.suite_version.clone(),
+        target: payload.target.clone(),
+        target_version: payload.target_version.clone(),
+        status: evaluations::ConformanceRunStatus::Running,
+        created_at: now,
+        updated_at: now,
+        report: None,
+    };
+    evaluations::persist_conformance_run(&state.server_store, tenant.tenant(), &record).await?;
+
+    // Run the suite against the target using a local registry.
+    // In production, checks are registered by owning crates at boot time;
+    // for now we run with whatever checks are available.
+    let registry = evaluations::ConformanceRegistry::new();
+    let report = registry.run(&suite_value, &payload.target).await;
+    record.status = evaluations::ConformanceRunStatus::Complete;
+    record.report = Some(report);
+    record.updated_at = Utc::now();
+    evaluations::persist_conformance_run(&state.server_store, tenant.tenant(), &record).await?;
+
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+async fn list_conformance_runs(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog = evaluations::list_conformance_runs(&state.server_store, tenant.tenant()).await?;
+    Ok(Json(
+        json!({ "runs": catalog.runs, "truncated": catalog.truncated }),
+    ))
+}
+
+async fn get_conformance_run(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Path(run_id): Path<String>,
+) -> Result<Json<evaluations::ConformanceRunRecord>, ApiError> {
+    evaluations::get_conformance_run(&state.server_store, tenant.tenant(), &run_id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("conformance run `{run_id}` not found")))
+}
+
+#[derive(Debug, Deserialize)]
+struct ConformanceCheckQuery {
+    suite_name: String,
+    suite_version: String,
+    target: String,
+    target_version: String,
+}
+
+async fn check_conformance_status(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<crate::auth::TenantContext>,
+    Query(query): Query<ConformanceCheckQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let run_id = evaluations::target_has_passing_conformance_run(
+        &state.server_store,
+        tenant.tenant(),
+        &query.suite_name,
+        &query.suite_version,
+        &query.target,
+        &query.target_version,
+    )
+    .await?;
+    Ok(Json(json!({
+        "passing": run_id.is_some(),
+        "run_id": run_id,
+    })))
+}

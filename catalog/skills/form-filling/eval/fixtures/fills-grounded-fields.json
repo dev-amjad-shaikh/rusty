@@ -1,0 +1,18 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "read_context", "arguments": { "scope": "vendor-onboarding" }, "status": "ok" }
+  ],
+  "final_state": {
+    "form": {
+      "fields": {
+        "name": { "value": "Acme Parts Ltd", "grounded_in": "context" },
+        "email": { "value": "ap@acme-parts.example", "grounded_in": "context" }
+      }
+    },
+    "obligations": []
+  },
+  "latency_ms": 2400,
+  "cost_usd": 0.003,
+  "total_tokens": 1600
+}

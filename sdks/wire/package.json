@@ -1,0 +1,16 @@
+{
+  "name": "@rusty-runtime/wire",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Generated TypeScript types for the Rusty gateway protocol. The wire is defined once, in rusty-server/src/protocol.rs; this package is its projection.",
+  "type": "module",
+  "main": "src/frames.ts",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "node --test test/roundtrip.test.mjs"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "16.0.0",
+    "typescript": "7.0.2"
+  }
+}

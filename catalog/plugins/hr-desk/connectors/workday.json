@@ -1,0 +1,304 @@
+{
+  "id": "workday",
+  "version": "1",
+  "display_name": "Workday HCM",
+  "description": "Workday REST API: a worker's record (job, manager, location, hire date, status), time-off balances and requests, job change history, and the time-off request a desk submits on a person's behalf. Written for the Workday REST services (common, absenceManagement, staffing); Workday SOAP (WWS) is out of scope.",
+  "documentation_url": "https://community.workday.com/sites/default/files/file-hosting/restapi/",
+  "base_url": "https://{tenant_host}/ccx/api",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Workday Connection",
+    "type": "object",
+    "required": [
+      "tenant_host",
+      "auth_host",
+      "tenant",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "tenant_host": {
+        "type": "string",
+        "title": "Services host",
+        "rusty_order": 0,
+        "description": "The tenant's API host.",
+        "rusty_pattern_descriptor": "wd2-impl-services1.workday.com"
+      },
+      "auth_host": {
+        "type": "string",
+        "title": "Authorization host",
+        "rusty_order": 1,
+        "description": "The host people sign in to for the OAuth authorization step.",
+        "rusty_pattern_descriptor": "impl.workday.com"
+      },
+      "tenant": {
+        "type": "string",
+        "title": "Tenant",
+        "rusty_order": 2,
+        "description": "The tenant name.",
+        "rusty_pattern_descriptor": "acme_preview"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "API client",
+        "description": "Register API Client for Integrations (Workday task) with the scopes Staffing, Time Off and Leave, Personal Data; the refresh token is issued when you authorize.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Access token",
+            "rusty_secret": true,
+            "rusty_order": 2,
+            "rusty_hidden": true
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh token",
+            "rusty_secret": true,
+            "rusty_order": 3,
+            "rusty_hidden": true
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Token expires",
+            "rusty_hidden": true,
+            "rusty_order": 4
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the authorization is accepted.",
+      "method": "GET",
+      "path": "/common/v1/{tenant}/workers?limit=1",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "search-workers",
+      "description": "Find workers by name or email.",
+      "method": "GET",
+      "path": "/common/v1/{tenant}/workers",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Name, email or employee id"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 10
+          }
+        },
+        "required": [
+          "search"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-worker",
+      "description": "One worker: primaryJob (position, manager, location, businessTitle), hireDate, status, workerType, primaryWorkEmail.",
+      "method": "GET",
+      "path": "/common/v1/{tenant}/workers/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Worker id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-worker-time-off-balances",
+      "description": "Time-off plan balances for a worker (vacation, sick, PTO) as of a date.",
+      "method": "GET",
+      "path": "/absenceManagement/v1/{tenant}/balances",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "worker": {
+            "type": "string",
+            "description": "Worker id"
+          },
+          "effective": {
+            "type": "string",
+            "description": "As-of date YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "worker"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-worker-time-off-requests",
+      "description": "A worker's time-off requests with status (Successfully Completed, In Progress, Denied) and the approver.",
+      "method": "GET",
+      "path": "/absenceManagement/v1/{tenant}/workers/{id}/requestTimeOff",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Worker id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-eligible-absence-types",
+      "description": "Which time-off types the worker may request (and their units).",
+      "method": "GET",
+      "path": "/absenceManagement/v1/{tenant}/workers/{id}/eligibleAbsenceTypes",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Worker id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "request-time-off",
+      "description": "Submit a time-off request for the worker (it routes to their approver like a self-service request). Only with the person's explicit yes in the conversation.",
+      "method": "POST",
+      "path": "/absenceManagement/v1/{tenant}/workers/{id}/requestTimeOff",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Worker id"
+          },
+          "days": {
+            "type": "array",
+            "description": "[{\"date\": \"2026-10-03\", \"dailyQuantity\": 8, \"timeOffType\": {\"id\": \"<eligible type id>\"}}]"
+          }
+        },
+        "required": [
+          "id",
+          "days"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-worker-job-changes",
+      "description": "Job change history (promotion, transfer, manager change) with effective dates.",
+      "method": "GET",
+      "path": "/staffing/v1/{tenant}/workers/{id}/jobChanges",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Worker id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection",
+  "authorization": {
+    "authorize_url": "https://{auth_host}/{tenant}/authorize",
+    "token_url": "https://{tenant_host}/ccx/oauth2/{tenant}/token",
+    "scopes": "Staffing Time_Off_and_Leave Personal_Data",
+    "client_id": "{credentials.client_id}",
+    "client_secret": "{credentials.client_secret}",
+    "extra_params": {}
+  }
+}

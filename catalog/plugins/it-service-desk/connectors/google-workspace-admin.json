@@ -1,0 +1,244 @@
+{
+  "id": "google-workspace-admin",
+  "version": "1",
+  "display_name": "Google Workspace Admin",
+  "description": "Admin SDK: ChromeOS devices (last sync, OS version, status, the signed-in user), Workspace user accounts (suspended, 2SV enrolled, last login), the login audit with failure reasons, and the ChromeOS actions a desk takes (reenrol wipe, disable).",
+  "documentation_url": "https://developers.google.com/admin-sdk/directory/reference/rest",
+  "base_url": "https://admin.googleapis.com",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Google Workspace Connection",
+    "type": "object",
+    "required": [
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "title": "OAuth client",
+        "description": "Google Cloud console → APIs & Services → Credentials, an OAuth client for a Workspace super admin or a delegated admin with the Chrome OS and Users privileges. The tokens are issued when you authorize.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Access token",
+            "rusty_secret": true,
+            "rusty_order": 2,
+            "rusty_hidden": true
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh token",
+            "rusty_secret": true,
+            "rusty_order": 3,
+            "rusty_hidden": true
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Token expires",
+            "rusty_hidden": true,
+            "rusty_order": 4
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the authorization is accepted.",
+      "method": "GET",
+      "path": "/admin/directory/v1/users?customer=my_customer&maxResults=1",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "search-chromeos-devices",
+      "description": "Find ChromeOS devices by user, serial or asset id. Returns deviceId, serialNumber, status, lastSync, osVersion, annotatedUser, recentUsers, bootMode.",
+      "method": "GET",
+      "path": "/admin/directory/v1/customer/my_customer/devices/chromeos",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "e.g. user:jdoe@acme.com or id:5CD1234 or asset_id:ACME-123"
+          },
+          "projection": {
+            "type": "string",
+            "description": "BASIC or FULL",
+            "default": "FULL"
+          },
+          "maxResults": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-chromeos-device",
+      "description": "One ChromeOS device in full: activeTimeRanges, cpuStatusReports, diskVolumeReports, systemRamFreeReports, lastKnownNetwork.",
+      "method": "GET",
+      "path": "/admin/directory/v1/customer/my_customer/devices/chromeos/{deviceId}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "The device id from search-chromeos-devices"
+          }
+        },
+        "required": [
+          "deviceId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-user",
+      "description": "A Workspace account: suspended, suspensionReason, isEnrolledIn2Sv, isEnforcedIn2Sv, lastLoginTime, orgUnitPath, changePasswordAtNextLogin.",
+      "method": "GET",
+      "path": "/admin/directory/v1/users/{userKey}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "userKey": {
+            "type": "string",
+            "description": "Primary email or user id"
+          }
+        },
+        "required": [
+          "userKey"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-login-events",
+      "description": "Login audit for a person: login_success, login_failure (login_failure_type: login_failure_invalid_password, login_failure_2sv_failure, login_failure_account_disabled), suspicious_login, account_disabled_*.",
+      "method": "GET",
+      "path": "/admin/reports/v1/activity/users/{userKey}/applications/login",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "userKey": {
+            "type": "string",
+            "description": "Primary email or 'all'"
+          },
+          "maxResults": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 50
+          },
+          "startTime": {
+            "type": "string",
+            "description": "RFC 3339 start, e.g. 2026-09-18T00:00:00Z"
+          }
+        },
+        "required": [
+          "userKey"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "chromeos-device-action",
+      "description": "Act on a ChromeOS device: deprovision (with deprovisionReason) or disable. Both stop the device for its user; confirm with the owner first. Re-enrolment needs the device in hand.",
+      "method": "POST",
+      "path": "/admin/directory/v1/customer/my_customer/devices/chromeos/{resourceId}/action",
+      "effect": "irreversible",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "description": "The device id"
+          },
+          "action": {
+            "type": "string",
+            "description": "deprovision or disable"
+          },
+          "deprovisionReason": {
+            "type": "string",
+            "description": "same_model_replacement, different_model_replacement, retiring_device, upgrade_transfer"
+          }
+        },
+        "required": [
+          "resourceId",
+          "action"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection",
+  "authorization": {
+    "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "scopes": "https://www.googleapis.com/auth/admin.directory.device.chromeos https://www.googleapis.com/auth/admin.directory.user.readonly https://www.googleapis.com/auth/admin.reports.audit.readonly",
+    "client_id": "{credentials.client_id}",
+    "client_secret": "{credentials.client_secret}",
+    "extra_params": {
+      "access_type": "offline",
+      "prompt": "consent"
+    }
+  }
+}

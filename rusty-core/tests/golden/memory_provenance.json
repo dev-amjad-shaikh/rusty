@@ -1,0 +1,19 @@
+{
+  "author": {
+    "type": "agent",
+    "agent_id": "researcher-7"
+  },
+  "evidence": {
+    "run_id": "run-abc",
+    "event_ids": [
+      "run-abc:3",
+      "run-abc:4"
+    ],
+    "correction_id": "correction-9",
+    "source_memory_ids": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ]
+  },
+  "written_at": "2025-06-15T15:06:41Z"
+}

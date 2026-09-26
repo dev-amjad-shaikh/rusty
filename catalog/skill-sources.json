@@ -1,0 +1,29 @@
+[
+  {
+    "id": "anthropic-skills",
+    "name": "Anthropic Agent Skills",
+    "url": "https://github.com/anthropics/skills",
+    "subpath": "skills",
+    "publisher": "Anthropic",
+    "license": null,
+    "description": "Anthropic's public skills in the Agent Skills format: working with documents (docx, pdf, pptx, xlsx), design, web artifacts and more. Licensing is per skill — read each skill's LICENSE."
+  },
+  {
+    "id": "addyosmani-agent-skills",
+    "name": "Agent Skills",
+    "url": "https://github.com/addyosmani/agent-skills",
+    "subpath": "skills",
+    "publisher": "Addy Osmani",
+    "license": "MIT",
+    "description": "Production-grade engineering skills: code review, testing, debugging, refactoring, performance, security, documentation."
+  },
+  {
+    "id": "superpowers",
+    "name": "Superpowers",
+    "url": "https://github.com/obra/superpowers",
+    "subpath": "skills",
+    "publisher": "Jesse Vincent",
+    "license": "MIT",
+    "description": "A software-development methodology as skills: brainstorming, writing plans, test-driven development, systematic debugging, verification before completion."
+  }
+]

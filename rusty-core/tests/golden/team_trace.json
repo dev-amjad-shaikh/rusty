@@ -1,0 +1,49 @@
+{
+  "run_ids": [
+    "coordination:acme:c-42",
+    "run:juror-a"
+  ],
+  "roots": [
+    "coordination:acme:c-42:1"
+  ],
+  "nodes": [
+    {
+      "event_id": "coordination:acme:c-42:1",
+      "run_id": "coordination:acme:c-42",
+      "seq": 1,
+      "kind": "coordination_start",
+      "children": [
+        "coordination:acme:c-42:2"
+      ],
+      "depth": 0
+    },
+    {
+      "event_id": "coordination:acme:c-42:2",
+      "run_id": "coordination:acme:c-42",
+      "seq": 2,
+      "kind": "mailbox_send",
+      "parent": "coordination:acme:c-42:1",
+      "children": [
+        "coordination:acme:c-42:3",
+        "run:juror-a:1"
+      ],
+      "depth": 1
+    },
+    {
+      "event_id": "coordination:acme:c-42:3",
+      "run_id": "coordination:acme:c-42",
+      "seq": 3,
+      "kind": "coordination_end",
+      "parent": "coordination:acme:c-42:1",
+      "depth": 1
+    },
+    {
+      "event_id": "run:juror-a:1",
+      "run_id": "run:juror-a",
+      "seq": 1,
+      "kind": "super_step_start",
+      "parent": "coordination:acme:c-42:2",
+      "depth": 2
+    }
+  ]
+}

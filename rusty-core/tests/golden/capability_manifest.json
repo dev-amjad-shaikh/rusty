@@ -1,0 +1,36 @@
+{
+  "agent_kind": "researcher",
+  "manifest_version": "researcher/1.4.0",
+  "accepts": {
+    "search": {
+      "kind": "application/json",
+      "max_bytes": null
+    },
+    "summarize": {
+      "kind": "application/json",
+      "max_bytes": 65536,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "topic": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "scopes": [
+    "private",
+    "team",
+    "user"
+  ],
+  "budget": {
+    "max_tokens": 250000,
+    "max_cost_usd": 1.5,
+    "deadline": "2027-01-15T08:00:00Z"
+  }
+}

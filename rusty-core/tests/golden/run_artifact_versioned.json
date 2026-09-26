@@ -1,0 +1,33 @@
+{
+  "artifact_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "name": "weekly-report",
+  "media_kind": "image",
+  "media_type": "image/png",
+  "lineage": {
+    "run_id": "run-9",
+    "effect_id": "0dad4eabd62f3c00f1e22ee7c7fe176f1cb0e3abfe62a60669792e0c8257e9dd",
+    "event_id": "run-9:7"
+  },
+  "versions": [
+    {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bytes": 41312,
+      "committed_at": "2025-10-09T08:53:20Z"
+    },
+    {
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "bytes": 41990,
+      "committed_at": "2025-10-10T12:40:00Z"
+    },
+    {
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "bytes": 42104,
+      "committed_at": "2025-10-11T16:26:40Z"
+    }
+  ],
+  "retention": {
+    "policy": "days",
+    "days": 30
+  },
+  "created_at": "2025-10-11T16:26:40Z"
+}

@@ -1,0 +1,29 @@
+[package]
+name = "rusty-otel"
+version = "0.1.7"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/rusty-otel"
+readme = "README.md"
+description = "The durable agent runtime built in Rust — OpenTelemetry integration: one-call tracing subscriber setup with optional OTLP span export."
+keywords = ["opentelemetry", "tracing", "observability", "agent", "otlp"]
+categories = ["asynchronous", "network-programming"]
+
+[dependencies]
+rusty-agent-runtime = { path = "../rusty-core", version = "0.12" }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
+tracing-opentelemetry = "0.33"
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+
+[dev-dependencies]
+async-trait = "0.1"
+serde_json = "1"
+tokio = { version = "1", features = ["full", "test-util"] }
+rusty-api = { path = "../rusty-api" }

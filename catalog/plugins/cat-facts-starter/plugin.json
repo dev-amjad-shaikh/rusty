@@ -1,0 +1,9 @@
+{
+  "id": "cat-facts-starter",
+  "name": "Cat Facts starter",
+  "version": "1.0.0",
+  "publisher": "Rusty",
+  "description": "A tiny public API and the skill to quote it honestly — the smallest package that proves a plugin: one connector, one skill, installed together.",
+  "connectors": ["connectors/cat-facts.json"],
+  "skills": ["skills/cite-the-source"]
+}

@@ -1,0 +1,170 @@
+{
+  "id": "salesforce",
+  "version": "1",
+  "display_name": "Salesforce",
+  "description": "Salesforce REST API: run SOQL, read an object's records, and describe what the org exposes.",
+  "documentation_url": "https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/",
+  "base_url": "https://{instance_host}",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Salesforce Connection",
+    "type": "object",
+    "required": [
+      "instance_host",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "instance_host": {
+        "type": "string",
+        "title": "My Domain host",
+        "description": "The org's API host \u2014 the My Domain address, not the -setup one.",
+        "rusty_pattern_descriptor": "acme-dev-ed.develop.my.salesforce.com",
+        "rusty_order": 0
+      },
+      "credentials": {
+        "type": "object",
+        "title": "Authentication",
+        "rusty_order": 1,
+        "oneOf": [
+          {
+            "title": "OAuth (client credentials)",
+            "type": "object",
+            "required": [
+              "auth",
+              "client_id",
+              "client_secret"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "auth": {
+                "type": "string",
+                "const": "oauth_client_credentials"
+              },
+              "client_id": {
+                "type": "string",
+                "title": "Consumer key",
+                "rusty_secret": true,
+                "rusty_order": 1
+              },
+              "client_secret": {
+                "type": "string",
+                "title": "Consumer secret",
+                "rusty_secret": true,
+                "rusty_order": 2
+              }
+            }
+          },
+          {
+            "title": "Access token",
+            "type": "object",
+            "required": [
+              "auth",
+              "token"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "auth": {
+                "type": "string",
+                "const": "access_token"
+              },
+              "token": {
+                "type": "string",
+                "title": "Access token",
+                "rusty_secret": true,
+                "rusty_order": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the org answers and the credentials are accepted.",
+      "method": "GET",
+      "path": "/services/data/v61.0/limits",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/services/oauth2/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        },
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "soql-query",
+      "description": "Run a SOQL query and return the matching records.",
+      "method": "GET",
+      "path": "/services/data/v61.0/query",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "required": [
+          "q"
+        ],
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "The SOQL query, e.g. SELECT Id, Name FROM Account LIMIT 10"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/services/oauth2/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        },
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-objects",
+      "description": "List the objects this org exposes over the REST API.",
+      "method": "GET",
+      "path": "/services/data/v61.0/sobjects",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/services/oauth2/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        },
+        {
+          "style": "bearer",
+          "token": "{credentials.token}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection"
+}

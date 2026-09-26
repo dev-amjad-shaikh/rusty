@@ -1,0 +1,7 @@
+[
+  "retry",
+  "timeout",
+  "worker_placement",
+  "concurrency",
+  "checkpoint_placement"
+]

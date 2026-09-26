@@ -1,0 +1,95 @@
+{
+  "memory_ids": [
+    "a5c9c40aad69b4d27132bf417dd9e559792adf5fe921da1b5e6b33b1ea924e59",
+    "14fd002ccb675158afa71b02e7a7f648d1412d32374480c49318eb69c1753b82"
+  ],
+  "records": [
+    {
+      "memory_id": "a5c9c40aad69b4d27132bf417dd9e559792adf5fe921da1b5e6b33b1ea924e59",
+      "kind": "fact",
+      "scope": {
+        "scope": "user",
+        "id": "user-7"
+      },
+      "key": "timezone",
+      "tags": [
+        "profile",
+        "locale"
+      ],
+      "priority": 5,
+      "provenance": {
+        "author": {
+          "type": "agent",
+          "agent_id": "researcher-7"
+        },
+        "evidence": {
+          "run_id": "run-abc",
+          "event_ids": [
+            "run-abc:3",
+            "run-abc:4"
+          ],
+          "correction_id": "correction-9",
+          "source_memory_ids": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "written_at": "2025-06-15T15:06:41Z"
+      },
+      "confidence": 0.95,
+      "validity": {
+        "valid_from": "2025-06-15T15:06:40Z",
+        "valid_until": "2028-08-16T00:53:20Z"
+      },
+      "created_at": "2025-06-15T15:06:41Z",
+      "expires_at": "2030-03-17T17:46:40Z",
+      "supersedes": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "content": {
+        "kind": "inline",
+        "value": {
+          "source": "profile form",
+          "timezone": "UTC+4"
+        }
+      }
+    },
+    {
+      "memory_id": "14fd002ccb675158afa71b02e7a7f648d1412d32374480c49318eb69c1753b82",
+      "kind": "summary",
+      "scope": {
+        "scope": "team",
+        "id": "team-blue"
+      },
+      "provenance": {
+        "author": {
+          "type": "distiller",
+          "name": "consolidator-v1"
+        },
+        "evidence": {
+          "source_memory_ids": [
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          ]
+        },
+        "written_at": "2025-06-15T15:06:42Z"
+      },
+      "confidence": 0.8,
+      "validity": {
+        "valid_from": "2025-06-15T15:06:40Z"
+      },
+      "created_at": "2025-06-15T15:06:42Z",
+      "content": {
+        "kind": "artifact",
+        "value": {
+          "sha256": "c0a566bdfc5ac72793f53709cbd9a8b3bb30947d160432f23c94e165e5b4ef77",
+          "bytes": 4110
+        }
+      }
+    }
+  ],
+  "token_accounting": {
+    "bytes_per_token": 4,
+    "margin_percent": 20,
+    "budget_tokens": 4096,
+    "used_tokens": 1246
+  },
+  "truncated": false
+}

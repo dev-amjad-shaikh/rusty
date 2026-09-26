@@ -1,0 +1,151 @@
+{
+  "id": "pagerduty",
+  "version": "1",
+  "display_name": "PagerDuty",
+  "description": "PagerDuty: read incidents, services and who is on call right now.",
+  "documentation_url": "https://developer.pagerduty.com/api-reference/",
+  "base_url": "https://api.pagerduty.com",
+  "connection_specification": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "credentials"
+    ],
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "api_token"
+        ],
+        "properties": {
+          "api_token": {
+            "type": "string",
+            "title": "REST API token",
+            "rusty_secret": true,
+            "rusty_order": 0,
+            "description": "Integrations \u2192 API Access Keys. A read-only key is enough."
+          }
+        },
+        "title": "Authentication",
+        "rusty_order": 0
+      }
+    },
+    "title": "PagerDuty Connection"
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the token is accepted.",
+      "method": "GET",
+      "path": "/abilities",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "Token token={credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-incidents",
+      "description": "List incidents.",
+      "method": "GET",
+      "path": "/incidents",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "statuses[]": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "Token token={credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-services",
+      "description": "List services.",
+      "method": "GET",
+      "path": "/services",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "Token token={credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-oncalls",
+      "description": "Who is on call now.",
+      "method": "GET",
+      "path": "/oncalls",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "Token token={credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection"
+}

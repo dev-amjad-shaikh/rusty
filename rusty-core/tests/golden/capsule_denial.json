@@ -1,0 +1,17 @@
+{
+  "capsule_id": "abababababababababababababababababababababababababababababababab",
+  "capability": "network",
+  "absent_grant": {
+    "kind": "network",
+    "hosts": [
+      "evil.example"
+    ],
+    "protocols": [
+      "https"
+    ],
+    "methods": [
+      "GET"
+    ]
+  },
+  "detail": "fetch GET https://evil.example/probe names no granted network scope"
+}

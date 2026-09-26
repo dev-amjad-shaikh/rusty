@@ -1,0 +1,256 @@
+{
+  "id": "jamf-pro",
+  "version": "1",
+  "display_name": "Jamf Pro",
+  "description": "Jamf Pro API: what Jamf knows about a Mac or iPhone — inventory, last check-in, OS, disk, FileVault, installed apps, MDM profiles — and the remote commands a service desk sends (inventory update, restart, lock).",
+  "documentation_url": "https://developer.jamf.com/jamf-pro/reference/jamf-pro-api",
+  "base_url": "https://{instance_host}",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Jamf Pro Connection",
+    "type": "object",
+    "required": [
+      "instance_host",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "instance_host": {
+        "type": "string",
+        "title": "Jamf Pro host",
+        "rusty_order": 0,
+        "description": "The tenant's Jamf Pro address.",
+        "rusty_pattern_descriptor": "acme.jamfcloud.com"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "API client",
+        "description": "Settings → System → API roles and clients. The role needs Read Computers, Read Mobile Devices, Read Users, Send Computer Remote Command to Update Inventory, Send Computer Restart Command.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the API client is accepted and the server answers.",
+      "method": "GET",
+      "path": "/api/v1/jamf-pro-version",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/api/oauth/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        }
+      ]
+    },
+    {
+      "name": "search-computers",
+      "description": "Find computers by user, name, serial or asset tag (RSQL filter). Returns id, name, serial, last contact, OS version, user.",
+      "method": "GET",
+      "path": "/api/v1/computers-inventory",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "RSQL filter, e.g. userAndLocation.username==\"jdoe\" or general.name==\"MBP-1234\" or hardware.serialNumber==\"C02XX\""
+          },
+          "section": {
+            "type": "string",
+            "description": "Sections to include, comma-separated: GENERAL,HARDWARE,USER_AND_LOCATION,OPERATING_SYSTEM,STORAGE,SECURITY",
+            "default": "GENERAL,HARDWARE,USER_AND_LOCATION,OPERATING_SYSTEM"
+          },
+          "page-size": {
+            "type": "integer",
+            "description": "Rows per page",
+            "default": 20
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/api/oauth/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        }
+      ]
+    },
+    {
+      "name": "get-computer",
+      "description": "Everything Jamf holds on one computer: hardware, OS, storage (free space), security (FileVault, Gatekeeper, firewall), installed applications, configuration profiles, last check-in and last inventory update.",
+      "method": "GET",
+      "path": "/api/v1/computers-inventory-detail/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The computer's Jamf id from search-computers"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/api/oauth/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        }
+      ]
+    },
+    {
+      "name": "get-computer-mdm-capability",
+      "description": "Whether the computer can receive MDM commands right now and which capabilities it reports.",
+      "method": "GET",
+      "path": "/api/v1/computers-inventory/{id}/mdm-capability",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The computer's Jamf id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/api/oauth/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        }
+      ]
+    },
+    {
+      "name": "search-mobile-devices",
+      "description": "Find iPhones and iPads by user, name or serial.",
+      "method": "GET",
+      "path": "/api/v2/mobile-devices/detail",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "RSQL filter, e.g. userAndLocation.username==\"jdoe\" or serialNumber==\"F9FXX\""
+          },
+          "page-size": {
+            "type": "integer",
+            "description": "Rows per page",
+            "default": 20
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/api/oauth/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        }
+      ]
+    },
+    {
+      "name": "update-inventory",
+      "description": "Ask the Mac to send a fresh inventory now (the person must be online). Safe to repeat.",
+      "method": "POST",
+      "path": "/api/v1/jamf-management-framework/redeploy/{id}",
+      "effect": "idempotent",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The computer's Jamf id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/api/oauth/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        }
+      ]
+    },
+    {
+      "name": "send-mdm-command",
+      "description": "Send one MDM command to a device: RestartDevice, ShutDownDevice, DeviceLock (with a message), EnableRemoteDesktop, DisableRemoteDesktop. Lock and shutdown interrupt the person; confirm with them first.",
+      "method": "POST",
+      "path": "/api/v2/mdm/commands",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "clientData": {
+            "type": "array",
+            "description": "[{\"managementId\": \"<device management id from get-computer>\"}]"
+          },
+          "commandData": {
+            "type": "object",
+            "description": "{\"commandType\": \"RestartDevice\"} or {\"commandType\": \"DeviceLock\", \"message\": \"...\"}"
+          }
+        },
+        "required": [
+          "clientData",
+          "commandData"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://{instance_host}/api/oauth/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": null
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

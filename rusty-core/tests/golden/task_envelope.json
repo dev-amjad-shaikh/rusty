@@ -1,0 +1,26 @@
+{
+  "format_version": 1,
+  "task_id": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d:task:7",
+  "parent": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d:12",
+  "sender": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d",
+  "recipient": "pool-default",
+  "worker_version": "activity-worker/1.4.0",
+  "input": {
+    "kind": "artifact",
+    "value": {
+      "sha256": "9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca7",
+      "bytes": 8192
+    }
+  },
+  "output_contract": {
+    "kind": "application/json",
+    "max_bytes": 65536
+  },
+  "deadline": "2025-06-15T15:11:40Z",
+  "budget": {
+    "max_attempts": 5,
+    "timeout_ms": 30000
+  },
+  "idempotency_key": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d:charge:7",
+  "effect": "idempotent"
+}

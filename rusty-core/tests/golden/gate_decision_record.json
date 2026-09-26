@@ -1,0 +1,19 @@
+{
+  "tenant": "default",
+  "environment": "staging",
+  "revision_id": "04a44aff303e1efb2d988bbc93e98a2570852d3f7725abb69cc97a87dc6ab163",
+  "baseline_revision_id": "c2c01e8fae3bdbc5ec82f6edae7ab68cc13d9fb150bd69d060018596999489b4",
+  "policy": "r0.12-default",
+  "dataset_version": "support-v3",
+  "outcome": "allow",
+  "checks": [
+    {
+      "metric": "\"pass_rate\"",
+      "passed": true,
+      "observed": 0.91,
+      "required": 0.85,
+      "detail": "pass rate clears the floor"
+    }
+  ],
+  "decided_at": "2025-10-09T08:56:40Z"
+}

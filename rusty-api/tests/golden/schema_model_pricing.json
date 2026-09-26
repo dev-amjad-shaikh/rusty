@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ModelPricing",
+  "description": "Per-million-token pricing for a model, supplied by whoever constructs it.\n\nThe crate ships no built-in price list: a vendor table would be stale the week it ships, so rates are operator configuration attached to the model.",
+  "type": "object",
+  "required": [
+    "input_per_million",
+    "output_per_million"
+  ],
+  "properties": {
+    "cached_input_per_million": {
+      "description": "USD per million cache-served prompt tokens. When absent, cached tokens bill at the full input rate.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double"
+    },
+    "input_per_million": {
+      "description": "USD per million uncached prompt tokens.",
+      "type": "number",
+      "format": "double"
+    },
+    "output_per_million": {
+      "description": "USD per million completion tokens.",
+      "type": "number",
+      "format": "double"
+    }
+  }
+}

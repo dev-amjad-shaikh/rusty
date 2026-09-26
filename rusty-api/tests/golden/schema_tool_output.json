@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ToolOutput",
+  "description": "The dual-representation output of a tool invocation.",
+  "type": "object",
+  "required": [
+    "display",
+    "structured"
+  ],
+  "properties": {
+    "display": {
+      "description": "Human-readable text (rendered in chat, logged, shown to users).",
+      "type": "string"
+    },
+    "structured": {
+      "description": "Machine-structured value (passed to downstream tools, stored, scored)."
+    }
+  }
+}

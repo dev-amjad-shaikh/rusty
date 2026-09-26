@@ -1,0 +1,13 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "kb_search", "arguments": { "query": "warranty discontinued model" }, "status": "ok" },
+    { "seq": 2, "name": "log_gap", "arguments": { "question": "What is the warranty on the discontinued model?", "reason": "no grounding entries" }, "status": "ok" }
+  ],
+  "final_state": {
+    "outcome": "refused"
+  },
+  "latency_ms": 2200,
+  "cost_usd": 0.003,
+  "total_tokens": 1500
+}

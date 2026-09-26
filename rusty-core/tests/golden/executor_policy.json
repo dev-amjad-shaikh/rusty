@@ -1,0 +1,14 @@
+{
+  "retry": {
+    "base_delay_ms": 500,
+    "max_delay_ms": 60000,
+    "max_attempts": 5
+  },
+  "timeout": {
+    "default_millis": 30000,
+    "max_millis": 120000
+  },
+  "concurrency": {
+    "max_parallel": 8
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "pattern": "quorum",
+  "members": [
+    {
+      "member": "juror-a",
+      "agent_id": "juror-a-agent",
+      "manifest_version": "researcher/1.4.0",
+      "kind": "summarize",
+      "input": {
+        "kind": "inline",
+        "value": {
+          "topic": "juror-a"
+        }
+      },
+      "effect": "pure"
+    },
+    {
+      "member": "juror-b",
+      "agent_id": "juror-b-agent",
+      "manifest_version": "researcher/1.4.0",
+      "kind": "summarize",
+      "input": {
+        "kind": "inline",
+        "value": {
+          "topic": "juror-b"
+        }
+      },
+      "effect": "pure"
+    },
+    {
+      "member": "juror-c",
+      "agent_id": "juror-c-agent",
+      "manifest_version": "researcher/1.4.0",
+      "kind": "summarize",
+      "input": {
+        "kind": "inline",
+        "value": {
+          "topic": "juror-c"
+        }
+      },
+      "effect": "pure"
+    }
+  ],
+  "threshold": 2,
+  "resolver": {
+    "resolver": "majority_equal"
+  }
+}

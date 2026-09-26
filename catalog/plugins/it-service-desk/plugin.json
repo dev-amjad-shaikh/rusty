@@ -1,0 +1,37 @@
+{
+  "id": "it-service-desk",
+  "name": "IT Service Desk",
+  "version": "1.0.0",
+  "publisher": "Rusty",
+  "description": "Everything a first-line IT desk does — intake, laptops (Mac, Windows, ChromeOS, Linux), network and VPN, workplace apps (Zoom, Teams, Slack, Outlook), sign-in and MFA, access to business systems, escalation — as method skills with per-platform references, and the connectors they read from (Jamf, Intune, Microsoft 365, Okta, Google Workspace, Zoom, SAP Cloud Identity) written from the vendors' API documentation. Connect what you have; each skill files a gap for what it could not read.",
+  "connectors": [
+    "connectors/jamf-pro.json",
+    "connectors/microsoft-intune.json",
+    "connectors/microsoft-365.json",
+    "connectors/okta.json",
+    "connectors/google-workspace-admin.json",
+    "connectors/zoom.json",
+    "connectors/sap-cloud-identity.json"
+  ],
+  "skills": [
+    "skills/it-issue-intake",
+    "skills/laptop-troubleshooting",
+    "skills/network-connectivity-troubleshooting",
+    "skills/workplace-app-troubleshooting",
+    "skills/identity-and-sign-in-troubleshooting",
+    "skills/saas-access-troubleshooting",
+    "skills/escalate-and-record"
+  ],
+  "hosts": [
+    "learn.microsoft.com",
+    "developer.jamf.com",
+    "developer.okta.com",
+    "developers.google.com",
+    "developers.zoom.us",
+    "help.sap.com",
+    "api.slack.com"
+  ],
+  "knowledge": [
+    "knowledge/vendor-documentation.md"
+  ]
+}

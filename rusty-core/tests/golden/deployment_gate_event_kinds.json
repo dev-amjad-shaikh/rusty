@@ -1,0 +1,8 @@
+[
+  "gate_decision_recorded",
+  "canary_declared",
+  "canary_cleared",
+  "shadow_run_started",
+  "shadow_effect_refused",
+  "shadow_verdict"
+]

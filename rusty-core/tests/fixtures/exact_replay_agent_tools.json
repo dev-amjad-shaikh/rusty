@@ -1,0 +1,411 @@
+{
+  "format_version": 1,
+  "graph_hash": "9c625523ee08746c33fc9ac2a540302d336305a2a79e6a5e04147014e15d2d7f",
+  "graph_version": "replay-fixture-v1",
+  "journal": {
+    "run_id": "run-replay",
+    "thread_id": "t-replay",
+    "events": [
+      {
+        "id": "run-replay:0",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 0,
+        "kind": "super_step_start",
+        "effect": "pure",
+        "input": {
+          "kind": "inline",
+          "value": {
+            "active_nodes": [
+              "agent"
+            ],
+            "step": 0
+          }
+        },
+        "output": null,
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": null,
+        "recorded_at": "2023-11-14T22:13:20Z"
+      },
+      {
+        "id": "run-replay:1",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": "agent",
+        "seq": 1,
+        "kind": "node_input",
+        "effect": "pure",
+        "input": {
+          "kind": "inline",
+          "value": {}
+        },
+        "output": null,
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:0",
+        "recorded_at": "2023-11-14T22:13:20.010Z"
+      },
+      {
+        "id": "run-replay:2",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": "agent",
+        "seq": 2,
+        "kind": "model_call",
+        "effect": "non_idempotent",
+        "input": {
+          "kind": "inline",
+          "value": {
+            "messages": [
+              {
+                "content": "ping",
+                "role": "user"
+              }
+            ],
+            "tools": []
+          }
+        },
+        "output": {
+          "kind": "inline",
+          "value": {
+            "message": {
+              "content": "pong",
+              "role": "assistant"
+            },
+            "model": "mock-model-v1",
+            "usage": {
+              "completion_tokens": 3,
+              "prompt_tokens": 12,
+              "total_tokens": 15
+            }
+          }
+        },
+        "latency_ms": 10,
+        "tokens": {
+          "prompt_tokens": 12,
+          "completion_tokens": 3,
+          "total_tokens": 15
+        },
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:1",
+        "recorded_at": "2023-11-14T22:13:20.050Z"
+      },
+      {
+        "id": "run-replay:3",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": "agent",
+        "seq": 3,
+        "kind": "node_output",
+        "effect": "pure",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "command": null,
+            "updates": {
+              "log": "agent:pong"
+            }
+          }
+        },
+        "latency_ms": 40,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:1",
+        "recorded_at": "2023-11-14T22:13:20.070Z"
+      },
+      {
+        "id": "run-replay:4",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 4,
+        "kind": "super_step_end",
+        "effect": "pure",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "log": [
+              "agent:pong"
+            ]
+          }
+        },
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:3",
+        "recorded_at": "2023-11-14T22:13:20.080Z"
+      },
+      {
+        "id": "run-replay:5",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 5,
+        "kind": "routing_decision",
+        "effect": "pure",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "goto": [],
+            "next": [
+              {
+                "node": "tools",
+                "scoped": null
+              }
+            ]
+          }
+        },
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:4",
+        "recorded_at": "2023-11-14T22:13:20.090Z"
+      },
+      {
+        "id": "run-replay:6",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 6,
+        "kind": "checkpoint_written",
+        "effect": "idempotent",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "checkpoint_id": "bb43d723-3453-4528-ba29-9b2ed359012b",
+            "step": 0,
+            "suspension": false
+          }
+        },
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:5",
+        "recorded_at": "2023-11-14T22:13:20.120Z"
+      },
+      {
+        "id": "run-replay:7",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 7,
+        "kind": "super_step_start",
+        "effect": "pure",
+        "input": {
+          "kind": "inline",
+          "value": {
+            "active_nodes": [
+              "tools"
+            ],
+            "step": 1
+          }
+        },
+        "output": null,
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:5",
+        "recorded_at": "2023-11-14T22:13:20.130Z"
+      },
+      {
+        "id": "run-replay:8",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": "tools",
+        "seq": 8,
+        "kind": "node_input",
+        "effect": "pure",
+        "input": {
+          "kind": "inline",
+          "value": {
+            "log": [
+              "agent:pong"
+            ]
+          }
+        },
+        "output": null,
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:7",
+        "recorded_at": "2023-11-14T22:13:20.140Z"
+      },
+      {
+        "id": "run-replay:9",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": "tools",
+        "seq": 9,
+        "kind": "tool_call",
+        "effect": "read_only",
+        "input": {
+          "kind": "inline",
+          "value": {
+            "arguments": {
+              "text": "hello"
+            },
+            "tool": "echo"
+          }
+        },
+        "output": {
+          "kind": "inline",
+          "value": "hello"
+        },
+        "latency_ms": 10,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:8",
+        "recorded_at": "2023-11-14T22:13:20.180Z"
+      },
+      {
+        "id": "run-replay:10",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": "tools",
+        "seq": 10,
+        "kind": "node_output",
+        "effect": "pure",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "command": null,
+            "updates": {
+              "log": "tools:hello"
+            }
+          }
+        },
+        "latency_ms": 40,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:8",
+        "recorded_at": "2023-11-14T22:13:20.200Z"
+      },
+      {
+        "id": "run-replay:11",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 11,
+        "kind": "super_step_end",
+        "effect": "pure",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "log": [
+              "agent:pong",
+              "tools:hello"
+            ]
+          }
+        },
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:10",
+        "recorded_at": "2023-11-14T22:13:20.210Z"
+      },
+      {
+        "id": "run-replay:12",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 12,
+        "kind": "routing_decision",
+        "effect": "pure",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "goto": [],
+            "next": []
+          }
+        },
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:11",
+        "recorded_at": "2023-11-14T22:13:20.220Z"
+      },
+      {
+        "id": "run-replay:13",
+        "run_id": "run-replay",
+        "thread_id": "t-replay",
+        "node_id": null,
+        "seq": 13,
+        "kind": "checkpoint_written",
+        "effect": "idempotent",
+        "input": null,
+        "output": {
+          "kind": "inline",
+          "value": {
+            "checkpoint_id": "31952445-b970-4bb4-a33a-3e09b6b70bba",
+            "step": 1,
+            "suspension": false
+          }
+        },
+        "latency_ms": null,
+        "tokens": null,
+        "cost_usd": null,
+        "status": "ok",
+        "parent": "run-replay:12",
+        "recorded_at": "2023-11-14T22:13:20.250Z"
+      }
+    ],
+    "artifacts": {},
+    "head_hash": "098bbe4e6cfc6989516b403418f3268f27850f52612db0b92a8b357d04f6bc79"
+  },
+  "final_checkpoint": {
+    "id": "31952445-b970-4bb4-a33a-3e09b6b70bba",
+    "thread_id": "t-replay",
+    "step": 1,
+    "state": {
+      "log": [
+        "agent:pong",
+        "tools:hello"
+      ]
+    },
+    "next_nodes": [],
+    "created_at": "2023-11-14T22:13:20.230Z",
+    "header": {
+      "format_version": 1,
+      "graph_version": "replay-fixture-v1",
+      "graph_hash": "9c625523ee08746c33fc9ac2a540302d336305a2a79e6a5e04147014e15d2d7f",
+      "policy_version": "static-v0",
+      "logical_clock": 1700000000240
+    },
+    "journal_ref": {
+      "events": 13,
+      "sha256": "7290934f4000545d6d8b97b8878e3c5ed4f75f19e14284a9e634ec1296a6772e"
+    }
+  },
+  "metadata": {
+    "name": "exact-replay-agent-tools",
+    "clock": {
+      "start_ms": 1700000000000,
+      "tick_ms": 10
+    },
+    "rng_seed": 7
+  }
+}

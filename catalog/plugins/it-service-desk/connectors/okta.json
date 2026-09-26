@@ -1,0 +1,324 @@
+{
+  "id": "okta",
+  "version": "1",
+  "display_name": "Okta",
+  "description": "Okta Management API: a person's account status (ACTIVE, LOCKED_OUT, PASSWORD_EXPIRED, SUSPENDED), their enrolled MFA factors, group memberships and app assignments, the system log of their sign-in attempts with the failure reason, and the lifecycle actions a desk takes (unlock, expire password, reset a factor, clear sessions).",
+  "documentation_url": "https://developer.okta.com/docs/reference/core-okta-api/",
+  "base_url": "https://{org_host}",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Okta Connection",
+    "type": "object",
+    "required": [
+      "org_host",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "org_host": {
+        "type": "string",
+        "title": "Okta org host",
+        "rusty_order": 0,
+        "description": "The org's address, without https://.",
+        "rusty_pattern_descriptor": "acme.okta.com"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "API token",
+        "description": "Security → API → Tokens. A read-only admin token is enough for diagnosis; unlock and factor reset need Help Desk Administrator.",
+        "required": [
+          "api_token"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "api_token": {
+            "type": "string",
+            "title": "SSWS API token",
+            "rusty_secret": true,
+            "rusty_order": 0
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the token is accepted.",
+      "method": "GET",
+      "path": "/api/v1/org",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-user",
+      "description": "One person by login, email or id: status, lastLogin, passwordChanged, statusChanged, profile.",
+      "method": "GET",
+      "path": "/api/v1/users/{login}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string",
+            "description": "Login (usually the email), or the Okta user id"
+          }
+        },
+        "required": [
+          "login"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-user-factors",
+      "description": "Enrolled MFA factors: factorType (push, sms, token:software:totp, webauthn), provider, status (ACTIVE, PENDING_ACTIVATION), created.",
+      "method": "GET",
+      "path": "/api/v1/users/{id}/factors",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Okta user id or login"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-user-groups",
+      "description": "Groups the person is in — app access is usually granted by group.",
+      "method": "GET",
+      "path": "/api/v1/users/{id}/groups",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Okta user id or login"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-user-app-links",
+      "description": "Apps assigned to the person (what their dashboard shows).",
+      "method": "GET",
+      "path": "/api/v1/users/{id}/appLinks",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Okta user id or login"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "system-log",
+      "description": "Sign-in and admin events. outcome.reason names the failure: INVALID_CREDENTIALS, LOCKED_OUT, VERIFICATION_ERROR (MFA), DENIED_BY_POLICY, USER_NOT_ASSIGNED (no app access).",
+      "method": "GET",
+      "path": "/api/v1/logs",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "e.g. actor.alternateId eq \"jdoe@acme.com\" or target.alternateId eq \"jdoe@acme.com\""
+          },
+          "q": {
+            "type": "string",
+            "description": "Free-text, e.g. the app name"
+          },
+          "since": {
+            "type": "string",
+            "description": "ISO-8601 start, e.g. 2026-09-18T00:00:00Z"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 50
+          },
+          "sortOrder": {
+            "type": "string",
+            "description": "ASCENDING or DESCENDING",
+            "default": "DESCENDING"
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "unlock-user",
+      "description": "Unlock a LOCKED_OUT account. Safe to repeat; verify the person's identity first.",
+      "method": "POST",
+      "path": "/api/v1/users/{id}/lifecycle/unlock",
+      "effect": "idempotent",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Okta user id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "expire-password",
+      "description": "Force a password change at next sign-in.",
+      "method": "POST",
+      "path": "/api/v1/users/{id}/lifecycle/expire_password",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Okta user id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "reset-factor",
+      "description": "Remove one enrolled MFA factor (lost phone); the person re-enrols at next sign-in. Verify identity first; this cannot be undone.",
+      "method": "DELETE",
+      "path": "/api/v1/users/{id}/factors/{factor_id}",
+      "effect": "irreversible",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Okta user id"
+          },
+          "factor_id": {
+            "type": "string",
+            "description": "Factor id from list-user-factors"
+          }
+        },
+        "required": [
+          "id",
+          "factor_id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    },
+    {
+      "name": "clear-sessions",
+      "description": "Sign the person out of every Okta session (stuck or compromised session).",
+      "method": "DELETE",
+      "path": "/api/v1/users/{id}/sessions",
+      "effect": "irreversible",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Okta user id"
+          },
+          "oauthTokens": {
+            "type": "boolean",
+            "description": "Also revoke OAuth tokens",
+            "default": false
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "SSWS {credentials.api_token}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

@@ -1,0 +1,281 @@
+{
+  "id": "docusign",
+  "version": "1",
+  "display_name": "DocuSign",
+  "description": "DocuSign eSignature API: where a contract stands — envelope status (sent, delivered, completed, declined, voided), who has and has not signed, the audit trail — and the nudges a desk sends (resend) or the stop it applies (void).",
+  "documentation_url": "https://developers.docusign.com/docs/esign-rest-api/reference/",
+  "base_url": "https://{account_host}/restapi/v2.1/accounts/{account_id}",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "DocuSign Connection",
+    "type": "object",
+    "required": [
+      "account_host",
+      "account_id",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "account_host": {
+        "type": "string",
+        "title": "API base host",
+        "rusty_order": 0,
+        "description": "From the account's user info: demo.docusign.net or na2.docusign.net.",
+        "rusty_pattern_descriptor": "na2.docusign.net"
+      },
+      "account_id": {
+        "type": "string",
+        "title": "Account ID",
+        "rusty_order": 1,
+        "description": "The API account id (GUID) from Settings → Apps and Keys.",
+        "rusty_pattern_descriptor": "12345678-aaaa-bbbb-cccc-1234567890ab"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "DocuSign integration key",
+        "description": "Settings → Apps and Keys → Add App and Integration Key, with a secret key. The tokens are issued when you authorize.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Access token",
+            "rusty_secret": true,
+            "rusty_order": 2,
+            "rusty_hidden": true
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh token",
+            "rusty_secret": true,
+            "rusty_order": 3,
+            "rusty_hidden": true
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Token expires",
+            "rusty_hidden": true,
+            "rusty_order": 4
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the authorization is accepted.",
+      "method": "GET",
+      "path": "/users?count=1",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-envelopes",
+      "description": "Envelopes changed since a date, optionally by status or a search text (customer name, contract number). Returns envelopeId, status, emailSubject, sentDateTime, completedDateTime.",
+      "method": "GET",
+      "path": "/envelopes",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "description": "ISO-8601 start, e.g. 2026-09-01"
+          },
+          "status": {
+            "type": "string",
+            "description": "sent, delivered, completed, declined, voided (comma-separated)"
+          },
+          "search_text": {
+            "type": "string",
+            "description": "Free text over subject and recipients"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        },
+        "required": [
+          "from_date"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-envelope",
+      "description": "One envelope: status, sender, sentDateTime, deliveredDateTime, completedDateTime, expireDateTime, voidedReason.",
+      "method": "GET",
+      "path": "/envelopes/{envelopeId}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "envelopeId": {
+            "type": "string",
+            "description": "Envelope id"
+          }
+        },
+        "required": [
+          "envelopeId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-recipients",
+      "description": "Who must sign and where it stands: each signer's status (sent, delivered, completed, declined), signedDateTime, routingOrder, declinedReason.",
+      "method": "GET",
+      "path": "/envelopes/{envelopeId}/recipients",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "envelopeId": {
+            "type": "string",
+            "description": "Envelope id"
+          }
+        },
+        "required": [
+          "envelopeId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "audit-events",
+      "description": "The envelope's audit trail: viewed, signed, resent, corrected, with timestamps and actors.",
+      "method": "GET",
+      "path": "/envelopes/{envelopeId}/audit_events",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "envelopeId": {
+            "type": "string",
+            "description": "Envelope id"
+          }
+        },
+        "required": [
+          "envelopeId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "resend-envelope",
+      "description": "Resend the signing notification to the current recipients. Safe to repeat; tell the rep you did it.",
+      "method": "PUT",
+      "path": "/envelopes/{envelopeId}?resend_envelope=true",
+      "effect": "idempotent",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "envelopeId": {
+            "type": "string",
+            "description": "Envelope id"
+          }
+        },
+        "required": [
+          "envelopeId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "void-envelope",
+      "description": "Void an in-flight envelope with a reason. Cannot be undone; needs the sender's yes.",
+      "method": "PUT",
+      "path": "/envelopes/{envelopeId}",
+      "effect": "irreversible",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "envelopeId": {
+            "type": "string",
+            "description": "Envelope id"
+          },
+          "status": {
+            "type": "string",
+            "description": "Must be voided",
+            "default": "voided"
+          },
+          "voidedReason": {
+            "type": "string",
+            "description": "Why, shown to recipients"
+          }
+        },
+        "required": [
+          "envelopeId",
+          "status",
+          "voidedReason"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection",
+  "authorization": {
+    "authorize_url": "https://account.docusign.com/oauth/auth",
+    "token_url": "https://account.docusign.com/oauth/token",
+    "scopes": "signature extended",
+    "client_id": "{credentials.client_id}",
+    "client_secret": "{credentials.client_secret}",
+    "extra_params": {}
+  }
+}

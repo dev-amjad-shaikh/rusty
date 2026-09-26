@@ -1,0 +1,12 @@
+{
+  "candidate_id": "dee1cf631ee3558a3612b169df27751ff26713ff1a91f35e798c62563ae71a3a",
+  "surface": "memory:agent:support-1",
+  "previous": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "decision": {
+    "authority": {
+      "authority": "envelope",
+      "envelope_version": "r0.8-default"
+    }
+  },
+  "promoted_at": "2025-06-15T15:06:44Z"
+}

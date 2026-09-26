@@ -1,0 +1,31 @@
+{
+  "mutation_id": "gm-83a32578611d7af718ec15586c5cd888f66a4091622f70d95179e6602b7c45a9",
+  "gap_id": "gap-aeebb2f6cac86633ca29283701e04a2b87b5a6adacdf1078fab704466b54ae16",
+  "kind": {
+    "filed": {
+      "subject": {
+        "intent": {
+          "intent_id": "odyssey-login"
+        }
+      },
+      "statement": "No reliable guidance for Odyssey login loops after password change",
+      "evidence": [
+        {
+          "kind": "interaction_event",
+          "id": "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e"
+        }
+      ],
+      "origin": "induction",
+      "closure_criteria": {
+        "artifact_promoted": {
+          "candidate_id": "cand-odyssey-skill"
+        }
+      },
+      "volume": 380,
+      "failure_cost_millis": 45000,
+      "observed": true
+    }
+  },
+  "actor": "induction",
+  "at": "2023-11-14T22:20:00Z"
+}

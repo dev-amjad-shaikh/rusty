@@ -1,0 +1,44 @@
+{
+  "selected": [
+    {
+      "name": "web.search",
+      "score": 29000,
+      "matched_tags": [
+        "research",
+        "web"
+      ]
+    },
+    {
+      "name": "http.get",
+      "score": 10000,
+      "matched_tags": [
+        "web"
+      ]
+    }
+  ],
+  "ranking": [
+    {
+      "name": "web.search",
+      "score": 29000,
+      "matched_tags": [
+        "research",
+        "web"
+      ]
+    },
+    {
+      "name": "http.get",
+      "score": 10000,
+      "matched_tags": [
+        "web"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "name": "email.send",
+      "reason": {
+        "kind": "effect_above_ceiling"
+      }
+    }
+  ]
+}

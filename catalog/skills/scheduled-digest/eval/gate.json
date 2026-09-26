@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "name": "scheduled-digest-install-gate",
+  "minimum_runs": 1,
+  "minimum_run_pass_rate": 1.0,
+  "minimum_case_pass_rate": 1.0,
+  "minimum_assertion_pass_rates": {},
+  "minimum_tag_pass_rates": {},
+  "maximum_total_cost_usd": null,
+  "maximum_cost_ratio": null,
+  "maximum_regressions": null,
+  "forbid_removed_cases": false,
+  "comparison_thresholds": {
+    "max_pass_rate_drop": 0.05,
+    "max_latency_p95_ratio": 1.25
+  }
+}

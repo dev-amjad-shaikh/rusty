@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Effect",
+  "description": "The effect taxonomy: what a journaled event did to the world outside the run's own state.\n\nThe classification is declared by the producer (node/model/tool traits carry a default with an override point) and recorded on every journaled event. It is the input to three later policies:\n\n- **Retry**: which failed effects may be re-attempted at all, and under what key. - **Replay**: which effects exact replay may serve from the journal versus must re-execute. - **Capsules**: which effects a sandboxed capsule may perform at all under its capability grants.\n\nThe order of variants is a severity ladder: each class permits strictly less automation freedom than the one before. The `Ord` derive is that ladder made mechanical (declaration order), which is what capsule manifests compare declared effects against grant-implied minima with.",
+  "oneOf": [
+    {
+      "description": "No observable effect beyond its return value: a deterministic function of its inputs. Re-execution is always safe and always equivalent, so replay may either re-run it or reuse the journaled output, and retries are unconstrained. Default for plain compute nodes.",
+      "type": "string",
+      "enum": [
+        "pure"
+      ]
+    },
+    {
+      "description": "Reads external state but writes nothing (a GET, a file read, a lookup). Re-execution is safe but **not** necessarily equivalent — the world may have changed — so exact replay serves the journaled output while live replay re-reads. Retries are unconstrained.",
+      "type": "string",
+      "enum": [
+        "read_only"
+      ]
+    },
+    {
+      "description": "Writes external state, but repeating the same call with the same idempotency key has the same effect as calling once (PUT semantics, upserts). Safe to retry under a stable key; exact replay may serve the journaled receipt instead of re-sending.",
+      "type": "string",
+      "enum": [
+        "idempotent"
+      ]
+    },
+    {
+      "description": "Writes external state and repeating it duplicates the effect, but a declared compensating action can logically undo it (charge/refund). Retry only with care; replay and rollback policy must pair the effect with its compensation.",
+      "type": "string",
+      "enum": [
+        "compensatable"
+      ]
+    },
+    {
+      "description": "Writes external state with no safe automatic repetition (send an email, charge a card, POST without a key). Never silently retried, never served from a journal in any replay mode that claims fidelity — re-execution is an explicit, caller-approved decision. Default for model and tool calls, which the runtime cannot prove otherwise.",
+      "type": "string",
+      "enum": [
+        "non_idempotent"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "type": "hello-ok",
+  "protocol": 1,
+  "server": {
+    "version": "0.12.0",
+    "conn_id": "conn-7f2c"
+  },
+  "features": {
+    "methods": [
+      "threads.create",
+      "runs.stream"
+    ],
+    "events": [
+      "run.updated",
+      "tick"
+    ]
+  },
+  "snapshot": {
+    "state_version": 17,
+    "graphs": [
+      {
+        "name": "react_agent",
+        "channels": [
+          "messages"
+        ]
+      }
+    ]
+  },
+  "auth": {
+    "role": "operator",
+    "scopes": [
+      "runs:read",
+      "runs:write"
+    ]
+  },
+  "policy": {
+    "max_payload_bytes": 1048576,
+    "max_buffered_bytes": 8388608,
+    "tick_interval_ms": 15000
+  }
+}

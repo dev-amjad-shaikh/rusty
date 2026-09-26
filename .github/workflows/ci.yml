@@ -1,0 +1,283 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Lint, test, and doc-build each crate of the virtual workspace. The four
+  # matrix legs are independent: a failure in one crate never cancels the
+  # others (fail-fast: false), and each crate reports its own check.
+  rust:
+    name: rust / ${{ matrix.dir }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { dir: rusty-core, pkg: rusty-agent-runtime }
+          - { dir: rusty-server, pkg: rusty-agent-server }
+          - { dir: rusty-worker, pkg: rusty-worker }
+          - { dir: rusty-otel, pkg: rusty-otel }
+          - { dir: rusty-eval, pkg: rusty-eval }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (stable + rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          # All four crates share the workspace target dir; one shared cache
+          # avoids four legs overwriting each other's cache entry.
+          shared-key: rusty-workspace
+          key: ${{ matrix.pkg }}
+
+      - name: Format
+        run: cargo fmt -p ${{ matrix.pkg }} -- --check
+
+      - name: Clippy (warnings are errors)
+        run: |
+          cargo clippy -p ${{ matrix.pkg }} --all-targets -- -D warnings
+          cargo clippy -p ${{ matrix.pkg }} --all-targets --all-features -- -D warnings
+
+      # rusty-agent-server's crash-recovery proof spawns the demo server and
+      # worker as real processes; a package-scoped `cargo test` does not
+      # build cross-package example binaries, so build them first.
+      - name: Build examples (crash-recovery proof)
+        if: matrix.pkg == 'rusty-agent-server'
+        run: cargo build --workspace --examples
+
+      - name: Test
+        run: cargo test -p ${{ matrix.pkg }}
+
+      - name: Docs (warnings are errors)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps -p ${{ matrix.pkg }}
+
+  # Live database gate. The default crate legs compile the optional Postgres
+  # paths under clippy, but the integration suites are deliberately ignored
+  # unless DATABASE_URL points at a scratch database. Run those suites here
+  # against an ephemeral service so migrations, transactions, leases, outbox
+  # delivery, and crash-recovery persistence are exercised on every change.
+  postgres:
+    name: postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: rusty
+          POSTGRES_PASSWORD: rusty
+          POSTGRES_DB: rusty_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusty -d rusty_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://rusty:rusty@localhost:5432/rusty_test
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rusty-workspace-postgres
+          key: postgres
+
+      - name: Core Postgres tests
+        run: >-
+          cargo test -p rusty-agent-runtime --features postgres --lib
+          -- --ignored --test-threads=1
+
+      - name: Server Postgres tests
+        run: >-
+          cargo test -p rusty-agent-server --features postgres --lib --tests
+          -- --ignored --test-threads=1
+
+  # MSRV: resolve each crate's effective `rust-version` at runtime via
+  # cargo metadata (this follows `rust-version.workspace = true` inheritance
+  # from the root [workspace.package] table), then check the crate with
+  # exactly that toolchain. No version is hardcoded here.
+  msrv:
+    name: msrv / ${{ matrix.dir }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { dir: rusty-core, pkg: rusty-agent-runtime }
+          - { dir: rusty-server, pkg: rusty-agent-server }
+          - { dir: rusty-worker, pkg: rusty-worker }
+          - { dir: rusty-otel, pkg: rusty-otel }
+          - { dir: rusty-eval, pkg: rusty-eval }
+    steps:
+      - uses: actions/checkout@v7
+
+      # Uses the runner's preinstalled cargo; runs before any toolchain setup.
+      - name: Read effective rust-version via cargo metadata
+        id: msrv
+        run: |
+          msrv=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r --arg pkg "${{ matrix.pkg }}" '.packages[] | select(.name == $pkg) | .rust_version')
+          if [ -z "$msrv" ] || [ "$msrv" = "null" ]; then
+            echo "::error::${{ matrix.pkg }} declares no rust-version (checked directly and via workspace inheritance)"
+            exit 1
+          fi
+          echo "Effective MSRV for ${{ matrix.pkg }}: $msrv"
+          echo "version=$msrv" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rusty-workspace-msrv
+          key: ${{ matrix.pkg }}
+
+      - name: Check with MSRV toolchain
+        # No committed Cargo.lock (library policy), so --locked cannot be used.
+        # Resolve the newest dependency set that still supports the crate's
+        # declared Rust version instead of letting a transitive release raise it.
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+        run: cargo check -p ${{ matrix.pkg }}
+
+  # Advisory scan of the workspace Cargo.lock against the RustSec advisory DB.
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit
+        run: cargo audit --deny warnings
+
+  # Python SDK e2e. The suite launches the real rusty-agent-server demo binary
+  # (127.0.0.1:8100); it is prebuilt here so the test run does not spend its
+  # time compiling, and so a missing binary surfaces as a build failure in CI
+  # rather than a skipped test.
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rusty-workspace
+          key: rusty-agent-server
+
+      - name: Build server demo binary
+        run: cargo build -p rusty-agent-server --example server_demo
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Python SDK tests
+        run: python -m pytest sdks/python/tests -q
+
+  # TypeScript SDK e2e, against the same prebuilt demo binary. The package has
+  # no runtime dependencies, so no install step is required before npm test.
+  typescript:
+    name: typescript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rusty-workspace
+          key: rusty-agent-server
+
+      - name: Build server demo binary
+        run: cargo build -p rusty-agent-server --example server_demo
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: TypeScript SDK tests
+        working-directory: sdks/typescript
+        run: npm test
+
+  # The gateway wire contract: the generated TypeScript types must be
+  # exactly what the golden schemas produce, and the Rust-serialized
+  # hello-ok sample must satisfy them (rusty-server/src/protocol.rs is
+  # the single definition; drift fails here).
+  wire:
+    name: wire
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install wire package dependencies
+        working-directory: sdks/wire
+        run: npm ci
+
+      - name: Wire freshness and round-trip
+        working-directory: sdks/wire
+        run: npm test
+
+  studio:
+    name: studio
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install typed Studio dependencies
+        working-directory: studio/ui
+        run: npm ci
+
+      - name: Typed Studio checks
+        working-directory: studio/ui
+        run: npm run typecheck && npm run check:tiers && npm test && npm run build
+
+      - name: Typed Studio distribution is current
+        run: git diff --exit-code -- studio/ui/dist

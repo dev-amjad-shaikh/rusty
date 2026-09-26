@@ -1,0 +1,193 @@
+{
+  "id": "sap-cloud-identity",
+  "version": "1",
+  "display_name": "SAP Cloud Identity Services",
+  "description": "Identity Authentication (IAS) SCIM API: a person's SAP identity — active, locked, last login, email verified, groups (which grant SAP application access) — and the corrections a desk makes (activate, unlock).",
+  "documentation_url": "https://help.sap.com/docs/cloud-identity-services/cloud-identity-services/scim-rest-api",
+  "base_url": "https://{tenant_host}",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "SAP Cloud Identity Connection",
+    "type": "object",
+    "required": [
+      "tenant_host",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "tenant_host": {
+        "type": "string",
+        "title": "IAS tenant host",
+        "rusty_order": 0,
+        "description": "The tenant's address, without https://.",
+        "rusty_pattern_descriptor": "acme.accounts.ondemand.com"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "System client",
+        "description": "Administration Console → Applications & Resources → Administrators → Add System, with Manage Users and Read Users authorizations.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the system client is accepted.",
+      "method": "GET",
+      "path": "/scim/ServiceProviderConfig",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.client_id}",
+          "password": "{credentials.client_secret}"
+        }
+      ]
+    },
+    {
+      "name": "search-users",
+      "description": "Find a person by user name or email (SCIM filter).",
+      "method": "GET",
+      "path": "/scim/Users",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "e.g. userName eq \"jdoe\" or emails.value eq \"jdoe@acme.com\""
+          },
+          "count": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 10
+          }
+        },
+        "required": [
+          "filter"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.client_id}",
+          "password": "{credentials.client_secret}"
+        }
+      ]
+    },
+    {
+      "name": "get-user",
+      "description": "One identity in full: active, urn:ietf:params:scim:schemas:extension:sap:2.0:User (loginTime, passwordStatus, mailVerified, status), groups.",
+      "method": "GET",
+      "path": "/scim/Users/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "SCIM user id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.client_id}",
+          "password": "{credentials.client_secret}"
+        }
+      ]
+    },
+    {
+      "name": "list-groups",
+      "description": "Groups (application authorizations) with their members.",
+      "method": "GET",
+      "path": "/scim/Groups",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "e.g. displayName eq \"S4_Finance_Users\""
+          },
+          "count": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.client_id}",
+          "password": "{credentials.client_secret}"
+        }
+      ]
+    },
+    {
+      "name": "patch-user",
+      "description": "Correct an identity: set active true/false, or unlock (passwordStatus). Confirm with the person first.",
+      "method": "PATCH",
+      "path": "/scim/Users/{id}",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "SCIM user id"
+          },
+          "schemas": {
+            "type": "array",
+            "description": "[\"urn:ietf:params:scim:api:messages:2.0:PatchOp\"]"
+          },
+          "Operations": {
+            "type": "array",
+            "description": "[{\"op\":\"replace\",\"path\":\"active\",\"value\":true}]"
+          }
+        },
+        "required": [
+          "id",
+          "schemas",
+          "Operations"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.client_id}",
+          "password": "{credentials.client_secret}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

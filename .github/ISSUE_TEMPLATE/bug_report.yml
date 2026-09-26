@@ -1,0 +1,61 @@
+name: Bug report
+description: Report incorrect behavior in a Rusty component
+title: "[bug]: "
+labels: [bug]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Rusty is affected?
+      options:
+        - rusty-core (rusty-agent-runtime)
+        - rusty-server (rusty-agent-server)
+        - rusty-worker
+        - rusty-otel
+        - studio
+        - sdk-python
+        - sdk-typescript
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package version and, for Rust components, the output of `rustc --version`
+      placeholder: "rusty-agent-server 0.9.0, rustc 1.8x stable"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Steps to reproduce the behavior. Include a minimal code snippet or command sequence when possible.
+      placeholder: |
+        1. Start the server with ...
+        2. Create a thread ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened, including error messages and status codes.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output, stack traces, or SSE frames. Redact API keys and tenant data.
+      render: text
+    validations:
+      required: false

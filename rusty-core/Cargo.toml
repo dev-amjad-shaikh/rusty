@@ -1,0 +1,132 @@
+[package]
+name = "rusty-agent-runtime"
+version = "0.12.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/rusty-agent-runtime"
+readme = "README.md"
+description = "The durable agent runtime built in Rust — core graph engine: typed channels with reducers, Pregel/BSP super-step execution, checkpoints, interrupts, and streaming."
+keywords = ["agent", "graph", "llm", "orchestration", "langgraph"]
+categories = ["asynchronous", "network-programming"]
+# Explicit [[bench]] targets only — autodiscovery would also pick up the
+# shared helper module under benches/common/.
+autobenches = false
+
+# NOTE: Cargo.toml and src/lib.rs are owned EXCLUSIVELY by the scaffold engineer.
+# Do not edit them in implementation PRs; request changes instead.
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+# Cooperative cancellation (R0.6 wave 2c): `RunConfig::with_cancellation`
+# threads a `CancellationToken` into the executor — the same token type the
+# worker's lease/heartbeat protocol already uses.
+tokio-util = "0.7"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = { version = "0.8", features = ["chrono"] }
+thiserror = "2"
+rusty-api = { path = "../rusty-api" }
+futures = "0.3"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+# Flight Recorder (R0.5): content hashing for artifact references and journal
+# heads, plus the seeded-RNG determinism seam. Minimal features: only the
+# RngCore/SeedableRng traits and the ChaCha8 core are used.
+sha2 = "0.10"
+# Signed run receipts (R0.9 wave 3): Ed25519 over the receipt's canonical
+# bytes. Small, pure-Rust, no native code; key generation draws OS entropy
+# through `uuid` (below), so no RNG feature is needed here.
+ed25519-dalek = "2"
+rand = { version = "0.8", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Connector surface (docs/connector-surface-design.md): draft-07 config
+# validation against each manifest's `connection_specification`. Default
+# features off — no async, no network resolution, no python bindings.
+jsonschema = { version = "0.49", default-features = false }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json", "chrono"], optional = true }
+wasmtime = { version = "47", optional = true }
+# Provider layer, wave 2 (docs/provider-layer-design.md): multi-provider
+# model access through the genai crate, behind the `genai` feature. genai is
+# taken WITHOUT its default `rustls-tls` feature: in genai's reqwest 0.13
+# line that feature selects the aws-lc-rs backend (a C/assembly build via
+# aws-lc-sys), while the rest of this crate's HTTP stack rides reqwest
+# 0.12's ring-based rustls. The `reqwest-tls` edge below turns on reqwest
+# 0.13's `rustls-no-provider` instead (genai documents the no-TLS-feature
+# configuration as its supported bring-your-own-TLS path), and the `rustls`
+# edge supplies the ring crypto provider, which `GenaiChatModel` installs as
+# the process default before a client is built. No C toolchain required.
+genai = { version = "0.6", default-features = false, optional = true }
+reqwest-tls = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls-no-provider"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+# MSRV guard, not a code dependency: serde_with 3.18+ declares rustc 1.88,
+# above the workspace MSRV (1.86). This edge caps what genai's
+# `serde_with = "3"` requirement resolves to (3.17.x, rustc 1.82), so the
+# `genai` feature builds on the workspace toolchain — and so downstream
+# crates on 1.86 inherit the cap through feature unification rather than
+# discovering the break in their own builds.
+serde_with = { version = ">=3, <3.18", optional = true }
+
+[features]
+postgres = ["dep:sqlx"]
+wasm = ["dep:wasmtime"]
+genai = ["dep:genai", "dep:reqwest-tls", "dep:rustls", "dep:serde_with"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+# Benchmarks only: default features off (no plotters/rayon) to keep bench
+# builds lean; results still go to target/criterion as JSON estimates.
+criterion = { version = "0.5", default-features = false }
+# Skill-pack tests run the bundled eval suites through the real gate path.
+rusty-eval = { path = "../rusty-eval" }
+
+[[test]]
+name = "provider_seam"
+
+[[example]]
+# Manual live validation for the genai adapter (provider layer, wave 2):
+# requires provider API keys and network access — never run in CI. The
+# `required-features` gate keeps it out of default builds entirely.
+name = "genai_live"
+required-features = ["genai"]
+
+[[bench]]
+name = "graph_compile"
+harness = false
+
+[[bench]]
+name = "node_execution"
+harness = false
+
+[[bench]]
+name = "parallel_fanout"
+harness = false
+
+[[bench]]
+name = "reducers"
+harness = false
+
+[[bench]]
+name = "checkpoint"
+harness = false
+
+[[bench]]
+name = "interrupt_resume"
+harness = false
+
+[[bench]]
+name = "state_clone"
+harness = false
+
+[[bench]]
+name = "checkpoint_placement"
+harness = false
+
+[[bench]]
+name = "headroom_experiment"
+harness = false

@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EnforcementLevel",
+  "description": "The enforcement level reported by a runtime backend.",
+  "oneOf": [
+    {
+      "description": "Full policy enforcement.",
+      "type": "string",
+      "enum": [
+        "full"
+      ]
+    },
+    {
+      "description": "Partial enforcement (degraded or best-effort).",
+      "type": "string",
+      "enum": [
+        "partial"
+      ]
+    }
+  ]
+}

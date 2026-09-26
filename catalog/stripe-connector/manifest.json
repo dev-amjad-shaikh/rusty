@@ -1,0 +1,138 @@
+{
+  "id": "stripe",
+  "version": "1",
+  "display_name": "Stripe",
+  "description": "Stripe: read customers, charges and disputes \u2014 the records a refund or billing question turns on.",
+  "documentation_url": "https://docs.stripe.com/api",
+  "base_url": "https://api.stripe.com",
+  "connection_specification": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "credentials"
+    ],
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "secret_key"
+        ],
+        "properties": {
+          "secret_key": {
+            "type": "string",
+            "title": "Secret key",
+            "rusty_secret": true,
+            "rusty_order": 0,
+            "description": "A restricted key with read access is enough for these operations."
+          }
+        },
+        "title": "Authentication",
+        "rusty_order": 0
+      }
+    },
+    "title": "Stripe Connection"
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the key is accepted.",
+      "method": "GET",
+      "path": "/v1/balance",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.secret_key}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-customers",
+      "description": "List customers.",
+      "method": "GET",
+      "path": "/v1/customers",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string"
+          },
+          "starting_after": {
+            "type": "string"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.secret_key}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "get-charge",
+      "description": "Read one charge.",
+      "method": "GET",
+      "path": "/v1/charges/{charge}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "charge": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "charge"
+        ]
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.secret_key}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-disputes",
+      "description": "List disputes.",
+      "method": "GET",
+      "path": "/v1/disputes",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "starting_after": {
+            "type": "string"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.secret_key}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection"
+}

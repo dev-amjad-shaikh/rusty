@@ -1,0 +1,8 @@
+{
+  "surface": "memory:agent:support-1",
+  "active": "dee1cf631ee3558a3612b169df27751ff26713ff1a91f35e798c62563ae71a3a",
+  "canary": {
+    "candidate_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "fraction": 0.1
+  }
+}

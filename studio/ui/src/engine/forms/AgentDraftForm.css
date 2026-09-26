@@ -1,0 +1,104 @@
+/* The AgentDraftForm — the one form behind Guided (blank) and Chat. Layout only;
+ * every colour is a theme token. Rows follow AgentDraftForm.dc.html exactly. */
+
+.rn-adf { display: flex; flex-direction: column; gap: 22px; color: var(--ink); }
+.rn-adf__sec { display: flex; flex-direction: column; gap: 10px; }
+.rn-adf__head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.rn-adf__hint { font-size: 11px; color: var(--ink3); }
+.rn-adf__grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.rn-adf__err { font-size: 12px; color: var(--err); }
+
+/* Autonomy + connector + skill selectable buttons */
+.rn-adf__pillrow { display: flex; gap: 6px; flex-wrap: wrap; }
+.rn-adf__opt {
+  padding: 7px 12px; border-radius: var(--r-control); border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink2); font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: border-color 120ms, background 120ms, color 120ms;
+}
+.rn-adf__opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+.rn-adf__conn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-radius: var(--r-control); border: 1px solid var(--line); background: var(--panel);
+  color: var(--ink); font: inherit; font-size: 13px; cursor: pointer;
+}
+.rn-adf__conn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.rn-adf__conn .rn-adf__cname { font-weight: 600; }
+.rn-adf__conn .rn-adf__ccount { font-size: 11px; color: var(--ink3); }
+
+/* Card rows (measures, tools, rules, memory, triggers) */
+.rn-adf__rows { display: flex; flex-direction: column; gap: 6px; }
+.rn-adf__row {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--panel);
+}
+.rn-adf__row--bad { border-color: var(--err); }
+.rn-adf__row--col { flex-direction: column; align-items: stretch; padding: 10px; gap: 8px; }
+.rn-adf__rowerr { flex: 1 1 100%; font-size: 12px; color: var(--err); }
+.rn-adf__spacer { flex: 1; }
+.rn-adf__x { padding: 4px 6px; border: none; background: transparent; color: var(--ink3); font: inherit; font-size: 14px; cursor: pointer; line-height: 1; }
+.rn-adf__x:hover { color: var(--ink); }
+
+.rn-adf__empty {
+  padding: 12px 14px; border: 1px dashed var(--line); border-radius: var(--r-control);
+  font-size: 12px; color: var(--ink3);
+}
+
+/* Field inputs that live inside rows sit on the recessed --bg */
+.rn-adf__row .rn-input, .rn-adf__row .rn-select { background: var(--bg); }
+.rn-adf__grow { flex: 1 1 140px; min-width: 0; }
+.rn-adf__w-src { flex: 0 1 108px; min-width: 0; }
+.rn-adf__w-sm { flex: 0 1 84px; min-width: 0; }
+.rn-adf__w-xs { flex: 0 1 66px; min-width: 0; }
+.rn-adf__w-tool { flex: 0 1 168px; min-width: 0; }
+.rn-adf__w-label { flex: 0 1 130px; min-width: 0; }
+
+/* Measure kind cycle pill */
+.rn-adf__kind {
+  padding: 3px 8px; border-radius: var(--r-pill); border: 1px solid currentColor; background: transparent;
+  font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; cursor: pointer;
+}
+.rn-adf__kind--target { color: var(--ok); }
+.rn-adf__kind--gate { color: var(--ink); }
+.rn-adf__kind--guardrail { color: var(--warn); }
+
+/* Toolset wrap chip */
+.rn-adf__wrap {
+  padding: 3px 8px; border-radius: var(--r-pill); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
+}
+.rn-adf__wrap--off { border: 1px dashed var(--line); background: transparent; color: var(--ink3); font-weight: 500; }
+
+/* Skill toggle row */
+.rn-adf__skill {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--r-control); background: var(--panel); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.rn-adf__skill[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.rn-adf__check { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--ink3); background: transparent; flex-shrink: 0; }
+.rn-adf__skill[aria-pressed="true"] .rn-adf__check { border-color: var(--accent); background: var(--accent); }
+.rn-adf__skill code { flex-shrink: 0; }
+.rn-adf__sdesc { font-size: 12px; color: var(--ink2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Channel + learning grids */
+.rn-adf__channel { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; }
+.rn-adf__learn { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.rn-adf__toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-control); background: var(--panel); color: var(--ink);
+  font: inherit; font-size: 13px; cursor: pointer; text-align: left; font-weight: 500;
+}
+.rn-adf__inline {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: var(--r-control); background: var(--panel); font-size: 13px;
+}
+.rn-adf__inline .rn-input, .rn-adf__inline .rn-select { flex: 1 1 0; min-width: 0; }
+
+.rn-adf__kindtag {
+  padding: 3px 8px; border-radius: var(--r-pill); background: var(--code);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--ink2);
+}
+.rn-adf__next { font-size: 12px; color: var(--ink3); }
+.rn-adf__secretline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rn-adf__secretline label { font-size: 12px; color: var(--ink2); }
+.rn-adf__credlabel { font-size: 12px; color: var(--ink2); }

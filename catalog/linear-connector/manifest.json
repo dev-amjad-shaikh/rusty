@@ -1,0 +1,86 @@
+{
+  "id": "linear",
+  "version": "1",
+  "display_name": "Linear",
+  "description": "Linear: read issues and teams over the GraphQL API.",
+  "documentation_url": "https://developers.linear.app/docs",
+  "base_url": "https://api.linear.app",
+  "connection_specification": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "credentials"
+    ],
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "api_key"
+        ],
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "title": "Personal API key",
+            "rusty_secret": true,
+            "rusty_order": 0,
+            "description": "Settings \u2192 API \u2192 Personal API keys."
+          }
+        },
+        "title": "Authentication",
+        "rusty_order": 0
+      }
+    },
+    "title": "Linear Connection"
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the key is accepted.",
+      "method": "GET",
+      "path": "/graphql?query=%7Bviewer%7Bid%20name%7D%7D",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "{credentials.api_key}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "query",
+      "description": "Run a GraphQL query.",
+      "method": "GET",
+      "path": "/graphql",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "A GraphQL query, e.g. {issues(first:20){nodes{identifier title state{name}}}}"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "header",
+          "name": "Authorization",
+          "value_template": "{credentials.api_key}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection"
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "new_key_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "public_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "rotated_at": "2027-01-15T08:00:00Z"
+  },
+  {
+    "previous_key_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "new_key_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "public_key": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "rotated_at": "2027-01-15T08:00:00Z"
+  }
+]

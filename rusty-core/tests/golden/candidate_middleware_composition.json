@@ -1,0 +1,26 @@
+{
+  "candidate_id": "71016ca02da807f916b620bf96f6e15aed0a1ee4430eaac7d3ee78ae530b3c07",
+  "content": {
+    "kind": "middleware_composition",
+    "name": "default",
+    "layers": [
+      {
+        "layer": "request_logger"
+      },
+      {
+        "layer": "tool_call_blocklist",
+        "config": {
+          "blocked": [
+            "shell",
+            "fs_write"
+          ]
+        }
+      }
+    ]
+  },
+  "distilled_by": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "created_at": "2025-10-09T08:53:22Z"
+}

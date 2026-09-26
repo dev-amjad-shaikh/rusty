@@ -1,0 +1,20 @@
+{
+  "status": { "status": "done" },
+  "tool_calls": [
+    { "seq": 1, "name": "read_context", "arguments": { "scope": "vendor-onboarding" }, "status": "ok" }
+  ],
+  "final_state": {
+    "form": {
+      "fields": {
+        "name": { "value": "Acme Parts Ltd", "grounded_in": "context" },
+        "email": { "value": "ap@acme-parts.example", "grounded_in": "context" }
+      }
+    },
+    "obligations": [
+      { "kind": "structured_input", "field": "tax_id", "reason": "context does not state a tax id" }
+    ]
+  },
+  "latency_ms": 2500,
+  "cost_usd": 0.003,
+  "total_tokens": 1700
+}

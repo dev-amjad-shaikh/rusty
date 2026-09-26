@@ -1,0 +1,156 @@
+{
+  "id": "zendesk",
+  "version": "1",
+  "display_name": "Zendesk",
+  "description": "Zendesk Support: search and read tickets, and list the help-centre articles a brand publishes.",
+  "documentation_url": "https://developer.zendesk.com/api-reference/ticketing/introduction/",
+  "base_url": "https://{subdomain}.zendesk.com",
+  "connection_specification": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "subdomain",
+      "credentials"
+    ],
+    "properties": {
+      "subdomain": {
+        "type": "string",
+        "title": "Subdomain",
+        "rusty_order": 0,
+        "rusty_pattern_descriptor": "your-company (from your-company.zendesk.com)"
+      },
+      "credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "api_token"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Agent email",
+            "rusty_order": 0
+          },
+          "api_token": {
+            "type": "string",
+            "title": "API token",
+            "rusty_secret": true,
+            "rusty_order": 1,
+            "description": "Admin Center \u2192 Apps and integrations \u2192 Zendesk API."
+          }
+        },
+        "title": "Authentication",
+        "rusty_order": 1
+      }
+    },
+    "title": "Zendesk Connection"
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the account answers and the token is accepted.",
+      "method": "GET",
+      "path": "/api/v2/users/me",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}/token",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "search-tickets",
+      "description": "Search tickets.",
+      "method": "GET",
+      "path": "/api/v2/search",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "e.g. type:ticket status:open"
+          },
+          "page": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}/token",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "get-ticket",
+      "description": "Read one ticket.",
+      "method": "GET",
+      "path": "/api/v2/tickets/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}/token",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-articles",
+      "description": "List help-centre articles.",
+      "method": "GET",
+      "path": "/api/v2/help_center/articles",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "per_page": {
+            "type": "integer"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}/token",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection"
+}

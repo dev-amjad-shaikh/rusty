@@ -1,0 +1,26 @@
+{
+  "envelope_version": "acme-2026-03",
+  "prompt": {
+    "mode": "approval"
+  },
+  "policy": {
+    "mode": "canary",
+    "fraction": 0.1,
+    "auto": {
+      "dataset_version": "retry-v2",
+      "min_improvement": 0.02
+    }
+  },
+  "memory_set": {
+    "mode": "auto",
+    "dataset_version": "support-v3",
+    "min_improvement": 0.0,
+    "scopes": [
+      "run",
+      "agent"
+    ]
+  },
+  "tool_permission": {
+    "mode": "approval"
+  }
+}

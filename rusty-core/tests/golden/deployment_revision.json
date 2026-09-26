@@ -1,0 +1,24 @@
+{
+  "revision_id": "c2c01e8fae3bdbc5ec82f6edae7ab68cc13d9fb150bd69d060018596999489b4",
+  "content": {
+    "graph": "pipeline",
+    "graph_hash": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    "assistant": "support-agent",
+    "source_environment": "staging",
+    "pins": [
+      {
+        "surface": "model_settings:primary",
+        "candidate_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "surface": "prompt:system",
+        "candidate_id": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+      }
+    ]
+  },
+  "author": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "created_at": "2025-10-09T08:53:20Z"
+}

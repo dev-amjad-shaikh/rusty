@@ -1,0 +1,10 @@
+[
+  "deployment_resolved",
+  "revision_registered",
+  "revision_promoted",
+  "revision_rolled_back",
+  "environment_declared",
+  "env_secret_set",
+  "env_secret_revoked",
+  "env_secret_denied"
+]

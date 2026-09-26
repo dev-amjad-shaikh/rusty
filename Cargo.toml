@@ -1,0 +1,25 @@
+# Virtual workspace for the Rusty platform crates.
+# Crates remain independently versioned — bump versions in each crate's own
+# Cargo.toml and record the change in the root CHANGELOG.md.
+[workspace]
+resolver = "2"
+members = [
+    "rusty-api",
+    "rusty-core",
+    "rusty-server",
+    "rusty-worker",
+    "rusty-otel",
+    "rusty-eval",
+    "rusty-store",
+    "rusty-store-conformance",
+]
+# Local e2e scratch crates (gitignored) must never join the workspace.
+exclude = [".tmp-e2e"]
+
+[workspace.package]
+# Shared metadata only where all four crates agree. Versions stay per-crate.
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dev-amjad-shaikh/rusty"
+homepage = "https://github.com/dev-amjad-shaikh/rusty"

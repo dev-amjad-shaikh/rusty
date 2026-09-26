@@ -1,0 +1,166 @@
+{
+  "memory_ids": [
+    "e6d70601825c64524543e2e938e3a64a0edcd73081095b6d7ecc126adc778522",
+    "f5f04d831da43d4b07939a9a20d58ecf4e1f6e81cee754a131dae30ee8064b11",
+    "94a166d9f2acf01c8ddde5180c4678e33ce3071235a7276de19ec027d84eb0ee",
+    "7240a2abf3393bbf81f05bb2e9073080ec473e369e6bbb6c916863d22833335b"
+  ],
+  "records": [
+    {
+      "confidence": 0.9,
+      "content": {
+        "kind": "inline",
+        "value": {
+          "note": "partial draft"
+        }
+      },
+      "created_at": "1970-01-01T00:00:01Z",
+      "key": "run.scratch",
+      "kind": "fact",
+      "memory_id": "e6d70601825c64524543e2e938e3a64a0edcd73081095b6d7ecc126adc778522",
+      "provenance": {
+        "author": {
+          "agent_id": "researcher-7",
+          "type": "agent"
+        },
+        "written_at": "1970-01-01T00:00:01Z"
+      },
+      "scope": {
+        "id": "run-1",
+        "scope": "run"
+      },
+      "validity": {
+        "valid_from": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "confidence": 0.9,
+      "content": {
+        "kind": "inline",
+        "value": {
+          "episode": "run-8 summary"
+        }
+      },
+      "created_at": "1970-01-01T00:00:02Z",
+      "key": "episode.run_8",
+      "kind": "summary",
+      "memory_id": "f5f04d831da43d4b07939a9a20d58ecf4e1f6e81cee754a131dae30ee8064b11",
+      "priority": 5,
+      "provenance": {
+        "author": {
+          "agent_id": "researcher-7",
+          "type": "agent"
+        },
+        "written_at": "1970-01-01T00:00:02Z"
+      },
+      "scope": {
+        "id": "agent-1",
+        "scope": "agent"
+      },
+      "validity": {
+        "valid_from": "1970-01-01T00:00:01Z"
+      }
+    },
+    {
+      "confidence": 0.9,
+      "content": {
+        "kind": "inline",
+        "value": {
+          "tz": "UTC+4"
+        }
+      },
+      "created_at": "1970-01-01T00:00:03Z",
+      "key": "user.timezone",
+      "kind": "fact",
+      "memory_id": "94a166d9f2acf01c8ddde5180c4678e33ce3071235a7276de19ec027d84eb0ee",
+      "priority": 9,
+      "provenance": {
+        "author": {
+          "agent_id": "researcher-7",
+          "type": "agent"
+        },
+        "written_at": "1970-01-01T00:00:03Z"
+      },
+      "scope": {
+        "id": "user-7",
+        "scope": "user"
+      },
+      "validity": {
+        "valid_from": "1970-01-01T00:00:02Z"
+      }
+    },
+    {
+      "confidence": 0.8,
+      "content": {
+        "kind": "inline",
+        "value": {
+          "lang": "en-US"
+        }
+      },
+      "created_at": "1970-01-01T00:00:04Z",
+      "key": "user.language",
+      "kind": "fact",
+      "memory_id": "7240a2abf3393bbf81f05bb2e9073080ec473e369e6bbb6c916863d22833335b",
+      "priority": 1,
+      "provenance": {
+        "author": {
+          "agent_id": "researcher-7",
+          "type": "agent"
+        },
+        "written_at": "1970-01-01T00:00:04Z"
+      },
+      "scope": {
+        "id": "user-7",
+        "scope": "user"
+      },
+      "validity": {
+        "valid_from": "1970-01-01T00:00:03Z"
+      }
+    }
+  ],
+  "section_manifest": {
+    "format": "memory-tier-manifest-v1",
+    "over_fetch_ids": [
+      "94a166d9f2acf01c8ddde5180c4678e33ce3071235a7276de19ec027d84eb0ee",
+      "f5f04d831da43d4b07939a9a20d58ecf4e1f6e81cee754a131dae30ee8064b11",
+      "7240a2abf3393bbf81f05bb2e9073080ec473e369e6bbb6c916863d22833335b",
+      "e6d70601825c64524543e2e938e3a64a0edcd73081095b6d7ecc126adc778522"
+    ],
+    "rank": {
+      "over_fetch_percent": 200,
+      "utility_weight": 4
+    },
+    "tiers": [
+      {
+        "ids": [
+          "e6d70601825c64524543e2e938e3a64a0edcd73081095b6d7ecc126adc778522"
+        ],
+        "tier": "working",
+        "used_tokens": 7
+      },
+      {
+        "ids": [
+          "f5f04d831da43d4b07939a9a20d58ecf4e1f6e81cee754a131dae30ee8064b11"
+        ],
+        "tier": "episodic",
+        "used_tokens": 8
+      },
+      {
+        "ids": [
+          "94a166d9f2acf01c8ddde5180c4678e33ce3071235a7276de19ec027d84eb0ee",
+          "7240a2abf3393bbf81f05bb2e9073080ec473e369e6bbb6c916863d22833335b"
+        ],
+        "tier": "semantic",
+        "used_tokens": 8
+      }
+    ],
+    "utility_stamp": "1970-01-01T00:00:50Z"
+  },
+  "token_accounting": {
+    "budget_tokens": 512,
+    "bytes_per_token": 4,
+    "margin_percent": 20,
+    "used_tokens": 23
+  },
+  "truncated": false
+}

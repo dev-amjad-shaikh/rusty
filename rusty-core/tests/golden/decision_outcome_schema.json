@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DecisionOutcome",
+  "description": "How a decided action turned out, filled in when the affected operation completes. `None` on the wire until then — decisions and outcomes are recorded separately so in-flight decisions are visible.",
+  "oneOf": [
+    {
+      "description": "The selected action led to completion.",
+      "type": "string",
+      "enum": [
+        "success"
+      ]
+    },
+    {
+      "description": "The selected action did not lead to completion.",
+      "type": "string",
+      "enum": [
+        "failure"
+      ]
+    },
+    {
+      "description": "The run was cancelled or superseded before the outcome materialized.",
+      "type": "string",
+      "enum": [
+        "cancelled"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "coordination_id": "c-42",
+  "member": "alpha",
+  "pattern": "fan_out",
+  "input": {
+    "kind": "inline",
+    "value": {
+      "topic": "alpha"
+    }
+  },
+  "context": {
+    "scopes": [
+      "team"
+    ]
+  }
+}

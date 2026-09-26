@@ -1,0 +1,100 @@
+[package]
+name = "rusty-agent-server"
+version = "0.12.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/rusty-agent-server"
+readme = "README.md"
+description = "The durable agent runtime built in Rust — HTTP/SSE server: an Agent-Protocol subset with threads, background runs, checkpoints, and resumable streaming."
+keywords = ["agent", "graph", "llm", "server", "langgraph"]
+categories = ["asynchronous", "network-programming"]
+
+[features]
+# Postgres-backed persistence: `ServerConfig::with_postgres(url)` switches
+# both the run checkpointer (core's `PostgresCheckpointer`) and the server
+# store (assistants / crons / KV) to Postgres.
+postgres = ["dep:sqlx", "rusty-agent-runtime/postgres"]
+# R0.9 Rusty Capsules wave 2: the Cedar authorization plane
+# (`capsule_policy.rs`) — admission and grant checks, tenant overlays, and
+# the revocation-at-next-use recheck — plus the capability host it
+# authorizes (core's `wasm` feature). A server built without it refuses
+# the capsule policy surface with a typed error (fail closed).
+capsules = ["dep:cedar-policy", "rusty-agent-runtime/wasm"]
+
+[dependencies]
+serde_yaml = "0.9"
+rusty-agent-runtime = { path = "../rusty-core", version = "0.12" }
+# Wave 4: the server-side candidate evaluator composes `rusty-eval`'s
+# experiment runner over live graph preparation plus a versioned dataset
+# source; `promote → evaluate` calls it through the learning gate.
+rusty-eval = { path = "../rusty-eval", version = "0.1" }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+# Graceful shutdown (R0.6 wave 2c): one `CancellationToken` drains the run
+# executor, the outbox relay, and the cron scheduler together.
+tokio-util = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The gateway protocol (EP-04-S01) is schema-defined: the wire types carry
+# JSON Schema derives, and the golden schemas feed the TypeScript codegen
+# in `sdks/wire` — define the wire once, generate every client.
+schemars = "0.8"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+cron = "0.12"
+futures = "0.3"
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Trigger webhooks: HMAC-SHA256 signature verification (`X-Rusty-Signature`)
+# and SHA-256 payload hashes for the event log.
+hmac = "0.12"
+sha2 = "0.10"
+# The credential broker (R0.11 wave 3): XChaCha20-Poly1305 for the
+# envelope encryption of connection token material. RustCrypto's AEADs
+# are the established, externally audited (NCC Group) pure-Rust choice —
+# matching the `ed25519-dalek` posture of no native crypto code — and
+# the XChaCha20 variant's 192-bit nonces make random-nonce-per-seal safe
+# at envelope scale, so no nonce counter exists to mismanage (the
+# failure mode that rules out random-nonce AES-GCM). Its software
+# implementation is constant-time without AES-NI, which `aes-gcm`'s
+# portable fallback does not guarantee on every target.
+chacha20poly1305 = "0.10"
+# Permissive CORS in `router()` so browser clients (e.g. the Studio) can call
+# the API cross-origin. Production deployments should restrict this — see README.
+tower-http = { version = "0.6", features = ["cors"] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "postgres",
+    "runtime-tokio-rustls",
+    "json",
+    "chrono",
+], optional = true }
+# Cedar policy evaluation for the capsule authorization plane (R0.9 wave 2).
+# Server-only by design — the core crate's contracts stay engine-free — and
+# pure Rust with no native deps. The major is pinned like the rest.
+cedar-policy = { version = "4", optional = true }
+# The HTTP transport behind the OAuth token endpoint and demos: rustls
+# only, no native TLS, with `stream` for byte-ceiling-enforced incremental
+# reads.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+# Skill import (`POST /skills/import`): a git forge archive is a gzipped tar,
+# read in memory under explicit ceilings. Both are pure Rust.
+flate2 = "1"
+tar = "0.4"
+# CLI argument parsing for the rustyness binary (EP-13-S10).
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["full", "test-util"] }
+# Trigger tests sign webhook bodies the way an external sender would.
+hmac = "0.12"
+sha2 = "0.10"
+rusty-api = { path = "../rusty-api" }
+
+[[bin]]
+name = "rustyness"
+path = "src/bin/rustyness.rs"

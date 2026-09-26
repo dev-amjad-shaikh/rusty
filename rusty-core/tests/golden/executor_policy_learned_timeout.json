@@ -1,0 +1,15 @@
+{
+  "retry": {
+    "base_delay_ms": 1000,
+    "max_delay_ms": 300000,
+    "max_attempts": 3
+  },
+  "timeout": {
+    "max_millis": 300000,
+    "per_callee": {
+      "embed": 1000,
+      "search": 5000
+    }
+  },
+  "concurrency": {}
+}

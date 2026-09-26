@@ -1,0 +1,335 @@
+{
+  "id": "microsoft-365",
+  "version": "1",
+  "display_name": "Microsoft 365 (Entra ID, Exchange, service health)",
+  "description": "Microsoft Graph, people and services: a person's account state and licences, their sign-in attempts and why they failed, registered MFA methods, mailbox settings and rules, Teams and Exchange service health, and the account actions a desk takes (revoke sessions, reset an MFA method).",
+  "documentation_url": "https://learn.microsoft.com/en-us/graph/api/overview",
+  "base_url": "https://graph.microsoft.com",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Microsoft 365 Connection",
+    "type": "object",
+    "required": [
+      "tenant_id",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "tenant_id": {
+        "type": "string",
+        "title": "Entra tenant ID",
+        "rusty_order": 0,
+        "description": "Directory (tenant) ID from the app registration overview.",
+        "rusty_pattern_descriptor": "72f988bf-86f1-41af-91ab-2d7cd011db47"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "App registration",
+        "description": "An app registration with application permissions, admin-consented: User.Read.All, AuditLog.Read.All, UserAuthenticationMethod.Read.All, MailboxSettings.Read, ServiceHealth.Read.All, User.RevokeSessions.All, Organization.Read.All.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the app registration is accepted.",
+      "method": "GET",
+      "path": "/v1.0/organization",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "get-user",
+      "description": "A person's account: display name, UPN, accountEnabled, last password change, licences (assignedLicenses), usage location, department, manager.",
+      "method": "GET",
+      "path": "/v1.0/users/{upn}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "upn": {
+            "type": "string",
+            "description": "The user principal name or object id, e.g. jdoe@acme.com"
+          },
+          "$select": {
+            "type": "string",
+            "description": "Fields",
+            "default": "id,displayName,userPrincipalName,mail,accountEnabled,lastPasswordChangeDateTime,assignedLicenses,usageLocation,department,jobTitle,createdDateTime"
+          }
+        },
+        "required": [
+          "upn"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "list-sign-ins",
+      "description": "Recent sign-in attempts for a person with the result: status.errorCode (0 = success, 50126 wrong password, 50053 locked, 50074 MFA required, 53003 blocked by Conditional Access, 50076 MFA needed), the app, device, location, and conditionalAccessStatus.",
+      "method": "GET",
+      "path": "/v1.0/auditLogs/signIns",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "$filter": {
+            "type": "string",
+            "description": "e.g. userPrincipalName eq 'jdoe@acme.com'"
+          },
+          "$top": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 25
+          },
+          "$orderby": {
+            "type": "string",
+            "description": "Order",
+            "default": "createdDateTime desc"
+          }
+        },
+        "required": [
+          "$filter"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "list-authentication-methods",
+      "description": "Which MFA methods the person has registered: Authenticator app, phone, FIDO2 key, Windows Hello, temporary access pass.",
+      "method": "GET",
+      "path": "/v1.0/users/{upn}/authentication/methods",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "upn": {
+            "type": "string",
+            "description": "UPN or id"
+          }
+        },
+        "required": [
+          "upn"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "get-mailbox-settings",
+      "description": "The person's mailbox settings: automatic replies, time zone, delegate forwarding is visible here.",
+      "method": "GET",
+      "path": "/v1.0/users/{upn}/mailboxSettings",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "upn": {
+            "type": "string",
+            "description": "UPN or id"
+          }
+        },
+        "required": [
+          "upn"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "list-inbox-rules",
+      "description": "The person's inbox rules; a forwarding or delete-all rule explains 'my mail disappears'.",
+      "method": "GET",
+      "path": "/v1.0/users/{upn}/mailFolders/inbox/messageRules",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "upn": {
+            "type": "string",
+            "description": "UPN or id"
+          }
+        },
+        "required": [
+          "upn"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "list-service-health",
+      "description": "Current health of Exchange Online, Teams, SharePoint, Intune and the rest: is the problem Microsoft's?",
+      "method": "GET",
+      "path": "/v1.0/admin/serviceAnnouncement/healthOverviews",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "list-service-issues",
+      "description": "Open service incidents with impact descriptions.",
+      "method": "GET",
+      "path": "/v1.0/admin/serviceAnnouncement/issues",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "$filter": {
+            "type": "string",
+            "description": "e.g. isResolved eq false",
+            "default": "isResolved eq false"
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "revoke-sign-in-sessions",
+      "description": "Sign the person out everywhere (refresh tokens invalidated). Used after a compromise or a stuck session; they sign in again on every device.",
+      "method": "POST",
+      "path": "/v1.0/users/{upn}/revokeSignInSessions",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "upn": {
+            "type": "string",
+            "description": "UPN or id"
+          }
+        },
+        "required": [
+          "upn"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "delete-authentication-method",
+      "description": "Remove one registered MFA method (a lost phone). The person re-registers at next sign-in; needs a verified identity first.",
+      "method": "DELETE",
+      "path": "/v1.0/users/{upn}/authentication/microsoftAuthenticatorMethods/{method_id}",
+      "effect": "irreversible",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "upn": {
+            "type": "string",
+            "description": "UPN or id"
+          },
+          "method_id": {
+            "type": "string",
+            "description": "The method id from list-authentication-methods"
+          }
+        },
+        "required": [
+          "upn",
+          "method_id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

@@ -1,0 +1,39 @@
+{
+  "selected": [
+    {
+      "name": "web-research",
+      "revision": 2,
+      "content_hash": "ee1188dbfa7b9ebdc40ddcf718f4e405f42d23b3d8e466e38da19e7086f867de",
+      "score": 10000,
+      "matched_tags": [
+        "research"
+      ],
+      "metadata": "The web-research skill. — open-ended lookup tasks"
+    }
+  ],
+  "ranking": [
+    {
+      "name": "web-research",
+      "revision": 2,
+      "content_hash": "ee1188dbfa7b9ebdc40ddcf718f4e405f42d23b3d8e466e38da19e7086f867de",
+      "score": 10000,
+      "matched_tags": [
+        "research"
+      ],
+      "metadata": "The web-research skill. — open-ended lookup tasks"
+    }
+  ],
+  "excluded": [
+    {
+      "name": "email-drafting",
+      "revision": 1,
+      "content_hash": "f2b6ce851c733a9559fbf790851a1fb385a29ac072a2dc82363298544263b30f",
+      "reason": {
+        "kind": "unavailable_tools",
+        "missing": [
+          "email.send"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "sales-desk",
+  "name": "Sales Desk",
+  "version": "1.0.0",
+  "publisher": "Rusty",
+  "description": "What sales support does for sellers and their managers — request intake, deal desk (pricing, discount, approvals), pipeline hygiene and forecast, account and contact briefs, contract and signature status, billing and renewal, escalation — as method skills with references, and the connectors they read from (DocuSign, Gong, Outreach) written from the vendors' API documentation, alongside the Salesforce, HubSpot, Stripe, Jira and Slack connectors already in the catalog. Connect what you have; each skill files a gap for what it could not read.",
+  "connectors": [
+    "connectors/docusign.json",
+    "connectors/gong.json",
+    "connectors/outreach.json"
+  ],
+  "skills": [
+    "skills/sales-request-intake",
+    "skills/deal-desk-quote-and-discount",
+    "skills/pipeline-hygiene-and-forecast",
+    "skills/account-and-contact-research-brief",
+    "skills/contract-and-signature-status",
+    "skills/billing-renewal-and-order-status",
+    "skills/sales-escalate-and-record"
+  ],
+  "hosts": [
+    "developer.salesforce.com",
+    "docs.stripe.com",
+    "developers.hubspot.com",
+    "developer.outreach.io",
+    "developers.docusign.com",
+    "help.gong.io"
+  ]
+}

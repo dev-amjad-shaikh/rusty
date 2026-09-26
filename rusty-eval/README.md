@@ -1,0 +1,119 @@
+# rusty-eval
+
+Agent TestOps for Rusty: versioned evaluation datasets, deterministic
+assertions over recorded runs, experiment reports, and baseline-vs-candidate
+comparison — built directly on the [`rusty-agent-runtime`](../rusty-core)
+executor and Flight Recorder journal. No simulation harness, no live model
+required.
+
+## The pipeline
+
+```
+dataset (JSONL, versioned)
+      │
+      ▼
+ExperimentRunner ── runs the agent N× per case through Executor::run,
+      │            each run journaling into its own Flight Recorder journal;
+      │            sequential by default or bounded-parallel
+      ▼
+RunEvidence ── ordered tool-call trajectory + final state + latency/cost,
+      │        distilled from the journal
+      ▼
+Assertion::evaluate ── deterministic pass/fail with expected-vs-observed evidence
+      │
+      ▼
+ExperimentReport ── per-case detail, pass rate per assertion, p50/p95 latency, cost
+      │
+      ▼
+compare(baseline, candidate) ── per-assertion deltas, per-case regressions,
+                                threshold-flagged release verdict
+      │
+      ▼
+detect_pass_rate_regression ── paired exact significance + practical effect
+      │
+      ▼
+cluster_failures ── stable failure signatures, ranked clusters, evidence links
+```
+
+## Dataset format
+
+JSONL: line 1 is the header, every following line is a case. Serialization
+is canonical (field order fixed, map keys sorted), so datasets are diffable
+in version control and `load → save` is byte-stable.
+
+```jsonl
+{"kind":"header","format_version":1,"name":"math-tools","version":"1.0.0"}
+{"kind":"case","id":"add-two","input":{"messages":[{"role":"user","content":"2+3?"}]},"expect":{"tool_trajectory":[{"name":"calculator","args":{"/op":"add"}}],"state":[{"pointer":"/messages/3/content","expected":"the answer is 5"}]},"tags":["smoke"]}
+```
+
+Each case: `id`, `input` (merged into the run's initial state by default),
+`expect` (trajectory as an ordered subsequence with optional JSON-pointer
+argument matchers, state predicates, forbidden tools, cost/latency bounds),
+and `tags`. Loading validates `format_version` and refuses unknown versions.
+
+## Assertions
+
+Deterministic checks only — no model in the loop:
+
+| Assertion | Checks |
+|---|---|
+| `tool_call_order` | Expected calls appear as an ordered subsequence, argument matchers satisfied |
+| `tool_call_count` | Exact call count for one tool |
+| `state[...]` | Final-state value at a JSON pointer equals the expected value |
+| `no_tool_call` | Blacklisted tools never called |
+| `max_cost` / `max_latency` | Run totals within bounds |
+
+Every verdict returns `{ assertion, passed, expected, observed, detail }` —
+the report shows *why* a run failed, not just that it did.
+
+Experiments run sequentially by default so latency measurements remain
+uncontended. `ExperimentConfig::with_max_concurrency(n)` opts into bounded
+parallel execution for larger suites. The bound covers graph execution and
+judge calls; every run still gets a fresh graph and journal. Reports always
+sort by dataset case and repetition, and concurrent infrastructure failures
+resolve to the earliest case/repetition rather than whichever future happens
+to finish first. Once a parallel failure is observed, no new runs are
+admitted; only the already-active window is drained. Sequential execution
+retains its original fail-fast behavior.
+
+Baseline gates require matching concurrency settings. This keeps latency, cost,
+and rate-limit evidence comparable instead of silently mixing sequential and
+parallel workloads.
+
+## Statistical regression detection
+
+`detect_pass_rate_regression` pairs baseline and candidate outcomes by case id
+and repetition, then applies a one-sided exact McNemar test. It fails closed
+when datasets, repetitions, or run keys do not match. A regression is reported
+only when the configured sample size, minimum pass-rate drop, and significance
+level are all satisfied; underpowered comparisons are explicitly
+`insufficient_evidence`, never silently treated as safe.
+
+## Failure clustering
+
+`cluster_failures` turns a validated experiment report into deterministic
+failure groups keyed by termination mode, failed assertions, and judge
+outcome. Normalized categories and fingerprints distinguish root causes while
+removing volatile ids. Clusters are ranked by frequency and retain safe source
+references, never raw errors, observations, or judge rationales. Stable
+content-derived ids track the same failure shape across experiments. The
+versioned JSON artifact is recomputed against its source report when loaded,
+so supplied counts, members, signatures, or shares cannot survive tampering.
+
+## Judges
+
+`JudgeModel` (one async `judge` method, mirroring the runtime's `ChatModel`)
+is the evaluator seam. `RuleBasedJudge` scores the fraction of expectations
+met without a live model. `ModelJudge` adapts any runtime `ChatModel` into a
+structured LLM judge: the trusted rubric stays in the system instruction,
+evidence travels as untrusted JSON, output is accepted only as one
+schema-constrained tool call or strict JSON fallback, scores and rationale
+sizes are bounded before parsing, response roles are verified, and pass/fail
+is derived locally.
+
+## Status
+
+Foundation release (v0.1.0): library only, no CLI. Deliberately absent for
+now: provider-specific judge clients (use the runtime's `ChatModel` adapters),
+dataset/report storage backends beyond JSON files, and assertion kinds beyond
+the deterministic set above.

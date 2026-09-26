@@ -1,0 +1,66 @@
+# One-command demo stack: Rusty Server (server_demo example) + Rusty Studio.
+#
+#   docker compose up --build
+#
+#   Rusty Studio  →  http://localhost:8000/   (connect with base URL /api)
+#   Rusty API     →  http://localhost:8100/   (try: curl localhost:8100/info)
+#
+# Layout notes:
+# - The server demo binds 127.0.0.1:8100 inside its container. The studio
+#   service therefore shares the server's network namespace
+#   (network_mode: service:server) and proxies to loopback; scripts/
+#   studio_container.py binds 0.0.0.0 so Docker's published ports work.
+# - Ports are published on the `server` service because it owns the shared
+#   network namespace.
+# - Checkpoints persist in the `server-data` volume (server_demo writes to
+#   ./data/server-demo-checkpoints relative to its /app working directory).
+
+name: rusty
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM rust:1-slim
+        # rust:1-slim has no C toolchain; gcc + libc6-dev provide the linker
+        # and the compiler ring (rustls) needs.
+        RUN apt-get update \
+            && apt-get install -y --no-install-recommends gcc libc6-dev \
+            && rm -rf /var/lib/apt/lists/*
+        WORKDIR /app
+        # Virtual workspace: the root manifest plus all member crates must be
+        # present or cargo refuses to load the workspace.
+        COPY Cargo.toml ./
+        COPY rusty-core/ rusty-core/
+        COPY rusty-server/ rusty-server/
+        COPY rusty-worker/ rusty-worker/
+        COPY rusty-otel/ rusty-otel/
+        # Debug build on purpose: this image is the one-command demo stack,
+        # not a production artifact, and a release build multiplies build time
+        # for no demo-visible benefit. Cache mounts keep the cargo registry
+        # and target dir across rebuilds (and across interrupted builds).
+        RUN --mount=type=cache,target=/usr/local/cargo/registry \
+            --mount=type=cache,target=/app/target \
+            cargo build -p rusty-agent-server --example server_demo \
+            && cp target/debug/examples/server_demo /usr/local/bin/server_demo
+        CMD ["server_demo"]
+    ports:
+      - "8000:8000"  # Rusty Studio (served by the studio container in this netns)
+      - "8100:8100"  # HTTP/SSE API (TCP relay to 127.0.0.1:8100 in this netns)
+    volumes:
+      - server-data:/app/data
+
+  studio:
+    image: python:3-slim
+    depends_on:
+      - server
+    network_mode: service:server
+    working_dir: /app
+    volumes:
+      - ./studio:/app/studio:ro
+      - ./scripts:/app/scripts:ro
+    command: ["python", "scripts/studio_container.py"]
+
+volumes:
+  server-data:

@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EventStatus",
+  "description": "The outcome status of a journaled event.",
+  "oneOf": [
+    {
+      "description": "Completed normally.",
+      "type": "string",
+      "enum": [
+        "ok"
+      ]
+    },
+    {
+      "description": "Failed. The error description travels in the event's output payload.",
+      "type": "string",
+      "enum": [
+        "error"
+      ]
+    },
+    {
+      "description": "Suspended the run (a node called `interrupt()`). Control flow, not a failure — the payload is the interrupt value.",
+      "type": "string",
+      "enum": [
+        "interrupted"
+      ]
+    }
+  ]
+}

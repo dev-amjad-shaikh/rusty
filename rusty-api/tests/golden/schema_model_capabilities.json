@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ModelCapabilities",
+  "description": "Capability descriptors returned by [`ModelProvider::capabilities`].",
+  "type": "object",
+  "required": [
+    "reasoning",
+    "streaming",
+    "tool_calling"
+  ],
+  "properties": {
+    "context_window": {
+      "description": "Context-window size in tokens, if known.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "reasoning": {
+      "description": "Whether the provider supports reasoning tokens.",
+      "type": "boolean"
+    },
+    "streaming": {
+      "description": "Whether the provider supports streaming responses.",
+      "type": "boolean"
+    },
+    "tool_calling": {
+      "description": "Whether the provider supports function/tool calling.",
+      "type": "boolean"
+    }
+  }
+}

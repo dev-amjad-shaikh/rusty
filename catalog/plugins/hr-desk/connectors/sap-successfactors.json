@@ -1,0 +1,221 @@
+{
+  "id": "sap-successfactors",
+  "version": "1",
+  "display_name": "SAP SuccessFactors",
+  "description": "SuccessFactors OData API (Employee Central): a person's user record and employment (job, manager, department, location, hire date), time accounts and balances, recorded absences, and personal data fields the HR desk may read. For organisations on SuccessFactors rather than Workday.",
+  "documentation_url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/d599f15995d348a1b45ba5603e2aba9b",
+  "base_url": "https://{api_host}/odata/v2",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "SuccessFactors Connection",
+    "type": "object",
+    "required": [
+      "api_host",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "api_host": {
+        "type": "string",
+        "title": "API host",
+        "rusty_order": 0,
+        "description": "The data centre API host.",
+        "rusty_pattern_descriptor": "api4.successfactors.com"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "API user",
+        "description": "A technical user with the OData API permissions (username@companyId form) and its password, or configure OAuth SAML bearer outside this connector.",
+        "required": [
+          "username",
+          "password"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username (user@companyId)",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "rusty_secret": true,
+            "rusty_order": 1
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the API user is accepted.",
+      "method": "GET",
+      "path": "/User?$top=1&$format=json",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.username}",
+          "password": "{credentials.password}"
+        }
+      ]
+    },
+    {
+      "name": "search-users",
+      "description": "Find a person by name or email.",
+      "method": "GET",
+      "path": "/User",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "$filter": {
+            "type": "string",
+            "description": "e.g. email eq 'jdoe@acme.com' or lastName eq 'Doe'"
+          },
+          "$select": {
+            "type": "string",
+            "description": "Fields",
+            "default": "userId,username,firstName,lastName,email,status,department,division,location,title,managerId,hireDate"
+          },
+          "$format": {
+            "type": "string",
+            "description": "json",
+            "default": "json"
+          },
+          "$top": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 10
+          }
+        },
+        "required": [
+          "$filter"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.username}",
+          "password": "{credentials.password}"
+        }
+      ]
+    },
+    {
+      "name": "get-employment",
+      "description": "Employment and job (EmpJob): company, department, position, manager, location, event reason, effective dates.",
+      "method": "GET",
+      "path": "/EmpJob",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "$filter": {
+            "type": "string",
+            "description": "e.g. userId eq '1001'"
+          },
+          "$format": {
+            "type": "string",
+            "description": "json",
+            "default": "json"
+          },
+          "$top": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 5
+          }
+        },
+        "required": [
+          "$filter"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.username}",
+          "password": "{credentials.password}"
+        }
+      ]
+    },
+    {
+      "name": "get-time-accounts",
+      "description": "Time accounts (vacation, sick) with balances and accrual.",
+      "method": "GET",
+      "path": "/TimeAccount",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "$filter": {
+            "type": "string",
+            "description": "e.g. userId eq '1001'"
+          },
+          "$expand": {
+            "type": "string",
+            "description": "Related",
+            "default": "timeAccountDetails"
+          },
+          "$format": {
+            "type": "string",
+            "description": "json",
+            "default": "json"
+          }
+        },
+        "required": [
+          "$filter"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.username}",
+          "password": "{credentials.password}"
+        }
+      ]
+    },
+    {
+      "name": "list-absences",
+      "description": "Recorded absences (EmployeeTime): type, start, end, approval status.",
+      "method": "GET",
+      "path": "/EmployeeTime",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "$filter": {
+            "type": "string",
+            "description": "e.g. userId eq '1001' and startDate ge datetime'2026-01-01T00:00:00'"
+          },
+          "$format": {
+            "type": "string",
+            "description": "json",
+            "default": "json"
+          },
+          "$top": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        },
+        "required": [
+          "$filter"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.username}",
+          "password": "{credentials.password}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

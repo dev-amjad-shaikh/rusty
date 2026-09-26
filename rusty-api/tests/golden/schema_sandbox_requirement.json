@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SandboxRequirement",
+  "description": "The sandbox requirement a tool declares.",
+  "oneOf": [
+    {
+      "description": "No sandbox needed.",
+      "type": "string",
+      "enum": [
+        "none"
+      ]
+    },
+    {
+      "description": "Local process sandbox.",
+      "type": "string",
+      "enum": [
+        "local_process"
+      ]
+    },
+    {
+      "description": "Container sandbox.",
+      "type": "string",
+      "enum": [
+        "container"
+      ]
+    },
+    {
+      "description": "Remote sandbox.",
+      "type": "string",
+      "enum": [
+        "remote"
+      ]
+    }
+  ]
+}

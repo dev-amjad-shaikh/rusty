@@ -1,0 +1,10 @@
+[
+  "transient",
+  "rate_limited",
+  "timeout",
+  "invalid_input",
+  "dependency_failure",
+  "resource_exhausted",
+  "cancelled",
+  "unknown"
+]

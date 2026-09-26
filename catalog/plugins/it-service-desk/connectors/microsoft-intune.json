@@ -1,0 +1,277 @@
+{
+  "id": "microsoft-intune",
+  "version": "1",
+  "display_name": "Microsoft Intune",
+  "description": "Microsoft Graph, device management: what Intune knows about a Windows, macOS, iOS or Android device — compliance, last sync, OS, storage, enrollment — and the remote actions a desk takes (sync, restart, rotate the BitLocker key).",
+  "documentation_url": "https://learn.microsoft.com/en-us/graph/api/resources/intune-devices-conceptual",
+  "base_url": "https://graph.microsoft.com",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Intune Connection",
+    "type": "object",
+    "required": [
+      "tenant_id",
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "tenant_id": {
+        "type": "string",
+        "title": "Entra tenant ID",
+        "rusty_order": 0,
+        "description": "Directory (tenant) ID from the app registration overview.",
+        "rusty_pattern_descriptor": "72f988bf-86f1-41af-91ab-2d7cd011db47"
+      },
+      "credentials": {
+        "type": "object",
+        "title": "App registration",
+        "description": "An app registration with application permissions, admin-consented: DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementConfiguration.Read.All.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the app registration is accepted.",
+      "method": "GET",
+      "path": "/v1.0/deviceManagement/managedDevices?$top=1",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "search-devices",
+      "description": "Find managed devices by user, name or serial. Returns id, deviceName, userPrincipalName, operatingSystem, osVersion, complianceState, lastSyncDateTime, freeStorageSpaceInBytes.",
+      "method": "GET",
+      "path": "/v1.0/deviceManagement/managedDevices",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "$filter": {
+            "type": "string",
+            "description": "OData filter, e.g. userPrincipalName eq 'jdoe@acme.com' or deviceName eq 'ACME-LT-1234' or serialNumber eq 'PF3XX'"
+          },
+          "$select": {
+            "type": "string",
+            "description": "Fields to return",
+            "default": "id,deviceName,userPrincipalName,operatingSystem,osVersion,complianceState,lastSyncDateTime,freeStorageSpaceInBytes,totalStorageSpaceInBytes,enrolledDateTime,managementAgent,isEncrypted,jailBroken,model,manufacturer,serialNumber"
+          },
+          "$top": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "get-device",
+      "description": "One device in full.",
+      "method": "GET",
+      "path": "/v1.0/deviceManagement/managedDevices/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The managed device id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "get-device-compliance",
+      "description": "Which compliance policies the device fails and why (setting by setting).",
+      "method": "GET",
+      "path": "/v1.0/deviceManagement/managedDevices/{id}/deviceCompliancePolicyStates",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The managed device id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "get-device-configuration-states",
+      "description": "Which configuration profiles applied, pending or errored on the device.",
+      "method": "GET",
+      "path": "/v1.0/deviceManagement/managedDevices/{id}/deviceConfigurationStates",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The managed device id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "sync-device",
+      "description": "Ask the device to check in with Intune now. Safe to repeat.",
+      "method": "POST",
+      "path": "/v1.0/deviceManagement/managedDevices/{id}/syncDevice",
+      "effect": "idempotent",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The managed device id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "restart-device",
+      "description": "Restart the device remotely. It interrupts the person; confirm with them first.",
+      "method": "POST",
+      "path": "/v1.0/deviceManagement/managedDevices/{id}/rebootNow",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The managed device id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    },
+    {
+      "name": "rotate-bitlocker-keys",
+      "description": "Rotate the BitLocker recovery key (Windows). Use after a recovery key was read out to a person.",
+      "method": "POST",
+      "path": "/v1.0/deviceManagement/managedDevices/{id}/rotateBitLockerKeys",
+      "effect": "compensatable",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The managed device id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "oauth2_client_credentials",
+          "token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+          "client_id_template": "{credentials.client_id}",
+          "client_secret_template": "{credentials.client_secret}",
+          "scope_template": "https://graph.microsoft.com/.default"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

@@ -1,0 +1,38 @@
+{
+  "id": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d:4",
+  "run_id": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d",
+  "thread_id": "thread-42",
+  "node_id": "agent",
+  "seq": 4,
+  "kind": "model_call",
+  "effect": "non_idempotent",
+  "input": {
+    "kind": "inline",
+    "value": {
+      "messages": [
+        {
+          "content": "ping",
+          "role": "user"
+        }
+      ],
+      "tools": []
+    }
+  },
+  "output": {
+    "kind": "artifact",
+    "value": {
+      "sha256": "9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca7",
+      "bytes": 8192
+    }
+  },
+  "latency_ms": 137,
+  "tokens": {
+    "prompt_tokens": 128,
+    "completion_tokens": 32,
+    "total_tokens": 160
+  },
+  "cost_usd": 0.00042,
+  "status": "ok",
+  "parent": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d:1",
+  "recorded_at": "2025-06-15T15:06:40Z"
+}

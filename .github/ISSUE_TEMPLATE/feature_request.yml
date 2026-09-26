@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose new functionality for a Rusty component
+title: "[feat]: "
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Rusty would this affect?
+      options:
+        - rusty-core (rusty-agent-runtime)
+        - rusty-server (rusty-agent-server)
+        - rusty-worker
+        - rusty-otel
+        - studio
+        - sdk-python
+        - sdk-typescript
+        - multiple / cross-cutting
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve for you? Describe the use case, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: The API, behavior, or configuration you would like to see. Sketch the interface if you have one in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds or other approaches you have tried or ruled out.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to related issues, prior art in other runtimes, or anything else that helps evaluate the request.
+    validations:
+      required: false

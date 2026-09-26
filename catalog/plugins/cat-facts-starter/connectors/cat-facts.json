@@ -1,0 +1,61 @@
+{
+  "id": "cat-facts",
+  "version": "1",
+  "display_name": "Cat Facts",
+  "description": "catfact.ninja: a random cat fact, or a page of them. No credentials.",
+  "documentation_url": "https://catfact.ninja/",
+  "base_url": "https://catfact.ninja",
+  "connection_specification": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {},
+    "title": "Cat Facts Connection"
+  },
+  "operations": [
+    {
+      "name": "check",
+      "description": "Verify the service answers.",
+      "method": "GET",
+      "path": "/fact",
+      "effect": "read_only",
+      "params_schema": { "type": "object" },
+      "headers": [],
+      "auth": [],
+      "max_response_bytes": null
+    },
+    {
+      "name": "fact",
+      "description": "One random cat fact, with its length.",
+      "method": "GET",
+      "path": "/fact",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "max_length": { "type": "integer", "description": "Only facts at most this many characters." }
+        }
+      },
+      "headers": [],
+      "auth": [],
+      "max_response_bytes": null
+    },
+    {
+      "name": "facts",
+      "description": "A page of cat facts.",
+      "method": "GET",
+      "path": "/facts",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "limit": { "type": "integer", "description": "How many facts, at most 100." },
+          "page": { "type": "integer" }
+        }
+      },
+      "headers": [],
+      "auth": [],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check"
+}

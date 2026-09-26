@@ -1,0 +1,10 @@
+{
+  "handle_id": "hdl-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "connection_id": "conn-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "tenant": "acme",
+  "run_id": "run-9",
+  "scopes_checked": [
+    "drive.readonly"
+  ],
+  "used_at": "2027-01-15T08:04:10Z"
+}

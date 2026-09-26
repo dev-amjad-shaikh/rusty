@@ -1,0 +1,22 @@
+{
+  "tenant": "default",
+  "shadow_run_id": "shadow-run-1-abcdef123456-7f3a",
+  "source_run_id": "run-1",
+  "revision_id": "04a44aff303e1efb2d988bbc93e98a2570852d3f7725abb69cc97a87dc6ab163",
+  "refusals": [
+    {
+      "kind": "charge",
+      "effect": "non_idempotent",
+      "effect_id": "6db958c0cd2768daeed387078fbd71c19ad66e8787a1af719a3e2f94420469d5",
+      "input_hash": "f5326d6440b0819c676b274fb58aadd9b70b8642559d91b5e59bdbf638b3c3e3",
+      "served": true
+    }
+  ],
+  "matched": 1,
+  "unserved": 0,
+  "unrequested": [
+    "lookup"
+  ],
+  "outcome": "completed",
+  "completed_at": "2025-10-09T09:03:20Z"
+}

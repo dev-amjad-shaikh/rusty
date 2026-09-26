@@ -1,0 +1,31 @@
+{
+  "pattern": "delegate",
+  "delegate": {
+    "member": "writer",
+    "agent_id": "writer-agent",
+    "manifest_version": "researcher/1.4.0",
+    "kind": "summarize",
+    "input": {
+      "kind": "inline",
+      "value": {
+        "topic": "writer"
+      }
+    },
+    "effect": "non_idempotent",
+    "deadline": "2027-01-15T08:00:00Z"
+  },
+  "context": {
+    "scopes": [
+      "private",
+      "team"
+    ],
+    "channels": [
+      "thread:team-7"
+    ]
+  },
+  "result_contract": {
+    "kind": "application/json",
+    "max_bytes": 65536
+  },
+  "handoff": true
+}

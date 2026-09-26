@@ -1,0 +1,29 @@
+{
+  "id": "hr-desk",
+  "name": "HR Desk",
+  "version": "1.0.0",
+  "publisher": "Rusty",
+  "description": "What an HR help desk does for employees, managers and candidates — intake with confidentiality rules, policy answers with citations, time off and leave, benefits and payroll questions, employee data and job changes, onboarding and offboarding coordination, recruiting status, escalation to the HR partner — as method skills with references, and the connectors they read from (Workday, BambooHR, Greenhouse, SAP SuccessFactors) written from the vendors' API documentation, alongside Okta, Microsoft 365 and ServiceNow. Connect what you have; each skill files a gap for what it could not read.",
+  "connectors": [
+    "connectors/workday.json",
+    "connectors/bamboohr.json",
+    "connectors/greenhouse.json",
+    "connectors/sap-successfactors.json"
+  ],
+  "skills": [
+    "skills/hr-question-intake",
+    "skills/policy-question-with-citations",
+    "skills/time-off-and-leave",
+    "skills/benefits-payroll-and-compensation-questions",
+    "skills/employee-data-and-job-changes",
+    "skills/onboarding-and-offboarding-coordination",
+    "skills/recruiting-and-interview-status",
+    "skills/hr-escalate-and-record"
+  ],
+  "hosts": [
+    "community.workday.com",
+    "documentation.bamboohr.com",
+    "developers.greenhouse.io",
+    "help.sap.com"
+  ]
+}

@@ -1,0 +1,164 @@
+{
+  "id": "confluence",
+  "version": "1",
+  "display_name": "Confluence",
+  "description": "Atlassian Confluence Cloud: search pages with CQL, read a page's body, and list spaces.",
+  "documentation_url": "https://developer.atlassian.com/cloud/confluence/rest/v2/",
+  "base_url": "https://{site}.atlassian.net",
+  "connection_specification": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "site",
+      "credentials"
+    ],
+    "properties": {
+      "site": {
+        "type": "string",
+        "title": "Atlassian site",
+        "rusty_order": 0,
+        "description": "The site name in your Atlassian URL.",
+        "rusty_pattern_descriptor": "your-company (from your-company.atlassian.net)"
+      },
+      "credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "api_token"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Account email",
+            "rusty_order": 0
+          },
+          "api_token": {
+            "type": "string",
+            "title": "API token",
+            "rusty_secret": true,
+            "rusty_order": 1,
+            "description": "Created at id.atlassian.com under Security \u2192 API tokens."
+          }
+        },
+        "title": "Authentication",
+        "rusty_order": 1
+      }
+    },
+    "title": "Confluence Connection"
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the site answers and the token is accepted.",
+      "method": "GET",
+      "path": "/wiki/rest/api/space",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "search-content",
+      "description": "Search content with CQL.",
+      "method": "GET",
+      "path": "/wiki/rest/api/content/search",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "cql": {
+            "type": "string",
+            "description": "e.g. space = ENG AND type = page"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cql"
+        ]
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "get-page",
+      "description": "Read one page, with its body.",
+      "method": "GET",
+      "path": "/wiki/rest/api/content/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "expand": {
+            "type": "string",
+            "description": "e.g. body.storage,version"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-spaces",
+      "description": "List the spaces on the site.",
+      "method": "GET",
+      "path": "/wiki/rest/api/space",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "integer"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.email}",
+          "password": "{credentials.api_token}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection"
+}

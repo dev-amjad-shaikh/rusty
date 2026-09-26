@@ -1,0 +1,27 @@
+{
+  "candidate_id": "6eebad632af1fee949d1af5090c78a7d235cebd3a371e8acde0eca11a303e3ed",
+  "content": {
+    "kind": "tool_contract",
+    "tool": "web_search",
+    "schema": {
+      "properties": {
+        "limit": {
+          "default": 5,
+          "type": "integer"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    }
+  },
+  "distilled_by": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "created_at": "2025-10-09T08:53:22Z"
+}

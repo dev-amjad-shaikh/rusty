@@ -1,0 +1,353 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GatewayFrame",
+  "description": "Every gateway frame, as one closed union keyed by `type`. A frame that parses is one of exactly these shapes; a frame that does not is refused, never partially read.",
+  "oneOf": [
+    {
+      "description": "Client → server request.",
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "description": "Client-minted id the response echoes.",
+          "type": "string"
+        },
+        "method": {
+          "description": "Method name, from [`Features::methods`].",
+          "type": "string"
+        },
+        "params": {
+          "description": "Method arguments."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "req"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Server → client answer.",
+      "type": "object",
+      "required": [
+        "id",
+        "ok",
+        "type"
+      ],
+      "properties": {
+        "error": {
+          "description": "The failure, when not.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ErrorShape"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "description": "The request id this answers.",
+          "type": "string"
+        },
+        "ok": {
+          "description": "Whether the request succeeded.",
+          "type": "boolean"
+        },
+        "payload": {
+          "description": "The result, when `ok`."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "res"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Server → client sequenced event.",
+      "type": "object",
+      "required": [
+        "event",
+        "seq",
+        "type"
+      ],
+      "properties": {
+        "event": {
+          "description": "Event kind, from [`Features::events`].",
+          "type": "string"
+        },
+        "payload": {
+          "description": "Event payload."
+        },
+        "seq": {
+          "description": "Monotonic per-connection sequence number.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "event"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Server → client connect acceptance.",
+      "type": "object",
+      "required": [
+        "auth",
+        "features",
+        "policy",
+        "protocol",
+        "server",
+        "snapshot",
+        "type"
+      ],
+      "properties": {
+        "auth": {
+          "description": "The authority this connection actually holds (never assumed from what was requested).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/GrantedAuth"
+            }
+          ]
+        },
+        "features": {
+          "description": "What this server can do, as data: the methods a request may name and the events this connection may observe.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Features"
+            }
+          ]
+        },
+        "policy": {
+          "description": "Budgets the connection must respect.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PolicyBudgets"
+            }
+          ]
+        },
+        "protocol": {
+          "description": "The protocol generation the server chose from the client's range.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "server": {
+          "description": "Which server answered.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ServerIdentity"
+            }
+          ]
+        },
+        "snapshot": {
+          "description": "The initial state: everything after this arrives as sequenced events, so snapshot + gap-free `seq` is a complete view.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectSnapshot"
+            }
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "hello-ok"
+          ]
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "ConnectSnapshot": {
+      "description": "The state a connection starts from. Deliberately the same truth the REST surface serves at `/info`: the registered graphs. Everything richer (threads, runs) stays request/response until the sequenced event catalog carries it.",
+      "type": "object",
+      "required": [
+        "graphs",
+        "state_version"
+      ],
+      "properties": {
+        "graphs": {
+          "description": "The graphs registered on this server.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GraphSummary"
+          }
+        },
+        "state_version": {
+          "description": "Version of the state this snapshot describes; event frames carry the `seq` that continues from it.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ErrorShape": {
+      "description": "The structured error carried by failed responses and refused connects.",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable code.",
+          "type": "string"
+        },
+        "details": {
+          "description": "Error-specific detail payload."
+        },
+        "message": {
+          "description": "Human-readable description.",
+          "type": "string"
+        },
+        "retry_after_ms": {
+          "description": "Server-suggested floor before a retry.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "retryable": {
+          "description": "Whether retrying the same frame can succeed.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Features": {
+      "description": "The server's capability listing, as data a client can branch on.",
+      "type": "object",
+      "required": [
+        "events",
+        "methods"
+      ],
+      "properties": {
+        "events": {
+          "description": "Event kinds this connection may observe.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "methods": {
+          "description": "Request methods this server serves.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GrantedAuth": {
+      "description": "What the connection is allowed to do — the grant, not the request.",
+      "type": "object",
+      "required": [
+        "role",
+        "scopes"
+      ],
+      "properties": {
+        "role": {
+          "description": "The role the credentials resolved to.",
+          "type": "string"
+        },
+        "scopes": {
+          "description": "The scopes actually granted.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GraphSummary": {
+      "description": "One registered graph, as the snapshot lists it.",
+      "type": "object",
+      "required": [
+        "channels",
+        "name"
+      ],
+      "properties": {
+        "channels": {
+          "description": "Declared state channels.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "description": "Graph name (`POST /threads` binds to it).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PolicyBudgets": {
+      "description": "Connection budgets. Declared, not discovered: a client that knows the ceilings validates before sending instead of learning them from a dropped connection.",
+      "type": "object",
+      "required": [
+        "max_buffered_bytes",
+        "max_payload_bytes",
+        "tick_interval_ms"
+      ],
+      "properties": {
+        "max_buffered_bytes": {
+          "description": "Most unacknowledged bytes the server buffers before it closes the connection as stalled.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "max_payload_bytes": {
+          "description": "Largest frame the server accepts, in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick_interval_ms": {
+          "description": "Heartbeat interval; a client that misses several ticks should reconnect and re-snapshot.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ServerIdentity": {
+      "description": "The answering server's identity.",
+      "type": "object",
+      "required": [
+        "conn_id",
+        "version"
+      ],
+      "properties": {
+        "conn_id": {
+          "description": "This connection's server-minted id; correlates gateway log lines with client reports.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Server build version.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

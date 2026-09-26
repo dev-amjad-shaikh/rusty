@@ -1,0 +1,11 @@
+{
+  "tenant": "default",
+  "environment": "staging",
+  "revision_id": "04a44aff303e1efb2d988bbc93e98a2570852d3f7725abb69cc97a87dc6ab163",
+  "fraction": 0.1,
+  "author": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "declared_at": "2025-10-09T08:55:00Z"
+}

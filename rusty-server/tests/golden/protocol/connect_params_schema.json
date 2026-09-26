@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConnectParams",
+  "description": "The client's opening message: the protocol range it speaks, who it is, and how it authenticates.",
+  "type": "object",
+  "required": [
+    "client",
+    "max_protocol",
+    "min_protocol"
+  ],
+  "properties": {
+    "auth": {
+      "description": "Credentials. Absent on an open-mode server.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConnectAuth"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "client": {
+      "description": "Who is connecting.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ClientIdentity"
+        }
+      ]
+    },
+    "max_protocol": {
+      "description": "Newest protocol generation the client understands.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "min_protocol": {
+      "description": "Oldest protocol generation the client still understands.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "scopes": {
+      "description": "Scopes the client asks for; the grant comes back in [`HelloOk::auth`] and may be narrower.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "ClientIdentity": {
+      "description": "The connecting client's self-description.",
+      "type": "object",
+      "required": [
+        "id",
+        "platform",
+        "version"
+      ],
+      "properties": {
+        "display_name": {
+          "description": "Human-readable name, when the client has one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable client identifier (e.g. `studio`, `sdk-ts`).",
+          "type": "string"
+        },
+        "platform": {
+          "description": "Platform the client runs on (e.g. `web`, `node`, `python`).",
+          "type": "string"
+        },
+        "version": {
+          "description": "Client build version.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConnectAuth": {
+      "description": "Connect credentials. Mirrors the HTTP surface's `X-Api-Key` scheme — the gateway grants what the same key would be granted over REST.",
+      "type": "object",
+      "properties": {
+        "api_key": {
+          "description": "API key, when the server is not in open mode.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

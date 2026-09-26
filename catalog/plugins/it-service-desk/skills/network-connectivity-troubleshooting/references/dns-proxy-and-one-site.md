@@ -1,0 +1,8 @@
+# DNS, proxy, and "just this one site"
+- **Clock skew** makes every TLS site fail with certificate errors: check the date and time zone first.
+- **DNS**: `nslookup site` fails but `ping 1.1.1.1` works → flush (`sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder` on Mac; `ipconfig /flushdns` on Windows; `resolvectl flush-caches` on Linux), then try the corporate resolver explicitly (`nslookup site <resolver ip>`). If the corporate resolver fails for one name that public DNS resolves, it is a block or an internal-only name (needs VPN).
+- **Proxy / secure web gateway** (Zscaler, Netskope, Umbrella): a block page or a certificate from the gateway means policy, not the laptop. Read the block reason on the page; the fix is a request to the security team, not a workaround. A proxy PAC that is stale explains "some sites hang": Mac `networksetup -getautoproxyurl Wi-Fi`; Windows `netsh winhttp show proxy` and Settings → Network → Proxy.
+- **IPv6**: a site fails only on some networks; disabling IPv6 on the adapter is a diagnostic, not a fix. Report it to the network team with the site.
+- **Browser-only**: works in a private window → extension or cache; works in another browser → that browser's proxy/DNS settings (Firefox has its own DNS-over-HTTPS; Chrome has its own secure DNS).
+- **MTU**: sites load partly then hang, VPN especially: lower the MTU on the tunnel (1400) as a test.
+- **Certificate pinned/inspected**: an app (not a browser) fails behind TLS inspection; the app needs the gateway root certificate in its own trust store (Java, Python, Docker, git each keep their own). Say which store.

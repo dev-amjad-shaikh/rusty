@@ -1,0 +1,27 @@
+[
+  {
+    "action": "retry",
+    "attempt": 1
+  },
+  {
+    "action": "abort"
+  },
+  {
+    "action": "set_timeout",
+    "millis": 100
+  },
+  {
+    "action": "select_worker",
+    "worker": "w1"
+  },
+  {
+    "action": "set_concurrency",
+    "limit": 4
+  },
+  {
+    "action": "write_checkpoint"
+  },
+  {
+    "action": "skip_checkpoint"
+  }
+]

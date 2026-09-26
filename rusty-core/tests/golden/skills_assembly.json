@@ -1,0 +1,27 @@
+{
+  "format": "context-manifest-v1",
+  "policy": {
+    "name": "skills-test"
+  },
+  "counter": "estimated",
+  "budget_tokens": 4096,
+  "manifest_tokens": 177,
+  "sections": [
+    {
+      "kind": "task",
+      "budget_tokens": 256,
+      "used_tokens": 15,
+      "truncated": false
+    },
+    {
+      "kind": "skills",
+      "budget_tokens": 512,
+      "used_tokens": 114,
+      "truncated": false,
+      "ids": [
+        "web-research@2:ee1188dbfa7b9ebdc40ddcf718f4e405f42d23b3d8e466e38da19e7086f867de",
+        "email-drafting@1:f2b6ce851c733a9559fbf790851a1fb385a29ac072a2dc82363298544263b30f"
+      ]
+    }
+  ]
+}

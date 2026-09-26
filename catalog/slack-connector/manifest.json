@@ -1,0 +1,179 @@
+{
+  "id": "slack",
+  "version": "1",
+  "display_name": "Slack",
+  "description": "Slack Web API: read the workspace's channels and people, and post a message to a channel. Connected by installing the app to a workspace.",
+  "documentation_url": "https://api.slack.com/web",
+  "base_url": "https://slack.com",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Slack Connection",
+    "type": "object",
+    "required": [
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "title": "Slack app",
+        "description": "From api.slack.com/apps \u2192 Basic Information. The token itself is issued when you authorize the install \u2014 you never type it.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 0,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Bot token",
+            "rusty_secret": true,
+            "rusty_hidden": true,
+            "rusty_order": 2
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh token",
+            "rusty_secret": true,
+            "rusty_hidden": true,
+            "rusty_order": 3
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Token expires",
+            "rusty_hidden": true,
+            "rusty_order": 4
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the token is valid and say which workspace and app it belongs to.",
+      "method": "GET",
+      "path": "/api/auth.test",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-channels",
+      "description": "List the conversations the app can see.",
+      "method": "GET",
+      "path": "/api/conversations.list",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "string",
+            "description": "public_channel, private_channel, mpim, im"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-users",
+      "description": "List the people in the workspace.",
+      "method": "GET",
+      "path": "/api/users.list",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "post-message",
+      "description": "Post a message to a channel.",
+      "method": "POST",
+      "path": "/api/chat.postMessage",
+      "effect": "irreversible",
+      "params_schema": {
+        "type": "object",
+        "required": [
+          "channel",
+          "text"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "headers": [],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection",
+  "authorization": {
+    "authorize_url": "https://slack.com/oauth/v2/authorize",
+    "token_url": "https://slack.com/api/oauth.v2.access",
+    "scopes": "channels:read,users:read,chat:write",
+    "client_id": "{credentials.client_id}",
+    "client_secret": "{credentials.client_secret}",
+    "extra_params": {}
+  }
+}

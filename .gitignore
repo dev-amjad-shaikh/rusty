@@ -1,0 +1,29 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Python (SDKs)
+__pycache__/
+*.pyc
+
+# Local e2e scratch / server pid
+.tmp-e2e
+srv.pid
+
+# Checkpoint / demo data produced by examples
+rusty-server/data/
+data/
+
+# OS
+.DS_Store
+
+# Local working archive (not part of the public repo)
+_local-archive/
+
+# Operator-local deployment config (model endpoints, keys)
+.env.rusty-local
+target-core/
+target-full/
+aboutrusty/node_modules/
+aboutrusty/.vite/

@@ -1,0 +1,22 @@
+[
+  "super_step_start",
+  "super_step_end",
+  "node_input",
+  "node_output",
+  "model_call",
+  "tool_call",
+  "remote_call",
+  "wasm_call",
+  "interrupt",
+  "resume",
+  "routing_decision",
+  "checkpoint_written",
+  "effect_receipt",
+  "agent_spawn",
+  "agent_exit",
+  "mailbox_send",
+  "mailbox_receive",
+  "supervision_event",
+  "coordination_start",
+  "coordination_end"
+]

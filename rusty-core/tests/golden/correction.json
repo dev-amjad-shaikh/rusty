@@ -1,0 +1,18 @@
+{
+  "correction_id": "correction-9",
+  "author": "amjad",
+  "target": {
+    "type": "run_event",
+    "run_id": "run-abc",
+    "event_id": "run-abc:7"
+  },
+  "corrected": {
+    "answer": "42",
+    "unit": " AED"
+  },
+  "scope": {
+    "scope": "agent",
+    "id": "researcher-7"
+  },
+  "rationale": "the run quoted the pre-2024 exchange rate"
+}

@@ -1,0 +1,7 @@
+{
+  "surface": "memory:agent:support-1",
+  "from": "dee1cf631ee3558a3612b169df27751ff26713ff1a91f35e798c62563ae71a3a",
+  "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "cause": "drift monitor: pass-rate drop on support@v3 (runs run-201..run-210)",
+  "rolled_back_at": "2025-06-15T15:06:45Z"
+}

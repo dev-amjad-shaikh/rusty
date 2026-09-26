@@ -1,0 +1,18 @@
+{
+  "candidate_id": "d26da7d04774b3807124a2ed693ebf5446f228e348877971383af7de34c73c20",
+  "content": {
+    "kind": "model_settings",
+    "name": "primary",
+    "model": "gpt-5.2-2026-06-01",
+    "parameters": {
+      "max_tokens": 2048,
+      "seed": 42,
+      "temperature": 0.2
+    }
+  },
+  "distilled_by": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "created_at": "2025-10-09T08:53:22Z"
+}

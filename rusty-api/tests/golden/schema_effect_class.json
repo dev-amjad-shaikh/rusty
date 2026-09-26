@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EffectClass",
+  "description": "The effect class a tool declares, used for placement and sandboxing.",
+  "oneOf": [
+    {
+      "description": "No side effects beyond computation.",
+      "type": "string",
+      "enum": [
+        "read"
+      ]
+    },
+    {
+      "description": "May read and write, but execution is the expected path.",
+      "type": "string",
+      "enum": [
+        "execute"
+      ]
+    },
+    {
+      "description": "Network egress.",
+      "type": "string",
+      "enum": [
+        "egress"
+      ]
+    }
+  ]
+}

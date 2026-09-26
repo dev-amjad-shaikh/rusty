@@ -1,0 +1,110 @@
+/* Rustynome design tokens — the single source of visual truth.
+ * Values are the design handoff's, verbatim (01-design-system.md + the
+ * reference HTML). Two themes only; `data-theme` on the root selects. */
+
+:root {
+  --font-ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Radii — controls 8, cards 10–12, main card 14, app frame 18, pills 999. */
+  --r-control: 8px;
+  --r-card: 12px;
+  --r-card-lg: 14px;
+  --r-frame: 18px;
+  --r-pill: 999px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #e8e8e8;
+  --bg: #f7f7f7;
+  --panel: #ffffff;
+  --line: #e6e6e6;
+  --ink: #141414;
+  --ink2: #6b6b6b;
+  --ink3: #9b9b9b;
+  --accent: #141414;
+  --accent-soft: #ececec;
+  --ok: #1f9d6a;
+  --ok-soft: #e6f6ee;
+  --warn: #b7791f;
+  --warn-soft: #fbf1dc;
+  --err: #d3322b;
+  --err-soft: #fbe6e4;
+  --code: #f2f2f2;
+  --focus: #1f9d6a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0f0f0f;
+  --bg: #171717;
+  --panel: #1d1d1d;
+  --line: #2c2c2c;
+  --ink: #f0f0f0;
+  --ink2: #a3a3a3;
+  --ink3: #6f6f6f;
+  --accent: #f0f0f0;
+  --accent-soft: #2a2a2a;
+  --ok: #3fbf85;
+  --ok-soft: #14301f;
+  --warn: #d9a541;
+  --warn-soft: #2f2712;
+  --err: #ef6b5f;
+  --err-soft: #3a1a17;
+  --code: #242424;
+  --focus: #3fbf85;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; height: 100%; }
+
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--ink); }
+
+code, pre, kbd { font-family: var(--font-mono); }
+
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+
+/* The select chevron is drawn as a background image; components set
+ * `background-color` (never the `background` shorthand, which wipes it). */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a8a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  cursor: pointer;
+}
+
+input::placeholder, textarea::placeholder { color: var(--ink3); }
+input:focus, select:focus, textarea:focus { border-color: var(--ink3); }
+
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+
+@keyframes rn-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+@keyframes rn-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}

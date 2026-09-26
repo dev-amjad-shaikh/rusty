@@ -1,0 +1,13 @@
+/* The Knot theme, as handed off: the prototype's stylesheets in the order it
+ * loads them, unchanged. theme-knot.css is last and wins. */
+@import "@tabler/icons-webfont/dist/tabler-icons.min.css";
+@import "./css/mosaic.css";
+@import "./css/components.css";
+@import "./css/builder.css";
+@import "./css/flows.css";
+@import "./css/screens.css";
+@import "./css/features.css";
+@import "./css/theme-knot.css";
+
+/* The app mounts the shell full-bleed; the prototype's <body> did the same. */
+html, body, #root { height: 100%; margin: 0; }

@@ -1,0 +1,32 @@
+# Local OpenTelemetry stack for rusty-otel:
+# OTLP collector (receives spans from the demo/app) -> Jaeger all-in-one (UI).
+#
+# Usage:
+#   docker compose up -d
+#   OTEL_DEMO_ENDPOINT=http://localhost:4318/v1/traces cargo run --example otel_demo
+#   open http://localhost:16686   (Jaeger UI, service "rusty-otel-demo")
+#
+# Tear down:
+#   docker compose down
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: rusty-otel-jaeger
+    # Only the UI is exposed; OTLP ingest stays on the internal network where
+    # the collector forwards to it.
+    ports:
+      - "16686:16686"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: rusty-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    # Your app talks to the collector here (OTLP/gRPC + OTLP/HTTP).
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - jaeger

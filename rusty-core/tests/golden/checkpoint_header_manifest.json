@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "graph_version": "react-v3",
+  "graph_hash": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+  "policy_version": "static-v0",
+  "logical_clock": 1750000000000,
+  "manifest": {
+    "prompts": {
+      "system": "edff20fbc61c032a9206bdc94aec3b70e05ab953383972b267b83957d9ba7bfe"
+    },
+    "tool_schemas": {
+      "search": "094ec29d007cce150c65abf0756d79ad5b62a1acfdb6e0841f69f1377ef41761"
+    },
+    "model": "gpt-5.2-2026-06-01",
+    "model_params": "fc004364a674799b07f8e4e6323ad74398745607ae3bd955e0d9c1d7529a0762",
+    "memory_schema": "memory-v1",
+    "capsules": {
+      "researcher": "1.4.0"
+    }
+  }
+}

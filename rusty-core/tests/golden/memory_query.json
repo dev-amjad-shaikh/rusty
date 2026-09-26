@@ -1,0 +1,23 @@
+{
+  "scope": {
+    "scope": "agent",
+    "id": "researcher-7"
+  },
+  "kinds": [
+    "fact",
+    "preference"
+  ],
+  "key": "timezone",
+  "tags": [
+    "profile"
+  ],
+  "valid_at": "2027-01-15T08:00:00Z",
+  "min_confidence": 0.5,
+  "include_expired": true,
+  "include_superseded": true,
+  "authored_by": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "as_of": "2027-01-15T08:00:00Z"
+}

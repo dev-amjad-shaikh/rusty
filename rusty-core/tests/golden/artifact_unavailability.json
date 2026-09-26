@@ -1,0 +1,16 @@
+[
+  {
+    "artifact_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tenant": "acme",
+    "name": "weekly-report",
+    "surface": "bytes",
+    "observed_at": "2025-10-12T20:13:20Z"
+  },
+  {
+    "artifact_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tenant": "acme",
+    "name": "weekly-report",
+    "surface": "preview",
+    "observed_at": "2025-10-12T20:15:00Z"
+  }
+]

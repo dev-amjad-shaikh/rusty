@@ -1,0 +1,11 @@
+{
+  "surface": "middleware:default",
+  "tag": "staging",
+  "candidate_id": "71016ca02da807f916b620bf96f6e15aed0a1ee4430eaac7d3ee78ae530b3c07",
+  "pointer": "active",
+  "digest": "49be7a368f8b7aab10b880448219b5c0b1cbb7c53367b552e7fd4e55f8a6a98a",
+  "layers": [
+    "request_logger",
+    "tool_call_blocklist"
+  ]
+}

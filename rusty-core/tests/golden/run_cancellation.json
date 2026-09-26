@@ -1,0 +1,10 @@
+{
+  "cause": "hook",
+  "keep_inbox": false,
+  "dropped": {
+    "steering": 2,
+    "followups": 1,
+    "staged": 1,
+    "pending": 0
+  }
+}

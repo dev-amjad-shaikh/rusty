@@ -1,0 +1,81 @@
+{
+ "id": "ledger",
+ "version": "2",
+ "display_name": "Ledger",
+ "description": "A ledger of entries, paged: read the schema this deployment is on, then list entries a page at a time following next_cursor until it is null.",
+ "documentation_url": "https://example.com/ledger/docs",
+ "base_url": "https://{host}",
+ "connection_specification": {
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+   "host"
+  ],
+  "properties": {
+   "host": {
+    "type": "string",
+    "title": "Ledger host",
+    "rusty_order": 0,
+    "description": "The host this ledger answers on.",
+    "rusty_pattern_descriptor": "ledger.example.com"
+   }
+  }
+ },
+ "operations": [
+  {
+   "name": "check-connection",
+   "description": "Verify the ledger answers.",
+   "method": "GET",
+   "path": "/v1/schema",
+   "effect": "read_only",
+   "params_schema": {
+    "type": "object"
+   },
+   "headers": [],
+   "auth": [],
+   "max_response_bytes": null
+  },
+  {
+   "name": "schema",
+   "description": "The fields this ledger's current schema has, and their types. Call this before listing entries, and again whenever a call is refused for an unknown field: field names change between schema versions.",
+   "method": "GET",
+   "path": "/v1/schema",
+   "effect": "read_only",
+   "params_schema": {
+    "type": "object"
+   },
+   "headers": [],
+   "auth": [],
+   "max_response_bytes": null
+  },
+  {
+   "name": "list-entries",
+   "description": "One page of ledger entries. The answer carries `entries`, `total` and `next_cursor`; when next_cursor is not null there are more pages, and the next call passes it as `cursor`. Reading every entry means following the cursor until it comes back null. The field names come from the schema this ledger is on; call `schema` first and use the names it gives. A name from another version is refused with the names that exist.",
+   "method": "GET",
+   "path": "/v1/entries",
+   "effect": "read_only",
+   "params_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+     "cursor": {
+      "type": "string",
+      "description": "The `next_cursor` from the previous page. Omit for the first page."
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Entries per page, 1-100. The ledger's own default is used when omitted."
+     },
+     "fields": {
+      "type": "string",
+      "description": "Comma-separated field names to return. The field names come from the schema this ledger is on; call `schema` first and use the names it gives. A name from another version is refused with the names that exist."
+     }
+    }
+   },
+   "headers": [],
+   "auth": [],
+   "max_response_bytes": null
+  }
+ ],
+ "check": "check-connection"
+}

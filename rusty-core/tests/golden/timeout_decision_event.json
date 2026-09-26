@@ -1,0 +1,55 @@
+{
+  "id": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d:d2",
+  "run_id": "019157c4-6f1f-7a3b-8c2d-9e4f5a6b7c8d",
+  "thread_id": "thread-42",
+  "seq": 2,
+  "family": "timeout",
+  "features": {
+    "attempt": 1,
+    "bound_ms": 5000,
+    "callee": "search",
+    "effect": "idempotent",
+    "latency_p50_ms": 820,
+    "latency_p95_ms": 4100,
+    "latency_p99_ms": 7300,
+    "latency_samples": 64
+  },
+  "legal_actions": [
+    {
+      "action": "set_timeout",
+      "millis": 100
+    },
+    {
+      "action": "set_timeout",
+      "millis": 500
+    },
+    {
+      "action": "set_timeout",
+      "millis": 1000
+    },
+    {
+      "action": "set_timeout",
+      "millis": 5000
+    },
+    {
+      "action": "set_timeout",
+      "millis": 30000
+    },
+    {
+      "action": "set_timeout",
+      "millis": 120000
+    },
+    {
+      "action": "set_timeout",
+      "millis": 300000
+    }
+  ],
+  "selected": {
+    "action": "set_timeout",
+    "millis": 5000
+  },
+  "propensity": 1.0,
+  "policy_version": "policy-288c0b9c5aff",
+  "outcome": null,
+  "decided_at": "2025-06-15T15:06:40Z"
+}

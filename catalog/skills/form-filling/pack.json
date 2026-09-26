@@ -1,0 +1,16 @@
+{
+  "id": "form-filling",
+  "name": "Form Filling",
+  "version": "1.0.0",
+  "publisher": "rusty",
+  "skills": [
+    {
+      "dir": ".",
+      "dependencies": [
+        { "type": "gateway", "capability": "structured_input" },
+        { "type": "tool", "name": "read_context" }
+      ],
+      "reference_docs": ["references/field-grounding.md"]
+    }
+  ]
+}

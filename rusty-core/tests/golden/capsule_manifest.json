@@ -1,0 +1,81 @@
+{
+  "identity": {
+    "name": "researcher",
+    "description": "third-party research capsule"
+  },
+  "version": "1.4.0",
+  "build_digest": "e91b0c27497b9b76bc909bee10a948ec1d4cf32572f3f0c226fce4f9b3753635",
+  "interface": {
+    "world": "rusty:capsule/world@0.1.0",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "topic": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "type": "object"
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object"
+    }
+  },
+  "effects": [
+    "read_only",
+    "non_idempotent"
+  ],
+  "capabilities": [
+    {
+      "kind": "filesystem",
+      "paths": [
+        "/data/research"
+      ],
+      "mode": "read"
+    },
+    {
+      "kind": "network",
+      "hosts": [
+        "api.example"
+      ],
+      "protocols": [
+        "https"
+      ],
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "kind": "secret",
+      "handles": [
+        "search-api-key"
+      ]
+    },
+    {
+      "kind": "tool",
+      "tools": [
+        "web_search"
+      ]
+    },
+    {
+      "kind": "model",
+      "models": [
+        "summarizer-v3"
+      ]
+    },
+    {
+      "kind": "clock"
+    }
+  ],
+  "budget": {
+    "fuel": 5000000,
+    "max_memory_bytes": 16777216,
+    "wall_time_ms": 30000,
+    "max_tokens": 50000,
+    "max_cost_usd": 1.25,
+    "max_output_bytes": 65536
+  }
+}

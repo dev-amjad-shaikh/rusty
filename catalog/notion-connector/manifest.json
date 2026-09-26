@@ -1,0 +1,161 @@
+{
+  "id": "notion",
+  "version": "1",
+  "display_name": "Notion",
+  "description": "Notion: search the workspace, read a page's blocks, and query a database.",
+  "documentation_url": "https://developers.notion.com/reference/intro",
+  "base_url": "https://api.notion.com",
+  "connection_specification": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "credentials"
+    ],
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "integration_token"
+        ],
+        "properties": {
+          "integration_token": {
+            "type": "string",
+            "title": "Internal integration token",
+            "rusty_secret": true,
+            "rusty_order": 0,
+            "description": "From notion.so/my-integrations. The pages you want must be shared with the integration."
+          }
+        },
+        "title": "Authentication",
+        "rusty_order": 0
+      }
+    },
+    "title": "Notion Connection"
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the token is valid and say which bot it belongs to.",
+      "method": "GET",
+      "path": "/v1/users/me",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "headers": [
+        [
+          "Notion-Version",
+          "2022-06-28"
+        ]
+      ],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.integration_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "list-users",
+      "description": "List the people the integration can see.",
+      "method": "GET",
+      "path": "/v1/users",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "page_size": {
+            "type": "integer"
+          },
+          "start_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "headers": [
+        [
+          "Notion-Version",
+          "2022-06-28"
+        ]
+      ],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.integration_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "get-page",
+      "description": "Read a page's properties.",
+      "method": "GET",
+      "path": "/v1/pages/{page_id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "page_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id"
+        ]
+      },
+      "headers": [
+        [
+          "Notion-Version",
+          "2022-06-28"
+        ]
+      ],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.integration_token}"
+        }
+      ],
+      "max_response_bytes": null
+    },
+    {
+      "name": "get-block-children",
+      "description": "Read the blocks a page or block contains.",
+      "method": "GET",
+      "path": "/v1/blocks/{block_id}/children",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "block_id": {
+            "type": "string"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "start_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_id"
+        ]
+      },
+      "headers": [
+        [
+          "Notion-Version",
+          "2022-06-28"
+        ]
+      ],
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.integration_token}"
+        }
+      ],
+      "max_response_bytes": null
+    }
+  ],
+  "check": "check-connection"
+}

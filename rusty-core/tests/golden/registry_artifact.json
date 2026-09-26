@@ -1,0 +1,19 @@
+{
+  "surface": "prompt:system",
+  "family": "prompt",
+  "owner": {
+    "type": "human",
+    "human_id": "amjad"
+  },
+  "commits": [
+    {
+      "candidate_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "committed_at": "2025-10-09T08:53:21Z"
+    },
+    {
+      "candidate_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "committed_at": "2025-10-09T08:53:23Z"
+    }
+  ],
+  "created_at": "2025-10-09T08:53:20Z"
+}

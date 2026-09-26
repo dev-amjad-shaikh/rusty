@@ -1,0 +1,179 @@
+{
+  "id": "gong",
+  "version": "1",
+  "display_name": "Gong",
+  "description": "Gong API: recorded sales calls — who was on them, when, the transcript-derived topics, trackers and next steps — for one account or one rep over a period.",
+  "documentation_url": "https://gong.app.gong.io/settings/api/documentation",
+  "base_url": "https://api.gong.io/v2",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Gong Connection",
+    "type": "object",
+    "required": [
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "title": "API key",
+        "description": "Company Settings → Ecosystem → API → Create key: an access key and its secret (technical administrator).",
+        "required": [
+          "access_key",
+          "access_key_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 0,
+        "properties": {
+          "access_key": {
+            "type": "string",
+            "title": "Access key",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "access_key_secret": {
+            "type": "string",
+            "title": "Access key secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the key is accepted.",
+      "method": "GET",
+      "path": "/users?limit=1",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.access_key}",
+          "password": "{credentials.access_key_secret}"
+        }
+      ]
+    },
+    {
+      "name": "list-calls",
+      "description": "Calls in a window: id, title, started, duration, participants' emails, direction, the CRM opportunity it is linked to.",
+      "method": "GET",
+      "path": "/calls",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "fromDateTime": {
+            "type": "string",
+            "description": "ISO-8601 start, e.g. 2026-09-01T00:00:00Z"
+          },
+          "toDateTime": {
+            "type": "string",
+            "description": "ISO-8601 end"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Paging cursor"
+          }
+        },
+        "required": [
+          "fromDateTime",
+          "toDateTime"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.access_key}",
+          "password": "{credentials.access_key_secret}"
+        }
+      ]
+    },
+    {
+      "name": "get-call",
+      "description": "One call's metadata and participants.",
+      "method": "GET",
+      "path": "/calls/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Call id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.access_key}",
+          "password": "{credentials.access_key_secret}"
+        }
+      ]
+    },
+    {
+      "name": "calls-extensive",
+      "description": "Calls with content: topics, trackers, points of interest (next steps, questions, objections), talk ratios, and the CRM context. Filter by date and by participant email or call ids.",
+      "method": "POST",
+      "path": "/calls/extensive",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "object",
+            "description": "{\"fromDateTime\": \"...\", \"toDateTime\": \"...\", \"callIds\": [...]} or with \"primaryUserIds\""
+          },
+          "contentSelector": {
+            "type": "object",
+            "description": "{\"exposedFields\": {\"content\": {\"topics\": true, \"trackers\": true, \"pointsOfInterest\": true}, \"interaction\": {\"speakers\": true}, \"parties\": true}}"
+          }
+        },
+        "required": [
+          "filter",
+          "contentSelector"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.access_key}",
+          "password": "{credentials.access_key_secret}"
+        }
+      ]
+    },
+    {
+      "name": "list-users",
+      "description": "Gong users (reps) with emails, for mapping a rep to their calls.",
+      "method": "GET",
+      "path": "/users",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "Paging cursor"
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.access_key}",
+          "password": "{credentials.access_key_secret}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

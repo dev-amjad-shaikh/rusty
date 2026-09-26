@@ -1,0 +1,166 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ObserverEvent",
+  "description": "Lifecycle facts an [`Observer`] may be notified of.",
+  "oneOf": [
+    {
+      "description": "An event was appended to the journal.",
+      "type": "object",
+      "required": [
+        "event_id",
+        "event_kind",
+        "kind"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "event_kind": {
+          "type": "string",
+          "enum": [
+            "event_appended"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "A phase was entered.",
+      "type": "object",
+      "required": [
+        "event_kind",
+        "phase",
+        "step"
+      ],
+      "properties": {
+        "event_kind": {
+          "type": "string",
+          "enum": [
+            "phase_entered"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "step": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    {
+      "description": "A phase was exited.",
+      "type": "object",
+      "required": [
+        "event_kind",
+        "phase",
+        "step"
+      ],
+      "properties": {
+        "event_kind": {
+          "type": "string",
+          "enum": [
+            "phase_exited"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "step": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "summary": true
+      }
+    },
+    {
+      "description": "A seam decision was taken.",
+      "type": "object",
+      "required": [
+        "event_kind",
+        "handlers",
+        "outcome",
+        "seam"
+      ],
+      "properties": {
+        "event_kind": {
+          "type": "string",
+          "enum": [
+            "seam_decision"
+          ]
+        },
+        "handlers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "seam": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "An invariant violation was detected.",
+      "type": "object",
+      "required": [
+        "detail",
+        "event_kind",
+        "invariant"
+      ],
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "event_kind": {
+          "type": "string",
+          "enum": [
+            "invariant_violation"
+          ]
+        },
+        "invariant": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "A budget was consumed.",
+      "type": "object",
+      "required": [
+        "consumed",
+        "event_kind",
+        "kind",
+        "limit"
+      ],
+      "properties": {
+        "consumed": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "event_kind": {
+          "type": "string",
+          "enum": [
+            "budget_consumed"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,222 @@
+{
+  "id": "greenhouse",
+  "version": "1",
+  "display_name": "Greenhouse Recruiting",
+  "description": "Greenhouse Harvest API: candidates and their applications, the stage each application is in, scheduled interviews, offers, and open jobs — so hiring managers, recruiters and candidates get a status that comes from the system, not from memory.",
+  "documentation_url": "https://developers.greenhouse.io/harvest.html",
+  "base_url": "https://harvest.greenhouse.io/v1",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Greenhouse Connection",
+    "type": "object",
+    "required": [
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "title": "Harvest API key",
+        "description": "Configure → Dev Center → API Credential Management → Harvest API key with Candidates, Applications, Jobs, Offers and Scheduled Interviews permissions (read).",
+        "required": [
+          "api_key"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 0,
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "title": "Harvest API key",
+            "rusty_secret": true,
+            "rusty_order": 0
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the key is accepted.",
+      "method": "GET",
+      "path": "/jobs?per_page=1",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.api_key}",
+          "password": ""
+        }
+      ]
+    },
+    {
+      "name": "list-candidates",
+      "description": "Find candidates by email or by last update.",
+      "method": "GET",
+      "path": "/candidates",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Candidate email"
+          },
+          "updated_after": {
+            "type": "string",
+            "description": "ISO-8601"
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 10
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.api_key}",
+          "password": ""
+        }
+      ]
+    },
+    {
+      "name": "get-candidate",
+      "description": "One candidate with their application ids, recruiter and coordinator.",
+      "method": "GET",
+      "path": "/candidates/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Candidate id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.api_key}",
+          "password": ""
+        }
+      ]
+    },
+    {
+      "name": "get-application",
+      "description": "One application: job, status (active, rejected, hired), current_stage, source, applied_at, rejection reason.",
+      "method": "GET",
+      "path": "/applications/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Application id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.api_key}",
+          "password": ""
+        }
+      ]
+    },
+    {
+      "name": "list-scheduled-interviews",
+      "description": "Interviews scheduled for an application: interviewers, start/end, status, location.",
+      "method": "GET",
+      "path": "/applications/{id}/scheduled_interviews",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Application id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.api_key}",
+          "password": ""
+        }
+      ]
+    },
+    {
+      "name": "get-current-offer",
+      "description": "The application's current offer: status (unresolved, accepted, rejected, deprecated), starts_at, sent_at.",
+      "method": "GET",
+      "path": "/applications/{id}/offer/current_offer",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Application id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.api_key}",
+          "password": ""
+        }
+      ]
+    },
+    {
+      "name": "list-jobs",
+      "description": "Open jobs with hiring team and openings.",
+      "method": "GET",
+      "path": "/jobs",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "open, closed, draft",
+            "default": "open"
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "basic",
+          "username": "{credentials.api_key}",
+          "password": ""
+        }
+      ]
+    }
+  ],
+  "check": "check-connection"
+}

@@ -1,0 +1,243 @@
+{
+  "id": "outreach",
+  "version": "1",
+  "display_name": "Outreach",
+  "description": "Outreach API: a prospect's engagement — which sequences they are in, the step they are on, replies, bounces, opt-outs — and the mailings sent to them, so a rep's 'did they get my email' has an answer.",
+  "documentation_url": "https://developers.outreach.io/api/reference/",
+  "base_url": "https://api.outreach.io/api/v2",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Outreach Connection",
+    "type": "object",
+    "required": [
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "title": "Outreach OAuth app",
+        "description": "Outreach → Settings → Integrations → Outreach API: an app with the read scopes. The tokens are issued when you authorize.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Access token",
+            "rusty_secret": true,
+            "rusty_order": 2,
+            "rusty_hidden": true
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh token",
+            "rusty_secret": true,
+            "rusty_order": 3,
+            "rusty_hidden": true
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Token expires",
+            "rusty_hidden": true,
+            "rusty_order": 4
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the authorization is accepted.",
+      "method": "GET",
+      "path": "/users?page[size]=1",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-prospects",
+      "description": "Find prospects by email, name or account.",
+      "method": "GET",
+      "path": "/prospects",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter[emails]": {
+            "type": "string",
+            "description": "An email address"
+          },
+          "filter[name]": {
+            "type": "string",
+            "description": "Full name"
+          },
+          "filter[account][name]": {
+            "type": "string",
+            "description": "Account name"
+          },
+          "page[size]": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 10
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-prospect",
+      "description": "One prospect: stage, owner, optedOut, engagedAt, clickCount, openCount, replyCount, touchedAt.",
+      "method": "GET",
+      "path": "/prospects/{id}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Prospect id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-sequence-states",
+      "description": "The prospect's sequence memberships: which sequence, state (active, paused, finished, bounced, replied, optedOut), current step, next step at.",
+      "method": "GET",
+      "path": "/sequenceStates",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter[prospect][id]": {
+            "type": "string",
+            "description": "Prospect id"
+          },
+          "page[size]": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        },
+        "required": [
+          "filter[prospect][id]"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-mailings",
+      "description": "Emails sent to a prospect: subject, state (delivered, bounced, opened, replied), deliveredAt, openedAt, repliedAt, bouncedAt.",
+      "method": "GET",
+      "path": "/mailings",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter[prospect][id]": {
+            "type": "string",
+            "description": "Prospect id"
+          },
+          "sort": {
+            "type": "string",
+            "description": "Order",
+            "default": "-deliveredAt"
+          },
+          "page[size]": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        },
+        "required": [
+          "filter[prospect][id]"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-sequences",
+      "description": "Sequences on the account, with enabled state and step counts.",
+      "method": "GET",
+      "path": "/sequences",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "filter[name]": {
+            "type": "string",
+            "description": "Sequence name"
+          },
+          "page[size]": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        }
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection",
+  "authorization": {
+    "authorize_url": "https://api.outreach.io/oauth/authorize",
+    "token_url": "https://api.outreach.io/oauth/token",
+    "scopes": "prospects.read sequences.read sequenceStates.read mailings.read users.read accounts.read",
+    "client_id": "{credentials.client_id}",
+    "client_secret": "{credentials.client_secret}",
+    "extra_params": {}
+  }
+}

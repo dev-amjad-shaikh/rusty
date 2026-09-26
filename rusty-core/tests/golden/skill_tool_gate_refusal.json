@@ -1,0 +1,14 @@
+{
+  "active_skills": [
+    {
+      "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "web-research",
+      "revision": 2
+    }
+  ],
+  "declared_tools": [
+    "web.search"
+  ],
+  "kind": "skill_tool_gate",
+  "tool": "email.send"
+}

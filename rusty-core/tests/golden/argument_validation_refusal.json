@@ -1,0 +1,15 @@
+{
+  "kind": "argument_validation",
+  "violations": [
+    {
+      "message": "missing required property `query`",
+      "path": "",
+      "rule": "required"
+    },
+    {
+      "message": "expected \"integer\", found string",
+      "path": "/limit",
+      "rule": "type"
+    }
+  ]
+}

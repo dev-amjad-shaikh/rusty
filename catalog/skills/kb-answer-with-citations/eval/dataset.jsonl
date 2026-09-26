@@ -1,0 +1,3 @@
+{"kind": "header", "format_version": 1, "name": "kb-answer-with-citations", "version": "1.0.0"}
+{"kind": "case", "id": "grounded-answer", "input": {"question": "How do I rotate an API key?"}, "expect": {"tool_trajectory": [{"name": "kb_search"}], "state": [{"pointer": "/outcome", "expected": "answered"}, {"pointer": "/answer/citations/0/entry_id", "expected": "kb-1042"}]}, "tags": ["smoke", "grounding"]}
+{"kind": "case", "id": "ungrounded-refusal", "input": {"question": "What is the warranty on the discontinued model?"}, "expect": {"tool_trajectory": [{"name": "kb_search"}, {"name": "log_gap"}], "state": [{"pointer": "/outcome", "expected": "refused"}]}, "tags": ["grounding", "refusal"]}

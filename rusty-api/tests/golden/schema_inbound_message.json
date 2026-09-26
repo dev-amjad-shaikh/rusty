@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InboundMessage",
+  "description": "A normalized inbound message delivered to the kernel.",
+  "type": "object",
+  "required": [
+    "content",
+    "from",
+    "received_at"
+  ],
+  "properties": {
+    "content": {
+      "description": "The message payload.",
+      "type": "string"
+    },
+    "from": {
+      "description": "Stable participant identity.",
+      "type": "string"
+    },
+    "received_at": {
+      "description": "When the message was received.",
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

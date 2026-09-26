@@ -1,0 +1,267 @@
+{
+  "id": "zoom",
+  "version": "1",
+  "display_name": "Zoom",
+  "description": "Zoom API: a person's Zoom account (type, licence, status, client version, last login), their settings (audio, recording, waiting room), meeting quality per participant (audio/video/screen-share QoS, CPU, network), and the meetings they host.",
+  "documentation_url": "https://developers.zoom.us/docs/api/",
+  "base_url": "https://api.zoom.us",
+  "connection_specification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Zoom Connection",
+    "type": "object",
+    "required": [
+      "credentials"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "credentials": {
+        "type": "object",
+        "title": "Zoom OAuth app",
+        "description": "marketplace.zoom.us → Build App → General app (user-managed or account-level). Scopes: user:read:admin, dashboard_meetings:read:admin, account:read:admin. The tokens are issued when you authorize.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "additionalProperties": false,
+        "rusty_order": 1,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client ID",
+            "rusty_secret": true,
+            "rusty_order": 0
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client secret",
+            "rusty_secret": true,
+            "rusty_order": 1
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Access token",
+            "rusty_secret": true,
+            "rusty_order": 2,
+            "rusty_hidden": true
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh token",
+            "rusty_secret": true,
+            "rusty_order": 3,
+            "rusty_hidden": true
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Token expires",
+            "rusty_hidden": true,
+            "rusty_order": 4
+          }
+        }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "check-connection",
+      "description": "Verify the authorization is accepted.",
+      "method": "GET",
+      "path": "/v2/users/me",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-user",
+      "description": "A person's Zoom account: type (Basic/Licensed), status, last_login_time, last_client_version, verified, dept, pmi, timezone.",
+      "method": "GET",
+      "path": "/v2/users/{userId}",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "Email or user id"
+          }
+        },
+        "required": [
+          "userId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-user-settings",
+      "description": "The person's settings: audio type, join before host, waiting room, recording, in-meeting features. Explains 'I cannot record' and 'my participants are stuck in the waiting room'.",
+      "method": "GET",
+      "path": "/v2/users/{userId}/settings",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "Email or user id"
+          }
+        },
+        "required": [
+          "userId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-user-meetings",
+      "description": "Meetings the person hosts: upcoming, scheduled, live, previous.",
+      "method": "GET",
+      "path": "/v2/users/{userId}/meetings",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "Email or user id"
+          },
+          "type": {
+            "type": "string",
+            "description": "scheduled, live, upcoming, previous_meetings",
+            "default": "previous_meetings"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 20
+          }
+        },
+        "required": [
+          "userId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "list-dashboard-meetings",
+      "description": "Meetings on the account in a window (Dashboard; Business plan or higher). Gives the meeting uuid for participant quality.",
+      "method": "GET",
+      "path": "/v2/metrics/meetings",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Start date YYYY-MM-DD"
+          },
+          "to": {
+            "type": "string",
+            "description": "End date YYYY-MM-DD"
+          },
+          "type": {
+            "type": "string",
+            "description": "past, pastOne, live",
+            "default": "past"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 30
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-meeting-participants-qos",
+      "description": "Per-participant quality for one meeting: audio and video bitrate, latency, jitter, packet loss, CPU, network type, client version. The evidence behind 'Zoom was choppy'.",
+      "method": "GET",
+      "path": "/v2/metrics/meetings/{meetingId}/participants/qos",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "meetingId": {
+            "type": "string",
+            "description": "Meeting id or uuid (double-encode a uuid with / in it)"
+          },
+          "type": {
+            "type": "string",
+            "description": "past or live",
+            "default": "past"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Rows",
+            "default": 10
+          }
+        },
+        "required": [
+          "meetingId"
+        ]
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    },
+    {
+      "name": "get-account-settings",
+      "description": "Account-level settings and locks — a setting locked here cannot be changed by the person.",
+      "method": "GET",
+      "path": "/v2/accounts/me/settings",
+      "effect": "read_only",
+      "params_schema": {
+        "type": "object"
+      },
+      "auth": [
+        {
+          "style": "bearer",
+          "token": "{credentials.access_token}"
+        }
+      ]
+    }
+  ],
+  "check": "check-connection",
+  "authorization": {
+    "authorize_url": "https://zoom.us/oauth/authorize",
+    "token_url": "https://zoom.us/oauth/token",
+    "scopes": "user:read:admin dashboard_meetings:read:admin dashboard_home:read:admin account:read:admin",
+    "client_id": "{credentials.client_id}",
+    "client_secret": "{credentials.client_secret}",
+    "extra_params": {}
+  }
+}

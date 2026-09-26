@@ -1,0 +1,100 @@
+{
+  "annotations": {},
+  "assignments": {
+    "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e": [
+      {
+        "assigned_at": "2023-11-14T22:18:20Z",
+        "assigner": "miner:induction-1",
+        "event_id": "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e",
+        "intent_id": "odyssey-login"
+      }
+    ]
+  },
+  "entries": {
+    "gap-aeebb2f6cac86633ca29283701e04a2b87b5a6adacdf1078fab704466b54ae16": {
+      "closure_criteria": {
+        "artifact_promoted": {
+          "candidate_id": "cand-odyssey-skill"
+        }
+      },
+      "empty_probes": 0,
+      "evidence": [
+        {
+          "id": "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e",
+          "kind": "interaction_event"
+        }
+      ],
+      "failure_cost_millis": 45000,
+      "filed_at": "2023-11-14T22:20:00Z",
+      "gap_id": "gap-aeebb2f6cac86633ca29283701e04a2b87b5a6adacdf1078fab704466b54ae16",
+      "observed": true,
+      "origin": "induction",
+      "statement": "No reliable guidance for Odyssey login loops after password change",
+      "status": "open",
+      "subject": {
+        "intent": {
+          "intent_id": "odyssey-login"
+        }
+      },
+      "updated_at": "2023-11-14T22:20:00Z",
+      "volume": 380
+    }
+  },
+  "events": {
+    "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e": {
+      "actor": {
+        "id": "u-7f3a",
+        "role": "employee"
+      },
+      "channel": "portal_search",
+      "event_id": "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e",
+      "links": [],
+      "occurred_at": "2023-11-14T22:13:20Z",
+      "outcome": "no_result",
+      "resolution_path": "abandoned",
+      "source": {
+        "record_id": "SRL0042",
+        "stream": "sp_log",
+        "system": "servicenow"
+      },
+      "utterance": "odyssey login loop after password change"
+    }
+  },
+  "format_version": 1,
+  "mutations": {
+    "gap-aeebb2f6cac86633ca29283701e04a2b87b5a6adacdf1078fab704466b54ae16": [
+      {
+        "actor": "induction",
+        "at": "2023-11-14T22:20:00Z",
+        "gap_id": "gap-aeebb2f6cac86633ca29283701e04a2b87b5a6adacdf1078fab704466b54ae16",
+        "kind": {
+          "filed": {
+            "closure_criteria": {
+              "artifact_promoted": {
+                "candidate_id": "cand-odyssey-skill"
+              }
+            },
+            "evidence": [
+              {
+                "id": "ie-3817478de49ae9aa8c4430c8cf233d34a88e64a1fcfcd2544dee86378d89751e",
+                "kind": "interaction_event"
+              }
+            ],
+            "failure_cost_millis": 45000,
+            "observed": true,
+            "origin": "induction",
+            "statement": "No reliable guidance for Odyssey login loops after password change",
+            "subject": {
+              "intent": {
+                "intent_id": "odyssey-login"
+              }
+            },
+            "volume": 380
+          }
+        },
+        "mutation_id": "gm-83a32578611d7af718ec15586c5cd888f66a4091622f70d95179e6602b7c45a9"
+      }
+    ]
+  },
+  "tallies": {}
+}
