@@ -48,7 +48,10 @@ fi
 
 # Run the built binary directly (not via `cargo run`) so its PID is the
 # process to kill on exit. Workspace builds place examples in the root
-# target/ directory.
+# target/ directory. The demo reads its bind address from RUSTY_DEMO_ADDR
+# (RUSTY_SERVER_PORT above is this script's own knob — without this export
+# the server would bind its compiled-in default regardless of the knob).
+export RUSTY_DEMO_ADDR="127.0.0.1:$SERVER_PORT"
 "target/debug/examples/server_demo" &
 SERVER_PID=$!
 

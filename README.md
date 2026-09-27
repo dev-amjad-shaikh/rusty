@@ -59,7 +59,10 @@ docker compose up       # the same pair, containerized
 
 Open **http://localhost:4400** — the Agents front door. Every agent whose
 behavior holds a conversation opens straight into chat, with the run's
-journaled evidence live in the rail beside it. By default the demo's
+journaled evidence live in the rail beside it. The first boot seeds an
+administrator; its password lands in
+`data/server-demo-checkpoints/bootstrap-admin.txt` (sign in with it, change
+it, delete the file — the banner says the same). By default the demo's
 `react_agent` answers from a deterministic local model (no network, no
 credentials); to chat with a real model, put any OpenAI-compatible endpoint
 in a git-ignored `.env.rusty-local` at the repo root:
@@ -71,6 +74,15 @@ RUSTY_LLM_API_KEY=<key>            # optional — a local vLLM/Ollama box needs 
 # provider extensions, merged into every request (example: Qwen3 no-think)
 RUSTY_LLM_EXTRA_BODY='{"chat_template_kwargs":{"enable_thinking":false},"max_tokens":2048}'
 ```
+
+**Cold-start, measured** (Apple M2 Max, warm cargo/npm caches, 2026-09-26):
+the clone is seconds, the workspace build ~1.5 min, the Studio build ~20 s,
+then `dev.sh` boots the pair and Studio is chat-ready — about two minutes
+end to end. A cold cargo cache adds the dependency compile on top;
+`sccache` makes every rebuild after that near-instant. `Cargo.lock` is
+deliberately not committed (library-first workspace), so the first build
+resolves the dependency graph fresh — expect that step to vary with
+registry freshness.
 
 ## Example
 

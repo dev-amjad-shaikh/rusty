@@ -957,7 +957,17 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // override stays honest when a human runs the demo with it set.
     let base = format!("localhost:{}", config.bind_addr.port());
     println!("\nrusty-server demo on http://{base}");
-    println!("  react_agent model: {react_model}\n");
+    println!("  react_agent model: {react_model}");
+    if config.bootstrap_admin {
+        println!(
+            "\n  first boot seeds an administrator — sign in before the curl menu below:"
+        );
+        println!("    password file: <store>/bootstrap-admin.txt (next to the checkpoint store)");
+        println!("  curl -s -c /tmp/rusty-cookies.txt -X POST http://{base}/auth/login \\");
+        println!("    -H 'content-type: application/json' \\");
+        println!("    -d '{{\"username\": \"admin\", \"password\": \"<from the file>\"}}'");
+        println!("  then pass -b /tmp/rusty-cookies.txt with every request.\n");
+    }
     println!("  (Ctrl-C / SIGTERM drains gracefully: in-flight requests and runs");
     println!("   finish within the grace window, runs resume from their checkpoints)\n");
     println!("  # liveness + registered graphs");

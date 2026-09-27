@@ -3795,6 +3795,76 @@ async fn history(
 /// the allowlist, the skills it follows. One function, so a run started from
 /// the API, a schedule and a webhook are the same run — an agent fired by a
 /// cron without this is a bare graph wearing the agent's name.
+/// The deployment's context policy pins the thread's leading system message
+/// as the identity section, and the engine rightly refuses to invent one —
+/// a run whose policy demands identity but carries none is a wiring bug.
+/// The wiring is the deployment's own (it chose the policy), so admission
+/// completes it: a run whose turn does not open with a system message gets
+/// its charter prepended, journaled as message 0 like any other message.
+/// The charter is the run's explicit `config.instructions` when it names
+/// one, and the deployment's minimum — a sentence naming the graph —
+/// otherwise; the assistant path may already have prepended, and
+/// `prepend_charter` no-ops on a leading system message, so this is safe
+/// to run after it. A turn that already opens with a system message, or a
+/// thread that has checkpoints (it heard its charter on an earlier turn),
+/// is left alone. Without the policy the function does nothing.
+pub(crate) async fn apply_deployment_charter(
+    state: &AppState,
+    graph: &str,
+    internal_thread_id: &str,
+    payload: &mut RunPayload,
+) {
+    let policy_pins_identity = state
+        .run_deps
+        .context_policy
+        .as_ref()
+        .is_some_and(|policy| policy.identity.is_some());
+    if !policy_pins_identity {
+        return;
+    }
+    let opens_with_system = payload
+        .input
+        .as_ref()
+        .and_then(|input| input.get("messages"))
+        .and_then(Value::as_array)
+        .and_then(|messages| messages.first())
+        .and_then(|first| first.get("role"))
+        .and_then(Value::as_str)
+        == Some("system");
+    if opens_with_system {
+        return;
+    }
+    let heard_already = state
+        .checkpointer
+        .get_latest(internal_thread_id)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    if heard_already {
+        return;
+    }
+    if payload
+        .config
+        .as_ref()
+        .and_then(|config| config.instructions.as_ref())
+        .is_none()
+    {
+        let config = payload.config.get_or_insert_with(RunConfigPayload::default);
+        config.instructions = Some(format!(
+            "You are `{graph}`, an agent served by Rusty. \
+             Help the person you are talking with, directly and honestly."
+        ));
+    }
+    if let Some(text) = payload
+        .config
+        .as_ref()
+        .and_then(|config| config.instructions.clone())
+    {
+        prepend_charter(&mut payload.input, &text);
+    }
+}
+
 /// A run that names its skills and its tool notes on the payload — a draft
 /// tried from the builder before any agent exists — takes the same doors an
 /// agent's would: the skills ride in as the context's skills section (with
@@ -4629,6 +4699,11 @@ pub(crate) async fn schedule_for_thread(
         )
         .await;
     }
+    // The deployment's context policy pins the thread's leading system
+    // message as the identity section; runs that carry no charter of their
+    // own get the deployment's minimum identity instead of a mid-run
+    // failure (see the function).
+    apply_deployment_charter(state, &record.graph, &internal_id, &mut payload).await;
     apply_draft_config(state, tenant.tenant(), &mut payload).await;
     // Capability admission, shared by every run endpoint: the selection is
     // validated against the graph's executable catalog now, so an unknown
