@@ -983,7 +983,9 @@ impl Broker {
                 connection_id: Some(request.requirement.connection_id.clone()),
                 handle_id: None,
                 tenant: Some(request.tenant.clone()),
-                reason: rusty_agent_runtime::broker::BrokerDenialReason::UnknownConnection,
+                reason: Box::new(
+                    rusty_agent_runtime::broker::BrokerDenialReason::UnknownConnection,
+                ),
                 detail: format!(
                     "connection `{}` is unknown to tenant `{}`",
                     request.requirement.connection_id, request.tenant
@@ -1781,7 +1783,7 @@ mod tests {
                 .await
                 .unwrap_err();
         assert!(
-            matches!(err.reason, BrokerDenialReason::UnknownHandle),
+            matches!(&*err.reason, BrokerDenialReason::UnknownHandle),
             "got: {err}"
         );
         // Garbage fails the same way (parse failure and forgery are one
@@ -1791,7 +1793,7 @@ mod tests {
                 .await
                 .unwrap_err();
         assert!(
-            matches!(err.reason, BrokerDenialReason::UnknownHandle),
+            matches!(&*err.reason, BrokerDenialReason::UnknownHandle),
             "got: {err}"
         );
         let _ = std::fs::remove_dir_all(root);
@@ -1845,7 +1847,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        match &err.reason {
+        match &*err.reason {
             BrokerDenialReason::ConnectionRevoked { grant } => {
                 assert_eq!(
                     grant,
@@ -1904,7 +1906,7 @@ mod tests {
         let err = rusty_agent_runtime::broker::CredentialBroker::issue(&b, &request)
             .await
             .unwrap_err();
-        match &err.reason {
+        match &*err.reason {
             BrokerDenialReason::ScopeNotGranted { missing } => {
                 assert_eq!(missing, &vec!["drive.admin".to_owned()])
             }
@@ -1943,7 +1945,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            matches!(err.reason, BrokerDenialReason::UnknownConnection),
+            matches!(&*err.reason, BrokerDenialReason::UnknownConnection),
             "got: {err}"
         );
         let _ = std::fs::remove_dir_all(root);
@@ -2214,7 +2216,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err.reason, BrokerDenialReason::ConnectionNeedsReauth),
+            matches!(&*err.reason, BrokerDenialReason::ConnectionNeedsReauth),
             "got: {err}"
         );
         // The flip: status, the classified failure, and the journaled
@@ -2248,7 +2250,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(matches!(
-            err.reason,
+            err.reason.as_ref(),
             BrokerDenialReason::ConnectionNeedsReauth
         ));
         // The re-auth path: a recorded consent act re-activates, and the
@@ -2338,7 +2340,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+            matches!(&*err.reason, BrokerDenialReason::BrokerUnavailable),
             "got: {err}"
         );
         assert!(err.detail.contains("no refresh path"), "got: {err}");
@@ -2369,7 +2371,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+            matches!(&*err.reason, BrokerDenialReason::BrokerUnavailable),
             "got: {err}"
         );
         assert_eq!(provider.call_counts(), (0, 1));
@@ -2493,7 +2495,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+            matches!(&*err.reason, BrokerDenialReason::BrokerUnavailable),
             "got: {err}"
         );
         assert_eq!(provider.call_counts(), (0, 0));

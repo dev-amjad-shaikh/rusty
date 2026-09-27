@@ -360,7 +360,7 @@ impl CredentialBroker for ScriptedBroker {
                 connection_id: Some(request.requirement.connection_id.clone()),
                 handle_id: None,
                 tenant: Some(request.tenant.clone()),
-                reason: BrokerDenialReason::UnknownConnection,
+                reason: Box::new(BrokerDenialReason::UnknownConnection),
                 detail: "scripted broker: unknown connection".into(),
             })?;
         if record.status == ConnectionStatus::Revoked {
@@ -877,7 +877,7 @@ async fn secret_resolver_unknown_ref_fails_closed() {
     let resolver = ScriptedSecretResolver::new();
     let err = resolver.resolve_secret(&ref_).await.unwrap_err();
     assert!(
-        matches!(err.reason, BrokerDenialReason::BrokerUnavailable),
+        matches!(&*err.reason, BrokerDenialReason::BrokerUnavailable),
         "got: {err:?}"
     );
     assert!(err.to_string().contains("unknown"), "got: {err}");

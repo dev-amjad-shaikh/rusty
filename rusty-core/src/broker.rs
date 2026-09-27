@@ -830,9 +830,10 @@ pub struct BrokerDenial {
     /// Why the call was refused. Flattened, so the internally-tagged
     /// reason sits at the denial's top level — `{"reason":
     /// "connection_revoked", "grant": […], …}` — one flat evidence
-    /// object, never a `reason.reason` nesting.
+    /// object, never a `reason.reason` nesting. Boxed so the denial
+    /// stays small on the `Err` path of every broker call.
     #[serde(flatten)]
-    pub reason: BrokerDenialReason,
+    pub reason: Box<BrokerDenialReason>,
 
     /// Human-facing context: what was attempted, against which grant.
     pub detail: String,
@@ -845,7 +846,7 @@ impl BrokerDenial {
             connection_id: None,
             handle_id: None,
             tenant: None,
-            reason: BrokerDenialReason::UnknownHandle,
+            reason: Box::new(BrokerDenialReason::UnknownHandle),
             detail,
         }
     }
@@ -856,9 +857,9 @@ impl BrokerDenial {
             connection_id: Some(claims.connection_id.clone()),
             handle_id: Some(claims.handle_id.clone()),
             tenant: Some(claims.tenant.clone()),
-            reason: BrokerDenialReason::HandleExpired {
+            reason: Box::new(BrokerDenialReason::HandleExpired {
                 expires_at: claims.expires_at,
-            },
+            }),
             detail: format!(
                 "handle `{}` expired at {} — handles are short-lived; re-issue at the next use",
                 claims.handle_id, claims.expires_at
@@ -887,7 +888,7 @@ impl BrokerDenial {
             handle_id,
             tenant,
             detail: format!("{detail} — missing scopes: {}", missing.join(", ")),
-            reason: BrokerDenialReason::ScopeNotGranted { missing },
+            reason: Box::new(BrokerDenialReason::ScopeNotGranted { missing }),
         }
     }
 
@@ -897,9 +898,9 @@ impl BrokerDenial {
             connection_id: Some(record.connection_id.clone()),
             handle_id: Some(handle_id.to_owned()),
             tenant: Some(tenant.to_owned()),
-            reason: BrokerDenialReason::ConnectionRevoked {
+            reason: Box::new(BrokerDenialReason::ConnectionRevoked {
                 grant: record.scopes.iter().cloned().collect(),
-            },
+            }),
             detail: format!(
                 "connection `{}` is revoked — the grant {} no longer holds; the next use fails \
                  closed, not the next deploy",
@@ -919,7 +920,7 @@ impl BrokerDenial {
             connection_id: Some(record.connection_id.clone()),
             handle_id: Some(handle_id.to_owned()),
             tenant: Some(tenant.to_owned()),
-            reason: BrokerDenialReason::ConnectionNeedsReauth,
+            reason: Box::new(BrokerDenialReason::ConnectionNeedsReauth),
             detail: format!(
                 "connection `{}` needs re-authentication — a human must record a new consent act",
                 record.connection_id
@@ -933,7 +934,7 @@ impl BrokerDenial {
             connection_id: Some(claims.connection_id.clone()),
             handle_id: Some(claims.handle_id.clone()),
             tenant: Some(claims.tenant.clone()),
-            reason: BrokerDenialReason::UnknownConnection,
+            reason: Box::new(BrokerDenialReason::UnknownConnection),
             detail: format!(
                 "connection `{}` is unknown to tenant `{}`",
                 claims.connection_id, claims.tenant
@@ -947,7 +948,7 @@ impl BrokerDenial {
             connection_id: None,
             handle_id: None,
             tenant: None,
-            reason: BrokerDenialReason::BrokerUnavailable,
+            reason: Box::new(BrokerDenialReason::BrokerUnavailable),
             detail,
         }
     }
@@ -955,7 +956,7 @@ impl BrokerDenial {
 
 impl std::fmt::Display for BrokerDenial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tag = match &self.reason {
+        let tag = match &*self.reason {
             BrokerDenialReason::UnknownHandle => "unknown_handle",
             BrokerDenialReason::HandleExpired { .. } => "handle_expired",
             BrokerDenialReason::ScopeNotGranted { .. } => "scope_not_granted",
@@ -2450,7 +2451,7 @@ mod tests {
         ] {
             let err = CredentialHandle::parse_token(bad).unwrap_err();
             assert!(
-                matches!(err.reason, BrokerDenialReason::UnknownHandle),
+                matches!(&*err.reason, BrokerDenialReason::UnknownHandle),
                 "{bad:?} -> {err:?}"
             );
         }
@@ -2477,7 +2478,7 @@ mod tests {
     #[test]
     fn denial_payloads_are_attributable_and_byte_free() {
         let denial = BrokerDenial::connection_revoked(&record(), "acme", "hdl-x");
-        match &denial.reason {
+        match &*denial.reason {
             BrokerDenialReason::ConnectionRevoked { grant } => {
                 assert_eq!(
                     grant,
