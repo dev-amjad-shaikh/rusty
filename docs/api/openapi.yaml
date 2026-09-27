@@ -1,0 +1,1011 @@
+openapi: 3.1.0
+info:
+  title: Rusty Agent Server
+  description: |
+    HTTP surface of the Rusty agent server — the durable runtime behind
+    [Rusty](https://github.com/dev-amjad-shaikh/rusty).
+
+    This spec covers the core builder surfaces: health and discovery, auth,
+    threads, runs, assistants, connectors, skills, knowledge, memory, and
+    evaluation (datasets + experiments). The server exposes additional
+    enterprise surfaces (approvals, plugins, receipts, SCIM, OIDC, worlds,
+    campaigns, and more) that are not yet documented here — see
+    `docs/api/README.md` for the coverage plan.
+
+    ## Conventions
+
+    - All bodies are JSON; all timestamps are RFC 3339 / ISO 8601 UTC.
+    - Errors are always `{ "error": <kind>, "message": <detail> }` with a
+      matching HTTP status.
+    - Runs are journaled: `POST /threads/{id}/runs` returns `202` with the
+      run id, then the client polls, streams, or waits.
+  version: 0.12.0
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8080
+    description: local demo (scripts/dev.sh)
+tags:
+  - name: health
+  - name: auth
+  - name: threads
+  - name: runs
+  - name: assistants
+  - name: connectors
+  - name: skills
+  - name: knowledge
+  - name: memory
+  - name: evaluation
+paths:
+  /ok:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      operationId: ok
+      security: []
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ok" }
+  /health:
+    get:
+      tags: [health]
+      summary: Readiness probe — checks backing stores, not just the process
+      operationId: healthCheck
+      security: []
+      responses:
+        "200":
+          description: Process and stores are healthy.
+        "503":
+          description: A backing store is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /info:
+    get:
+      tags: [health]
+      summary: Deployment discovery — version, checkpointer, graphs, models, policy
+      operationId: info
+      security: []
+      responses:
+        "200":
+          description: Deployment description.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InfoResponse" }
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in — sets the rusty_session HttpOnly cookie
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginPayload" }
+      responses:
+        "200":
+          description: Signed in. The session rides the `rusty_session` cookie.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: rusty_session=…; HttpOnly; SameSite=Lax
+        "401":
+          description: Wrong credentials.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Sign out — clears the session cookie
+      operationId: logout
+      responses:
+        "200": { description: Signed out. }
+  /auth/password:
+    post:
+      tags: [auth]
+      summary: Change the signed-in user's password
+      operationId: changePassword
+      responses:
+        "200": { description: Password changed. }
+        "400":
+          description: Rejected (policy or wrong current password).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /me:
+    get:
+      tags: [auth]
+      summary: Who is signed in
+      operationId: whoami
+      responses:
+        "200":
+          description: The current principal.
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          description: Anonymous.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads:
+    post:
+      tags: [threads]
+      summary: Create a thread bound to a registered graph
+      operationId: createThread
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateThreadPayload" }
+      responses:
+        "201":
+          description: The created thread.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ThreadRecord" }
+        "400":
+          description: Unknown graph.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads/{thread_id}:
+    get:
+      tags: [threads]
+      summary: Fetch one thread
+      operationId: getThread
+      parameters:
+        - { $ref: "#/components/parameters/ThreadId" }
+      responses:
+        "200":
+          description: The thread.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ThreadRecord" }
+        "404":
+          description: Unknown thread.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads/{thread_id}/fork:
+    post:
+      tags: [threads]
+      summary: Fork a thread — copy its checkpoints onto a new thread
+      operationId: forkThread
+      parameters:
+        - { $ref: "#/components/parameters/ThreadId" }
+      responses:
+        "201":
+          description: The forked thread (`forked_from`, `seed_length` set).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ThreadRecord" }
+        "404":
+          description: Unknown thread.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads/{thread_id}/regenerate:
+    post:
+      tags: [threads]
+      summary: Regenerate — drop the thread's checkpoints, keep the record
+      operationId: regenerateThread
+      parameters:
+        - { $ref: "#/components/parameters/ThreadId" }
+      responses:
+        "200": { description: Regenerated. }
+        "404":
+          description: Unknown thread.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads/{thread_id}/history:
+    post:
+      tags: [threads]
+      summary: Append messages to the thread's durable history
+      operationId: history
+      parameters:
+        - { $ref: "#/components/parameters/ThreadId" }
+      responses:
+        "200": { description: Appended. }
+        "404":
+          description: Unknown thread.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads/{thread_id}/runs:
+    post:
+      tags: [runs]
+      summary: Start a run on this thread (async, 202)
+      description: |
+        The run is journaled: this returns `202` with the run id and status,
+        then the client polls `GET /runs/{run_id}`, streams
+        `GET /runs/{run_id}/stream`, or uses the blocking/streaming variants
+        on this thread. On resume the checkpointed state takes precedence
+        over `input`.
+      operationId: createRun
+      parameters:
+        - { $ref: "#/components/parameters/ThreadId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunPayload" }
+      responses:
+        "202":
+          description: Run accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunAccepted" }
+        "400":
+          description: Rejected at admission (policy, unknown graph, …).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads/{thread_id}/runs/wait:
+    post:
+      tags: [runs]
+      summary: Start a run and block until it terminates (up to one hour)
+      operationId: createRunWait
+      parameters:
+        - { $ref: "#/components/parameters/ThreadId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunPayload" }
+      responses:
+        "200":
+          description: Terminal result.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown thread.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "504":
+          description: Did not terminate within the server-side ceiling.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /threads/{thread_id}/runs/stream:
+    post:
+      tags: [runs]
+      summary: Start a run and stream its frames as SSE
+      description: |
+        `text/event-stream` of JSON frames. `values` and `updates` frames
+        carry graph output; `metadata`, `error`, and `end` are always
+        emitted; the stream keeps alive with 15s heartbeats. `stream_mode`
+        on the payload selects which frame families to emit.
+      operationId: createRunStream
+      parameters:
+        - { $ref: "#/components/parameters/ThreadId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunPayload" }
+      responses:
+        "200":
+          description: Frame stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /runs:
+    get:
+      tags: [runs]
+      summary: List recent runs (board view — capped, latest first)
+      operationId: listRuns
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 25, maximum: 100 }
+        - name: assistant_id
+          in: query
+          description: Restrict to one assistant's runs.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Run listing rows.
+          content:
+            application/json:
+              schema: { type: object }
+  /runs/{run_id}:
+    get:
+      tags: [runs]
+      summary: Fetch one run — status, result, journal metadata
+      operationId: getRun
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /runs/{run_id}/cancel:
+    post:
+      tags: [runs]
+      summary: Cancel a running run
+      operationId: cancelRun
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+      responses:
+        "200": { description: Cancelled. }
+        "404":
+          description: Unknown run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /runs/{run_id}/stream:
+    get:
+      tags: [runs]
+      summary: Subscribe to a run's SSE frames (joins replay + live)
+      operationId: getRunStream
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+      responses:
+        "200":
+          description: Frame stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "404":
+          description: Unknown run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /runs/{run_id}/events:
+    get:
+      tags: [runs]
+      summary: The run's journaled event log
+      operationId: getRunEvents
+      parameters:
+        - { $ref: "#/components/parameters/RunId" }
+      responses:
+        "200":
+          description: Event log.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /runs/replay:
+    post:
+      tags: [runs]
+      summary: Replay a journaled run deterministically from its journal
+      operationId: replayRun
+      responses:
+        "200":
+          description: Replay result.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /runs/diff:
+    get:
+      tags: [runs]
+      summary: Diff two runs (replay vs original divergence report)
+      operationId: diffRuns
+      responses:
+        "200":
+          description: Divergence report.
+          content:
+            application/json:
+              schema: { type: object }
+  /assistants:
+    post:
+      tags: [assistants]
+      summary: Create an assistant — a named, versioned deployment of a graph
+      operationId: createAssistant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAssistantPayload" }
+      responses:
+        "201":
+          description: The created assistant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantView" }
+        "400":
+          description: Invalid payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [assistants]
+      summary: List assistants
+      operationId: listAssistants
+      responses:
+        "200":
+          description: Assistant views.
+          content:
+            application/json:
+              schema: { type: object }
+  /assistants/{assistant_id}:
+    get:
+      tags: [assistants]
+      summary: Fetch one assistant
+      operationId: getAssistant
+      parameters:
+        - { $ref: "#/components/parameters/AssistantId" }
+      responses:
+        "200":
+          description: The assistant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantView" }
+        "404":
+          description: Unknown assistant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /assistants/{assistant_id}/archive:
+    post:
+      tags: [assistants]
+      summary: Archive an assistant (kept, out of the normal list)
+      operationId: archiveAssistant
+      parameters:
+        - { $ref: "#/components/parameters/AssistantId" }
+      responses:
+        "200": { description: Archived. }
+  /assistants/{assistant_id}/restore:
+    post:
+      tags: [assistants]
+      summary: Restore an archived assistant
+      operationId: restoreAssistant
+      parameters:
+        - { $ref: "#/components/parameters/AssistantId" }
+      responses:
+        "200": { description: Restored. }
+  /connectors/instances:
+    post:
+      tags: [connectors]
+      summary: Instantiate a registered connector manifest (schema-validated, secrets sealed)
+      description: |
+        Config is validated against the manifest's connection specification;
+        a rejection is `422` whose message names the failing schema path.
+        Secrets extract and seal through the broker before anything persists.
+      operationId: registerConnectorInstance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstantiatePayload" }
+      responses:
+        "201":
+          description: The instance.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown manifest hash.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Config rejected by the manifest schema.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [connectors]
+      summary: List connector instances
+      operationId: listConnectorInstances
+      responses:
+        "200":
+          description: Instances.
+          content:
+            application/json:
+              schema: { type: object }
+  /connectors/check:
+    post:
+      tags: [connectors]
+      summary: Test a connector config without persisting anything
+      operationId: checkConnector
+      responses:
+        "200":
+          description: Check outcome.
+          content:
+            application/json:
+              schema: { type: object }
+  /connectors/describe:
+    post:
+      tags: [connectors]
+      summary: Draft a connector manifest from an OpenAPI document
+      operationId: describeConnector
+      responses:
+        "200":
+          description: Draft manifest.
+          content:
+            application/json:
+              schema: { type: object }
+  /connectors/openapi:
+    post:
+      tags: [connectors]
+      summary: Build a connector manifest from an OpenAPI document
+      operationId: connectorFromOpenapi
+      responses:
+        "201":
+          description: The registered manifest.
+          content:
+            application/json:
+              schema: { type: object }
+  /connectors/instances/{instance_id}:
+    delete:
+      tags: [connectors]
+      summary: Revoke an instance (sealed secrets are destroyed)
+      operationId: revokeConnectorInstance
+      parameters:
+        - { $ref: "#/components/parameters/InstanceId" }
+      responses:
+        "200": { description: Revoked. }
+        "404":
+          description: Unknown instance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      tags: [connectors]
+      summary: Rotate an instance's credentials
+      operationId: rotateConnectorInstance
+      parameters:
+        - { $ref: "#/components/parameters/InstanceId" }
+      responses:
+        "200": { description: Rotated. }
+  /skills/library:
+    get:
+      tags: [skills]
+      summary: The installable skill library
+      operationId: listSkillLibrary
+      responses:
+        "200":
+          description: Library entries.
+          content:
+            application/json:
+              schema: { type: object }
+  /skills/{name}:
+    get:
+      tags: [skills]
+      summary: Fetch one skill
+      operationId: getSkill
+      parameters:
+        - { $ref: "#/components/parameters/SkillName" }
+      responses:
+        "200":
+          description: The skill.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown skill.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [skills]
+      summary: Remove a skill
+      operationId: removeSkill
+      parameters:
+        - { $ref: "#/components/parameters/SkillName" }
+      responses:
+        "200": { description: Removed. }
+  /skills/{name}/promote:
+    post:
+      tags: [skills]
+      summary: Promote a learned skill revision to active
+      operationId: promoteSkill
+      parameters:
+        - { $ref: "#/components/parameters/SkillName" }
+      responses:
+        "200": { description: Promoted. }
+  /knowledge/sources:
+    get:
+      tags: [knowledge]
+      summary: List registered knowledge sources
+      operationId: listKnowledgeSources
+      responses:
+        "200":
+          description: Sources.
+          content:
+            application/json:
+              schema: { type: object }
+    post:
+      tags: [knowledge]
+      summary: Register a knowledge source
+      operationId: registerKnowledgeSource
+      responses:
+        "201":
+          description: The registered source.
+          content:
+            application/json:
+              schema: { type: object }
+  /knowledge/sources/{source_id}:
+    get:
+      tags: [knowledge]
+      summary: Fetch one source
+      operationId: getKnowledgeSource
+      parameters:
+        - { $ref: "#/components/parameters/SourceId" }
+      responses:
+        "200":
+          description: The source.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /knowledge/query:
+    post:
+      tags: [knowledge]
+      summary: Query the knowledge base
+      operationId: queryKnowledge
+      responses:
+        "200":
+          description: Hits.
+          content:
+            application/json:
+              schema: { type: object }
+  /memory:
+    post:
+      tags: [memory]
+      summary: Write a durable cross-thread memory
+      operationId: writeMemory
+      responses:
+        "200":
+          description: The stored memory.
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/query:
+    post:
+      tags: [memory]
+      summary: Query durable memory
+      operationId: queryMemory
+      responses:
+        "200":
+          description: Matching memories.
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/conflicts:
+    post:
+      tags: [memory]
+      summary: List memory conflicts awaiting resolution
+      operationId: listMemoryConflicts
+      responses:
+        "200":
+          description: Conflicts.
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/forget:
+    post:
+      tags: [memory]
+      summary: Forget one memory
+      operationId: forgetMemory
+      responses:
+        "200": { description: Forgotten. }
+  /memory/{memory_id}:
+    get:
+      tags: [memory]
+      summary: Fetch one memory
+      operationId: getMemory
+      parameters:
+        - name: memory_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The memory.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown memory.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /datasets/{name}:
+    get:
+      tags: [evaluation]
+      summary: Fetch a dataset
+      operationId: getDataset
+      parameters:
+        - { $ref: "#/components/parameters/DatasetName" }
+      responses:
+        "200":
+          description: The dataset.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown dataset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [evaluation]
+      summary: Delete a dataset
+      operationId: deleteDataset
+      parameters:
+        - { $ref: "#/components/parameters/DatasetName" }
+      responses:
+        "200": { description: Deleted. }
+  /datasets/sweep:
+    post:
+      tags: [evaluation]
+      summary: Sweep the datasets directory and register what changed
+      operationId: sweepDatasets
+      responses:
+        "200":
+          description: Sweep report.
+          content:
+            application/json:
+              schema: { type: object }
+  /experiments:
+    post:
+      tags: [evaluation]
+      summary: Run an experiment — a candidate against a dataset version
+      operationId: createExperiment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExperimentPayload" }
+      responses:
+        "201":
+          description: The experiment summary.
+          content:
+            application/json:
+              schema: { type: object }
+    get:
+      tags: [evaluation]
+      summary: List experiments
+      operationId: listExperiments
+      responses:
+        "200":
+          description: Experiment summaries.
+          content:
+            application/json:
+              schema: { type: object }
+  /experiments/{experiment_id}:
+    get:
+      tags: [evaluation]
+      summary: Fetch one experiment
+      operationId: getExperiment
+      parameters:
+        - { $ref: "#/components/parameters/ExperimentId" }
+      responses:
+        "200":
+          description: The experiment.
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown experiment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /experiments/{experiment_id}/cancel:
+    post:
+      tags: [evaluation]
+      summary: Cancel a running experiment
+      operationId: cancelExperiment
+      parameters:
+        - { $ref: "#/components/parameters/ExperimentId" }
+      responses:
+        "200": { description: Cancelled. }
+  /experiments/{experiment_id}/report:
+    get:
+      tags: [evaluation]
+      summary: The experiment's judged report
+      operationId: getExperimentReport
+      parameters:
+        - { $ref: "#/components/parameters/ExperimentId" }
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema: { type: object }
+  /experiments/compare:
+    get:
+      tags: [evaluation]
+      summary: Compare two experiments against their thresholds
+      operationId: compareExperiments
+      responses:
+        "200":
+          description: Comparison verdict.
+          content:
+            application/json:
+              schema: { type: object }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: rusty_session
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+  parameters:
+    ThreadId:
+      name: thread_id
+      in: path
+      required: true
+      schema: { type: string }
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: { type: string }
+    AssistantId:
+      name: assistant_id
+      in: path
+      required: true
+      schema: { type: string }
+    InstanceId:
+      name: instance_id
+      in: path
+      required: true
+      schema: { type: string }
+    SkillName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    SourceId:
+      name: source_id
+      in: path
+      required: true
+      schema: { type: string }
+    DatasetName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    ExperimentId:
+      name: experiment_id
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, description: "Machine-readable kind (e.g. not_signed_in, invalid_config)." }
+        message: { type: string, description: "Human-readable detail." }
+    Ok:
+      type: object
+      properties:
+        ok: { type: boolean, example: true }
+    InfoResponse:
+      type: object
+      required: [service, version, api_protocol_version, checkpointer, server_store, store_path, graphs]
+      properties:
+        service: { type: string, example: rusty-agent-server }
+        version: { type: string, example: "0.12.0" }
+        api_protocol_version: { type: integer, example: 1 }
+        checkpointer: { type: string, description: "Which checkpointer backs this deployment (e.g. memory, sqlite, file)." }
+        server_store: { type: string }
+        store_path: { type: string }
+        sweep_at: { type: ["string", "null"], description: "Daily suite sweep as HH:MM UTC, when configured." }
+        llm: { type: object, description: "Models behind the graphs: primary, fallback, active." }
+        context_policy: { type: ["object", "null"], description: "Deployment default context window and compaction keep." }
+        graphs:
+          type: array
+          items:
+            type: object
+            required: [name, channels]
+            properties:
+              name: { type: string }
+              channels: { type: array, items: { type: string } }
+    LoginPayload:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    CreateThreadPayload:
+      type: object
+      required: [graph]
+      properties:
+        graph: { type: string, description: "Registered graph name this thread binds to." }
+        metadata: { type: object }
+        thread_id: { type: string, description: "Client-chosen id; a UUID v4 is generated when omitted." }
+    ThreadRecord:
+      type: object
+      required: [thread_id, tenant, graph, metadata, created_at]
+      properties:
+        thread_id: { type: string }
+        tenant: { type: string }
+        graph: { type: string }
+        metadata: { type: object }
+        forked_from: { type: string, description: "Set on forks." }
+        seed_length: { type: integer, description: "Checkpoints copied from the parent at fork time." }
+        created_at: { type: string, format: date-time }
+    RunPayload:
+      type: object
+      properties:
+        input: { type: object, description: "Initial state. Ignored on resume — the checkpointed state takes precedence." }
+        command: { type: object, description: 'Human-in-the-loop channel, e.g. { "resume": <value> }.' }
+        config: { type: object, description: 'e.g. { "recursion_limit": n }.' }
+        checkpoint: { type: object, description: 'Time travel: { "checkpoint_id": "…" } replays from that checkpoint (404 when unknown).' }
+        metadata: { type: object, description: "Free-form run metadata (stored, not interpreted)." }
+        stream_mode: { type: array, items: { type: string }, description: 'Frame families for SSE: default ["values", "updates"].' }
+    RunAccepted:
+      type: object
+      required: [run_id, thread_id, status]
+      properties:
+        run_id: { type: string }
+        thread_id: { type: string }
+        status: { type: string, example: running }
+    CreateAssistantPayload:
+      type: object
+      required: [name, graph]
+      properties:
+        name: { type: string }
+        graph: { type: string, description: "Registered graph this assistant runs." }
+        assistant_id: { type: string, description: "Client-chosen id; a UUID v4 is generated when omitted." }
+        config: { type: object, description: "Free-form config; recursion_limit is honored as a run default." }
+        metadata: { type: object }
+    AssistantView:
+      type: object
+      required: [assistant_id, name, graph, config, metadata, created_at, active_version_id, version_count]
+      properties:
+        assistant_id: { type: string }
+        name: { type: string }
+        graph: { type: string }
+        config: { type: object }
+        metadata: { type: object }
+        created_at: { type: string, format: date-time }
+        active_version_id: { type: string }
+        version_count: { type: integer }
+        archived_at: { type: string, format: date-time }
+    InstantiatePayload:
+      type: object
+      required: [manifest_hash, config]
+      properties:
+        manifest_hash: { type: string, description: "Hash of a registered connector manifest." }
+        config: { type: object, description: "Validated against the manifest's connection specification." }
+    CreateExperimentPayload:
+      type: object
+      required: [candidate_id, dataset_name, dataset_version, target_metric, thresholds]
+      properties:
+        experiment_id: { type: string }
+        candidate_id: { type: string, description: "The assistant/version under test." }
+        dataset_name: { type: string }
+        dataset_version: { type: string }
+        runs_per_case: { type: integer, default: 1 }
+        max_concurrency: { type: integer, default: 4 }
+        target_metric: { type: string }
+        thresholds: { type: object, description: "Comparison thresholds the report is judged against." }
