@@ -101,6 +101,14 @@ async fn main() -> Result<()> {
 
 The graph topology is validated when you call `GraphBuilder::compile()` — `create_react_agent` does this internally — before any node or paid LLM call runs. Swap `Echo` for `OpenAiCompatibleClient` to talk to OpenAI, vLLM, Ollama, LM Studio, or a compatible gateway.
 
+## Durability, demonstrated
+
+No simulated failure — a real process, a real `kill -9`. A deep-dive run finishes two stages and parks mid-decision; the server is killed outright; a brand-new process boots against the same store, the completed work is intact, and the pending human decision resumes with one command:
+
+![A run parks mid-decision, the server is SIGKILLed, and a fresh process resumes from the checkpoint](docs/screenshots/crash-resume.gif)
+
+The recording is the demo server (`cargo run --example server_demo -p rusty-agent-server`, stage delay shortened via `RUSTY_DEMO_STAGE_DELAY_MS`). The same flow runs unmodified at full stage length, and [`rusty-server/tests/crash_recovery.rs`](rusty-server/tests/crash_recovery.rs) asserts the SIGKILL-and-restart path in CI.
+
 ## Components
 
 | Piece | Path | What it is |
