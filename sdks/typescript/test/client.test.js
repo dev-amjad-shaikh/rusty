@@ -98,6 +98,9 @@ before(async () => {
   child = spawn(BINARY, [], {
     cwd: SCRATCH_DIR, // demo's ./data/server-demo-checkpoints lands here
     stdio: ['ignore', 'ignore', 'pipe'],
+    // The suite assumes the dev-mode server: no sign-in wall. The demo
+    // seeds a bootstrap admin unless RUSTY_OPEN=1 opts out.
+    env: { ...process.env, RUSTY_OPEN: '1' },
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => {

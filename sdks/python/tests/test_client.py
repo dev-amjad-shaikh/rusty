@@ -98,6 +98,9 @@ class LiveServerTestCase(unittest.TestCase):
             cwd=cls.workdir,
             stdout=cls._log,
             stderr=subprocess.STDOUT,
+            # The suite assumes the dev-mode server: no sign-in wall. The
+            # demo seeds a bootstrap admin unless RUSTY_OPEN=1 opts out.
+            env={**os.environ, "RUSTY_OPEN": "1"},
         )
         cls.client = RustyClient(BASE_URL, timeout=30)
         deadline = time.time() + 30
