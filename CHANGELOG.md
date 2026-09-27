@@ -6,6 +6,10 @@ All notable changes to the Rusty platform. Format loosely follows [Keep a Change
 
 The post-R0.12 cycle turns the platform from a governed runtime into a working agent product, without bumping crate versions. The planes below are all behind the existing crates; they will be versioned and branded with the next release.
 
+### Changed
+
+- **MSRV 1.86 → 1.87.** The `yoke-derive 0.8.3` release (transitive, via `jsonschema`'s IDNA stack) uses the inherent `str::from_utf8` stabilized in 1.87 and declares no `rust-version`, so a fresh resolution on a 1.86 floor picks a crate that cannot compile there. The floor moves to the first toolchain that builds the newest dep set; the `genai` (1.88) and `capsules` (1.89) feature floors are unchanged.
+
 ### Added
 
 - **The connector plane** *(rusty-agent-runtime `connector` module, rusty-server `/connectors`)* — schema-driven connector configuration in the Airbyte model: one JSON Schema document *is* the connector, so any public REST API becomes a connector a builder can author without new code. Content-addressed manifests, per-tenant instances with a lifecycle state machine (pending → connecting → healthy | degraded | failed, plus disabled), credentials injected as broker handles — never raw bytes — and tool catalogs pinned by generation. MCP stdio and HTTP search providers alongside the manifest-driven connectors.

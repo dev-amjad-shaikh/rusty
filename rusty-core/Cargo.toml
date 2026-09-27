@@ -65,10 +65,10 @@ genai = { version = "0.6", default-features = false, optional = true }
 reqwest-tls = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls-no-provider"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 # MSRV guard, not a code dependency: serde_with 3.18+ declares rustc 1.88,
-# above the workspace MSRV (1.86). This edge caps what genai's
+# above the workspace MSRV (1.87). This edge caps what genai's
 # `serde_with = "3"` requirement resolves to (3.17.x, rustc 1.82), so the
 # `genai` feature builds on the workspace toolchain — and so downstream
-# crates on 1.86 inherit the cap through feature unification rather than
+# crates on 1.87 inherit the cap through feature unification rather than
 # discovering the break in their own builds.
 serde_with = { version = ">=3, <3.18", optional = true }
 

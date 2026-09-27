@@ -90,8 +90,8 @@ Which package pairs must agree, and on what:
 
 ## MSRV
 
-The minimum supported Rust version for all four crates is **1.86**,
-declared once in `[workspace.package]` (`rust-version = "1.86"`) and
+The minimum supported Rust version for all four crates is **1.87**,
+declared once in `[workspace.package]` (`rust-version = "1.87"`) and
 inherited by every crate via `rust-version.workspace = true`.
 
 MSRV is enforced in CI: the `msrv / ${{ matrix.crate }}` job in

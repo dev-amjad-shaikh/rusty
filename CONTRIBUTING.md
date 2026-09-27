@@ -15,7 +15,7 @@ Thanks for helping build the Rusty platform. This repository is a monorepo of in
 
 ## Checks
 
-The four crates share a virtual workspace (root `Cargo.toml`), so builds resolve from the repository root; per-crate `--manifest-path` commands work as before. In the crate you touched, run the standard trio on stable Rust (MSRV 1.86):
+The four crates share a virtual workspace (root `Cargo.toml`), so builds resolve from the repository root; per-crate `--manifest-path` commands work as before. In the crate you touched, run the standard trio on stable Rust (MSRV 1.87):
 
 ```bash
 cargo fmt --all -- --check

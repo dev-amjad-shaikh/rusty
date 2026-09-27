@@ -658,7 +658,7 @@ budget is clamped or refused at admission and the clamp is journaled.
 > embedders building `CapsuleHost`s plug `plane.rechecker(tenant)` into
 > them). Refinements worth naming. **`cedar-policy` is pinned to v4**
 > (resolved 4.12.0): it requires rustc ≥ 1.89 while the workspace
-> declares 1.86, so the `capsules` feature raises the effective floor
+> declares 1.87, so the `capsules` feature raises the effective floor
 > for feature-enabled builds only — default builds are untouched. **No
 > Cedar schema**: every request is built by typed constructors from
 > per-request JSON entities, so schema checking has no untrusted input

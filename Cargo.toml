@@ -19,7 +19,7 @@ exclude = [".tmp-e2e"]
 [workspace.package]
 # Shared metadata only where all four crates agree. Versions stay per-crate.
 edition = "2021"
-rust-version = "1.86"
+rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dev-amjad-shaikh/rusty"
 homepage = "https://github.com/dev-amjad-shaikh/rusty"

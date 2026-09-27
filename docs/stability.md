@@ -129,7 +129,7 @@ R1.0 — Unleashed (see [roadmap.md](roadmap.md)) flips the default from
   checkpoints written by any earlier 1.x release; a migration path is
   provided across the 0.x → 1.0 boundary for the documented
   checkpointers.
-- **MSRV bumps become minor-release events.** The MSRV (currently 1.86,
+- **MSRV bumps become minor-release events.** The MSRV (currently 1.87,
   see [versioning.md](versioning.md#msrv)) may only rise in a minor
   release, never in a patch.
 - **Deprecation gains teeth.** Public API removals are preceded by at
