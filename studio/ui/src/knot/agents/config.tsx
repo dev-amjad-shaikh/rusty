@@ -318,7 +318,7 @@ export function ConfigColumn({ agent, draft, edit, status, proposals }: { agent:
           const granted = !c.authorization || c.authorization.kind === "connected" || c.authorization.kind === "not_required";
           return (
             <div key={c.instance_id} className="item" data-connector={c.instance_id}>
-              <div className="item-ic logo" style={{ background: "var(--ink-900)", color: "#fff" }}><i className="ti ti-plug-connected" /></div>
+              <div className="item-ic logo" style={{ background: "var(--bg-tint)", color: "#fff" }}><i className="ti ti-plug-connected" /></div>
               <div className="item-body">
                 <div className="item-name">{c.connector?.display_name ?? c.instance_id} {granted ? <Badge tone="good">Connected</Badge> : <Badge tone="warn">Reauthorize</Badge>}</div>
                 <div className="item-desc">Uses {(c.tools ?? []).filter((t) => toolNames.includes(t)).length} of its {(c.tools ?? []).length} action{(c.tools ?? []).length === 1 ? "" : "s"}</div>

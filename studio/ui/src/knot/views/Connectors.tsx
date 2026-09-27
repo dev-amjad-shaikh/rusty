@@ -39,7 +39,7 @@ export function ConnectorsView() {
     const a = authLabel(m);
     return (
       <div key={m.hash} className="lcard" data-conn={m.display_name} onClick={() => first ? open("drawer", <ManageDrawer manifest={m} instance={first} agents={agentsOf(first)} onChanged={reload} standIns={worlds.filter((w) => w.instance_id === first.instance_id || w.connector === m.id)} newer={manifests.filter((x) => x.id === m.id && x.hash !== m.hash && x.version > m.version).sort((x, y) => (x.version < y.version ? 1 : -1))[0] ?? null} />) : open("modal", <CredentialModal manifest={m} onDone={reload} />)}>
-        <div className="lcard-top"><div className="lcard-ic logo" style={{ background: "var(--ink-900)" }}><i className="ti ti-plug-connected" /></div><div style={{ flex: 1 }}><div className="lcard-title">{m.display_name}</div><div className="lcard-sub">{m.operations.length} action{m.operations.length === 1 ? "" : "s"}</div></div>{grant && <Badge tone={grant[0]}>{grant[1]}</Badge>}</div>
+        <div className="lcard-top"><div className="lcard-ic logo" style={{ background: "var(--bg-tint)" }}><i className="ti ti-plug-connected" /></div><div style={{ flex: 1 }}><div className="lcard-title">{m.display_name}</div><div className="lcard-sub">{m.operations.length} action{m.operations.length === 1 ? "" : "s"}</div></div>{grant && <Badge tone={grant[0]}>{grant[1]}</Badge>}</div>
         <div className="lcard-desc" title={m.description}>{firstSentence(m.description ?? "", 140)}</div>
         {inst.length > 1 && <div className="lcard-tags"><span className="item-tag">{inst.length} connections</span></div>}
         <div className="lcard-foot">{first ? <><span className="mu"><UsedStack agents={agentsOf(first).map((x) => x.name)} /></span><span className="sp" /><button className="m-btn secondary sm" data-manage>Manage</button></> : <><span className="sp" /><button className="m-btn primary sm" data-connect>Connect</button></>}</div>
@@ -64,7 +64,7 @@ export function ConnectorsView() {
         {connected.length > 0 && <><div className="lib-cat"><span>Connected</span><span className="ln" /><span className="gc">{connected.length}</span></div><div className="lib-grid">{connected.map(card)}</div></>}
         {mcp.length > 0 && <><div className="lib-cat"><span>MCP servers</span><span className="ln" /><span className="gc">{mcp.length}</span></div><div className="lib-grid">{mcp.map((m) => (
           <div key={m.id} className="lcard" onClick={() => open("drawer", <McpServerDrawer s={m} onChanged={reload} />)}>
-            <div className="lcard-top"><div className="lcard-ic logo" style={{ background: "var(--ink-900)" }}><i className="ti ti-server-2" /></div><div style={{ flex: 1 }}><div className="lcard-title">{m.name}</div><div className="lcard-sub">{m.command} {m.args.join(" ")}</div></div><Badge tone={m.status.state === "mounted" ? "good" : m.status.state === "failed" ? "bad" : "warn"}>{m.status.state.replace("_", " ")}</Badge></div>
+            <div className="lcard-top"><div className="lcard-ic logo" style={{ background: "var(--bg-tint)" }}><i className="ti ti-server-2" /></div><div style={{ flex: 1 }}><div className="lcard-title">{m.name}</div><div className="lcard-sub">{m.command} {m.args.join(" ")}</div></div><Badge tone={m.status.state === "mounted" ? "good" : m.status.state === "failed" ? "bad" : "warn"}>{m.status.state.replace("_", " ")}</Badge></div>
             <div className="lcard-desc">{m.status.server ?? (m.status.error ?? "Not mounted yet.")}</div>
             <div className="lcard-tags"><span className="item-tag">MCP</span><span className="item-tag">{m.status.tools.length} tools</span></div>
             <div className="lcard-foot"><span className="sp" /><button className="m-btn secondary sm">Manage</button></div>
@@ -109,7 +109,7 @@ function ManageDrawer({ manifest, instance, agents, onChanged, newer, standIns =
   }
   return (
     <div className="m-drawer">
-      <OvHead icon="ti-plug-connected" bg="var(--ink-900)" fg="#fff" logo title={manifest.display_name} sub={`Connected ${ago(instance.created_at)}`} />
+      <OvHead icon="ti-plug-connected" bg="var(--bg-tint)" fg="#fff" logo title={manifest.display_name} sub={`Connected ${ago(instance.created_at)}`} />
       <div className="ov-body">
         <div className="kv"><span className="k">Status</span><span className="v"><Badge tone={grant[0]}>{grant[1]}</Badge></span><span className="k">Connected</span><span className="v">{ago(instance.created_at)}</span><span className="k">Address</span><span className="v" style={{ fontSize: 12, color: "var(--ink-500)" }}>{manifest.base_url.replace(/^https?:\/\//, "")}</span><span className="k">Used by</span><span className="v"><UsedStack agents={agents.map((x) => x.name)} /></span></div>
         <div className="cat-label"><span>What agents can do with it</span><span className="ln" /></div>

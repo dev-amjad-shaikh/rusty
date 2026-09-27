@@ -7,16 +7,31 @@ machine. There is no server picker and no hosted control plane.
 
 ## Product structure
 
-Studio has three primary destinations:
+Studio is one workspace with nine destinations on the left strip:
 
-- **Agents** — create, configure, version, and choose an agent. The creation flow begins with one visual
-  capability map spanning purpose, model, knowledge, tools, output, and guardrails. Exact manifests and
-  configuration evidence remain available through deliberate review surfaces.
-- **Work** — prepare a goal, run it, follow progress, inspect the exact trace, and turn that trace into an
-  evaluation without changing workspaces or losing run ownership.
-- **Operations** — handle failures, recurring work, automation delivery, governance, and multi-agent
-  coordination. Routine work does not open on an operations dashboard; specialist tools remain available
-  through contextual handoffs and progressive disclosure.
+- **Home** — the front door: recent runs, the decision gate holding irreversible
+  actions, and the agents you own.
+- **Agents** — create, configure, test, and publish an agent. Creation is a six-step
+  wizard (Template · Identity · Goal · Instructions · Model & tools · Review); the
+  builder then keeps goal, readiness, model & behavior, instructions, tools, skills,
+  memory, triggers, and evaluation on one canvas, with a test rail beside it.
+- **Skills** — the governed library of `SKILL.md` procedures: compose one in place,
+  import a repository, or browse the registry, then attach it to any agent.
+- **Tools** — the catalog of what agents can call: built-ins, platform tools, and
+  connector operations, each carrying an effect class.
+- **Connectors** — the systems your agents can work in. Connect one once — credentials
+  live in the broker as opaque handles, never as raw values — and every operation its
+  manifest names becomes a tool any allowed agent can use.
+- **Knowledge** — governed sources an agent reads from, retrieved as cited chunks.
+- **Tests** — versioned datasets, experiments, and the release gates an agent's
+  publish is measured against.
+- **AI models** — the providers and models the workspace thinks with.
+- **Activity** — what got done, where agents are waiting for a person, what went
+  wrong, and the verifier's own evidence.
+
+Step-by-step guides to each flow live in [how-to.md](how-to.md); the screens are in
+[screenshots/](screenshots/). The workspace renders in the Rusty design language —
+oxidised dark canvas, glass surfaces, one ember accent, Outfit and IBM Plex Mono.
 
 While the local runtime boots, Studio shows a plain startup screen and keeps waiting for it; only a
 definitive refusal becomes an error with exact recovery guidance. System counts and technical compatibility
@@ -24,15 +39,19 @@ evidence are secondary details, not the product's opening message.
 
 ## Development layout
 
-Studio 1.0 is a typed React application. The production bundle is committed so `studio/serve.py` can host
-Studio without Node.js; during development, `npm run dev` in `studio/ui` boots the local backend and the UI
-with one command.
+Studio 1.0 is a typed React application. The build output (`studio/ui/dist/`) is
+git-ignored and produced on demand: `studio/serve.py` hosts a previously built
+bundle and proxies `/api/*` to the Rusty server for same-origin local use — no
+Node.js needed at serve time. During development, `npm run dev` in `studio/ui`
+boots the Vite dev server on :8878 against the local backend on :8100 — the first
+`cargo build` can take a few minutes; the script waits for `/info` before starting
+Vite.
 
 ```
 studio/
-├── ui/                ← React, TypeScript, routes, feature modules, and production bundle
-│   ├── src/           ← Agents, Work, Operations, shared contracts, and design system
-│   └── dist/          ← committed self-hostable production assets
+├── ui/                ← React, TypeScript, routes, feature modules, and design system
+│   ├── src/           ← the knot workspace (views, flows, engine) under src/knot + src/engine
+│   └── dist/          ← git-ignored production bundle, produced by `npm run build`
 └── serve.py           ← typed Studio host + same-origin API proxy
 ```
 

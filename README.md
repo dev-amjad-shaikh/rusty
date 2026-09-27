@@ -27,6 +27,8 @@ Rusty is **v0.x** under active development. Packages version independently — s
 
 Latest release: **R0.12 — Operations Plane** (2026-08-11) — content-addressed run artifacts with lineage, previews, and retention, plus a deployment control plane: immutable revisions, dev/staging/prod environments, canary and shadow deployments wired to evaluation release gates, byte-exact rollback. Earlier cycles shipped the Flight Recorder, durable work, the Agent Fabric, governed learning, capsule isolation, and signed run receipts — see [CHANGELOG.md](CHANGELOG.md).
 
+`main` carries one cycle past that release, not yet versioned: the **post-R0.12 product cycle** — schema-driven connectors, governed `SKILL.md` skills, the knowledge plane with cited retrieval, durable goals, the verifier trust suite, intelligence campaigns, and the Rusty Studio v4 workspace in the Rusty design language (the oxidised-canvas, ember-accent dark UI shown in the screenshots below). Crates stay at 0.12.x until the next versioned release; details in the [Unreleased section of the changelog](CHANGELOG.md).
+
 ## Install
 
 ```toml
@@ -115,7 +117,7 @@ Two support crates are not published: [`rusty-api/`](rusty-api/) — the depende
 
 ## How Rusty compares
 
-Factual as of 2026-08-06; `—` means "not present, or not verified by us".
+Factual as of 2026-09-26; `—` means "not present, or not verified by us".
 
 | | Rusty | LangGraph (framework) | LangGraph Platform | Rust LLM frameworks (rig, langchain-rust) |
 |---|---|---|---|---|
@@ -142,10 +144,27 @@ Rusty is explicit about what v0.x is not:
 - **Open by default in dev — hardened in production.** With no API keys configured the dev server runs unauthenticated with permissive CORS (loudly warning if bound past loopback). A `production` server (`RUSTY_ENV=production`) refuses to boot without authentication and serves same-origin only unless `with_cors_allowed_origin` names a cross-origin browser client.
 - **Deliberately rejected:** PyO3 / napi-rs bindings and a `cdylib` / C ABI — the HTTP/SSE server is the polyglot interop layer instead. Rationale in [docs/roadmap.md](docs/roadmap.md#explicitly-rejected).
 
+## Screenshots
+
+Rusty Studio in the Rusty design language — oxidised dark canvas, glass surfaces, one ember accent.
+
+| | |
+|---|---|
+| ![Home — the front door: recent runs, the decision gate, and your agents](docs/screenshots/home.png) | ![Agents — the builder: goal, readiness, model & behavior, instructions](docs/screenshots/agent-builder.png) |
+| Home — the front door: recent runs, the decision gate, and your agents. | Agents — the builder: goal, readiness, model & behavior, instructions, test beside the canvas. |
+| ![Connectors — connect a system once, every allowed agent uses it](docs/screenshots/connectors.png) | ![Skills — governed reusable procedures over tools](docs/screenshots/skills.png) |
+| Connectors — the systems your agents can work in; connect once, every allowed agent uses it. | Skills — reusable procedures that bundle a method with the tools it needs. |
+| ![Tests — versioned datasets, experiments, and release gates](docs/screenshots/tests.png) | ![Activity — what got done, where agents wait, what went wrong](docs/screenshots/activity.png) |
+| Tests — versioned datasets, experiments, and release gates. | Activity — what got done, where agents wait for a person, what went wrong. |
+
+Step-by-step guides to everything above — building an agent, a skill, a tool, and adding a connector: [docs/how-to.md](docs/how-to.md).
+
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) — the anatomy deep-dive: how one run flows through the engine, eight diagrams, the named failure modes.
+- [docs/how-to.md](docs/how-to.md) — build an agent, a skill, a tool, and add a connector, step by step, in Rusty Studio.
 - [docs/server-quickstart.md](docs/server-quickstart.md) — zero to a served graph with interrupt/resume over HTTP in ten minutes.
+- [docs/studio.md](docs/studio.md) — the Studio workspace, its views, and the screens above.
 - [docs/roadmap.md](docs/roadmap.md) — phases, what's implemented, what's explicitly rejected.
 - [docs/versioning.md](docs/versioning.md) — independent per-package versioning and which version governs which compatibility boundary.
 - [docs/stability.md](docs/stability.md) — stability guarantees and deprecation policy per package.

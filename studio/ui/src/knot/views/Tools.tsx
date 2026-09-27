@@ -7,7 +7,7 @@ import { UsedStack } from "./Skills";
 import { connectorOf, isPlatform, riskOf, toolIcon } from "../data";
 import { firstSentence, plainName } from "../agents/words";
 
-const TYPE_STYLE: Record<string, [string, string]> = { "Built in": ["var(--bg-muted)", "var(--ink-700)"], Platform: ["var(--brand-soft)", "var(--ink-800)"], Connector: ["var(--ink-900)", "#fff"] };
+const TYPE_STYLE: Record<string, [string, string]> = { "Built in": ["var(--bg-muted)", "var(--ink-700)"], Platform: ["var(--brand-soft)", "var(--ink-800)"], Connector: ["var(--bg-tint)", "#fff"] };
 /** A tool's type: built in (no dot), the platform's own (dotted, no connection derives it), or a connection's operation. */
 const typeOf = (t: ServerTool, derived: Set<string>) => (!t.name.includes(".") ? "Built in" : derived.has(t.name) ? "Connector" : "Platform");
 

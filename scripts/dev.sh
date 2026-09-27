@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# scripts/dev.sh — boot Nexus Server (the server_demo example) and Nexus
+# scripts/dev.sh — boot Rusty Server (the server_demo example) and Rusty
 # Studio together, locally, no Docker. Ctrl-C stops both.
 #
 #   ./scripts/dev.sh
 #
-#   Nexus Server  →  http://127.0.0.1:8100
-#   Nexus Studio  →  http://127.0.0.1:4400
+#   Rusty Server  →  http://127.0.0.1:8100
+#   Rusty Studio  →  http://127.0.0.1:4400
 #
 # Operator configuration (a real model endpoint, keys) lives in
 # .env.rusty-local at the repo root — git-ignored, sourced when present:
@@ -36,13 +36,13 @@ fi
 command -v cargo >/dev/null 2>&1 || { echo "error: cargo not found (install a Rust toolchain via rustup)" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found" >&2; exit 1; }
 
-echo "Building Nexus Server (rusty-server/examples/server_demo.rs) ..."
+echo "Building Rusty Server (rusty-server/examples/server_demo.rs) ..."
 cargo build -p rusty-agent-server --example server_demo
 
 # The studio host serves studio/ui/dist; build it when missing or older
 # than the newest source file.
 if [ ! -f studio/ui/dist/index.html ] || [ -n "$(find studio/ui/src studio/ui/index.html -newer studio/ui/dist/index.html -print -quit 2>/dev/null)" ]; then
-  echo "Building Nexus Studio (studio/ui) ..."
+  echo "Building Rusty Studio (studio/ui) ..."
   (cd studio/ui && { [ -d node_modules ] || npm ci; } && npm run build)
 fi
 
@@ -60,7 +60,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo -n "Waiting for Nexus Server on 127.0.0.1:$SERVER_PORT"
+echo -n "Waiting for Rusty Server on 127.0.0.1:$SERVER_PORT"
 ready=""
 for _ in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:$SERVER_PORT/ok" >/dev/null 2>&1; then
@@ -84,8 +84,8 @@ fi
 
 cat <<EOF
 
-  Nexus Server  →  http://127.0.0.1:$SERVER_PORT   (try: curl 127.0.0.1:$SERVER_PORT/info)
-  Nexus Studio  →  http://127.0.0.1:$STUDIO_PORT   (open this one)
+  Rusty Server  →  http://127.0.0.1:$SERVER_PORT   (try: curl 127.0.0.1:$SERVER_PORT/info)
+  Rusty Studio  →  http://127.0.0.1:$STUDIO_PORT   (open this one)
 
 Ctrl-C stops both.
 EOF

@@ -20,7 +20,7 @@ license: Apache-2.0
 
 - A cut page: "65 of 100 visible".
 - A single user behind all the rows, a test fixture, a canary — say it.
-  "All 100 searches were performed by one user, Nexus Connector, on
+  "All 100 searches were performed by one user, the test connector, on
   2026-09-04" changes what the numbers mean.
 
 ## The shape

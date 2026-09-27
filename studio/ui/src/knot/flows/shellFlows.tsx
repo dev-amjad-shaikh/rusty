@@ -176,7 +176,7 @@ function MembersTab({ users, onChanged }: { users: UserSummary[] | null; onChang
       {users === null && <div className="thread-empty">Reading…</div>}
       {users?.map((u) => (
         <div key={u.id} className="member">
-          <div className="av" style={{ background: "var(--ink-900)" }}>{(u.name ?? u.id).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</div>
+          <div className="av" style={{ background: "var(--bg-tint)" }}>{(u.name ?? u.id).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</div>
           <div className="mn">{u.name ?? u.id}<small>{u.id}{u.external ? " · signs in with single sign-on" : ""}{u.active === false ? " · no longer active" : ""}</small></div>
           <span className="item-tag">{u.roles.join(" · ")}</span>
           {admin && u.id !== me?.principal.id && <><button className="m-btn ghost sm" title="Sign the person out everywhere" onClick={async () => { try { await revokeUserSessions(u.id); toast(`${u.name ?? u.id} signed out everywhere`, "ti-logout"); } catch (err) { say(err); } }}><i className="ti ti-logout" /></button><button className="m-btn ghost sm" title="Remove the account" data-flow="remove-person" onClick={() => setRemoving({ id: u.id, name: u.name ?? u.id })}><i className="ti ti-trash" /></button><button className="m-btn ghost sm" title="Forget for good: their memory, conversations, runs and grants go, every agent's notes about them are scrubbed, and their key is destroyed" data-flow="forget-person" onClick={() => setForgetting({ id: u.id, name: u.name ?? u.id, reason: "" })}><i className="ti ti-eraser" /></button></>}
