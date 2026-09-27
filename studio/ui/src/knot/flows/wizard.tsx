@@ -76,7 +76,7 @@ export function CreateWizard() {
   return (
     <div className="wz">
       <div className="wz-rail">
-        <div className="wz-brand"><div className="bm"><i className="ti ti-robot" style={{ fontSize: 18 }} /></div><div><div className="bt">New agent</div><div className="bs">Rustynome</div></div></div>
+        <div className="wz-brand"><div className="bm"><i className="ti ti-robot" style={{ fontSize: 18 }} /></div><div><div className="bt">New agent</div><div className="bs">Rusty</div></div></div>
         <div className="wz-steps">{STEPS.map((s, i) => <div key={s} className={`wz-step${i === step ? " active" : ""}${i < step ? " done" : ""}`} data-step={i} onClick={() => { if (i <= step) setStep(i); }}><div className="sn">{i < step ? <i className="ti ti-check" /> : i + 1}</div><div><div className="sl">{s}</div></div></div>)}</div>
         <div className="wz-rail-foot">Step <span data-curstep>{step + 1}</span> of {STEPS.length}</div>
       </div>

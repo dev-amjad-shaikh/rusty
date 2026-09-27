@@ -4,6 +4,7 @@ import { OverlayHost, useOverlay } from "./overlay";
 import { useServer } from "../engine/net/server";
 import { useEngine } from "../engine/state";
 import { NotificationsDrawer, SettingsModal } from "./flows/shellFlows";
+import rustyMark from "./assets/rusty-mark.png";
 import "./knot.css";
 
 /** The icon strip's destinations, in the prototype's order. */
@@ -57,7 +58,7 @@ function Shell() {
   return (
     <div className="shell" data-screen-label="Agent Builder">
       <nav className="strip">
-        <div className="strip-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7l8-4 8 4-8 4-8-4z" fill="currentColor" opacity=".9" /><path d="M4 12l8 4 8-4M4 17l8 4 8-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg></div>
+        <div className="strip-mark"><img src={rustyMark} alt="Rusty" /></div>
         {VIEWS.map((v) => (
           <Link key={v.view} to={v.to} className={`strip-btn${active === v.view ? " active" : ""}`} data-view={v.view} title={v.title}><i className={`ti ${v.icon}`} /></Link>
         ))}

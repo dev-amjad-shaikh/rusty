@@ -27,7 +27,7 @@ export function SkillsView() {
   const openSkill = (s?: ServerSkill) => open("drawer", <SkillEditorDrawer skill={s} isNew={!s} onSaved={() => void useServer.getState().refresh()} />);
   return (
     <div className="view library active" id="view-skills">
-      <div className="lib-top"><div className="crumbs"><span>Rustynome</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Skills</b></div><div className="sp" /><div className="lib-search" style={{ maxWidth: 240 }}><i className="ti ti-search" /><input placeholder="Search…" data-libsearch value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
+      <div className="lib-top"><div className="crumbs"><span>Rusty</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Skills</b></div><div className="sp" /><div className="lib-search" style={{ maxWidth: 240 }}><i className="ti ti-search" /><input placeholder="Search…" data-libsearch value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
       <div className="lib-page">
         <div className="lib-hero">
           <div className="lh-ic" style={{ background: "var(--cat-plum-bg)", color: "var(--cat-plum)" }}><i className="ti ti-puzzle" /></div>

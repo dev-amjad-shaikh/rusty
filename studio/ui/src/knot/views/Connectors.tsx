@@ -48,7 +48,7 @@ export function ConnectorsView() {
   };
   return (
     <div className="view library active" id="view-connectors">
-      <div className="lib-top"><div className="crumbs"><span>Rustynome</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Connectors</b></div><div className="sp" /><div className="lib-search" style={{ maxWidth: 240 }}><i className="ti ti-search" /><input placeholder="Search…" data-libsearch value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
+      <div className="lib-top"><div className="crumbs"><span>Rusty</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Connectors</b></div><div className="sp" /><div className="lib-search" style={{ maxWidth: 240 }}><i className="ti ti-search" /><input placeholder="Search…" data-libsearch value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
       <div className="lib-page">
         <div className="lib-hero">
           <div className="lh-ic" style={{ background: "var(--cat-teal-bg)", color: "var(--cat-teal)" }}><i className="ti ti-plug-connected" /></div>

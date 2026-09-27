@@ -26,7 +26,7 @@ export function ToolsView() {
   const inUse = new Set(assistants.filter((a) => !a.archived_at && !isPlatform(a)).flatMap((a) => (a.config?.studio_intent?.tools ?? []).map((t) => t.name)));
   return (
     <div className="view library active" id="view-tools">
-      <div className="lib-top"><div className="crumbs"><span>Rustynome</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Tools</b></div><div className="sp" /><div className="lib-search" style={{ maxWidth: 240 }}><i className="ti ti-search" /><input placeholder="Search…" data-libsearch value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
+      <div className="lib-top"><div className="crumbs"><span>Rusty</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Tools</b></div><div className="sp" /><div className="lib-search" style={{ maxWidth: 240 }}><i className="ti ti-search" /><input placeholder="Search…" data-libsearch value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
       <div className="lib-page">
         <div className="lib-hero">
           <div className="lh-ic" style={{ background: "var(--accent-bg)", color: "var(--accent)" }}><i className="ti ti-tool" /></div>

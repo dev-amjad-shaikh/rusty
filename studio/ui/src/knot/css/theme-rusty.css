@@ -1,0 +1,235 @@
+/* The Rusty design language: oxidised dark canvas, glass surfaces, one
+ * ember accent (design handoff "Agent Builder Rusty", theme-rusty.css).
+ * Loads last and wins. Fonts ship from @fontsource (see main.tsx), not a
+ * network import. --font-ui carries the engine layer onto Outfit too. */
+html:root {
+  color-scheme: dark;
+  --font-ui: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --bg-page:    #0d0a09; /* tiers:allow — design-handoff theme literal */
+  --bg-canvas:  #110c0a; /* tiers:allow — design-handoff theme literal */
+  --bg-surface: #1a1310; /* tiers:allow — design-handoff theme literal */
+  --bg-tint:    #1f1713; /* tiers:allow — design-handoff theme literal */
+  --bg-muted:   rgba(255,236,214,.07); /* tiers:allow — design-handoff theme literal */
+
+  --ink-900: #f7ece4; /* tiers:allow — design-handoff theme literal */
+  --ink-800: #ece0d5; /* tiers:allow — design-handoff theme literal */
+  --ink-700: #ddd0c4; /* tiers:allow — design-handoff theme literal */
+  --ink-600: #cbb3a2; /* tiers:allow — design-handoff theme literal */
+  --ink-500: #b8b0a8; /* tiers:allow — design-handoff theme literal */
+  --ink-400: #9e968e; /* tiers:allow — design-handoff theme literal */
+  --ink-300: #5a4a40; /* tiers:allow — design-handoff theme literal */
+  --ink-200: rgba(236,150,96,.16); /* tiers:allow — design-handoff theme literal */
+  --ink-100: rgba(255,236,214,.05); /* tiers:allow — design-handoff theme literal */
+
+  --line:        rgba(236,150,96,.16); /* tiers:allow — design-handoff theme literal */
+  --line-soft:   rgba(236,150,96,.09); /* tiers:allow — design-handoff theme literal */
+  --line-strong: rgba(236,150,96,.3); /* tiers:allow — design-handoff theme literal */
+
+  --brand:        #e8742a; /* tiers:allow — design-handoff theme literal */
+  --brand-strong: #f0862b; /* tiers:allow — design-handoff theme literal */
+  --brand-soft:   rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+  --on-brand:     #2a1000; /* tiers:allow — design-handoff theme literal */
+
+  --accent:     #f0862b; /* tiers:allow — design-handoff theme literal */
+  --accent-bg:  rgba(240,134,43,.16); /* tiers:allow — design-handoff theme literal */
+  --accent-ink: #2a1000; /* tiers:allow — design-handoff theme literal */
+
+  --good: #7fd49a; --good-bg: rgba(95,191,127,.1);  --good-line: rgba(95,191,127,.32); --good-dot: #5fbf7f; /* tiers:allow — design-handoff theme literal */
+  --warn: #f5b774; --warn-bg: rgba(240,134,43,.1);  --warn-line: rgba(240,134,43,.34); --warn-dot: #f0862b; /* tiers:allow — design-handoff theme literal */
+  --bad:  #f09a80; --bad-bg:  rgba(224,106,74,.1);  --bad-line:  rgba(224,106,74,.34); --bad-dot:  #e06a4a; /* tiers:allow — design-handoff theme literal */
+  --info: #e3c9b4; --info-bg: rgba(201,169,143,.1); --info-line: rgba(201,169,143,.3); --info-dot: #c9a98f; /* tiers:allow — design-handoff theme literal */
+
+  --cat-blue: #f0c3a3; --cat-blue-bg: rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+  --cat-amber: #f0c3a3; --cat-amber-bg: rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+  --cat-plum: #f0c3a3; --cat-plum-bg: rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+  --cat-orange: #f0c3a3; --cat-orange-bg: rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+  --cat-peach: #f0c3a3; --cat-peach-bg: rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+  --cat-teal: #f0c3a3; --cat-teal-bg: rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+  --cat-rose: #f0c3a3; --cat-rose-bg: rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+
+  --font-sans: 'Outfit', ui-sans-serif, sans-serif;
+  --font-display: 'Outfit', ui-sans-serif, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --r-sm: 8px; --r-md: 10px; --r-lg: 12px; --r-xl: 18px;
+
+  --shadow-md: 0 12px 30px -18px rgba(0,0,0,.7); /* tiers:allow — design-handoff theme literal */
+  --shadow-lg: 0 18px 40px -20px rgba(0,0,0,.75), 0 0 22px -8px rgba(232,116,42,.22); /* tiers:allow — design-handoff theme literal */
+  --shadow-xl: 0 24px 64px rgba(0,0,0,.6); /* tiers:allow — design-handoff theme literal */
+
+  --g-fill: linear-gradient(158deg, rgba(255,236,214,.075) 0%, rgba(255,222,192,.03) 100%); /* tiers:allow — design-handoff theme literal */
+  --g-fill-hi: linear-gradient(158deg, rgba(255,238,218,.11) 0%, rgba(255,224,196,.05) 100%); /* tiers:allow — design-handoff theme literal */
+  --g-lift: 0 18px 40px -26px rgba(0,0,0,.7), 0 0 22px -10px rgba(232,116,42,.2); /* tiers:allow — design-handoff theme literal */
+  --ember: linear-gradient(180deg, #fb9a3f, #e8742a); /* tiers:allow — design-handoff theme literal */
+}
+
+/* ── Atmosphere ─────────────────────────────────────────── */
+html, body { background: #0d0a09; } /* tiers:allow — design-handoff theme literal */
+body { color: var(--ink-800); font-family: var(--font-sans); font-weight: 300; -webkit-font-smoothing: antialiased; }
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 8% 60%, rgba(150,70,34,.22), rgba(80,36,18,0) 70%), /* tiers:allow — design-handoff theme literal */
+    radial-gradient(100% 76% at 46% 100%, rgba(74,42,26,.4) 0%, rgba(13,10,9,0) 70%), /* tiers:allow — design-handoff theme literal */
+    repeating-linear-gradient(90deg, rgba(255,240,228,.022) 0 1px, transparent 1px 84px), /* tiers:allow — design-handoff theme literal */
+    repeating-linear-gradient(0deg, rgba(255,240,228,.018) 0 1px, transparent 1px 84px), /* tiers:allow — design-handoff theme literal */
+    radial-gradient(126% 100% at 50% 46%, rgba(8,6,5,0) 40%, rgba(6,4,4,.6) 100%); /* tiers:allow — design-handoff theme literal */
+}
+body::after {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .06; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.shell { position: relative; z-index: 1; background: transparent; }
+.work, .config, .library, .builder-view { background: transparent; }
+.work-top, .lib-top { background: rgba(13,9,7,.6); backdrop-filter: blur(20px) saturate(1.2); -webkit-backdrop-filter: blur(20px) saturate(1.2); border-bottom-color: var(--line-soft); } /* tiers:allow — design-handoff theme literal */
+.test { background: rgba(13,8,6,.55); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-left: 1px solid var(--line-soft); } /* tiers:allow — design-handoff theme literal */
+.obs-bar { background: transparent; }
+::selection { background: rgba(240,134,43,.28); color: #fff3ea; } /* tiers:allow — design-handoff theme literal */
+a { color: #e8742a; } a:hover { color: #f0862b; } /* tiers:allow — design-handoff theme literal */
+*::-webkit-scrollbar-thumb { background: rgba(236,150,96,.22) !important; border-color: transparent !important; border-radius: 999px; } /* tiers:allow — design-handoff theme literal */
+
+/* ── Type: light weights, mono eyebrows ─────────────────── */
+h1, h2, h3, .hero-name, .page-title, .lib-title, .wz-h, .ov-title, .md .md-h1, .md .md-h2 { font-weight: 300; color: #f7ece4; } /* tiers:allow — design-handoff theme literal */
+.hero-name { font-size: 30px; line-height: 36px; font-weight: 200; letter-spacing: -.024em; }
+.lib-title, .wz-h { font-size: 40px; line-height: 44px; font-weight: 200; letter-spacing: -.024em; }
+.block-title, .rail-title, .item-name, .mem-name, .guard-name, .readiness .rt, .lcard-title, .tmpl-name, .pp-t, .pi-t, .h-sec, .lh-title, .a-title, .goal-card .go { font-weight: 400; }
+.rail-title { font-size: 20px; font-weight: 300; letter-spacing: -.015em; }
+.crumbs b, .lib-top .crumbs b, .ag-link.active .nm, .m-seg button.on, .m-tab.on, .md strong { font-weight: 400; }
+.m-btn, .m-badge, .m-chip, .preset, .ag-link .nm { font-weight: 300; }
+.rl-group-label, .sb-group-label, .sec-kicker, .page-eyebrow, .msg .who, .skill-tools .lbl, .m-menu-label, .m-table th,
+.lib-eyebrow, .wz-eyebrow, .cat-label, .lib-cat, .wz-brand .bs, .goal-card .ge, .sk-kicker, .obs-kpi .k, .log .lvl {
+  font-family: var(--font-mono); font-weight: 400; font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-600); /* tiers:allow — design-handoff theme literal */
+}
+.crumbs { font-family: var(--font-mono); font-size: 12px; color: var(--ink-500); }
+.save-state { font-family: var(--font-mono); font-size: 11px; }
+
+/* ── Icon strip ─────────────────────────────────────────── */
+.strip { background: rgba(13,8,6,.88); backdrop-filter: blur(28px) saturate(1.25); -webkit-backdrop-filter: blur(28px) saturate(1.25); border-right: 1px solid rgba(255,190,150,.12); } /* tiers:allow — design-handoff theme literal */
+.strip-mark { width: 36px; height: 36px; background: none !important; border-radius: 0; margin-bottom: 16px; }
+.strip-mark img { width: 36px; height: 36px; display: block; filter: drop-shadow(0 6px 16px rgba(232,116,38,.45)); } /* tiers:allow — design-handoff theme literal */
+.strip-btn { color: var(--ink-500); border-radius: 9px; position: relative; }
+.strip-btn:hover { background: rgba(236,150,96,.16); color: #fff3ea; } /* tiers:allow — design-handoff theme literal */
+.strip-btn.active, .strip-btn.active:hover { background: rgba(240,134,43,.18); color: #ffc7a6; box-shadow: 0 0 18px -6px rgba(232,116,42,.5); } /* tiers:allow — design-handoff theme literal */
+.strip-btn.active::before { content: ''; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: #fb9a3f; } /* tiers:allow — design-handoff theme literal */
+.strip-dot { background: #e8742a !important; border-color: #0d0a09 !important; } /* tiers:allow — design-handoff theme literal */
+
+/* ── Rail ───────────────────────────────────────────────── */
+.rail { background: rgba(13,8,6,.62); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-right-color: rgba(255,190,150,.1); } /* tiers:allow — design-handoff theme literal */
+.rail-foot { border-top-color: var(--line-soft); }
+.ag-link { border-radius: 9px; position: relative; }
+.ag-link:hover { background: rgba(236,150,96,.12); } /* tiers:allow — design-handoff theme literal */
+.ag-link.active { background: rgba(240,134,43,.14); } /* tiers:allow — design-handoff theme literal */
+.ag-link.active::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: #fb9a3f; } /* tiers:allow — design-handoff theme literal */
+.ag-link .nm { color: var(--ink-500); } .ag-link.active .nm { color: #fff3ea; } /* tiers:allow — design-handoff theme literal */
+.ag-tile-sm, .hero-tile { background: rgba(240,134,43,.16) !important; color: #f0c3a3 !important; box-shadow: inset 0 0 0 1px rgba(236,150,96,.22); } /* tiers:allow — design-handoff theme literal */
+.hero-tile { width: 56px; height: 56px; border-radius: 12px; font-size: 26px; box-shadow: inset 0 0 0 1px rgba(236,150,96,.28), 0 0 26px -8px rgba(232,116,42,.5); } /* tiers:allow — design-handoff theme literal */
+.hero-tile .edit-dot { background: var(--ember) !important; color: #2a1000 !important; border-color: #0d0a09 !important; } /* tiers:allow — design-handoff theme literal */
+
+/* ── Buttons ────────────────────────────────────────────── */
+.m-btn { border-radius: 8px; }
+.m-btn.primary, .m-btn.accent { background: var(--ember); color: #2a1000; border-color: transparent; box-shadow: 0 8px 26px -10px rgba(232,116,38,.9); font-weight: 400; } /* tiers:allow — design-handoff theme literal */
+.m-btn.primary:hover, .m-btn.accent:hover { background: var(--ember); filter: brightness(1.08); box-shadow: 0 8px 30px -8px rgba(240,134,43,1); } /* tiers:allow — design-handoff theme literal */
+.m-btn.secondary { background: linear-gradient(160deg, rgba(255,238,218,.07), rgba(255,224,196,.028)); color: var(--ink-800); border-color: rgba(236,150,96,.2); box-shadow: inset 0 1px 0 rgba(255,238,222,.1); } /* tiers:allow — design-handoff theme literal */
+.m-btn.secondary:hover { background: rgba(255,238,218,.11); border-color: var(--line-strong); } /* tiers:allow — design-handoff theme literal */
+.m-btn.ghost { color: var(--ink-500); }
+.m-btn.ghost:hover { background: rgba(236,150,96,.14); color: #fff3ea; } /* tiers:allow — design-handoff theme literal */
+.m-btn.danger { background: transparent; }
+.composer-send { background: var(--ember); color: #2a1000; box-shadow: 0 6px 18px -8px rgba(232,116,38,.9); } /* tiers:allow — design-handoff theme literal */
+.composer-send:hover { background: var(--ember); filter: brightness(1.08); }
+
+/* ── Glass surfaces ─────────────────────────────────────── */
+.m-card, .item, .skill, .mem-card, .trace, .readiness, .goal-card, .lib-stat, .lcard, .acard, .prov, .route-card, .chart-card,
+.proposal, .run, .obs-kpi, .log-list, .tmpl-card, .trig-opt, .deploy-opt, .mdl-row, .pick-tool, .proto-opt, .src-opt, .lib-table-wrap, .act-list, .rev-grid, .pv-widget {
+  background: var(--g-fill); border-color: rgba(236,150,96,.18); box-shadow: var(--g-lift); border-radius: 12px; /* tiers:allow — design-handoff theme literal */
+}
+.item, .skill, .mem-card, .trace, .proposal, .run, .obs-kpi, .proto-opt, .src-opt, .mdl-row, .pick-tool { box-shadow: none; border-radius: 10px; background: rgba(255,236,214,.035); border-color: rgba(236,150,96,.13); } /* tiers:allow — design-handoff theme literal */
+.item:hover, .skill:hover, .lcard:hover, .acard:hover, .tmpl-card:hover, .prov:hover, .trig-opt:hover { background: var(--g-fill-hi); border-color: var(--line-strong); }
+.lcard:hover, .acard:hover, .tmpl-card:hover { transform: translateY(-2px); box-shadow: 0 26px 54px -24px rgba(0,0,0,.8), 0 0 28px -6px rgba(240,134,43,.35); } /* tiers:allow — design-handoff theme literal */
+.m-card.block { background: var(--g-fill); }
+.readiness { background: linear-gradient(160deg, rgba(240,134,43,.14), rgba(200,110,44,.05)); border-color: rgba(240,134,43,.3); } /* tiers:allow — design-handoff theme literal */
+.mem-card.on, .tmpl-card.sel, .mdl-row.sel, .deploy-opt.sel, .pick-tool.on, .icon-pick.sel, .proto-opt.sel, .src-opt.sel, .opt-list .trig-opt.sel, [data-block].flash { border-color: rgba(240,134,43,.6); background: rgba(240,134,43,.08); } /* tiers:allow — design-handoff theme literal */
+.add-row { border-color: rgba(236,150,96,.22); color: var(--ink-500); border-radius: 10px; } /* tiers:allow — design-handoff theme literal */
+.add-row:hover { border-color: #f0862b; color: #ffd0b3; background: rgba(240,134,43,.06); } /* tiers:allow — design-handoff theme literal */
+.m-alert, .m-alert.info, .m-alert.good, .m-alert.warn, .m-alert.bad, .vars-intro, .auth-method, .disc-log, .copy-row { background: rgba(255,236,214,.035); border-color: rgba(236,150,96,.14); } /* tiers:allow — design-handoff theme literal */
+.prop, .ai-suggest, .pp-foot { background: rgba(255,236,214,.03); } /* tiers:allow — design-handoff theme literal */
+
+/* Overlays stay opaque for legibility */
+.m-modal, .m-drawer, .m-menu, .wz-overlay { background: #17100d; border-color: rgba(236,150,96,.2); } /* tiers:allow — design-handoff theme literal */
+.m-modal, .m-drawer { box-shadow: 0 24px 64px rgba(0,0,0,.6), 0 0 40px -12px rgba(232,116,42,.25); } /* tiers:allow — design-handoff theme literal */
+.m-overlay { background: rgba(6,4,3,.62); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); } /* tiers:allow — design-handoff theme literal */
+.ov-foot { background: rgba(255,236,214,.03); } /* tiers:allow — design-handoff theme literal */
+.m-menu-item:hover { background: rgba(236,150,96,.16); } /* tiers:allow — design-handoff theme literal */
+
+/* ── Icon tiles ─────────────────────────────────────────── */
+.block-ic, .item-ic:not(.logo), .mem-ic, .guard-ic, .trace-ic, .model-logo, .lh-ic, .lcard-ic:not(.logo), .tl-ic, .oh-ic:not(.logo), .wt-ic, .pt-ic, .to-ic, .do-ic, .mdl-logo, .pp-ic {
+  background: rgba(240,134,43,.12) !important; color: #f0c3a3 !important; border: 1px solid rgba(236,150,96,.2); /* tiers:allow — design-handoff theme literal */
+}
+.mem-card.on .mem-ic, .mdl-row.sel .mdl-logo, .pick-tool.on .pt-ic, .proto-opt.sel .pt-ic, .pi-ic, .wz-step.active .sn {
+  background: var(--ember) !important; color: #2a1000 !important; border-color: transparent; /* tiers:allow — design-handoff theme literal */
+}
+.block-head .chev, .run-head .chev { color: var(--ink-400); }
+.trace-check { color: #5fbf7f; } /* tiers:allow — design-handoff theme literal */
+
+/* ── Controls ───────────────────────────────────────────── */
+.m-input, .m-textarea, .m-select, .m-input-group, .model-pick, .composer, .instr-editor, .ov-search, .lib-search, .sk-src {
+  background: rgba(255,236,214,.045); border-color: rgba(236,150,96,.18); color: var(--ink-800); border-radius: 10px; /* tiers:allow — design-handoff theme literal */
+}
+.m-input:focus, .m-textarea:focus, .m-select:focus, .m-input-group:focus-within, .composer:focus-within, .instr-editor:focus, .sk-src:focus {
+  border-color: rgba(240,134,43,.6); box-shadow: 0 0 0 3px rgba(240,134,43,.14); /* tiers:allow — design-handoff theme literal */
+}
+.m-select option { background: #17100d; } /* tiers:allow — design-handoff theme literal */
+input::placeholder, textarea::placeholder { color: #8b837b; } /* tiers:allow — design-handoff theme literal */
+.model-pick:hover { border-color: var(--line-strong); background: rgba(255,238,218,.07); } /* tiers:allow — design-handoff theme literal */
+.instr-editor { font-family: var(--font-mono); font-weight: 300; color: var(--ink-700); }
+.instr-editor .var, .vrow .vk .vtok, .md .var, .cite { background: rgba(240,134,43,.18); color: #ffc7a6; } /* tiers:allow — design-handoff theme literal */
+.cite:hover { background: #e8742a; color: #2a1000; } /* tiers:allow — design-handoff theme literal */
+
+.m-switch { background: rgba(255,236,214,.12); box-shadow: inset 0 0 0 1px rgba(236,150,96,.2); } /* tiers:allow — design-handoff theme literal */
+.m-switch::after { background: #ece0d5; } /* tiers:allow — design-handoff theme literal */
+.m-switch.on { background: var(--ember); box-shadow: 0 0 12px -2px rgba(240,134,43,.6); } /* tiers:allow — design-handoff theme literal */
+.m-switch.on::after { background: #2a1000; } /* tiers:allow — design-handoff theme literal */
+.m-box { border-color: rgba(236,150,96,.35); background: transparent; } /* tiers:allow — design-handoff theme literal */
+.m-check input:checked + .m-box, .op-row input:checked + .m-box { background: #e8742a; border-color: #e8742a; color: #2a1000; } /* tiers:allow — design-handoff theme literal */
+
+.m-slider { background: rgba(255,244,236,.12); } /* tiers:allow — design-handoff theme literal */
+.m-slider::-webkit-slider-thumb { background: #fb9a3f; border: 2px solid #0d0a09; box-shadow: 0 0 0 1px #fb9a3f, 0 0 12px rgba(240,134,43,.7); } /* tiers:allow — design-handoff theme literal */
+.m-slider::-moz-range-thumb { background: #fb9a3f; border: 2px solid #0d0a09; box-shadow: 0 0 0 1px #fb9a3f, 0 0 12px rgba(240,134,43,.7); } /* tiers:allow — design-handoff theme literal */
+
+.m-seg, .theme-toggle { background: linear-gradient(160deg, rgba(255,238,218,.07), rgba(255,224,196,.028)); border: 1px solid rgba(236,150,96,.16); border-radius: 11px; padding: 3px; } /* tiers:allow — design-handoff theme literal */
+.m-seg button { border-radius: 8px; color: var(--ink-500); }
+.m-seg button:hover { color: #fff3ea; } /* tiers:allow — design-handoff theme literal */
+.m-seg button.on { background: linear-gradient(160deg, rgba(240,134,43,.26), rgba(200,110,44,.12)); color: #ffe2cb; box-shadow: inset 0 0 0 1px rgba(255,236,214,.4); } /* tiers:allow — design-handoff theme literal */
+.m-tab { color: var(--ink-500); } .m-tab.on { color: #ffd0b3; border-bottom-color: #f0862b; } /* tiers:allow — design-handoff theme literal */
+
+.m-progress { background: rgba(255,244,236,.1); border-radius: 7px; height: 3px; } /* tiers:allow — design-handoff theme literal */
+.m-progress > span, .m-progress.accent > span, .m-progress .bar { background: linear-gradient(90deg, #b4501f, #f0862b 62%, #ffa557) !important; box-shadow: 0 0 10px -2px rgba(240,134,43,.8); border-radius: 7px; } /* tiers:allow — design-handoff theme literal */
+.m-progress.good > span { background: #5fbf7f !important; box-shadow: none; } /* tiers:allow — design-handoff theme literal */
+.spark div { background: rgba(236,150,96,.2) !important; } /* tiers:allow — design-handoff theme literal */
+.spark div:last-child, .goal-card .spark div:last-child { background: #f0862b !important; } /* tiers:allow — design-handoff theme literal */
+
+/* ── Chips, badges, tags ────────────────────────────────── */
+.m-chip, .item-tag, .preset, .kbd, .auth-opt, .sk-tool { background: rgba(255,236,214,.05); border-color: rgba(236,150,96,.16); color: var(--ink-600); border-radius: 6px; } /* tiers:allow — design-handoff theme literal */
+.item-tag { font-family: var(--font-mono); font-weight: 300; font-size: 11.5px; color: var(--ink-500); }
+.preset:hover, .auth-opt:hover { background: rgba(240,134,43,.14); color: #ffd0b3; border-color: rgba(240,134,43,.4); } /* tiers:allow — design-handoff theme literal */
+.auth-opt.on, .area-chips .auth-opt.on { background: rgba(240,134,43,.2); color: #ffe2cb; border-color: rgba(240,134,43,.5); } /* tiers:allow — design-handoff theme literal */
+.m-chip i { color: #f0a36b !important; } /* tiers:allow — design-handoff theme literal */
+.m-badge { border-radius: 6px; font-family: var(--font-mono); font-size: 11px !important; letter-spacing: .02em; }
+.m-badge.solid { background: var(--ember); color: #2a1000; border-color: transparent; } /* tiers:allow — design-handoff theme literal */
+.m-badge.accent { background: rgba(240,134,43,.16); color: #ffc7a6; border-color: rgba(240,134,43,.3); } /* tiers:allow — design-handoff theme literal */
+
+/* ── Chat ───────────────────────────────────────────────── */
+.msg.user .bub, .chat-bubble.user { background: linear-gradient(160deg, rgba(240,134,43,.3), rgba(200,110,44,.16)); color: #fff3ea; box-shadow: inset 0 0 0 1px rgba(255,210,170,.3); } /* tiers:allow — design-handoff theme literal */
+.msg.agent .bub, .chat-bubble.agent { background: rgba(255,236,214,.05); border-color: rgba(236,150,96,.14); color: var(--ink-700); } /* tiers:allow — design-handoff theme literal */
+.trace-name { color: #ffd0b3; } /* tiers:allow — design-handoff theme literal */
+.test-head, .test-foot { border-color: var(--line-soft); }
+
+/* ── Tables, toasts, misc ───────────────────────────────── */
+.m-table th { background: transparent; }
+.m-table tbody tr:hover { background: rgba(236,150,96,.06); } /* tiers:allow — design-handoff theme literal */
+.m-toast { background: #1f1511; color: #ece0d5; border: 1px solid rgba(236,150,96,.24); box-shadow: 0 18px 40px -16px rgba(0,0,0,.8), 0 0 22px -8px rgba(232,116,42,.35); } /* tiers:allow — design-handoff theme literal */
+.m-toast .t-ic { color: #5fbf7f; } /* tiers:allow — design-handoff theme literal */
+.m-spin { border-color: rgba(236,150,96,.2); border-top-color: #f0862b; } /* tiers:allow — design-handoff theme literal */
+.pub-done .burst { background: rgba(240,134,43,.14); color: #fb9a3f; border-color: rgba(240,134,43,.4); box-shadow: 0 0 40px -6px rgba(240,134,43,.6); } /* tiers:allow — design-handoff theme literal */
+.wz-step.active { background: rgba(240,134,43,.12); } /* tiers:allow — design-handoff theme literal */
+.dl.del { text-decoration-color: rgba(224,106,74,.5); } /* tiers:allow — design-handoff theme literal */
+.boot-mark { background: none !important; }

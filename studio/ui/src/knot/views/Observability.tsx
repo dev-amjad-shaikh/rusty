@@ -63,7 +63,7 @@ export function ObservabilityView() {
   const verified = runs.filter((r) => r.verification?.verdict === "verified" || r.verification?.verdict === "failed");
   return (
     <div className="view library active" id="view-analytics">
-      <div className="lib-top"><div className="crumbs"><span>Rustynome</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Activity</b></div><div className="sp" /></div>
+      <div className="lib-top"><div className="crumbs"><span>Rusty</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Activity</b></div><div className="sp" /></div>
       <div className="lib-page">
         <div className="lib-hero">
           <div className="lh-ic" style={{ background: "var(--cat-blue-bg)", color: "var(--cat-blue)" }}><i className="ti ti-chart-dots-3" /></div>

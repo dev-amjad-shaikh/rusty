@@ -54,11 +54,11 @@ export function HomeView() {
   const runsOf = (id: string) => runs.filter((r) => r.assistant_id === id);
   return (
     <div className="view library active" id="view-home">
-      <div className="lib-top"><div className="crumbs"><span>Rustynome</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Home</b></div><div className="sp" /></div>
+      <div className="lib-top"><div className="crumbs"><span>Rusty</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>Home</b></div><div className="sp" /></div>
       <div className="lib-page">
         <div className="lib-hero">
           <div className="lh-ic"><i className="ti ti-layout-dashboard" /></div>
-          <div className="lh-main"><div className="lib-eyebrow">Rustynome</div><h1 className="lib-title">{greet}, {who}</h1><p className="lib-lead">Your {agents.length} agent{agents.length === 1 ? "" : "s"} handled {runs.length} runs recently{withoutPause !== null ? (withoutPause === 100 ? ", none of them needing a person" : `; ${100 - withoutPause}% needed a person`) : ""}.</p></div>
+          <div className="lh-main"><div className="lib-eyebrow">Rusty</div><h1 className="lib-title">{greet}, {who}</h1><p className="lib-lead">Your {agents.length} agent{agents.length === 1 ? "" : "s"} handled {runs.length} runs recently{withoutPause !== null ? (withoutPause === 100 ? ", none of them needing a person" : `; ${100 - withoutPause}% needed a person`) : ""}.</p></div>
           <div className="lh-act"><button className="m-btn primary" data-flow="new-agent" onClick={() => openWizard(<CreateWizard />)}><i className="ti ti-plus" /> New agent</button></div>
         </div>
         <div className="lib-stats">

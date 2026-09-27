@@ -8,6 +8,7 @@
 @import "./css/screens.css";
 @import "./css/features.css";
 @import "./css/theme-knot.css";
+@import "./css/theme-rusty.css";
 
 /* The app mounts the shell full-bleed; the prototype's <body> did the same. */
 html, body, #root { height: 100%; margin: 0; }

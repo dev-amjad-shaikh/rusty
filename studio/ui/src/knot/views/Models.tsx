@@ -50,7 +50,7 @@ export function ModelsView() {
 
   return (
     <div className="view library active" id="view-models">
-      <div className="lib-top"><div className="crumbs"><span>Rustynome</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>AI models</b></div><div className="sp" /></div>
+      <div className="lib-top"><div className="crumbs"><span>Rusty</span><i className="ti ti-chevron-right" style={{ color: "var(--ink-300)", fontSize: 15 }} /><b>AI models</b></div><div className="sp" /></div>
       <div className="lib-page">
         <div className="lib-hero">
           <div className="lh-ic"><i className="ti ti-cpu" /></div>
